@@ -199,6 +199,10 @@ std::string format_summary(const std::vector<ParamSummary>& s) {
 }
 
 std::string format_diagnostics(const FitDiagnostics& d) {
+  return diagnostic_report(d).text;
+}
+
+DiagnosticReport diagnostic_report(const FitDiagnostics& d) {
   std::string out;
   int problems = 0;
   int unavailable = 0;
@@ -346,7 +350,7 @@ std::string format_diagnostics(const FitDiagnostics& d) {
     line(problems == 1
              ? "1 diagnostic check failed."
              : std::to_string(problems) + " diagnostic checks failed.");
-  return out;
+  return {out, problems, unavailable};
 }
 
 std::string format_sampling_warnings(const std::vector<ChainProblems>& chains,

@@ -314,7 +314,11 @@ def generate(stanc: pathlib.Path, registry: pathlib.Path,
     #
     # Math 5.4 fixes columns_dot_product(data matrix, var matrix) and adds
     # to_matrix(array[] vector), so neither needs an oracle exclusion.
-    cmdstan_crashes = {}
+    cmdstan_crashes = {
+        "diag_matrix(row_vector)=>matrix":
+            "the reference stanc (CmdStan 2.40) predates "
+            "diag_matrix(row_vector)",
+    }
     rendered: list[tuple[str, Callable[[int], str]]] = []
     for signature, descriptor in selected:
         positions = activity_positions(signature, descriptor)
@@ -345,7 +349,8 @@ def generate(stanc: pathlib.Path, registry: pathlib.Path,
         "signature_dump_sha256": inventory.raw_sha256,
         "registry_name_count": len(descriptors),
         "dumped_registry_name_count": len(dumped_names),
-        "tested_signature_count": len(selected),
+        "tested_signature_count": len({identity.split("@")[0]
+                                       for identity, _ in rendered}),
         "tested_case_count": len(rendered),
         "excluded_signature_count": len(excluded),
         "missing_from_stanc": sorted(set(descriptors) - dumped_names),

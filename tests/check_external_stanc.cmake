@@ -22,10 +22,18 @@ expect_result("--stanli-compile with a missing executable" 1 "COMPILE_FAIL "
               --stanli-compile "${work}/no-such-stanli-compile")
 
 if(NOT WIN32)
-  # A stand-in stanli-compile: prints already-compiled MIR for its model.
+  # A stand-in stanli-compile: writes an empty --messages-json file and
+  # prints already-compiled MIR for its model.
   set(fake "${work}/stanli-compile")
-  file(WRITE "${fake}"
-       "#!/bin/sh\nexec cat \"${SOURCE_DIR}/tests/fixtures/ar1.tmir.sexp\"\n")
+  file(WRITE "${fake}" "#!/bin/sh
+while [ $# -gt 1 ]; do
+  if [ \"$1\" = --messages-json ]; then
+    printf '{\"warnings\":[],\"o1_fallback\":null}\\n' > \"$2\"
+  fi
+  shift
+done
+exec cat \"${SOURCE_DIR}/tests/fixtures/ar1.tmir.sexp\"
+")
   execute_process(COMMAND chmod +x "${fake}")
   expect_result("--stanli-compile ${fake}" 0 "OK " --stanli-compile "${fake}")
 endif()

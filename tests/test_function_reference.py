@@ -1,7 +1,6 @@
 """Check compiled standalone C-ABI results against independent CmdStan rows."""
 import json
 import math
-import os
 from pathlib import Path
 import subprocess
 import sys
@@ -21,8 +20,7 @@ def main(host):
     points = ('0','1','2','0')
     values = [str(reference['points'][point]['wa']['values'][0]) for point in points]
     run = subprocess.run([host,str(FIXTURE.with_suffix('.tmir.sexp')),*values],
-                         capture_output=True,text=True,
-                         env={**os.environ,'STANLI_EXECUTION_REPORT':'1'})
+                         capture_output=True,text=True)
     assert run.returncode == 0, (run.returncode,run.stdout,run.stderr)
     reports = [json.loads(line) for line in run.stderr.splitlines() if line.startswith('{')]
     selections = [r for r in reports if r.get('kind') == 'execution_function_selection']

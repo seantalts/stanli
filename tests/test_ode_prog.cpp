@@ -449,7 +449,6 @@ void check_interpreted_density_activity() {
     mir::Expr v;
     v.kind = mir::Expr::Var;
     v.name = name;
-    v.type_ = "UReal";
     v.unsized = {0, mir::UnsizedLeaf::Real};
     v.data_only = data;
     return v;
@@ -459,7 +458,6 @@ void check_interpreted_density_activity() {
   call.fn_lib = mir::Expr::Lib::UserDefined;
   call.fn_propto = true;
   call.name = "shifted_lpdf";
-  call.type_ = "UReal";
   call.unsized = {0, mir::UnsizedLeaf::Real};
   call.args = {real_var("x", false), real_var("mu", true), real_var("s", true)};
   {

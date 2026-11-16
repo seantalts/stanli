@@ -1,3 +1,4 @@
+#include <stanli/debug_switch.hpp>
 #include <stanli/execution_report.hpp>
 #include <stanli/compile.hpp>
 #include <stanli/algebra.hpp>
@@ -254,7 +255,7 @@ std::string execution_report(const CompiledModel& model,
     r.w.StartObject();
     r.str("value_engine", wa.interp ? "mir_interpreter" : "bound_graph");
     r.str("status", wa.interp ? "attached_unprobed" : "lowered");
-    r.str("refusal", wa.truncated);
+    r.str("refusal", wa.truncated.value_or(""));
     // Partial or forced-interpreter graphs are not the driver-selected path.
     if (!wa.interp) {
       r.w.Key("graph");
@@ -269,7 +270,7 @@ std::string execution_report(const CompiledModel& model,
     r.w.StartObject();
     r.str("value_engine",
           model.transform_inits->interp ? "mir_interpreter" : "unavailable");
-    r.str("refusal", model.transform_inits->truncated);
+    r.str("refusal", model.transform_inits->truncated.value_or(""));
     r.w.EndObject();
   }
   r.w.Key("reported_fallbacks");
@@ -282,7 +283,7 @@ std::string execution_report(const CompiledModel& model,
 void report_execution_host(const char* host, const CompiledModel& cm,
                            bool interpreter, bool bound_graph,
                            const char* neither, const std::string& reason) {
-  if (!execution_reporting_enabled()) return;
+  if (!cm.execution_report) return;
   const char* value_engine = interpreter   ? "mir_interpreter"
                              : bound_graph ? "bound_graph"
                                            : neither;
@@ -310,7 +311,7 @@ void report_execution_function(const std::string& name, bool compiled,
   emit_diagnostic(r.finish());
 }
 bool execution_reporting_enabled() {
-  const char* flag = std::getenv("STANLI_EXECUTION_REPORT");
+  const char* flag = debug_env("STANLI_EXECUTION_REPORT");
   return flag && *flag && *flag != '0';
 }
 }  // namespace stanli

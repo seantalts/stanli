@@ -1,6 +1,7 @@
 // In-place functional updates: a chain of OP_SET_INDEX writes into the
 // same vector must collapse onto one buffer (O(N) instead of O(N^2)) with
 // values and gradients unchanged.
+#include "density_ops.hpp"
 #include "env_helpers.hpp"
 #include "graph_helpers.hpp"
 #include <stanli/graph.hpp>
@@ -84,7 +85,8 @@ static Graph build_chain(int L, Fills& fills, std::vector<int>& terms,
     const int rd = g.add_slot(1, false);
     g.add_op(OP_INDEX, {nxt}, rd, {n});
     const int lp = g.add_slot(1, false);
-    const int id = g.add_op(OP_NORMAL_LPDF, {cslot(0.2 * n), rd, sigma}, lp);
+    const int id = stanli::testutil::add_density(
+        g, OP_NORMAL_LPDF, {cslot(0.2 * n), rd, sigma}, lp);
     g.ops[id].variant = 0x06;
     terms.push_back(lp);
     prev = nxt;
@@ -404,7 +406,8 @@ static void test_bail_later_reader() {
   g.add_op(OP_INDEX, {second_in}, late, {0});  // reads a mid-chain value
   const int lp = g.add_slot(1, false);
   // slot 1 is build_chain's sigma parameter (positive at the eval point).
-  const int id = g.add_op(OP_NORMAL_LPDF, {late, late, 1}, lp);
+  const int id =
+      stanli::testutil::add_density(g, OP_NORMAL_LPDF, {late, late, 1}, lp);
   g.ops[id].variant = 0x06;
   terms.push_back(lp);
 
@@ -573,7 +576,8 @@ static Graph build_double_store(int L, Between between, Fills& fills,
   std::vector<double> yv((size_t)L);
   for (int i = 0; i < L; ++i) yv[(size_t)i] = 0.3 * i - 0.5;
   fills.emplace_back(ydata, yv);
-  const int id = g.add_op(OP_NORMAL_LPDF, {ydata, prev, sigma}, lp);
+  const int id = stanli::testutil::add_density(g, OP_NORMAL_LPDF,
+                                               {ydata, prev, sigma}, lp);
   g.ops[id].variant = 0x06;
   terms.push_back(lp);
   return g;
@@ -606,7 +610,8 @@ static void test_first_store_after_add_is_destructive() {
   std::vector<double> yv((size_t)L);
   for (int i = 0; i < L; ++i) yv[(size_t)i] = 0.3 * i - 0.5;
   fills.emplace_back(ydata, yv);
-  const int id = g.add_op(OP_NORMAL_LPDF, {ydata, prev, sigma}, lp);
+  const int id = stanli::testutil::add_density(g, OP_NORMAL_LPDF,
+                                               {ydata, prev, sigma}, lp);
   g.ops[id].variant = 0x06;
   std::vector<int> terms{lp};
 

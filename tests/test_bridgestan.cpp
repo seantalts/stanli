@@ -941,6 +941,18 @@ void test_embedded_manifest() {
   bs_model_destruct(w);
   bs_model_destruct(m);
 
+  // Stan's data reader accepts bare NaN and Infinity, and Python's
+  // json.dumps writes them, so the payload around the manifest must too.
+  const std::string non_finite =
+      "{\"spare\": [NaN, Infinity, -Infinity], " + data.substr(1);
+  err = nullptr;
+  m = bs_model_construct(non_finite.c_str(), 1234, &err);
+  if (m == nullptr)
+    fail(std::string("NaN and Infinity in the data were rejected: ") +
+         (err != nullptr ? err : "(no message)"));
+  bs_free_error_msg(err);
+  bs_model_destruct(m);
+
   // A wrong build id is a loud staleness error: the MIR dialect moves
   // with the runtime that lowers it.
   root["__stanli"]["build_id"] = "abi1-deadbeef-Linux-x86_64";

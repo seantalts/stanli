@@ -1,22 +1,18 @@
 {
   "lang/bad1.stanfunctions": {
     "cause": "stanli parses every input as a full Stan program; stanc parses .stanfunctions files as functions only",
-    "stanli": "Syntax error in 'bad1.stanfunctions', line 1, column 0 to column 3, parsing error:"
+    "stanli": "error: Syntax error: Ill-formed program."
   },
   "lang/bad2.stanfunctions": {
     "cause": "stanli parses every input as a full Stan program; stanc parses .stanfunctions files as functions only",
-    "stanli": "Syntax error in 'bad2.stanfunctions', line 1, column 0 to column 4, parsing error:"
+    "stanli": "error: Syntax error: Ill-formed program."
   },
   "lang/bad3.stanfunctions": {
     "cause": "stanli parses every input as a full Stan program; stanc parses .stanfunctions files as functions only",
-    "stanli": "Syntax error in 'bad3.stanfunctions', line 1, column 0 to column 5, parsing error:"
+    "stanli": "error: Syntax error: Ill-formed program."
   },
   "lang/bad4.stanfunctions": {
     "cause": "stanli parses every input as a full Stan program; stanc parses .stanfunctions files as functions only",
-    "stanli": "Syntax error in 'bad4.stanfunctions', line 1, column 0 to column 5, parsing error:"
-  },
-  "new/bad_constrained_type_in_fn copy.stan": {
-    "cause": "stanc3's test runner passes the unquoted path through a shell, so stanc got two arguments; stanli gets the one file",
-    "same_as": "new/bad_constrained_type_in_fn.stan"
+    "stanli": "error: Syntax error: Ill-formed program."
   }
 }

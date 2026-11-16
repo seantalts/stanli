@@ -13,6 +13,7 @@
 //    built from the shapes real models produce (write chains, read-backs,
 //    whole-vector reads, elementwise arithmetic, densities), including
 //    the interleavings no hand-written test would think to write.
+#include "density_ops.hpp"
 #include "env_helpers.hpp"
 #include "graph_helpers.hpp"
 #include <stanli/constfold.hpp>
@@ -268,8 +269,8 @@ static Graph random_graph(std::mt19937& rng, Fills& fills,
         const int rd = g.add_slot(1, false);
         g.add_op(OP_INDEX, {vec}, rd, {k});
         const int lp = g.add_slot(1, false);
-        const int id =
-            g.add_op(OP_NORMAL_LPDF, {cslot(0.1 * s), rd, sigma}, lp);
+        const int id = stanli::testutil::add_density(
+            g, OP_NORMAL_LPDF, {cslot(0.1 * s), rd, sigma}, lp);
         g.ops[id].variant = 0x06;
         terms.push_back(lp);
         break;
@@ -284,8 +285,8 @@ static Graph random_graph(std::mt19937& rng, Fills& fills,
         const int rd = g.add_slot(1, false);
         g.add_op(OP_INDEX, {vecp}, rd, {k});
         const int lp = g.add_slot(1, false);
-        const int id =
-            g.add_op(OP_NORMAL_LPDF, {cslot(0.3 - 0.05 * s), rd, sigma}, lp);
+        const int id = stanli::testutil::add_density(
+            g, OP_NORMAL_LPDF, {cslot(0.3 - 0.05 * s), rd, sigma}, lp);
         g.ops[id].variant = 0x06;
         terms.push_back(lp);
         break;
@@ -294,7 +295,8 @@ static Graph random_graph(std::mt19937& rng, Fills& fills,
         const int a = g.add_slot(1, false);
         g.add_op(OP_ADD, {mu, cslot(0.4 * ((s % 3) + 1))}, a);
         const int lp = g.add_slot(1, false);
-        const int id = g.add_op(OP_NORMAL_LPDF, {cslot(0.2 * s), a, sigma}, lp);
+        const int id = stanli::testutil::add_density(
+            g, OP_NORMAL_LPDF, {cslot(0.2 * s), a, sigma}, lp);
         g.ops[id].variant = 0x06;
         terms.push_back(lp);
         break;

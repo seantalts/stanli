@@ -360,7 +360,7 @@ void solve_fwd(KernelCtx& ctx) {
   // mdivide_left's active overload uses HouseholderQR while its double
   // overload uses FullPivLU, and those are observably different answers on
   // ill-conditioned inputs.
-  if ((ctx.variant & 1u) && !values_only()) {
+  if ((ctx.variant & 1u) && !values_only(ctx)) {
     solve_active_fwd<Left, Kind>(ctx, vec);
   } else {
     vec ? solve_double<Left, Kind, true>(ctx)

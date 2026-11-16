@@ -3,6 +3,7 @@
 #include "build_id.hpp"
 #include "lower_work.hpp"
 #include "lower_worker.hpp"
+#include <stanli/debug_switch.hpp>
 #include <stanli/gp_cov_fusion.hpp>
 #include <stanli/execution_report.hpp>
 #include <stanli/large_stack.hpp>
@@ -10,13 +11,14 @@
 
 #include <stan/math/rev/core/chainablestack.hpp>
 
+#include <cstring>
 #include <thread>
 
 namespace stanli {
 namespace lower_detail {
 
 StructuredMode read_structured_mode() {
-  const char* flag = std::getenv("STANLI_STRUCTURED_LOOPS");
+  const char* flag = debug_env("STANLI_STRUCTURED_LOOPS");
   if (!flag || !*flag || std::string_view(flag) == "auto")
     return StructuredMode::Auto;
   if (std::string_view(flag) == "0") return StructuredMode::Off;
@@ -33,7 +35,9 @@ Lowering::Lowering(const DataMap& d, PrepTrace& p, PassDumper& dump_to,
       prep(p),
       dumper(dump_to),
       prep_graph(graph_name),
-      td_rng(std::move(stream)) {}
+      td_rng(std::move(stream)) {
+  td.set_native_extrema(true);
+}
 template <typename Map>
 static void copy_named(Map& to, const Map& from,
                        const std::set<std::string>* names) {
@@ -128,7 +132,8 @@ void Lowering::observe_indexed_rhs(const mir::Expr& rhs, const Val& v) {
     observe(v, std::move(*evaluated));
     return;
   }
-  if (rhs.type_ != "UInt" || g.slots[v.slot].len != 1) return;
+  if (!mir::is_unsized(rhs, mir::UnsizedLeaf::Int) || g.slots[v.slot].len != 1)
+    return;
   try {
     const long value = eval_int(rhs);
     DataMap::Entry en;
@@ -292,7 +297,7 @@ void Lowering::omit_zero_size(const std::string& name,
 void Lowering::bind_data(const mir::Program& p) {
   std::set<std::string> input_names;
   bool all_inputs_bound = true;
-  bool use_prebound = std::getenv("STANLI_NO_DATA_PRELOAD") == nullptr;
+  bool use_prebound = debug_env("STANLI_NO_DATA_PRELOAD") == nullptr;
   for (const auto& [name, type] : p.input_vars) {
     input_names.insert(name);
     if (!data_entry(name)) omit_zero_size(name, type);
@@ -365,8 +370,28 @@ void Lowering::bind_data(const mir::Program& p) {
   {
     ExtentScope extents(data_extent_scope);
     for (const auto& [name, type] : p.input_vars) {
-      record(name, type);
-      validate_data_dims(name, type);
+      try {
+        record(name, type);
+        validate_data_dims(name, type);
+      } catch (const std::exception&) {
+        // CmdStan computes each size, printing if it prints, before it
+        // checks that input. Print the sizes prepare_data computes ahead of
+        // the failing input's declaration, then report its error.
+        data_extent_scope = false;
+        for (const auto& st : p.prepare_data) {
+          if (st.kind != mir::Stmt::Decl) continue;
+          if (st.decl_id == name) break;
+          if (!st.has_init || input_names.count(st.decl_id) ||
+              expr_effects(st.init) != kMessageEffect)
+            continue;
+          try {
+            (void)td.exec(st);
+          } catch (const std::exception&) {
+            break;
+          }
+        }
+        throw;
+      }
     }
   }
   for (const auto& st : p.prepare_data) {
@@ -392,19 +417,6 @@ void Lowering::bind_data(const mir::Program& p) {
          canonical_input_rebuild(st, input_names)))
       continue;
     record_interpreter_event("prepare_data", "statement_entry");
-    if (st.kind == mir::Stmt::Decl && st.has_init) {
-      const auto sized = data_extent_memo.find(expr_signature(st.init));
-      if (sized != data_extent_memo.end()) {
-        mir::Stmt resolved = st;
-        resolved.init = mir::Expr{};
-        resolved.init.kind = mir::Expr::LitInt;
-        resolved.init.lit_i = sized->second;
-        resolved.init.type_ = "UInt";
-        resolved.init.data_only = true;
-        (void)td.exec(resolved);
-        continue;
-      }
-    }
     (void)td.exec(st);
   }
   // The interpreter keeps a block's locals after the block ends. Drop them,
@@ -855,7 +867,7 @@ void Lowering::run_passes(const std::vector<int>& roots, const PassPlan& plan) {
     // After re-roll, which builds the vector terms this reads; before
     // partition, CSE and islands, which then work on what is left.
     const auto collapse_time = prep.start();
-    const bool report_terms = std::getenv("STANLI_COLLAPSE_REPORT") != nullptr;
+    const bool report_terms = debug_env("STANLI_COLLAPSE_REPORT") != nullptr;
     CollapseReport report;
     const CollapseStats collapsed = collapse_observations(
         g, out.fills, target_terms, roots, report_terms ? &report : nullptr);
@@ -915,22 +927,30 @@ void Lowering::run_passes(const std::vector<int>& roots, const PassPlan& plan) {
 }
 CompiledModel::WriteArray Lowering::run_write_array(const mir::Program& p) {
   const auto total_time = prep.start();
-  for (const auto& f : p.fun_defs) fun_defs[f.name] = &f;
+  for (const auto& f : p.fun_defs) fun_defs[mir::function_key(f)] = &f;
   in_write_array = true;
-  output_vars = &p.output_vars;
-  // stanc3 guards the two emission groups on these flags; the sampler wants
-  // both, so pin them and let the data-only IfElse fold them away.
+  output_cursor = mir::OutputCursor(p.output_vars);
+  // The readers drop stanc3's section guards on these flags; a guard they
+  // did not recognize still folds away with both pinned on.
   int_env["emit_transformed_parameters__"] = 1;
   int_env["emit_generated_quantities__"] = 1;
   CompiledModel::WriteArray wa;
   DumpOnThrow guard{*this};
   const auto lower_time = prep.start();
-  for (const auto& s : p.generate_quantities) {
+  for (size_t i = 0; i < p.generate_quantities.size(); ++i) {
+    const mir::Stmt& s = p.generate_quantities[i];
+    if (i == p.transformed_parameters_begin)
+      wa_section = mir::OutputVar::Block::TransformedParameters;
+    if (i == p.generated_quantities_begin)
+      wa_section = mir::OutputVar::Block::GeneratedQuantities;
     const auto mark = wa_mark();
     const auto fail_section = [&](const std::string& what) {
-      const char* section = mark.n_gq_start   ? "generated quantities"
-                            : mark.n_tp_start ? "transformed parameters"
-                                              : "write_array";
+      const char* section =
+          wa_section == mir::OutputVar::Block::GeneratedQuantities
+              ? "generated quantities"
+          : wa_section == mir::OutputVar::Block::TransformedParameters
+              ? "transformed parameters"
+              : "write_array";
       wa_rollback(mark);
       // Keep the valid prefix for diagnostics, but drivers select WaInterp
       // whenever this marker is set and it evaluates the whole section from
@@ -953,7 +973,7 @@ CompiledModel::WriteArray Lowering::run_write_array(const mir::Program& p) {
   roots.insert(roots.end(), extra_roots.begin(), extra_roots.end());
   prep.graph(prep_graph, "lower", lower_time, g, out.fills, target_terms.size(),
              out.views.size(), PrepTrace::Extra::Truncated,
-             !wa.truncated.empty());
+             wa.truncated.has_value());
   dump("lower", roots);
 
   run_passes(roots, kWriteArrayPasses);
@@ -971,11 +991,10 @@ CompiledModel::WriteArray Lowering::run_write_array(const mir::Program& p) {
              out.n_unconstrained);
   guard.done = true;
   wa.graph = std::move(g);
-  // A section stanc did not emit a guard for (or one lowering stopped
-  // short of) has no columns of its own: it starts where the CSV ends.
-  // The transformed-parameter boundary falls back to the generated
-  // quantities one rather than to the end, so a missing first guard
-  // cannot order the two backwards and hand a reader a negative count.
+  // A section with no columns (or one lowering stopped short of) starts
+  // where the next one does; the transformed-parameter boundary falls back
+  // to the generated-quantities one, so the two cannot come out ordered
+  // backwards and hand a reader a negative count.
   wa.n_gq_start = n_gq_start.value_or(out.views.size());
   wa.n_tp_start = n_tp_start.value_or(wa.n_gq_start);
   wa.columns = std::move(out.views);
@@ -985,7 +1004,7 @@ CompiledModel::WriteArray Lowering::run_write_array(const mir::Program& p) {
 CompiledModel Lowering::run(const mir::Program& p) {
   DumpOnThrow guard{*this};
   const auto total_time = prep.start();
-  for (const auto& f : p.fun_defs) fun_defs[f.name] = &f;
+  for (const auto& f : p.fun_defs) fun_defs[mir::function_key(f)] = &f;
   const auto bind_time = prep.start();
   if (!data_prepared) bind_data(p);
   prep.graph(prep_graph, "bind_data", bind_time, g, out.fills,
@@ -1049,9 +1068,7 @@ bool bounded_specialization_candidate(Lowering& lo, const mir::Program& p) {
     // Expansion gains were established for single selectors. Range/gather
     // bodies also expose different reduction/fusion choices; keep their
     // established representation until that separate arithmetic is proved.
-    if (e.kind == mir::Expr::FunApp && e.name.compare(0, 5, "Index") == 0 &&
-        e.name != "IndexSingle")
-      return false;
+    if (mir::is_index(e) && e.kind != mir::Expr::IndexSingle) return false;
     if (e.kind == mir::Expr::FunApp && e.fn_lib == mir::Expr::Lib::UserDefined)
       return false;
     for (const auto& a : e.args)
@@ -1062,8 +1079,8 @@ bool bounded_specialization_candidate(Lowering& lo, const mir::Program& p) {
     return shape(e) && !lo.expr_effectful(e);
   };
   std::function<bool(const mir::Stmt&)> statement = [&](const mir::Stmt& s) {
-    if (s.kind == mir::Stmt::NRFunApp && s.fn_name != "FnCheck" &&
-        s.fn_name != "FnValidateSize")
+    if (s.kind == mir::Stmt::NRFunApp && mir::internal_name(s) != "FnCheck" &&
+        mir::internal_name(s) != "FnValidateSize")
       return false;
     if ((s.kind == mir::Stmt::For || s.kind == mir::Stmt::While) &&
         lo.region_runtime_control(s))
@@ -1088,12 +1105,12 @@ bool bounded_specialization_candidate(Lowering& lo, const mir::Program& p) {
 
 std::optional<CompiledModel> try_bounded_specialization(Lowering& lo,
                                                         const mir::Program& p) {
-  const char* policy = std::getenv("STANLI_BOUNDED_SPECIALIZATION");
+  const char* policy = debug_env("STANLI_BOUNDED_SPECIALIZATION");
   // Explicit zero/unknown values keep the established path for ablation.
   if ((policy && std::string_view(policy) != "1") ||
       lo.structured_policy != StructuredMode::Auto)
     return {};
-  for (const auto& f : p.fun_defs) lo.fun_defs[f.name] = &f;
+  for (const auto& f : p.fun_defs) lo.fun_defs[mir::function_key(f)] = &f;
   if (!bounded_specialization_candidate(lo, p)) return {};
   // Transformed data, including its RNG and observable effects, runs once.
   // Both paths start after it; the trial owns every mutable lowering field.
@@ -1137,10 +1154,10 @@ std::string report_request() {
 constexpr uint64_t kParallelWriteArrayMinWork = 1000;
 constexpr uint64_t kParallelWriteArrayMaxDataBytes = uint64_t{64} << 20;
 
-enum class ParallelWriteArray { Off, Auto, Force };
-
-ParallelWriteArray read_parallel_write_array() {
-  const char* v = std::getenv("STANLI_PARALLEL_WA");
+ParallelWriteArray parallel_write_array(const CompileOptions& options) {
+  if (options.parallel_write_array != ParallelWriteArray::Auto)
+    return options.parallel_write_array;
+  const char* v = debug_env("STANLI_PARALLEL_WA");
   if (!v || !*v || std::string_view(v) == "auto")
     return ParallelWriteArray::Auto;
   if (std::string_view(v) == "1" || std::string_view(v) == "force")
@@ -1151,8 +1168,13 @@ ParallelWriteArray read_parallel_write_array() {
 class WriteArrayLowering {
  public:
   WriteArrayLowering(const DataMap& data, const mir::Program& prog,
-                     bool trace_prep, PassDumper& dumper)
-      : data_(data), prog_(prog), trace_(trace_prep), dumper_(dumper) {}
+                     bool trace_prep, PassDumper& dumper,
+                     ParallelWriteArray policy)
+      : data_(data),
+        prog_(prog),
+        trace_(trace_prep),
+        dumper_(dumper),
+        policy_(policy) {}
 
   void begin(Lowering& log_prob) {
     if (!should_run_alongside(log_prob)) {
@@ -1193,7 +1215,7 @@ class WriteArrayLowering {
 
  private:
   bool should_run_alongside(Lowering& log_prob) {
-    const ParallelWriteArray policy = read_parallel_write_array();
+    const ParallelWriteArray policy = policy_;
     if (policy == ParallelWriteArray::Off || !thread_safe_build() ||
         std::thread::hardware_concurrency() == 1 || dumper_.enabled() ||
         execution_trace_active())
@@ -1238,6 +1260,7 @@ class WriteArrayLowering {
   PrepTrace trace_;
   PassDumper off_{nullptr, nullptr};
   PassDumper& dumper_;
+  ParallelWriteArray policy_;
   std::vector<std::string> bound_env_, bound_decls_;
   std::optional<Lowering> wa_;
   std::optional<CompiledModel::WriteArray> result_;
@@ -1256,17 +1279,21 @@ CompiledModel compile_model(const std::string& mir_text, const DataMap& data,
   std::optional<stan::math::ChainableStack> autodiff_stack_of_caller;
   if (thread_safe_build() && stan::math::ChainableStack::instance_ == nullptr)
     autodiff_stack_of_caller.emplace();
-  const bool report_enabled = execution_reporting_enabled();
+  const bool report_enabled =
+      options.execution_report || execution_reporting_enabled();
   ExecutionTrace execution_trace;
   std::optional<ExecutionTraceScope> execution_scope;
   if (report_enabled) execution_scope.emplace(execution_trace);
   if (options.reduce_sum_threads < 1 || options.reduce_sum_min_chunk_ns < 0 ||
       options.reduce_sum_max_chunks < 1)
     throw std::invalid_argument("invalid reduce_sum compilation options");
-  const char* prep_env = std::getenv("STANLI_PROFILE_PREP");
+  const char* prep_env = debug_env("STANLI_PROFILE_PREP");
   PrepTrace prep(prep_env && prep_env[0] != '0');
-  PassDumper dumper(std::getenv("STANLI_DUMP_PASSES"),
-                    std::getenv("STANLI_DUMP_STAGES"));
+  PassDumper dumper = options.dump_passes.empty()
+                          ? PassDumper(debug_env("STANLI_DUMP_PASSES"),
+                                       debug_env("STANLI_DUMP_STAGES"))
+                          : PassDumper(options.dump_passes.c_str(),
+                                       options.dump_stages.c_str());
   if (dumper.enabled()) dumper.write("mir", "mir.sexp", mir_text);
   const auto compile_time = prep.start();
   // Shared because the interpreted write_array fallback, when needed,
@@ -1287,12 +1314,16 @@ CompiledModel compile_model(const std::string& mir_text, const DataMap& data,
              static_cast<int64_t>(mir_text.size()));
   Lowering lo(data, prep, dumper, "log_prob", WaRng(seed));
   lo.compile_options = options;
+  if (const char* refuse = std::getenv("STANLI_NO_INTERPRETER");
+      refuse != nullptr && refuse[0] != '\0' && std::strcmp(refuse, "0") != 0)
+    lo.compile_options.allow_interpreter = false;
   // A second lowering, over the transformed data the first one already
   // interpreted: re-running prepare_data would double preparation time on
   // the models where preparation is the cost (nn_rbm1bJ100, 20.7 s).
   std::optional<WriteArrayLowering> wa_lowering;
   if (!prog->generate_quantities.empty()) {
-    wa_lowering.emplace(data, *prog, prep.enabled(), dumper);
+    wa_lowering.emplace(data, *prog, prep.enabled(), dumper,
+                        parallel_write_array(options));
     lo.after_data_prepared = [&] { wa_lowering->begin(lo); };
   }
   auto specialized = try_bounded_specialization(lo, *prog);
@@ -1320,7 +1351,7 @@ CompiledModel compile_model(const std::string& mir_text, const DataMap& data,
       w.truncated = "write_array reads " + std::to_string(w.n_unconstrained) +
                     " unconstrained values, log_prob reads " +
                     std::to_string(cm.n_unconstrained) +
-                    (w.truncated.empty() ? "" : "; " + w.truncated);
+                    (w.truncated ? "; " + *w.truncated : "");
       w.columns.clear();
       w.n_tp_start = w.n_gq_start = 0;
     }
@@ -1333,7 +1364,7 @@ CompiledModel compile_model(const std::string& mir_text, const DataMap& data,
     // set it in a shipped environment: drivers PREFER an attached
     // interpreter (capi.cpp, bridgestan_abi.cpp), so it moves every caller
     // onto the slow per-draw path.
-    if (!w.truncated.empty() || std::getenv("STANLI_WA_FORCE_INTERP")) {
+    if (w.truncated || debug_env("STANLI_WA_FORCE_INTERP")) {
       // The graph could not express the whole section; hand the model the
       // per-draw interpreter, seeded with data + transformed data and the
       // emission flags the guard blocks test.
@@ -1350,8 +1381,8 @@ CompiledModel compile_model(const std::string& mir_text, const DataMap& data,
                                             std::move(flags));
     }
     cm.write_array = std::move(w);
-    if (!cm.write_array->truncated.empty())
-      add_interpreter_fallback(cm, cm.write_array->truncated);
+    if (cm.write_array->truncated)
+      add_interpreter_fallback(cm, *cm.write_array->truncated);
   }
   if (prog->has_transform_inits) {
     // The inverse parameter transforms. Nothing is interpreted here: the
@@ -1399,15 +1430,17 @@ CompiledModel compile_model(const std::string& mir_text, const DataMap& data,
         params.push_back(std::move(p));
       }
     }
-    if (ti.truncated.empty())
+    if (!ti.truncated)
       ti.interp = std::make_shared<InitInterp>(prog, shared_interp_env(),
                                                std::move(params));
     cm.transform_inits = std::move(ti);
   }
-  if (!cm.interpreter_fallbacks.empty() && std::getenv("STANLI_NO_INTERPRETER"))
+  if (!cm.interpreter_fallbacks.empty() &&
+      !lo.compile_options.allow_interpreter)
     throw CompileError(interpreter_error(cm));
   prep.plain("compile", "total", compile_time);
   prep.report();
+  cm.execution_report = report_enabled;
   if (report_enabled) {
     execution_trace.check();
     emit_diagnostic(execution_report(cm, &execution_trace));
@@ -1416,10 +1449,11 @@ CompiledModel compile_model(const std::string& mir_text, const DataMap& data,
 }
 
 std::string interpreter_error(const CompiledModel& cm) {
-  return "stanli: STANLI_NO_INTERPRETER is set and parts of this model have "
-         "no compiled path: " +
+  return "stanli: the MIR interpreter is not allowed (allow_interpreter is "
+         "false, or STANLI_NO_INTERPRETER is set) and parts of this model "
+         "have no compiled path: " +
          fallback_items(cm) +
-         ". Unset it to run them through the MIR interpreter, which is far "
+         ". Allow it to run them through the MIR interpreter, which is far "
          "slower. " +
          report_request();
 }

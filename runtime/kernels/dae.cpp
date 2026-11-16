@@ -19,6 +19,7 @@ using stan::math::var;
 
 struct DaeResidual {
   const DaeSpec* spec;
+  EvalState* eval_state = nullptr;
   mutable RhsWorkspace workspace;
 
   template <typename T_y, typename T_yp, typename T_param>
@@ -32,7 +33,8 @@ struct DaeResidual {
     Eigen::Matrix<T, Eigen::Dynamic, 1> out(y.size());
     if (spec->prog.ok) {
       run_dae_into<T>(spec->prog, t, y.data(), yp.data(), theta.data(),
-                      theta.size(), x_r.data(), out.data(), workspace.get<T>());
+                      theta.size(), x_r.data(), out.data(), workspace.get<T>(),
+                      eval_state);
       return out;
     }
 
@@ -51,7 +53,7 @@ struct DaeResidual {
 template <typename T_y0, typename T_yp0, typename T_theta>
 auto solve(const DaeSpec& spec, const double* y_values, const double* yp_values,
            int64_t states, const double* theta_values, int64_t parameters,
-           const double* controls = nullptr) {
+           const double* controls, EvalState* state) {
   Eigen::Matrix<T_y0, Eigen::Dynamic, 1> y0(states);
   Eigen::Matrix<T_yp0, Eigen::Dynamic, 1> yp0(states);
   for (int64_t i = 0; i < states; ++i) {
@@ -60,7 +62,7 @@ auto solve(const DaeSpec& spec, const double* y_values, const double* yp_values,
   }
   std::vector<T_theta> theta(theta_values, theta_values + parameters);
   return stan::math::dae_tol(
-      DaeResidual{&spec}, y0, yp0, spec.t0, spec.ts,
+      DaeResidual{&spec, state}, y0, yp0, spec.t0, spec.ts,
       controls ? controls[0] : spec.rtol, controls ? controls[1] : spec.atol,
       controls ? static_cast<long>(controls[2]) : spec.max_steps, nullptr,
       theta, spec.x_r, spec.x_i);
@@ -71,7 +73,7 @@ void dae_fwd_data(KernelCtx& ctx, const DaeSpec& spec) {
   const int64_t P = ctx.in[2].len;
   const auto solution = solve<double, double, double>(
       spec, ctx.in[0].data, ctx.in[1].data, S, ctx.in[2].data, P,
-      ctx.n_in == 4 ? ctx.in[3].data : nullptr);
+      ctx.n_in == 4 ? ctx.in[3].data : nullptr, ctx.eval_state);
   for (size_t n = 0; n < solution.size(); ++n)
     for (int64_t i = 0; i < S; ++i)
       ctx.out.data[(int64_t)n * S + i] = solution[n][i];
@@ -93,8 +95,8 @@ void dae_fwd_active(KernelCtx& ctx, const DaeSpec& spec) {
   std::vector<T_theta> theta(ctx.in[2].data, ctx.in[2].data + P);
   stan::math::nested_rev_autodiff nested;
   const auto solution = stan::math::dae_tol(
-      DaeResidual{&spec}, y0, yp0, spec.t0, spec.ts, spec.rtol, spec.atol,
-      spec.max_steps, nullptr, theta, spec.x_r, spec.x_i);
+      DaeResidual{&spec, ctx.eval_state}, y0, yp0, spec.t0, spec.ts, spec.rtol,
+      spec.atol, spec.max_steps, nullptr, theta, spec.x_r, spec.x_i);
   for (size_t n = 0; n < solution.size(); ++n)
     for (int64_t i = 0; i < S; ++i)
       ctx.out.data[(int64_t)n * S + i] = solution[n][i].val();
@@ -134,18 +136,17 @@ void dae_fwd(KernelCtx& ctx) {
   const DaeSpec& spec = *static_cast<const DaeSpec*>(ctx.udata);
   const int64_t S = ctx.in[0].len;
   if (ctx.n_in == 4 &&
-      (ctx.in[3].len != 3 || (!values_only() && ctx.variant != 0x8u)))
+      (ctx.in[3].len != 3 || (!values_only(ctx) && solver_activity(ctx).any())))
     throw std::invalid_argument(
         "runtime DAE controls require a value-only solve");
   if (ctx.in[1].len != S)
     throw std::invalid_argument(
         "dae: initial state and derivative differ in size");
-  if (values_only()) {
+  if (values_only(ctx)) {
     dae_fwd_data(ctx, spec);
     return;
   }
-  const uint8_t mask = (ctx.variant & 0x8u) != 0 ? (ctx.variant & 0x7u) : 0x7u;
-  switch (mask) {
+  switch (solver_activity(ctx).byte() & 0x7u) {
     case 0:
       dae_fwd_data(ctx, spec);
       break;
@@ -174,25 +175,25 @@ void dae_fwd(KernelCtx& ctx) {
 }
 
 void dae_bwd(KernelCtx& ctx) {
-  const uint8_t mask = (ctx.variant & 0x8u) != 0 ? (ctx.variant & 0x7u) : 0x7u;
-  if (mask == 0) return;
+  const SolverActivity active = solver_activity(ctx);
+  if (!active.any()) return;
   const int64_t S = ctx.in[0].len, P = ctx.in[2].len, W = 2 * S + P;
   for (int64_t o = ctx.out.len; o-- > 0;) {
     const double adjoint = ctx.out_adj_vec.data[o];
-    if ((mask & 1u) && ctx.in_adj[0].data)
+    if (active.is_active(0) && ctx.in_adj[0].data)
       for (int64_t i = 0; i < S; ++i)
         ctx.in_adj[0].data[i] += adjoint * ctx.scratch[o * W + i];
-    if ((mask & 2u) && ctx.in_adj[1].data)
+    if (active.is_active(1) && ctx.in_adj[1].data)
       for (int64_t i = 0; i < S; ++i)
         ctx.in_adj[1].data[i] += adjoint * ctx.scratch[o * W + S + i];
-    if ((mask & 4u) && ctx.in_adj[2].data)
+    if (active.is_active(2) && ctx.in_adj[2].data)
       for (int64_t i = 0; i < P; ++i)
         ctx.in_adj[2].data[i] += adjoint * ctx.scratch[o * W + 2 * S + i];
   }
 }
 
 int64_t dae_scratch(const Op& op, const Slot* slots) {
-  if ((op.variant & 0x8u) != 0 && (op.variant & 0x7u) == 0) return 0;
+  if (!solver_activity(op).any()) return 0;
   const int64_t S = slots[op.in[0]].len;
   return slots[op.out].len * (2 * S + slots[op.in[2]].len);
 }

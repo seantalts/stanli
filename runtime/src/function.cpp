@@ -73,34 +73,36 @@ int64_t checked_elements(const std::vector<int64_t>& dims,
   return n;
 }
 
-void validate_argument(const std::string& name,
-                       const stanli::mir::UnsizedView& view,
-                       const stanli::DataMap::Entry& value) {
+// Why `value` cannot be the argument `name`, or nothing when it can.
+std::optional<std::string> argument_mismatch(
+    const std::string& name, const stanli::mir::UnsizedView& view,
+    const stanli::DataMap::Entry& value) {
   using Leaf = stanli::mir::UnsizedLeaf;
   const size_t rank = static_cast<size_t>(view.depth) + leaf_rank(view.leaf);
   if (value.dims.size() != rank)
-    throw std::runtime_error("argument '" + name + "' has rank " +
-                             std::to_string(value.dims.size()) + ", expected " +
-                             std::to_string(rank));
-
+    return "argument '" + name + "' has rank " +
+           std::to_string(value.dims.size()) + ", expected " +
+           std::to_string(rank);
   const int64_t expected = checked_elements(value.dims, name);
   if (value.r.size() != static_cast<size_t>(expected))
-    throw std::runtime_error("argument '" + name +
-                             "' storage does not match its dimensions");
+    return "argument '" + name + "' storage does not match its dimensions";
   if (view.leaf == Leaf::Int) {
-    if (!value.is_int)
-      throw std::runtime_error("argument '" + name + "' must be integer");
+    if (!value.is_int) return "argument '" + name + "' must be integer";
     if (value.i.size() != static_cast<size_t>(expected))
-      throw std::runtime_error("integer argument '" + name +
-                               "' has no matching integer storage");
+      return "integer argument '" + name + "' has no matching integer storage";
   }
+  return std::nullopt;
+}
+
+void validate_argument(const std::string& name,
+                       const stanli::mir::UnsizedView& view,
+                       const stanli::DataMap::Entry& value) {
+  if (auto why = argument_mismatch(name, view, value))
+    throw std::runtime_error(*why);
 }
 
 bool named(const stanli::mir::FunDef& f, std::string_view requested) {
-  if (f.name == requested) return true;
-  return f.name.size() > requested.size() &&
-         f.name.compare(0, requested.size(), requested) == 0 &&
-         f.name[requested.size()] == '(';
+  return f.name == requested || stanli::mir::function_key(f) == requested;
 }
 
 const stanli::mir::FunDef* select_function(
@@ -109,7 +111,7 @@ const stanli::mir::FunDef* select_function(
   // An explicitly resolved signature, e.g. foo(real,vector), selects one
   // definition without inspecting values.
   for (const auto* f : candidates)
-    if (f->name == requested) return f;
+    if (stanli::mir::function_key(*f) == requested) return f;
   if (arguments == nullptr) {
     if (candidates.size() == 1) return candidates.front();
     throw std::runtime_error("Stan function '" + requested +
@@ -117,31 +119,38 @@ const stanli::mir::FunDef* select_function(
   }
 
   std::vector<const stanli::mir::FunDef*> matches;
+  std::string refusals;
   int best_promotions = std::numeric_limits<int>::max();
   for (const auto* f : candidates) {
-    try {
-      int promotions = 0;
-      for (size_t i = 0; i < f->arg_names.size(); ++i) {
-        const auto& value = arguments->at(f->arg_names[i]);
-        validate_argument(f->arg_names[i], f->arg_views[i], value);
-        // Match stanc's ordinary numeric promotion preference: an integer
-        // argument selects an integer overload ahead of a real overload.
-        if (value.is_int &&
-            f->arg_views[i].leaf == stanli::mir::UnsizedLeaf::Real)
-          ++promotions;
+    std::optional<std::string> why;
+    int promotions = 0;
+    for (size_t i = 0; i < f->arg_names.size() && !why; ++i) {
+      if (!arguments->has(f->arg_names[i])) {
+        why = "no argument '" + f->arg_names[i] + "'";
+        break;
       }
-      if (promotions < best_promotions) {
-        best_promotions = promotions;
-        matches.clear();
-      }
-      if (promotions == best_promotions) matches.push_back(f);
-    } catch (const std::exception&) {
+      const auto& value = arguments->at(f->arg_names[i]);
+      why = argument_mismatch(f->arg_names[i], f->arg_views[i], value);
+      // Match stanc's ordinary numeric promotion preference: an integer
+      // argument selects an integer overload ahead of a real overload.
+      if (value.is_int &&
+          f->arg_views[i].leaf == stanli::mir::UnsizedLeaf::Real)
+        ++promotions;
     }
+    if (why) {
+      refusals += "; " + f->name + ": " + *why;
+      continue;
+    }
+    if (promotions < best_promotions) {
+      best_promotions = promotions;
+      matches.clear();
+    }
+    if (promotions == best_promotions) matches.push_back(f);
   }
   if (matches.size() == 1) return matches.front();
   if (matches.empty())
     throw std::runtime_error("no overload of Stan function '" + requested +
-                             "' matches the arguments");
+                             "' matches the arguments" + refusals);
   throw std::runtime_error(
       "arguments ambiguously match overloaded Stan function '" + requested +
       "'; use a resolved signature");
@@ -498,7 +507,7 @@ stanli_function* stanli_function_new_from_mir(const char* mir_text,
     // Fail at construction for a missing name. Overloads are intentionally
     // selected later, when their argument values are present.
     for (const auto& f : out->program->fun_defs) {
-      out->functions.emplace(f.name, &f);
+      out->functions.emplace(stanli::mir::function_key(f), &f);
       if (named(f, function_name)) {
         out->candidates.push_back(&f);
         // The public result follows the typed return, just as promoted input
@@ -547,6 +556,11 @@ stanli_function* stanli_function_new_from_stan(const char* stan_code,
 }
 
 void stanli_function_free(stanli_function* function) { delete function; }
+
+void stanli_function_set_execution_report(stanli_function* function,
+                                          int enabled) {
+  if (function != nullptr) function->report_execution = enabled != 0;
+}
 
 int stanli_function_call(const stanli_function* function,
                          const stanli::DataMap* arguments,

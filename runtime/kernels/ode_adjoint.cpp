@@ -19,6 +19,7 @@ using stan::math::var;
 
 struct AdjointRhs {
   const OdeAdjointSpec* spec;
+  EvalState* eval_state = nullptr;
   mutable RhsWorkspace workspace;
 
   template <typename T_time, typename T_y, typename T_param>
@@ -35,7 +36,7 @@ struct AdjointRhs {
     Eigen::Matrix<T, Eigen::Dynamic, 1> out(state.size());
     if (spec->prog.ok) {
       run_rhs_into<T>(spec->prog, t, state.data(), theta.data(), theta.size(),
-                      x_r.data(), out.data(), workspace.get<T>());
+                      x_r.data(), out.data(), workspace.get<T>(), eval_state);
       return out;
     }
 
@@ -51,7 +52,7 @@ struct AdjointRhs {
 template <typename T_y0, typename T_t0, typename T_ts, typename T_theta>
 auto solve(const OdeAdjointSpec& spec, const T_y0& y0, const T_t0& t0,
            const std::vector<T_ts>& ts, const std::vector<T_theta>& theta,
-           const double* controls = nullptr) {
+           const double* controls, EvalState* state) {
   const Eigen::Index S = y0.size();
   Eigen::Map<const Eigen::VectorXd> atol_forward(
       controls ? controls + 1 : spec.absolute_tolerance_forward.data(),
@@ -60,7 +61,7 @@ auto solve(const OdeAdjointSpec& spec, const T_y0& y0, const T_t0& t0,
       controls ? controls + S + 2 : spec.absolute_tolerance_backward.data(),
       controls ? S : (Eigen::Index)spec.absolute_tolerance_backward.size());
   return stan::math::ode_adjoint_tol_ctl(
-      AdjointRhs{&spec}, y0, t0, ts,
+      AdjointRhs{&spec, state}, y0, t0, ts,
       controls ? controls[0] : spec.relative_tolerance_forward, atol_forward,
       controls ? controls[S + 1] : spec.relative_tolerance_backward,
       atol_backward,
@@ -84,11 +85,12 @@ void ode_adjoint_fwd(KernelCtx& ctx) {
   std::vector<double> ts(ctx.in[2].data, ctx.in[2].data + ctx.in[2].len);
   std::vector<double> theta(ctx.in[3].data, ctx.in[3].data + ctx.in[3].len);
   if (ctx.n_in == 5 &&
-      (ctx.in[4].len != 2 * S + 9 || (ctx.variant & 0x0fu) != 0))
+      (ctx.in[4].len != 2 * S + 9 || solver_activity(ctx).any()))
     throw std::invalid_argument(
         "runtime adjoint ODE controls require a value-only solve");
   const auto solution =
-      solve(spec, y0, t0, ts, theta, ctx.n_in == 5 ? ctx.in[4].data : nullptr);
+      solve(spec, y0, t0, ts, theta, ctx.n_in == 5 ? ctx.in[4].data : nullptr,
+            ctx.eval_state);
   if ((int64_t)solution.size() * S != ctx.out.len)
     throw std::runtime_error(
         "ode_adjoint_tol_ctl: result shape disagrees with output times");
@@ -98,9 +100,8 @@ void ode_adjoint_fwd(KernelCtx& ctx) {
 }
 
 void ode_adjoint_bwd(KernelCtx& ctx) {
-  const uint8_t mask =
-      (ctx.variant & 0x10u) != 0 ? (ctx.variant & 0x0fu) : 0x0fu;
-  if (mask == 0) return;
+  const SolverActivity active = solver_activity(ctx);
+  if (!active.any()) return;
   const OdeAdjointSpec& spec = *static_cast<const OdeAdjointSpec*>(ctx.udata);
   const int64_t S = ctx.in[0].len;
   const int64_t N = ctx.in[2].len;
@@ -117,20 +118,21 @@ void ode_adjoint_bwd(KernelCtx& ctx) {
   theta.reserve((size_t)P);
   for (int64_t i = 0; i < P; ++i) theta.emplace_back(ctx.in[3].data[i]);
 
-  const auto solution = solve(spec, y0, t0, ts, theta);
+  const auto solution = solve(spec, y0, t0, ts, theta, nullptr, ctx.eval_state);
   var weighted = 0.0;
   for (int64_t n = 0; n < N; ++n)
     for (int64_t i = 0; i < S; ++i)
       weighted += ctx.out_adj_vec.data[n * S + i] * solution[(size_t)n][i];
   weighted.grad();
 
-  if ((mask & 0x1u) && ctx.in_adj[0].data)
+  if (active.is_active(0) && ctx.in_adj[0].data)
     for (int64_t i = 0; i < S; ++i) ctx.in_adj[0].data[i] += y0(i).adj();
-  if ((mask & 0x2u) && ctx.in_adj[1].data) ctx.in_adj[1].data[0] += t0.adj();
-  if ((mask & 0x4u) && ctx.in_adj[2].data)
+  if (active.is_active(1) && ctx.in_adj[1].data)
+    ctx.in_adj[1].data[0] += t0.adj();
+  if (active.is_active(2) && ctx.in_adj[2].data)
     for (int64_t i = 0; i < N; ++i)
       ctx.in_adj[2].data[i] += ts[(size_t)i].adj();
-  if ((mask & 0x8u) && ctx.in_adj[3].data)
+  if (active.is_active(3) && ctx.in_adj[3].data)
     for (int64_t i = 0; i < P; ++i)
       ctx.in_adj[3].data[i] += theta[(size_t)i].adj();
 }

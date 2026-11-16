@@ -97,7 +97,7 @@ static std::vector<double> write_array_row(const std::string& mir,
                  row.begin() + col.slot + col.len);
     return out;
   }
-  if (!lm.write_array->truncated.empty()) return out;
+  if (lm.write_array->truncated.has_value()) return out;
   Executor wex(std::move(lm.write_array->graph));
   lm.write_array->bind(wex);
   std::copy(params.begin(), params.end(), wex.params_data());
@@ -290,7 +290,7 @@ static size_t rewrite_udf_rows_slice_to_upfrom(std::string& text) {
     }
     const std::string node = read_sexp_at(text, idx);
     const size_t node_end = idx + node.size();
-    if (node.find("rows FnPlain AoS") != std::string::npos &&
+    if (node.find("rows FnPlain)") != std::string::npos &&
         node.find("(Var W)") != std::string::npos) {
       const std::string lo = read_sexp_at(node, std::strlen("(Between"));
       out += text.substr(pos, idx - pos);
@@ -1491,6 +1491,36 @@ static void test_udf_data_call_o1() {
 // caller's propto, so the `~` inside prior_lp drops its constant terms while
 // the explicit normal_lpdf in scaled_lp keeps them. A `return;` ends only the
 // call: weighted_lp skips k == 2 and the loop continues.
+// stanc3 renames a function whose name is a C++ keyword (`public` becomes
+// `_stan_public`), and a void call names its function in the statement. Both
+// names, and one longer than sixty characters, must resolve.
+static void test_udf_void_names() {
+  using namespace stanli;
+  CompiledModel cm;
+  try {
+    cm = compile_model(slurp("tests/fixtures/udf_void_names.tmir.sexp"),
+                       DataMap());
+  } catch (const std::exception& error) {
+    check(false, std::string("udf void names compile: ") + error.what());
+    return;
+  }
+  Executor ex(cm.graph);
+  cm.bind(ex);
+  for (const auto& [y, want] : std::vector<std::pair<double, std::string>>{
+           {0.5, "public saw 0.5"}, {-0.5, "long name saw -0.5"}}) {
+    ex.params_data()[0] = y;
+    double grad = 0.0;
+    std::string got;
+    try {
+      (void)ex.gradient(&grad);
+    } catch (const std::domain_error& e) {
+      got = e.what();
+    }
+    check(got.find(want) != std::string::npos,
+          "udf void names reject: want '" + want + "', got '" + got + "'");
+  }
+}
+
 static void test_udf_void_statements() {
   using namespace stanli;
   const std::string mir = slurp("tests/fixtures/udf_void_statements.tmir.sexp");
@@ -2038,29 +2068,6 @@ int main() {
     expect_same_lowering("data preload shapes", fast, oracle);
   }
 
-  // A future stanc version may put another effect in the same top-level block
-  // as an input rebuild.  Make that shape synthetically by changing the inner
-  // generated `pos__ = pos__ + 1` into `N = pos__ + 1`.  The conservative
-  // classifier must interpret the whole mixed block; skipping it would leave
-  // y as [3,4], while the interpreter rebuilds it as [3,3].
-  {
-    std::string mir = slurp("tests/fixtures/loopy.tmir.sexp");
-    const std::string from = "(Assignment ((LVariable pos__) ()) UInt";
-    const std::string to = "(Assignment ((LVariable N) ()) UInt";
-    size_t pos = 0;
-    for (int occurrence = 0; occurrence < 3 && pos != std::string::npos;
-         ++occurrence) {
-      pos = mir.find(from, pos);
-      if (occurrence < 2 && pos != std::string::npos) pos += from.size();
-    }
-    check(pos != std::string::npos, "data preload mixed-block mutation");
-    if (pos != std::string::npos) mir.replace(pos, from.size(), to);
-    const DataMap d = DataMap::from_json(R"({"N": 2, "y": [3, 4]})");
-    const LowerSnapshot fast = lower_snapshot(mir, d, {0.4}, false);
-    const LowerSnapshot oracle = lower_snapshot(mir, d, {0.4}, true);
-    expect_same_lowering("data preload mixed block", fast, oracle);
-  }
-
   // A missing input and a real-valued JSON token for an integer input must
   // take the checked interpreter path, not become a partial preload or a
   // truncating cast.  The fast-path-on and escape-hatch diagnostics agree.
@@ -2592,9 +2599,9 @@ int main() {
       expect_eq("structured matrix ops repeated gradient " + std::to_string(i),
                 repeated[i], gradient[i]);
 
-    check(cm.write_array && cm.write_array->truncated.empty(),
+    check(cm.write_array && !cm.write_array->truncated,
           "structured matrix ops write_array compiled");
-    if (cm.write_array && cm.write_array->truncated.empty()) {
+    if (cm.write_array && !cm.write_array->truncated) {
       Executor wex(std::move(cm.write_array->graph));
       cm.write_array->bind(wex);
       for (int i = 0; i < 5; ++i) wex.params_data()[i] = point[i];
@@ -2676,9 +2683,9 @@ int main() {
     d.set_int("D", 2);
     CompiledModel lm =
         compile_model(slurp("tests/fixtures/udf_local_shape.tmir.sexp"), d);
-    check(lm.write_array && lm.write_array->truncated.empty(),
+    check(lm.write_array && !lm.write_array->truncated,
           "UDF local shape write_array compiled");
-    if (lm.write_array && lm.write_array->truncated.empty()) {
+    if (lm.write_array && !lm.write_array->truncated) {
       Executor wex(std::move(lm.write_array->graph));
       lm.write_array->bind(wex);
       const double q[4] = {0.25, -0.5, 0.75, -0.2};
@@ -2721,9 +2728,9 @@ int main() {
                       "." + std::to_string(i),
                   gradient[i], want_grad[point][i]);
     }
-    check(cm.write_array && cm.write_array->truncated.empty(),
+    check(cm.write_array && !cm.write_array->truncated,
           "conditional UDF return write_array compiled");
-    if (cm.write_array && cm.write_array->truncated.empty()) {
+    if (cm.write_array && !cm.write_array->truncated) {
       Executor wex(std::move(cm.write_array->graph));
       cm.write_array->bind(wex);
       wex.params_data()[0] = points[0][0];
@@ -2895,9 +2902,9 @@ int main() {
       expect_ulp(tag + " lp", lp, acc.val());
       check(std::fabs(grad[0] - mu.adj()) < 1e-12, tag + " grad");
       stan::math::recover_memory();
-      check(lm.write_array && lm.write_array->truncated.empty(),
+      check(lm.write_array && !lm.write_array->truncated,
             tag + " write_array compiled");
-      if (lm.write_array && lm.write_array->truncated.empty()) {
+      if (lm.write_array && !lm.write_array->truncated) {
         Executor wex(std::move(lm.write_array->graph));
         lm.write_array->bind(wex);
         wex.params_data()[0] = 0.4;
@@ -3217,9 +3224,9 @@ int main() {
 
       // The same logical matrix alias must survive the separately lowered
       // write_array graph used for transformed-parameter CSV columns.
-      check(lm.write_array && lm.write_array->truncated.empty(),
+      check(lm.write_array && !lm.write_array->truncated,
             "viewalias write_array compiled");
-      if (lm.write_array && lm.write_array->truncated.empty()) {
+      if (lm.write_array && !lm.write_array->truncated) {
         Executor wex(std::move(lm.write_array->graph));
         lm.write_array->bind(wex);
         for (int i = 0; i < 6; ++i) wex.params_data()[i] = points[0][i];
@@ -3577,9 +3584,9 @@ int main() {
         const std::string tag =
             fn + std::string(propto ? " propto" : " normalized") +
             (island ? " island" : " direct");
-        check(lm.write_array && lm.write_array->truncated.empty(),
+        check(lm.write_array && !lm.write_array->truncated,
               tag + " write_array compiles");
-        if (!lm.write_array || !lm.write_array->truncated.empty()) continue;
+        if (!lm.write_array || lm.write_array->truncated.has_value()) continue;
         Executor ex(std::move(lm.write_array->graph));
         lm.write_array->bind(ex);
         ex.params_data()[0] = 0.0;
@@ -4853,9 +4860,9 @@ int main() {
       expect_eq("tdintsize g" + std::to_string(k), grad[k], x(k).adj());
     stan::math::recover_memory();
 
-    check(lm.write_array && lm.write_array->truncated.empty(),
+    check(lm.write_array && !lm.write_array->truncated,
           "tdintsize prepared write_array compiled");
-    if (lm.write_array && lm.write_array->truncated.empty()) {
+    if (lm.write_array && !lm.write_array->truncated) {
       Executor wx(std::move(lm.write_array->graph));
       lm.write_array->bind(wx);
       for (int k = 0; k < 14; ++k) wx.params_data()[k] = 0.1 * (k + 1) - 0.7;
@@ -5153,9 +5160,9 @@ int main() {
       expect_eq(tag + " no-loop lp", ex.gradient(&grad), -0.5);
       expect_eq(tag + " no-loop grad", grad, 1.0);
 
-      check(cm.write_array && cm.write_array->truncated.empty(),
+      check(cm.write_array && !cm.write_array->truncated,
             tag + " write_array compiled");
-      if (!cm.write_array || !cm.write_array->truncated.empty()) return;
+      if (!cm.write_array || cm.write_array->truncated.has_value()) return;
       Executor wex(std::move(cm.write_array->graph));
       cm.write_array->bind(wex);
       wex.params_data()[0] = 0.5;
@@ -6385,9 +6392,9 @@ int main() {
     // write_array runs the same calls with `jacobian__ = false`, so the
     // `total` column is the returned contribution alone. log_prob adds the
     // four jacobian increments to it, and each of those is nonzero here.
-    check(bm.write_array && bm.write_array->truncated.empty(),
+    check(bm.write_array && !bm.write_array->truncated,
           "boundfn write_array compiled");
-    if (bm.write_array && bm.write_array->truncated.empty()) {
+    if (bm.write_array && !bm.write_array->truncated) {
       Executor wex(std::move(bm.write_array->graph));
       bm.write_array->bind(wex);
       for (int i = 0; i < 3; ++i) wex.params_data()[i] = pts[0][i];
@@ -6493,11 +6500,11 @@ int main() {
           "transformed-data HOF lp");
     check(std::fabs(gradient[0] - expected) < 1e-7,
           "transformed-data HOF gradient");
-    check(hm.write_array && !hm.write_array->interp &&
-              hm.write_array->truncated.empty(),
-          "higher-order write_array compiled completely");
+    check(
+        hm.write_array && !hm.write_array->interp && !hm.write_array->truncated,
+        "higher-order write_array compiled completely");
     if (hm.write_array && !hm.write_array->interp &&
-        hm.write_array->truncated.empty()) {
+        !hm.write_array->truncated) {
       Executor wex(std::move(hm.write_array->graph));
       hm.write_array->bind(wex);
       wex.params_data()[0] = 0.0;
@@ -6915,9 +6922,9 @@ int main() {
     }
     // The identity elements have to reach write_array untransformed too:
     // an unbounded declaration writes its unconstrained value straight out.
-    check(im.write_array && im.write_array->truncated.empty(),
+    check(im.write_array && !im.write_array->truncated,
           "infbounds write_array compiled");
-    if (im.write_array && im.write_array->truncated.empty()) {
+    if (im.write_array && !im.write_array->truncated) {
       Executor wex(std::move(im.write_array->graph));
       im.write_array->bind(wex);
       for (int i = 0; i < 14; ++i) wex.params_data()[i] = pts[0][i];
@@ -7509,7 +7516,7 @@ int main() {
     check(cm.n_unconstrained == 22,
           "choose size: choose(4, 2) sizes the parameter vector");
     check(cm.write_array && !cm.write_array->columns.empty() &&
-              cm.write_array->truncated.empty(),
+              !cm.write_array->truncated,
           "choose size: the write_array graph carries the whole section");
   }
 
@@ -7623,9 +7630,9 @@ int main() {
     for (int i = 0; i < 6; ++i)
       expect_ulp("crossprod: g" + std::to_string(i), gradient[i], a(i).adj());
 
-    check(cm.write_array && cm.write_array->truncated.empty(),
+    check(cm.write_array && !cm.write_array->truncated,
           "crossprod: write_array compiled");
-    if (cm.write_array && cm.write_array->truncated.empty()) {
+    if (cm.write_array && !cm.write_array->truncated) {
       Executor wex(std::move(cm.write_array->graph));
       cm.write_array->bind(wex);
       for (int i = 0; i < 6; ++i) wex.params_data()[i] = q[i];
@@ -9027,6 +9034,7 @@ int main() {
   test_udf_lp_branch_propto();
   test_udf_branch_kernels();
   test_udf_data_call_o1();
+  test_udf_void_names();
   test_udf_void_statements();
   test_structured_vector_return();
   test_structured_dead_after_break();

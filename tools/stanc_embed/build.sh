@@ -11,7 +11,7 @@ source tools/stanc_embed/provenance.sh
 source tools/build_jobs.sh
 BUILD_JOBS=$(stanli_detect_build_jobs)
 SRC=${1:?stanc3 source dir}
-SWITCH=${2:-stanc3-55}
+SWITCH=${2:-stanc3-552}
 STANC3_SRC_SHA=$(stanc_embed_read_setup STANC3_SRC_SHA)
 if [[ ! "$STANC3_SRC_SHA" =~ ^[0-9a-f]{40}$ ]]; then
   echo "could not read an exact STANC3_SRC_SHA from deps/pins.env" >&2

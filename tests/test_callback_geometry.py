@@ -47,10 +47,8 @@ def main(check, dump_ops):
             for node in wa_callbacks:
                 assert node["callback"]["value_engine"] == (
                     "mir_interpreter" if suffix else "register_program"), node
-                flags = node["variant"]
-                assert flags == {"OP_ODE": 0x10, "OP_DAE": 0x8,
-                                 "OP_ALGEBRA_SOLVER": 0, "OP_QUADRATURE": 0,
-                                 "OP_ODE_ADJOINT": 0x10}[node["operation"]], node
+                # Generated quantities solve on data: no input is active.
+                assert node["variant"] == 0, node
     for name in ("ode_runtime_for", "for_bound_semantics", "ode_integer_arithmetic",
                  "ode_nested_callback", "ode_runtime_index",
                  "ode_constant_loop", "ode_retained_loop", "ode_nested_for"):
@@ -91,7 +89,7 @@ def main(check, dump_ops):
     selected = list(callbacks(report["write_array"]))
     assert Counter(n["operation"] for n in selected) == {"OP_ODE": 1, "OP_ALGEBRA_SOLVER": 1}
     for node in selected:
-        assert node["variant"] == (0x10 if node["operation"] == "OP_ODE" else 0), node
+        assert node["variant"] == 0, node
         assert node.get("input_adjoint_mask", 0) == 0, node
 
     stem = ROOT / "tests/fixtures/matrix_callback_value_fallback"

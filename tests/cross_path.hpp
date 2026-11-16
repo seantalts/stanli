@@ -498,7 +498,7 @@ inline Run evaluate(const std::string& mir_text, const DataMap& data,
     r.paths.wa = "none";
   } else if (cm.write_array->interp) {
     r.paths.wa =
-        cm.write_array->truncated.empty() ? "graph+interp" : "truncated+interp";
+        !cm.write_array->truncated ? "graph+interp" : "truncated+interp";
   } else {
     r.paths.wa = cm.write_array->columns.empty() ? "empty" : "graph";
   }
@@ -1080,8 +1080,7 @@ inline Paths path_report(const std::string& mir_text, const DataMap& data,
       if (!cm.write_array)
         p.wa = "none";
       else if (cm.write_array->interp)
-        p.wa = cm.write_array->truncated.empty() ? "graph+interp"
-                                                 : "truncated+interp";
+        p.wa = !cm.write_array->truncated ? "graph+interp" : "truncated+interp";
       else
         p.wa = cm.write_array->columns.empty() ? "empty" : "graph";
       p.wa_columns =

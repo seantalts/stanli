@@ -192,7 +192,7 @@ paths and hashes in raw records unchanged.
 | Document | Contents / use |
 | --- | --- |
 | [2026-10-15 · General runtime fixes](../../notes/performance/2026-10-15-general-runtime-fixes.md) | Baseline-ISA registry storage and ADD_N binding; rejected constant sharing and benchmark evidence. |
-| [Stanli portable MIR v2](../../compiler/portable_ir/SCHEMA.md) | Portable MIR producer/consumer format and compatibility contract. |
+| [Stanli portable MIR v3](../../compiler/portable_ir/SCHEMA.md) | Portable MIR producer/consumer format and compatibility contract. |
 | [2026-08-06 · Elementwise-lp densities and batched mixture kernels](archive/plans/2026-08-06-elementwise-lp.md) | Historical plan or digest; read final disposition first. |
 | [2026-08-06 · Perf Phase 2 Plan](archive/plans/2026-08-06-perf-phase2.md) | Historical plan or digest; read final disposition first. |
 | [2026-08-06 · Tape islands: compile irreducible scalar residue to one op](archive/plans/2026-08-06-tape-islands.md) | Historical plan or digest; read final disposition first. |

@@ -20,7 +20,7 @@ namespace mir {
 namespace detail {
 namespace {
 
-constexpr std::string_view kMagic = "STANLI2:";
+constexpr std::string_view kMagic = "STANLI3:";
 constexpr size_t kMaxInputBytes = size_t{256} * 1024 * 1024;
 constexpr size_t kMaxStringBytes = size_t{16} * 1024 * 1024;
 constexpr size_t kMaxTotalStringBytes = size_t{256} * 1024 * 1024;
@@ -29,7 +29,7 @@ constexpr uint32_t kMaxListItems = 1000000;
 constexpr size_t kMaxValues = 10000000;
 
 [[noreturn]] void fail_wire(size_t offset, const std::string& message) {
-  throw std::runtime_error("portable mir v2 at byte " + std::to_string(offset) +
+  throw std::runtime_error("portable mir at byte " + std::to_string(offset) +
                            ": " + message);
 }
 
@@ -46,7 +46,7 @@ std::string decode_payload(std::string_view wire) {
   if (wire.size() > kMaxInputBytes)
     fail_wire(0, "input exceeds 268435456 bytes");
   if (wire.size() < kMagic.size() || wire.substr(0, kMagic.size()) != kMagic)
-    fail_wire(0, "missing STANLI2 header");
+    fail_wire(0, "missing STANLI3 header");
   const std::string_view encoded = wire.substr(kMagic.size());
   if (encoded.size() % 4 != 0)
     fail_wire(wire.size(), "base64 length is not a multiple of 4");
@@ -188,7 +188,7 @@ class Reader {
    public:
     explicit Depth(Reader& reader) : reader_(reader) {
       if (reader_.depth_ >= 2 * nesting_limit())
-        throw NestingTooDeep("portable mir v2: nested too deeply (more than " +
+        throw NestingTooDeep("portable mir: nested too deeply (more than " +
                              std::to_string(nesting_limit()) + " levels)");
       reader_.peak_ = std::max(reader_.peak_, ++reader_.depth_);
     }
@@ -212,7 +212,7 @@ class Reader {
   }
 
   [[noreturn]] void fail(const std::string& message) const {
-    throw std::runtime_error("portable mir v2 at byte " +
+    throw std::runtime_error("portable mir at byte " +
                              std::to_string(position_) + ": " + message);
   }
 
@@ -287,27 +287,47 @@ constexpr std::array<UnsizedLeaf, 7> kLeafTags = {
     UnsizedLeaf::Complex, UnsizedLeaf::Vector, UnsizedLeaf::RowVector,
     UnsizedLeaf::Matrix};
 
-constexpr std::array<Expr::Kind, 11> kExprTags = {
-    Expr::Var,    Expr::LitInt,    Expr::LitReal,    Expr::LitStr,
-    Expr::FunApp, Expr::Promotion, Expr::Indexed,    Expr::TernaryIf,
-    Expr::EOr,    Expr::EAnd,      Expr::Unsupported};
+constexpr std::array<Expr::Kind, 16> kExprTags = {
+    Expr::Var,         Expr::LitInt,      Expr::LitReal,      Expr::LitStr,
+    Expr::FunApp,      Expr::Promotion,   Expr::Indexed,      Expr::TernaryIf,
+    Expr::EOr,         Expr::EAnd,        Expr::Unsupported,  Expr::IndexAll,
+    Expr::IndexSingle, Expr::IndexUpfrom, Expr::IndexBetween, Expr::IndexMulti};
 
 constexpr std::array<Expr::Lib, 3> kLibraryTags = {
     Expr::Lib::StanLib, Expr::Lib::Internal, Expr::Lib::UserDefined};
 
-constexpr std::array<Transform::Kind, 17> kTransformTags = {
-    Transform::Identity,         Transform::Lower,        Transform::Upper,
-    Transform::LowerUpper,       Transform::Offset,       Transform::Multiplier,
-    Transform::OffsetMultiplier, Transform::Simplex,      Transform::Ordered,
-    Transform::PositiveOrdered,  Transform::CholeskyCorr, Transform::UnitVector,
-    Transform::SumToZero,        Transform::Correlation,  Transform::Covariance,
-    Transform::CholeskyCov,      Transform::Unsupported};
+constexpr std::array<FnSuffix, 6> kSuffixTags = {
+    FnSuffix::Plain, FnSuffix::Rng,    FnSuffix::Lpdf,
+    FnSuffix::Lpmf,  FnSuffix::Target, FnSuffix::Jacobian};
 
-constexpr std::array<Stmt::Kind, 14> kStmtTags = {
-    Stmt::Decl,     Stmt::Assignment, Stmt::TargetPE, Stmt::Block,
-    Stmt::SList,    Stmt::For,        Stmt::IfElse,   Stmt::While,
-    Stmt::NRFunApp, Stmt::Return,     Stmt::Break,    Stmt::Continue,
-    Stmt::Skip,     Stmt::Unsupported};
+constexpr std::array<Transform::Kind, 19> kTransformTags = {
+    Transform::Identity,
+    Transform::Lower,
+    Transform::Upper,
+    Transform::LowerUpper,
+    Transform::Offset,
+    Transform::Multiplier,
+    Transform::OffsetMultiplier,
+    Transform::Simplex,
+    Transform::Ordered,
+    Transform::PositiveOrdered,
+    Transform::CholeskyCorr,
+    Transform::UnitVector,
+    Transform::SumToZero,
+    Transform::Correlation,
+    Transform::Covariance,
+    Transform::CholeskyCov,
+    Transform::StochasticColumn,
+    Transform::StochasticRow,
+    Transform::Unsupported};
+
+// Tag 14 is `jacobian +=`, a TargetPE with its jacobian flag set.
+constexpr uint8_t kJacobianPETag = 14;
+constexpr std::array<Stmt::Kind, 15> kStmtTags = {
+    Stmt::Decl,     Stmt::Assignment,  Stmt::TargetPE, Stmt::Block,
+    Stmt::SList,    Stmt::For,         Stmt::IfElse,   Stmt::While,
+    Stmt::NRFunApp, Stmt::Return,      Stmt::Break,    Stmt::Continue,
+    Stmt::Skip,     Stmt::Unsupported, Stmt::TargetPE};
 
 UnsizedView read_view(Reader& reader) {
   UnsizedView view;
@@ -320,12 +340,25 @@ UnsizedView read_view(Reader& reader) {
 Expr read_expr(Reader& reader);
 Stmt read_stmt(Reader& reader);
 
+FnSuffix read_suffix(Reader& reader) {
+  const uint8_t tag = reader.u8();
+  return read_tag(reader, tag, kSuffixTags, "unknown function-suffix tag");
+}
+
+FunctionType read_function_type(Reader& reader) {
+  Reader::Depth depth(reader);
+  FunctionType value;
+  value.args = reader.list<UnsizedView>([&] { return read_view(reader); });
+  value.suffix = read_suffix(reader);
+  value.propto = reader.boolean();
+  return value;
+}
+
 std::vector<Expr> read_exprs(Reader& reader) {
   return reader.list<Expr>([&] { return read_expr(reader); });
 }
 
 void read_meta(Reader& reader, Expr& value) {
-  value.type_ = reader.string();
   value.unsized = read_view(reader);
   value.data_only = reader.boolean();
   value.promoted = reader.boolean();
@@ -338,9 +371,16 @@ Expr read_expr(Reader& reader) {
   const uint8_t tag = reader.u8();
   value.kind = read_tag(reader, tag, kExprTags, "unknown expression tag");
   switch (value.kind) {
-    case Expr::Var:
+    case Expr::Var: {
       value.name = reader.string();
+      const uint8_t present = reader.u8();
+      if (present > 1) reader.fail("optional marker is not 0 or 1");
+      if (present) {
+        value.fn_type = read_function_type(reader);
+        value.fn_propto = value.fn_type->propto;
+      }
       break;
+    }
     case Expr::LitInt:
       value.lit_i = reader.i32();
       value.lit = static_cast<double>(value.lit_i);
@@ -356,6 +396,7 @@ Expr read_expr(Reader& reader) {
       value.fn_lib = read_tag(reader, library, kLibraryTags,
                               "unknown function-library tag");
       value.name = reader.string();
+      value.fn_suffix = read_suffix(reader);
       value.fn_propto = reader.boolean();
       value.args = read_exprs(reader);
       break;
@@ -365,6 +406,11 @@ Expr read_expr(Reader& reader) {
     case Expr::TernaryIf:
     case Expr::EOr:
     case Expr::EAnd:
+    case Expr::IndexAll:
+    case Expr::IndexSingle:
+    case Expr::IndexUpfrom:
+    case Expr::IndexBetween:
+    case Expr::IndexMulti:
       value.args = read_exprs(reader);
       break;
     case Expr::Unsupported:
@@ -381,12 +427,6 @@ Transform read_transform(Reader& reader) {
   value.kind = read_tag(reader, tag, kTransformTags, "unknown transform tag");
   value.args = read_exprs(reader);
   value.raw = reader.string();
-  if (value.kind == Transform::Unsupported) {
-    if (value.raw == "StochasticColumn")
-      value.kind = Transform::StochasticColumn;
-    else if (value.raw == "StochasticRow")
-      value.kind = Transform::StochasticRow;
-  }
   return value;
 }
 
@@ -407,6 +447,16 @@ SizedType read_sized(Reader& reader) {
   return value;
 }
 
+// A declaration's type: tag 0 is sized, tag 1 unsized.
+SizedType read_decl_type(Reader& reader) {
+  const uint8_t tag = reader.u8();
+  if (tag == 0) return read_sized(reader);
+  if (tag != 1) reader.fail("unknown declaration-type tag");
+  const UnsizedView view = read_view(reader);
+  std::string raw = reader.string();
+  return unsized_declaration(view, std::move(raw));
+}
+
 std::vector<Stmt> read_stmts(Reader& reader) {
   return reader.list<Stmt>([&] { return read_stmt(reader); });
 }
@@ -416,10 +466,11 @@ Stmt read_stmt(Reader& reader) {
   Stmt value;
   const uint8_t tag = reader.u8();
   value.kind = read_tag(reader, tag, kStmtTags, "unknown statement tag");
+  value.jacobian = tag == kJacobianPETag;
   switch (value.kind) {
     case Stmt::Decl:
       value.decl_id = reader.string();
-      value.decl_type = read_sized(reader);
+      value.decl_type = read_decl_type(reader);
       value.decl_data_only = reader.boolean();
       value.has_init = reader.boolean();
       if (value.has_init) value.init = read_expr(reader);
@@ -455,20 +506,32 @@ Stmt read_stmt(Reader& reader) {
       value.body = read_stmts(reader);
       value.raw = reader.string();
       break;
-    case Stmt::NRFunApp:
+    case Stmt::NRFunApp: {
+      const uint8_t library = reader.u8();
+      value.fn_lib = read_tag(reader, library, kLibraryTags,
+                              "unknown function-library tag");
       value.fn_name = reader.string();
+      value.fn_suffix = read_suffix(reader);
       value.fn_args = read_exprs(reader);
-      value.check_transform = read_optional_transform(reader);
-      value.check_var_name = reader.string();
+      // FnCheck's and FnWriteParam's value leads their operand list, ahead
+      // of a check's bounds.
+      const uint8_t payload = reader.u8();
+      const std::string_view internal = internal_name(value);
+      if (payload != (internal == "FnCheck"        ? 1
+                      : internal == "FnWriteParam" ? 2
+                                                   : 0))
+        reader.fail("statement payload does not match its function");
+      if (payload == 1) {
+        value.check_transform = read_transform(reader);
+        value.check_var_name = reader.string();
+      } else if (payload == 2) {
+        value.write_transform = read_optional_transform(reader);
+      }
+      if (payload != 0)
+        value.fn_args.insert(value.fn_args.begin(), read_expr(reader));
       value.raw = reader.string();
-      // FnCheck and FnWriteParam share the wire's optional-transform slot.
-      // Split them here so the rest of the runtime never has to ask which
-      // meaning a transform carries: FnCheck verifies a constraint,
-      // FnWriteParam names one to invert.
-      if (value.fn_name == "FnWriteParam")
-        value.write_transform =
-            std::exchange(value.check_transform, std::nullopt);
       break;
+    }
     case Stmt::Return:
       value.has_init = reader.boolean();
       if (value.has_init) value.rhs = read_expr(reader);
@@ -494,14 +557,26 @@ FunDef read_fun(Reader& reader) {
   FunDef value;
   value.name = reader.string();
   value.arg_names = read_strings(reader);
-  value.arg_types = read_strings(reader);
   value.arg_views = reader.list<UnsizedView>([&] { return read_view(reader); });
   value.arg_data_only = reader.list<bool>([&] { return reader.boolean(); });
   value.body = read_stmts(reader);
   const size_t arity = value.arg_names.size();
-  if (value.arg_types.size() != arity || value.arg_views.size() != arity ||
-      value.arg_data_only.size() != arity)
+  if (value.arg_views.size() != arity || value.arg_data_only.size() != arity)
     reader.fail("function argument field lengths disagree");
+  return value;
+}
+
+constexpr std::array<OutputVar::Block, 3> kBlockTags = {
+    OutputVar::Block::Parameters, OutputVar::Block::TransformedParameters,
+    OutputVar::Block::GeneratedQuantities};
+
+OutputVar read_output_var(Reader& reader) {
+  Reader::Depth depth(reader);
+  OutputVar value;
+  value.name = reader.string();
+  const uint8_t block = reader.u8();
+  value.block = read_tag(reader, block, kBlockTags, "unknown output-block tag");
+  value.type = read_sized(reader);
   return value;
 }
 
@@ -519,24 +594,23 @@ Program read_program(Reader& reader) {
   result.prepare_data = read_stmts(reader);
   result.log_prob = read_stmts(reader);
   result.generate_quantities = read_stmts(reader);
+  result.transformed_parameters_begin = reader.u32();
+  result.generated_quantities_begin = reader.u32();
+  if (result.transformed_parameters_begin > result.generated_quantities_begin ||
+      result.generated_quantities_begin > result.generate_quantities.size())
+    reader.fail("write_array section boundaries out of order");
   result.fun_defs = reader.list<FunDef>([&] { return read_fun(reader); });
-  result.output_vars = read_strings(reader);
-  // Appended after the sections every v2 document carries. A document from a
-  // producer that predates it simply ends here, and decodes with no inverse
-  // parameter transforms -- the same state as a model whose section could not
-  // be encoded. Anything else still has to be a well-formed statement list,
-  // and finish() still rejects bytes beyond it.
-  if (!reader.at_end()) {
-    result.has_transform_inits = true;
-    result.transform_inits = read_stmts(reader);
-  }
+  result.output_vars =
+      reader.list<OutputVar>([&] { return read_output_var(reader); });
+  result.has_transform_inits = true;
+  result.transform_inits = read_stmts(reader);
   result.nesting = (reader.peak_depth() + 1) / 2;
   return result;
 }
 
 }  // namespace
 
-Program read_portable_v2_program(std::string_view bytes) {
+Program read_portable_program(std::string_view bytes) {
   const std::string payload = decode_payload(bytes);
   Reader reader(payload);
   Program result = read_program(reader);

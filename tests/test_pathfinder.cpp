@@ -7,6 +7,8 @@
 #include <stanli/estimate.hpp>
 #include <stanli/nuts.hpp>
 
+#include <Eigen/Dense>
+
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
@@ -118,6 +120,36 @@ int main() {
     for (size_t i = 0; i < seen.size() && i < r.path.size(); ++i)
       expect("observer iterate " + std::to_string(i),
              seen[i].iter == r.path[i].iter && seen[i].lp == r.path[i].lp);
+  }
+
+  // ---- the selected iterate and its ELBO -------------------------------
+  // The first num_elbo_draws draws are the selected iterate's ELBO draws,
+  // so its ELBO is their mean of lp - lp_approx, at full precision. Asking
+  // for fewer draws than that changes neither the selection nor the ELBO.
+  {
+    auto m = testmodels::eight_schools();
+    Executor ex(std::move(m.graph));
+    testmodels::fill_eight_schools_data(m, ex);
+    PathfinderConfig cfg;
+    cfg.seed = 4242;
+    cfg.num_draws = 100;
+    const PathfinderResult r = run_pathfinder(ex, cfg);
+    Eigen::ArrayXd ratio(cfg.num_elbo_draws);
+    for (int i = 0; i < cfg.num_elbo_draws; ++i)
+      ratio(i) = r.lp[(size_t)i] - r.lp_approx[(size_t)i];
+    expect("selected ELBO is the mean over the ELBO draws",
+           r.selected_elbo == ratio.mean());
+
+    PathfinderConfig few = cfg;
+    few.num_draws = 10;
+    const PathfinderResult s = run_pathfinder(ex, few);
+    expect("fewer draws than ELBO draws keeps num_draws",
+           s.draws.size() == (size_t)few.num_draws);
+    expect("fewer draws keeps the selected iterate",
+           s.selected_iter == r.selected_iter);
+    expect("fewer draws keeps the ELBO", s.selected_elbo == r.selected_elbo);
+    expect("fewer draws are the leading draws",
+           std::equal(s.draws.begin(), s.draws.end(), r.draws.begin()));
   }
 
   // ---- pareto_khat -----------------------------------------------------

@@ -1,4 +1,4 @@
-# Stanli portable MIR v2
+# Stanli portable MIR v3
 
 This document defines the stanli-owned wire representation of the MIR slice
 consumed by the C++ runtime. It is not a serialization of every stanc3 MIR
@@ -10,38 +10,41 @@ selected optimization policy. The decoder constructs `stanli::mir::Program`
 directly, validates it, then runs the same overload and binding finalizer used
 by the legacy S-expression reader.
 
-Version 2 is a canonical ASCII envelope around a compact, fixed-layout binary
+Version 3 is a canonical ASCII envelope around a compact, fixed-layout binary
 payload. The envelope crosses native callbacks, subprocess output, V8,
 js_of_ocaml, Web Workers, and existing C-string APIs without transcoding or
 embedded-NUL problems. The payload avoids a JSON DOM, repeated field names,
 inactive fields, and decimal parsing.
 
-Portable MIR v1 was a pre-release JSON format. It is not accepted by this
-runtime and has no compatibility role. The legacy stanc3 S-expression reader
-remains a separate transitional input path.
+Portable MIR v1 was a pre-release JSON format and v2 (`STANLI2:`) the layout
+before every stanc3 fact the runtime reads became a typed field. Neither is
+accepted by this runtime; a `STANLI<n>:` document of another version is
+rejected with a request to recompile the model. The legacy stanc3
+S-expression reader remains a separate input path.
 
 ## Envelope and format detection
 
 A canonical document is:
 
 ```text
-STANLI2:<base64 payload>
+STANLI3:<base64 payload>
 ```
 
-`STANLI2:` is the eight-byte ASCII version marker. The remainder is standard
+`STANLI3:` is the eight-byte ASCII version marker. The remainder is standard
 RFC 4648 base64 using `A-Z`, `a-z`, `0-9`, `+`, and `/`, with required `=`
 padding. There is no whitespace, BOM, or final newline.
 
 The multi-format decoder dispatches as follows:
 
-1. An exact `STANLI2:` prefix selects this decoder.
-2. Otherwise, after the four ASCII whitespace bytes are skipped, `(` selects
+1. An exact `STANLI3:` prefix selects this decoder.
+2. Any other `STANLI` prefix is a document of another version and is
+   rejected.
+3. Otherwise, after the four ASCII whitespace bytes are skipped, `(` selects
    the legacy S-expression reader.
-3. Every other input is rejected.
+4. Every other input is rejected.
 
-Once the v2 prefix is seen, malformed base64 or a malformed payload is a hard
-v2 error. The decoder never retries another format. `STANLI3:` and the former
-JSON envelope are unknown formats rather than near matches.
+Once the v3 prefix is seen, malformed base64 or a malformed payload is a hard
+v3 error. The decoder never retries another format.
 
 Canonical base64 has exactly one spelling. Padding may occur only in the final
 quartet, and unused tail bits must be zero. A decoder rejects non-canonical
@@ -106,6 +109,35 @@ u8 leaf
 | 1 | `Internal` |
 | 2 | `UserDefined` |
 
+### Function suffix
+
+stanc3's `Fun_kind.suffix`: the kind of function a name denotes. Stan source
+spells it with the name's ending, but consumers read this tag, never the
+name.
+
+| Tag | Meaning | Source spelling |
+| ---: | --- | --- |
+| 0 | `FnPlain` | |
+| 1 | `FnRng` | `_rng` |
+| 2 | `FnLpdf` | `_lpdf`, `_lupdf` |
+| 3 | `FnLpmf` | `_lpmf`, `_lupmf` |
+| 4 | `FnTarget` | `_lp` |
+| 5 | `FnJacobian` | `_jacobian` |
+
+### `FunctionType`
+
+```text
+list<UnsizedView> args
+u8 suffix
+bool propto
+```
+
+The type of a variable that names a function, as a higher-order callback
+argument does: the views of the function's arguments, its suffix, and
+whether the reference asks for the unnormalized density. A callback written
+`foo_lupdf`/`foo_lupmf` is encoded with the definition's name,
+`foo_lpdf`/`foo_lpmf`, and `propto` set.
+
 ### Expression kind
 
 Every expression begins with a kind tag and its active fields, then ends with
@@ -113,22 +145,26 @@ the common metadata suffix shown below.
 
 | Tag | Kind | Active fields after tag |
 | ---: | --- | --- |
-| 0 | `Var` | `string name` |
+| 0 | `Var` | `string name`, `optional<FunctionType> function_type` |
 | 1 | `LitInt` | `i32 value` |
 | 2 | `LitReal` | `f64 value` |
 | 3 | `LitStr` | `string value` |
-| 4 | `FunApp` | `u8 library`, `string name`, `bool propto`, `list<Expr> args` |
+| 4 | `FunApp` | `u8 library`, `string name`, `u8 suffix`, `bool propto`, `list<Expr> args` |
 | 5 | `Promotion` | `list<Expr> args` |
 | 6 | `Indexed` | `list<Expr> args` |
 | 7 | `TernaryIf` | `list<Expr> args` |
 | 8 | `EOr` | `list<Expr> args` |
 | 9 | `EAnd` | `list<Expr> args` |
 | 10 | `Unsupported` | none |
+| 11 | `IndexAll` | `list<Expr> args` (empty) |
+| 12 | `IndexSingle` | `list<Expr> args` (the index) |
+| 13 | `IndexUpfrom` | `list<Expr> args` (the lower bound) |
+| 14 | `IndexBetween` | `list<Expr> args` (the lower and upper bounds) |
+| 15 | `IndexMulti` | `list<Expr> args` (the integer array of indices) |
 
 The common suffix is:
 
 ```text
-string type
 UnsizedView unsized
 bool data_only
 bool promoted
@@ -141,18 +177,9 @@ The producer currently flattens stanc3 `Promotion` nodes into the promoted
 inner expression and sets `promoted`, matching the legacy structural mapping.
 Tag 5 remains defined for direct runtime inputs and validation coverage.
 
-Synthetic index descriptors are ordinary `FunApp` values inside an `Indexed`
-argument list. Their canonical names and arities are validated after decode:
-
-| Name | Argument count |
-| --- | ---: |
-| `IndexAll` | 0 |
-| `IndexSingle` | 1 |
-| `IndexUpfrom` | 1 |
-| `IndexBetween` | 2 |
-| `IndexMulti` | 1 |
-
-They use library tag 0 and default function metadata.
+The index kinds (11-15) occur only after the base of an `Indexed` expression
+and in an assignment's `lhs_indices`; their arities are validated after
+decode, and their metadata suffix carries default values.
 
 ### Transform kind
 
@@ -182,7 +209,9 @@ string raw
 | 13 | `Correlation` |
 | 14 | `Covariance` |
 | 15 | `CholeskyCov` |
-| 16 | `Unsupported` |
+| 16 | `StochasticColumn` |
+| 17 | `StochasticRow` |
+| 18 | `Unsupported` |
 
 Argument arities are checked against the selected kind.
 
@@ -200,6 +229,42 @@ string raw
 element for an array and is empty otherwise. Dimension counts are validated
 against the base.
 
+### `DeclType`
+
+```text
+u8 tag
+```
+
+| `tag` | Meaning | Fields after tag |
+| ---: | --- | --- |
+| 0 | `Sized` | `SizedType type` |
+| 1 | `Unsized` | `UnsizedView view`, `string raw` |
+
+stanc3 declares optimizer temporaries, such as an inlined function's result,
+unsized; the first whole-variable assignment gives such a container its
+shape. `raw` spells an `Unknown` leaf's stanc3 type for diagnostics and is
+otherwise empty. The decoder gives an unsized `int` or `real` the sized
+`SInt`/`SReal` spelling, since a scalar's width is fixed.
+
+### Statement payload
+
+The two compiler-internal statement functions that carry data beyond their
+arguments say so with a tag. Any other statement uses tag 0, and the tag must
+match the function.
+
+| Tag | Function | Fields after tag |
+| ---: | --- | --- |
+| 0 | any other | none |
+| 1 | `FnCheck` | `Transform constraint`, `string var_name`, `Expr value` |
+| 2 | `FnWriteParam` | `optional<Transform> unconstrain`, `Expr value` |
+
+`FnCheck` verifies `value` against `constraint`, whose bounds are the
+statement's arguments. `FnWriteParam` writes `value`; in `transform_inits`
+`unconstrain` is the transform to invert, turning an already-constrained
+value into a free one, and in `generate_quantities` it is absent because the
+value is constrained already. The decoder puts `value` first in the
+statement's argument list.
+
 ### Statement kind
 
 Each statement starts with one tag and then only fields active for that kind.
@@ -207,7 +272,7 @@ There is no inactive-field block.
 
 | Tag | Kind | Active fields after tag |
 | ---: | --- | --- |
-| 0 | `Decl` | `string id`, `SizedType type`, `bool data_only`, `bool has_init`, optional `Expr init`, `optional<Transform> read_transform`, `list<Expr> read_dims`, `string raw` |
+| 0 | `Decl` | `string id`, `DeclType type`, `bool data_only`, `bool has_init`, optional `Expr init`, `optional<Transform> read_transform`, `list<Expr> read_dims`, `string raw` |
 | 1 | `Assignment` | `string lhs`, `list<Expr> lhs_indices`, `Expr rhs`, `string raw` |
 | 2 | `TargetPE` | `Expr target`, `string raw` |
 | 3 | `Block` | `list<Stmt> body`, `string raw` |
@@ -215,33 +280,40 @@ There is no inactive-field block.
 | 5 | `For` | `string loopvar`, `Expr lower`, `Expr upper`, `list<Stmt> body`, `string raw` |
 | 6 | `IfElse` | `Expr condition`, `list<Stmt> body`, `string raw` |
 | 7 | `While` | `Expr condition`, `list<Stmt> body`, `string raw` |
-| 8 | `NRFunApp` | `string name`, `list<Expr> args`, `optional<Transform> payload_transform`, `string check_var_name`, `string raw` |
+| 8 | `NRFunApp` | `u8 library`, `string name`, `u8 suffix`, `list<Expr> args`, `u8 payload` and its fields, `string raw` |
 | 9 | `Return` | `bool has_value`, optional `Expr value`, `string raw` |
 | 10 | `Break` | none |
 | 11 | `Continue` | none |
 | 12 | `Skip` | `string raw` |
 | 13 | `Unsupported` | `string raw` |
+| 14 | `JacobianPE` | `Expr target`, `string raw` |
+
+`JacobianPE` is `jacobian += target`. The decoder reads it as a `TargetPE`
+whose `jacobian` flag is set: stanli always evaluates the density with the
+Jacobian, so it adds to the target like any other increment.
 
 The `IfElse` body has one or two statements in then/else order. `For` and
-`While` each have exactly one body statement. `FnCheck` and `FnWriteParam`
-payload fields follow the same structural conventions as the legacy mapping.
+`While` each have exactly one body statement.
 
 ### `FunDef`
 
 ```text
 string name
 list<string> arg_names
-list<string> arg_types
 list<UnsizedView> arg_views
 list<bool> arg_data_only
 list<Stmt> body
 ```
 
-The four argument lists must have identical lengths. `arg_types` preserves the
-complete stanc3 unsized-type spelling; `arg_views` is the runtime's redundant
-structural view and must agree with it. Producer-side function names and
-user-defined calls are unsuffixed. The shared finalizer appends overload
-signatures and rejects collisions exactly once.
+The three argument lists must have identical lengths. Function names are stanc3's names,
+including its `_stan_` prefix for a C++ keyword, which the finalizer removes.
+A `propto` flag is true only for an `FnLpdf`/`FnLpmf` call written
+`_lupdf`/`_lupmf`.
+
+When a name has several definitions, the shared finalizer gives each its
+argument signature as a separate `overload` field and records on every call,
+statement call and callback variable the overload its argument views (for a
+callback, its `function_type` views) select; names stay unchanged.
 
 ### `Program`
 
@@ -252,34 +324,55 @@ list<InputVar> input_vars
 list<Stmt> prepare_data
 list<Stmt> log_prob
 list<Stmt> generate_quantities
+u32 transformed_parameters_begin
+u32 generated_quantities_begin
 list<FunDef> fun_defs
-list<string> output_vars
-list<Stmt> transform_inits   (optional; see below)
+list<OutputVar> output_vars
+list<Stmt> transform_inits
 ```
 
-An `InputVar` is `string name` followed by `SizedType type`.
+stanc3 separates `generate_quantities`, its write_array body, into
+parameter, transformed-parameter and generated-quantity sections with
+top-level early-return guards on `emit_transformed_parameters__` and
+`emit_generated_quantities__`. The runtime always emits every section, so
+the producer drops the two guards and records the index of the statement
+each later section begins with; a missing section begins where the next
+one does. The decoder requires
+`transformed_parameters_begin <= generated_quantities_begin <=` the
+statement count.
 
-`payload_transform` is the one optional-transform slot an `NRFunApp` carries.
-Its meaning follows the internal function name, and the decoder splits the two
-apart so no consumer has to ask: on `FnCheck` it is the constraint being
-verified; on the `FnWriteParam` of `transform_inits` it is the transform to
-INVERT, turning an already-constrained value into a free one. The
-`FnWriteParam`s of `generate_quantities` carry none -- their values are
-constrained already.
+An `InputVar` is `string name` followed by `SizedType type`. An `OutputVar`
+is
 
-`transform_inits` is stanc3's inverse parameter-transform section: its
-`FnReadData` calls name PARAMETERS read from a caller-supplied init context
-rather than model data, and each parameter ends in an `FnWriteParam` carrying
-the transform to invert.
+```text
+string name
+u8 block
+SizedType constrained_type
+```
 
-It is the only optional element of the payload, and it is optional in exactly
-one direction. It trails every required section, so a document written by a
-producer from before it existed simply ends after `output_vars` and decodes
-with an empty `transform_inits` -- the same state as a model whose section
-could not be encoded, which callers already have to handle. A decoder must not
-treat its absence as truncation, and must still reject bytes beyond it. The
-current producer always emits it, empty list included, so the canonical bytes
-for a given input remain unique.
+| `block` | Meaning |
+| ---: | --- |
+| 0 | `Parameters` |
+| 1 | `TransformedParameters` |
+| 2 | `GeneratedQuantities` |
+
+`output_vars` lists the parameters, transformed parameters and generated
+quantities in the order `generate_quantities` writes them, which is CmdStan's
+column order. The runtime assigns each executed `FnWriteParam` to the first
+variable whose columns (the product of its constrained type's extents) are
+not all written; a write that still reads a variable by name selects that
+variable, skipping zero-width variables before it. Column names, CSV section
+boundaries and the complex-output check all come from the variable so
+assigned, so a write the optimizer turned into a literal is named correctly.
+
+`FnReadData` is a statement, `FnReadData(x, context__, "x")`, that reads the
+named input whole into the declared `x`. `transform_inits` is stanc3's inverse
+parameter-transform section: its `FnReadData` statements name PARAMETERS read
+from a caller-supplied init context rather than model data, and each parameter
+ends in an `FnWriteParam` carrying the transform to invert.
+
+Every section is required, `transform_inits` included; a model without
+parameters writes it as an empty list.
 
 The order of every list is semantic and preserved. Source locations and
 stanc3 fields absent from `stanli::mir` are not encoded.
@@ -289,14 +382,13 @@ stanc3 fields absent from `stanli::mir` are not encoded.
 The producer must not silently omit or reinterpret an unsupported construct.
 Expressions, statements, and transforms use their `Unsupported` tag; a sized
 type retains its exact unrecognized `base`. Each carries a complete
-deterministic opaque spelling in `raw`. Supported nodes may also carry `raw`
-when the legacy mapping uses an internal payload. The decoder preserves those
-bytes; lowering either consumes the supported payload or reports an
-unsupported-form error.
+deterministic opaque spelling in `raw`; lowering reports such a node as an
+unsupported form.
 
-`raw` is diagnostic/compatibility data rather than executable syntax. It is
-still included in canonical byte equality so native OCaml, js_of_ocaml, and
-Windows builds cannot drift unnoticed.
+`raw` is diagnostic text only: every fact the runtime acts on has a typed
+field, and no consumer parses `raw`. It is still included in canonical byte
+equality so native OCaml, js_of_ocaml, and Windows builds cannot drift
+unnoticed.
 
 ## Validation and finalization
 
@@ -304,11 +396,11 @@ After structural decoding and before a `Program` is exposed, the runtime:
 
 1. checks expression, index, transform, sized-type, statement, and known
    function arities;
-2. checks the redundant type/view metadata used by the lowerer;
-3. checks function argument list lengths and type/view agreement;
-4. resolves user-defined overload names and rejects final-name collisions;
-5. validates variable and function bindings; and
-6. rejects trailing payload bytes.
+2. checks function argument list lengths;
+3. records the overload each user-function call selects and rejects
+   colliding overloads;
+4. validates variable and function bindings; and
+5. rejects trailing payload bytes.
 
 Validation runs before downstream code can index positional argument vectors.
 Malformed input therefore becomes a compiler error rather than undefined
@@ -346,7 +438,7 @@ and anything deeper is rejected as nested too deeply.
 For a fixed stanc3 revision, source, include map, and pass selection, every
 producer must emit identical bytes. Canonical encoding requires:
 
-1. the exact `STANLI2:` prefix;
+1. the exact `STANLI3:` prefix;
 2. the tag numbers and field order in this document;
 3. little-endian fixed-width scalars;
 4. original list order;
@@ -362,6 +454,4 @@ user functions, warnings, and frontend errors. Windows uses the same encoder
 and participates in the same byte comparison.
 
 A future incompatible layout gets a new ASCII header and a new decoder. It
-must never reuse `STANLI2:` with different tag meanings or field order.
-Appending an optional trailing section, as `transform_inits` did, is the one
-change that keeps the header: it cannot alter how any earlier byte is read.
+must never reuse `STANLI3:` with different tag meanings or field order.

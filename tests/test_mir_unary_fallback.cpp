@@ -27,6 +27,14 @@
 namespace {
 
 using stanli::mir::UnsizedLeaf;
+using stanli::mir::UnsizedView;
+constexpr UnsizedView kInt{0, UnsizedLeaf::Int};
+constexpr UnsizedView kReal{0, UnsizedLeaf::Real};
+constexpr UnsizedView kVector{0, UnsizedLeaf::Vector};
+constexpr UnsizedView kRowVector{0, UnsizedLeaf::RowVector};
+constexpr UnsizedView kMatrix{0, UnsizedLeaf::Matrix};
+constexpr UnsizedView kRealArray{1, UnsizedLeaf::Real};
+constexpr UnsizedView kIntArray{1, UnsizedLeaf::Int};
 
 using stanli::compile_rhs;
 using stanli::MirInterp;
@@ -41,7 +49,7 @@ Expr lit(double x) {
   Expr e;
   e.kind = Expr::LitReal;
   e.lit = x;
-  e.type_ = "UReal";
+  e.unsized = {0, UnsizedLeaf::Real};
   e.data_only = true;
   return e;
 }
@@ -50,38 +58,38 @@ Expr integer(long x) {
   Expr e;
   e.kind = Expr::LitInt;
   e.lit_i = x;
-  e.type_ = "UInt";
+  e.unsized = {0, UnsizedLeaf::Int};
   e.data_only = true;
   return e;
 }
 
-Expr variable(std::string name, std::string type) {
+Expr variable(std::string name, UnsizedView type) {
   Expr e;
   e.kind = Expr::Var;
   e.name = std::move(name);
-  e.type_ = std::move(type);
+  e.unsized = type;
   return e;
 }
 
-Expr call(std::string name, std::vector<Expr> args, std::string type,
+Expr call(std::string name, std::vector<Expr> args, UnsizedView type,
           Expr::Lib lib = Expr::Lib::StanLib) {
   Expr e;
   e.kind = Expr::FunApp;
   e.name = std::move(name);
   e.args = std::move(args);
-  e.type_ = std::move(type);
+  e.unsized = type;
   e.fn_lib = lib;
   return e;
 }
 
 Expr element(Expr base, long index) {
   Expr ix;
-  ix.name = "IndexSingle";
+  ix.kind = stanli::mir::Expr::IndexSingle;
   ix.args.push_back(integer(index));
   Expr e;
   e.kind = Expr::Indexed;
   e.args = {std::move(base), std::move(ix)};
-  e.type_ = "UReal";
+  e.unsized = {0, UnsizedLeaf::Real};
   return e;
 }
 
@@ -97,21 +105,19 @@ FunDef rhs(std::string name, Expr value) {
   FunDef f;
   f.name = std::move(name);
   f.arg_names = {"t", "y", "theta", "x_r", "x_i"};
-  f.arg_types = {"UReal", "UVector", "UVector", "(UArray UReal)",
-                 "(UArray UInt)"};
   f.arg_views = {{0, UnsizedLeaf::Real},
                  {0, UnsizedLeaf::Vector},
                  {0, UnsizedLeaf::Vector},
                  {1, UnsizedLeaf::Real},
                  {1, UnsizedLeaf::Int}};
   f.body = {returning(
-      call("FnMakeArray", {std::move(value)}, "UVector", Expr::Lib::Internal))};
+      call("FnMakeArray", {std::move(value)}, kVector, Expr::Lib::Internal))};
   return f;
 }
 
 FunDef unary_rhs(const std::string& name, std::optional<double> seed) {
-  Expr value = call(name, {element(variable("theta", "UVector"), 1)}, "UReal");
-  if (seed) value = call("Times__", {std::move(value), lit(*seed)}, "UReal");
+  Expr value = call(name, {element(variable("theta", kVector), 1)}, kReal);
+  if (seed) value = call("Times__", {std::move(value), lit(*seed)}, kReal);
   return rhs("unary_rhs", std::move(value));
 }
 
@@ -431,14 +437,12 @@ void test_vector_jacobian() {
   FunDef f;
   f.name = "vector_rhs";
   f.arg_names = {"t", "y", "theta", "x_r", "x_i"};
-  f.arg_types = {"UReal", "UVector", "UVector", "(UArray UReal)",
-                 "(UArray UInt)"};
   f.arg_views = {{0, UnsizedLeaf::Real},
                  {0, UnsizedLeaf::Vector},
                  {0, UnsizedLeaf::Vector},
                  {1, UnsizedLeaf::Real},
                  {1, UnsizedLeaf::Int}};
-  f.body = {returning(call("sin", {variable("theta", "UVector")}, "UVector"))};
+  f.body = {returning(call("sin", {variable("theta", kVector)}, kVector))};
   const std::map<std::string, const FunDef*> defs{{f.name, &f}};
   stan::math::nested_rev_autodiff nested;
   const std::vector<stan::math::var> theta{-0.4, 0.2, 0.7};
@@ -459,10 +463,9 @@ void test_vector_jacobian() {
 }
 
 void test_ode_program() {
-  Expr rate = call("sin", {element(variable("theta", "UVector"), 1)}, "UReal");
-  Expr value =
-      call("Times__", {std::move(rate), element(variable("y", "UVector"), 1)},
-           "UReal");
+  Expr rate = call("sin", {element(variable("theta", kVector), 1)}, kReal);
+  Expr value = call(
+      "Times__", {std::move(rate), element(variable("y", kVector), 1)}, kReal);
   FunDef f = rhs("ode_rhs", std::move(value));
   const std::map<std::string, const FunDef*> defs{{f.name, &f}};
   const std::vector<int> x_i{2};
@@ -509,8 +512,8 @@ void test_ode_program() {
     expect_close(std::string("ODE program gradient ") + label, gradient,
                  want * 0.4 * std::cos(0.2), 2e-8);
   };
-  run(0x0u, "legacy var/var");
-  run(0x6u, "data y/active theta");
+  run(0x3u, "var/var");
+  run(0x2u, "data y/active theta");
 }
 
 }  // namespace

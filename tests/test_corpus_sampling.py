@@ -7,7 +7,7 @@ import types
 import unittest
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1] / "tools"))
-from check_corpus_sampling import (parse_timings, reference_names, sample_csv,
+from check_corpus_sampling import (read_timings, reference_names, sample_csv,
                                    selected_cases, source_digest, SAMPLER_COLUMNS)
 
 
@@ -46,12 +46,20 @@ class CorpusSamplingTests(unittest.TestCase):
                     reference_names(invalid, source, data)
 
     def test_missing_or_invalid_phase_timings_fail(self):
-        self.assertEqual(parse_timings("stanli_run: timings prep_s=1 sample_s=2 output_s=0"),
-                         {"prep_s": 1, "sample_s": 2, "output_s": 0})
-        for text in ("", "stanli_run: timings prep_s=nan sample_s=1 output_s=1",
-                     "stanli_run: timings prep_s=-1 sample_s=1 output_s=1"):
+        with tempfile.TemporaryDirectory() as temporary:
+            path = pathlib.Path(temporary) / "timings.json"
+            path.write_text('{"prep_s": 1, "sample_s": 2, "output_s": 0}')
+            self.assertEqual(read_timings(path),
+                             {"prep_s": 1, "sample_s": 2, "output_s": 0})
+            for text in ("", '{"prep_s": NaN, "sample_s": 1, "output_s": 1}',
+                         '{"prep_s": -1, "sample_s": 1, "output_s": 1}',
+                         '{"prep_s": 1, "sample_s": 1}',
+                         '{"prep_s": "1", "sample_s": 1, "output_s": 1}'):
+                path.write_text(text)
+                with self.assertRaises(ValueError):
+                    read_timings(path)
             with self.assertRaises(ValueError):
-                parse_timings(text)
+                read_timings(pathlib.Path(temporary) / "absent.json")
 
     def test_csv_truncation_nonfinite_diagnostics_and_output_mismatch_fail(self):
         good = ("# comment\n" + ",".join(SAMPLER_COLUMNS + ["theta", "yrep"]) + "\n"

@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import pathlib
 import copy
+import json
 import math
 import stat
 import sys
@@ -34,6 +35,7 @@ from cmdstan_ref import point_results, split_points  # noqa: E402
 import verify_sample  # noqa: E402
 import toolchain  # noqa: E402
 import verify_refs  # noqa: E402
+import check_status  # noqa: E402
 from corpus_inventory import local_cases, source_digest
 from verify_sample import evaluate, record_wa, write_refs  # noqa: E402
 
@@ -47,22 +49,33 @@ VALUES = {"values": ["-3.5", "1", "-2"], "status": "VERIFIED",
 REF = {"primary": 0, "points": {str(p): VALUES for p in POINTS}}
 
 
+def compiled(fallbacks=(), section="graph"):
+    """Shell that writes stanli_check's compile record to $status."""
+    record = {"record": "compile", "ok": True,
+              "interpreter_fallbacks": list(fallbacks),
+              "write_array": {"section": section, "columns": 1,
+                              "truncated": None}}
+    return f"echo '{json.dumps(record)}' > \"$status\"\n"
+
+
 def stub(tmp, body, wa=True):
     """A stanli_check that runs `body` with $point set to --point's value.
 
     A real one answers --wa-values with a write_array row and the replay
     demands one, so the stub emits a row too. Cases about the row itself
-    pass wa=False and write their own.
+    pass wa=False and write their own. It writes a compile record with no
+    interpreted parts to the --status-json file before `body` runs.
     """
     path = pathlib.Path(tmp) / "stanli_check_stub.sh"
     row = ('if [ -n "$wa" ]; then echo "WANAMES a"; echo "WAVALS 1"; fi\n'
            if wa else "")
-    path.write_text("#!/bin/sh\npoint=0\nwa=\n"
+    path.write_text("#!/bin/sh\npoint=0\nwa=\nstatus=/dev/null\n"
                     'while [ $# -gt 0 ]; do\n'
                     '  [ "$1" = --point ] && point=$2\n'
                     '  [ "$1" = --wa-values ] && wa=1\n'
+                    '  [ "$1" = --status-json ] && status=$2\n'
                     '  shift\n'
-                    "done\n" + row + body + "\n")
+                    "done\n" + compiled() + row + body + "\n")
     path.chmod(path.stat().st_mode | stat.S_IXUSR)
     return path
 
@@ -190,7 +203,7 @@ class CheckModelPointsTest(unittest.TestCase):
         self.assertEqual(self.run_check('echo "OK -3.5 1 -2"')[1], "OK")
 
     def test_interpreter_use_must_be_listed(self):
-        interp = 'echo "INTERP stanli: parts run interpreted" >&2\necho "OK -3.5 1 -2"'
+        interp = compiled(["generated quantities"]) + 'echo "OK -3.5 1 -2"'
         self.assertEqual(self.run_check(interp)[1], "INTERPRETER")
         with unittest.mock.patch.dict(verify_refs.CORPUS_INTERPRETED,
                                       {MODEL: "a test"}):
@@ -410,7 +423,9 @@ class FastModeGateTest(unittest.TestCase):
     def test_the_flag_reaches_stanli_check(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = pathlib.Path(tmp) / "stanli_check_stub.sh"
-            path.write_text('#!/bin/sh\ncase " $* " in\n'
+            path.write_text('#!/bin/sh\nstatus="$(eval echo \\${$#})"\n'
+                            + compiled() +
+                            'case " $* " in\n'
                             '  *" --fast-math "*) echo "OK -3.5 1 -2";;\n'
                             '  *) echo "COMPILE_FAIL default mode";;\nesac\n')
             path.chmod(path.stat().st_mode | stat.S_IXUSR)
@@ -513,17 +528,25 @@ class CorpusOptionsTest(unittest.TestCase):
         self.assertIn("grad[2] g(real)=>real", result[5])
 
     def test_interpreter_use_must_match_the_expectation(self):
-        interp = 'echo "INTERP stanli: parts run interpreted" >&2\n'
+        interp = compiled(["transformed parameters"])
         self.assertEqual(self.run_check(self.row("1 2", interp), wa=False)[1],
                          "INTERPRETER")
         self.assertEqual(self.run_check(self.row("1 2"), wa=False,
                                         interpreted=True)[1], "INTERPRETER")
         self.assertEqual(self.run_check(self.row("1 2", interp), wa=False,
                                         interpreted=True)[1], "OK")
-        wa_note = ('echo "WA 1 vars 2 values 0 nonfinite complete '
-                   '(interpreted: generated quantities)" >&2\n')
-        self.assertEqual(self.run_check(self.row("1 2", wa_note), wa=False)[1],
-                         "INTERPRETER")
+        wa_interp = compiled(section="interpreted")
+        self.assertEqual(self.run_check(self.row("1 2", wa_interp),
+                                        wa=False)[1], "INTERPRETER")
+        note = 'echo "write_array interpreted" >&2\n'
+        self.assertEqual(self.run_check(self.row("1 2", note), wa=False)[1],
+                         "OK")
+
+    def test_a_run_that_writes_no_compile_record_is_a_crash(self):
+        result = self.run_check(self.row("1 2", 'rm -f "$status"\n'),
+                                wa=False)
+        self.assertEqual(result[1], "CRASH")
+        self.assertIn("no status record", result[5])
 
     def test_the_scale_floor_holds_small_values_to_an_absolute_error(self):
         pt = {"values": ["-3.5", "1e-6", "-2"]}
@@ -593,10 +616,76 @@ class SharedHeaderWorkTest(unittest.TestCase):
             with unittest.mock.patch("verify_refs.tempfile.mkdtemp", return_value=tmp), \
                  unittest.mock.patch("verify_refs.corpus_models", return_value=[("a", None), ("b", None)]), \
                  unittest.mock.patch("verify_refs.corpus_input", return_value=(root / "model.stan", root / "data.json")), \
-                 unittest.mock.patch("verify_refs.subprocess.run", return_value=unittest.mock.Mock(returncode=0, stdout="theta", stderr="")), \
+                 unittest.mock.patch("verify_refs.subprocess.run", side_effect=WriteArrayHeaderTest.columns(None)), \
                  unittest.mock.patch("verify_refs.cmdstan_header", return_value=(["theta"], "")) as header:
                 self.assertEqual(verify_refs.check_wa_headers(root, root / "check", root / "cmdstan", []), 0)
             self.assertEqual([call.args[1] for call in header.call_args_list], [root / "a", root / "b"])
+
+
+class WriteArrayHeaderTest(unittest.TestCase):
+    """--wa-headers compares a truncated graph's columns as a prefix."""
+
+    @staticmethod
+    def columns(truncated):
+        """A subprocess.run for stanli_check --columns printing theta."""
+        def run(argv, **_):
+            status = pathlib.Path(argv[argv.index("--status-json") + 1])
+            status.write_text(json.dumps(
+                {"record": "compile", "ok": True, "interpreter_fallbacks": [],
+                 "write_array": {"section": "graph", "columns": 1,
+                                 "truncated": truncated}}) + "\n")
+            return unittest.mock.Mock(returncode=0, stdout="theta", stderr="")
+        return run
+
+    def headers(self, truncated):
+        run = self.columns(truncated)
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp)
+            with unittest.mock.patch("verify_refs.tempfile.mkdtemp", return_value=tmp), \
+                 unittest.mock.patch("verify_refs.corpus_models", return_value=[("a", None)]), \
+                 unittest.mock.patch("verify_refs.corpus_input", return_value=(root / "model.stan", root / "data.json")), \
+                 unittest.mock.patch("verify_refs.subprocess.run", side_effect=run), \
+                 unittest.mock.patch("verify_refs.cmdstan_header", return_value=(["theta", "y"], "")):
+                return verify_refs.check_wa_headers(root, root / "check", root / "cmdstan", [])
+
+    def test_a_truncated_graph_matches_a_prefix(self):
+        self.assertEqual(self.headers("unsupported function f"), 0)
+
+    def test_a_complete_graph_must_match_every_column(self):
+        self.assertEqual(self.headers(None), 1)
+
+
+class WriteArrayCoverageTest(unittest.TestCase):
+    """--wa-report reads the write_array outcome from the status records."""
+
+    def coverage(self, section, truncated=None, wa=None):
+        compile_ = {"record": "compile", "ok": True,
+                    "interpreter_fallbacks": [],
+                    "write_array": {"section": section, "columns": 2,
+                                    "truncated": truncated}}
+        point = {"record": "point", "point": 0, "ok": True}
+        if wa is not None:
+            point["write_array"] = wa
+        return verify_refs.wa_coverage(
+            check_status.CheckStatus(compile_, {0: point}), 0)
+
+    def test_each_outcome(self):
+        done = {"ok": True, "columns": 2, "values": 3, "nonfinite": 1}
+        self.assertEqual(self.coverage("none")[:2], ("NO_GQ_SECTION", ""))
+        self.assertEqual(self.coverage("graph", wa=done),
+                         ("COMPLETE", "2 vars, 1/3 nonfinite", None))
+        self.assertEqual(self.coverage("interpreted", "f", done)[:2],
+                         ("COMPLETE", "2 vars (interpreted), 1/3 nonfinite"))
+        self.assertEqual(self.coverage("graph", "unsupported function f",
+                                       done),
+                         ("TRUNCATED", "unsupported function f, 1/3 nonfinite",
+                          "unsupported function f"))
+        self.assertEqual(self.coverage("graph", "unsupported function f"),
+                         ("EMPTY", "unsupported function f",
+                          "unsupported function f"))
+        threw = {"ok": False, "error": "domain_error", "message": "bad"}
+        self.assertEqual(self.coverage("graph", wa=threw),
+                         ("EMPTY", "bad", "bad"))
 
 
 class StrictReferenceTest(unittest.TestCase):

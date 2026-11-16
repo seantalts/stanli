@@ -22,6 +22,7 @@
 // see the wrong contents -- the destructive update chains write one slot end
 // to end, which makes that reachable rather than theoretical. Such slots are
 // refused, and the refusal cascades to everything downstream of them.
+#include <stanli/debug_switch.hpp>
 #include <stanli/constfold.hpp>
 #include <stanli/island.hpp>
 #include <stanli/optable.hpp>
@@ -138,7 +139,7 @@ ConstFoldStats const_fold(
     Graph& g, std::vector<std::pair<int, std::vector<double>>>& fills,
     const std::vector<int>& roots, std::vector<int>* folded) {
   ConstFoldStats st;
-  if (const char* e = std::getenv("STANLI_NO_CONSTFOLD"))
+  if (const char* e = debug_env("STANLI_NO_CONSTFOLD"))
     if (e[0] == '1') return st;
 
   const std::vector<char> is_const = mark_constant_ops(g);

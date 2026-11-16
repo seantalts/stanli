@@ -8,7 +8,10 @@
 //        [--sampler-stats] [--chains N] [--num-threads N] [--threads-per-chain
 //        N] [--thin N]
 //        [--save-warmup] [--init-radius X] [--summary] [--timings]
-//        [--fast-math]
+//        [--timings-json PATH] [--fast-math]
+//
+// --timings prints the prep, sampling and output seconds to stderr;
+// --timings-json writes them to PATH as {"prep_s", "sample_s", "output_s"}.
 //
 // --chains runs N chains and concatenates their draws in chain order, so
 // a reader that expects one chain still parses the CSV. --summary is
@@ -56,6 +59,7 @@ int main(int argc, char** argv) {
         "[--sampler-stats] "
         "[--chains N] [--num-threads N] [--threads-per-chain N] [--thin N] "
         "[--save-warmup] [--init-radius X] [--summary] [--timings] "
+        "[--timings-json PATH] "
         "[--fast-math]\n");
     return 2;
   }
@@ -69,6 +73,7 @@ int main(int argc, char** argv) {
   bool want_stats = false;
   bool want_summary = false;
   bool want_timings = false;
+  std::string timings_json;
   bool fast_math = false;
   int n_chains = 1;
   // 0 means "one thread per chain", resolved once n_chains is known.
@@ -101,7 +106,10 @@ int main(int argc, char** argv) {
     }
     if (i + 1 >= argc) break;
     const std::string v = argv[++i];
-    if (k == "--seed")
+    if (k == "--timings-json") {
+      timings_json = v;
+      want_timings = true;
+    } else if (k == "--seed")
       cfg.seed = (uint32_t)std::stoul(v);
     else if (k == "--warmup")
       cfg.warmup = std::stoi(v);
@@ -439,11 +447,24 @@ int main(int argc, char** argv) {
       const auto seconds = [](auto duration) {
         return std::chrono::duration<double>(duration).count();
       };
-      std::fprintf(
-          stderr,
-          "stanli_run: timings prep_s=%.9g sample_s=%.9g output_s=%.9g\n",
-          seconds(prepared - timing_start), seconds(sampled - prepared),
-          seconds(written - sampled));
+      const double prep_s = seconds(prepared - timing_start),
+                   sample_s = seconds(sampled - prepared),
+                   output_s = seconds(written - sampled);
+      if (timings_json.empty()) {
+        std::fprintf(
+            stderr,
+            "stanli_run: timings prep_s=%.9g sample_s=%.9g output_s=%.9g\n",
+            prep_s, sample_s, output_s);
+      } else {
+        std::FILE* f = std::fopen(timings_json.c_str(), "w");
+        if (!f)
+          throw std::runtime_error("cannot write timings to " + timings_json);
+        std::fprintf(f,
+                     "{\"prep_s\": %.17g, \"sample_s\": %.17g, "
+                     "\"output_s\": %.17g}\n",
+                     prep_s, sample_s, output_s);
+        std::fclose(f);
+      }
     }
   } catch (const stanli::tooling::CompileError& e) {
     std::fprintf(stderr, "%s\n", e.what());

@@ -56,9 +56,10 @@ static void summarize(const stanli::Graph& g) {
 
 int main(int argc, char** argv) {
   if (argc < 3) {
-    std::fprintf(stderr,
-                 "usage: dump_ops mir.sexp data.json [max_ops|-1 "
-                 "summary|--execution-json [--forbid-mir]]\n");
+    std::fprintf(
+        stderr,
+        "usage: dump_ops mir.sexp data.json [max_ops|-1 "
+        "summary|--execution-json [--forbid-mir] [--execution-report]]\n");
     return 2;
   }
   const bool execution_json =
@@ -66,15 +67,26 @@ int main(int argc, char** argv) {
   const int max_ops = argc > 3 && !execution_json ? std::atoi(argv[3]) : 200;
   stanli::DataMap data = stanli::DataMap::from_json(slurp(argv[2]));
   if (execution_json) {
-    if (argc > 5 || (argc > 4 && std::string(argv[4]) != "--forbid-mir")) {
-      std::fprintf(stderr, "--execution-json accepts only --forbid-mir\n");
-      return 2;
-    }
     stanli::ExecutionTrace trace;
-    trace.forbid_mir = argc > 4 && std::string(argv[4]) == "--forbid-mir";
+    // --execution-report also emits the compiler's own manifest, from a
+    // scope nested inside this one.
+    stanli::CompileOptions options;
+    for (int i = 4; i < argc; ++i) {
+      const std::string flag = argv[i];
+      if (flag == "--forbid-mir") {
+        trace.forbid_mir = true;
+      } else if (flag == "--execution-report") {
+        options.execution_report = true;
+      } else {
+        std::fprintf(stderr,
+                     "--execution-json accepts only --forbid-mir and "
+                     "--execution-report\n");
+        return 2;
+      }
+    }
     stanli::ExecutionTraceScope scope(trace);
     try {
-      const auto cm = stanli::compile_model(slurp(argv[1]), data);
+      const auto cm = stanli::compile_model(slurp(argv[1]), data, 1, options);
       trace.check();
       std::puts(stanli::execution_report(cm, &trace).c_str());
       return 0;

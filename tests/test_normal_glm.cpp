@@ -1,5 +1,6 @@
 // Differential oracle is the preceding kernel's unit-seeded Stan Math tape.
 // Independent CmdStan corpus checks complement these exact internal checks.
+#include "density_ops.hpp"
 #include "expect.hpp"
 
 #include <stanli/graph.hpp>
@@ -20,7 +21,8 @@ using CMapM = Eigen::Map<const MatD>;
 using CMapV = Eigen::Map<const VecD>;
 using VarV = Eigen::Matrix<stan::math::var, -1, 1>;
 double reference_normal_glm(KernelCtx& ctx) {
-  const int64_t rows = ctx.idata[0], cols = ctx.idata[1];
+  const GlmLayout layout = glm_layout(ctx.idata, ctx.n_idata);
+  const int64_t rows = layout.rows, cols = layout.cols;
   const bool propto = (ctx.variant & 0x80u) != 0;
   // y is a parameter when stanc3's --O1 partial evaluator built the GLM
   // out of `theta ~ normal(X * b, s)`: the outcome needs its gradient
@@ -48,9 +50,8 @@ double reference_normal_glm(KernelCtx& ctx) {
   for (int64_t i = 0; i < ctx.in[4].len; ++i) sigma(i) = ctx.in[4].data[i];
   var out;
   const bool one_a = ctx.in[2].len == 1, one_s = ctx.in[4].len == 1;
-  const bool legacy = ctx.variant == 0;
-  const bool sigma_data = propto && !legacy && (ctx.variant & 0x10u) == 0;
-  const bool others_data = propto && !legacy && (ctx.variant & 0xfu) == 0;
+  const bool sigma_data = propto && (ctx.variant & 0x10u) == 0;
+  const bool others_data = propto && (ctx.variant & 0xfu) == 0;
   CMapV alpha_d(ctx.in[2].data, ctx.in[2].len);
   CMapV beta_d(ctx.in[3].data, ctx.in[3].len);
   CMapV sigma_d(ctx.in[4].data, ctx.in[4].len);
@@ -87,7 +88,7 @@ double reference_normal_glm(KernelCtx& ctx) {
       out = call(y, x, alpha, beta, sigma);
     }
   };
-  const bool row_x = ctx.n_idata >= 5 && ctx.idata[4] == 1;
+  const bool row_x = layout.row_vector_design();
   auto pick_x = [&](auto&& y) {
     if (row_x) {
       if (x_var)
@@ -117,7 +118,7 @@ double reference_normal_glm(KernelCtx& ctx) {
   // whole var tape in the forward, throw it away, and build it again in
   // the backward to call grad() -- 90.9% of diamonds' gradient, and more
   // work than CmdStan does for the same statement.
-  if (!values_only()) {
+  if (!values_only(ctx)) {
     stan::math::grad(out.vi_);
     double* s = ctx.scratch;
     if (y_var) {
@@ -155,12 +156,12 @@ static void check(int n, int cols, unsigned mask, unsigned scalar, bool row_x,
     inputs[invalid][0] =
         invalid == 4 ? -1.0 : std::numeric_limits<double>::infinity();
   std::vector<double> scratch(total, 123.0), expected(total, 456.0);
-  int idata[] = {rows, cols, 0, 0, row_x ? 1 : 0};
+  int idata[] = {rows, cols, row_x ? kGlmRowVectorDesign : 0};
   double value = 0;
   KernelCtx ctx;
   ctx.n_in = 5;
   ctx.idata = idata;
-  ctx.n_idata = 5;
+  ctx.n_idata = 3;
   ctx.variant = mask | (propto ? 0x80u : 0u);
   ctx.out = {&value, 1};
   ctx.out_adj = weight;
@@ -221,9 +222,10 @@ static void check(int n, int cols, unsigned mask, unsigned scalar, bool row_x,
     std::vector<int> slots;
     for (int k = 0; k < 5; ++k) slots.push_back(graph.add_slot(lens[k], true));
     const int out = graph.add_slot(1, false);
-    graph.add_op(OP_NORMAL_ID_GLM_LPDF,
-                 {slots[0], slots[1], slots[2], slots[3], slots[4]}, out,
-                 {rows, cols});
+    stanli::testutil::add_density(
+        graph, OP_NORMAL_ID_GLM_LPDF,
+        {slots[0], slots[1], slots[2], slots[3], slots[4]}, out,
+        testutil::glm_idata({}, rows, cols));
     graph.ops.back().variant = ctx.variant;
     graph.result_slot = out;
     Executor ex(std::move(graph));

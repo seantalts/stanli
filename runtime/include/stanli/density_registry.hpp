@@ -5,7 +5,9 @@
 #ifndef STANLI_DENSITY_REGISTRY_HPP
 #define STANLI_DENSITY_REGISTRY_HPP
 
+#include <stanli/density_layout.hpp>
 #include <stanli/function_shape.hpp>
+#include <stanli/kernel_types.hpp>
 
 #include <cstddef>
 #include <cstdint>
@@ -52,6 +54,37 @@ enum class AllIntegerDensity : uint8_t {
   DiscreteRangeLccdf,
 };
 
+// OP_ALL_INTEGER_DENSITY's variant: which density, and propto.
+struct AllIntegerMode {
+  AllIntegerDensity density = AllIntegerDensity::None;
+  bool propto = false;
+
+  constexpr uint8_t byte() const {
+    return (uint8_t)((uint8_t)density |
+                     (propto ? DensityMode::kProptoBit : 0u));
+  }
+  static constexpr AllIntegerMode of(uint8_t byte) {
+    return {(AllIntegerDensity)(byte & ~DensityMode::kProptoBit),
+            (byte & DensityMode::kProptoBit) != 0};
+  }
+};
+
+enum class PoissonBinomialKind : uint8_t { Lpmf, Cdf, Lcdf, Lccdf };
+
+// OP_POISSON_BINOMIAL's variant: the probability function, and whether its
+// one real argument is autodiff.
+struct PoissonBinomialMode {
+  PoissonBinomialKind kind = PoissonBinomialKind::Lpmf;
+  bool active = false;
+
+  constexpr uint8_t byte() const {
+    return (uint8_t)(((uint8_t)kind << 1) | (active ? 1u : 0u));
+  }
+  static constexpr PoissonBinomialMode of(uint8_t byte) {
+    return {(PoissonBinomialKind)((byte >> 1) & 3u), (byte & 1u) != 0};
+  }
+};
+
 struct IntegerDensityArgument {
   std::vector<int> values;
   // A language scalar broadcasts.  A one-element array does not.
@@ -69,9 +102,11 @@ struct DensitySizeError : std::invalid_argument {
 struct VectorizedDensityLayout {
   int64_t width = 0;
   // One entry for every set bit in DensitySpec::vectorized_vector_args, in
-  // source-argument order. -1 denotes a language vector/row_vector; a
-  // nonnegative value denotes the number of elements in an array of vectors.
+  // source-argument order: the number of vectors, 1 for a language
+  // vector/row_vector.
   std::vector<int> vector_counts;
+  // Bit j: entry j is an array of vectors.
+  int array_mask = 0;
 };
 
 struct DensityCallArgument {
@@ -106,13 +141,13 @@ struct DensitySpec {
   bool lane_outcome = false;
   // Index among real arguments of a GLM's design matrix.
   uint8_t glm_matrix_arg = 0;
-  // Function-family bits which are independent of activity and propto.
-  uint8_t fixed_variant = 0;
   DensityEvaluationPolicy evaluation = DensityEvaluationPolicy::GraphKernel;
   AllIntegerDensity all_integer = AllIntegerDensity::None;
   // Real-input mask (after integer arguments) for vector/row_vector arguments
   // which also accept an array of vectors.
   uint8_t vectorized_vector_args = 0;
+  bool categorical_logit = false;
+  PoissonBinomialKind poisson_binomial = PoissonBinomialKind::Lpmf;
 };
 
 // OP_CATEGORICAL's ordinary variant byte replaces its former opaque per-op
@@ -122,13 +157,7 @@ struct DensitySpec {
 inline constexpr uint8_t kCategoricalArgAutodiff = 1u << 0;
 inline constexpr uint8_t kCategoricalLogit = 1u << 1;
 inline constexpr uint8_t kCategoricalScalarOutcome = 1u << 2;
-// Separates integer outcome values from an appended vectorized-layout payload.
-inline constexpr int kVectorizedDensityLayoutMarker = -2147483647;
-inline constexpr int kGlmScalarLayoutMarker = -2147483646;
-// In the GLM scalar-layout mask: the design is one row_vector shared by every
-// outcome, so the outcome count is the instance count.
-inline constexpr int kGlmRowVectorDesign = 1 << 6;
-
+inline constexpr uint8_t kCategoricalPropto = DensityMode::kProptoBit;
 std::vector<int> pack_all_integer_density_arguments(
     const std::vector<IntegerDensityArgument>& arguments);
 // Dispatches each source argument as either an int or vector<int>, preserving

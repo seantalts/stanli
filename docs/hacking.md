@@ -70,7 +70,7 @@ model.stan + data.json
   |  stanc3 parse/typecheck/Stan-Math transform (upstream OCaml)
   v  stanli-owned budgeted O1 + vectorize_loops policy (typed OCaml)
 compiler/ocaml/stanli_pipeline.ml + portable_mir.ml
-  |  canonical compact portable MIR v2
+  |  canonical compact portable MIR v3
   v
 decode_program (compact portable MIR or legacy s-expression)
   |  decoded into mir::Stmt / mir::Expr structs
@@ -101,8 +101,10 @@ Step by step:
    optimization policy: upstream O1 plus the separately selected upstream
    `vectorize_loops` pass. Before O1's dataflow passes, it isolates function
    inlining and measures the maximum statement-depth cost of any procedure.
-   A cost over 20,000 uses the untouched transformed O0 MIR and emits a
-   diagnostic; `STANLI_NO_O1_FALLBACK=1` restores unconditional O1 for an A/B
+   A cost over 20,000 uses the untouched transformed O0 MIR and reports an
+   O1 fallback notice, separate from the warnings (`O1FallbackWarning` in
+   Python, a `stanli_o1_fallback` condition in R, `o1Fallback` in the npm
+   package); `STANLI_NO_O1_FALLBACK=1` restores unconditional O1 for an A/B
    compiler run. This avoids known pathological O1 behavior without a timeout,
    compiler-thread cancellation, or partial-output recovery. It passes the
    selected typed MIR value to
@@ -110,7 +112,11 @@ Step by step:
    runtime's consumed slice. [`compiler/native/`](../compiler/native/) is the
    callback linked into native libraries; [`compiler/js/`](../compiler/js/)
    exports the same pipeline through js_of_ocaml and provides the CLI entry
-   point cross-built for Windows as `stanli-compile.exe`.
+   point cross-built for Windows as `stanli-compile.exe`. The CLI prints MIR
+   on stdout and messages for people on stderr; with `--messages-json PATH`
+   it also writes `{"warnings": [...], "o1_fallback": null or "..."}` to
+   PATH, which the Python, R and native-tool callers read. The JavaScript
+   export returns the same notice in an `o1_fallback` field.
 
    One of the fork's commits fixes integer folding. Upstream's partial
    evaluator folds with the host OCaml `int` width (63 bits natively and 32
@@ -121,22 +127,19 @@ Step by step:
    the correction cannot silently disappear.
 
 2. **[`mir_decode.cpp`](../runtime/src/mir_decode.cpp) selects a decoder.**
-   Native embedded compilation, the preferred browser compiler, and Windows
-   `stanli-compile.exe` emit the stanli-owned compact portable format. Stock
-   browser and Windows rollback compilers, the R JavaScript compiler, and
-   user-supplied stock stanc emit the legacy stanc3 s-expression. Both decode
-   into the same plain C++ structs (`mir::Stmt`, `mir::Expr`) and share name
+   Native embedded compilation, the browser and R JavaScript compiler, and
+   `stanli-compile` emit the stanli-owned compact portable format. Stock
+   stanc's `--debug-optimized-mir` output, which the test fixtures and the
+   native tools' `--stanc PATH` use, is the legacy stanc3 s-expression. Both
+   decode into the same plain C++ structs (`mir::Stmt`, `mir::Expr`) and share name
    resolution and validation. Anything they do not recognize is a loud error,
    never a guess.
 
-   The Windows wheel keeps the compiler outside `stanli.dll`: it packages the
-   preferred `stanli-compile.exe` and stock `stanc.exe` rollback as
-   short-lived subprocesses, with no OCaml compiler DLL. Python selects stock
-   only when the portable executable is absent. Native R first honors the
-   explicit `STANLI_STANC` stock override, then checks for the portable and
-   stock executables beside the runtime, then stock stanc on `PATH`, and then
-   V8. A failure from a selected compiler is surfaced without trying the next
-   one.
+   The Windows wheel keeps the compiler outside `stanli.dll`: it packages
+   `stanli-compile.exe` as a short-lived subprocess, with no OCaml compiler
+   DLL. Native R without an embedded compiler uses `stanli-compile` beside
+   the runtime, and otherwise the bundled JavaScript compiler through V8. A
+   failure from the selected compiler is surfaced without trying another.
 
 3. **[`lower.cpp`](../runtime/src/lower.cpp) turns MIR into the op
    graph.** Along the way: transformed data is evaluated once, at
@@ -149,8 +152,12 @@ Step by step:
    `write_array` is lowered from the prepared data, so in a build with
    threads and a model with enough to lower on both sides it runs on a
    second thread beside the log density and is joined before
-   `compile_model` returns. `STANLI_PARALLEL_WA=0` lowers the two one after
-   the other and `STANLI_PARALLEL_WA=1` always uses the second thread.
+   `compile_model` returns. `CompileOptions::parallel_write_array` (and
+   `parallel_write_array` in the C ABI's `stanli_model_opts`, or
+   `bench_grad --parallel-wa=`) chooses: `Off` lowers the two one after the
+   other and `Force` always uses the second thread. Left at `Auto`, the
+   developer switch decides: `STANLI_PARALLEL_WA=0` is `Off`, `1` or `force`
+   is `Force`, and any other value but `auto` is `Off`.
 
 4. **The passes rewrite the list.** In pipeline order: in-place
    updates, store-to-load forwarding, constant folding, loop
@@ -186,7 +193,7 @@ ones through every stage, op list and register programs included.
 | [`compiler/portable_ir/SCHEMA.md`](../compiler/portable_ir/SCHEMA.md), [`compiler/ocaml/`](../compiler/ocaml/) | The stanli-owned portable MIR contract, shared optimization policy, and typed-OCaml encoder. |
 | [`compiler/native/`](../compiler/native/), [`compiler/js/`](../compiler/js/) | Thin native callback, js_of_ocaml, and Windows CLI entry points around the shared OCaml pipeline. |
 | [`runtime/src/lower.cpp`](../runtime/src/lower.cpp) | Lowering: transformed MIR in, op graph out. |
-| [`runtime/src/mir_decode.cpp`](../runtime/src/mir_decode.cpp), [`portable_mir_v2_reader.cpp`](../runtime/src/portable_mir_v2_reader.cpp), [`mir_reader.cpp`](../runtime/src/mir_reader.cpp) | Dispatches compact portable MIR or legacy s-expressions into one MIR representation and runs their shared finalization. |
+| [`runtime/src/mir_decode.cpp`](../runtime/src/mir_decode.cpp), [`portable_mir_reader.cpp`](../runtime/src/portable_mir_reader.cpp), [`mir_reader.cpp`](../runtime/src/mir_reader.cpp) | Dispatches compact portable MIR or legacy s-expressions into one MIR representation and runs their shared finalization. |
 | [`runtime/src/inplace.cpp`](../runtime/src/inplace.cpp), [`constfold.cpp`](../runtime/src/constfold.cpp), [`reroll.cpp`](../runtime/src/reroll.cpp), [`island.cpp`](../runtime/src/island.cpp) | The graph passes, in pipeline order. |
 | [`runtime/src/executor.cpp`](../runtime/src/executor.cpp) | Runs the op list. `STANLI_PROFILE=1` prints per-opcode time accounting. |
 | [`runtime/kernels/`](../runtime/kernels/) | The kernels: [`densities.cpp`](../runtime/kernels/densities.cpp), [`elementwise.cpp`](../runtime/kernels/elementwise.cpp), [`constrain.cpp`](../runtime/kernels/constrain.cpp), and friends. [`ode.cpp`](../runtime/kernels/ode.cpp) owns the canonical Stan Math solves and the direct all-double coupled RK path. [`matrix_fns.cpp`](../runtime/kernels/matrix_fns.cpp) and [`legacy_fns.cpp`](../runtime/kernels/legacy_fns.cpp) wrap stan-math functions that have no native kernel yet. |
@@ -197,7 +204,7 @@ ones through every stage, op list and register programs included.
 | [`runtime/src/nuts.cpp`](../runtime/src/nuts.cpp) | The sampler: Stan's own `adapt_diag_e_nuts`, configured to match CmdStan exactly. |
 | [`runtime/src/capi.cpp`](../runtime/src/capi.cpp), [`capi.h`](../runtime/include/stanli/capi.h) | The C ABI. [`python/stanli/__init__.py`](../python/stanli/__init__.py) is a thin ctypes wrapper over it. |
 | [`runtime/src/stanc_embed_c.cpp`](../runtime/src/stanc_embed_c.cpp), [`tools/stanc_embed/`](../tools/stanc_embed/) | The native OCaml-runtime bridge plus exact-source overlay, provenance, and Windows cross-build tooling. |
-| [`js/`](../js/), [`web/`](../web/) | The npm package (a one-call `sample()` over a worker) and the demo page. The worker prefers the portable compiler and keeps stock stancjs as a one-cycle legacy fallback. [`tools/build_web.sh`](../tools/build_web.sh) builds the page from the package, so the two cannot drift. |
+| [`js/`](../js/), [`web/`](../web/) | The npm package (a one-call `sample()` over a worker) and the demo page. The worker loads `stanli-compiler.js` when a request carries Stan source. [`tools/build_web.sh`](../tools/build_web.sh) builds the page from the package, so the two cannot drift. |
 | [`tools/`](../tools/) | Small programs and scripts; the important ones are listed below. |
 | [`harnesses/`](../harnesses/) | Corpus sweeps that need a local posteriordb: [`fn_sweep.py`](../harnesses/fn_sweep.py), benchmarks. |
 | [`tests/`](../tests/) | One `test_*.cpp` per subsystem, plus [`fixtures/`](../tests/fixtures/) with checked-in `.stan` sources. CMake generates ignored MIR before its consumers; run [`tools/gen_fixtures.sh`](../tools/gen_fixtures.sh) to do so explicitly. |
@@ -227,7 +234,10 @@ The tools you will reach for most:
   is intentionally stronger than the existing `STANLI_NO_INTERPRETER` policy.
   Constructions and probe entries are not instruction/evaluation counts.
 - `STANLI_EXECUTION_REPORT=1`: emit the same manifest through the diagnostic
-  sink at model compilation. The C API and BridgeStan emit a separate host
+  sink at model compilation. `CompileOptions::execution_report`,
+  `execution_report` in `stanli_model_opts`, `dump_ops --execution-report`
+  and `stanli_function_set_execution_report` for a standalone function handle
+  turn it on without the environment. The C API and BridgeStan emit a separate host
   selection event after write-array discovery, distinguishing an attached
   fallback from successful output discovery. Standalone function handles
   created with this flag emit interpreter construction traces on calls.
@@ -248,11 +258,11 @@ The tools you will reach for most:
   Only the selected write-array route is listed; a partial/unselected graph
   is not added to its executing coverage. Use existing inclusive profiles for
   time attribution, and do not sum overlapping parent/child times.
-- `STANLI_DUMP_PASSES=<dir>`: an environment variable read by anything that
+- `STANLI_DUMP_PASSES=<dir>`: a developer switch read by anything that
   compiles a model. It writes the graph after every lowering pass to
   `<dir>/NN-<graph>-<stage>.txt`, numbered so `ls` sorts in pass order, plus
   the input MIR document as `00-mir.sexp` (the shipped compilers write an
-  encoded `STANLI2:` document there rather than an S-expression). Diff two consecutive files to see exactly
+  encoded `STANLI3:` document there rather than an S-expression). Diff two consecutive files to see exactly
   what one pass did. A pass that throws still leaves
   `NN-<graph>-FAILED-after-<stage>.txt` with the graph it died on.
 
@@ -271,7 +281,9 @@ The tools you will reach for most:
   MIR is the stage `mir`. Sequence numbers still count the stages the filter
   dropped, so `05-log_prob-constfold.txt` is `05` under any selection.
   `stanli_check` takes the same two as `--dump-passes=<list>` and
-  `--dump-dir=<dir>`; without a directory it dumps to stdout.
+  `--dump-dir=<dir>`; without a directory it dumps to stdout. It hands them
+  to the runtime as `CompileOptions::dump_passes` and `dump_stages`, which a
+  C++ caller can set directly, and refuses them with `--paths` or `--cross`.
 
   ```
   ./build/stanli_check model.stan data.json --dump-passes=log_prob:reroll
@@ -383,11 +395,14 @@ depends on which arguments are parameters: if `sigma` is data, its
 parameter, that term must stay. CmdStan's generated C++ makes this
 decision through template types at compile time. stanli's kernels are
 compiled before your model exists, so the decision is made at lowering
-time instead and carried on the op, in the `variant` byte: bits 0-5
-mark which arguments are being differentiated, bit 6 selects the
-elementwise form (the output is each element's log density rather than
-their sum), and bit 7 says whether `~`-style dropping (propto) is in
-effect.
+time instead and carried on the op, in the `variant` byte. Density
+kernels read and write it as a `DensityMode`
+([`kernel_types.hpp`](../runtime/include/stanli/kernel_types.hpp)): which
+arguments are being differentiated, whether the op writes the
+elementwise form (each element's log density rather than their sum),
+and whether `~`-style dropping (propto) is in effect. Every field is
+written explicitly; a zero byte means no argument is active. The ODE,
+DAE and quadrature kernels use `SolverActivity` the same way.
 
 Bugs here are nasty in a specific way: the gradient stays perfect
 while the log density is off by a constant. Sampling still works,
@@ -775,10 +790,25 @@ Or manually:
 ```
 ./tools/dev_setup.sh --no-build
 build_jobs=$(tools/build_jobs.sh)
-cmake -B build -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++
+cmake -B build -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++ \
+  -DSTANLI_DEBUG_SWITCHES=ON
 cmake --build build --parallel "$build_jobs"
 ctest --test-dir build --parallel "$build_jobs"
 ```
+
+The runtime's `STANLI_*` environment variables that turn a pass off, force
+an engine, set a tuning limit or print a diagnostic, such as those in
+[OPTIMIZATIONS.md](../runtime/src/OPTIMIZATIONS.md), are developer switches,
+read through `debug_env()` in
+[`debug_switch.hpp`](../runtime/include/stanli/debug_switch.hpp). Build and
+tool variables such as `STANLI_JOBS` and `STANLI_PROFILE` are not. CMake's
+`STANLI_DEBUG_SWITCHES` compiles them in. It defaults to OFF, which is what
+the wheels, the R runtime and the browser builds ship: there a set switch is
+ignored, with a one-time notice. `tools/dev_setup.sh` configures both of its
+builds ON. Tests that set a switch carry the CTest label `debug_switches` and
+are disabled in an OFF build; `ctest -L debug_switches` runs them in an ON
+build. `STANLI_NO_INTERPRETER`, `STANLI_ISA`, `STANLI_NO_FUSED_DENSITY` and
+`STANLI_NO_O1_FALLBACK` are not developer switches and work in every build.
 
 `tools/build_jobs.sh` caps parallelism by CPU count and usable RAM: 4 GiB
 per concurrent Stan Math compile on macOS and Windows, 6 GiB elsewhere,
@@ -827,7 +857,8 @@ one flag locally. Its compiler uses much more memory than Release:
 
 ```
 asan_jobs=$(STANLI_JOB_MEMORY_GIB=12 tools/build_jobs.sh)
-cmake -B build-asan -DCMAKE_BUILD_TYPE=RelWithDebInfo -DSTANLI_SANITIZE=address
+cmake -B build-asan -DCMAKE_BUILD_TYPE=RelWithDebInfo -DSTANLI_SANITIZE=address \
+  -DSTANLI_DEBUG_SWITCHES=ON
 cmake --build build-asan --parallel "$asan_jobs" && \
   ctest --test-dir build-asan --parallel "$asan_jobs"
 ```

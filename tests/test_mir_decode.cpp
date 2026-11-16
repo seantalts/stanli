@@ -84,7 +84,7 @@ std::string encode_base64(std::string_view bytes) {
 }
 
 std::string v2_wire(std::string_view payload) {
-  return "STANLI2:" + encode_base64(payload);
+  return "STANLI3:" + encode_base64(payload);
 }
 
 void append_bool(std::string& bytes, bool value) {
@@ -118,6 +118,15 @@ void append_expr(std::string& bytes, const mir::Expr& value) {
   switch (value.kind) {
     case mir::Expr::Var:
       append_string(bytes, value.name);
+      append_bool(bytes, value.fn_type.has_value());
+      if (value.fn_type) {
+        append_list(bytes, value.fn_type->args,
+                    [](std::string& out, const mir::UnsizedView& view) {
+                      append_view(out, view);
+                    });
+        append_u8(bytes, static_cast<uint8_t>(value.fn_type->suffix));
+        append_bool(bytes, value.fn_type->propto);
+      }
       break;
     case mir::Expr::LitInt:
       append_u32(bytes,
@@ -135,6 +144,7 @@ void append_expr(std::string& bytes, const mir::Expr& value) {
     case mir::Expr::FunApp:
       append_u8(bytes, static_cast<uint8_t>(value.fn_lib));
       append_string(bytes, value.name);
+      append_u8(bytes, static_cast<uint8_t>(value.fn_suffix));
       append_bool(bytes, value.fn_propto);
       append_expr_list(bytes, value.args);
       break;
@@ -143,12 +153,16 @@ void append_expr(std::string& bytes, const mir::Expr& value) {
     case mir::Expr::TernaryIf:
     case mir::Expr::EOr:
     case mir::Expr::EAnd:
+    case mir::Expr::IndexAll:
+    case mir::Expr::IndexSingle:
+    case mir::Expr::IndexUpfrom:
+    case mir::Expr::IndexBetween:
+    case mir::Expr::IndexMulti:
       append_expr_list(bytes, value.args);
       break;
     case mir::Expr::Unsupported:
       break;
   }
-  append_string(bytes, value.type_);
   append_view(bytes, value.unsized);
   append_bool(bytes, value.data_only);
   append_bool(bytes, value.promoted);
@@ -182,11 +196,19 @@ void append_stmt_list(std::string& bytes,
 }
 
 void append_stmt(std::string& bytes, const mir::Stmt& value) {
-  append_u8(bytes, static_cast<uint8_t>(value.kind));
+  append_u8(bytes, value.jacobian ? 14 : static_cast<uint8_t>(value.kind));
   switch (value.kind) {
     case mir::Stmt::Decl:
       append_string(bytes, value.decl_id);
-      append_sized(bytes, value.decl_type);
+      if (!value.decl_type.base.empty() ||
+          value.decl_type.unsized.leaf == mir::UnsizedLeaf::Unknown) {
+        append_u8(bytes, 0);
+        append_sized(bytes, value.decl_type);
+      } else {
+        append_u8(bytes, 1);
+        append_view(bytes, value.decl_type.unsized);
+        append_string(bytes, value.decl_type.raw);
+      }
       append_bool(bytes, value.decl_data_only);
       append_bool(bytes, value.has_init);
       if (value.has_init) append_expr(bytes, value.init);
@@ -223,12 +245,32 @@ void append_stmt(std::string& bytes, const mir::Stmt& value) {
       append_string(bytes, value.raw);
       break;
     case mir::Stmt::NRFunApp:
+      append_u8(bytes, static_cast<uint8_t>(value.fn_lib));
       append_string(bytes, value.fn_name);
-      append_expr_list(bytes, value.fn_args);
-      append_optional_transform(bytes, value.fn_name == "FnWriteParam"
-                                           ? value.write_transform
-                                           : value.check_transform);
-      append_string(bytes, value.check_var_name);
+      append_u8(bytes, static_cast<uint8_t>(value.fn_suffix));
+      if (mir::internal_name(value) == "FnCheck" ||
+          mir::internal_name(value) == "FnWriteParam") {
+        const bool check = mir::internal_name(value) == "FnCheck";
+        const std::vector<mir::Expr> args =
+            value.fn_args.empty()
+                ? std::vector<mir::Expr>{}
+                : std::vector<mir::Expr>(value.fn_args.begin() + 1,
+                                         value.fn_args.end());
+        append_expr_list(bytes, args);
+        append_u8(bytes, check ? 1 : 2);
+        if (check) {
+          append_transform(bytes,
+                           value.check_transform.value_or(mir::Transform{}));
+          append_string(bytes, value.check_var_name);
+        } else {
+          append_optional_transform(bytes, value.write_transform);
+        }
+        append_expr(
+            bytes, value.fn_args.empty() ? mir::Expr{} : value.fn_args.front());
+      } else {
+        append_expr_list(bytes, value.fn_args);
+        append_u8(bytes, 0);
+      }
       append_string(bytes, value.raw);
       break;
     case mir::Stmt::Return:
@@ -256,7 +298,6 @@ void append_strings(std::string& bytes,
 void append_fun(std::string& bytes, const mir::FunDef& value) {
   append_string(bytes, value.name);
   append_strings(bytes, value.arg_names);
-  append_strings(bytes, value.arg_types);
   append_list(bytes, value.arg_views,
               [](std::string& out, const mir::UnsizedView& view) {
                 append_view(out, view);
@@ -276,18 +317,26 @@ std::string write_v2(const mir::Program& value) {
   append_stmt_list(payload, value.prepare_data);
   append_stmt_list(payload, value.log_prob);
   append_stmt_list(payload, value.generate_quantities);
+  append_u32(payload,
+             static_cast<uint32_t>(value.transformed_parameters_begin));
+  append_u32(payload, static_cast<uint32_t>(value.generated_quantities_begin));
   append_list(payload, value.fun_defs,
               [](std::string& out, const mir::FunDef& definition) {
                 append_fun(out, definition);
               });
-  append_strings(payload, value.output_vars);
+  append_list(payload, value.output_vars,
+              [](std::string& out, const mir::OutputVar& var) {
+                append_string(out, var.name);
+                append_u8(out, static_cast<uint8_t>(var.block));
+                append_sized(out, var.type);
+              });
   append_stmt_list(payload, value.transform_inits);
   return v2_wire(payload);
 }
 
 std::string empty_v2_payload() {
   std::string payload;
-  for (int i = 0; i < 6; ++i) append_u32(payload, 0);
+  for (int i = 0; i < 9; ++i) append_u32(payload, 0);
   return payload;
 }
 
@@ -300,7 +349,6 @@ std::string real_target_v2_payload(uint64_t bits, uint8_t data_only = 1,
   append_u8(payload, 2);   // TargetPE
   append_u8(payload, 2);   // LitReal
   append_u64(payload, bits);
-  append_string(payload, "UReal");
   append_u8(payload, 0);  // unsized array depth
   append_u8(payload, leaf);
   append_u8(payload, data_only);
@@ -308,8 +356,11 @@ std::string real_target_v2_payload(uint64_t bits, uint8_t data_only = 1,
   append_string(payload, "");
   append_string(payload, "");  // statement raw
   append_u32(payload, 0);      // generate_quantities
+  append_u32(payload, 0);      // transformed_parameters_begin
+  append_u32(payload, 0);      // generated_quantities_begin
   append_u32(payload, 0);      // fun_defs
   append_u32(payload, 0);      // output_vars
+  append_u32(payload, 0);      // transform_inits
   return payload;
 }
 
@@ -332,7 +383,7 @@ size_t count_full_span_assignments(const std::vector<mir::Stmt>& body,
   for (const mir::Stmt& statement : body) {
     count += statement.kind == mir::Stmt::Assignment && statement.lhs == lhs &&
              statement.lhs_idx.size() == 1 &&
-             statement.lhs_idx[0].name == "IndexAll";
+             statement.lhs_idx[0].kind == stanli::mir::Expr::IndexAll;
     count += count_full_span_assignments(statement.body, lhs);
   }
   return count;
@@ -405,6 +456,16 @@ const char* write_expr_kind(mir::Expr::Kind value) {
       return "EAnd";
     case mir::Expr::Unsupported:
       return "Unsupported";
+    case mir::Expr::IndexAll:
+      return "IndexAll";
+    case mir::Expr::IndexSingle:
+      return "IndexSingle";
+    case mir::Expr::IndexUpfrom:
+      return "IndexUpfrom";
+    case mir::Expr::IndexBetween:
+      return "IndexBetween";
+    case mir::Expr::IndexMulti:
+      return "IndexMulti";
   }
   return "Unsupported";
 }
@@ -434,16 +495,25 @@ std::string write_f64(double value) {
   return text;
 }
 
+json write_function_type(const std::optional<mir::FunctionType>& value) {
+  if (!value) return nullptr;
+  return {{"args", write_array(value->args, write_unsized)},
+          {"suffix", static_cast<int>(value->suffix)},
+          {"propto", value->propto}};
+}
+
 json write_expr(const mir::Expr& value) {
   return {{"kind", write_expr_kind(value.kind)},
           {"name", value.name},
           {"fn_lib", write_expr_lib(value.fn_lib)},
+          {"fn_suffix", static_cast<int>(value.fn_suffix)},
           {"fn_propto", value.fn_propto},
+          {"fn_overload", value.fn_overload},
+          {"fn_type", write_function_type(value.fn_type)},
           {"lit_i", std::to_string(value.lit_i)},
           {"lit", write_f64(value.lit)},
           {"lit_s", value.lit_s},
           {"args", write_array(value.args, write_expr)},
-          {"type_", value.type_},
           {"unsized", write_unsized(value.unsized)},
           {"data_only", value.data_only},
           {"promoted", value.promoted},
@@ -484,6 +554,10 @@ const char* write_transform_kind(mir::Transform::Kind value) {
       return "Covariance";
     case mir::Transform::CholeskyCov:
       return "CholeskyCov";
+    case mir::Transform::StochasticColumn:
+      return "StochasticColumn";
+    case mir::Transform::StochasticRow:
+      return "StochasticRow";
     case mir::Transform::Unsupported:
       return "Unsupported";
   }
@@ -553,7 +627,11 @@ json write_stmt(const mir::Stmt& value) {
           {"lhs_idx", write_array(value.lhs_idx, write_expr)},
           {"rhs", write_expr(value.rhs)},
           {"target", write_expr(value.target)},
+          {"jacobian", value.jacobian},
+          {"fn_lib", write_expr_lib(value.fn_lib)},
           {"fn_name", value.fn_name},
+          {"fn_suffix", static_cast<int>(value.fn_suffix)},
+          {"fn_overload", value.fn_overload},
           {"fn_args", write_array(value.fn_args, write_expr)},
           {"check_transform", value.check_transform
                                   ? write_transform(*value.check_transform)
@@ -572,11 +650,17 @@ json write_stmt(const mir::Stmt& value) {
 
 json write_fun_def(const mir::FunDef& value) {
   return {{"name", value.name},
+          {"overload", value.overload},
           {"arg_names", write_strings(value.arg_names)},
-          {"arg_types", write_strings(value.arg_types)},
           {"arg_views", write_array(value.arg_views, write_unsized)},
           {"arg_data_only", write_bools(value.arg_data_only)},
           {"body", write_array(value.body, write_stmt)}};
+}
+
+json write_output_var(const mir::OutputVar& value) {
+  return {{"name", value.name},
+          {"block", static_cast<int>(value.block)},
+          {"type", write_sized_type(value.type)}};
 }
 
 json write_program_object(const mir::Program& value) {
@@ -589,9 +673,11 @@ json write_program_object(const mir::Program& value) {
           {"log_prob", write_array(value.log_prob, write_stmt)},
           {"generate_quantities",
            write_array(value.generate_quantities, write_stmt)},
+          {"transformed_parameters_begin", value.transformed_parameters_begin},
+          {"generated_quantities_begin", value.generated_quantities_begin},
           {"transform_inits", write_array(value.transform_inits, write_stmt)},
           {"fun_defs", write_array(value.fun_defs, write_fun_def)},
-          {"output_vars", write_strings(value.output_vars)}};
+          {"output_vars", write_array(value.output_vars, write_output_var)}};
 }
 
 bool expect_error(const std::string& text, const std::string& needle,
@@ -627,7 +713,6 @@ mir::Expr literal(double value = 1.0) {
   mir::Expr expression;
   expression.kind = mir::Expr::LitReal;
   expression.lit = value;
-  expression.type_ = "UReal";
   expression.unsized.leaf = mir::UnsizedLeaf::Real;
   expression.data_only = true;
   return expression;
@@ -978,7 +1063,7 @@ void check_full_span_assignment_lowering() {
           for (mir::Stmt& statement : body) {
             if (statement.kind == mir::Stmt::Assignment &&
                 statement.lhs == "x" && statement.lhs_idx.size() == 1 &&
-                statement.lhs_idx[0].name == "IndexAll" &&
+                statement.lhs_idx[0].kind == stanli::mir::Expr::IndexAll &&
                 statement.rhs.args.size() == 2) {
               statement.rhs.args[1].lit_i = 3;
               statement.rhs.args[1].lit = 3.0;
@@ -999,9 +1084,8 @@ void check_full_span_assignment_lowering() {
           for (mir::Stmt& statement : body) {
             if (statement.kind == mir::Stmt::Assignment &&
                 statement.lhs == "x" && statement.lhs_idx.size() == 1 &&
-                statement.lhs_idx[0].name == "IndexAll") {
+                statement.lhs_idx[0].kind == stanli::mir::Expr::IndexAll) {
               statement.rhs.name = "rep_vector";
-              statement.rhs.type_ = "UVector";
               statement.rhs.unsized.leaf = mir::UnsizedLeaf::Vector;
               return true;
             }
@@ -1088,9 +1172,9 @@ void check_full_span_assignment_lowering() {
           "full-span generated-vector write_array exists");
     if (legacy_model.write_array && portable_model.write_array) {
       check(!legacy_model.write_array->interp &&
-                legacy_model.write_array->truncated.empty() &&
+                !legacy_model.write_array->truncated &&
                 !portable_model.write_array->interp &&
-                portable_model.write_array->truncated.empty(),
+                !portable_model.write_array->truncated,
             "full-span generated-vector write_array lowers completely");
       check(CompiledModel::csv_names(legacy_model.write_array->columns) ==
                 CompiledModel::csv_names(portable_model.write_array->columns),
@@ -1155,7 +1239,6 @@ void check_exact_float_bits() {
   mir::Stmt target;
   target.kind = mir::Stmt::TargetPE;
   target.target.kind = mir::Expr::LitReal;
-  target.target.type_ = "UReal";
   target.target.unsized.leaf = mir::UnsizedLeaf::Real;
   target.target.data_only = true;
   program.log_prob.push_back(target);
@@ -1176,7 +1259,6 @@ void check_exact_float_bits() {
 void check_structural_rejections() {
   mir::Expr indexed;
   indexed.kind = mir::Expr::Indexed;
-  indexed.type_ = "UReal";
   indexed.unsized.leaf = mir::UnsizedLeaf::Real;
   expect_compile_error(write_v2(target_program(indexed)),
                        "Indexed expression arity",
@@ -1189,44 +1271,40 @@ void check_structural_rejections() {
         "base-only Indexed wrapper");
 
   mir::Expr bad_index;
-  bad_index.kind = mir::Expr::FunApp;
-  bad_index.name = "IndexSingle";
+  bad_index.kind = stanli::mir::Expr::IndexSingle;
   indexed.args.push_back(bad_index);
-  expect_error(write_v2(target_program(indexed)), "IndexSingle call",
+  expect_error(write_v2(target_program(indexed)), "index arity",
                "IndexSingle without operand");
 
-  bad_index.name = "IndexBetween";
+  bad_index.kind = stanli::mir::Expr::IndexBetween;
   bad_index.args.push_back(literal());
   indexed.args[1] = bad_index;
-  expect_error(write_v2(target_program(indexed)), "IndexBetween call",
+  expect_error(write_v2(target_program(indexed)), "IndexBetween arity",
                "IndexBetween with one endpoint");
 
-  bad_index.name = "IndexUpfrom";
+  bad_index.kind = stanli::mir::Expr::IndexUpfrom;
   bad_index.args.clear();
   indexed.args[1] = bad_index;
-  expect_error(write_v2(target_program(indexed)), "IndexUpfrom call",
+  expect_error(write_v2(target_program(indexed)), "index arity",
                "IndexUpfrom without lower bound");
   bad_index.args.push_back(literal());
   indexed.args[1] = bad_index;
   const mir::Program upfrom = decode_program(write_v2(target_program(indexed)));
-  check(upfrom.log_prob[0].target.args[1].name == "IndexUpfrom",
-        "IndexUpfrom portable shape");
+  check(
+      upfrom.log_prob[0].target.args[1].kind == stanli::mir::Expr::IndexUpfrom,
+      "IndexUpfrom portable shape");
 
-  bad_index.name = "IndexAll";
+  bad_index.kind = stanli::mir::Expr::IndexAll;
   indexed.args[1] = bad_index;
-  expect_error(write_v2(target_program(indexed)), "IndexAll call",
+  expect_error(write_v2(target_program(indexed)), "IndexAll arity",
                "IndexAll with an operand");
 
-  bad_index.name = "FutureIndex";
-  indexed.args[1] = bad_index;
-  expect_error(write_v2(target_program(indexed)), "index descriptor",
-               "unknown synthetic index");
-
+  bad_index.kind = mir::Expr::FunApp;
   bad_index.name = "IndexSingle";
-  bad_index.fn_lib = mir::Expr::Lib::UserDefined;
+  bad_index.args = {literal()};
   indexed.args[1] = bad_index;
   expect_error(write_v2(target_program(indexed)), "index descriptor",
-               "noncanonical synthetic index library");
+               "a call in index position");
 
   for (const auto& test : std::vector<std::pair<mir::Expr::Kind, const char*>>{
            {mir::Expr::Promotion, "Promotion expression arity"},
@@ -1235,7 +1313,6 @@ void check_structural_rejections() {
            {mir::Expr::EAnd, "EAnd expression arity"}}) {
     mir::Expr expression;
     expression.kind = test.first;
-    expression.type_ = "UReal";
     expression.unsized.leaf = mir::UnsizedLeaf::Real;
     expect_error(write_v2(target_program(expression)), test.second,
                  test.second);
@@ -1244,7 +1321,6 @@ void check_structural_rejections() {
   mir::Expr bad_call;
   bad_call.kind = mir::Expr::FunApp;
   bad_call.name = "Plus__";
-  bad_call.type_ = "UReal";
   bad_call.unsized.leaf = mir::UnsizedLeaf::Real;
   bad_call.args.push_back(literal());
   expect_compile_error(write_v2(target_program(bad_call)), "Plus__ call",
@@ -1266,7 +1342,6 @@ void check_structural_rejections() {
   mir::Expr wiener;
   wiener.kind = mir::Expr::FunApp;
   wiener.name = "wiener_lpdf";
-  wiener.type_ = "UReal";
   wiener.unsized.leaf = mir::UnsizedLeaf::Real;
   wiener.args.assign(7, literal());
   const std::string extended_wiener = write_v2(target_program(wiener));
@@ -1284,18 +1359,12 @@ void check_structural_rejections() {
   expect_error(write_v2(target_program(wiener)), "expected 5 to 9 argument(s)",
                "ten-argument wiener rejected structurally");
 
-  mir::Expr bad_metadata = literal();
-  bad_metadata.unsized.leaf = mir::UnsizedLeaf::Int;
-  expect_error(write_v2(target_program(bad_metadata)),
-               "expression type metadata", "expression type/view mismatch");
-
   mir::Program bad_binding;
   mir::SizedType real_type;
   real_type.base = "SReal";
   mir::Expr x;
   x.kind = mir::Expr::Var;
   x.name = "x";
-  x.type_ = "UInt";
   x.unsized.leaf = mir::UnsizedLeaf::Int;
   bad_binding = target_program(x);
   bad_binding.input_vars.emplace_back("x", real_type);
@@ -1307,13 +1376,12 @@ void check_structural_rejections() {
   mir::Stmt unsized_declaration;
   unsized_declaration.kind = mir::Stmt::Decl;
   unsized_declaration.decl_id = "tmp";
-  unsized_declaration.decl_type.raw = "(Unsized (UArray UReal))";
+  unsized_declaration.decl_type.unsized = {1, mir::UnsizedLeaf::Real};
   unsized_assignment.log_prob.push_back(std::move(unsized_declaration));
   mir::Stmt first_assignment;
   first_assignment.kind = mir::Stmt::Assignment;
   first_assignment.lhs = "tmp";
   first_assignment.rhs.kind = mir::Expr::Unsupported;
-  first_assignment.rhs.type_ = "UArray";
   first_assignment.rhs.unsized = {1, mir::UnsizedLeaf::Real};
   unsized_assignment.log_prob.push_back(std::move(first_assignment));
   const mir::Program restored_unsized =
@@ -1341,38 +1409,20 @@ void check_structural_rejections() {
   expect_error(write_v2(wrong_unsized_initializer),
                "declaration initializer type disagrees with its binding",
                "unsized declaration initializer mismatch");
-  mir::Program malformed_unsized = unsized_assignment;
-  malformed_unsized.log_prob[0].decl_type.raw = "(Unsized (UArray UFuture))";
-  expect_error(write_v2(malformed_unsized), "unsized declaration type",
-               "malformed unsized declaration spelling");
-
-  mir::Program bad_function;
-  mir::FunDef function;
-  function.name = "f";
-  function.arg_names.push_back("x");
-  function.arg_types.push_back("(UArray UReal)");
-  function.arg_views.push_back(mir::UnsizedView{0, mir::UnsizedLeaf::Real});
-  function.arg_data_only.push_back(true);
-  bad_function.fun_defs.push_back(std::move(function));
-  expect_error(write_v2(bad_function),
-               "function argument type disagrees with its view",
-               "function argument type/view mismatch");
 
   mir::Program colliding_functions;
   const auto add_function = [&](const std::string& name,
-                                const std::string& type,
                                 mir::UnsizedLeaf leaf) {
     mir::FunDef definition;
     definition.name = name;
     definition.arg_names.push_back("x");
-    definition.arg_types.push_back(type);
     definition.arg_views.push_back(mir::UnsizedView{0, leaf});
     definition.arg_data_only.push_back(false);
     colliding_functions.fun_defs.push_back(std::move(definition));
   };
-  add_function("f", "UReal", mir::UnsizedLeaf::Real);
-  add_function("f", "UInt", mir::UnsizedLeaf::Int);
-  add_function("f(int)", "UInt", mir::UnsizedLeaf::Int);
+  add_function("f", mir::UnsizedLeaf::Real);
+  add_function("f", mir::UnsizedLeaf::Int);
+  add_function("f(int)", mir::UnsizedLeaf::Int);
   expect_error(write_v2(colliding_functions),
                "duplicate function name after overload resolution",
                "overload suffix collision");
@@ -1423,10 +1473,13 @@ void check_structural_rejections() {
 }
 
 void check_v2_rejections() {
-  expect_error("STANLI3:", "unrecognized input format", "unknown v2 version");
+  expect_error("STANLI4:", "is from a different stanli compiler",
+               "unknown portable version");
+  expect_error("STANLI2:AAAAAA==", "is from a different stanli compiler",
+               "retired portable v2 envelope");
   expect_error("{\"stanli_ir\":1}", "unrecognized input format",
                "retired portable v1 envelope");
-  expect_error(" STANLI2:", "unrecognized input format",
+  expect_error(" STANLI3:", "unrecognized input format",
                "v2 leading whitespace");
   expect_error("[]", "unrecognized input format", "unknown input format");
   expect_error(" \n\t", "empty input", "empty input");
@@ -1436,21 +1489,10 @@ void check_v2_rejections() {
             empty.log_prob.empty() && empty.generate_quantities.empty() &&
             empty.fun_defs.empty() && empty.output_vars.empty(),
         "v2 empty program");
-  // empty_v2_payload() stops after output_vars, which is exactly the shape a
-  // producer that predates transform_inits emits. It must decode, with no
-  // inverse parameter transforms rather than an error.
-  check(!empty.has_transform_inits && empty.transform_inits.empty(),
-        "v2 document without the trailing section decodes");
+  check(empty.has_transform_inits && empty.transform_inits.empty(),
+        "v3 empty transform_inits section");
   check(empty_wire.find('\0') == std::string::npos,
         "v2 envelope is safe for C-string transports");
-
-  // The current producer writes the section even when it is empty. Presence
-  // must survive independently of content so a parameterless current model
-  // can unconstrain an empty object, while an old document remains unsupported.
-  const mir::Program current_empty = decode_program(write_v2(mir::Program{}));
-  check(current_empty.has_transform_inits &&
-            current_empty.transform_inits.empty(),
-        "v2 explicitly empty transform_inits section stays present");
 
   mir::Program loop_control;
   mir::Stmt break_statement;
@@ -1473,6 +1515,7 @@ void check_v2_rejections() {
   mir::Stmt free_write;
   free_write.kind = mir::Stmt::NRFunApp;
   free_write.fn_name = "FnWriteParam";
+  free_write.fn_lib = mir::Expr::Lib::Internal;
   mir::Transform lower;
   lower.kind = mir::Transform::Lower;
   mir::Expr bound;
@@ -1484,6 +1527,7 @@ void check_v2_rejections() {
   mir::Stmt constrained_write;
   constrained_write.kind = mir::Stmt::NRFunApp;
   constrained_write.fn_name = "FnWriteParam";
+  constrained_write.fn_lib = mir::Expr::Lib::Internal;
   inits.generate_quantities.push_back(constrained_write);
   const mir::Program decoded_inits = decode_program(write_v2(inits));
   check(
@@ -1511,27 +1555,26 @@ void check_v2_rejections() {
   check_real_bits(UINT64_C(0x7ff8000000000042),
                   "v2 preserves binary64 NaN payload bits");
 
-  expect_error("STANLI2:AAA", "multiple of 4", "v2 incomplete base64 quartet");
-  expect_error("STANLI2:!!!!", "invalid base64 character",
+  expect_error("STANLI3:AAA", "multiple of 4", "v2 incomplete base64 quartet");
+  expect_error("STANLI3:!!!!", "invalid base64 character",
                "v2 invalid base64 character");
-  expect_error("STANLI2:AA==AAAA", "padding before final quartet",
+  expect_error("STANLI3:AA==AAAA", "padding before final quartet",
                "v2 early base64 padding");
-  expect_error("STANLI2:AB==", "non-canonical base64 tail",
+  expect_error("STANLI3:AB==", "non-canonical base64 tail",
                "v2 non-canonical one-byte tail");
-  expect_error("STANLI2:AAB=", "non-canonical base64 tail",
+  expect_error("STANLI3:AAB=", "non-canonical base64 tail",
                "v2 non-canonical two-byte tail");
 
   std::string truncated = empty_v2_payload();
   truncated.pop_back();
   expect_error(v2_wire(truncated), "truncated input", "v2 truncated payload");
   std::string trailing = empty_v2_payload();
-  append_u32(trailing, 0);  // an empty transform_inits, which is well formed
   append_u8(trailing, 0);
   expect_error(v2_wire(trailing), "trailing bytes", "v2 trailing payload");
-  std::string short_section = empty_v2_payload();
-  append_u8(short_section, 0);
-  expect_error(v2_wire(short_section), "truncated input",
-               "v2 partial trailing section");
+  std::string no_transform_inits = empty_v2_payload();
+  no_transform_inits.resize(no_transform_inits.size() - 4);
+  expect_error(v2_wire(no_transform_inits), "truncated input",
+               "missing transform_inits section");
 
   std::string oversized_list;
   append_u32(oversized_list, 1000001);
@@ -1610,6 +1653,7 @@ void check_v2_rejections() {
     append_u32(payload, 1);
     append_u8(payload, 0);  // Decl
     append_string(payload, "x");
+    append_u8(payload, 0);  // sized
     append_string(payload, "SReal");
     append_u32(payload, 0);  // dimensions
     append_string(payload, "");
@@ -1624,6 +1668,28 @@ void check_v2_rejections() {
                "optional marker is not 0 or 1", "v2 invalid optional marker");
   expect_error(v2_wire(declaration_through_transform(1, 0xff)),
                "unknown transform tag", "v2 unknown transform tag");
+  std::string unknown_declaration_type;
+  append_u32(unknown_declaration_type, 0);
+  append_u32(unknown_declaration_type, 0);
+  append_u32(unknown_declaration_type, 1);
+  append_u8(unknown_declaration_type, 0);  // Decl
+  append_string(unknown_declaration_type, "x");
+  append_u8(unknown_declaration_type, 2);
+  expect_error(v2_wire(unknown_declaration_type),
+               "unknown declaration-type tag", "unknown declaration-type tag");
+  std::string check_without_payload;
+  append_u32(check_without_payload, 0);
+  append_u32(check_without_payload, 0);
+  append_u32(check_without_payload, 1);
+  append_u8(check_without_payload, 8);  // NRFunApp
+  append_u8(check_without_payload, 1);  // Internal
+  append_string(check_without_payload, "FnCheck");
+  append_u8(check_without_payload, 0);   // FnPlain
+  append_u32(check_without_payload, 0);  // arguments
+  append_u8(check_without_payload, 0);   // no payload
+  expect_error(v2_wire(check_without_payload),
+               "statement payload does not match its function",
+               "FnCheck without its payload");
 
   expect_error(v2_wire(real_target_v2_payload(0, 2)), "boolean is not 0 or 1",
                "v2 invalid boolean");

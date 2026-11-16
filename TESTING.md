@@ -97,7 +97,7 @@ BRANCH` runs it on a branch. The jobs are in
 | [corpus replay](#comparison-with-cmdstan-on-complete-models) | log density, gradient and `write_array` rows of 366 models at 3 points | recorded CmdStan values | PR on Linux x86-64; post-merge on macOS arm64 and x86-64, Linux aarch64 and Linux GCC | parameter values away from the 3 points; Windows |
 | [fast-mode replay](#fast-mode) | the same models compiled in fast mode | the same references, fast-mode limits | PR, Linux x86-64 | macOS, Windows and ARM |
 | [local corpus replays](#comparison-with-cmdstan-on-complete-models) | log density, gradient and outputs of the function, signature, fixture and other local models | recorded CmdStan values | PR (CTest) | signatures and sizes the generators exclude |
-| [stanc3 good models](#testing-stan-language-coverage) | the 1,244 models in stanc3's `good` integration tests at up to 5 points | recorded CmdStan values and messages, 1e-9; a status ledger | PR (CTest) | models whose generated data CmdStan rejects |
+| [stanc3 good models](#testing-stan-language-coverage) | the 1,380 models in stanc3's `good` integration tests at up to 5 points | recorded CmdStan values and messages, 1e-9; a status ledger | PR (CTest) | models whose generated data CmdStan rejects |
 | [stanc3 bad models](#testing-stan-language-coverage) | compile errors of the 1,191 models in stanc3's `bad` integration tests | stanc3's expected output; a ledger | PR (CTest) | |
 | [sampling smoke](#comparison-with-cmdstan-on-complete-models) | 100 saved draws of the 13 Aalto fixtures | reference output names, draw count, finiteness | PR (CTest) | convergence |
 | [cross-path matrix](#comparing-stanli-execution-paths) | every fixture at 3 points and the 22 cogmod models at 13, under 18 execution configurations | each other, bitwise, with a ledger | PR (CTest) | transformed data, which has one engine; an error every path shares |
@@ -309,7 +309,8 @@ The compiler runs as a native executable, as JavaScript and as a Windows
 executable, and all three must emit the same compact MIR bytes.
 [`tests/test_portable_stancjs.cjs`](tests/test_portable_stancjs.cjs) checks
 this on the [compiler fixtures](tests/compiler/README.md), along with repeat
-determinism, error and warning parity, and the stock `stanc()` API.
+determinism and parity of errors, warnings and the O1 fallback notice between
+the JavaScript result and the CLI's `--messages-json` file.
 
 ## Testing Stan language coverage
 
@@ -340,11 +341,11 @@ generators exclude.
 
 stanc3's integration tests cover syntax and type combinations that posteriordb
 and the generators miss. [`tools/check_stanc3_good.py`](tools/check_stanc3_good.py)
-runs the 1,244 models in `test/integration/good` and compares log density,
+runs the 1,380 models in `test/integration/good` and compares log density,
 gradient and `write_array` row with recorded CmdStan answers at up to five
 points under the 1e-9 limit. Where CmdStan throws, stanli must throw the same
 message. [`tools/check_stanc3_bad.py`](tools/check_stanc3_bad.py) compares the
-error text of the 1,191 models in `test/integration/bad` with stanc3's expected
+error text of the 1,192 models in `test/integration/bad` with stanc3's expected
 output. A model that does better or worse than its ledger entry
 ([good](tests/stanc3_good/ledger.json), [bad](tests/stanc3_bad_ledger.json))
 fails. See [`tests/stanc3_good/README.md`](tests/stanc3_good/README.md).
@@ -433,12 +434,42 @@ gradient, which must also match its analytic value within 2 ULP. The difference
 comes from adjoint ODE sensitivity integration
 ([measurements](notes/execution/2026-09-28-nested-callback-coverage.md)).
 
+## Developer switches
+
+The runtime reads about 60 `STANLI_*` environment variables that turn a pass
+off, force an engine or print a diagnostic
+([docs/hacking.md](docs/hacking.md#building)). The CMake option
+`STANLI_DEBUG_SWITCHES` compiles them in. It defaults to OFF, which is what
+the wheels, the R runtime and the browser builds ship, and
+`tools/build_wheel.sh` refuses a `build-rel/` configured ON.
+`tools/dev_setup.sh` and the sanitizer jobs configure ON.
+
+A test that sets a switch is listed in `STANLI_DEBUG_SWITCH_TESTS` in
+[`CMakeLists.txt`](CMakeLists.txt) and carries the CTest label
+`debug_switches`. In an OFF build CTest reports it as `Not Run (Disabled)` and
+the run still passes. CI runs CTest that way in the shipped `build-rel/`; the
+manylinux job's differential step builds ON and runs
+`ctest -L debug_switches`. Locally:
+
+```sh
+cmake -B build -DSTANLI_DEBUG_SWITCHES=ON
+cmake --build build --parallel "$(tools/build_jobs.sh)"
+ctest --test-dir build -L debug_switches
+```
+
+A test that only needs pass dumps, an execution report or a write_array
+thread policy sets the typed fields instead and runs in every build:
+`CompileOptions::dump_passes`, `dump_stages`, `execution_report` and
+`parallel_write_array`, the last two also in `stanli_model_opts`.
+`test_wa_parallel --switches` and `test_pass_dump --switches` are the labeled
+halves that check the environment switches themselves.
+
 ## Reproducing locally
 
 Replaying the checked-in references does not run CmdStan.
 [`tools/dev_setup.sh`](tools/dev_setup.sh) configures `build/` and `build-rel/`
-with `-DSTANLI_EMBED_STANC=ON` (`build-rel/` with the density oracle off) and
-runs CTest in `build/`. Without the embedded compiler or
+with `-DSTANLI_EMBED_STANC=ON` and `-DSTANLI_DEBUG_SWITCHES=ON` (`build-rel/`
+with the density oracle off) and runs CTest in `build/`. Without the embedded compiler or
 `deps/stanc3/stanli-compile`, every test that compiles Stan source fails.
 
 ```sh
@@ -472,6 +503,7 @@ AddressSanitizer builds compile Stan source through `stanli-compile`, which
 ```sh
 asan_jobs=$(STANLI_JOB_MEMORY_GIB=12 tools/build_jobs.sh)
 cmake -B build-asan -DCMAKE_BUILD_TYPE=RelWithDebInfo -DSTANLI_SANITIZE=address \
+  -DSTANLI_DEBUG_SWITCHES=ON \
   -DSTANLI_PORTABLE_COMPILER="$PWD/deps/stanc3/stanli-compile"
 cmake --build build-asan --parallel "$asan_jobs" && \
   ctest --test-dir build-asan --parallel "$asan_jobs"

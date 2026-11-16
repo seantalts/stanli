@@ -26,6 +26,8 @@ int main(int argc, char** argv) {
         stanli_function_new_from_mir(mir.c_str(), "combined", err, sizeof err),
         stanli_function_free);
     if (!function) throw std::runtime_error(err);
+    // The test reads the selection reports from stderr.
+    stanli_function_set_execution_report(function.get(), 1);
 
     // Round-trip every returned double for the independent Python ULP check.
     std::cout << std::setprecision(std::numeric_limits<double>::max_digits10);

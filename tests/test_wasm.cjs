@@ -2,7 +2,7 @@
 // schools from Stan source, evaluate a gradient, sample, and check the
 // posterior mean of mu. Mirrors the wheel smoke test.
 //
-//   node tests/test_wasm.cjs [stanli.js] [stanli-compiler.js] [stancjs.bc.js]
+//   node tests/test_wasm.cjs [stanli.js] [stanli-compiler.js]
 "use strict";
 const fs = require("fs");
 const os = require("os");
@@ -13,7 +13,6 @@ const modPath = path.resolve(
     process.argv[2] || path.join(__dirname, "..", "build-wasm", "stanli.js"));
 const createStanli = require(modPath);
 const compilerPath = process.argv[3] && path.resolve(process.argv[3]);
-const fallbackPath = process.argv[4] && path.resolve(process.argv[4]);
 
 function fail(msg) {
   console.error("FAIL " + msg);
@@ -51,34 +50,20 @@ createStanli().then((M) => {
     const exported = require(compilerPath);
     const portable =
         (exported && exported.stanli_compile) || globalThis.stanli_compile;
-    const stanc = (exported && exported.stanc) || globalThis.stanc;
     const code = fs.readFileSync(path.join(fixtures, "es.stan"), "utf8");
     let compiled;
     if (typeof portable === "function") {
       portableCompile = portable;
       compiled = portable("embedded_model", code);
       if (!compiled.errors &&
-          !String(compiled.result).startsWith("STANLI2:"))
+          !String(compiled.result).startsWith("STANLI3:"))
         fail("portable stancjs returned legacy or malformed MIR");
-    } else if (typeof stanc === "function") {
-      compiled = stanc("es_model", code, ["O1", "debug-optimized-mir"]);
     } else {
-      fail("browser compiler did not export stanli_compile() or stanc()");
+      fail("browser compiler did not export stanli_compile()");
     }
     if (compiled.errors)
       fail("browser compiler: " + Array.from(compiled.errors).join("\n"));
     mir = String(compiled.result);
-
-    if (fallbackPath) {
-      const fallbackExported = require(fallbackPath);
-      const fallback =
-          (fallbackExported && fallbackExported.stanc) || globalThis.stanc;
-      if (typeof fallback !== "function")
-        fail("fallback stancjs did not export stanc()");
-      const version = fallback("version-test", "", ["version"]);
-      if (version.errors || /%%(?:NAME|VERSION)%%/.test(String(version.result)))
-        fail("fallback stancjs has unsubstituted version metadata");
-    }
   } else {
     try {
       mir = nativeMir(fixtures);
@@ -285,10 +270,11 @@ createStanli().then((M) => {
     const buildWithOpts = (mirText, fastMath) => {
       const mirP = M.stringToNewUTF8(mirText);
       const dataP = M.stringToNewUTF8(regData);
-      const optsP = M._malloc(12);
+      const optsP = M._malloc(24);
       M._stanli_model_opts_init(optsP);
-      const fields = new Int32Array(M.HEAPF64.buffer, optsP, 3);
-      if (fields[0] !== 1 || fields[1] !== 1 || fields[2] !== 0)
+      const fields = new Int32Array(M.HEAPF64.buffer, optsP, 6);
+      if (fields[0] !== 1 || fields[1] !== 1 || fields[2] !== 0 || fields[3] !== 1 ||
+          fields[4] !== 0 || fields[5] !== 0)
         fail("model_opts_init wrote " + Array.from(fields));
       fields[2] = fastMath ? 1 : 0;
       const m = M._stanli_model_new_with_opts(mirP, dataP, optsP, errPtr,

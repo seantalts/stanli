@@ -46,6 +46,7 @@
 // never per-model: cross-lane reads (parameter recurrences), partial or
 // strided INDEX progressions, outputs escaping the lane, opcodes outside
 // the vocabulary.
+#include <stanli/debug_switch.hpp>
 #include <stanli/builtin_registry.hpp>
 #include <stanli/optable.hpp>
 #include <stanli/reroll.hpp>
@@ -597,7 +598,7 @@ RerollStats reroll(Graph& g,
                    const std::vector<int>& extra_roots,
                    bool fuse_shared_params) {
   RerollStats st;
-  if (std::getenv("STANLI_NO_REROLL")) return st;
+  if (debug_env("STANLI_NO_REROLL")) return st;
 
   const int packed_rows =
       fuse_log_sum_exp_rows(g, target_terms, extra_roots, st.row_steps);
@@ -725,8 +726,7 @@ RerollStats reroll(Graph& g,
   // sig[u] is op_signature(g.ops[u]); period_fwd(P)[k] is the largest L
   // such that sig[k] == sig[k + P] == ... == sig[k + L * P], built once
   // per P and cached.
-  const bool prefilter_off =
-      std::getenv("STANLI_NO_REROLL_PREFILTER") != nullptr;
+  const bool prefilter_off = debug_env("STANLI_NO_REROLL_PREFILTER") != nullptr;
   std::vector<uint64_t> sig;
   if (!prefilter_off) {
     sig.resize(g.ops.size());

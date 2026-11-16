@@ -360,7 +360,7 @@ std::vector<int> categorical_outcomes(const KernelCtx& ctx) {
 template <typename Arg>
 auto categorical_eval(uint8_t variant, const std::vector<int>& outcomes,
                       const Arg& arg) {
-  const bool propto = (variant & 0x80u) != 0;
+  const bool propto = (variant & kCategoricalPropto) != 0;
   if (variant & kCategoricalScalarOutcome) {
     if (variant & kCategoricalLogit)
       return propto
@@ -414,7 +414,7 @@ void categorical_fwd(KernelCtx& ctx) {
   // a propto call whose source type was var therefore returns its dropped
   // zero in that mode.  Preserve that existing contract and use the native
   // active-type path only for a normal forward/gradient evaluation.
-  if (native_scalar_probability(ctx.variant) && !values_only()) {
+  if (native_scalar_probability(ctx.variant) && !values_only(ctx)) {
     const int outcome = categorical_scalar_outcome(ctx);
     const Eigen::Map<const Eigen::VectorXd> arg(ctx.in[1].data, ctx.in[1].len);
     // With an active argument, both <true> and <false> retain this summand;
@@ -422,14 +422,14 @@ void categorical_fwd(KernelCtx& ctx) {
     ctx.out.data[0] = stan::math::categorical_lpmf<false>(outcome, arg);
     return;
   }
-  if (native_scalar_logit(ctx.variant) && !values_only()) {
+  if (native_scalar_logit(ctx.variant) && !values_only(ctx)) {
     const int outcome = categorical_scalar_outcome(ctx);
     const Eigen::Map<const Eigen::VectorXd> arg(ctx.in[1].data, ctx.in[1].len);
     ctx.out.data[0] = stan::math::categorical_logit_lpmf<false>(outcome, arg);
     return;
   }
   const std::vector<int> outcomes = categorical_outcomes(ctx);
-  if ((ctx.variant & kCategoricalArgAutodiff) && !values_only()) {
+  if ((ctx.variant & kCategoricalArgAutodiff) && !values_only(ctx)) {
     stan::math::nested_rev_autodiff nested;
     const auto arg = categorical_vars(ctx.in[1]);
     ctx.out.data[0] = categorical_eval(ctx.variant, outcomes, arg).val();
@@ -481,10 +481,9 @@ void categorical_bwd(KernelCtx& ctx) {
 }
 
 void all_integer_density_fwd(KernelCtx& ctx) {
-  const auto density =
-      static_cast<AllIntegerDensity>(ctx.variant & uint8_t{0x7f});
+  const AllIntegerMode mode = AllIntegerMode::of(ctx.variant);
   ctx.out.data[0] = evaluate_packed_all_integer_density(
-      density, ctx.idata, ctx.n_idata, (ctx.variant & 0x80u) != 0);
+      mode.density, ctx.idata, ctx.n_idata, mode.propto);
 }
 
 void all_integer_density_bwd(KernelCtx&) {}

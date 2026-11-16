@@ -47,7 +47,7 @@ void store_output(KernelCtx& ctx, const R& result) {
 
 template <typename Op>
 void library_fwd(KernelCtx& ctx) {
-  if ((ctx.variant & kMatrixActiveForward) && !values_only()) {
+  if ((ctx.variant & kMatrixActiveForward) && !values_only(ctx)) {
     stan::math::nested_rev_autodiff nested;
     auto xs = load_inputs<var>(ctx);
     store_output(ctx, Op::template call<var>(ctx, xs));

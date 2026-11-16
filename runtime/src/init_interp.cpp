@@ -85,7 +85,7 @@ InitInterp::InitInterp(
     : prog_(std::move(prog)),
       base_env_(std::move(base_env)),
       params_(std::move(params)) {
-  for (const auto& f : prog_->fun_defs) funs_[f.name] = &f;
+  for (const auto& f : prog_->fun_defs) funs_[mir::function_key(f)] = &f;
 }
 
 std::vector<double> InitInterp::eval(
@@ -143,8 +143,7 @@ std::vector<double> InitInterp::eval(
     return it == shaped.end() ? nullptr : &it->second;
   };
   h.stmt = [&](const mir::Stmt& s) {
-    if (s.kind != mir::Stmt::NRFunApp || s.fn_name != "FnWriteParam" ||
-        !s.write_transform)
+    if (mir::internal_name(s) != "FnWriteParam" || !s.write_transform)
       return false;
     if (s.fn_args.empty() || s.fn_args[0].kind != mir::Expr::Var)
       refuse("a free write does not name its parameter");
@@ -232,7 +231,7 @@ const InitInterp& transform_inits_interp(const CompiledModel& cm) {
   if (!cm.transform_inits->interp)
     throw std::runtime_error(
         "this model's inverse parameter transforms are unavailable: " +
-        cm.transform_inits->truncated);
+        cm.transform_inits->truncated.value_or(""));
   return *cm.transform_inits->interp;
 }
 

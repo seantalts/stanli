@@ -36,6 +36,7 @@ import time
 REPO = pathlib.Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO / "tools"))
 from cmdstan_ref import compile_cmd, point_results  # noqa: E402
+from corpus_inventory import stanc3_good_models  # noqa: E402
 from verify_refs import parse_status  # noqa: E402
 import toolchain  # noqa: E402
 
@@ -62,8 +63,8 @@ def pinned_sha():
 
 
 def corpus_models():
-    return {p.relative_to(CORPUS).as_posix(): sha256(p.read_bytes())
-            for p in sorted(CORPUS.rglob("*.stan"))}
+    return {rel: sha256((CORPUS / rel).read_bytes())
+            for rel in stanc3_good_models(CORPUS)}
 
 
 def serialize(doc):

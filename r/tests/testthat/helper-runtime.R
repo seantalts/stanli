@@ -1,8 +1,24 @@
-# These need a runtime. Point STANLI_RUNTIME at a build (and
-# STANLI_STANC at a stanc3 if that build does not embed one) to run them;
-# they skip otherwise, so R CMD check passes on a machine with neither.
-skip_without_runtime <- function() {
-  if (!stanli_available()) skip("no stanli runtime installed")
+# These need a runtime. Point STANLI_RUNTIME at a build (with stanli-compile
+# beside it if that build does not embed the compiler) to run them; they skip
+# otherwise, so R CMD check passes on a machine with neither.
+# STANLI_REQUIRE_RUNTIME=1 makes a missing runtime a failure, for CI jobs
+# where one was installed on purpose.
+skip_without_runtime <- function(available = stanli_available()) {
+  if (available) return(invisible())
+  if (identical(Sys.getenv("STANLI_REQUIRE_RUNTIME"), "1"))
+    stop("STANLI_REQUIRE_RUNTIME=1 but no stanli runtime is installed")
+  skip("no stanli runtime installed")
+}
+
+# STANLI_REQUIRE_NUTPIER=1 does the same for nutpieR.
+skip_without_nutpie <- function(
+    installed = requireNamespace("nutpieR", quietly = TRUE)) {
+  if (!installed) {
+    if (identical(Sys.getenv("STANLI_REQUIRE_NUTPIER"), "1"))
+      stop("STANLI_REQUIRE_NUTPIER=1 but nutpieR cannot be loaded")
+    skip("nutpieR cannot be loaded")
+  }
+  skip_without_runtime()
 }
 
 subprocess_available <- function(os = R.version$os, bin = R.home("bin")) {

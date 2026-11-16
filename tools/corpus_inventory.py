@@ -37,6 +37,16 @@ def source_digest(path):
     return hashlib.sha256(path.read_bytes().replace(b"\r\n", b"\n")).hexdigest()
 
 
+def stanc3_good_models(corpus):
+    """The models in stanc3's test/integration/good, as sorted paths relative
+    to it. stanc3 keeps the output of its own tests in expected_* directories;
+    a pretty-printed model there repeats a model that is already listed."""
+    return sorted(
+        p.relative_to(corpus).as_posix() for p in corpus.rglob("*.stan")
+        if not any(part.startswith("expected_")
+                   for part in p.relative_to(corpus).parts[:-1]))
+
+
 def _insert(cases, case):
     if case.name in cases:
         raise ValueError(f"Duplicate corpus model id: {case.name}")

@@ -36,7 +36,7 @@ endif()
 
 # Sanitizers, for running the test suite under. Empty by default and never
 # a shipped flavour: this is a way to run ctest, not a build anyone
-# installs, so it deliberately does not touch STANLI_BUILD_ID.
+# installs, so it deliberately does not touch the build id.
 #
 # Global rather than an option on the stanmath interface target, because
 # the bugs worth catching do not respect target boundaries -- the vendored
@@ -165,6 +165,22 @@ if(NOT STANLI_STAN_DENSITY_ORACLE)
   target_compile_definitions(stanmath INTERFACE STANLI_FUSED_ONLY=1)
 endif()
 
+# The STANLI_* environment variables that turn passes off, force paths, set
+# tuning limits or print diagnostics (runtime/include/stanli/debug_switch.hpp).
+# Tests and investigations use them. OFF, the default and what packaging
+# builds use, compiles them out, so the runtime's behavior cannot change
+# through the environment. The tests that need them carry the debug_switches
+# label and are disabled in an OFF build (STANLI_DEBUG_SWITCH_TESTS below);
+# tools/dev_setup.sh configures ON. STANLI_NO_INTERPRETER, STANLI_ISA,
+# STANLI_NO_FUSED_DENSITY and STANLI_NO_O1_FALLBACK are not developer
+# switches.
+option(STANLI_DEBUG_SWITCHES
+  "Read the developer STANLI_* environment switches" OFF)
+if(NOT STANLI_DEBUG_SWITCHES)
+  target_compile_definitions(stanmath INTERFACE STANLI_NO_DEBUG_SWITCHES=1)
+endif()
+set(STANLI_DEBUG_SWITCH_TESTS)
+
 # Chains in threads. stan-math's autodiff stack is a plain static unless
 # STAN_THREADS is defined, in which case it is thread_local (__thread on
 # gcc/clang). The legacy kernels and tape islands build NESTED var tapes
@@ -281,9 +297,10 @@ target_compile_options(sundials PRIVATE -w
 set_target_properties(sundials PROPERTIES POSITION_INDEPENDENT_CODE ON)
 
 # Identifies this runtime binary, for callers that cache artifacts next to
-# the library that produced them (the BridgeStan lib pair keys its manifest
-# on it). The git sha names the source; the flavour bits name the build
-# choices that change what the same source produces. Uncommitted edits do
+# the library that produced them (the BridgeStan payload carries it).
+# build_id.cpp prefixes the C ABI version; this part names the source and
+# the platform, plus "-threads" for a thread-safe build, the one build
+# choice that changes what the same source produces. Uncommitted edits do
 # not move it -- it identifies a build of the project, not a working tree.
 execute_process(COMMAND git -C ${CMAKE_CURRENT_SOURCE_DIR} rev-parse --short=12 HEAD
                 OUTPUT_VARIABLE STANLI_GIT_SHA
@@ -291,10 +308,10 @@ execute_process(COMMAND git -C ${CMAKE_CURRENT_SOURCE_DIR} rev-parse --short=12 
 if(NOT STANLI_GIT_SHA)
   set(STANLI_GIT_SHA "nogit")
 endif()
-set(STANLI_BUILD_ID
-  "abi1-${STANLI_GIT_SHA}-${CMAKE_SYSTEM_NAME}-${CMAKE_SYSTEM_PROCESSOR}")
+set(STANLI_BUILD_SOURCE
+  "${STANLI_GIT_SHA}-${CMAKE_SYSTEM_NAME}-${CMAKE_SYSTEM_PROCESSOR}")
 if(STANLI_THREADS)
-  string(APPEND STANLI_BUILD_ID "-threads")
+  string(APPEND STANLI_BUILD_SOURCE "-threads")
 endif()
 
 # Only this tiny translation unit reads the build id. Keeping this definition
@@ -302,7 +319,7 @@ endif()
 # runtime target invalidates every stan-math-heavy object on every commit even
 # when none of those sources or headers changed.
 set_source_files_properties(runtime/src/build_id.cpp PROPERTIES
-  COMPILE_DEFINITIONS STANLI_BUILD_ID="${STANLI_BUILD_ID}")
+  COMPILE_DEFINITIONS STANLI_BUILD_SOURCE="${STANLI_BUILD_SOURCE}")
 
 # One runtime source inventory. The implementation is compiled once as a PIC
 # object library and reused by the shared library and the test/static library.
@@ -363,7 +380,7 @@ set(STANLI_RUNTIME_SOURCES
   runtime/src/mir_reader.cpp
   runtime/src/mir_decode.cpp
   runtime/src/large_stack.cpp
-  runtime/src/portable_mir_v2_reader.cpp
+  runtime/src/portable_mir_reader.cpp
   runtime/src/lower.cpp
   runtime/src/lower_expr.cpp
   runtime/src/lower_stmt.cpp
@@ -414,8 +431,8 @@ endif()
 
 # Optional AVX2 copies of the dense-matrix kernels, for a fast mode. The
 # default build is unchanged: this is OFF, and the baseline kernels stay the
-# default even when it is ON (STANLI_FAST_MATH=1 opts in at run time, only on
-# a CPU that can run them). Each kernel file is compiled twice, a baseline
+# default even when it is ON (STANLI_ISA=avx2 opts in at run time, only on a
+# CPU that can run them). Each kernel file is compiled twice, a baseline
 # copy with its registration entry points renamed *_base and an AVX2 copy
 # (-march=x86-64-v3) in its own Eigen namespace (-DEigen=EigenAvx2): Eigen's
 # templates have identical mangled names but different packet sizes and
@@ -907,6 +924,8 @@ endfunction()
 # stanc to find -- which is the whole point of an interpreter for a
 # language whose reference implementation compiles C++ per model.
 add_library(stanli_stanc_process STATIC tools/stanc_process.cpp)
+target_include_directories(stanli_stanc_process PUBLIC runtime/include
+                           PRIVATE runtime/third_party)
 if(NOT EMSCRIPTEN)
   target_link_libraries(stanli_stanc_process PRIVATE Threads::Threads)
 endif()
@@ -1005,6 +1024,7 @@ foreach(_stanli_cogmod_source IN LISTS STANLI_COGMOD_SOURCES)
   set_tests_properties(test_cross_path_${_stanli_cogmod} PROPERTIES
     PASS_REGULAR_EXPRESSION "CROSS OK "
     FAIL_REGULAR_EXPRESSION "CROSS (FAIL|SKIP)")
+  list(APPEND STANLI_DEBUG_SWITCH_TESTS test_cross_path_${_stanli_cogmod})
 endforeach()
 add_executable(bench_grad tools/bench_grad.cpp
   $<TARGET_OBJECTS:stanli_tbb_stub>)
@@ -1168,6 +1188,7 @@ if(NOT EMSCRIPTEN)
     if(exit_fixture MATCHES "^structured_callback_")
       set_tests_properties(${exit_fixture}_reference PROPERTIES
         ENVIRONMENT "STANLI_STRUCTURED_LOOPS=force")
+      list(APPEND STANLI_DEBUG_SWITCH_TESTS ${exit_fixture}_reference)
     endif()
   endforeach()
   add_test(NAME callback_geometry
@@ -1359,6 +1380,11 @@ if(STANLI_STAN_DENSITY_ORACLE)
 endif()
 foreach(STANLI_TEST IN LISTS STANLI_TESTS)
   stanli_add_test(${STANLI_TEST})
+endforeach()
+# The parts of these two that check the environment switches themselves.
+foreach(_stanli_split test_wa_parallel test_pass_dump)
+  add_test(NAME ${_stanli_split}_switches COMMAND ${_stanli_split} --switches
+           WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
 endforeach()
 set_tests_properties(test_ode_prog PROPERTIES TIMEOUT 180)
 target_link_libraries(test_region_map PRIVATE stanli_stanc_process)
@@ -1707,4 +1733,29 @@ if(Python3_Interpreter_FOUND)
              WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
   endif()
 endif()
+
+# Tests that set developer switches, to turn a pass off for a differential
+# check, force an engine, or read a diagnostic. An OFF build ignores the
+# switches, so these would fail or check nothing there: they carry the
+# debug_switches label (ctest -L debug_switches) and are disabled.
+list(APPEND STANLI_DEBUG_SWITCH_TESTS
+  test_execution_report test_sampler_parity test_lower test_region_map
+  test_reroll test_inplace test_pass_safety test_structured_checks
+  test_structured_loop test_constfold test_collapse test_cse test_fast_math
+  test_partition test_solve_reuse test_cross_path test_write_array
+  test_island test_odevariadic test_algebra test_brmsmono
+  test_wa_parallel_switches test_pass_dump_switches
+  test_prep_profile_reroll_dispositions test_write_array_semantics
+  hypergeometric_1f0_register_reference
+  hypergeometric_1f0_structured_reference callback_geometry
+  test_run_rng test_ctsem_engine test_data_loop_memo)
+foreach(_stanli_switch_test IN LISTS STANLI_DEBUG_SWITCH_TESTS)
+  if(TEST ${_stanli_switch_test})
+    set_property(TEST ${_stanli_switch_test} APPEND PROPERTY
+                 LABELS debug_switches)
+    if(NOT STANLI_DEBUG_SWITCHES)
+      set_property(TEST ${_stanli_switch_test} PROPERTY DISABLED TRUE)
+    endif()
+  endif()
+endforeach()
 endif()  # NOT EMSCRIPTEN

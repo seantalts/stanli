@@ -746,10 +746,10 @@ void student_t_dispatch(const Y& y, const Nu& nu, const M& mu, const S& sigma,
 
 void student_t_lpdf_run(KernelCtx& ctx) {
   count_call();
-  const unsigned variant = ctx.variant;
-  const bool propto = (variant & 0x80u) != 0;
-  if (variant & 0x40u) {
-    const unsigned mask = variant & 0x3fu;
+  const DensityMode mode = density_mode(ctx);
+  const bool propto = mode.propto;
+  const unsigned mask = mode.active;
+  if (mode.elementwise) {
     const int64_t N = ctx.out.len;
     for (int64_t n = 0; n < N; ++n) {
       Out4 o;
@@ -767,7 +767,6 @@ void student_t_lpdf_run(KernelCtx& ctx) {
     }
     return;
   }
-  const unsigned mask = variant == 0 ? 15u : (variant & 0x3fu);
   Out4 o;
   int64_t off = 0;
   std::size_t n = 1;
@@ -858,10 +857,10 @@ struct GammaOp {
 template <typename Op>
 void fused_lpdf(KernelCtx& ctx) {
   count_call();
-  const unsigned variant = ctx.variant;
-  const bool propto = (variant & 0x80u) != 0;
-  if (variant & 0x40u) {
-    const unsigned mask = variant & 0x3fu;
+  const DensityMode mode = density_mode(ctx);
+  const bool propto = mode.propto;
+  const unsigned mask = mode.active;
+  if (mode.elementwise) {
     const int64_t N = ctx.out.len;
     for (int64_t n = 0; n < N; ++n) {
       Out o;
@@ -877,7 +876,6 @@ void fused_lpdf(KernelCtx& ctx) {
     }
     return;
   }
-  const unsigned mask = variant == 0 ? 7u : (variant & 0x3fu);
   Out o;
   int64_t off = 0;
   for (int k = 0; k < 3; ++k) {
@@ -932,10 +930,9 @@ void set_fused_density(bool on) {
 std::size_t fused_density_calls() { return g_calls; }
 #endif
 
-void ordered_logistic_lpmf_fused(KernelCtx& ctx) {
+void ordered_logistic_lpmf_fused(KernelCtx& ctx, int64_t n) {
   count_call();
   static constexpr const char* function = "ordered_logistic";
-  const int64_t n = ctx.n_idata - 3;
   const int* y = ctx.idata;
   const int64_t L = ctx.in[0].len, C = ctx.in[1].len;
   const double* lambda = ctx.in[0].data;

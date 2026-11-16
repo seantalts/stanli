@@ -11,6 +11,7 @@
 #include <stanli/data.hpp>
 #include <stanli/init_interp.hpp>
 #include <stanli/graph.hpp>
+#include <stanli/message.hpp>
 #include <stanli/mir.hpp>
 
 #include <optional>
@@ -28,6 +29,16 @@ class WaInterp;
 
 struct CompileError : std::runtime_error {
   explicit CompileError(const std::string& what) : std::runtime_error(what) {}
+};
+
+// Stan Math rejecting the model's values, found while compiling: an index
+// out of range or a size mismatch that CmdStan reports at run time. `error`
+// is the class Stan Math's check throws. A CompileError, so every fallback
+// that catches one still does.
+struct StanMathCompileError : CompileError {
+  StanMathCompileError(MessageError error, const std::string& what)
+      : CompileError(what), error(error) {}
+  MessageError error;
 };
 
 struct CompiledModel {
@@ -53,6 +64,11 @@ struct CompiledModel {
     // already peeled to one emitted value and leave this empty.
     std::vector<int64_t> dims;
     bool matrix_storage = false;  // the final two dims form a matrix
+    // A write-array view of one element of an array: the declared variable
+    // and the element's 1-based index path, outermost first. Empty when the
+    // view is a whole variable.
+    std::string variable;
+    std::vector<int64_t> index;
     // Empty means identity. Nonidentity permutations are prepared once while
     // compiling the concrete model, so serialization performs one indexed
     // copy per value with no per-draw division or allocation.
@@ -86,27 +102,30 @@ struct CompiledModel {
       return storage_order.empty() ? serial : storage_order[(size_t)serial];
     }
 
+    // The declared dimensions behind this view's columns, first index
+    // fastest: none for a scalar.
+    std::vector<int64_t> shape() const {
+      if (!dims.empty()) return dims;
+      if (naming == Naming::Matrix && rows > 0) return {rows, len / rows};
+      if (naming == Naming::Scalar || (naming == Naming::Auto && len == 1))
+        return {};
+      return {len};
+    }
+
     void append_names(std::vector<std::string>& out) const {
-      if (!dims.empty()) {
-        for (int64_t f = 0; f < len; ++f) {
-          std::string column = name;
-          int64_t q = f;
-          for (int64_t d : dims) {
-            column += "." + std::to_string(q % d + 1);
-            q /= d;
-          }
-          out.push_back(std::move(column));
-        }
-      } else if (naming == Naming::Matrix && rows > 0) {
-        for (int64_t f = 0; f < len; ++f)
-          out.push_back(name + "." + std::to_string(f % rows + 1) + "." +
-                        std::to_string(f / rows + 1));
-      } else if (naming == Naming::Scalar ||
-                 (naming == Naming::Auto && len == 1)) {
+      const std::vector<int64_t> s = shape();
+      if (s.empty()) {
         out.push_back(name);
-      } else {
-        for (int64_t i = 0; i < len; ++i)
-          out.push_back(name + "." + std::to_string(i + 1));
+        return;
+      }
+      for (int64_t f = 0; f < len; ++f) {
+        std::string column = name;
+        int64_t q = f;
+        for (int64_t d : s) {
+          column += "." + std::to_string(q % d + 1);
+          q /= d;
+        }
+        out.push_back(std::move(column));
       }
     }
   };
@@ -178,11 +197,10 @@ struct CompiledModel {
     size_t n_gq_start = 0;
     std::vector<std::pair<int, std::vector<double>>> fills;
     int64_t n_unconstrained = 0;  // must agree with the log_prob graph's
-    // Non-empty when lowering stopped early (an unsupported RNG family or
-    // draw-dependent branch, say). `columns` then holds the prefix that did
-    // lower, and this says what stopped it -- silently short CSV rows would
-    // be worse.
-    std::string truncated;
+    // Set when lowering stopped early (an unsupported RNG family or
+    // draw-dependent branch, say), to what stopped it. `columns` then holds
+    // the prefix that did lower -- silently short CSV rows would be worse.
+    std::optional<std::string> truncated;
     // Set alongside `truncated`: the per-draw interpreter that runs the
     // whole section, unsupported RNG draws and draw-dependent branches
     // included.
@@ -208,12 +226,15 @@ struct CompiledModel {
   // somewhere the user did not ask for.
   struct TransformInits {
     std::shared_ptr<InitInterp> interp;
-    std::string truncated;
+    // Why the section cannot be run, when it cannot.
+    std::optional<std::string> truncated;
   };
   std::optional<TransformInits> transform_inits;
   // Each part of the model that has no compiled path and would run through
   // the MIR interpreter, with the lowering's reason.
   std::vector<std::string> interpreter_fallbacks;
+  // Compiled with execution reporting on, so hosts report their selection.
+  bool execution_report = false;
   // Reasons opt-in within-chain reduction sites kept ordinary lowering.
   std::vector<std::string> reduce_sum_fallbacks;
   // Set when a serial compile has a reduce_sum that threads_per_chain > 1
@@ -234,11 +255,32 @@ struct CompiledModel {
 // The default matches the reference drivers and BridgeStan's convention.
 // Native opt-in. Retained fixed-shape reductions reuse caller-owned teams;
 // unsupported/small calls keep whole-slice lowering. See reduce_sum.hpp.
+// Where write_array is lowered. Auto uses a second thread when the build has
+// threads and both sides have enough to lower; Off always lowers the two one
+// after the other; Force uses the second thread whenever the build has one.
+enum class ParallelWriteArray { Auto, Off, Force };
+
 struct CompileOptions {
   int reduce_sum_threads = 1;
   int64_t reduce_sum_min_chunk_ns = 30000;
   int reduce_sum_max_chunks = 1024;
   bool fast_math = false;
+  // False refuses, with a CompileError, a model that has any part without a
+  // compiled path (interpreter_fallbacks). The environment variable
+  // STANLI_NO_INTERPRETER set to anything but 0 does the same.
+  bool allow_interpreter = true;
+  // Lowering stage dumps: a directory, or "-" for stdout. Empty leaves the
+  // choice to STANLI_DUMP_PASSES. dump_stages narrows the stages as
+  // STANLI_DUMP_STAGES does.
+  std::string dump_passes;
+  std::string dump_stages;
+  // Emit the execution manifest (execution_report.hpp) through the
+  // diagnostic sink, and let hosts emit their selection event. False leaves
+  // the choice to STANLI_EXECUTION_REPORT.
+  bool execution_report = false;
+  // Auto leaves the choice to STANLI_PARALLEL_WA: 1 or force is Force, auto
+  // or empty is Auto, anything else is Off.
+  ParallelWriteArray parallel_write_array = ParallelWriteArray::Auto;
 };
 CompiledModel compile_model(const std::string& mir_text, const DataMap& data,
                             unsigned seed = 1);

@@ -32,6 +32,7 @@
 // cumsum([0, ta - b_1, ...])[j] = j*t*a - sum_{i<=j} b_i. Buckets refine on
 // the subtracted vector -- the item -- and the slope is whichever of the two
 // scalars that refinement holds still.
+#include <stanli/debug_switch.hpp>
 #include <stanli/builtin_registry.hpp>
 #include <stanli/density_registry.hpp>
 #include <stanli/optable.hpp>
@@ -81,16 +82,17 @@ bool idata_is_shape(uint16_t opcode) {
          has_op_trait(opcode, op_trait::kRerollIdataDensity);
 }
 
-// densities_lpmf.cpp's with_int_group: these carry their outcomes as two
-// [len, vals...] groups, len == -1 marking a language-level scalar.
-// Everything else with kRerollIdataDensity carries one flat outcome array.
+// These carry their outcomes and trials as two IntGroups
+// (density_layout.hpp). Everything else with kRerollIdataDensity carries one
+// flat outcome array.
 bool has_int_groups(uint16_t opcode) {
   return opcode == OP_BINOMIAL_LPMF || opcode == OP_BINOMIAL_LOGIT_LPMF ||
          opcode == OP_BETA_BINOMIAL_LPMF;
 }
 
-int64_t group_len(const int* p) { return p[0] == -1 ? 2 : 1 + p[0]; }
-int group_elem(const int* p, int64_t e) { return p[0] == -1 ? p[1] : p[1 + e]; }
+IntGroups binomial_groups(const Op& op) {
+  return int_groups(op.idata, op.n_idata, 2);
+}
 
 bool elt_costs_per_element(uint16_t opcode) {
   return lane_elt_costs_per_element(opcode);
@@ -101,17 +103,15 @@ bool elt_costs_per_element(uint16_t opcode) {
 int64_t idata_width(const Op& op) {
   if (!has_op_trait(op.opcode, op_trait::kRerollIdataDensity)) return 1;
   if (!has_int_groups(op.opcode)) return op.n_idata;
-  int64_t w = 1, m = 0;
-  while (m < op.n_idata) {
-    const int64_t len = op.idata[m];
-    if (len != -1) {
-      if (len < 1 || m + 1 + len > op.n_idata) return 0;
-      if (w != 1 && w != len) return 0;
-      w = len;
-    }
-    m += group_len(op.idata + m);
+  const IntGroups groups = binomial_groups(op);
+  int64_t w = 1;
+  for (int k = 0; k < groups.n; ++k) {
+    const IntGroup& g = groups.group[k];
+    if (g.scalar) continue;
+    if (g.count < 1 || (w != 1 && w != g.count)) return 0;
+    w = g.count;
   }
-  return m == op.n_idata ? w : 0;
+  return w;
 }
 
 struct Lane {
@@ -170,7 +170,7 @@ PartitionStats partition_lanes(Graph& g, Fills& fills,
                                const std::vector<int>& extra_roots,
                                bool fuse_shared_params) {
   PartitionStats st;
-  if (std::getenv("STANLI_NO_PARTITION")) return st;
+  if (debug_env("STANLI_NO_PARTITION")) return st;
   const size_t n_ops = g.ops.size();
   if (n_ops < 2 * (size_t)kMinLanes) return st;
 
@@ -235,7 +235,8 @@ PartitionStats partition_lanes(Graph& g, Fills& fills,
     if (!term_delim && !is_element_store(op)) continue;
     // Reach back over the ops whose values never leave the lane. An op that
     // is read later is not part of any lane: it stays where it is, and the
-    // lane starts after it.
+    // lane starts after it. Nor is an op nothing reads, such as an inlined
+    // argument a branch did not use: it would decide the bucket.
     size_t begin = u;
     while (begin > run_begin) {
       ++st.segment_steps;
@@ -243,7 +244,7 @@ PartitionStats partition_lanes(Graph& g, Fills& fills,
       const int o = prev.out;
       if (o < 0 || prev.out2 >= 0 || g.slots[(size_t)o].is_param ||
           term_set.count(o) != 0 || root_set.count(o) != 0 ||
-          writers[(size_t)o].size() != 1 ||
+          writers[(size_t)o].size() != 1 || uses[(size_t)o].empty() ||
           any_at_or_after(uses[(size_t)o], u + 1, st.list_steps))
         break;
       --begin;
@@ -287,11 +288,10 @@ PartitionStats partition_lanes(Graph& g, Fills& fills,
       } else if (has_int_groups(op.opcode)) {
         // The group widths, not their values: a scalar group and a vector
         // group concatenate differently and must not share a bucket.
-        for (int64_t m = 0; m < op.n_idata;) {
-          key.w.push_back(op.idata[m]);
-          const int64_t step = group_len(op.idata + m);
-          if (step < 2) break;
-          m += step;
+        const IntGroups groups = binomial_groups(op);
+        for (int k = 0; k < groups.n; ++k) {
+          key.w.push_back(groups.group[k].count);
+          key.w.push_back(groups.group[k].scalar);
         }
       }
       pos_of[op.out] = (int)(u - lane.begin);
@@ -427,9 +427,11 @@ PartitionStats partition_lanes(Graph& g, Fills& fills,
     lp.in[1] = alpha;
     lp.in[2] = beta;
     lp.out = g.add_slot(1, false);
-    lp.variant = (uint8_t)((glm.categorical_variant & 0x80u) | 0x7u);
-    outcomes.push_back((int)n);
-    outcomes.push_back(1);
+    lp.variant =
+        DensityMode{0x7u, false,
+                    (glm.categorical_variant & kCategoricalPropto) != 0}
+            .byte();
+    append_glm_layout(outcomes, (int)n, 1, 0);
     attach_idata(lp, std::move(outcomes));
     out_ops.push_back(lp);
 
@@ -959,8 +961,8 @@ PartitionStats partition_lanes(Graph& g, Fills& fills,
     std::vector<Op> out_ops;
     out_ops.reserve((size_t)ops_out);
     // The fused lpmf's outcome vector is the lanes' immediates, laid out the
-    // way the kernel unpacks them: one flat array, or group by group with a
-    // [len, vals...] header each, every group widened to the fused length.
+    // way the kernel unpacks them: one flat array, or IntGroups with every
+    // group widened to the fused length.
     const auto attach_outcomes = [&](Op& o, int p, int64_t w) {
       if (!has_op_trait(o.opcode, op_trait::kRerollIdataDensity)) return;
       const Op& t = op_at(p, 0);
@@ -970,12 +972,15 @@ PartitionStats partition_lanes(Graph& g, Fills& fills,
         for (int64_t l = 0; l < L; ++l)
           for (int64_t e = 0; e < w; ++e) v.push_back(op_at(p, l).idata[e]);
       } else {
-        for (int64_t m = 0; m < t.n_idata; m += group_len(t.idata + m)) {
+        const int n_groups = binomial_groups(t).n;
+        for (int k = 0; k < n_groups; ++k) {
           v.push_back((int)(L * w));
-          for (int64_t l = 0; l < L; ++l)
-            for (int64_t e = 0; e < w; ++e)
-              v.push_back(group_elem(op_at(p, l).idata + m, e));
+          for (int64_t l = 0; l < L; ++l) {
+            const IntGroup g = binomial_groups(op_at(p, l)).group[k];
+            for (int64_t e = 0; e < w; ++e) v.push_back(g.at(e));
+          }
         }
+        v.push_back(0);  // no group is a scalar once widened
       }
       attach_idata(o, std::move(v));
     };
@@ -1053,7 +1058,7 @@ PartitionStats partition_lanes(Graph& g, Fills& fills,
           ap.out = op.out;
           break;
         case Emit::kEltDensity:
-          op.variant = (uint8_t)(op.variant | 0x40u);
+          op.variant = elementwise_density(op.variant);
           op.out = g.add_slot(L * ap.rows, false);
           attach_outcomes(op, p, ap.rows);
           ap.out = op.out;

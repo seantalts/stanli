@@ -11,12 +11,9 @@
 // copy of each and silently mix them. See
 // notes/performance/2026-10-05-avx2-kernel-dispatch.md.
 //
-// The default is the baseline copy, so default-mode results do not change.
-// The AVX2 copy is chosen only when asked for and the CPU can run it:
-//   STANLI_FAST_MATH=1   fast mode: take the AVX2 kernels where available
-//   STANLI_ISA=avx2      force AVX2 (testing); STANLI_ISA=baseline forces the
-//                        baseline copy even when STANLI_FAST_MATH is set
-//   STANLI_ISA_VERBOSE=1 report the choice on stderr
+// The default is the baseline copy, so results do not change. STANLI_ISA=avx2
+// selects the AVX2 copy for the whole process, for testing and benchmarks,
+// when the CPU can run it. A model's fast_math option does not select it.
 #include <cpuid.h>
 
 #include <cstdio>
@@ -68,20 +65,9 @@ bool cpu_runs_x86_64_v3() {
   return c & (1u << 5);  // LZCNT
 }
 
-bool env_on(const char* name) {
-  const char* v = std::getenv(name);
-  return v && *v && std::strcmp(v, "0") != 0;
-}
-
-bool want_avx2(bool* forced) {
+bool want_avx2() {
   const char* isa = std::getenv("STANLI_ISA");
-  *forced = false;
-  if (isa && !std::strcmp(isa, "baseline")) return false;
-  if (isa && !std::strcmp(isa, "avx2")) {
-    *forced = true;
-    return true;
-  }
-  return env_on("STANLI_FAST_MATH");
+  return isa && !std::strcmp(isa, "avx2");
 }
 
 void run_avx2_initializers() {
@@ -93,18 +79,14 @@ void run_avx2_initializers() {
 }  // namespace
 
 void register_matrix_kernels() {
-  bool forced = false;
-  const bool wanted = want_avx2(&forced);
+  const bool wanted = want_avx2();
   const bool capable = register_matrix_kernels_avx2 && cpu_runs_x86_64_v3();
-  if (wanted && !capable && forced)
+  if (wanted && !capable)
     std::fprintf(stderr,
                  "stanli: STANLI_ISA=avx2 requested but this CPU lacks "
                  "AVX2/FMA/BMI2, or this build has no AVX2 kernels; using "
                  "the baseline kernels\n");
   const bool use_avx2 = wanted && capable;
-  if (env_on("STANLI_ISA_VERBOSE"))
-    std::fprintf(stderr, "stanli: dense-matrix kernels: %s\n",
-                 use_avx2 ? "avx2" : "baseline");
   if (use_avx2) {
     run_avx2_initializers();
     register_matrix_kernels_avx2();

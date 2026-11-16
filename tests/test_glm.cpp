@@ -34,9 +34,9 @@ static void check_empty_glm(uint16_t opcode, const std::string& name) {
   const int scaled_slot = g.add_slot(1, false);
   if (has_phi) {
     g.add_op(opcode, {X_slot, alpha_slot, beta_slot, phi_slot}, lp_slot,
-             {0, K});
+             {0, K, 0});
   } else {
-    g.add_op(opcode, {X_slot, alpha_slot, beta_slot}, lp_slot, {0, K});
+    g.add_op(opcode, {X_slot, alpha_slot, beta_slot}, lp_slot, {0, K, 0});
   }
   g.add_op(OP_MUL, {lp_slot, infinity_slot}, scaled_slot);
   g.result_slot = scaled_slot;
@@ -99,8 +99,7 @@ static void check_glm(const std::string& tag, uint16_t opcode, bool propto,
   for (int i = 0; i < cols; ++i) b[(size_t)i] = 0.2 + 0.11 * i;
   std::vector<int> idata;
   for (int i = 0; i < rows; ++i) idata.push_back(bern ? i % 2 : 1 + (i % 4));
-  idata.push_back(rows);
-  idata.push_back(cols);
+  append_glm_layout(idata, rows, cols, 0);
 
   const double seed = -0.73;
   Graph g;
@@ -304,8 +303,7 @@ static void check_tail_glms() {
   std::vector<int> bin;
   for (int i = 0; i < rows; ++i) bin.push_back(1 + (i % 4));
   for (int i = 0; i < rows; ++i) bin.push_back(5 + i);
-  bin.push_back(rows);
-  bin.push_back(cols);
+  append_glm_layout(bin, rows, cols, 0);
   check_tail_glm("binom glm", OP_BINOMIAL_LOGIT_GLM_LPMF, false, bin, rows,
                  cols, 1, cols);
   check_tail_glm("binom glm propto", OP_BINOMIAL_LOGIT_GLM_LPMF, true, bin,
@@ -318,8 +316,7 @@ static void check_tail_glms() {
   const int cats = 3;
   std::vector<int> cat;
   for (int i = 0; i < rows; ++i) cat.push_back(1 + (i % cats));
-  cat.push_back(rows);
-  cat.push_back(cols);
+  append_glm_layout(cat, rows, cols, 0);
   check_tail_glm("cat glm", OP_CATEGORICAL_LOGIT_GLM_LPMF, false, cat, rows,
                  cols, cats, cols * cats);
   check_tail_glm("cat glm propto", OP_CATEGORICAL_LOGIT_GLM_LPMF, true, cat,
@@ -337,12 +334,8 @@ static void check_tail_glms() {
             std::vector<int> outcomes;
             for (int i = 0; i < nr; ++i)
               outcomes.push_back(scalar ? 1 : 1 + i % categories);
-            outcomes.push_back(nr);
-            outcomes.push_back(nc);
-            if (scalar) {
-              outcomes.push_back(kGlmScalarLayoutMarker);
-              outcomes.push_back(1);
-            }
+            append_glm_layout(outcomes, nr, nc,
+                              scalar ? kGlmScalarFirstOutcome : 0);
             for (double weight : {0.0, -0.0, 1.0, -1.3, 1e308, 1e-308,
                                   std::numeric_limits<double>::infinity()})
               check_tail_glm("categorical recorder",
@@ -358,7 +351,7 @@ static void check_tail_glms() {
   check_tail_glm("ord glm propto", OP_ORDERED_LOGISTIC_GLM_LPMF, true, cat,
                  rows, cols, cols, cats - 1);
   check_tail_glm("ord glm empty", OP_ORDERED_LOGISTIC_GLM_LPMF, false,
-                 {0, cols}, 0, cols, cols, cats - 1,
+                 {0, cols, 0}, 0, cols, cols, cats - 1,
                  std::numeric_limits<double>::infinity());
 }
 

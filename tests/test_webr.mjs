@@ -109,7 +109,7 @@ if (compilerPath) {
       unicode_ok <- eval_js('(() => {
         const mir = Module.FS.readFile("/tmp/portable-bundled.mir",
                                        {encoding: "utf8"});
-        if (!mir.startsWith("STANLI2:"))
+        if (!mir.startsWith("STANLI3:"))
           return "FAIL missing portable envelope";
         const payload = Uint8Array.from(atob(mir.slice(8)),
                                         c => c.charCodeAt(0));
@@ -122,7 +122,7 @@ if (compilerPath) {
         }
         return "FAIL UTF-8 changed";
       })()')
-      good <- if (!startsWith(mir, "STANLI2:")) {
+      good <- if (!startsWith(mir, "STANLI3:")) {
         "FAIL missing portable envelope"
       } else {
         unicode_ok
@@ -153,31 +153,19 @@ if (compilerPath) {
           return("FAIL missing include lost its filename")
         "ok"
       }
-      portable_includes <- check_includes("STANLI2:")
+      portable_includes <- check_includes("STANLI3:")
 
       instrumented <- eval_js('(() => {
         const portable = globalThis.stanli_compile;
-        const classic = globalThis.stanc;
-        if (typeof portable !== "function" || typeof classic !== "function")
-          return "FAIL compiler exports missing";
-        globalThis.__stanli_helper_calls = {
-          portable: 0, classic: 0, warnings: 0,
-          classic_arguments: 0, classic_flags: [], classic_includes: null
-        };
+        if (typeof portable !== "function")
+          return "FAIL compiler export missing";
+        globalThis.__stanli_helper_calls = {portable: 0, warnings: 0};
         globalThis.stanli_compile = function() {
           globalThis.__stanli_helper_calls.portable += 1;
           const r = portable.apply(this, arguments);
           globalThis.__stanli_helper_calls.warnings = r.warnings
             ? r.warnings.length : 0;
           return r;
-        };
-        globalThis.stanc = function() {
-          globalThis.__stanli_helper_calls.classic += 1;
-          globalThis.__stanli_helper_calls.classic_arguments = arguments.length;
-          globalThis.__stanli_helper_calls.classic_flags = arguments[2];
-          globalThis.__stanli_helper_calls.classic_includes =
-            arguments[3] && Object.keys(arguments[3]).sort();
-          return classic.apply(this, arguments);
         };
         return "ok";
       })()')
@@ -188,10 +176,30 @@ if (compilerPath) {
       warning_mir <- mir_from_webr(eval_js, warning_source, "webr_warning")
       warning_calls <- eval_js(
         'JSON.stringify(globalThis.__stanli_helper_calls)')
-      warning_ok <- if (!startsWith(warning_mir, "STANLI2:")) {
+      warning_ok <- if (!startsWith(warning_mir, "STANLI3:")) {
         "FAIL warning source produced no portable MIR"
       } else if (!grepl('"warnings":[1-9]', warning_calls)) {
         "FAIL portable warning was not observed"
+      } else {
+        "ok"
+      }
+
+      loops <- paste0("for (i", 1:9, " in 1:1) {", collapse = "\n")
+      budget_source <- paste("parameters { real x; }", "model {",
+                             "real s = 0;", loops, strrep("s += 1;\n", 2100),
+                             strrep("}\n", 9), "x ~ normal(s, 1);", "}",
+                             sep = "\n")
+      o1 <- NULL
+      budget_mir <- withCallingHandlers(
+        mir_from_webr(eval_js, budget_source, "webr_budget"),
+        stanli_o1_fallback = function(w) {
+          o1 <<- c(o1, conditionMessage(w))
+          invokeRestart("muffleWarning")
+        })
+      o1_ok <- if (!startsWith(budget_mir, "STANLI3:")) {
+        "FAIL budget source produced no portable MIR"
+      } else if (length(o1) != 1L || !grepl("skipped O1", o1, fixed = TRUE)) {
+        "FAIL O1 fallback was not a stanli_o1_fallback condition"
       } else {
         "ok"
       }
@@ -204,32 +212,12 @@ if (compilerPath) {
       final_calls <- eval_js('JSON.stringify(globalThis.__stanli_helper_calls)')
       bad <- if (!grepl("stanli_compile", bad_message, fixed = TRUE)) {
         "FAIL portable error was not reported"
-      } else if (!grepl('"portable":2', final_calls, fixed = TRUE) ||
-                 !grepl('"classic":0', final_calls, fixed = TRUE)) {
-        "FAIL portable error retried through stanc"
+      } else if (!grepl('"portable":3', final_calls, fixed = TRUE)) {
+        "FAIL portable error was retried"
       } else {
         "ok"
       }
-
-      eval_js('delete globalThis.stanli_compile; "ok"')
-      legacy_mir <- mir_from_webr(eval_js, "model {}", "webr_legacy")
-      fallback_calls <- eval_js(
-        'JSON.stringify(globalThis.__stanli_helper_calls)')
-      fallback <- if (!startsWith(legacy_mir, "((functions_block")) {
-        "FAIL absent portable export did not select legacy stanc"
-      } else if (!grepl('"classic":1', fallback_calls, fixed = TRUE) ||
-                 !grepl('"classic_arguments":4', fallback_calls,
-                        fixed = TRUE) ||
-                 !grepl('"classic_flags":["O1","debug-optimized-mir"]',
-                        fallback_calls, fixed = TRUE) ||
-                 !grepl('"classic_includes":[]', fallback_calls, fixed = TRUE)) {
-        "FAIL legacy fallback received the wrong call shape"
-      } else {
-        "ok"
-      }
-      legacy_includes <- check_includes("((functions_block")
-      c(good, portable_includes, instrumented, warning_ok, bad, fallback,
-        legacy_includes)
+      c(good, portable_includes, instrumented, warning_ok, o1_ok, bad)
     }, finally = restore_process())
     statuses
   `);
@@ -242,7 +230,7 @@ if (compilerPath) {
 }
 
 console.log(compilerOnly
-  ? 'webr compiler helper OK: portable and legacy includes resolve'
+  ? 'webr compiler helper OK: includes, warnings and the O1 notice resolve'
   : compilerPath
   ? 'webr load OK: runtime symbols and R portable helper resolve'
   : 'webr load OK: side module loads and the bridge symbols resolve');

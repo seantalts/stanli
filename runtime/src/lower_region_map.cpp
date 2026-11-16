@@ -1,3 +1,4 @@
+#include <stanli/debug_switch.hpp>
 #include <stanli/region_map.hpp>
 
 #include <cstdlib>
@@ -112,7 +113,7 @@ class ParameterControl {
       return true;
     if (e.kind == mir::Expr::FunApp &&
         e.fn_lib == mir::Expr::Lib::UserDefined &&
-        call(e.name, pattern(e.args, env), depth + 1))
+        call(mir::function_key(e), pattern(e.args, env), depth + 1))
       return true;
     for (const auto& a : e.args)
       if (expression(a, env, depth + 1)) return true;
@@ -126,8 +127,8 @@ class ParameterControl {
     if (s.kind == mir::Stmt::For &&
         (dependent(s.lower, env) || dependent(s.upper, env)))
       return true;
-    if (s.kind == mir::Stmt::NRFunApp && defs_.count(s.fn_name) &&
-        call(s.fn_name, pattern(s.fn_args, env), depth + 1))
+    if (s.fn_lib == mir::Expr::Lib::UserDefined &&
+        call(mir::function_key(s), pattern(s.fn_args, env), depth + 1))
       return true;
     for (const mir::Expr* value :
          {&s.init, &s.rhs, &s.target, &s.lower, &s.upper, &s.cond})
@@ -246,40 +247,39 @@ bool reads_name(const mir::Stmt& s, const std::string& name) {
   return false;
 }
 
-bool accumulate_as_target(mir::Stmt& s, const std::string& name,
-                          mir::Expr* update) {
+// The body only adds to `name`: every write is `name = name + term` with a
+// real scalar term that does not read `name`, and nothing else reads it.
+// *read is the first `name` read on a right-hand side.
+bool only_accumulates(const mir::Stmt& s, const std::string& name,
+                      const mir::Expr** read) {
   if (s.kind == mir::Stmt::Assignment && s.lhs == name) {
     const mir::Expr& rhs = s.rhs;
     if (!s.lhs_idx.empty() || rhs.kind != mir::Expr::FunApp ||
-        rhs.name != "Plus__" || rhs.args.size() != 2 || rhs.type_ != "UReal" ||
+        rhs.name != "Plus__" || rhs.args.size() != 2 ||
+        !mir::is_unsized(rhs, mir::UnsizedLeaf::Real) ||
         rhs.args[0].kind != mir::Expr::Var || rhs.args[0].name != name ||
         Lowering::expr_references(rhs.args[1], name))
       return false;
-    if (update->args.empty()) *update = rhs;
-    mir::Expr term = std::move(s.rhs.args[1]);
-    s.kind = mir::Stmt::TargetPE;
-    s.lhs.clear();
-    s.rhs = mir::Expr{};
-    s.target = std::move(term);
+    if (*read == nullptr) *read = &rhs.args[0];
     return true;
   }
   if (reads_name(s, name)) return false;
-  for (auto& child : s.body)
-    if (!accumulate_as_target(child, name, update)) return false;
+  for (const auto& child : s.body)
+    if (!only_accumulates(child, name, read)) return false;
   return true;
 }
 
 }  // namespace
 
 bool Lowering::lower_region_map(const mir::Stmt& s, long lo, long hi) {
-  const char* mode = std::getenv("STANLI_REGION_MAP");
+  const char* mode = debug_env("STANLI_REGION_MAP");
   if (mode && std::string_view(mode) == "0") return false;
   if (in_write_array || region_current) return false;
   if (structured_policy == StructuredMode::Prefer ||
       structured_policy == StructuredMode::Force)
     return false;
   const bool diagnostics =
-      std::getenv("STANLI_REGION_MAP_DIAGNOSTICS") != nullptr;
+      debug_env("STANLI_REGION_MAP_DIAGNOSTICS") != nullptr;
   const auto refuse = [&](const std::string& why) {
     if (diagnostics)
       emit_diagnostic("stanli_region_map refused (" + s.loopvar + "): " + why);
@@ -292,9 +292,8 @@ bool Lowering::lower_region_map(const mir::Stmt& s, long lo, long hi) {
   if (target_scale != 1.0) return refuse("enclosing target scaling");
   std::set<std::string> locals;
   for (const auto& child : s.body) collect_loop_locals(child, &locals);
-  std::optional<mir::Stmt> accumulated;
   std::string accumulator;
-  mir::Expr accumulator_update;
+  const mir::Expr* accumulator_read = nullptr;
   if (!has_target_pe(s)) {
     std::vector<std::string> writes;
     assigned_names(s, &writes);
@@ -307,11 +306,10 @@ bool Lowering::lower_region_map(const mir::Stmt& s, long lo, long hi) {
         accumulator = name;
       }
     if (accumulator.empty()) return refuse("body has no target increment");
-    accumulated = s;
-    if (!accumulate_as_target(*accumulated, accumulator, &accumulator_update))
+    if (!only_accumulates(s, accumulator, &accumulator_read))
       return refuse("body does more than add to " + accumulator);
   }
-  const mir::Stmt& loop = accumulated ? *accumulated : s;
+  const mir::Stmt& loop = s;
   if (stmt_effectful(loop)) return refuse("body has effects");
   for (const auto& child : loop.body)
     if (body_escapes(child, false)) return refuse("break, continue or return");
@@ -320,13 +318,14 @@ bool Lowering::lower_region_map(const mir::Stmt& s, long lo, long hi) {
     assigned_names(loop, &writes);
     for (const auto& name : writes) {
       if (name == loop.loopvar) return refuse("loop variable assigned");
-      if (!locals.count(name))
+      if (!locals.count(name) && name != accumulator)
         return refuse("assigns " + name + " declared outside the body");
     }
   }
 
   std::set<std::string> names;
   mir::collect_names(loop, &names);
+  names.erase(accumulator);
   auto snapshot = wa_snapshot(names);
   const auto abandon = [&](const std::string& why) {
     wa_restore(snapshot);
@@ -339,13 +338,16 @@ bool Lowering::lower_region_map(const mir::Stmt& s, long lo, long hi) {
   c.checked_region = &loop;
   configure_island_compiler(c, *prog, reg, names, &loop);
   try {
-    const int target_reg = c.alloc(1);
+    const int sum_reg = c.alloc(1);
     const double zero = 0.0;
-    c.emit_const(target_reg, &zero, 1);
-    c.target_reg = target_reg;
+    c.emit_const(sum_reg, &zero, 1);
+    if (accumulator.empty())
+      c.target_reg = sum_reg;
+    else
+      c.accumulator = ProgramCompiler::Accumulator{accumulator, sum_reg};
     const int iter = c.alloc(1);
     c.compile_loop_body(loop, iter);
-    prog->out_regs.push_back(target_reg);
+    prog->out_regs.push_back(sum_reg);
     c.finish();
     prog->ins.push_back(IslandProg::LiveIn{iter, 1, -1, 0, false});
   } catch (Bail& b) {
@@ -356,9 +358,10 @@ bool Lowering::lower_region_map(const mir::Stmt& s, long lo, long hi) {
   if (reg.in_slots.empty()) return abandon("no live-in values");
   if (island_has_effect(*prog)) return abandon("program has effects");
   prog->label = loop.loopvar;
+  prog->check_clean = debug_env("STANLI_REGION_MAP_CHECK_CLEAN") != nullptr;
   const RegionMapProg pristine = *prog;
   int64_t save_limit = kMaxRegionMapSavedCells;
-  if (const char* limit = std::getenv("STANLI_REGION_MAP_SAVE_LIMIT"))
+  if (const char* limit = debug_env("STANLI_REGION_MAP_SAVE_LIMIT"))
     save_limit = std::strtoll(limit, nullptr, 10);
   const int64_t count = static_cast<int64_t>(hi) - lo + 1;
   std::vector<char> persistent;
@@ -429,7 +432,7 @@ bool Lowering::lower_region_map(const mir::Stmt& s, long lo, long hi) {
            count * saved_per_iteration > save_limit;
   };
 
-  const char* lanes_env = std::getenv("STANLI_REGION_MAP_LANES");
+  const char* lanes_env = debug_env("STANLI_REGION_MAP_LANES");
   const bool lanes_enabled = !(lanes_env && std::string_view(lanes_env) == "0");
   bool use_lanes = false;
   std::string lane_refusal = "off";
@@ -504,21 +507,13 @@ bool Lowering::lower_region_map(const mir::Stmt& s, long lo, long hi) {
   if (accumulator.empty()) {
     push_target_term(op.out);
   } else {
-    const std::string sum = "(region map sum " + std::to_string(op.out) + ")";
-    SlotInfo si = view_of("UReal");
+    SlotInfo si = view_of(mir::UnsizedView{0, mir::UnsizedLeaf::Real});
     si.param_free = false;
-    bind_synthetic(sum, Val{op.out, scalar_autodiff(), si},
-                   DeclView{1, scalar_autodiff(), si, false, false});
-    mir::Stmt update;
-    update.kind = mir::Stmt::Assignment;
-    update.lhs = accumulator;
-    update.rhs = accumulator_update;
-    update.rhs.args[1] = update.rhs.args[0];
-    update.rhs.args[1].name = sum;
-    update.raw = loop.raw;
-    assign_plain(update);
-    scope.erase(sum);
-    decls.erase(sum);
+    const Val sum{op.out, scalar_autodiff(), si};
+    assign_value(accumulator,
+                 add_real_scalars(lower_expr(*accumulator_read), sum),
+                 loop.raw);
+    td_erase(accumulator);
   }
   int_env.erase(loop.loopvar);
   if (diagnostics)

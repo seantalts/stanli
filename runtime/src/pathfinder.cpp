@@ -1,3 +1,4 @@
+#include <stanli/rejection.hpp>
 #include <stanli/estimate.hpp>
 
 #include "initialize.hpp"
@@ -14,7 +15,9 @@
 #include <chrono>
 #include <cmath>
 #include <cstdlib>
+#include <cstring>
 #include <limits>
+#include <map>
 #include <type_traits>
 
 namespace stanli {
@@ -94,6 +97,21 @@ class PathCollector : public stan::callbacks::structured_writer {
   void begin_record(const std::string& key) override {
     record_ = std::atoi(key.c_str());
   }
+  // A log density the service computed while this record was open. During
+  // an iteration's record those are its ELBO draws.
+  void note_lp(double lp) { lp_by_record_[record_].push_back(lp); }
+  // The record whose first lp values are `elbo_lp`, bit for bit: the
+  // iteration whose ELBO draws the service returned. -1 when none is.
+  int record_with_lp(const std::vector<double>& elbo_lp) const {
+    const auto same = [](double a, double b) {
+      return std::memcmp(&a, &b, sizeof a) == 0;
+    };
+    for (const auto& [record, lps] : lp_by_record_)
+      if (record > 0 && lps.size() >= elbo_lp.size() &&
+          std::equal(elbo_lp.begin(), elbo_lp.end(), lps.begin(), same))
+        return record;
+    return -1;
+  }
   void write(const std::string& key, const Eigen::VectorXd& vec) override {
     if (key != "unconstrained_parameters") return;
     const int iter = record_ > 0 ? record_ - 1 : 0;
@@ -115,7 +133,8 @@ class PathCollector : public stan::callbacks::structured_writer {
     for (Eigen::Index i = 0; i < q.size(); ++i) ex_->params_data()[i] = q(i);
     try {
       return ex_->forward();
-    } catch (const std::exception&) {
+    } catch (const std::exception& e) {
+      if (is_internal_error(e)) throw;
       return -std::numeric_limits<double>::infinity();
     }
   }
@@ -123,25 +142,12 @@ class PathCollector : public stan::callbacks::structured_writer {
   Executor* ex_;
   PathObserver observe_;
   int record_ = 0;
+  std::map<int, std::vector<double>> lp_by_record_;
 };
 
-// The ELBO-selected iterate and its ELBO reach no writer; the service
-// reports them only in this one info message, emitted when refresh is
-// nonzero. Errors are kept for PathfinderResult::message.
+// Errors are kept for PathfinderResult::message.
 class PathLogger : public stan::callbacks::logger {
  public:
-  void info(const std::string& message) override {
-    const auto at = message.find("Best Iter: [");
-    if (at == std::string::npos) return;
-    int iter = 0;
-    double elbo = 0;
-    if (std::sscanf(message.c_str() + at, "Best Iter: [%d] ELBO (%lf)", &iter,
-                    &elbo) == 2) {
-      best_iter = iter;
-      best_elbo = elbo;
-    }
-  }
-  void info(const std::stringstream& message) override { info(message.str()); }
   void error(const std::string& message) override {
     if (!errors.empty()) errors += "; ";
     errors += message;
@@ -150,8 +156,6 @@ class PathLogger : public stan::callbacks::logger {
     error(message.str());
   }
 
-  int best_iter = -1;
-  double best_elbo = kNaN;
   std::string errors;
 };
 
@@ -162,8 +166,24 @@ class PathLogger : public stan::callbacks::logger {
 // transform at all.
 class PathfinderModel : public ExecutorModel {
  public:
-  PathfinderModel(Executor& ex, const double* init)
-      : ExecutorModel(ex), init_(init) {}
+  PathfinderModel(Executor& ex, const double* init, PathCollector& path)
+      : ExecutorModel(ex), init_(init), path_(path) {}
+
+  // The service's ELBO and draw evaluations are this call, with no
+  // gradient. Each value goes to the path record it was computed under.
+  template <bool propto, bool jacobian, typename T>
+  T log_prob(Eigen::Matrix<T, -1, 1>& q, std::ostream* msgs) const {
+    const T lp = ExecutorModel::log_prob<propto, jacobian, T>(q, msgs);
+    if constexpr (std::is_same_v<T, double> && !propto && jacobian)
+      path_.note_lp(lp);
+    return lp;
+  }
+  template <bool propto, bool jacobian, typename T>
+  T log_prob(std::vector<T>& params_r, std::vector<int>& params_i,
+             std::ostream* msgs) const {
+    return ExecutorModel::log_prob<propto, jacobian, T>(params_r, params_i,
+                                                        msgs);
+  }
 
   template <typename Context>
   void transform_inits(const Context& /*context*/,
@@ -175,6 +195,7 @@ class PathfinderModel : public ExecutorModel {
 
  private:
   const double* init_;
+  PathCollector& path_;
 };
 
 }  // namespace
@@ -185,9 +206,9 @@ PathfinderResult run_pathfinder(Executor& ex, const PathfinderConfig& cfg,
   out.selected_elbo = kNaN;
   out.khat = kNaN;
 
-  PathfinderModel model(ex, cfg.init);
-  DrawCollector draws;
   PathCollector path(ex, observe);
+  PathfinderModel model(ex, cfg.init, path);
+  DrawCollector draws;
   PathLogger logger;
   stan::callbacks::writer init_writer;
   stan::callbacks::interrupt interrupt;
@@ -217,8 +238,9 @@ PathfinderResult run_pathfinder(Executor& ex, const PathfinderConfig& cfg,
         model, init, cfg.seed, (unsigned int)cfg.chain_id, cfg.init_radius,
         cfg.history_size, cfg.init_alpha, cfg.tol_obj, cfg.tol_rel_obj,
         cfg.tol_grad, cfg.tol_rel_grad, cfg.tol_param, cfg.num_iterations,
-        cfg.num_elbo_draws, cfg.num_draws, /*save_iterations=*/true,
-        /*refresh=*/1, interrupt, logger, init_writer, draws, path);
+        cfg.num_elbo_draws, std::max(cfg.num_draws, cfg.num_elbo_draws),
+        /*save_iterations=*/true, /*refresh=*/0, interrupt, logger, init_writer,
+        draws, path);
   } catch (const std::exception& e) {
     out.return_code = 1;
     out.message = e.what();
@@ -227,15 +249,31 @@ PathfinderResult run_pathfinder(Executor& ex, const PathfinderConfig& cfg,
                        std::chrono::steady_clock::now() - start)
                        .count();
 
+  // The service writes the selected iterate's ELBO draws first. With at
+  // least num_elbo_draws draws requested it writes all of them, and the
+  // draws past num_draws come from no further random numbers.
+  const size_t n_elbo = (size_t)std::max(cfg.num_elbo_draws, 0);
+  int selected = -1;
+  if (n_elbo > 0 && draws.lp.size() >= n_elbo) {
+    Eigen::ArrayXd ratio((Eigen::Index)n_elbo);
+    for (size_t i = 0; i < n_elbo; ++i)
+      ratio((Eigen::Index)i) = draws.lp[i] - draws.lp_approx[i];
+    out.selected_elbo = ratio.mean();
+    selected = path.record_with_lp(
+        std::vector<double>(draws.lp.begin(), draws.lp.begin() + n_elbo));
+  }
+  const size_t keep =
+      std::min(draws.draws.size(), (size_t)std::max(cfg.num_draws, 0));
+  draws.draws.resize(keep);
+  draws.lp.resize(keep);
+  draws.lp_approx.resize(keep);
   out.draws = std::move(draws.draws);
   out.lp = std::move(draws.lp);
   out.lp_approx = std::move(draws.lp_approx);
   out.path = std::move(path.path);
   if (out.message.empty()) out.message = logger.errors;
-  if (!out.path.empty() && logger.best_iter >= 0) {
-    out.selected_iter = std::min(logger.best_iter, (int)out.path.size() - 1);
-    out.selected_elbo = logger.best_elbo;
-  }
+  if (!out.path.empty() && selected >= 0)
+    out.selected_iter = std::min(selected, (int)out.path.size() - 1);
 
   std::vector<double> ratios(out.lp.size());
   for (size_t i = 0; i < ratios.size(); ++i)

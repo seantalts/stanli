@@ -34,8 +34,9 @@ void throws_with(F&& f, const std::string& needle, const char* message) {
   }
 }
 
-stanli::DataMap::Entry compiled_call(const stanli::Function& function,
+stanli::DataMap::Entry compiled_call(stanli::Function& function,
                                      const stanli::DataMap& args) {
+  function.set_execution_report(true);
   stanli_test::StdoutCapture diagnostic(stderr);
   auto result = function(args);
   const auto report = diagnostic.finish();
@@ -111,11 +112,6 @@ int main() {
   using stanli::Function;
 
   try {
-#ifdef _WIN32
-    _putenv_s("STANLI_EXECUTION_REPORT", "1");
-#else
-    setenv("STANLI_EXECUTION_REPORT", "1", 1);
-#endif
     const std::string source = slurp("tests/fixtures/standalone_compiled.stan");
     // The MIR constructor works in every runtime build, including developer
     // builds which deliberately omit the embedded source compiler.
@@ -329,6 +325,7 @@ int main() {
                   "constant prefix cannot erase an empty-array read");
     }
     Function dynamic(source, "dynamic_result");
+    dynamic.set_execution_report(true);
     for (double x : {1., -1., 2.}) {
       DataMap input;
       input.set_real("x", x);
@@ -475,6 +472,7 @@ int main() {
       input.set_int("x", wide);
       stanli_test::StdoutCapture diagnostic(stderr);
       Function promote_integer(source, "promote_integer");
+      promote_integer.set_execution_report(true);
       const auto got = promote_integer(input);
       const auto report = diagnostic.finish();
       check(!got.is_int && got.i.empty() &&
@@ -508,6 +506,8 @@ int main() {
                 overloaded(scalar).r == std::vector<double>({2.5}),
             "cached candidates select by the current rank");
     }
+    throws_with([&] { (void)numeric(vector); }, "has rank 1, expected 0",
+                "an unmatched call says why each overload was refused");
     Function resolved(source, "numeric(real)");
     check(resolved(promoted).r == std::vector<double>({22.0}),
           "resolved signature preserves promotion despite integer overload");

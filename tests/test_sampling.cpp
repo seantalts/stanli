@@ -105,7 +105,8 @@ void test_conjugate() {
     ++failures;
     return;
   }
-  expect_eq_str("conj write_array truncated", cm.write_array->truncated, "");
+  expect_eq_str("conj write_array truncated",
+                cm.write_array->truncated.value_or(""), "");
 
   // CmdStan's column order: constrained parameters, then transformed
   // parameters, then generated quantities, each in declaration order.

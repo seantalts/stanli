@@ -495,6 +495,10 @@ test_that("a part with no compiled path warns, or errors when refused", {
     }"
   expect_warning(stanli_model(code = code), "interpreter")
   expect_warning(es_model(), NA)
+  expect_error(stanli_model(code = code, allow_interpreter = FALSE),
+               "no compiled path")
+  expect_error(stanli_model(code = code, allow_interpreter = NA),
+               "allow_interpreter")
   Sys.setenv(STANLI_NO_INTERPRETER = "1")
   on.exit(Sys.unsetenv("STANLI_NO_INTERPRETER"), add = TRUE)
   expect_error(stanli_model(code = code), "STANLI_NO_INTERPRETER")
@@ -771,4 +775,60 @@ test_that("sampling never touches the caller's random stream", {
                  refresh = 0)
     expect_null(random_state())
   })
+})
+
+o1_budget_code <- function() {
+  loops <- paste0("for (i", 1:9, " in 1:1) {", collapse = "\n")
+  paste("parameters { real x; }", "model {", "real s = 0;", loops,
+        strrep("s += 1;\n", 2100), strrep("}\n", 9),
+        "x ~ normal(s, 1);", "}", sep = "\n")
+}
+
+o1_notice <- function(expr) {
+  seen <- NULL
+  value <- withCallingHandlers(
+    expr,
+    stanli_o1_fallback = function(w) {
+      seen <<- c(seen, conditionMessage(w))
+      invokeRestart("muffleWarning")
+    })
+  list(value = value, seen = seen)
+}
+
+test_that("an O1 fallback is a classed warning", {
+  skip_without_runtime()
+  got <- o1_notice(stanli_model(code = o1_budget_code()))
+  expect_length(got$seen, 1)
+  expect_match(got$seen, "skipped O1", fixed = TRUE)
+  expect_s3_class(got$value, "stanli_model")
+})
+
+test_that("the stanli-compile executable reports the O1 fallback as a classed warning", {
+  compiler <- Sys.getenv("STANLI_TEST_PORTABLE_COMPILER")
+  skip_if(!nzchar(compiler) || !file.exists(compiler),
+          "STANLI_TEST_PORTABLE_COMPILER does not name a stanli-compile")
+  got <- o1_notice(stanli:::mir_from_binary(compiler, o1_budget_code()))
+  expect_length(got$seen, 1)
+  expect_match(got$seen, "skipped O1", fixed = TRUE)
+  expect_true(startsWith(got$value, "STANLI3:"))
+})
+
+test_that("a model's variables and columns come from the runtime", {
+  skip_without_runtime()
+  model <- stanli_model(code = "
+    parameters { real mu; vector[2] v; }
+    transformed parameters {
+      array[2] vector[3] tp;
+      for (i in 1:2) tp[i] = rep_vector(mu, 3);
+    }
+    model { mu ~ normal(0, 1); v ~ normal(0, 1); }
+    generated quantities { matrix[2, 3] m = rep_matrix(mu, 2, 3); }")
+  expect_identical(model$variables,
+                   list(mu = integer(0), v = 2L, tp = c(2L, 3L),
+                        m = c(2L, 3L)))
+  expect_identical(model$columns[1:6],
+                   c("mu", "v[1]", "v[2]", "tp[1,1]", "tp[2,1]", "tp[1,2]"))
+  expect_identical(parameter_names(model), c("mu", "v"))
+  expect_identical(parameter_names(model, scalars = TRUE),
+                   c("mu", "v[1]", "v[2]"))
 })

@@ -1,4 +1,5 @@
 #include "lower_internal.hpp"
+#include <stanli/debug_switch.hpp>
 
 namespace stanli {
 namespace lower_detail {
@@ -13,15 +14,16 @@ constexpr long kWhileUnrollLimit = 1L << 16;
 static bool bounded_while_guard(const mir::Expr& e) {
   using E = mir::Expr;
   if (e.kind == E::LitInt || e.kind == E::LitReal) return true;
-  if (e.kind == E::Var) return e.type_ == "UInt" || e.type_ == "UReal";
+  if (e.kind == E::Var) return mir::language_scalar(e);
   if (e.kind == E::Indexed) {
     if (e.args.empty() || e.args[0].kind != E::Var ||
-        (e.type_ != "UInt" && e.type_ != "UReal"))
+        (!mir::is_unsized(e, mir::UnsizedLeaf::Int) &&
+         !mir::is_unsized(e, mir::UnsizedLeaf::Real)))
       return false;
     for (size_t i = 1; i < e.args.size(); ++i) {
       const auto& index = e.args[i];
-      if (index.kind != E::FunApp || index.name != "IndexSingle" ||
-          index.args.size() != 1 || !bounded_while_guard(index.args[0]))
+      if (index.kind != E::IndexSingle || index.args.size() != 1 ||
+          !bounded_while_guard(index.args[0]))
         return false;
     }
     return true;
@@ -57,7 +59,7 @@ bool Lowering::expr_has_jacobian(const mir::Expr& e) {
     // has this suffix. Conservatively carry a target through such a call;
     // an unused zero is cheaper than dropping a nested adjustment.
     if (e.fn_lib == mir::Expr::Lib::UserDefined &&
-        transform_suffix(e.name, "_jacobian"))
+        e.fn_suffix == mir::FnSuffix::Jacobian)
       return true;
   }
   for (const auto& a : e.args)
@@ -481,7 +483,7 @@ void Lowering::configure_island_compiler(ProgramCompiler& c,
     return true;
   };
   c.extern_real = [&](const mir::Expr& x, double* value) {
-    if (x.type_ != "UReal") return false;
+    if (!mir::is_unsized(x, mir::UnsizedLeaf::Real)) return false;
     auto evaluated = try_eval_pure(x);
     if (!evaluated || evaluated->is_int || evaluated->r.size() != 1)
       return false;
@@ -594,7 +596,7 @@ void Lowering::finalize_island_program_once(IslandProg& prog, bool native,
   }
   // Generated quantities have no backward consumer.
   prog.native_adj = native && gen_adjoint(prog, keep_every_clear) &&
-                    !std::getenv("STANLI_NO_NATIVE_ADJ");
+                    !debug_env("STANLI_NO_NATIVE_ADJ");
 }
 // Compile `s` (a statement region) or `e` (a ternary) into a program.
 void Lowering::lower_island(const mir::Stmt* s, const mir::Expr* e,
@@ -787,7 +789,7 @@ void Lowering::emit_island(const std::shared_ptr<IslandProg>& prog,
   // A single nonempty live-out already occupies this entire fresh slot.
   // Keep it distinct from all live-ins, but avoid an identity extraction.
   if (out_lens.size() == 1 && out_lens[0] > 0 &&
-      !std::getenv("STANLI_NO_REGION_DIRECT_OUTPUT")) {
+      !debug_env("STANLI_NO_REGION_DIRECT_OUTPUT")) {
     out_slots->push_back(is.out);
     return;
   }
@@ -808,8 +810,8 @@ void Lowering::lower_runtime_ifelse(const mir::Stmt& s) {
   Range ignored;
   lower_island(&s, nullptr, &reg, &ignored, &prog);
   // Widths come from the region compiler's own registers: they are what
-  // out_regs packs, and they already reflect a zero-length sentinel
-  // declaration the region's assignment sized.
+  // out_regs packs, and they already reflect a zero-size declaration the
+  // region's assignment sized.
   std::vector<int> out_lens;
   for (const Range& v : reg.out_views) out_lens.push_back(v.len);
   if (reg.has_target) out_lens.push_back(1);
@@ -830,7 +832,7 @@ void Lowering::lower_runtime_ifelse(const mir::Stmt& s) {
       // now a register-program result; retain the UInt type but make it a
       // graph-local runtime value so later branches and scalar reads use
       // the value the loop actually produced.
-      si = view_of("UInt");
+      si = view_of(mir::UnsizedView{0, mir::UnsizedLeaf::Int});
       si.param_free = false;
       scope[name] = Val{out_slots[k], false, si};
       decls[name] = DeclView{1, false, si};
@@ -852,8 +854,8 @@ void Lowering::lower_runtime_ifelse(const mir::Stmt& s) {
       }
     }
     if (!shaped_outside) {
-      // The outside declaration was the inliner's zero-length sentinel;
-      // the region's registers carry the real shape.
+      // The outside declaration was zero-size, which Stan's assignment
+      // resizes; the region's registers carry the real shape.
       si = SlotInfo{};
       si.rows = reg.out_views[k].rows;
       si.cols = reg.out_views[k].cols;
@@ -902,7 +904,7 @@ Lowering::Val Lowering::lower_program_expression(const mir::Expr& e) {
   if (value.kind == ViewKind::Array)
     si = array_view(value.dims, value.leaf, e.data_only);
   else {
-    si = view_of(e.type_);
+    si = view_of(e.unsized);
     si.rows = value.rows;
     si.cols = value.cols;
     si.kind = value.kind;
@@ -911,9 +913,9 @@ Lowering::Val Lowering::lower_program_expression(const mir::Expr& e) {
   return {out_slots[0], expression_autodiff(e), si};
 }
 bool Lowering::stmt_effectful(const mir::Stmt& s) {
-  if (s.kind == mir::Stmt::NRFunApp && message_action(s.fn_name)) return true;
+  if (message_action(mir::internal_name(s))) return true;
   // A void function runs only for its effects.
-  if (mir::user_defined_statement_name(s.fn_name)) return true;
+  if (s.fn_lib == mir::Expr::Lib::UserDefined) return true;
   for (const auto& e : s.fn_args)
     if (expr_effectful(e)) return true;
   if (s.has_init && expr_effectful(s.init)) return true;
@@ -939,10 +941,8 @@ bool Lowering::repeatable_target_expr(const mir::Expr& e,
     return false;
   if (e.kind == mir::Expr::FunApp) {
     if (e.fn_lib != mir::Expr::Lib::StanLib) return false;
-    const std::string& name = e.name;
-    const bool rng =
-        name.size() >= 4 && name.compare(name.size() - 4, 4, "_rng") == 0;
-    if (rng || mir::higher_order_call(e) || mir::stateful_intrinsic_kind(e))
+    if (e.fn_suffix == mir::FnSuffix::Rng || mir::higher_order_call(e) ||
+        mir::stateful_intrinsic_kind(e))
       return false;
   }
   for (const auto& a : e.args)
@@ -1055,8 +1055,7 @@ bool Lowering::needs_runtime_value(const mir::Expr& e) {
   return false;
 }
 bool Lowering::runtime_int_value(const mir::Expr& e) const {
-  if (e.type_ != "UInt" || e.unsized.leaf != mir::UnsizedLeaf::Int ||
-      e.unsized.depth != 0)
+  if (!mir::is_unsized(e, mir::UnsizedLeaf::Int) || e.unsized.depth != 0)
     return false;
   if (e.kind == mir::Expr::Var) {
     auto it = scope.find(e.name);
@@ -1117,8 +1116,10 @@ Lowering::Val Lowering::lower_runtime_int_sum(const mir::Expr& e,
               static_cast<uint64_t>(range.hi))
     fail("runtime integer sum may overflow int32 in a partial sum", e.raw);
 
-  Val result = with_layout(emit_value(OP_SUM_VEC, {a}, 1, view_of("UInt")),
-                           ExpressionLayout::scalar());
+  Val result = with_layout(
+      emit_value(OP_SUM_VEC, {a}, 1,
+                 view_of(mir::UnsizedView{0, mir::UnsizedLeaf::Int})),
+      ExpressionLayout::scalar());
   result.autodiff = false;
   // A range is only a static proof. The elements or logical extent may be
   // runtime-produced; do not let compile-time geometry/control consume the
@@ -1191,17 +1192,21 @@ void Lowering::emit_error(MessageError error, const std::string& message) {
   g.ops.push_back(op);
 }
 void Lowering::assign_plain(const mir::Stmt& s) {
-  Val rhs = lower_expr(s.rhs);
-  auto old = scope.find(s.lhs);
+  const Val rhs = assign_value(s.lhs, lower_expr(s.rhs), s.raw);
+  sync_data_local(s.lhs, s.rhs, rhs);
+}
+Lowering::Val Lowering::assign_value(const std::string& lhs, Val rhs,
+                                     const std::string& raw) {
+  auto old = scope.find(lhs);
   if (old != scope.end()) {
     rhs = checked_binding(rhs, g.slots[old->second.slot].len, old->second.si,
-                          s.lhs, s.raw);
+                          lhs, raw);
     const bool param_free = rhs.si.param_free;
     rhs.autodiff = old->second.autodiff;
     rhs.si = old->second.si;
     rhs.si.param_free = param_free;
   } else {
-    auto dl = decls.find(s.lhs);
+    auto dl = decls.find(lhs);
     if (dl != decls.end()) {
       if (dl->second.deferred_shape) {
         dl->second.len = g.slots[rhs.slot].len;
@@ -1212,16 +1217,15 @@ void Lowering::assign_plain(const mir::Stmt& s) {
                   (is_matrix(dl->second.si) && is_matrix(rhs.si) &&
                    (dl->second.si.rows != rhs.si.rows ||
                     dl->second.si.cols != rhs.si.cols)))) {
-        // stanc3's --O1 inliner declares a function's return
-        // variable zero-length (`array[real, 0]`, `vector[0]`)
-        // because the returned size is the callee's business, and
-        // C++ assignment resizes. Slots do not, so the first
-        // whole-variable assignment defines the shape instead.
+        // stan::model::assign treats a zero-size destination as a
+        // wildcard that takes the right-hand side's size. Slots do not
+        // resize, so the first whole-variable assignment defines the
+        // shape instead.
         dl->second.len = g.slots[rhs.slot].len;
         dl->second.si = rhs.si;
       } else {
         SlotInfo expected = dl->second.si;
-        rhs = checked_binding(rhs, dl->second.len, expected, s.lhs, s.raw);
+        rhs = checked_binding(rhs, dl->second.len, expected, lhs, raw);
         const bool pf = rhs.si.param_free;
         rhs.si = expected;
         rhs.si.param_free = pf;
@@ -1230,8 +1234,8 @@ void Lowering::assign_plain(const mir::Stmt& s) {
     }
   }
   rhs.layout = owning_layout(rhs.si);
-  scope[s.lhs] = rhs;
-  sync_data_local(s.lhs, s.rhs, rhs);
+  scope[lhs] = rhs;
+  return rhs;
 }
 // The statements that hold no child statements, so none of them can leave a
 // loop or a function.
@@ -1361,7 +1365,7 @@ void Lowering::lower_simple_stmt(const mir::Stmt& s) {
             [&](const mir::Expr& ix) { return runtime_selector(ix); });
         const bool whole = std::all_of(
             s.lhs_idx.begin(), s.lhs_idx.end(),
-            [](const mir::Expr& ix) { return ix.name == "IndexAll"; });
+            [](const mir::Expr& ix) { return ix.kind == mir::Expr::IndexAll; });
         if (whole && bound == scope.end() && declared->second.len == 0) {
           assign_plain(s);
           return;
@@ -1383,9 +1387,10 @@ void Lowering::lower_simple_stmt(const mir::Stmt& s) {
                                                                    : 1;
           const bool all_single =
               s.lhs_idx.size() <= rank &&
-              std::all_of(
-                  s.lhs_idx.begin(), s.lhs_idx.end(),
-                  [](const mir::Expr& ix) { return ix.name == "IndexSingle"; });
+              std::all_of(s.lhs_idx.begin(), s.lhs_idx.end(),
+                          [](const mir::Expr& ix) {
+                            return ix.kind == mir::Expr::IndexSingle;
+                          });
           if (whole) {
             map.count = lhs_len;
           } else if (all_single) {
@@ -1406,7 +1411,7 @@ void Lowering::lower_simple_stmt(const mir::Stmt& s) {
               map.stride = a.stride;
               map.count = a.len;
               expected_view = indexed_view(lhs_si, s.lhs_idx.size(), map.count,
-                                           s.rhs.type_);
+                                           s.rhs.unsized);
             } else if (is_matrix(lhs_si)) {
               const int64_t i = eval_int(s.lhs_idx[0].args[0]);
               check_uni_index(i, lhs_si.rows,
@@ -1420,12 +1425,14 @@ void Lowering::lower_simple_stmt(const mir::Stmt& s) {
                                 s.raw);
                 map.offset = (j - 1) * lhs_si.rows + (i - 1);
                 map.count = 1;
-                expected_view = view_of("UReal");
+                expected_view =
+                    view_of(mir::UnsizedView{0, mir::UnsizedLeaf::Real});
               } else {
                 map.offset = i - 1;
                 map.stride = lhs_si.rows;
                 map.count = lhs_si.cols;
-                expected_view = view_of("URowVector");
+                expected_view =
+                    view_of(mir::UnsizedView{0, mir::UnsizedLeaf::RowVector});
                 expected_view.param_free = lhs_si.param_free;
               }
             } else {
@@ -1433,7 +1440,8 @@ void Lowering::lower_simple_stmt(const mir::Stmt& s) {
               check_uni_index(i, lhs_len, "vector[uni] assign", s.raw);
               map.offset = i - 1;
               map.count = 1;
-              expected_view = view_of("UReal");
+              expected_view =
+                  view_of(mir::UnsizedView{0, mir::UnsizedLeaf::Real});
             }
             map.kind = map.stride != 1 && map.count != 1
                            ? BuiltinSliceMap::Kind::Strided
@@ -1453,7 +1461,7 @@ void Lowering::lower_simple_stmt(const mir::Stmt& s) {
               selected.push_back(index_positions(s.lhs_idx[d],
                                                  shape.dimensions[d],
                                                  "assignment index", s.raw));
-              drops.push_back(s.lhs_idx[d].name == "IndexSingle");
+              drops.push_back(s.lhs_idx[d].kind == mir::Expr::IndexSingle);
             }
             try {
               map = builtin_index_map(shape, selected, drops,
@@ -1463,13 +1471,13 @@ void Lowering::lower_simple_stmt(const mir::Stmt& s) {
                        error.what(),
                    s.raw);
             }
-            if (s.rhs.type_ == "UReal" || s.rhs.type_ == "UInt") {
-              expected_view = view_of(s.rhs.type_);
-            } else if (s.rhs.type_ == "UVector" ||
-                       s.rhs.type_ == "URowVector") {
-              expected_view = view_of(s.rhs.type_);
+            if (mir::language_scalar(s.rhs)) {
+              expected_view = view_of(s.rhs.unsized);
+            } else if (mir::is_unsized(s.rhs, mir::UnsizedLeaf::Vector) ||
+                       mir::is_unsized(s.rhs, mir::UnsizedLeaf::RowVector)) {
+              expected_view = view_of(s.rhs.unsized);
               expected_view.param_free = lhs_si.param_free;
-            } else if (s.rhs.type_ == "UMatrix") {
+            } else if (mir::is_unsized(s.rhs, mir::UnsizedLeaf::Matrix)) {
               if (map.dimensions.size() != 2)
                 fail("unsupported indexed assignment: matrix shape", s.raw);
               expected_view = matrix_view(map.dimensions[0], map.dimensions[1],
@@ -1509,8 +1517,7 @@ void Lowering::lower_simple_stmt(const mir::Stmt& s) {
         }
         Val rhs_v = lower_expr(s.rhs);
         if (runtime) {
-          Val nv = region_index(prev_v, s.lhs_idx, s.rhs.type_, s.rhs.unsized,
-                                &rhs_v);
+          Val nv = region_index(prev_v, s.lhs_idx, s.rhs.unsized, &rhs_v);
           nv.autodiff = prev_v.autodiff;
           scope[s.lhs] = nv;
           sync_indexed_data_local(s.lhs, nv);
@@ -1549,8 +1556,9 @@ void Lowering::lower_simple_stmt(const mir::Stmt& s) {
           for (int64_t k = 0; k < map.count; ++k) {
             const int cell =
                 checked_immediate((*cells)[(size_t)k], "assignment cell");
-            const Val el =
-                emit_value(OP_INDEX, {rhs_v}, 1, view_of("UReal"), {(int)k});
+            const Val el = emit_value(
+                OP_INDEX, {rhs_v}, 1,
+                view_of(mir::UnsizedView{0, mir::UnsizedLeaf::Real}), {(int)k});
             if (known_at) {
               const size_t from = (size_t)(*known_at)[(size_t)k];
               DataMap::Entry one;
@@ -1602,7 +1610,7 @@ void Lowering::lower_simple_stmt(const mir::Stmt& s) {
     case mir::Stmt::Skip:
       return;
     case mir::Stmt::NRFunApp:
-      if (s.fn_name == "FnCheck") {
+      if (mir::internal_name(s) == "FnCheck") {
         // prepare_data checks already ran in bind_data. Any check reaching
         // this lowering belongs to log_prob/write_array and must retain its
         // per-evaluation position, even when its value is parameter-free.
@@ -1691,7 +1699,7 @@ void Lowering::lower_simple_stmt(const mir::Stmt& s) {
         g.udata_pool.push_back(std::move(spec));
         return;
       }
-      if (s.fn_name == "FnValidateSize") {
+      if (mir::internal_name(s) == "FnValidateSize") {
         if (s.fn_args.size() != 3 || s.fn_args[0].kind != mir::Expr::LitStr ||
             s.fn_args[1].kind != mir::Expr::LitStr)
           fail("malformed FnValidateSize", s.raw);
@@ -1711,7 +1719,7 @@ void Lowering::lower_simple_stmt(const mir::Stmt& s) {
               s.raw);
         return;
       }
-      if (s.fn_name == "check_matching_dims") {
+      if (mir::library_name(s) == "check_matching_dims") {
         if (s.fn_args.size() != 5 || s.fn_args[0].kind != mir::Expr::LitStr ||
             s.fn_args[1].kind != mir::Expr::LitStr ||
             s.fn_args[3].kind != mir::Expr::LitStr)
@@ -1740,7 +1748,7 @@ void Lowering::lower_simple_stmt(const mir::Stmt& s) {
       // std::domain_error at forward time, which is the same exception
       // from the same place CmdStan's generated code throws it, so the
       // sampler counts it as a rejected proposal rather than a failure.
-      if (const auto action = message_action(s.fn_name)) {
+      if (const auto action = message_action(mir::internal_name(s))) {
         auto spec = std::make_shared<MessageSpec>();
         std::vector<int> ins;
         std::vector<MessageShape> shapes;
@@ -1771,7 +1779,7 @@ void Lowering::lower_simple_stmt(const mir::Stmt& s) {
         g.ops.push_back(op);
         return;
       }
-      if (s.fn_name == "FnWriteParam") {
+      if (mir::internal_name(s) == "FnWriteParam") {
         // One CSV column, at the point the emission happens: this is what
         // fixes the column order to CmdStan's. Arrays of containers are
         // emitted one element at a time -- `array[K] simplex[K] theta`
@@ -1783,40 +1791,40 @@ void Lowering::lower_simple_stmt(const mir::Stmt& s) {
         const mir::Expr* base = &s.fn_args[0];
         while (base->kind == mir::Expr::Indexed) {
           for (size_t k = base->args.size(); k-- > 1;) {
-            if (base->args[k].name != "IndexSingle")
+            if (base->args[k].kind != mir::Expr::IndexSingle)
               fail("FnWriteParam under a non-scalar index", s.raw);
             ixs.push_back(eval_int(base->args[k].args[0]));
           }
           base = &base->args[0];
         }
-        std::string name;
-        if (base->kind == mir::Expr::Var) {
-          name = base->name;
-        } else {
-          size_t next = 0;
-          if (output_vars) {
-            const auto at = std::find(output_vars->begin(), output_vars->end(),
-                                      last_written);
-            if (at != output_vars->end())
-              next = (size_t)(at - output_vars->begin()) + 1;
-          }
-          if (!output_vars || next >= output_vars->size())
-            fail("cannot name a substituted FnWriteParam", s.raw);
-          name = (*output_vars)[next];
-        }
-        last_written = name;
+        const Val v = lower_expr(s.fn_args[0]);
+        const mir::OutputVar* owner = output_cursor.take(
+            base->kind == mir::Expr::Var ? base->name : std::string(),
+            g.slots[v.slot].len, [&](const mir::OutputVar& var) {
+              return sized_len(var.type, nullptr, nullptr, var.name);
+            });
+        if (owner == nullptr)
+          fail("FnWriteParam matches no output variable", s.raw);
+        if (owner->block != mir::OutputVar::Block::Parameters && !n_tp_start)
+          n_tp_start = out.views.size();
+        if (owner->block == mir::OutputVar::Block::GeneratedQuantities &&
+            !n_gq_start)
+          n_gq_start = out.views.size();
+        std::string name = owner->name;
         for (auto it = ixs.rbegin(); it != ixs.rend(); ++it)
           name += "." + std::to_string(*it);
-        const Val v = lower_expr(s.fn_args[0]);
         // stanc peels the array dimensions, so what is left here is a
         // scalar, a vector/row_vector, or a matrix -- and its type decides
         // how CmdStan indexes the columns.
         using Naming = CompiledModel::ParamView::Naming;
-        const std::string& t = s.fn_args[0].type_;
+        const mir::Expr& t = s.fn_args[0];
         CompiledModel::ParamView pv{name, v.slot, g.slots[v.slot].len};
-        if (t == "UReal" || t == "UInt" || t == "UComplex") {
+        pv.variable = owner->name;
+        pv.index.assign(ixs.rbegin(), ixs.rend());
+        if (mir::language_scalar(t) ||
+            mir::is_unsized(t, mir::UnsizedLeaf::Complex)) {
           pv.naming = Naming::Scalar;
-        } else if (t == "UMatrix") {
+        } else if (mir::is_unsized(t, mir::UnsizedLeaf::Matrix)) {
           if (!is_matrix(v.si))
             fail("FnWriteParam of a matrix with unknown shape: " + name, s.raw);
           pv.rows = v.si.rows;
@@ -1924,7 +1932,7 @@ Lowering::Flow Lowering::lower_stmt_impl(const mir::Stmt& s) {
       // nothing. Kept as a region its counters would exist only at run
       // time, and a later declaration sized by one could not be laid out.
       const bool bookkeeping = static_int_bookkeeping(s.body);
-      if (bookkeeping && std::getenv("STANLI_STRUCTURED_LOOP_DIAGNOSTICS") &&
+      if (bookkeeping && debug_env("STANLI_STRUCTURED_LOOP_DIAGNOSTICS") &&
           region_auto_profitable(s, std::pair<int64_t, int64_t>{lo, hi}))
         emit_diagnostic(
             "stanli_structured counting loop evaluated at compile "
@@ -2043,21 +2051,6 @@ Lowering::Flow Lowering::lower_stmt_impl(const mir::Stmt& s) {
       return Flow::Next;
     }
     case mir::Stmt::IfElse: {
-      // The guards are data-only and fold away below (both flags are
-      // pinned on), so this is the only chance to note that a CSV
-      // section ended here.
-      if (in_write_array) {
-        switch (mir::emit_guard(s)) {
-          case mir::EmitGuard::TransformedParams:
-            if (!n_tp_start) n_tp_start = out.views.size();
-            break;
-          case mir::EmitGuard::GeneratedQuantities:
-            if (!n_gq_start) n_gq_start = out.views.size();
-            break;
-          case mir::EmitGuard::None:
-            break;
-        }
-      }
       bool known = false, c = false;
       if (auto evaluated = try_eval_pure(s.cond)) {
         c = evaluated->r.at(0) != 0.0;
@@ -2081,7 +2074,6 @@ Lowering::Flow Lowering::lower_stmt_impl(const mir::Stmt& s) {
           mir::Expr choice;
           choice.kind = mir::Expr::TernaryIf;
           choice.args = {s.cond, then_value, else_value};
-          choice.type_ = then_value.type_;
           choice.unsized = then_value.unsized;
           choice.data_only =
               s.cond.data_only && then_value.data_only && else_value.data_only;

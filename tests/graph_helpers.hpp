@@ -100,6 +100,23 @@ inline RunResult run_one_op(uint16_t opcode,
   return r;
 }
 
+// The density variant that marks exactly the parameter inputs active.
+inline uint8_t density_activity(const std::vector<bool>& params,
+                                bool propto = false) {
+  uint8_t active = 0;
+  for (size_t k = 0; k < params.size(); ++k)
+    if (params[k]) active |= (uint8_t)(1u << k);
+  return DensityMode{active, false, propto}.byte();
+}
+
+inline RunResult run_density(uint16_t opcode,
+                             const std::vector<std::vector<double>>& vals,
+                             const std::vector<bool>& params,
+                             std::vector<int> idata = {}) {
+  return run_one_op(opcode, vals, params, std::move(idata),
+                    density_activity(params));
+}
+
 // One elementwise op feeding OP_SUM_VEC so vector outputs reduce to a scalar
 // lp (sum), matching a var reference of sum(f(args)).
 inline RunResult run_op_sum(uint16_t opcode, int64_t out_len,

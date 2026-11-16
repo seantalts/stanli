@@ -1,6 +1,5 @@
 """Exercise diagnostic JSON through the tool and the shipped C API."""
 import json
-import os
 from pathlib import Path
 import subprocess
 import sys
@@ -33,8 +32,8 @@ def main(tool, host):
         assert strict.returncode == 1
         assert json.loads(strict.stdout)["strict_violation"]
         assert "strict execution diagnostic" in strict.stderr
-        nested = subprocess.run(command + ["--forbid-mir"], text=True, capture_output=True,
-                                env={**os.environ, "STANLI_EXECUTION_REPORT": "1"})
+        nested = subprocess.run(command + ["--forbid-mir", "--execution-report"],
+                                text=True, capture_output=True)
         assert nested.returncode == 1
         assert json.loads(nested.stdout)["strict_violation"]
 
@@ -47,8 +46,8 @@ def main(tool, host):
         # A failed probe still reports the selection, then refuses the model.
         run = run_checked if probe != "failed" else (
             lambda c, **kw: subprocess.run(c, text=True, capture_output=True, **kw))
-        ordinary = run(command, env={**os.environ, "STANLI_EXECUTION_REPORT": "0"})
-        observed = run(command, env={**os.environ, "STANLI_EXECUTION_REPORT": "1"})
+        ordinary = run(command)
+        observed = run(command + ["--execution-report"])
         if probe == "failed":
             for result in (ordinary, observed):
                 assert result.returncode == 1, result

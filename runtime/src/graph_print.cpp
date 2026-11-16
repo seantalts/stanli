@@ -126,8 +126,12 @@ void print_island_body(std::string& out, const Graph& g, size_t u, int n) {
           n, u, p.code.size(), p.n_regs, p.calls.size(), p.adj.code.size(),
           (int)p.native_adj);
   appendf(out, "  live-ins:");
-  for (size_t k = 0; k < p.ins.size(); ++k)
-    appendf(out, " slot%d->r%d[len %d]", op.in[k], p.ins[k].reg, p.ins[k].len);
+  for (size_t k = 0; k < p.ins.size(); ++k) {
+    // Past Op::in's six descriptors, live-ins share a packed one.
+    const int input = p.ins[k].input >= 0 ? p.ins[k].input : (int)k;
+    appendf(out, " slot%d->r%d[len %d]", op.in[input], p.ins[k].reg,
+            p.ins[k].len);
+  }
   appendf(out, "\n  live-outs (out_regs):");
   for (int r : p.out_regs) appendf(out, " r%d", r);
   appendf(out, "\n\n  FORWARD:\n");

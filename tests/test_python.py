@@ -6,6 +6,7 @@ Run against an installed wheel (CI does) or a local build:
     tools/build_wheel.sh && PYTHONPATH=python python3 tests/test_python.py
 """
 import base64
+import ctypes
 import concurrent.futures
 import contextlib
 import copy
@@ -267,7 +268,7 @@ def test_function_errors_and_recovery():
 
 
 def _portable_payload(mir):
-    assert mir.startswith("STANLI2:"), mir[:80]
+    assert mir.startswith("STANLI3:"), mir[:80]
     return base64.b64decode(mir[8:], validate=True)
 
 
@@ -1100,16 +1101,6 @@ def test_to_arviz_keeps_dims():
     assert fit.to_arviz().posterior["M"].shape == (2, 50, 2, 3)
 
 
-def test_group_variables_incomplete_and_non_numeric():
-    variables = stanli._group_variables(["x[1]", "x[3]"])
-    assert set(variables) == {"x[1]", "x[3]"}
-    assert variables["x[1]"][0] == () and variables["x[3]"][0] == ()
-
-    variables = stanli._group_variables(["z.real"])
-    assert set(variables) == {"z.real"}
-    assert variables["z.real"][0] == ()
-
-
 def test_thin_and_save_warmup_change_the_row_count():
     m = _es()
     assert m.sample(chains=1, seed=6, warmup=100, samples=100,
@@ -1236,11 +1227,8 @@ def test_stan_to_mir_round_trips():
     # path uses: the model built from it must be the same model.
     code = "parameters { real x; } model { x ~ normal(0, 1); }"
     mir = stanli.stan_to_mir(code)
-    assert mir.startswith("STANLI2:") or "log_prob" in mir
-    suffix = ".exe" if sys.platform == "win32" else ""
-    if (stanli._BIN / ("stanli-compile" + suffix)).is_file():
-        _portable_payload(mir)
-        assert not mir.endswith(("\n", "\r")), "portable MIR has final newline"
+    _portable_payload(mir)
+    assert not mir.endswith(("\n", "\r")), "portable MIR has final newline"
 
     from_source = stanli.Model(stan_code=code)
     from_mir = stanli.Model(mir=mir)
@@ -1267,13 +1255,12 @@ def test_full_span_assignment_from_source():
 def test_stan_to_mir_is_optimized():
     # The shared policy keeps O1 dataflow optimizations and preserves source
     # arithmetic. Dead-branch removal is observable in both the embedded
-    # compiler and subprocess output, including the stock-compiler fallback.
+    # compiler and subprocess output.
     code = ("parameters { real x; } model { "
             "if (1) target += normal_lpdf(x | 0, 1); "
             "else target += student_t_lpdf(x | 3, 0, 1); }")
     mir = stanli.stan_to_mir(code)
-    optimized = (_portable_payload(mir) if mir.startswith("STANLI2:")
-                 else mir.encode("utf-8"))
+    optimized = _portable_payload(mir)
     assert b"normal_lpdf" in optimized, "MIR lost the live branch"
     assert b"student_t_lpdf" not in optimized, "MIR retained the dead branch"
 
@@ -1402,9 +1389,8 @@ def test_stan_include_errors_comments_and_compiler_state():
 
 def test_packaged_subprocess_includes():
     suffix = ".exe" if sys.platform == "win32" else ""
-    available = [stanli._BIN / (name + suffix) for name in ("stanli-compile", "stanc")]
-    # Installed Windows wheels provide these; local builds can stage them too.
-    for compiler in available:
+    # Installed Windows wheels provide this; local builds can stage it too.
+    for compiler in [stanli._BIN / ("stanli-compile" + suffix)]:
         if not compiler.is_file():
             continue
         with tempfile.TemporaryDirectory() as tmp, include_fixture() as fixture:
@@ -1425,36 +1411,52 @@ def test_packaged_subprocess_includes():
                     raise AssertionError("subprocess accepted a missing include")
 
 
-def test_subprocess_compiler_preference_and_rollback_contract():
-    # The Windows wheel carries both executables for one release cycle. The
-    # portable producer wins by presence; a non-zero result from it is a real
-    # failure and must never be hidden by silently retrying pristine stanc.
+def _fake_compiler_run(calls, warnings=(), o1_fallback=None,
+                       stderr="text for people"):
+    """A subprocess.run stand-in for stanli-compile that writes its
+    --messages-json file."""
+    import json
+
+    def run(argv, **kwargs):
+        calls.append((argv, kwargs))
+        path = argv[argv.index("--messages-json") + 1]
+        pathlib.Path(path).write_text(json.dumps(
+            {"warnings": list(warnings), "o1_fallback": o1_fallback}),
+            encoding="utf-8")
+        return subprocess.CompletedProcess(argv, 0, "STANLI3:ZmFrZQ==",
+                                           stderr)
+    return run
+
+
+def test_subprocess_compiler_contract():
+    # The packaged stanli-compile is the only subprocess compiler. Its
+    # warnings and O1 notice come from the --messages-json file, and a
+    # non-zero exit is an error carrying its stderr.
     suffix = ".exe" if sys.platform == "win32" else ""
     with tempfile.TemporaryDirectory() as tmpdir:
         compiler_dir = pathlib.Path(tmpdir)
         portable = compiler_dir / ("stanli-compile" + suffix)
-        stock = compiler_dir / ("stanc" + suffix)
         source = compiler_dir / "source with spaces.stan"
         portable.touch()
-        stock.touch()
+        (compiler_dir / ("stanc" + suffix)).touch()
         source.write_text("model {}", encoding="utf-8")
         calls = []
 
-        def successful_run(argv, **kwargs):
-            calls.append((argv, kwargs))
-            return subprocess.CompletedProcess(
-                argv, 0, "STANLI2:ZmFrZQ==",
-                "a successful frontend warning")
-
+        run = _fake_compiler_run(calls, ["a successful frontend warning"],
+                                 "stanli compiler: skipped O1")
         with mock.patch.object(stanli, "_BIN", compiler_dir), \
-                mock.patch.object(stanli.subprocess, "run", successful_run):
+                mock.patch.object(stanli.subprocess, "run", run):
             with warnings.catch_warnings(record=True) as caught:
                 warnings.simplefilter("always")
                 got = stanli._stanc_mir(source)
-        assert got == "STANLI2:ZmFrZQ=="
-        assert [str(w.message) for w in caught] == [
-            "a successful frontend warning"]
-        assert calls[0][0] == [str(portable), str(source)]
+        assert got == "STANLI3:ZmFrZQ=="
+        assert [(w.category, str(w.message)) for w in caught] == [
+            (RuntimeWarning, "a successful frontend warning"),
+            (stanli.O1FallbackWarning, "stanli compiler: skipped O1")]
+        argv = calls[0][0]
+        assert argv[0] == str(portable) and argv[-1] == str(source)
+        assert argv[1] == "--messages-json" and len(argv) == 4
+        assert not pathlib.Path(argv[2]).exists()
         assert calls[0][1]["encoding"] == "utf-8"
         assert calls[0][1]["capture_output"] is True
 
@@ -1471,26 +1473,18 @@ def test_subprocess_compiler_preference_and_rollback_contract():
             except RuntimeError as exc:
                 assert "bad Stan" in str(exc)
             else:
-                raise AssertionError("preferred compiler failure was ignored")
-        assert calls == [[str(portable), str(source)]], calls
+                raise AssertionError("compiler failure was ignored")
+        assert len(calls) == 1, calls
 
+        # A stock stanc beside the runtime is not a compiler stanli uses.
         portable.unlink()
-        calls.clear()
-        with mock.patch.object(stanli, "_BIN", compiler_dir), \
-                mock.patch.object(stanli.subprocess, "run", successful_run), \
-                ignored_warnings():
-            stanli._stanc_mir(source)
-        assert calls[0][0] == [str(stock), "--O1",
-                               "--debug-optimized-mir", str(source)]
-
-        stock.unlink()
         with mock.patch.object(stanli, "_BIN", compiler_dir):
             try:
                 stanli._compiler_command(source)
             except RuntimeError as exc:
-                assert "stanli-compile" in str(exc) and "stanc" in str(exc)
+                assert "stanli-compile" in str(exc)
             else:
-                raise AssertionError("missing bundled compilers were accepted")
+                raise AssertionError("a missing stanli-compile was accepted")
 
 
 def test_subprocess_source_is_exact_utf8_and_fully_cleaned_up():
@@ -1501,8 +1495,8 @@ def test_subprocess_source_is_exact_utf8_and_fully_cleaned_up():
     def fake_compile(source):
         seen["source"] = source
         seen["bytes"] = source.read_bytes()
-        # Pristine stanc writes this beside its input even when only its debug
-        # MIR was requested. The whole private directory must be reclaimed.
+        # A compiler that writes beside its input must not leave files
+        # behind: the whole private directory is reclaimed.
         source.with_suffix(".hpp").write_text("generated", encoding="utf-8")
         return "(fake MIR)"
 
@@ -1517,14 +1511,12 @@ def test_subprocess_source_is_exact_utf8_and_fully_cleaned_up():
         assert stanli._read_utf8_file(source_file) == code
 
 
-def test_windows_wheel_compilers_and_stock_rollback_execute():
+def test_windows_wheel_compiler_executes():
     if sys.platform != "win32":
         return
 
     packaged_portable = stanli._BIN / "stanli-compile.exe"
-    packaged_stock = stanli._BIN / "stanc.exe"
     assert packaged_portable.is_file(), "Windows wheel lacks stanli-compile.exe"
-    assert packaged_stock.is_file(), "Windows wheel lacks stanc.exe"
 
     unicode_text = "π ☃ é 👋"
     code = ("transformed data {\r\n"
@@ -1533,12 +1525,10 @@ def test_windows_wheel_compilers_and_stock_rollback_execute():
             "parameters { real x; }\r\n"
             "model { x ~ normal(0, 1); }\r\n")
     with tempfile.TemporaryDirectory(
-            prefix="stanli compiler rollback π ") as tmp:
+            prefix="stanli compiler π ") as tmp:
         compiler_dir = pathlib.Path(tmp)
         portable = compiler_dir / packaged_portable.name
-        stock = compiler_dir / packaged_stock.name
         shutil.copy2(packaged_portable, portable)
-        shutil.copy2(packaged_stock, stock)
 
         with mock.patch.object(stanli, "_BIN", compiler_dir):
             portable_mir = stanli._subprocess_mir(code)
@@ -1546,14 +1536,7 @@ def test_windows_wheel_compilers_and_stock_rollback_execute():
             assert not portable_mir.endswith(("\n", "\r"))
             assert unicode_text.encode("utf-8") in payload
 
-            # Removing only the temporary preferred producer must select the
-            # packaged rollback compiler. Its legacy MIR still has to lower
-            # into the same executable runtime graph.
-            portable.unlink()
-            legacy_mir = stanli._subprocess_mir(code)
-
-        assert legacy_mir.lstrip().startswith("(")
-        model = stanli.Model(mir=legacy_mir)
+        model = stanli.Model(mir=portable_mir)
         lp, grad = model.log_prob_grad(np.array([0.25]))
         assert np.isfinite(lp)
         assert np.isfinite(grad).all()
@@ -1755,18 +1738,9 @@ def test_fast_math_reaches_the_subprocess_compiler():
     with tempfile.TemporaryDirectory() as tmpdir:
         compiler_dir = pathlib.Path(tmpdir)
         portable = compiler_dir / ("stanli-compile" + suffix)
-        stock = compiler_dir / ("stanc" + suffix)
         source = compiler_dir / "model.stan"
         source.write_text("model {}", encoding="utf-8")
-        stock.touch()
         with mock.patch.object(stanli, "_BIN", compiler_dir):
-            try:
-                stanli._compiler_command(source, fast_math=True)
-            except RuntimeError as exc:
-                assert "fast_math" in str(exc) and "stanli-compile" in str(exc)
-            else:
-                raise AssertionError("stock stanc accepted fast_math")
-            assert stanli._compiler_command(source)[0] == str(stock)
             portable.touch()
             assert stanli._compiler_command(source, fast_math=True) == [
                 str(portable), "--fast-math", str(source)]
@@ -2159,10 +2133,81 @@ def test_construction_errors_raise_runtime_error():
     assert error is not None and "STANLI_NO_INTERPRETER" in error, error
 
 
+def test_allow_interpreter_false_refuses_fallback_models():
+    fallback = (FIXTURES / "wapar_wa_fallback.stan").read_text()
+    try:
+        stanli.Model(stan_code=fallback, data=WA_FALLBACK_DATA,
+                     allow_interpreter=False)
+    except RuntimeError as e:
+        assert "no compiled path" in str(e), str(e)
+    else:
+        raise AssertionError("allow_interpreter=False accepted a fallback")
+    clean = "parameters { real x; } model { x ~ normal(0, 1); }"
+    stanli.Model(stan_code=clean, allow_interpreter=False)
+
+
+def _o1_budget_source():
+    body = "s += 1;\n" * 2100
+    loops = "".join(f"for (i{d} in 1:1) {{\n" for d in range(9))
+    return ("parameters { real x; }\nmodel {\nreal s = 0;\n" + loops + body
+            + "}\n" * 9 + "x ~ normal(s, 1);\n}\n")
+
+
+def test_o1_fallback_is_its_own_warning_category():
+    assert issubclass(stanli.O1FallbackWarning, RuntimeWarning)
+    assert "O1FallbackWarning" in stanli.__all__
+    source = _o1_budget_source()
+    paths = _compiler_paths()
+    assert paths, "no compile path to test"
+    for path in paths:
+        for build in (lambda: stanli.Model(stan_code=source),
+                      lambda: stanli.stan_to_mir(source)):
+            with path(), warnings.catch_warnings(record=True) as caught:
+                warnings.simplefilter("always")
+                build()
+            o1 = [w for w in caught
+                  if issubclass(w.category, stanli.O1FallbackWarning)]
+            assert len(o1) == 1 and "skipped O1" in str(o1[0].message), \
+                [str(w.message) for w in caught]
+            others = [w for w in caught if w not in o1]
+            assert not any("skipped O1" in str(w.message) for w in others), \
+                [str(w.message) for w in others]
+
+
+def test_struct_mirrors_are_checked_against_the_runtime():
+    stanli._check_layouts(stanli._lib)
+
+    class Wrong(ctypes.Structure):
+        _fields_ = [("seed", ctypes.c_uint32), ("fast_math", ctypes.c_int)]
+
+    try:
+        stanli._check_layouts(stanli._lib, {"stanli_model_opts": Wrong})
+    except ImportError as e:
+        assert "stanli_model_opts" in str(e), str(e)
+    else:
+        raise AssertionError("a wrong struct mirror was accepted")
+
+
+def test_variables_come_from_the_runtime():
+    code = """
+    parameters { real mu; vector[2] v; }
+    transformed parameters {
+      array[2] vector[3] tp;
+      for (i in 1:2) tp[i] = rep_vector(mu, 3);
+    }
+    model { mu ~ normal(0, 1); v ~ normal(0, 1); }
+    generated quantities { matrix[2, 3] m = rep_matrix(mu, 2, 3); real s = 1; }
+    """
+    fit = stanli.Model(stan_code=code).sample(chains=1, warmup=20, samples=5)
+    assert fit.variables == {"mu": (), "v": (2,), "tp": (2, 3),
+                             "m": (2, 3), "s": ()}, fit.variables
+    assert np.array_equal(fit.draws("tp")[:, :, 1, 2], fit.draws("tp[2,3]"))
+
+
 def test_models_construct_concurrently_from_python_threads():
     source = (FIXTURES / "wapar_wa_fallback.stan").read_text()
-    with mock.patch.dict(os.environ, {"STANLI_PARALLEL_WA": "0"}):
-        reference = stanli.Model(stan_code=source, data=WA_FALLBACK_DATA)
+    reference = stanli.Model(stan_code=source, data=WA_FALLBACK_DATA,
+                             _parallel_write_array="off")
     names = reference.constrained_names
     q = np.array([0.3, -0.2])
     want = reference.log_prob_grad(q)
@@ -2170,15 +2215,15 @@ def test_models_construct_concurrently_from_python_threads():
 
     def build(_):
         barrier.wait()
-        model = stanli.Model(stan_code=source, data=WA_FALLBACK_DATA)
+        model = stanli.Model(stan_code=source, data=WA_FALLBACK_DATA,
+                             _parallel_write_array="force")
         got = model.log_prob_grad(q)
         assert model.constrained_names == names
         assert got[0] == want[0] and (got[1] == want[1]).all()
 
     # warnings.catch_warnings is process-wide, so it wraps the whole pool
     # instead of each thread.
-    with mock.patch.dict(os.environ, {"STANLI_PARALLEL_WA": "1"}), \
-            warnings.catch_warnings(record=True) as caught:
+    with warnings.catch_warnings(record=True) as caught:
         warnings.simplefilter("always")
         with concurrent.futures.ThreadPoolExecutor(max_workers=6) as pool:
             list(pool.map(build, range(6)))

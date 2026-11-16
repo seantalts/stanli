@@ -27,14 +27,15 @@ typedef struct stanli_model stanli_model;
  * from the wrong seed with the wrong step size. A binding must compare
  * this against the value it was compiled against before calling
  * anything, and refuse on a mismatch. */
-#define STANLI_ABI_VERSION 5
+#define STANLI_ABI_VERSION 6
 int stanli_abi_version(void);
 
 /* 1 if this build embeds stanc3, else 0. */
 int stanli_has_embedded_stanc(void);
 
 /* Model construction options. Call stanli_model_opts_init before setting
- * fields: seed 1, one thread per chain, fast_math 0.
+ * fields: seed 1, one thread per chain, fast_math 0, allow_interpreter 1,
+ * execution_report 0, parallel_write_array STANLI_PARALLEL_WA_AUTO.
  *
  * seed is the model-construction seed: RNG calls in transformed data draw from
  * create_rng(seed, 0) once, when the model is built, exactly as CmdStan's
@@ -51,11 +52,33 @@ int stanli_has_embedded_stanc(void);
  * selects the compile-time rewrites that stanc3 applies, such as fused
  * multiply-add; for a model built from MIR text the rewrites are whatever the
  * MIR was compiled with, so compile it with stanli_stan_to_mir_with_opts
- * using the same setting. Default models are unchanged. */
+ * using the same setting. Default models are unchanged.
+ *
+ * allow_interpreter 0 makes construction fail, naming the parts, when parts
+ * of the model have no compiled path and would run through the MIR
+ * interpreter.
+ *
+ * execution_report 1 emits the execution manifest, then the host's
+ * write_array selection, through the diagnostic sink while the model is
+ * built.
+ *
+ * parallel_write_array says where write_array is lowered while the model is
+ * built: AUTO on a second thread when the build has threads and the model has
+ * enough to lower on both sides, OFF on the calling thread after log_prob,
+ * FORCE on a second thread whenever the build has threads. Results are the
+ * same either way. */
+typedef enum {
+  STANLI_PARALLEL_WA_AUTO = 0,
+  STANLI_PARALLEL_WA_OFF = 1,
+  STANLI_PARALLEL_WA_FORCE = 2
+} stanli_parallel_wa;
 typedef struct {
   uint32_t seed;
   int threads_per_chain;
   int fast_math;
+  int allow_interpreter;
+  int execution_report;
+  int parallel_write_array; /* a stanli_parallel_wa */
 } stanli_model_opts;
 void stanli_model_opts_init(stanli_model_opts* o);
 
@@ -77,8 +100,9 @@ stanli_model* stanli_model_new_from_stan_with_opts(
     char* err, size_t err_len);
 
 /* Like stanli_model_new_from_stan_with_opts, naming the source file in
- * compiler messages (null filename: the compiler's default label). Compiler
- * warnings are appended to stanli_warnings(model). */
+ * compiler messages (null filename: the compiler's default label). The
+ * compiler's messages are kept on the model; see
+ * stanli_model_n_compiler_messages. */
 stanli_model* stanli_model_new_from_stan_named(const char* stan_code,
                                                const char* filename,
                                                const char* data_json,
@@ -102,15 +126,35 @@ char* stanli_stan_to_mir_with_opts(const char* stan_code,
                                    size_t include_path_count, int fast_math,
                                    char* err, size_t err_len);
 
-/* Like stanli_stan_to_mir_with_opts, with the source file named in compiler
- * messages (null: the compiler's default label) and the compiler's warnings
- * returned instead of printed. If warnings_out is non-null, *warnings_out is
- * set to null or to a string freed with stanli_string_free; with a null
- * warnings_out the warnings go to stderr. */
-char* stanli_stan_to_mir_named(const char* stan_code, const char* filename,
-                               const char* const* include_paths,
-                               size_t include_path_count, int fast_math,
-                               char** warnings_out, char* err, size_t err_len);
+/* What the compiler says besides the MIR: a warning from stanc3, or the
+ * notice that O1 was skipped because the model exceeds stanli's structural
+ * budget (the model then runs from O0 MIR; STANLI_NO_O1_FALLBACK=1 forces
+ * O1). */
+typedef enum {
+  STANLI_COMPILER_WARNING = 0,
+  STANLI_COMPILER_O1_FALLBACK = 1
+} stanli_compiler_message_kind;
+
+/* One compilation of Stan source, with the source file named in compiler
+ * messages (null: the compiler's default label). The other arguments are
+ * those of stanli_stan_to_mir_with_opts. Returns null only when out of
+ * memory; free with stanli_compilation_free. */
+typedef struct stanli_compilation stanli_compilation;
+stanli_compilation* stanli_compile_stan(const char* stan_code,
+                                        const char* filename,
+                                        const char* const* include_paths,
+                                        size_t include_path_count,
+                                        int fast_math);
+/* The MIR, or null when compilation failed. */
+const char* stanli_compilation_mir(const stanli_compilation* c);
+/* The error, or null when compilation succeeded. */
+const char* stanli_compilation_error(const stanli_compilation* c);
+/* Message i, for 0 <= i < stanli_compilation_n_messages(c). */
+int64_t stanli_compilation_n_messages(const stanli_compilation* c);
+stanli_compiler_message_kind stanli_compilation_message_kind(
+    const stanli_compilation* c, int64_t i);
+const char* stanli_compilation_message(const stanli_compilation* c, int64_t i);
+void stanli_compilation_free(stanli_compilation* c);
 
 /* Frees a string this library returned ownership of. */
 void stanli_string_free(char* p);
@@ -135,15 +179,25 @@ char* stanli_take_messages(void);
  * refuse a mismatch. Static storage; do not free. */
 const char* stanli_build_id(void);
 
+/* The data argument a BridgeStan client passes to bs_model_construct to
+ * get this model from this runtime: the object in data_json (null means no
+ * data) with a "__stanli" member holding stanli_build_id(), mir and name.
+ * Returns null with a message in err when data_json is not a JSON object;
+ * on success the caller frees the string with stanli_string_free. */
+char* stanli_bridgestan_data(const char* data_json, const char* mir,
+                             const char* name, char* err, size_t err_len);
+
 /* Always 1: every build reproduces CmdStan's lp__ exactly. Kept so callers
  * written against earlier builds keep linking. */
 int stanli_exact_lp(void);
 
-/* Retained native reduction count and newline-separated lowering refusals.
- * Diagnostics cover graph lowering, not calls inside opaque runtime regions.
- * The string is owned by the model. */
+/* Retained native reduction count, and the reasons graph lowering kept
+ * reduce_sum calls serial, one per refusal. Diagnostics cover graph
+ * lowering, not calls inside opaque runtime regions. Strings are owned by
+ * the model. */
 int stanli_reduce_sum_count(const stanli_model* m);
-const char* stanli_reduce_sum_fallbacks(const stanli_model* m);
+int64_t stanli_n_reduce_sum_fallbacks(const stanli_model* m);
+const char* stanli_reduce_sum_fallback(const stanli_model* m, int64_t i);
 
 void stanli_model_free(stanli_model* m);
 
@@ -335,7 +389,9 @@ void stanli_metric_opts_init(stanli_metric_opts* o);
  * Returns 0 when every chain succeeded. Returns the NUMBER OF FAILED
  * CHAINS otherwise, with the first failure's message in err: a run where
  * three of four chains sampled is a partial result the caller may want,
- * and the failed chains' rows are left untouched.
+ * and the failed chains' rows are left untouched. Returns -1 with a message
+ * in err when the run could not start: bad options, metric or resume
+ * records.
  *
  * `refresh` follows CmdStan's convention: in each phase, report the first
  * transition, every refresh-th transition, and the phase's final transition.
@@ -369,7 +425,7 @@ void stanli_metric_opts_init(stanli_metric_opts* o);
  *
  * `metric` holds the metric controls (null means the defaults of
  * stanli_metric_opts_init). An invalid metric, inverse metric or step size
- * fails before any chain starts, returns nonzero, and puts Stan's message in
+ * fails before any chain starts, returns -1, and puts Stan's message in
  * err. */
 int stanli_sample_multi_metric(stanli_model* m, const stanli_sample_opts* opts,
                                const stanli_metric_opts* metric, int refresh,
@@ -405,6 +461,7 @@ size_t stanli_resume_size(const stanli_model* m);
  * treedepth__, n_leapfrog__, divergent__, energy__. */
 #define STANLI_N_SAMPLER_COLS 7
 const char* stanli_sampler_column_name(int i);
+int stanli_n_sampler_columns(void);
 
 /* ---- summaries and convergence diagnostics -------------------------------
  *
@@ -428,6 +485,12 @@ enum {
   STANLI_STAT_RHAT,
   STANLI_N_SUMMARY_STATS
 };
+
+/* "mean", "mcse_mean", "sd", "mcse_sd", "q5", "q50", "q95", "ess_bulk",
+ * "ess_tail", "r_hat": the name of STANLI_STAT_* value i, for bindings that
+ * cannot read this enum. */
+const char* stanli_summary_stat_name(int i);
+int stanli_n_summary_stats(void);
 
 /* Writes n_cols * STANLI_N_SUMMARY_STATS doubles into out: for each
  * column, the statistics above in that order. R-hat is rank-normalized
@@ -465,6 +528,13 @@ int64_t stanli_sampling_warnings(const stanli_sample_opts* opts,
                                  const stanli_sample_report* reports,
                                  const double* stats, char* out,
                                  size_t out_len);
+
+/* The verdict stanli_diagnose_text ends with, as numbers: how many checks
+ * failed and how many could not be computed (too few draws, say). Takes
+ * the same draws, stats and max_depth. Returns 0 on success. */
+int stanli_diagnose_counts(const double* draws, int64_t n_chains,
+                           int64_t n_draws, int64_t n_cols, const double* stats,
+                           int max_depth, int* n_failed, int* n_unavailable);
 
 /* ---- optimization --------------------------------------------------------
  *
@@ -598,7 +668,8 @@ int stanli_pathfinder_inits(stanli_model* m, uint32_t seed, int chain_id,
  *
  * `log`, when non-null, receives each line the service logs, on the calling
  * thread: level 0 is information (ADVI's convergence table, progress), 1 a
- * warning (Pathfinder's Pareto k), 2 an error. `poll`, when non-null, is
+ * warning (Pathfinder's Pareto k, ADVI stopping at its iteration limit), 2
+ * an error. `poll`, when non-null, is
  * asked on the calling thread about every 100 ms; a nonzero answer abandons
  * the run, which then returns 0 with *interrupted set to 1 and nothing
  * usable in the output buffers. `interrupted` may be null.
@@ -768,11 +839,53 @@ int stanli_wa_row(stanli_model* m, const double* q, double* out);
  * the MIR interpreter. Then a message to show once per model: which parts,
  * why, and where to report it. Owned by the model. */
 const char* stanli_warnings(const stanli_model* m);
+/* The compiler's messages for a model built from Stan source, as
+ * stanli_compilation_message* report them; none for a model built from MIR.
+ * i must satisfy 0 <= i < stanli_model_n_compiler_messages(m). Strings are
+ * owned by the model. */
+int64_t stanli_model_n_compiler_messages(const stanli_model* m);
+stanli_compiler_message_kind stanli_model_compiler_message_kind(
+    const stanli_model* m, int64_t i);
+const char* stanli_model_compiler_message(const stanli_model* m, int64_t i);
+
+/* The declared variables behind a set of output columns, in column order.
+ * Variable i covers the product of its dims consecutive columns, first index
+ * fastest (CmdStan's order); a scalar has no dims and one column. `set` is
+ * STANLI_CONSTRAINED_COLUMNS (stanli_constrained_name) or
+ * STANLI_WRITE_ARRAY_COLUMNS (stanli_wa_column_name). Strings are owned by
+ * the model; out-of-range indices return 0 or null. */
+#define STANLI_CONSTRAINED_COLUMNS 0
+#define STANLI_WRITE_ARRAY_COLUMNS 1
+int64_t stanli_n_variables(const stanli_model* m, int set);
+const char* stanli_variable_name(const stanli_model* m, int set, int64_t i);
+int64_t stanli_variable_n_dims(const stanli_model* m, int set, int64_t i);
+int64_t stanli_variable_dim(const stanli_model* m, int set, int64_t i,
+                            int64_t k);
+
+/* The layout of every struct this header declares, for bindings that mirror
+ * them and cannot include it (R's C glue copies them, Python declares ctypes
+ * structures). Entry i names a struct and one of its fields; a binding
+ * compares each field it mirrors, and each struct's size, at load and refuses
+ * to run on any difference. Static storage. */
+typedef struct {
+  const char* type;
+  const char* field;
+  size_t offset;
+  size_t size;
+  size_t type_size;
+} stanli_field_layout;
+int64_t stanli_n_field_layouts(void);
+const stanli_field_layout* stanli_field_layouts(void);
 /* 1 if transformed data drew from the construction seed, so this model is a
  * function of that seed: a binding that runs everything under one seed the
  * way CmdStan does rebuilds with the run seed when this is set, and never
  * otherwise. Generated-quantities draws do not count. */
 int stanli_transformed_data_rng(const stanli_model* m);
+/* The parts of the model stanli_warnings is about, one entry each: what
+ * runs through the MIR interpreter and why. stanli_interpreter_fallback
+ * returns "" for an index out of range. Owned by the model. */
+int64_t stanli_n_interpreter_fallbacks(const stanli_model* m);
+const char* stanli_interpreter_fallback(const stanli_model* m, int64_t i);
 
 #ifdef __cplusplus
 }

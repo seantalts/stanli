@@ -121,13 +121,12 @@ std::vector<double> read_row(
 
 bool compiled_completely(const stanli::CompiledModel& cm,
                          const std::string& what) {
-  if (cm.write_array && !cm.write_array->interp &&
-      cm.write_array->truncated.empty())
+  if (cm.write_array && !cm.write_array->interp && !cm.write_array->truncated)
     return true;
   ++failures;
-  std::printf(
-      "FAIL %s did not compile completely: %s\n", what.c_str(),
-      cm.write_array ? cm.write_array->truncated.c_str() : "no write_array");
+  std::printf("FAIL %s did not compile completely: %s\n", what.c_str(),
+              cm.write_array ? cm.write_array->truncated.value_or("").c_str()
+                             : "no write_array");
   return false;
 }
 
@@ -146,12 +145,12 @@ bool expect_interpreted(const std::string& text, const stanli::DataMap& data,
     return false;
   }
   if (!cm.write_array || !cm.write_array->interp ||
-      (!reason.empty() &&
-       cm.write_array->truncated.find(reason) == std::string::npos)) {
+      (!reason.empty() && cm.write_array->truncated.value_or("").find(reason) ==
+                              std::string::npos)) {
     ++failures;
-    std::printf(
-        "FAIL %s: got %s\n", what.c_str(),
-        cm.write_array ? cm.write_array->truncated.c_str() : "no write_array");
+    std::printf("FAIL %s: got %s\n", what.c_str(),
+                cm.write_array ? cm.write_array->truncated.value_or("").c_str()
+                               : "no write_array");
     return false;
   }
   if (out) *out = std::move(cm);
@@ -162,13 +161,12 @@ void expect_compiled(const std::string& text, const stanli::DataMap& data,
                      const std::string& what) {
   try {
     const stanli::CompiledModel cm = stanli::compile_model(text, data);
-    if (cm.write_array && !cm.write_array->interp &&
-        cm.write_array->truncated.empty())
+    if (cm.write_array && !cm.write_array->interp && !cm.write_array->truncated)
       return;
     ++failures;
-    std::printf(
-        "FAIL %s: got %s\n", what.c_str(),
-        cm.write_array ? cm.write_array->truncated.c_str() : "no write_array");
+    std::printf("FAIL %s: got %s\n", what.c_str(),
+                cm.write_array ? cm.write_array->truncated.value_or("").c_str()
+                               : "no write_array");
   } catch (const std::exception& e) {
     ++failures;
     std::printf("FAIL %s: did not compile: %s\n", what.c_str(), e.what());
@@ -269,7 +267,7 @@ void test_wanames_pipeline() {
     std::printf("FAIL wanames: no write_array\n");
     return;
   }
-  expect_eq("wanames truncated", cm.write_array->truncated, "");
+  expect_eq("wanames truncated", cm.write_array->truncated.value_or(""), "");
   // Taken verbatim from CmdStan's CSV for this model (diagnostic columns
   // dropped). Note gq's order: Stan flattens an array of vectors with the
   // FIRST index varying fastest, like everything else it serializes.
@@ -364,7 +362,7 @@ void test_gq_bare_fill_is_nan() {
     std::printf("FAIL gqbarefill: no write_array\n");
     return;
   }
-  expect_eq("gqbarefill truncated", cm.write_array->truncated, "");
+  expect_eq("gqbarefill truncated", cm.write_array->truncated.value_or(""), "");
   expect_eq("gqbarefill header", joined(cm.write_array->columns),
             "mu,q.1,q.2,q.3");
 
@@ -403,7 +401,7 @@ void test_gq_name_shadowing() {
     std::printf("FAIL gqshadow: no write_array\n");
     return;
   }
-  expect_eq("gqshadow truncated", cm.write_array->truncated, "");
+  expect_eq("gqshadow truncated", cm.write_array->truncated.value_or(""), "");
   expect_eq("gqshadow header", joined(cm.write_array->columns), "mu,x.1,x.2");
 
   const std::vector<double> want{0.375, 3.75, 7.5};
@@ -1095,10 +1093,10 @@ void expect_retained_write_array_loop(const std::string& stem,
     std::printf("FAIL %s: no write_array\n", stem.c_str());
     return;
   }
-  if (!cm.write_array->truncated.empty()) {
+  if (cm.write_array->truncated.has_value()) {
     ++failures;
     std::printf("FAIL %s write_array truncated: %s\n", stem.c_str(),
-                cm.write_array->truncated.c_str());
+                cm.write_array->truncated.value_or("").c_str());
   }
   if (find_retained_loop(cm.write_array->graph) == nullptr) {
     ++failures;
@@ -1168,7 +1166,7 @@ void test_write_array_carried_loop() {
       x[static_cast<size_t>(i)] = 0.25 * (i % 5) - 0.5;
     data.set_real_array("x", x);
     CompiledModel cm = compile_model(text, data);
-    if (!cm.write_array || !cm.write_array->truncated.empty()) {
+    if (!cm.write_array || cm.write_array->truncated.has_value()) {
       ++failures;
       std::printf("FAIL structured_wa_carried T=%d: no compiled write_array\n",
                   t);
@@ -1297,8 +1295,9 @@ void expect_bounded_output(const std::string& fixture,
     ++failures;
     std::printf("FAIL %s bounded selection: expected compiled=%d, %s\n",
                 fixture.c_str(), compiled,
-                normal.write_array ? normal.write_array->truncated.c_str()
-                                   : "missing outputs");
+                normal.write_array
+                    ? normal.write_array->truncated.value_or("").c_str()
+                    : "missing outputs");
     return;
   }
   if (!compiled) {
@@ -1561,10 +1560,10 @@ void test_write_array_selected_loop_refused() {
     std::printf("FAIL gq_selected_loop_refused: no write_array\n");
     return;
   }
-  if (!small.write_array->truncated.empty()) {
+  if (small.write_array->truncated.has_value()) {
     ++failures;
     std::printf("FAIL gq_selected_loop_refused: truncated at N=32: %s\n",
-                small.write_array->truncated.c_str());
+                small.write_array->truncated.value_or("").c_str());
   }
   const size_t small_ops = small.write_array->graph.ops.size();
   const size_t large_ops = large.write_array->graph.ops.size();
@@ -1614,12 +1613,12 @@ void test_write_array_selected_loop_overflow() {
     std::printf("FAIL gq_selected_loop_overflow: no write_array\n");
     return;
   }
-  if (cm.write_array->truncated.empty() ||
-      cm.write_array->truncated.find("generated quantities") ==
+  if (!cm.write_array->truncated ||
+      cm.write_array->truncated.value_or("").find("generated quantities") ==
           std::string::npos) {
     ++failures;
     std::printf("FAIL gq_selected_loop_overflow: truncated message is [%s]\n",
-                cm.write_array->truncated.c_str());
+                cm.write_array->truncated.value_or("").c_str());
   }
   if (!cm.write_array->interp) {
     ++failures;
@@ -1641,11 +1640,11 @@ void test_constant_folded_gq_column() {
   CompiledModel cm = compile_model(text, data);
   test_unsetenv("STANLI_WA_FORCE_INTERP");
   if (!cm.write_array || !cm.write_array->interp ||
-      !cm.write_array->truncated.empty()) {
+      cm.write_array->truncated.has_value()) {
     ++failures;
-    std::printf(
-        "FAIL gqconst did not compile completely: %s\n",
-        cm.write_array ? cm.write_array->truncated.c_str() : "no write_array");
+    std::printf("FAIL gqconst did not compile completely: %s\n",
+                cm.write_array ? cm.write_array->truncated.value_or("").c_str()
+                               : "no write_array");
     return;
   }
   expect_eq("gqconst header", joined(cm.write_array->columns),
@@ -1662,6 +1661,34 @@ void test_constant_folded_gq_column() {
     ++failures;
     std::printf("FAIL gqconst row: got %zu values\n", row.size());
   }
+}
+
+// A zero-size output before a folded one: its loop writes nothing, so
+// naming the folded write "the variable after the last one written" calls
+// it z. The writes' widths against output_vars name it w.
+void test_constant_folded_gq_after_empty_output() {
+  using namespace stanli;
+  DataMap data;
+  data.set_int("N", 0);
+  const std::string text =
+      slurp("tests/fixtures/gqconst_after_empty.tmir.sexp");
+  test_setenv("STANLI_WA_FORCE_INTERP", "1");
+  CompiledModel cm = compile_model(text, data);
+  test_unsetenv("STANLI_WA_FORCE_INTERP");
+  if (!cm.write_array || !cm.write_array->interp) {
+    ++failures;
+    std::printf("FAIL gqconst_after_empty did not compile\n");
+    return;
+  }
+  expect_eq("gqconst_after_empty graph header", joined(cm.write_array->columns),
+            "mu,w");
+  Executor pex(cm.graph);
+  cm.bind(pex);
+  Executor wex(std::move(cm.write_array->graph));
+  cm.write_array->bind(wex);
+  (void)cross_checked_row(cm, pex, wex, {0.25}, 1, "gqconst_after_empty");
+  expect_eq("gqconst_after_empty interpreted header",
+            joined(cm.write_array->interp->columns()), "mu,w");
 }
 
 struct RngException {
@@ -2103,7 +2130,7 @@ void test_multi_normal_rng_lowering_guards() {
       "((pattern (Var mu)) (meta ((type_ UVector) (loc <opaque>) (adlevel "
       "DataOnly))))";
   const std::string covariance_arg =
-      "((pattern (Var inline_cov_matrix_2d_return_sym1__))\n"
+      "((pattern (Var inline_cov_matrix_2d_return1__))\n"
       "           (meta ((type_ UMatrix) (loc <opaque>) (adlevel "
       "DataOnly))))";
   const size_t mean = base.find(mean_arg, call);
@@ -2185,17 +2212,16 @@ void test_multi_normal_rng_lowering_guards() {
 
   std::string unknown_covariance = base;
   const size_t covariance_var =
-      unknown_covariance.find("(Var inline_cov_matrix_2d_return_sym1__)", call);
+      unknown_covariance.find("(Var inline_cov_matrix_2d_return1__)", call);
   unknown_covariance.replace(
       covariance_var,
-      std::string("(Var inline_cov_matrix_2d_return_sym1__)").size(),
-      "(Var mu)");
+      std::string("(Var inline_cov_matrix_2d_return1__)").size(), "(Var mu)");
   expect_interp(unknown_covariance, "covariance has no known matrix shape",
                 "multi-normal unknown covariance shape stays interpreted");
 
   std::string mismatched_covariance = base;
   const size_t matrix_decl = mismatched_covariance.find(
-      "(decl_id inline_cov_matrix_2d_covariance_sym2__)");
+      "(decl_id inline_cov_matrix_2d_covariance2__)");
   size_t first_extent =
       mismatched_covariance.find("((pattern (Lit Int 2))", matrix_decl);
   size_t second_extent =
@@ -2708,11 +2734,12 @@ void test_layout_materialization_boundaries() {
     for (const Op& op : udf.write_array->graph.ops)
       udf_packet_products += op.opcode == OP_PROD_VEC && op.variant == 0;
   if (!udf.write_array || udf.write_array->interp ||
-      !udf.write_array->truncated.empty() || udf_packet_products != 1) {
+      udf.write_array->truncated.has_value() || udf_packet_products != 1) {
     ++failures;
     std::printf("FAIL container UDF return did not compile as owning: %s\n",
-                udf.write_array ? udf.write_array->truncated.c_str()
-                                : "no write_array");
+                udf.write_array
+                    ? udf.write_array->truncated.value_or("").c_str()
+                    : "no write_array");
   } else {
     Executor udf_graph(std::move(udf.write_array->graph));
     udf.write_array->bind(udf_graph);
@@ -2812,12 +2839,12 @@ void test_matrix_transpose_extrema_fallback() {
   DataMap data;
   CompiledModel cm = compile_model(text, data);
   if (!cm.write_array || !cm.write_array->interp ||
-      cm.write_array->truncated.find("grouping is not native") ==
+      cm.write_array->truncated.value_or("").find("grouping is not native") ==
           std::string::npos) {
     ++failures;
-    std::printf(
-        "FAIL matrix transpose extrema did not fail closed: %s\n",
-        cm.write_array ? cm.write_array->truncated.c_str() : "no write_array");
+    std::printf("FAIL matrix transpose extrema did not fail closed: %s\n",
+                cm.write_array ? cm.write_array->truncated.value_or("").c_str()
+                               : "no write_array");
     return;
   }
 
@@ -2876,11 +2903,12 @@ void test_compiled_gq_extrema() {
     data.set_real_array("d", x, {static_cast<int64_t>(x.size())});
     CompiledModel cm = compile_model(text, data);
     if (!cm.write_array || cm.write_array->interp ||
-        !cm.write_array->truncated.empty()) {
+        cm.write_array->truncated.has_value()) {
       ++failures;
       std::printf("FAIL extrema fixture case %zu did not compile: %s\n", c,
-                  cm.write_array ? cm.write_array->truncated.c_str()
-                                 : "no write_array");
+                  cm.write_array
+                      ? cm.write_array->truncated.value_or("").c_str()
+                      : "no write_array");
       continue;
     }
     int extrema_ops = 0, minima = 0, maxima = 0;
@@ -3058,7 +3086,7 @@ void test_gq_extrema_lowering_guards() {
   // owning-vector provenance merely from its Var syntax.
   std::string udf = slurp("tests/fixtures/gq_extrema_udf.tmir.sexp");
   const size_t udf_wa = udf.find("(generate_quantities");
-  const std::string stan_min = "(FunApp (StanLib min FnPlain AoS)";
+  const std::string stan_min = "(FunApp (StanLib min FnPlain)";
   const size_t inlined = udf.find(stan_min, udf_wa);
   if (udf_wa == std::string::npos || inlined == std::string::npos) {
     ++failures;
@@ -3372,7 +3400,7 @@ void test_gq_reduction_lowering_guards() {
   // a UDF must remain on WaInterp even when the caller's syntax is a Var.
   std::string dynamic_udf = udf_fixture;
   const size_t udf_wa = dynamic_udf.find("(generate_quantities");
-  const std::string stan_prod = "(FunApp (StanLib prod FnPlain AoS)";
+  const std::string stan_prod = "(FunApp (StanLib prod FnPlain)";
   const size_t inlined_prod = dynamic_udf.find(stan_prod, udf_wa);
   if (udf_wa == std::string::npos || inlined_prod == std::string::npos) {
     ++failures;
@@ -3990,9 +4018,9 @@ void test_runtime_int_sum_redeclaration_shadowing() {
   CompiledModel cm = compile_model(literal, reduction_data());
   if (!cm.write_array || cm.write_array->interp) {
     ++failures;
-    std::printf(
-        "FAIL same-id literal int redeclaration did not compile: %s\n",
-        cm.write_array ? cm.write_array->truncated.c_str() : "no write_array");
+    std::printf("FAIL same-id literal int redeclaration did not compile: %s\n",
+                cm.write_array ? cm.write_array->truncated.value_or("").c_str()
+                               : "no write_array");
   } else {
     Executor graph(std::move(cm.write_array->graph));
     cm.write_array->bind(graph);
@@ -4076,11 +4104,11 @@ void test_choose_index_gq() {
   CompiledModel cm = compile_model(text, data);
   test_unsetenv("STANLI_WA_FORCE_INTERP");
   if (!cm.write_array || !cm.write_array->interp ||
-      !cm.write_array->truncated.empty()) {
+      cm.write_array->truncated.has_value()) {
     ++failures;
-    std::printf(
-        "FAIL choosesize did not compile completely: %s\n",
-        cm.write_array ? cm.write_array->truncated.c_str() : "no write_array");
+    std::printf("FAIL choosesize did not compile completely: %s\n",
+                cm.write_array ? cm.write_array->truncated.value_or("").c_str()
+                               : "no write_array");
     return;
   }
   std::vector<double> q(22);
@@ -4236,11 +4264,12 @@ void test_integer_rng_control() {
     auto cm = compile_model(
         slurp("tests/fixtures/gq_rng_integer_control.tmir.sexp"), data);
     test_unsetenv("STANLI_WA_FORCE_INTERP");
-    if (!cm.write_array || !cm.write_array->truncated.empty()) {
+    if (!cm.write_array || cm.write_array->truncated.has_value()) {
       ++failures;
       std::printf("FAIL integer RNG control did not compile: %s\n",
-                  cm.write_array ? cm.write_array->truncated.c_str()
-                                 : "no write_array");
+                  cm.write_array
+                      ? cm.write_array->truncated.value_or("").c_str()
+                      : "no write_array");
       continue;
     }
     Executor ex(cm.write_array->graph);
@@ -4282,7 +4311,7 @@ void test_integer_rng_control() {
   auto dynamic = compile_model(
       slurp("tests/fixtures/gq_rng_dynamic_shape.tmir.sexp"), data);
   if (!dynamic.write_array || !dynamic.write_array->interp ||
-      dynamic.write_array->truncated.empty()) {
+      !dynamic.write_array->truncated) {
     ++failures;
     std::printf("FAIL RNG-dependent local extent must stay interpreted\n");
   } else {
@@ -4303,7 +4332,7 @@ void test_integer_rng_control() {
   auto bad = compile_model(
       slurp("tests/fixtures/gq_rng_invalid_index.tmir.sexp"), data);
   test_unsetenv("STANLI_WA_FORCE_INTERP");
-  if (!bad.write_array || !bad.write_array->truncated.empty()) {
+  if (!bad.write_array || bad.write_array->truncated.has_value()) {
     ++failures;
     std::printf("FAIL RNG checked-index fixture did not compile\n");
   } else {
@@ -4346,7 +4375,7 @@ void test_integer_expressions() {
     auto model = compile_model(source, data);
     test_unsetenv("STANLI_WA_FORCE_INTERP");
     if (!model.write_array || !model.write_array->interp ||
-        !model.write_array->truncated.empty()) {
+        model.write_array->truncated.has_value()) {
       ++failures;
       std::printf("FAIL integer expressions did not compile\n");
       continue;
@@ -4421,7 +4450,8 @@ void test_integer_expressions() {
     data.set_int("divisor", 2);
     auto model = compile_model(text, data);
     if (!model.write_array || !model.write_array->interp ||
-        model.write_array->truncated.find(reason) == std::string::npos) {
+        model.write_array->truncated.value_or("").find(reason) ==
+            std::string::npos) {
       ++failures;
       std::printf("FAIL direct integer sum lost guard: %s\n", reason);
     }
@@ -4466,6 +4496,7 @@ int main() {
   test_choose_index_gq();
   test_interpreted_lkj();
   test_constant_folded_gq_column();
+  test_constant_folded_gq_after_empty_output();
   test_categorical_rng_lowering_guards();
   test_compiled_categorical_rng();
   test_categorical_rng_empty_vector();

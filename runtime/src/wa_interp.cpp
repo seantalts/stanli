@@ -338,7 +338,7 @@ WaInterp::WaInterp(
     : prog_(std::move(prog)),
       shared_env_(std::move(shared_env)),
       base_env_(std::move(own_env)) {
-  for (const auto& f : prog_->fun_defs) funs_[f.name] = &f;
+  for (const auto& f : prog_->fun_defs) funs_[mir::function_key(f)] = &f;
 }
 
 std::vector<double> WaInterp::eval(
@@ -349,7 +349,7 @@ std::vector<double> WaInterp::eval(
     cols_.clear();
     n_tp_start_ = n_gq_start_ = 0;
     saw_tp_ = saw_gq_ = false;
-    last_written_.clear();
+    output_cursor_ = mir::OutputCursor(prog_->output_vars);
   }
   std::vector<double> row;
   MirInterp<double>* cur = nullptr;
@@ -357,20 +357,8 @@ std::vector<double> WaInterp::eval(
   h.stmt = [this, &cur, &params, &row](const mir::Stmt& s) {
     if (s.kind == mir::Stmt::Decl && s.read_transform)
       return read_param(*cur, s, params);
-    if (s.kind == mir::Stmt::NRFunApp && s.fn_name == "FnWriteParam")
+    if (mir::internal_name(s) == "FnWriteParam")
       return write_param(*cur, s, row);
-    // The section guards: note the boundary and let the interpreter run
-    // the statement, whose condition is false (both flags are on).
-    if (!have_cols_) {
-      const mir::EmitGuard eg = mir::emit_guard(s);
-      if (eg == mir::EmitGuard::TransformedParams) {
-        n_tp_start_ = cols_.size();
-        saw_tp_ = true;
-      } else if (eg == mir::EmitGuard::GeneratedQuantities) {
-        n_gq_start_ = cols_.size();
-        saw_gq_ = true;
-      }
-    }
     return false;
   };
   h.fun = [this, &rng](MirInterp<double>& in, const mir::Expr& e,
@@ -387,15 +375,14 @@ std::vector<double> WaInterp::eval(
                out);
   };
   MirInterp<double> in(funs_, "write_array", std::move(h));
+  in.set_native_extrema(true);
   cur = &in;
   in.set_parent_env(shared_env_.get());
   in.env() = base_env_;
   in.run(prog_->generate_quantities);
   if (!have_cols_) {
-    // A section with no guard of its own contributes no columns, so it
-    // starts where the CSV ends -- except that a missing first guard
-    // falls back to the second boundary, so the two cannot come out
-    // ordered backwards.
+    // A section with no columns starts where the next one does, so the two
+    // boundaries cannot come out ordered backwards.
     if (!saw_gq_) n_gq_start_ = cols_.size();
     if (!saw_tp_) n_tp_start_ = n_gq_start_;
     have_cols_ = true;
@@ -431,8 +418,7 @@ bool WaInterp::write_param(MirInterp<double>& in, const mir::Stmt& s,
                            std::vector<double>& row) {
   const mir::Expr& v = s.fn_args.at(0);
   // CmdStan writes a real and an imaginary column; one real column is wrong.
-  if (v.unsized.leaf == mir::UnsizedLeaf::Complex ||
-      v.raw.find("UComplex") != std::string::npos)
+  if (v.unsized.leaf == mir::UnsizedLeaf::Complex)
     throw CompileError("complex numbers are not supported yet (in output " +
                        v.name + ")");
   DataMap::Entry e = in.eval(v);
@@ -445,7 +431,7 @@ bool WaInterp::write_param(MirInterp<double>& in, const mir::Stmt& s,
     const mir::Expr* base = &v;
     while (base->kind == mir::Expr::Indexed) {
       for (size_t k = base->args.size(); k-- > 1;) {
-        if (base->args[k].name != "IndexSingle")
+        if (base->args[k].kind != mir::Expr::IndexSingle)
           throw CompileError(
               "cannot name an output parameter written through a non-scalar "
               "index");
@@ -453,32 +439,38 @@ bool WaInterp::write_param(MirInterp<double>& in, const mir::Stmt& s,
       }
       base = &base->args[0];
     }
-    std::string name = base->name;
-    if (name.empty()) {
-      // The optimizer (--O1 constant propagation) replaced the write's
-      // variable reference with the value itself, so the name is gone
-      // from the statement. Writes happen in output_vars order, and a
-      // substituted write is always a whole variable, so the name is the
-      // output var after the last one written.
-      const auto& ov = prog_->output_vars;
-      size_t idx = 0;
-      if (!last_written_.empty()) {
-        auto it = std::find(ov.begin(), ov.end(), last_written_);
-        if (it != ov.end()) idx = (size_t)(it - ov.begin()) + 1;
-      }
-      if (idx >= ov.size())
-        throw CompileError(
-            "cannot name an output parameter after optimization");
-      name = ov[idx];
+    const mir::OutputVar* owner = output_cursor_.take(
+        base->kind == mir::Expr::Var ? base->name : std::string(), len,
+        [&in](const mir::OutputVar& var) {
+          int64_t columns = 1;
+          for (const mir::Expr& dim : var.type.dims) columns *= in.as_int(dim);
+          return columns;
+        });
+    if (owner == nullptr)
+      throw CompileError("an output write matches no output variable");
+    if (mir::is_complex(owner->type))
+      throw CompileError("complex numbers are not supported yet (in output " +
+                         owner->name + ")");
+    if (owner->block != mir::OutputVar::Block::Parameters && !saw_tp_) {
+      n_tp_start_ = cols_.size();
+      saw_tp_ = true;
     }
-    last_written_ = name;
+    if (owner->block == mir::OutputVar::Block::GeneratedQuantities &&
+        !saw_gq_) {
+      n_gq_start_ = cols_.size();
+      saw_gq_ = true;
+    }
+    std::string name = owner->name;
     for (auto it = ixs.rbegin(); it != ixs.rend(); ++it)
       name += "." + std::to_string(*it);
     using Naming = CompiledModel::ParamView::Naming;
     CompiledModel::ParamView pv{name, (int)row.size(), len};
-    if (v.type_ == "UReal" || v.type_ == "UInt" || v.type_ == "UComplex") {
+    pv.variable = owner->name;
+    pv.index.assign(ixs.rbegin(), ixs.rend());
+    if (mir::language_scalar(v) ||
+        mir::is_unsized(v, mir::UnsizedLeaf::Complex)) {
       pv.naming = Naming::Scalar;
-    } else if (v.type_ == "UMatrix") {
+    } else if (mir::is_unsized(v, mir::UnsizedLeaf::Matrix)) {
       pv.naming = Naming::Matrix;
       pv.rows = e.dims.size() == 2 ? e.dims[0] : len;
     } else {
@@ -496,7 +488,9 @@ bool interpreted_rng_call(MirInterp<double>& in, const mir::Expr& e,
                           DataMap::Entry* out, WaRng& rng) {
   stan::rng_t& g = rng.gen();
   const std::string& f = e.name;
-  if (f.size() < 5 || f.compare(f.size() - 4, 4, "_rng") != 0) return false;
+  if (e.kind != mir::Expr::FunApp || e.fn_lib != mir::Expr::Lib::StanLib ||
+      e.fn_suffix != mir::FnSuffix::Rng || f.size() < 5)
+    return false;
   const std::string base = f.substr(0, f.size() - 4);
 
   std::vector<DataMap::Entry> av;

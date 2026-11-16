@@ -7,6 +7,7 @@
 #include <cstdint>
 #include <memory>
 #include <mutex>
+#include <stdexcept>
 #include <string>
 #include <utility>
 #include <vector>
@@ -18,6 +19,12 @@ inline constexpr int kRegionMapSavedGap = 64;
 inline constexpr int kRegionMapTile = 64;
 
 inline constexpr int kRegionMapProfileCodes = 128;
+
+// STANLI_REGION_MAP_CHECK_CLEAN found an adjoint cell left nonzero after a
+// recompute sweep: a kernel bug, never a property of the evaluation point.
+struct RegionMapUncleanSweep : std::logic_error {
+  using std::logic_error::logic_error;
+};
 
 struct RegionMapTally {
   uint64_t evaluations = 0, tiles = 0;
@@ -112,6 +119,9 @@ struct RegionMapProg : IslandProg {
   std::vector<std::pair<int, int>> saved;
   int saved_cells = 0;
   bool recompute = false;
+  // Check after each backward iteration that the adjoint cells it should
+  // have cleared are zero (STANLI_REGION_MAP_CHECK_CLEAN, read at lowering).
+  bool check_clean = false;
   RegionMapLanePlan lanes;
   std::string label;
 };

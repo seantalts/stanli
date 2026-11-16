@@ -17,6 +17,7 @@ namespace {
 
 struct MirIntegrand {
   const QuadratureSpec* spec;
+  EvalState* eval_state = nullptr;
   mutable RhsWorkspace workspace;
 
   template <typename Theta>
@@ -30,7 +31,7 @@ struct MirIntegrand {
     if (spec->prog.ok) {
       run_rhs<T>(spec->prog, x, &xc, theta.data(),
                  static_cast<size_t>(spec->parameter_count), spec->x_r.data(),
-                 result, workspace.get<T>());
+                 result, workspace.get<T>(), eval_state);
     } else {
       const mir::FunDef* callback = spec->callback();
       if (!callback)
@@ -48,14 +49,14 @@ struct MirIntegrand {
 template <typename T_a, typename T_b, typename T_theta>
 auto integrate(const QuadratureSpec& spec, const T_a& a, const T_b& b,
                const Eigen::Matrix<T_theta, Eigen::Dynamic, 1>& theta,
-               const double* controls = nullptr) {
+               const double* controls, EvalState* state) {
   const double relative = controls ? controls[0] : spec.relative_tolerance;
   const bool modern = spec.method != mir::QuadratureMethod::Integrate1D;
   const double absolute =
       controls && modern ? controls[1] : spec.absolute_tolerance;
   const int steps =
       controls && modern ? static_cast<int>(controls[2]) : spec.max_steps;
-  const MirIntegrand f{&spec};
+  const MirIntegrand f{&spec, state};
   switch (spec.method) {
     case mir::QuadratureMethod::Integrate1D:
       return stan::math::integrate_1d_impl(f, a, b, relative, nullptr, theta);
@@ -82,7 +83,8 @@ void quadrature_eval(KernelCtx& ctx, const QuadratureSpec& spec) {
     theta(i) = T(ctx.in[2].data[i]);
 
   auto integral =
-      integrate(spec, a, b, theta, ctx.n_in == 4 ? ctx.in[3].data : nullptr);
+      integrate(spec, a, b, theta, ctx.n_in == 4 ? ctx.in[3].data : nullptr,
+                ctx.eval_state);
   ctx.out.data[0] = stan::math::value_of(integral);
   if constexpr (ActiveA || ActiveB || ActiveTheta) {
     const int64_t scratch_len = 2 + ctx.in[2].len;
@@ -104,10 +106,10 @@ void quadrature_fwd(KernelCtx& ctx) {
   if (ctx.n_in == 4 &&
       (ctx.in[3].len !=
            (spec.method == mir::QuadratureMethod::Integrate1D ? 1 : 3) ||
-       (ctx.variant & 0x7u) != 0))
+       solver_activity(ctx).any()))
     throw std::invalid_argument(
         "runtime quadrature controls require a value-only solve");
-  switch (ctx.variant & 0x7u) {
+  switch (solver_activity(ctx).byte() & 0x7u) {
     case 0:
       quadrature_eval<false, false, false>(ctx, spec);
       break;
@@ -136,7 +138,7 @@ void quadrature_fwd(KernelCtx& ctx) {
 }
 
 void quadrature_bwd(KernelCtx& ctx) {
-  if ((ctx.variant & 0x7u) == 0) return;
+  if (!solver_activity(ctx).any()) return;
   int64_t at = 0;
   for (int k = 0; k < ctx.n_in; ++k) {
     for (int64_t i = 0; i < ctx.in[k].len; ++i, ++at)
@@ -146,7 +148,7 @@ void quadrature_bwd(KernelCtx& ctx) {
 }
 
 int64_t quadrature_scratch(const Op& op, const Slot* slots) {
-  if ((op.variant & 0x7u) == 0) return 0;
+  if (!solver_activity(op).any()) return 0;
   return sum_in_lens(op, slots);
 }
 

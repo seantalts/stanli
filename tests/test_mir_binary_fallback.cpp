@@ -31,7 +31,7 @@ Expr variable(std::string name) {
   Expr e;
   e.kind = Expr::Var;
   e.name = std::move(name);
-  e.type_ = "UReal";
+  e.unsized = {0, stanli::mir::UnsizedLeaf::Real};
   return e;
 }
 
@@ -40,7 +40,7 @@ Expr call_expr(std::string name, std::vector<Expr> args) {
   e.kind = Expr::FunApp;
   e.name = std::move(name);
   e.args = std::move(args);
-  e.type_ = "UReal";
+  e.unsized = {0, stanli::mir::UnsizedLeaf::Real};
   e.fn_lib = Expr::Lib::StanLib;
   return e;
 }

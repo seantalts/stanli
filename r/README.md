@@ -341,7 +341,8 @@ model, so `log_prob()` and the other model methods stop working;
 stanli_install(); stanli_available(); stanli_runtime_path()
 
 m <- stanli_model(file = NULL, code = NULL, data = NULL, mir = NULL, seed = 1,
-                  threads_per_chain = 1, include_paths = NULL, fast_math = FALSE)
+                  threads_per_chain = 1, include_paths = NULL, fast_math = FALSE,
+                  allow_interpreter = TRUE)
 stanli_check_syntax(code)
 log_prob_grad(m, q)                 # log density and gradient
 log_prob_hessian(m, q)              # and the Hessian at q
@@ -382,8 +383,8 @@ side to update.
 
 The macOS and Linux runtimes embed the Stan compiler. On Windows it runs as a
 short-lived `stanli-compile.exe` subprocess beside the runtime. Without either,
-R falls back to stock `stanc` beside the runtime or on `PATH`, and finally to the bundled JavaScript compiler through V8,
-which is also what webR uses.
+R uses the bundled JavaScript build of the same compiler through V8, which is
+also what webR uses.
 
 ## Limits
 

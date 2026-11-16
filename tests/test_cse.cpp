@@ -352,12 +352,12 @@ static SharedBackwardGraph build_shared_backward_graph() {
   dup([&](int o) { g.add_op(OP_LSE2, {p0, p1}, o); });
   dup([&](int o) { g.add_op(OP_LOG_DIFF_EXP, {hi, p0}, o); });
   dup([&](int o) { g.add_op(OP_LOG_MIX, {theta, p0, p1}, o); });
-  for (uint8_t variant : {uint8_t{0}, uint8_t{0x81}}) {
+  for (uint8_t variant : {uint8_t{0x01}, uint8_t{0x81}}) {
     dup([&](int o) {
       g.ops[g.add_op(OP_BERNOULLI_LPMF, {theta}, o, {1})].variant = variant;
     });
     dup([&](int o) {
-      g.ops[g.add_op(OP_BINOMIAL_LPMF, {theta}, o, {1, 3, 1, 10})].variant =
+      g.ops[g.add_op(OP_BINOMIAL_LPMF, {theta}, o, {1, 3, 1, 10, 0})].variant =
           variant;
     });
     dup([&](int o) {

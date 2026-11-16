@@ -1,5 +1,7 @@
 #include <stanli/message_sink.hpp>
 
+#include <stanli/debug_switch.hpp>
+
 #include <atomic>
 #include <cstdio>
 #include <mutex>
@@ -103,6 +105,14 @@ void emit_diagnostic(const std::string& text) {
   line += '\n';
   std::fwrite(line.data(), 1, line.size(), stderr);
 #endif
+}
+
+void debug_switch_ignored(const char* name) {
+  static std::atomic<bool> said{false};
+  if (said.exchange(true)) return;
+  emit_diagnostic(std::string("stanli: ") + name +
+                  " is ignored: this build has no developer switches (CMake "
+                  "option STANLI_DEBUG_SWITCHES=OFF)");
 }
 
 }  // namespace stanli

@@ -175,11 +175,11 @@ struct RecordingProgram {
     lower(root, outer);
     patch(outer.breaks, exit_break);
     patch(outer.continues, exit_continue);
-    const char* option = std::getenv("STANLI_STRUCTURED_DATA_RECORDING");
+    const char* option = debug_env("STANLI_STRUCTURED_DATA_RECORDING");
     if (!option || option[0] != '0') compile_data(s);
-    if (const char* work = std::getenv("STANLI_DATA_LOOP_MEMO_MIN_WORK"))
+    if (const char* work = debug_env("STANLI_DATA_LOOP_MEMO_MIN_WORK"))
       memo_min_work = std::strtoull(work, nullptr, 10);
-    if (const char* ratio = std::getenv("STANLI_DATA_LOOP_MEMO_MIN_RATIO"))
+    if (const char* ratio = debug_env("STANLI_DATA_LOOP_MEMO_MIN_RATIO"))
       memo_min_ratio = std::strtoull(ratio, nullptr, 10);
   }
 };
@@ -227,10 +227,10 @@ void RecordingProgram::compile_data(LoopState& s) {
     changed = false;
     propagate(propagate, p.root);
   }
-  const char* index_option = std::getenv("STANLI_STRUCTURED_PREPARED_INDEX");
+  const char* index_option = debug_env("STANLI_STRUCTURED_PREPARED_INDEX");
   const bool prepare_indices = !index_option || index_option[0] != '0';
   const char* iterator_option =
-      std::getenv("STANLI_STRUCTURED_PREPARED_ITERATOR");
+      debug_env("STANLI_STRUCTURED_PREPARED_ITERATOR");
   if (!iterator_option || iterator_option[0] != '0') {
     // A stable iterator binding requires one For writer in the whole region.
     // The original ForEnter publishes it; later iterations only change its
@@ -300,7 +300,7 @@ void RecordingProgram::compile_data(LoopState& s) {
       instruction.jump = branch.jump;
     }
   }
-  if (!std::getenv("STANLI_NO_DATA_LOOP_MEMO")) compile_memo(s);
+  if (!debug_env("STANLI_NO_DATA_LOOP_MEMO")) compile_memo(s);
   if (s.diagnostics)
     emit_diagnostic("stanli_structured data_recording: kernels=" +
                     std::to_string(kernels));

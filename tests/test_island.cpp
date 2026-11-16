@@ -1,6 +1,7 @@
 // Tape islands: a compiled region must match the op-by-op graph it
 // replaces (values and gradients), and everything the carver cannot prove
 // safe must stay untouched.
+#include "density_ops.hpp"
 #include "env_helpers.hpp"
 #include "graph_helpers.hpp"
 #include <stanli/compile.hpp>
@@ -212,7 +213,8 @@ static HmmGraph build_hmm(int T, int W = 2) {
       const int mk = g.add_slot(1, false);
       g.add_op(OP_INDEX, {mu}, mk, {k});
       const int em = g.add_slot(1, false);
-      const int id = g.add_op(OP_NORMAL_LPDF, {y, mk, sigma}, em);
+      const int id =
+          stanli::testutil::add_density(g, OP_NORMAL_LPDF, {y, mk, sigma}, em);
       g.ops[id].variant = 0x06;  // y data, mu/sigma active; propto OFF
       const int nk = g.add_slot(1, false);
       g.add_op(OP_ADD, {s0, em}, nk);
@@ -2346,7 +2348,8 @@ static void test_kernel_call_ops_carved(bool compact) {
     const int sm = g.add_slot(1, false);
     g.add_op(OP_ADD, {lg, cslot(0.15 * t + 0.4)}, sm);
     const int cd = g.add_slot(1, false);
-    g.add_op(OP_NORMAL_LCDF, {cslot(0.3), sm, cslot(2.0)}, cd);  // cdf
+    stanli::testutil::add_density(g, OP_NORMAL_LCDF,
+                                  {cslot(0.3), sm, cslot(2.0)}, cd);  // cdf
     const int pm = g.add_slot(1, false);
     {
       Op lp;  // poisson_lpmf(2 | exp-ish rate): int outcome rides in idata

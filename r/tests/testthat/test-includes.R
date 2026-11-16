@@ -86,12 +86,12 @@ test_that("the R JavaScript compiler uses Stan's nested include semantics", {
   on.exit(unlink(f$root, recursive = TRUE), add = TRUE)
   compile <- function(code) stanli:::mir_from_js(code, include_paths = f$root)
   mir <- compile(f$code)
-  expect_true(startsWith(mir, "STANLI2:"))
+  expect_true(startsWith(mir, "STANLI3:"))
   # Comments and string literals must never become filesystem dependencies.
   harmless <- paste0('/* #include absent.stan */\n// #include absent.stan\n',
                       'model { print("#include absent.stan"); }')
   expect_identical(stanli:::stan_include_sources(harmless, f$root), list())
-  expect_true(startsWith(compile(harmless), "STANLI2:"))
+  expect_true(startsWith(compile(harmless), "STANLI3:"))
   expect_error(compile("#include absent.stan\n"), "absent.stan", fixed = TRUE)
   writeLines("#include cycle.stan", file.path(f$root, "cycle.stan"))
   expect_error(compile("#include cycle.stan\n"), "recursively included", fixed = TRUE)
@@ -102,13 +102,13 @@ test_that("the R JavaScript compiler uses Stan's nested include semantics", {
   for (directive in c('#include "spaced π.stan"\r\n',
                        '#include\n<spaced π.stan>\n',
                        '#include\t"spaced π.stan" // comment\n'))
-    expect_true(startsWith(compile(directive), "STANLI2:"))
+    expect_true(startsWith(compile(directive), "STANLI3:"))
   # The bare alternative wins when it consumes more than the delimited form.
   # These filename characters are valid on Unix, but forbidden on Windows.
   if (.Platform$OS.type != "windows") {
     for (name in c('"body"tail', '<body>tail>')) {
       writeLines(f$expanded, file.path(f$root, name), useBytes = TRUE)
-      expect_true(startsWith(compile(paste0("#include ", name, "\n")), "STANLI2:"))
+      expect_true(startsWith(compile(paste0("#include ", name, "\n")), "STANLI3:"))
     }
   }
   if (stanli_available())
@@ -138,13 +138,14 @@ test_that("webR transports nested include files to the real JavaScript compiler"
       path <- ctx$eval(sub(",$", "", sub("^Module\\.FS\\.readFile\\(", "", match)))
       files[[path]] <- stanli:::read_utf8_file(path)
     }
+    if (!length(matches)) return(ctx$eval(script))
     ctx$assign("__files", files)
-    status <- ctx$eval(script)
-    if (identical(status, "ok")) {
-      written <- ctx$get("__written")
+    ctx$eval("globalThis.__written = null")
+    failed <- ctx$eval(script)
+    written <- ctx$get("__written")
+    if (!is.null(written))
       stanli:::write_utf8_file(written$path, written$value)
-    }
-    status
+    failed
   }
   mir <- stanli:::mir_from_webr(eval_js, f$code, include_paths = f$root)
   expect_identical(mir, stanli:::mir_from_js(f$code, include_paths = f$root))
@@ -155,24 +156,18 @@ test_that("webR transports nested include files to the real JavaScript compiler"
 test_that("native subprocess compilers receive include paths without changing cwd", {
   f <- include_fixture()
   on.exit(unlink(f$root, recursive = TRUE), add = TRUE)
-  portable <- Sys.getenv("STANLI_TEST_PORTABLE_COMPILER")
-  stock <- Sys.getenv("STANLI_STANC")
-  for (compiler in list(list(path = portable, portable = TRUE),
-                        list(path = stock, portable = FALSE))) {
-    if (!nzchar(compiler$path) || !file.exists(compiler$path)) next
-    wd <- getwd()
-    mir <- stanli:::mir_from_binary(compiler$path, f$code,
-                                    portable = compiler$portable,
-                                    include_paths = f$root)
-    expect_identical(getwd(), wd)
-    expect_error(stanli:::mir_from_binary(compiler$path, "#include absent.stan\n",
-                                          portable = compiler$portable,
-                                          include_paths = f$root),
-                  "absent.stan", fixed = TRUE)
-    if (stanli_available())
-      expect_identical(log_prob_grad(stanli_model(mir = mir, seed = 41), 0.3),
-                       log_prob_grad(stanli_model(code = f$expanded, seed = 41), 0.3))
-  }
+  compiler <- Sys.getenv("STANLI_TEST_PORTABLE_COMPILER")
+  skip_if(!nzchar(compiler) || !file.exists(compiler),
+          "STANLI_TEST_PORTABLE_COMPILER does not name a stanli-compile")
+  wd <- getwd()
+  mir <- stanli:::mir_from_binary(compiler, f$code, include_paths = f$root)
+  expect_identical(getwd(), wd)
+  expect_error(stanli:::mir_from_binary(compiler, "#include absent.stan\n",
+                                        include_paths = f$root),
+                "absent.stan", fixed = TRUE)
+  if (stanli_available())
+    expect_identical(log_prob_grad(stanli_model(mir = mir, seed = 41), 0.3),
+                     log_prob_grad(stanli_model(code = f$expanded, seed = 41), 0.3))
 })
 
 test_that("CmdStanR-style sampling forwards include paths", {

@@ -10,10 +10,8 @@
 //
 // Workers pool up to the hardware's concurrency, so independent calls --
 // one chain each -- run simultaneously. Compiling once and passing `mir`
-// keeps the 3.0 MB preferred compiler in a single worker (or out of the page
-// entirely, if the model was precompiled at build time with
-// stanc --O1 --debug-optimized-mir). The package carries stock stancjs for one
-// rollback cycle, but the worker loads it only if the portable compiler fails.
+// keeps the 3.0 MB compiler in a single worker (or out of the page entirely,
+// if the model's MIR was saved from an earlier compile()).
 
 const pool = [];
 const waiters = [];
@@ -102,9 +100,11 @@ function fastMathOption(value) {
  * @param {boolean} [opts.fastMath=false]  Compile in fast mode (fused
  *   multiply-add rewriting; numerics may differ from CmdStan in the last
  *   bits). Pass the same value to sample() together with the returned MIR.
- *   Needs the portable stanli compiler.
- * @returns {Promise<{mir: string, fastMath: boolean,
- *                    ms: {stanc: number}}>} */
+ * @returns {Promise<{mir: string, fastMath: boolean, warnings: string[],
+ *                    o1Fallback: string|null, ms: {stanc: number}}>}
+ *   `warnings` are the compiler's warnings. `o1Fallback` is null, or the
+ *   notice that the model exceeded the compiler's size budget for O1 and
+ *   was compiled from unoptimized MIR (correct, possibly slower). */
 export function compile(opts) {
   return request({ cmd: "compile", code: opts.code,
                    fastMath: fastMathOption(opts.fastMath) }, opts);
@@ -138,9 +138,9 @@ function pathfinderInitOptions(value) {
  * @param {Object} opts
  * @param {string} [opts.code]     Stan source (compiled in the worker by
  *   stanc3, which loads lazily on first use).
- * @param {string} [opts.mir]      Precompiled MIR (from `compile()` here, or
- *   `stanc --O1 --debug-optimized-mir` at build time). When given, neither
- *   browser compiler loads: the runtime alone is ~1.5 MB gzipped.
+ * @param {string} [opts.mir]      Precompiled MIR (from `compile()`, or
+ *   from `stan_to_mir()` in the Python package). When given, the compiler
+ *   does not load: the runtime alone is ~1.5 MB gzipped.
  * @param {Object|string} [opts.data]  Data as an object or JSON text.
  * @param {number} [opts.seed=1]       Run seed: transformed-data RNG at
  *   model construction (as CmdStan seeds it), then sampler and GQ RNG.
@@ -174,6 +174,7 @@ function pathfinderInitOptions(value) {
  * @returns {Promise<{names: string[], samples: number, generatedStart: number,
  *                    columns: Object<string, Float64Array>,
  *                    exactLp: boolean, fastMath: boolean,
+ *                    o1Fallback: string|null,
  *                    sampler: string, maxDepth: number|null,
  *                    samplerStats: Float64Array|null,
  *                    pathfinder?: {path: {iter, lp}[], khat: number,
@@ -187,6 +188,7 @@ function pathfinderInitOptions(value) {
  *   NUTS also returns post-warmup samplerStats in draw-major order:
  *   lp__, accept_stat__, stepsize__, treedepth__, n_leapfrog__,
  *   divergent__, energy__. Other methods return null for samplerStats.
+ *   `o1Fallback` is as in compile(), and null when `mir` was given.
  */
 // JSON.stringify writes null for a non-finite number, which Stan's data
 // reader rejects. It takes these quoted tokens.
@@ -240,6 +242,13 @@ export function sample(opts) {
  * WALNUTS and Pathfinder do not expose the required sampler statistics.
  * @returns {Promise<string>} */
 export async function diagnose(fits) {
+  return (await diagnoseReport(fits)).text;
+}
+
+/** diagnose(), with the report's verdict as numbers: `failed` checks and
+ * `unavailable` ones, which could not be computed.
+ * @returns {Promise<{text: string, failed: number, unavailable: number}>} */
+export async function diagnoseReport(fits) {
   const chains = Array.isArray(fits) ? fits : [fits];
   const first = chains[0];
   if (!first || !Number.isInteger(first.samples) || first.samples < 1 ||

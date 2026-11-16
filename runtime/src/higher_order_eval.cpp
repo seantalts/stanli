@@ -68,7 +68,7 @@ const mir::FunDef& callback(
     const mir::Expr& expr, const std::string& family) {
   if (expr.kind != mir::Expr::Var)
     throw CompileError(family + ": callback is not a function name");
-  auto it = funs.find(expr.name);
+  auto it = funs.find(mir::function_key(expr));
   if (it == funs.end())
     throw CompileError(family + ": unknown callback " + expr.name);
   return *it->second;
@@ -176,7 +176,7 @@ std::shared_ptr<OdeSpec> ode_spec(
   if (!meta || meta->method == mir::OdeMethod::Adjoint) return {};
   auto spec = std::make_shared<OdeSpec>();
   spec->adopt(funs);
-  spec->rhs_name = callback(funs, e.args.at(0), e.name).name;
+  spec->rhs_name = mir::function_key(callback(funs, e.args.at(0), e.name));
   spec->callback_name = spec->rhs_name;
   spec->legacy = meta->legacy;
   switch (meta->method) {
@@ -260,7 +260,7 @@ bool evaluate_retained_higher_order(
     if (meta->method == mir::OdeMethod::Adjoint) {
       auto spec = std::make_shared<OdeAdjointSpec>();
       spec->adopt(funs);
-      spec->rhs_name = callback(funs, e.args.at(0), e.name).name;
+      spec->rhs_name = mir::function_key(callback(funs, e.args.at(0), e.name));
       spec->callback_name = spec->rhs_name;
       std::vector<std::vector<double>> in;
       in.push_back(real_values(eval(e.args[1]), "adjoint ODE initial state"));
@@ -292,14 +292,14 @@ bool evaluate_retained_higher_order(
                                     (int)in[0].size(), spec->args);
       const int64_t states = (int64_t)in[0].size();
       const int64_t times = (int64_t)in[2].size();
-      *out = solution_invoke(OP_ODE_ADJOINT, 0x10u, std::move(in), times,
-                             states, spec);
+      *out = solution_invoke(OP_ODE_ADJOINT, SolverActivity{}.byte(),
+                             std::move(in), times, states, spec);
       return true;
     }
     std::vector<std::vector<double>> in;
     int64_t states = 0, times = 0;
     auto spec = ode_spec(funs, e, eval, in, &states, &times);
-    *out = solution_invoke(OP_ODE, meta->legacy ? 0x4u : 0x10u, std::move(in),
+    *out = solution_invoke(OP_ODE, SolverActivity{}.byte(), std::move(in),
                            times, states, spec);
     return true;
   }
@@ -307,7 +307,8 @@ bool evaluate_retained_higher_order(
     const auto meta = mir::quadrature_call(e.name);
     auto spec = std::make_shared<QuadratureSpec>();
     spec->adopt(funs);
-    spec->callback_name = callback(funs, e.args.at(0), e.name).name;
+    spec->callback_name =
+        mir::function_key(callback(funs, e.args.at(0), e.name));
     spec->method = meta->method;
     size_t callback_end = e.args.size();
     if (meta->legacy) {
@@ -338,7 +339,8 @@ bool evaluate_retained_higher_order(
     const auto meta = mir::dae_call(e.name);
     auto spec = std::make_shared<DaeSpec>();
     spec->adopt(funs);
-    spec->residual_name = callback(funs, e.args.at(0), e.name).name;
+    spec->residual_name =
+        mir::function_key(callback(funs, e.args.at(0), e.name));
     spec->callback_name = spec->residual_name;
     std::vector<std::vector<double>> in;
     in.push_back(real_values(eval(e.args[1]), "DAE initial state"));
@@ -357,14 +359,15 @@ bool evaluate_retained_higher_order(
                                   (int)in[0].size(), spec->args);
     const int64_t states = (int64_t)in[0].size();
     const int64_t times = (int64_t)spec->ts.size();
-    *out = solution_invoke(OP_DAE, 0x8u, std::move(in), times, states, spec);
+    *out = solution_invoke(OP_DAE, SolverActivity{}.byte(), std::move(in),
+                           times, states, spec);
     return true;
   }
   if (family->family == mir::HigherOrderFamily::Algebra) {
     const auto meta = mir::algebra_call(e.name);
     auto spec = std::make_shared<AlgebraSpec>();
     spec->adopt(funs);
-    spec->system_name = callback(funs, e.args.at(0), e.name).name;
+    spec->system_name = mir::function_key(callback(funs, e.args.at(0), e.name));
     spec->callback_name = spec->system_name;
     spec->select(*meta);
     std::vector<std::vector<double>> in;

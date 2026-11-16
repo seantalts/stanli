@@ -161,8 +161,126 @@ static void check_density_activity_guard() {
   }
 }
 
+static std::vector<int> testutil_vectorized(int width,
+                                            const std::vector<int>& counts,
+                                            int array_mask) {
+  std::vector<int> idata;
+  stanli::append_vectorized_layout(idata, width, counts, array_mask);
+  return idata;
+}
+
+// Each density idata layout as density_call_plan writes it and the one
+// decoder its kernels read it with.
+static void check_density_layouts() {
+  using namespace stanli;
+  const auto fail = [](const char* what) {
+    ++failures;
+    std::printf("FAIL %s\n", what);
+  };
+  const auto throws = [](auto&& f) {
+    try {
+      f();
+    } catch (const std::logic_error&) {
+      return true;
+    }
+    return false;
+  };
+
+  // A language int broadcasts; a one-element array is a container.
+  const std::vector<int> packed = pack_all_integer_density_arguments(
+      {{{3}, true}, {{3}, false}, {{1, 2}, false}});
+  const IntGroups groups = int_groups(packed.data(), (int64_t)packed.size(), 3);
+  if (!groups.group[0].scalar || groups.group[0].count != 1 ||
+      groups.group[0].at(5) != 3)
+    fail("scalar integer group");
+  if (groups.group[1].scalar || groups.group[1].count != 1)
+    fail("one-element integer array");
+  if (groups.group[2].scalar || groups.group[2].count != 2 ||
+      groups.group[2].at(1) != 2)
+    fail("integer array group");
+  const std::vector<int> scalar_pair{2, 1, 2, 1};
+  if (!throws([&] { int_groups(scalar_pair.data(), 4, 1); }))
+    fail("a scalar group of two values is refused");
+  if (!throws([&] { int_groups(packed.data(), (int64_t)packed.size(), 2); }))
+    fail("integer groups past the last argument are refused");
+
+  const auto shape = [](FunctionArgumentKind kind, FunctionContainerKind c,
+                        std::vector<int64_t> dims) {
+    int64_t size = 1;
+    for (int64_t d : dims) size *= d;
+    return make_function_shape(kind, c, FunctionContainerKind::Scalar,
+                               std::move(dims), size);
+  };
+  const auto real = [&](FunctionContainerKind c, std::vector<int64_t> dims) {
+    DensityCallArgument a;
+    a.shape = shape(FunctionArgumentKind::Real, c, std::move(dims));
+    return a;
+  };
+
+  // normal_id_glm: a row_vector design is the GLM flag, as for the integer
+  // GLMs, and nothing else in idata says so.
+  const FunctionSpec* nid = function_spec("normal_id_glm_lpdf", 5, uint64_t{0},
+                                          FunctionArgumentKind::Real);
+  if (nid == nullptr || nid->density() == nullptr) {
+    fail("normal_id_glm spec");
+    return;
+  }
+  for (bool row : {false, true}) {
+    const std::vector<DensityCallArgument> args{
+        real(FunctionContainerKind::Vector, {row ? 1 : 4}),
+        row ? real(FunctionContainerKind::RowVector, {3})
+            : real(FunctionContainerKind::Matrix, {4, 3}),
+        real(FunctionContainerKind::Scalar, {}),
+        real(FunctionContainerKind::Vector, {3}),
+        real(FunctionContainerKind::Scalar, {})};
+    const DensityCallPlan plan =
+        density_call_plan(*nid->density(), args, false);
+    const GlmLayout glm =
+        glm_layout(plan.idata.data(), (int64_t)plan.idata.size());
+    if (glm.row_vector_design() != row || glm.rows != (row ? 1 : 4) ||
+        glm.cols != 3 || glm.n_outcomes != 0 ||
+        plan.idata.size() != (size_t)kGlmHeader)
+      fail(row ? "normal_id_glm row_vector design"
+               : "normal_id_glm matrix design");
+  }
+
+  // multi_normal: a bare vector and an array of one vector are different
+  // overloads, so the layout keeps them apart.
+  const FunctionSpec* mn = function_spec("multi_normal_lpdf", 3, uint64_t{0},
+                                         FunctionArgumentKind::Real);
+  if (mn == nullptr || mn->density() == nullptr) {
+    fail("multi_normal spec");
+    return;
+  }
+  for (bool array : {false, true}) {
+    DensityCallArgument y = real(FunctionContainerKind::Vector, {2});
+    if (array) {
+      y.shape = make_function_shape(FunctionArgumentKind::Real,
+                                    FunctionContainerKind::Array,
+                                    FunctionContainerKind::Vector, {1, 2}, 2);
+      y.shape.array_depth = 1;
+    }
+    const DensityCallPlan plan =
+        density_call_plan(*mn->density(),
+                          {y, real(FunctionContainerKind::Vector, {2}),
+                           real(FunctionContainerKind::Matrix, {2, 2})},
+                          false);
+    const VectorizedLayout v =
+        vectorized_layout(plan.idata.data(), (int64_t)plan.idata.size(), 2);
+    if (v.width != 2 || v.count[0] != 1 || v.count[1] != 1 ||
+        v.is_array(0) != array || v.is_array(1))
+      fail(array ? "array of one vector" : "bare vector");
+  }
+  const std::vector<int> bare_two = testutil_vectorized(2, {2, 1}, 0);
+  if (!throws([&] {
+        vectorized_layout(bare_two.data(), (int64_t)bare_two.size(), 2);
+      }))
+    fail("a bare vector counting two is refused");
+}
+
 int main() {
   using namespace stanli;
+  check_density_layouts();
   std::set<std::string> keys;
   std::set<const FunctionSpec*> canonical_entries;
   size_t builtin_count = 0;
@@ -266,8 +384,8 @@ int main() {
   mir::Expr untyped_choose;
   untyped_choose.name = "choose";
   untyped_choose.args.resize(2);
-  untyped_choose.args[0].type_ = "UInt";
-  untyped_choose.args[1].type_ = "UInt";
+  untyped_choose.args[0].unsized = {0, mir::UnsizedLeaf::Int};
+  untyped_choose.args[1].unsized = {0, mir::UnsizedLeaf::Int};
   if (function_spec(untyped_choose) == nullptr) {
     std::printf("FAIL missing result metadata lookup\n");
     return 1;
@@ -289,13 +407,11 @@ int main() {
     e.kind = mir::Expr::FunApp;
     e.name = std::move(name);
     e.args = std::move(args);
-    e.type_ = "UInt";
     e.unsized.leaf = mir::UnsizedLeaf::Int;
     return e;
   };
   mir::Expr real;
   real.kind = mir::Expr::Var;
-  real.type_ = "UReal";
   real.unsized.leaf = mir::UnsizedLeaf::Real;
   const auto cdf = call("normal_lcdf", {real, real, real});
   const auto normalizer = call("log_diff_exp", {cdf, cdf});
@@ -308,7 +424,6 @@ int main() {
   }
   mir::Expr integer;
   integer.kind = mir::Expr::LitInt;
-  integer.type_ = "UInt";
   integer.unsized.leaf = mir::UnsizedLeaf::Int;
   const auto integer_negated = call("PMinus__", {integer});
   if (function_spec(call("PMinus__", {integer_negated}))->result() !=
@@ -328,7 +443,6 @@ int main() {
   }
   auto promoted = integer_negated;
   promoted.promoted = true;
-  promoted.type_ = "UReal";
   promoted.unsized.leaf = mir::UnsizedLeaf::Real;
   auto user_call = normalizer;
   user_call.fn_lib = mir::Expr::Lib::UserDefined;

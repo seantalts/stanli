@@ -2,6 +2,7 @@
 #define STANLI_INITIALIZE_HPP
 
 #include <stanli/graph.hpp>
+#include <stanli/rejection.hpp>
 
 #include <boost/random/uniform_real_distribution.hpp>
 
@@ -39,6 +40,7 @@ void initialize_point(Executor& ex, RNG& rng, double radius, const double* init,
         if (!std::isfinite(grad[(size_t)i])) return false;
       return true;
     } catch (const std::exception& e) {
+      if (is_internal_error(e)) throw;
       if (first_error.empty()) first_error = e.what();
       return false;
     }

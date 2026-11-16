@@ -130,6 +130,15 @@ std::string format_summary(const std::vector<ParamSummary>& s);
 // what to do about it. Empty problems produce "no problems detected".
 std::string format_diagnostics(const FitDiagnostics& d);
 
+// The same report with its verdict as numbers: checks that failed, and
+// checks that could not be computed.
+struct DiagnosticReport {
+  std::string text;
+  int failed = 0;
+  int unavailable = 0;
+};
+DiagnosticReport diagnostic_report(const FitDiagnostics& d);
+
 // What one finished chain reports about its own post-warmup transitions.
 struct ChainProblems {
   int64_t n_divergent = 0;

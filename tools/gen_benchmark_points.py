@@ -44,7 +44,7 @@ MAX_VALUE_DOUBLES = 1 << 26
 
 class _ModelOpts(ctypes.Structure):
     _fields_ = [("seed", ctypes.c_uint32), ("threads_per_chain", ctypes.c_int),
-                ("fast_math", ctypes.c_int)]
+                ("fast_math", ctypes.c_int), ("allow_interpreter", ctypes.c_int)]
 
 
 class _SampleOpts(ctypes.Structure):
@@ -108,6 +108,7 @@ def _bind(path):
 def _model(lib, mir, data, seed):
     opts = _ModelOpts()
     opts.seed, opts.threads_per_chain, opts.fast_math = seed, 1, 0
+    opts.allow_interpreter = 1
     err = ctypes.create_string_buffer(ERR_LEN)
     handle = lib.stanli_model_new_with_opts(pathlib.Path(mir).read_text().encode(),
                                             pathlib.Path(data).read_bytes(), ctypes.byref(opts),

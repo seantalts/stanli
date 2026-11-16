@@ -157,21 +157,17 @@ static void test_expression_layout_policy() {
   Expr vector;
   vector.kind = Expr::Var;
   vector.unsized.leaf = UnsizedLeaf::Vector;
-  vector.type_ = "UVector";
   Expr multi;
-  multi.kind = Expr::FunApp;
-  multi.name = "IndexMulti";
+  multi.kind = stanli::mir::Expr::IndexMulti;
   Expr gather;
   gather.kind = Expr::Indexed;
   gather.unsized.leaf = UnsizedLeaf::Vector;
-  gather.type_ = "UVector";
   gather.args = {vector, multi};
   Expr exp_gather;
   exp_gather.kind = Expr::FunApp;
   exp_gather.fn_lib = Expr::Lib::StanLib;
   exp_gather.name = "exp";
   exp_gather.unsized.leaf = UnsizedLeaf::Vector;
-  exp_gather.type_ = "UVector";
   exp_gather.args = {gather};
   Expr start;
   start.kind = Expr::LitInt;
@@ -183,17 +179,14 @@ static void test_expression_layout_policy() {
   segment_gather.fn_lib = Expr::Lib::StanLib;
   segment_gather.name = "segment";
   segment_gather.unsized.leaf = UnsizedLeaf::Vector;
-  segment_gather.type_ = "UVector";
   segment_gather.args = {gather, start, count};
   Expr matrix = vector;
   matrix.unsized.leaf = UnsizedLeaf::Matrix;
-  matrix.type_ = "UMatrix";
   Expr transpose;
   transpose.kind = Expr::FunApp;
   transpose.fn_lib = Expr::Lib::StanLib;
   transpose.name = "Transpose__";
   transpose.unsized.leaf = UnsizedLeaf::Matrix;
-  transpose.type_ = "UMatrix";
   transpose.args = {matrix};
   Expr udf_return = vector;
   udf_return.kind = Expr::FunApp;
@@ -201,12 +194,12 @@ static void test_expression_layout_policy() {
   Expr array_vector = vector;
   array_vector.unsized.depth = 1;
   Expr single = multi;
-  single.name = "IndexSingle";
+  single.kind = stanli::mir::Expr::IndexSingle;
   Expr inner = vector;
   inner.kind = Expr::Indexed;
   inner.args = {array_vector, single};
   Expr between = multi;
-  between.name = "IndexBetween";
+  between.kind = stanli::mir::Expr::IndexBetween;
   between.args = {start, count};
   Expr inner_range = inner;
   inner_range.args = {array_vector, single, between};
@@ -597,13 +590,11 @@ static void test_product_exact_grouping() {
   mir::Expr variable;
   variable.kind = mir::Expr::Var;
   variable.name = "x";
-  variable.type_ = "UVector";
   variable.unsized.leaf = mir::UnsizedLeaf::Vector;
   mir::Expr call;
   call.kind = mir::Expr::FunApp;
   call.name = "prod";
   call.fn_lib = mir::Expr::Lib::StanLib;
-  call.type_ = "UReal";
   call.unsized.leaf = mir::UnsizedLeaf::Real;
   call.args = {variable};
 
@@ -654,7 +645,6 @@ static void test_product_exact_grouping() {
   // retain MirInterp's existing ascending scalar fold.
   mir::Expr array_variable = variable;
   array_variable.name = "a";
-  array_variable.type_ = "(UArray UReal)";
   array_variable.unsized.leaf = mir::UnsizedLeaf::Real;
   array_variable.unsized.depth = 1;
   mir::Expr array_call = call;
@@ -1047,14 +1037,12 @@ static void test_extrema_exact_grouping() {
   mir::Expr arg;
   arg.kind = mir::Expr::Var;
   arg.name = "a";
-  arg.type_ = "(UArray UReal)";
   arg.unsized.leaf = mir::UnsizedLeaf::Real;
   arg.unsized.depth = 1;
   mir::Expr call;
   call.kind = mir::Expr::FunApp;
   call.name = "min";
   call.fn_lib = mir::Expr::Lib::StanLib;
-  call.type_ = "UReal";
   call.unsized.leaf = mir::UnsizedLeaf::Real;
   call.args = {arg};
   DataMap::Entry empty_real;
@@ -1069,7 +1057,6 @@ static void test_extrema_exact_grouping() {
     ++failures;
     std::printf("FAIL empty real legacy max is not -infinity\n");
   }
-  arg.type_ = "(UArray UInt)";
   arg.unsized.leaf = mir::UnsizedLeaf::Int;
   call.args = {arg};
   DataMap::Entry empty_int;
@@ -1092,6 +1079,51 @@ static void test_extrema_exact_grouping() {
   }
 }
 
+// The interpreter's name labels its errors and nothing else: the Eigen
+// reduction for min/max is chosen by set_native_extrema.
+void test_extrema_rule_is_not_the_label() {
+  using namespace stanli;
+  std::map<std::string, const mir::FunDef*> funs;
+  mir::Expr arg;
+  arg.kind = mir::Expr::Var;
+  arg.name = "a";
+  arg.unsized.leaf = mir::UnsizedLeaf::Vector;
+  mir::Expr call;
+  call.kind = mir::Expr::FunApp;
+  call.name = "max";
+  call.fn_lib = mir::Expr::Lib::StanLib;
+  call.unsized.leaf = mir::UnsizedLeaf::Real;
+  call.args = {arg};
+  DataMap::Entry values;
+  const double nan = std::numeric_limits<double>::quiet_NaN();
+  values.r = {1, nan, 3, 2, 5, nan, 0, 4};
+  values.dims = {8};
+  const auto run = [&](const char* label, bool native) {
+    MirInterp<double> interp(funs, label);
+    interp.set_native_extrema(native);
+    interp.env()["a"] = values;
+    return reduction_bits(interp.eval(call).r.at(0));
+  };
+  const uint64_t fold = run("extrema rule test", false);
+  const uint64_t eigen = run("extrema rule test", true);
+  // Eigen's NaN selection is the platform's packet max. Where it happens to
+  // match the fold on this input, the input cannot tell the rules apart.
+  if (fold == eigen) {
+    std::printf("SKIP extrema rule: both rules agree on this platform\n");
+    return;
+  }
+  for (const char* label : {"write_array", "prepare_data"}) {
+    if (run(label, false) != fold) {
+      ++failures;
+      std::printf("FAIL label %s selected the native extrema rule\n", label);
+    }
+    if (run(label, true) != eigen) {
+      ++failures;
+      std::printf("FAIL label %s with native extrema differs\n", label);
+    }
+  }
+}
+
 int main() {
   test_matrix_transpose_add();
   using namespace stanli;
@@ -1102,6 +1134,7 @@ int main() {
   test_product_exact_grouping();
   test_reduction_view_grouping();
   test_extrema_exact_grouping();
+  test_extrema_rule_is_not_the_label();
   const int N = 4;
 
   // Binary: all shape combos. Scalars are length-1 slots; the var reference

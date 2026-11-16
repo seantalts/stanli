@@ -13,7 +13,6 @@
     "stanli.js",
     "stanli.wasm",
     "stanli-compiler.js",
-    "stancjs.bc.js",
     "README.md",
     "LICENSE"
   ],

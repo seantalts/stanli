@@ -16,6 +16,9 @@ type 'a compilation =
   ; warnings: Frontend.Warnings.t list
   ; diagnostics: diagnostic list }
 
+val o1_fallback : 'a compilation -> string option
+(** The notice for an O1 pass skipped for the structural budget, if any. *)
+
 (** Source-level MIR passes added to upstream's stability-preserving O1 policy. *)
 type pass_selection =
   { vectorize_loops: bool
@@ -61,7 +64,7 @@ val compile_portable :
   -> model_name:string
   -> string
   -> string compilation
-(** Compile Stan source and encode canonical compact portable MIR v2.
+(** Compile Stan source and encode canonical compact portable MIR v3.
     [model_only] permits removal of functions unreachable from the model's
     entry points. The default preserves every exported function for the
     public function API. *)

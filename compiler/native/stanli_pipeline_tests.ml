@@ -75,7 +75,7 @@ let rec has_vector_density_stmt (stmt : Stmt.Located.t) =
     | Stmt.Pattern.TargetPE
         { Expr.pattern=
             Expr.Pattern.FunApp
-              ( Fun_kind.StanLib (_, (Fun_kind.FnLpdf _ | FnLpmf _), _)
+              ( Fun_kind.StanLib (_, Fun_kind.FnDist _)
               , {Expr.meta= {Expr.Typed.Meta.type_= UnsizedType.UVector; _}; _}
                 :: _ )
         ; _ } ->
@@ -95,7 +95,7 @@ let require condition message = if not condition then failwith message
 let has_call name mir =
   let rec expr (e : Expr.Typed.t) =
     (match e.pattern with
-     | Expr.Pattern.FunApp (Fun_kind.StanLib (called, _, _), _) ->
+     | Expr.Pattern.FunApp (Fun_kind.StanLib (called, _), _) ->
          String.equal called name
      | _ -> false)
     || Expr.Pattern.fold (fun found e -> found || expr e) false e.pattern in
@@ -159,7 +159,7 @@ let repeated_scalar_argument_test () =
   |} in
   let rec expr n (e : Expr.Typed.t) =
     let n = match e.pattern with
-      | FunApp (Fun_kind.StanLib ("exp", _, _), _) -> n + 1
+      | FunApp (Fun_kind.StanLib ("exp", _), _) -> n + 1
       | _ -> n in
     Expr.Pattern.fold expr n e.pattern in
   let rec stmt n (s : Stmt.Located.t) =
@@ -170,11 +170,10 @@ let repeated_scalar_argument_test () =
 let inlining_effect_order_test () =
   let inline source =
     compile_upstream_o0 source
-    |> Analysis_and_optimization.Optimize.function_inlining
-         ~bind_repeated_scalar_args:true in
+    |> Analysis_and_optimization.Optimize.function_inlining in
   let rec expr events (e : Expr.Typed.t) =
     let events = match e.pattern with
-      | FunApp (Fun_kind.StanLib ("normal_rng", _, _), _) ->
+      | FunApp (Fun_kind.StanLib ("normal_rng", _), _) ->
           events @ ["normal_rng"]
       | _ -> events in
     Expr.Pattern.fold expr events e.pattern in

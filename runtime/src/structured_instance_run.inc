@@ -15,7 +15,7 @@ struct Relocation {
 
 bool Execution::compiled_recording() {
   if (recording_enabled < 0) {
-    const char* option = std::getenv("STANLI_STRUCTURED_COMPILED_RECORDING");
+    const char* option = debug_env("STANLI_STRUCTURED_COMPILED_RECORDING");
     recording_enabled = !option || option[0] != '0';
   }
   return recording_enabled != 0;
@@ -1463,7 +1463,8 @@ bool Execution::instance_trip(double outer_value, Flow& flow,
   in.memo_undo.clear();
   try {
     ok = run_plan(t, r, *frame, outer_value);
-  } catch (const std::exception&) {
+  } catch (const std::exception& e) {
+    if (is_internal_error(e)) throw;
     ok = false;
   }
   if (ok) ok = shift_bindings(t, *frame);

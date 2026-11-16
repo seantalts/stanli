@@ -18,6 +18,7 @@
 // consecutive registers, and every such run has to stay consecutive. So a copy
 // is refused when its block starts or ends strictly inside a range, and the
 // renumbering only drops registers nothing names.
+#include <stanli/debug_switch.hpp>
 #include <stanli/program.hpp>
 
 #include <cmath>
@@ -169,7 +170,7 @@ bool forwardable_producer(const Program::Instr& I) {
 // jump target.
 bool forward_adjacent_copy_destinations(
     Program& p, const std::vector<std::pair<int, int>>& seeded, bool enabled) {
-  if (!enabled || std::getenv("STANLI_NO_PROGRAM_DEST_FORWARD") ||
+  if (!enabled || debug_env("STANLI_NO_PROGRAM_DEST_FORWARD") ||
       p.code.size() < 2)
     return false;
   for (const Program::Instr& I : p.code)
@@ -444,7 +445,7 @@ std::vector<std::pair<int, int>> used_program_inputs(
 // move cannot turn one initialization into one per iteration. No registers,
 // arithmetic, checks or effects are removed; all instruction targets remap.
 bool sink_program_fills(Program& p) {
-  if (std::getenv("STANLI_NO_FILL_SINK")) return false;
+  if (debug_env("STANLI_NO_FILL_SINK")) return false;
   const int n = static_cast<int>(p.code.size());
   if (n == 0 || n > 2048) return false;
   std::vector<std::vector<int>> pred((size_t)n + 1);
@@ -655,7 +656,7 @@ bool program_initializes_reads(const Program& p,
 // overwritten on every path before any read. Arithmetic is never treated as
 // dead: even a zero-seeded pullback can affect non-finite classifications.
 bool elide_acyclic_program_constants(Program& p) {
-  if (std::getenv("STANLI_NO_CFG_DEAD_CONSTANTS")) return false;
+  if (debug_env("STANLI_NO_CFG_DEAD_CONSTANTS")) return false;
   const size_t n = p.code.size();
   if (n == 0 || n > 2048) return false;
   bool control = false;
@@ -832,7 +833,7 @@ bool copy_eligible_op(const Program& p, size_t pc) {
 
 bool propagate_program_copies(Program& p,
                               const std::vector<std::pair<int, int>>& seeded) {
-  if (std::getenv("STANLI_NO_COPY_PROP")) return false;
+  if (debug_env("STANLI_NO_COPY_PROP")) return false;
   const size_t n = p.code.size();
   const int n_regs = p.n_regs;
   if (n == 0 || n_regs <= 0) return false;

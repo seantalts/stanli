@@ -470,6 +470,7 @@ jobs:
           fi
           cmake -B build-rel -DCMAKE_BUILD_TYPE=Release \
             -DSTANLI_STAN_DENSITY_ORACLE=OFF \
+            -DSTANLI_DEBUG_SWITCHES=OFF \
             "${compiler_args[@]}" \
             -DCMAKE_C_COMPILER_LAUNCHER=ccache \
             -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
@@ -544,10 +545,11 @@ jobs:
           echo "runner: $cores cores, testing -j$cores"
           ctest --test-dir build-rel --timeout 600 --parallel "$cores" --output-on-failure
 
-      # build-rel is the shipped configuration and has no Stan Math kernels for
-      # the fused densities. This builds the same sources with them kept, to
-      # run the differential tests and the STANLI_NO_FUSED_DENSITY oracle
-      # switch. One platform is enough: the comparison is of two kernels.
+      # build-rel is the shipped configuration: no Stan Math kernels for the
+      # fused densities and no developer switches, so ctest there skips the
+      # tests labeled debug_switches. This builds the same sources with both
+      # kept, to run the differential tests, the STANLI_NO_FUSED_DENSITY
+      # oracle and the switch tests. One platform is enough.
       - name: Differential tests against Stan Math
         if: matrix.plat == 'manylinux_2_28_x86_64'
         run: |
@@ -559,12 +561,15 @@ jobs:
           fi
           cmake -B build-oracle -DCMAKE_BUILD_TYPE=Release \
             -DSTANLI_STAN_DENSITY_ORACLE=ON \
+            -DSTANLI_DEBUG_SWITCHES=ON \
             "${compiler_args[@]}" \
             -DCMAKE_C_COMPILER_LAUNCHER=ccache \
             -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
             -DSTANLI_EMBED_STANC=ON
-          cmake --build build-oracle -j ${{ matrix.build_jobs }} \
-            --target test_density_fused
+          cmake --build build-oracle -j ${{ matrix.build_jobs }}
+          cores=$(nproc 2>/dev/null || echo 2)
+          ctest --test-dir build-oracle --timeout 600 --parallel "$cores" \
+            --output-on-failure -L debug_switches
           ctest --test-dir build-oracle --timeout 600 --output-on-failure \
             -R '^test_density_fused$'
 
@@ -696,7 +701,7 @@ jobs:
               --legacy-output /tmp/stanli-$name.legacy-mir \
               --output /tmp/stanli-$name.portable-mir \
               /tmp/stanli-portable-$name.stan
-            head -c 8 /tmp/stanli-$name.portable-mir | grep -q '^STANLI2:'
+            head -c 8 /tmp/stanli-$name.portable-mir | grep -q '^STANLI3:'
           done
           build-rel/test_mir_decode \
             /tmp/stanli-es.legacy-mir /tmp/stanli-es.portable-mir
@@ -728,7 +733,7 @@ jobs:
             for format in legacy portable; do
               for sample in 1 2 3 4 5; do
                 echo "format=$format sample=$sample"
-                STANLI_PROFILE_PREP=1 build-rel/bench_grad \
+                STANLI_PROFILE_PREP=1 build-oracle/bench_grad \
                   "/tmp/stanli-es.${format}-mir" \
                   tests/fixtures/eight_schools.json --prep
               done
@@ -990,25 +995,16 @@ jobs:
       # of against the source tree.
       - name: Build and check
         working-directory: r
+        # A check whose tests all skipped is green and worthless, which is
+        # the exact failure this job exists to prevent. The runtime and
+        # nutpieR are installed above, so their skips become failures.
         env:
           _R_CHECK_FORCE_SUGGESTS_: 'false'
+          STANLI_REQUIRE_RUNTIME: '1'
+          STANLI_REQUIRE_NUTPIER: '1'
         run: |
           R CMD build .
           R CMD check --no-manual --ignore-vignettes stanli_*.tar.gz
-          # A check whose tests all skipped is green and worthless, which
-          # is the exact failure this job exists to prevent. The runtime
-          # is right there, so nothing may skip for want of one.
-          log=stanli.Rcheck/tests/testthat.Rout
-          [ -f "$log" ] || log=stanli.Rcheck/tests/testthat.Rout.fail
-          cat "$log"
-          if grep -q 'no stanli runtime installed' "$log"; then
-            echo "the sampling tests skipped: the runtime was not seen"
-            exit 1
-          fi
-          if grep -Eq 'nutpieR\}? (is not installed|cannot be loaded)' "$log"; then
-            echo "the nutpie tests skipped: nutpieR was not installed"
-            exit 1
-          fi
 
       - name: Bundled portable compiler through V8 and the current runtime
         working-directory: r
@@ -1111,9 +1107,10 @@ jobs:
           name: r-first-posterior-${{ matrix.runtime }}
           path: r-first-posterior.csv
 
-  # The Windows wheel cannot embed the native compiler yet. Cross-build both
-  # the stock rollback executable and stanli's portable-MIR executable from
-  # the same stanc3 fork revision the other wheels embed, using stanc3's own
+  # The Windows wheel cannot embed the native compiler yet. Cross-build
+  # stanli's portable-MIR executable, which the wheel ships, and stock stanc,
+  # which the Windows test build uses for its MIR fixtures, from the same
+  # stanc3 fork revision the other wheels embed, using stanc3's own
   # Linux-to-Windows recipe. Their provenance is checked before packaging.
   stanc-windows:
     name: cross-build Windows compilers
@@ -1281,7 +1278,7 @@ jobs:
             > windows-compilers/stock-overflow.mir
           # The fork folds with int32 arithmetic, so the overflowing product
           # stays unfolded rather than becoming 2500000000.
-          grep -Fq 'Times__' windows-compilers/stock-overflow.mir
+          grep -Fq '(Operator Times)' windows-compilers/stock-overflow.mir
           if grep -Fq '2500000000' windows-compilers/stock-overflow.mir; then
             echo "stock stanc folded past int32" >&2
             exit 1
@@ -1295,11 +1292,9 @@ jobs:
             windows-compilers/stanli-compile.exe
           node tests/test_portable_stancjs.cjs \
             browser-compilers/stanli-compiler.js \
-            windows-compilers/stanli-compile.exe \
-            browser-compilers/stancjs.bc.js
+            windows-compilers/stanli-compile.exe
           Rscript tests/test_windows_compiler.R \
-            windows-compilers/stanli-compile.exe \
-            windows-compilers/stanc.exe
+            windows-compilers/stanli-compile.exe
 
   # Source PRs require the same Windows wheel build, CTest suite, and installed
   # Python checks that main, nightly, manual, and release runs exercise.
@@ -1401,6 +1396,7 @@ jobs:
           ccache -z
           cmake -B build-rel -G Ninja -DCMAKE_BUILD_TYPE=Release \
             -DSTANLI_STAN_DENSITY_ORACLE=OFF \
+            -DSTANLI_DEBUG_SWITCHES=OFF \
             -DCMAKE_C_COMPILER_LAUNCHER=ccache \
             -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
           cmake --build build-rel -j4
@@ -1413,9 +1409,7 @@ jobs:
           ./tools/build_wheel.sh
           test -f python/stanli/_bin/stanli.dll
           test -f python/stanli/_bin/stanli-compile.exe
-          test -f python/stanli/_bin/stanc.exe
           unzip -l dist/*.whl | grep -F 'stanli/_bin/stanli-compile.exe'
-          unzip -l dist/*.whl | grep -F 'stanli/_bin/stanc.exe'
 
       # The wheel must work from python.org's CPython, not just msys2's:
       # that is the interpreter Windows users actually have.
@@ -1437,8 +1431,8 @@ jobs:
           name: wheel-win_amd64
           path: dist/*.whl
 
-      # As above, for the R package. This _bin/ has both compiler executables
-      # as well as the DLL, because the Windows build does not embed one.
+      # As above, for the R package. This _bin/ has stanli-compile.exe as
+      # well as the DLL, because the Windows build does not embed a compiler.
       - name: Runtime tarball
         run: |
           mkdir -p runtime-dist
@@ -1447,10 +1441,10 @@ jobs:
           members=$(tar tzf \
             runtime-dist/stanli-runtime-windows-x86_64.tar.gz)
           printf '%s\n' "$members"
-          for file in stanli.dll stanli-compile.exe stanc.exe; do
+          for file in stanli.dll stanli-compile.exe; do
             printf '%s\n' "$members" | grep -Eq "(^|/)${file}$"
           done
-          test "$(printf '%s\n' "$members" | grep -vc '/$')" -eq 3
+          test "$(printf '%s\n' "$members" | grep -vc '/$')" -eq 2
 
       - uses: actions/upload-artifact@v4
         with:
@@ -1560,7 +1554,7 @@ jobs:
           install -m 755 browser-compilers/stanli_compiler_cli \
             deps/stanc3/stanli-compile
           deps/stanc3/stanli-compile tests/fixtures/es.stan > /tmp/es.portable-mir
-          head -c 8 /tmp/es.portable-mir | grep -q '^STANLI2:'
+          head -c 8 /tmp/es.portable-mir | grep -q '^STANLI3:'
       # Both fatal runs of this job died at the same place -- the density
       # shards -- with "the runner has received a shutdown signal" while
       # the sibling manylinux job on its own runner sailed on. That is the
@@ -1608,7 +1602,7 @@ jobs:
           # SUNDIALS C is instrumented on the same terms as the kernels.
           cmake -B build-asan -DCMAKE_BUILD_TYPE=None \
             -DCMAKE_C_FLAGS="-O1 -g1" -DCMAKE_CXX_FLAGS="-O1 -g1" \
-            -DSTANLI_SANITIZE=address \
+            -DSTANLI_SANITIZE=address -DSTANLI_DEBUG_SWITCHES=ON \
             -DCMAKE_C_COMPILER="$CC" -DCMAKE_CXX_COMPILER="$CXX" \
             -DCMAKE_C_COMPILER_LAUNCHER=ccache \
             -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
@@ -1718,7 +1712,7 @@ jobs:
         run: |
           cmake -B build-tsan -DCMAKE_BUILD_TYPE=None \
             -DCMAKE_C_FLAGS="-O1 -g1" -DCMAKE_CXX_FLAGS="-O1 -g1" \
-            -DSTANLI_SANITIZE=thread \
+            -DSTANLI_SANITIZE=thread -DSTANLI_DEBUG_SWITCHES=ON \
             -DCMAKE_C_COMPILER="$CC" -DCMAKE_CXX_COMPILER="$CXX"
           cmake --build build-tsan -j4 \
             --target test_capi test_pool test_multichain \
@@ -1726,7 +1720,7 @@ jobs:
       - name: ctest
         run: >-
           ctest --test-dir build-tsan --timeout 600 --output-on-failure
-          -R '^(test_capi|test_pool|test_multichain|test_wa_parallel|test_wa_parallel_abi)$'
+          -R '^(test_capi|test_pool|test_multichain|test_wa_parallel|test_wa_parallel_switches|test_wa_parallel_abi)$'
 
   # Build and link the browser runtime after merge, nightly, on demand, and
   # on tags. Pages and release jobs consume the artifact and run end-to-end
@@ -1791,7 +1785,7 @@ jobs:
           export CCACHE_BASEDIR="$(dirname "$RUNNER_TEMP")"
           ccache -z
           emcmake cmake -B build-wasm -DCMAKE_BUILD_TYPE=Release \
-            -DSTANLI_STAN_DENSITY_ORACLE=OFF \
+            -DSTANLI_STAN_DENSITY_ORACLE=OFF -DSTANLI_DEBUG_SWITCHES=OFF \
             -DCMAKE_C_COMPILER_LAUNCHER=ccache \
             -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
           cmake --build build-wasm -j4
@@ -1873,7 +1867,7 @@ jobs:
           export CCACHE_BASEDIR="$(dirname "$RUNNER_TEMP")"
           ccache -z
           emcmake cmake -B build-wasm-side -DCMAKE_BUILD_TYPE=Release \
-            -DSTANLI_STAN_DENSITY_ORACLE=OFF \
+            -DSTANLI_STAN_DENSITY_ORACLE=OFF -DSTANLI_DEBUG_SWITCHES=OFF \
             -DSTANLI_WASM_SIDE=ON -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
             -DCMAKE_C_COMPILER_LAUNCHER=ccache \
             -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
@@ -1913,8 +1907,7 @@ jobs:
           path: runtime-dist/*.tar.gz
 
   # One exact-source compiler build shared by pull-request parity, Pages, and
-  # npm. The stanli producer and its native CLI compile the same OCaml modules;
-  # stock stancjs is retained in the artifact as the legacy rollback path.
+  # npm. The stanli producer and its native CLI compile the same OCaml modules.
   browser-compiler:
     name: portable browser compiler
     needs: changes
@@ -1933,14 +1926,12 @@ jobs:
         uses: actions/cache@v4
         with:
           path: |
-            deps/stanc3/stancjs.bc.js
-            deps/stanc3/stancjs.bc.js.stamp
             deps/stanc3/stanli-compiler.js
             deps/stanc3/stanli-compiler.js.stamp
             deps/stanc3/stanli_compiler_cli
             deps/stanc3/stanli_compiler_cli.stamp
           key: >-
-            browser-compilers-v2-${{ env.STANC3_SRC_SHA }}-ocaml${{ env.OCAML_VERSION }}-dune${{ env.DUNE_VERSION }}-jsoo6.4.1-${{ hashFiles('compiler/ocaml/**', 'compiler/js/**', 'tools/stanc_embed/**') }}
+            browser-compilers-v3-${{ env.STANC3_SRC_SHA }}-ocaml${{ env.OCAML_VERSION }}-dune${{ env.DUNE_VERSION }}-jsoo6.4.1-${{ hashFiles('compiler/ocaml/**', 'compiler/js/**', 'tools/stanc_embed/**') }}
 
       - name: opam ${{ env.OPAM_VERSION }}
         if: steps.stancjs-cache.outputs.cache-hit != 'true'
@@ -1964,15 +1955,12 @@ jobs:
           (cd deps/stanc3-src &&
            opam pin add --switch=stancjs -y -n dune "$DUNE_VERSION" &&
            opam install . --switch=stancjs --deps-only -y &&
-           opam install --switch=stancjs -y \
+           opam install --switch=stancjs -y grace.0.4.1 \
              js_of_ocaml.6.4.1 js_of_ocaml-compiler.6.4.1 \
              js_of_ocaml-ppx.6.4.1 &&
            eval "$(opam env --switch=stancjs)" &&
-           dune subst &&
-           dune build --profile release src/stancjs/stancjs.bc.js)
+           dune subst)
           mkdir -p deps/stanc3
-          cp deps/stanc3-src/_build/default/src/stancjs/stancjs.bc.js \
-            deps/stanc3/
           tools/stanc_embed/install_overlay.sh js deps/stanc3-src
           (cd deps/stanc3-src &&
            eval "$(opam env --switch=stancjs)" &&
@@ -1985,8 +1973,6 @@ jobs:
             deps/stanc3/stanli_compiler_cli
           chmod +x deps/stanc3/stanli_compiler_cli
           source tools/stanc_embed/provenance.sh
-          stancjs_expected_stamp "$STANC3_SRC_REPO" "$STANC3_SRC_SHA" \
-            stancjs > deps/stanc3/stancjs.bc.js.stamp
           stanli_stancjs_expected_stamp "$STANC3_SRC_REPO" "$STANC3_SRC_SHA" \
             stancjs > deps/stanc3/stanli-compiler.js.stamp
           cp deps/stanc3/stanli-compiler.js.stamp \
@@ -1996,19 +1982,15 @@ jobs:
 
       - name: Keep static on one line for Safari 17
         run: |
-          tools/stanc_embed/fix_static_newline.sh \
-            deps/stanc3/stancjs.bc.js deps/stanc3/stanli-compiler.js
+          tools/stanc_embed/fix_static_newline.sh deps/stanc3/stanli-compiler.js
 
       - name: Validate browser compiler provenance
         run: |
           source tools/stanc_embed/provenance.sh
-          stancjs_artifact_matches deps/stanc3/stancjs.bc.js \
-            "$STANC3_SRC_REPO" "$STANC3_SRC_SHA" stancjs
           stanli_stancjs_artifact_matches deps/stanc3/stanli-compiler.js \
             "$STANC3_SRC_REPO" "$STANC3_SRC_SHA" stancjs
           stanli_stancjs_artifact_matches deps/stanc3/stanli_compiler_cli \
             "$STANC3_SRC_REPO" "$STANC3_SRC_SHA" stancjs
-          cat deps/stanc3/stancjs.bc.js.stamp
           cat deps/stanc3/stanli-compiler.js.stamp
 
       - name: Native and JavaScript compilers emit identical bytes
@@ -2016,15 +1998,11 @@ jobs:
           {
             node tests/test_portable_stancjs.cjs \
               deps/stanc3/stanli-compiler.js \
-              deps/stanc3/stanli_compiler_cli \
-              deps/stanc3/stancjs.bc.js
-            node tests/test_worker_compiler.cjs custom js/worker.js \
-              deps/stanc3/stanli-compiler.js deps/stanc3/stancjs.bc.js
-            node tests/test_worker_compiler.cjs fallback js/worker.js \
-              deps/stanc3/stanli-compiler.js deps/stanc3/stancjs.bc.js
-            wc -c deps/stanc3/stanli-compiler.js deps/stanc3/stancjs.bc.js
+              deps/stanc3/stanli_compiler_cli
+            node tests/test_worker_compiler.cjs js/worker.js \
+              deps/stanc3/stanli-compiler.js
+            wc -c deps/stanc3/stanli-compiler.js
             gzip -c deps/stanc3/stanli-compiler.js | wc -c
-            gzip -c deps/stanc3/stancjs.bc.js | wc -c
           } 2>&1 | tee /tmp/portable-mir-browser-measurements.txt
 
       # Exercise the R/JavaScript bridge without the post-submit side-module
@@ -2039,8 +2017,6 @@ jobs:
           mkdir -p browser-dist
           cp deps/stanc3/stanli-compiler.js \
             deps/stanc3/stanli-compiler.js.stamp \
-            deps/stanc3/stancjs.bc.js \
-            deps/stanc3/stancjs.bc.js.stamp \
             deps/stanc3/stanli_compiler_cli \
             deps/stanc3/stanli_compiler_cli.stamp browser-dist/
 
@@ -2099,8 +2075,7 @@ jobs:
           fi
 
   # The public demo: web/ plus the runtime and compiler artifacts, deployed
-  # to GitHub Pages on every main push. The stanli compiler emits portable
-  # MIR; stock stancjs remains beside it as the legacy rollback path.
+  # to GitHub Pages on every main push.
   pages:
     name: deploy the browser demo
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
@@ -2141,15 +2116,13 @@ jobs:
 
       - name: Compile and sample through the browser compiler
         run: |
-          node tests/test_wasm.cjs web/stanli.js \
-            web/stanli-compiler.js web/stancjs.bc.js
+          node tests/test_wasm.cjs web/stanli.js web/stanli-compiler.js
           node tests/test_worker_diagnostics.cjs web/stanli.js \
             web/stanli-compiler.js
 
       - name: Assemble the page and the npm package
         run: |
-          cp web/stanli.js web/stanli.wasm web/stanli-compiler.js \
-            web/stancjs.bc.js js/
+          cp web/stanli.js web/stanli.wasm web/stanli-compiler.js js/
           cp js/index.mjs web/stanli.mjs
           cp js/worker.js web/
           (cd js && npm pack --pack-destination ..)
@@ -2226,12 +2199,12 @@ jobs:
       - name: Compile and sample through the packaged browser compiler
         run: |
           node tests/test_wasm.cjs npm-dist/stanli.js \
-            npm-dist/stanli-compiler.js npm-dist/stancjs.bc.js
+            npm-dist/stanli-compiler.js
 
       - name: Assemble the npm package
         run: |
           cp npm-dist/stanli.js npm-dist/stanli.wasm \
-            npm-dist/stanli-compiler.js npm-dist/stancjs.bc.js js/
+            npm-dist/stanli-compiler.js js/
 
       # Deliberately no registry-url: setup-node writes an .npmrc with a
       # placeholder _authToken when it is given one, npm sees credentials

@@ -131,7 +131,7 @@ inline std::string describe(const CompiledModel& cm) {
   o << "warning [" << interpreter_warning(cm) << "]\n";
   if (cm.transform_inits)
     o << "transform_inits interp=" << (cm.transform_inits->interp != nullptr)
-      << " truncated=[" << cm.transform_inits->truncated << "]\n";
+      << " truncated=[" << cm.transform_inits->truncated.value_or("") << "]\n";
   else
     o << "transform_inits none\n";
   if (!cm.write_array) {
@@ -144,7 +144,7 @@ inline std::string describe(const CompiledModel& cm) {
     << " fills=" << fills_hash(w.fills) << "\n";
   o << "wa n_unconstrained " << w.n_unconstrained << " n_tp_start "
     << w.n_tp_start << " n_gq_start " << w.n_gq_start << " truncated ["
-    << w.truncated << "] interp=" << (w.interp != nullptr) << "\n";
+    << w.truncated.value_or("") << "] interp=" << (w.interp != nullptr) << "\n";
   put_views(o, "col", w.columns);
   o << "csv";
   for (const auto& n : CompiledModel::csv_names(w.columns)) o << " " << n;

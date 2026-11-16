@@ -87,11 +87,10 @@ bool Lowering::expr_effectful(const mir::Expr& e) {
 unsigned Lowering::expr_effects(const mir::Expr& e) {
   unsigned effects = 0;
   if (mir::stateful_intrinsic_kind(e)) effects |= kStatefulEffect;
-  if (e.kind == mir::Expr::FunApp && e.name.size() >= 4 &&
-      e.name.compare(e.name.size() - 4, 4, "_rng") == 0)
+  if (e.kind == mir::Expr::FunApp && e.fn_suffix == mir::FnSuffix::Rng)
     effects |= kStatefulEffect;
   if (e.kind == mir::Expr::FunApp && e.fn_lib == mir::Expr::Lib::UserDefined)
-    effects |= fun_effects(e.name);
+    effects |= fun_effects(mir::function_key(e));
   if (mir::is_reduce_sum(e) && reduce_sum_effectful(e))
     effects |= kStatefulEffect;
   for (const auto& a : e.args) effects |= expr_effects(a);
@@ -129,22 +128,18 @@ unsigned Lowering::fun_effects(const std::string& name) {
   visit_expr = [&](const mir::Expr& e) -> unsigned {
     unsigned found = 0;
     if (mir::stateful_intrinsic_kind(e)) found |= kStatefulEffect;
-    if (e.kind == mir::Expr::FunApp && e.name.size() >= 4 &&
-        e.name.compare(e.name.size() - 4, 4, "_rng") == 0)
+    if (e.kind == mir::Expr::FunApp && e.fn_suffix == mir::FnSuffix::Rng)
       found |= kStatefulEffect;
     if (e.kind == mir::Expr::FunApp && e.fn_lib == mir::Expr::Lib::UserDefined)
-      found |= visit_fun(e.name);
+      found |= visit_fun(mir::function_key(e));
     if (mir::is_reduce_sum(e)) {
       if (e.args.empty() || e.args[0].kind != mir::Expr::Var) {
         found |= kStatefulEffect;
       } else {
-        bool propto = false;
-        const mir::FunDef* partial = mir::resolve_callback(
-            fun_defs, mir::reduce_sum_partial_name(e.args[0].name, &propto),
-            mir::reduce_sum_partial_views(e));
+        const mir::FunDef* partial = mir::find_function(fun_defs, e.args[0]);
         if (partial == nullptr)
           found |= kStatefulEffect;
-        else if (visit_fun(partial->name))
+        else if (visit_fun(mir::function_key(*partial)))
           found |= kStatefulEffect;
       }
     }
@@ -155,8 +150,9 @@ unsigned Lowering::fun_effects(const std::string& name) {
   visit_stmt = [&](const mir::Stmt& s) -> unsigned {
     unsigned found = 0;
     if (s.kind == mir::Stmt::TargetPE) found |= kStatefulEffect;
-    if (s.kind == mir::Stmt::NRFunApp && message_action(s.fn_name))
-      found |= kMessageEffect;
+    if (message_action(mir::internal_name(s))) found |= kMessageEffect;
+    if (const auto call = mir::user_defined_statement_call(s))
+      found |= visit_expr(*call);
     for (const auto& e : s.fn_args) found |= visit_expr(e);
     if (s.has_init) found |= visit_expr(s.init);
     found |= visit_expr(s.rhs) | visit_expr(s.target) | visit_expr(s.lower) |
@@ -196,7 +192,7 @@ std::vector<int> Lowering::int_arg_values(LoweredArgument& actual) {
     return {static_cast<int>(eval_int(oc))};
   }
   fail("int argument must be int data (kind=" + std::to_string((int)oc.kind) +
-           " type=" + oc.type_ + ")",
+           " type=" + mir::type_spelling(oc.unsized) + ")",
        oc.raw);
 }
 // Stan's bound transforms, callable as ordinary functions rather than
@@ -317,7 +313,9 @@ std::optional<Lowering::Val> Lowering::lower_callable_transform(
     } else if (out_leaf == ViewKind::Matrix) {
       si = matrix_view(out_rows, out_cols, raw.si.param_free);
     } else {
-      si = view_of(out_leaf == ViewKind::RowVector ? "URowVector" : "UVector");
+      si = view_of(mir::UnsizedView{0, out_leaf == ViewKind::RowVector
+                                           ? mir::UnsizedLeaf::RowVector
+                                           : mir::UnsizedLeaf::Vector});
       si.param_free = raw.si.param_free;
     }
     std::vector<int> idata = {
@@ -514,7 +512,6 @@ mir::Stmt returns_to_breaks(const mir::Stmt& s, const std::string& result,
   mir::Expr flag;
   flag.kind = mir::Expr::Var;
   flag.name = exited;
-  flag.type_ = "UInt";
   flag.unsized = {0, mir::UnsizedLeaf::Int};
   mir::Stmt exit;
   exit.kind = mir::Stmt::Break;
@@ -541,7 +538,7 @@ mir::Stmt returns_to_breaks(const mir::Stmt& s, const std::string& result,
     mir::Expr one;
     one.kind = mir::Expr::LitInt;
     one.lit_i = 1;
-    one.type_ = "UInt";
+    one.unsized = {0, mir::UnsizedLeaf::Int};
     one.data_only = true;
     mir::Stmt set;
     set.kind = mir::Stmt::Assignment;
@@ -568,11 +565,12 @@ std::vector<mir::Stmt> single_exit_body(const mir::FunDef& f,
   mir::Stmt decl;
   decl.kind = mir::Stmt::Decl;
   decl.decl_id = result;
-  decl.decl_type.base = call.type_ == "UInt" ? "SInt" : "SReal";
+  decl.decl_type.base =
+      mir::is_unsized(call, mir::UnsizedLeaf::Int) ? "SInt" : "SReal";
   mir::Expr one;
   one.kind = mir::Expr::LitInt;
   one.lit_i = 1;
-  one.type_ = "UInt";
+  one.unsized = {0, mir::UnsizedLeaf::Int};
   one.data_only = true;
   mir::Stmt pass;
   pass.kind = mir::Stmt::For;
@@ -590,7 +588,6 @@ std::vector<mir::Stmt> single_exit_body(const mir::FunDef& f,
   mir::Expr value;
   value.kind = mir::Expr::Var;
   value.name = result;
-  value.type_ = call.type_;
   value.unsized = call.unsized;
   mir::Stmt ret;
   ret.kind = mir::Stmt::Return;
@@ -619,7 +616,7 @@ std::vector<mir::Stmt> single_exit_body(const mir::FunDef& f,
 Lowering::Val Lowering::lower_call_udf(const mir::Expr& e,
                                        const std::function<void()>& before_body,
                                        const UdfSpecialization& specialize) {
-  auto it = fun_defs.find(e.name);
+  auto it = fun_defs.find(mir::function_key(e));
   if (it == fun_defs.end()) fail("unknown function " + e.name, e.raw);
   const mir::FunDef& f = *it->second;
   CallArguments actuals(*this, e);
@@ -630,7 +627,8 @@ Lowering::Val Lowering::lower_call_udf(const mir::Expr& e,
     const mir::Expr& a = actual.expr();
     binds[i].formal_data_only =
         i < f.arg_data_only.size() && f.arg_data_only[i];
-    if (!region_current && a.data_only && a.type_ == "UInt") {
+    if (!region_current && a.data_only &&
+        mir::is_unsized(a, mir::UnsizedLeaf::Int)) {
       try {
         binds[i].iv = actual.require_constant_int("integer argument");
         binds[i].is_int = true;
@@ -718,7 +716,7 @@ Lowering::Val Lowering::lower_call_udf(const mir::Expr& e,
     }
   }
   const std::vector<mir::Stmt>* body = &f.body;
-  if ((e.type_ == "UReal" || e.type_ == "UInt") && e.unsized.depth == 0 &&
+  if (mir::language_scalar(e) &&
       (non_tail_return(f.body, true) ||
        std::any_of(f.body.begin(), f.body.end(), return_in_branch))) {
     auto rewritten =
@@ -730,7 +728,8 @@ Lowering::Val Lowering::lower_call_udf(const mir::Expr& e,
   const Flow flow = lower_stmts(*body);
   if (flow == Flow::Break || flow == Flow::Continue)
     fail(e.name + ": break or continue outside a loop");
-  if (e.type_.empty()) return {};  // a void function called as a statement
+  if (e.unsized.leaf == mir::UnsizedLeaf::Unknown)
+    return {};  // a void function called as a statement
   if (flow != Flow::Return)
     fail(e.name + ": no return value on the executed path");
   Val ret = std::move(return_value);
@@ -771,16 +770,16 @@ Lowering::Val Lowering::lower_multi_normal_rng(const mir::Expr& e,
                                                CallArguments& actuals) {
   if (!in_write_array)
     fail("multi_normal_rng is supported only in generated quantities", e.raw);
-  if (e.args.size() != 2 || e.type_ != "UVector" ||
+  if (e.args.size() != 2 || !mir::is_unsized(e, mir::UnsizedLeaf::Vector) ||
       e.unsized.leaf != mir::UnsizedLeaf::Vector || e.unsized.depth != 0)
     fail("multi_normal_rng: expected one vector result", e.raw);
   const mir::Expr& location_expr = actuals.at(0).expr();
   const mir::Expr& covariance_expr = actuals.at(1).expr();
-  if (location_expr.type_ != "UVector" ||
+  if (!mir::is_unsized(location_expr, mir::UnsizedLeaf::Vector) ||
       location_expr.unsized.leaf != mir::UnsizedLeaf::Vector ||
       location_expr.unsized.depth != 0)
     fail("multi_normal_rng: expected one vector location", e.raw);
-  if (covariance_expr.type_ != "UMatrix" ||
+  if (!mir::is_unsized(covariance_expr, mir::UnsizedLeaf::Matrix) ||
       covariance_expr.unsized.leaf != mir::UnsizedLeaf::Matrix ||
       covariance_expr.unsized.depth != 0)
     fail("multi_normal_rng: expected one covariance matrix", e.raw);
@@ -798,7 +797,7 @@ Lowering::Val Lowering::lower_multi_normal_rng(const mir::Expr& e,
     fail("multi_normal_rng: covariance shape must match the location", e.raw);
 
   Val draw = with_layout(emit_value(OP_RNG, {location, covariance}, k,
-                                    view_of(e.type_), {static_cast<int>(k)}),
+                                    view_of(e.unsized), {static_cast<int>(k)}),
                          ExpressionLayout::direct());
   g.ops.back().variant = e.name == "multi_normal_cholesky_rng"
                              ? kMultiNormalCholeskyRngVariant
@@ -811,11 +810,11 @@ Lowering::Val Lowering::lower_dirichlet_rng(const mir::Expr& e,
                                             CallArguments& actuals) {
   if (!in_write_array)
     fail("dirichlet_rng is supported only in generated quantities", e.raw);
-  if (e.args.size() != 1 || e.type_ != "UVector" ||
+  if (e.args.size() != 1 || !mir::is_unsized(e, mir::UnsizedLeaf::Vector) ||
       e.unsized.leaf != mir::UnsizedLeaf::Vector || e.unsized.depth != 0)
     fail("dirichlet_rng: expected one vector result", e.raw);
   const mir::Expr& alpha_expr = actuals.at(0).expr();
-  if (alpha_expr.type_ != "UVector" ||
+  if (!mir::is_unsized(alpha_expr, mir::UnsizedLeaf::Vector) ||
       alpha_expr.unsized.leaf != mir::UnsizedLeaf::Vector ||
       alpha_expr.unsized.depth != 0)
     fail("dirichlet_rng: expected one concentration vector", e.raw);
@@ -828,7 +827,7 @@ Lowering::Val Lowering::lower_dirichlet_rng(const mir::Expr& e,
     fail("dirichlet_rng: concentration vector must have a positive length",
          e.raw);
 
-  Val draw = with_layout(emit_value(OP_RNG, {alpha}, k, view_of(e.type_)),
+  Val draw = with_layout(emit_value(OP_RNG, {alpha}, k, view_of(e.unsized)),
                          ExpressionLayout::direct());
   g.ops.back().variant = kDirichletRngVariant;
   draw.si.param_free = false;
@@ -846,7 +845,8 @@ Lowering::Val Lowering::lower_categorical_rng(const mir::Expr& e,
       (e.unsized.leaf != mir::UnsizedLeaf::Int && !promoted_int))
     fail(e.name + ": expected one scalar int result", e.raw);
   const mir::Expr& probabilities = actuals.at(0).expr();
-  if (probabilities.type_ != "UVector" || probabilities.unsized.depth != 0 ||
+  if (!mir::is_unsized(probabilities, mir::UnsizedLeaf::Vector) ||
+      probabilities.unsized.depth != 0 ||
       probabilities.unsized.leaf != mir::UnsizedLeaf::Vector)
     fail(e.name + ": expected one " + (is_logit ? "logit" : "probability") +
              "-vector argument",
@@ -855,7 +855,7 @@ Lowering::Val Lowering::lower_categorical_rng(const mir::Expr& e,
   Val argument = actuals.at(0).value();
   if (!is_vector(argument.si))
     fail(e.name + ": argument is not a logical vector", e.raw);
-  Val draw = with_layout(emit_value(OP_RNG, {argument}, 1, view_of(e.type_)),
+  Val draw = with_layout(emit_value(OP_RNG, {argument}, 1, view_of(e.unsized)),
                          ExpressionLayout::scalar());
   g.ops.back().variant = is_logit ? kCategoricalLogitRngVariant
                          : e.name == "poisson_binomial_rng"
@@ -926,7 +926,9 @@ Lowering::Val Lowering::lower_scalar_rng(const mir::Expr& e,
     fail(e.name + ": result shape does not match RNG arguments", e.raw);
   // One vectorized call validates complete arguments before drawing. Scalar
   // calls retain their original no-metadata path.
-  const char* const scalar_type = scalar_rng_is_int(family) ? "UInt" : "UReal";
+  const mir::UnsizedView scalar_type{0, scalar_rng_is_int(family)
+                                            ? mir::UnsizedLeaf::Int
+                                            : mir::UnsizedLeaf::Real};
   const auto si = container_mask != 0 ? array_view({n}, ViewKind::Flat, false)
                                       : view_of(scalar_type);
   const std::vector<int> idata = container_mask != 0
@@ -1062,7 +1064,7 @@ Lowering::Val Lowering::lower_funapp(const mir::Expr& e) {
       }
     }
     if (e.name == "FnMakeRowVec") {
-      if (e.type_ == "UMatrix") {
+      if (mir::is_unsized(e, mir::UnsizedLeaf::Matrix)) {
         const int64_t rows = (int64_t)parts.size();
         const int64_t cols = parts.empty() ? 0 : g.slots[parts[0].slot].len;
         for (const Val& p : parts)
@@ -1235,7 +1237,8 @@ Lowering::Val Lowering::lower_funapp(const mir::Expr& e) {
         if (!width || !range)
           fail("num_elements: runtime array needs bounded fixed inner extents",
                e.raw);
-        Val extent{a.runtime_dims[0], false, view_of("UInt")};
+        Val extent{a.runtime_dims[0], false,
+                   view_of(mir::UnsizedView{0, mir::UnsizedLeaf::Int})};
         extent.si.param_free = true;
         Val count = emit_value(OP_MUL, {extent, constant(double(*width))}, 1);
         set_int_range(count, range->lo, range->hi);
@@ -1244,7 +1247,8 @@ Lowering::Val Lowering::lower_funapp(const mir::Expr& e) {
       const int axis = runtime_shape_axis(a, e.name);
       if (axis < 0) return constant(1);
       if (size_t(axis) < a.runtime_dims.size() && a.runtime_dims[axis] >= 0) {
-        Val extent{a.runtime_dims[axis], false, view_of("UInt")};
+        Val extent{a.runtime_dims[axis], false,
+                   view_of(mir::UnsizedView{0, mir::UnsizedLeaf::Int})};
         extent.si.param_free = true;
         return with_layout(extent, ExpressionLayout::scalar());
       }
@@ -1271,8 +1275,8 @@ Lowering::Val Lowering::lower_funapp(const mir::Expr& e) {
 std::optional<Lowering::Val> Lowering::lower_density_fn(
     const mir::Expr& e, CallArguments& actuals, const DensitySpec* selected) {
   // Leading integer arguments become idata; the rest become real slots.
-  // Layouts: one integer group = raw values; two groups =
-  // [len, vals..., len, vals...]; glm = [y..., rows, cols].
+  // One integer group is the raw values; the other layouts are in
+  // density_layout.hpp.
   const stanli::DensitySpec* density = selected;
   if (density != nullptr) {
     const stanli::DensitySpec& spec = *density;
@@ -1351,7 +1355,7 @@ std::optional<Lowering::Val> Lowering::lower_density_fn(
       emit_error(MessageError::InvalidArgument, e.name + ": " + error.what());
       return constant(0.0);
     } catch (const std::exception& error) {
-      fail(builtin_error_message(e.name, error), e.raw);
+      fail_builtin(e.name, error, e.raw);
     }
     if (plan.empty_result) return constant(0.0);
     if (extent >= 0) {
@@ -1383,9 +1387,10 @@ std::optional<Lowering::Val> Lowering::lower_density_fn(
     for (const Val& v : a) active = active || v.autodiff;
     Val packed = a[1];
     for (size_t k = 2; k < 7; ++k)
-      packed = emit_value(OP_CONCAT2, {packed, a[k]},
-                          g.slots[packed.slot].len + g.slots[a[k].slot].len,
-                          view_of("UVector"));
+      packed =
+          emit_value(OP_CONCAT2, {packed, a[k]},
+                     g.slots[packed.slot].len + g.slots[a[k].slot].len,
+                     view_of(mir::UnsizedView{0, mir::UnsizedLeaf::Vector}));
     Val dv = emit_value(OP_GAUSSIAN_DLM_OBS_LPDF, {a[0], packed}, 1, {},
                         {checked_immediate(a[0].si.rows, "dlm rows"),
                          checked_immediate(a[0].si.cols, "dlm steps"),
@@ -1419,7 +1424,8 @@ std::optional<Lowering::Val> Lowering::lower_eltwise_fn(
     set_int_initialized(result);
     return result;
   }
-  if ((e.name == "divide" || e.name == "elt_divide") && e.type_ == "UInt")
+  if ((e.name == "divide" || e.name == "elt_divide") &&
+      mir::is_unsized(e, mir::UnsizedLeaf::Int))
     fail(e.name + ": integer division needs a register expression", e.raw);
   // `A \ B` and `B / A` with a matrix divisor are linear solves, not
   // elementwise division: stanc spells them with the ordinary division
@@ -1439,8 +1445,9 @@ std::optional<Lowering::Val> Lowering::lower_eltwise_fn(
   const BuiltinSpec* solve =
       shaped_builtin_spec(e.name, e.args.size(), BuiltinShapePolicy::Solve);
   if (solve == nullptr && e.name == "Divide__" && e.args.size() == 2 &&
-      e.args.at(0).type_ != "UReal" && e.args.at(0).type_ != "UInt" &&
-      e.args.at(1).type_ == "UMatrix")
+      !mir::is_unsized(e.args.at(0), mir::UnsizedLeaf::Real) &&
+      !mir::is_unsized(e.args.at(0), mir::UnsizedLeaf::Int) &&
+      mir::is_unsized(e.args.at(1), mir::UnsizedLeaf::Matrix))
     solve = shaped_builtin_spec("mdivide_right", 2, BuiltinShapePolicy::Solve);
   if (solve != nullptr) {
     actuals.require_arity(2);
@@ -1495,7 +1502,7 @@ std::optional<Lowering::Val> Lowering::lower_eltwise_fn(
         return with_layout(emit_value(OP_MUL, {a, b}, len),
                            elementwise_layout({a, b}));
       }
-      fail(builtin_error_message(e.name, error), e.raw);
+      fail_builtin(e.name, error, e.raw);
     }
     switch (map.kind) {
       case BuiltinProductMap::Kind::ScalarScale: {
@@ -1509,18 +1516,23 @@ std::optional<Lowering::Val> Lowering::lower_eltwise_fn(
       case BuiltinProductMap::Kind::MatVec:
         if (a.si.param_free && b.si.kind == ViewKind::Vector)
           return with_layout(
-              emit_value(OP_MATVEC, {a, b}, map.m, view_of("UVector"),
+              emit_value(OP_MATVEC, {a, b}, map.m,
+                         view_of(mir::UnsizedView{0, mir::UnsizedLeaf::Vector}),
                          {(int)map.m, (int)map.k}),
-              owning_layout(view_of("UVector")));
+              owning_layout(
+                  view_of(mir::UnsizedView{0, mir::UnsizedLeaf::Vector})));
         return with_layout(
-            emit_value(OP_GEMM, {a, b}, map.m, view_of("UVector"),
+            emit_value(OP_GEMM, {a, b}, map.m,
+                       view_of(mir::UnsizedView{0, mir::UnsizedLeaf::Vector}),
                        {(int)map.m, (int)map.k, 1}),
-            owning_layout(view_of("UVector")));
+            owning_layout(
+                view_of(mir::UnsizedView{0, mir::UnsizedLeaf::Vector})));
       case BuiltinProductMap::Kind::Gemm:
       case BuiltinProductMap::Kind::Outer: {
-        SlotInfo si = map.result.container == FunctionContainerKind::RowVector
-                          ? view_of("URowVector")
-                          : matrix_view(map.m, map.n);
+        SlotInfo si =
+            map.result.container == FunctionContainerKind::RowVector
+                ? view_of(mir::UnsizedView{0, mir::UnsizedLeaf::RowVector})
+                : matrix_view(map.m, map.n);
         return with_layout(emit_value(OP_GEMM, {a, b}, map.m * map.n, si,
                                       {(int)map.m, (int)map.k, (int)map.n}),
                            owning_layout(si));
@@ -1559,7 +1571,7 @@ std::optional<Lowering::Val> Lowering::lower_eltwise_fn(
     Val c = actuals.at(2).value(), d = actuals.at(3).value();
     const std::vector<Val> values{a, b, c, d};
     const auto layout = resolved_builtin_layout(e, *builtin, values);
-    SlotInfo si = view_of(e.type_);
+    SlotInfo si = view_of(e.unsized);
     si.param_free = a.si.param_free && b.si.param_free && c.si.param_free &&
                     d.si.param_free;
     return with_layout(
@@ -1694,10 +1706,10 @@ std::optional<Lowering::Val> Lowering::lower_eltwise_fn(
     SlotInfo si;
     switch (ctor->constructor_container) {
       case FunctionContainerKind::Vector:
-        si = view_of("UVector");
+        si = view_of(mir::UnsizedView{0, mir::UnsizedLeaf::Vector});
         break;
       case FunctionContainerKind::RowVector:
-        si = view_of("URowVector");
+        si = view_of(mir::UnsizedView{0, mir::UnsizedLeaf::RowVector});
         break;
       case FunctionContainerKind::Matrix:
         si = matrix_view(built.dimensions[0], built.dimensions[1], true);
@@ -1746,7 +1758,9 @@ std::optional<Lowering::Val> Lowering::lower_eltwise_fn(
                      ? MessageError::OutOfRange
                      : MessageError::Domain,
                  error.what());
-      SlotInfo si = view_of(is_vector(a.si) ? "UVector" : "URowVector");
+      SlotInfo si = view_of(
+          mir::UnsizedView{0, is_vector(a.si) ? mir::UnsizedLeaf::Vector
+                                              : mir::UnsizedLeaf::RowVector});
       Val placeholder{add_slot(length, false), false, si, owning_layout(si)};
       out.fills.emplace_back(
           placeholder.slot,
@@ -1757,10 +1771,10 @@ std::optional<Lowering::Val> Lowering::lower_eltwise_fn(
     SlotInfo si;
     switch (map.result.container) {
       case FunctionContainerKind::Vector:
-        si = view_of("UVector");
+        si = view_of(mir::UnsizedView{0, mir::UnsizedLeaf::Vector});
         break;
       case FunctionContainerKind::RowVector:
-        si = view_of("URowVector");
+        si = view_of(mir::UnsizedView{0, mir::UnsizedLeaf::RowVector});
         break;
       case FunctionContainerKind::Matrix:
         si = matrix_view(map.result.dimensions[0], map.result.dimensions[1]);
@@ -1873,9 +1887,10 @@ std::optional<Lowering::Val> Lowering::lower_eltwise_fn(
     } catch (const std::invalid_argument& error) {
       fail(e.name + ": " + error.what(), e.raw);
     }
-    SlotInfo si = view_of(
-        map.result.container == FunctionContainerKind::RowVector ? "URowVector"
-                                                                 : "UVector");
+    SlotInfo si = view_of(mir::UnsizedView{
+        0, map.result.container == FunctionContainerKind::RowVector
+               ? mir::UnsizedLeaf::RowVector
+               : mir::UnsizedLeaf::Vector});
     si.param_free = a.si.param_free && b.si.param_free;
     return with_layout(
         emit_value(OP_GROUP_DOT, {a, b}, map.groups, si,
@@ -1901,7 +1916,8 @@ std::optional<Lowering::Val> Lowering::lower_eltwise_fn(
       if (a.runtime_dims.size() != 2 || a.runtime_dims[0] < 0 ||
           a.runtime_dims[0] != a.runtime_dims[1])
         fail("matrix_exp: needs one runtime square extent", e.raw);
-      Val extent{a.runtime_dims[0], false, view_of("UInt"),
+      Val extent{a.runtime_dims[0], false,
+                 view_of(mir::UnsizedView{0, mir::UnsizedLeaf::Int}),
                  ExpressionLayout::scalar()};
       extent.si.param_free = true;
       Val result = emit_value(OP_MATRIX_EXP_DYNAMIC, {a, extent},
@@ -1928,7 +1944,7 @@ std::optional<Lowering::Val> Lowering::lower_eltwise_fn(
         si = matrix_view(map.result.dimensions[0], map.result.dimensions[1]);
         break;
       case FunctionContainerKind::Vector:
-        si = view_of("UVector");
+        si = view_of(mir::UnsizedView{0, mir::UnsizedLeaf::Vector});
         break;
       case FunctionContainerKind::Array:
         si = array_view(map.result.dimensions, ViewKind::Flat, true);
@@ -1970,7 +1986,7 @@ std::optional<Lowering::Val> Lowering::lower_eltwise_fn(
       reduction != nullptr) {
     if (e.name == "sum") {
       const bool int_surface =
-          e.type_ == "UInt" || e.unsized.leaf == mir::UnsizedLeaf::Int ||
+          e.unsized.leaf == mir::UnsizedLeaf::Int ||
           (!e.args.empty() && e.args[0].unsized.leaf == mir::UnsizedLeaf::Int);
       if (int_surface && bounded_output)
         return lower_runtime_int_sum(e, actuals);
@@ -2017,9 +2033,9 @@ std::optional<Lowering::Val> Lowering::lower_eltwise_fn(
     // Whole-value kernels such as softmax and cumulative_sum can themselves
     // be vectorized over arrays, including one-lane leaves, so rebuilding a
     // view from the shallow MIR result spelling would discard outer axes.
-    if (e.type_ == "UMatrix" && !is_matrix(si))
+    if (mir::is_unsized(e, mir::UnsizedLeaf::Matrix) && !is_matrix(si))
       fail(e.name + ": matrix result has unknown logical extents", e.raw);
-    stamp_kind(&si, e.type_);
+    stamp_kind(&si, e.unsized);
     si.param_free = a.si.param_free;
     // These functions return freshly allocated Eigen containers. Their
     // result starts at lane zero independently of the input's provenance;
@@ -2063,7 +2079,7 @@ std::optional<Lowering::Val> Lowering::lower_eltwise_fn(
     // Preserve the pre-existing construction-time behavior for data-only
     // products. Dynamic products use OP_PROD_VEC in either graph.
     if (auto v = fold_const(e)) return *v;
-    if (e.args.size() != 1 || e.type_ != "UReal" ||
+    if (e.args.size() != 1 || !mir::is_unsized(e, mir::UnsizedLeaf::Real) ||
         e.unsized.leaf != mir::UnsizedLeaf::Real || e.unsized.depth != 0)
       fail("prod needs exactly one scalar-real result", e.raw);
     actuals.require_arity(1);
@@ -2098,13 +2114,13 @@ std::optional<Lowering::Val> Lowering::lower_eltwise_fn(
       if (!is_scalar(extent) || extent.autodiff)
         fail(e.name + ": runtime extent must be a data integer", e.raw);
       Val result = emit_value(OP_REP_VEC_DYNAMIC, {a, extent}, range->hi,
-                              view_of(e.type_));
+                              view_of(e.unsized));
       result.runtime_dims = {extent.slot};
-      return with_layout(result, owning_layout(view_of(e.type_)));
+      return with_layout(result, owning_layout(view_of(e.unsized)));
     }
     const long n = actuals.at(1).require_constant_int("rep_vector extent");
-    return with_layout(emit_value(OP_REP_VEC, {a}, n, view_of(e.type_)),
-                       owning_layout(view_of(e.type_)));
+    return with_layout(emit_value(OP_REP_VEC, {a}, n, view_of(e.unsized)),
+                       owning_layout(view_of(e.unsized)));
   }
   if (e.name == "rep_array" && e.args.size() >= 2 && e.args.size() <= 4) {
     // The element keeps its shape; rep_array prepends up to three outer
@@ -2188,19 +2204,25 @@ std::optional<Lowering::Val> Lowering::lower_eltwise_fn(
 
     if (nnz == 0)
       return with_layout(
-          emit_value(OP_REP_VEC, {constant(0.0)}, rows, view_of("UVector")),
-          owning_layout(view_of("UVector")));
+          emit_value(OP_REP_VEC, {constant(0.0)}, rows,
+                     view_of(mir::UnsizedView{0, mir::UnsizedLeaf::Vector})),
+          owning_layout(
+              view_of(mir::UnsizedView{0, mir::UnsizedLeaf::Vector})));
     std::vector<int> gather;
     gather.reserve((size_t)nnz);
     for (int column : columns) gather.push_back(column - 1);
-    Val picked =
-        emit_value(OP_GATHER, {vector}, nnz, view_of("UVector"), gather);
+    Val picked = emit_value(
+        OP_GATHER, {vector}, nnz,
+        view_of(mir::UnsizedView{0, mir::UnsizedLeaf::Vector}), gather);
     Val products = with_layout(
-        emit_value(OP_MUL, {weights, picked}, nnz, view_of("UVector")),
+        emit_value(OP_MUL, {weights, picked}, nnz,
+                   view_of(mir::UnsizedView{0, mir::UnsizedLeaf::Vector})),
         elementwise_layout({weights, picked}));
-    return with_layout(emit_value(OP_SEGMENT_SUM, {products}, rows,
-                                  view_of("UVector"), offsets),
-                       owning_layout(view_of("UVector")));
+    return with_layout(
+        emit_value(OP_SEGMENT_SUM, {products}, rows,
+                   view_of(mir::UnsizedView{0, mir::UnsizedLeaf::Vector}),
+                   offsets),
+        owning_layout(view_of(mir::UnsizedView{0, mir::UnsizedLeaf::Vector})));
   }
   if (e.name == "csr_to_dense_matrix" && e.args.size() == 5) {
     actuals.require_arity(5);
@@ -2240,8 +2262,9 @@ std::optional<Lowering::Val> Lowering::lower_eltwise_fn(
             checked_immediate(k, "csr entry");
       }
     }
-    Val padded = emit_value(OP_CONCAT2, {weights, constant(0.0)}, nnz + 1,
-                            view_of("UVector"));
+    Val padded =
+        emit_value(OP_CONCAT2, {weights, constant(0.0)}, nnz + 1,
+                   view_of(mir::UnsizedView{0, mir::UnsizedLeaf::Vector}));
     return with_layout(emit_value(OP_GATHER, {padded}, rows * cols, si, gather),
                        owning_layout(si));
   }
@@ -2299,7 +2322,8 @@ std::optional<Lowering::Val> Lowering::lower_matrix_fn(const mir::Expr& e,
     if (e.args.size() == 2) {
       Val v = actuals.at(0).value();
       const long n = actuals.at(1).require_constant_int("rep_matrix extent");
-      const bool rowvec = actuals.at(0).expr().type_ == "URowVector";
+      const bool rowvec =
+          mir::is_unsized(actuals.at(0).expr(), mir::UnsizedLeaf::RowVector);
       const long R = rowvec ? n : g.slots[v.slot].len;
       const long C = rowvec ? g.slots[v.slot].len : n;
       si = matrix_view(R, C);
@@ -2355,7 +2379,7 @@ std::optional<Lowering::Val> Lowering::lower_matrix_fn(const mir::Expr& e,
     if (e.name == "append_col") {
       if (da.rows != db.rows) fail("append_col row mismatch", e.raw);
       const LogicalDims out_dims{da.rows, da.cols + db.cols};
-      const SlotInfo si = view_for_dims(e.type_, out_dims);
+      const SlotInfo si = view_for_dims(e.unsized, out_dims);
       // Every supported value is column-major under this logical view;
       // adding columns is therefore always a contiguous concatenation.
       return with_layout(emit_value(OP_CONCAT2, {a, b}, la + lb, si),
@@ -2363,7 +2387,7 @@ std::optional<Lowering::Val> Lowering::lower_matrix_fn(const mir::Expr& e,
     }
     if (da.cols != db.cols) fail("append_row column mismatch", e.raw);
     const LogicalDims out_dims{da.rows + db.rows, da.cols};
-    const SlotInfo si = view_for_dims(e.type_, out_dims);
+    const SlotInfo si = view_for_dims(e.unsized, out_dims);
     if (out_dims.cols == 1)
       return with_layout(emit_value(OP_CONCAT2, {a, b}, la + lb, si),
                          owning_layout(si));

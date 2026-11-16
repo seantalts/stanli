@@ -230,7 +230,8 @@ import stanli
 
 model = stanli.Model(stan_file="model.stan", data="data.json")
 model = stanli.Model(stan_code=src, data={"J": 8, "y": y, "sigma": sigma},
-                     include_paths=None, fast_math=False)
+                     include_paths=None, fast_math=False,
+                     allow_interpreter=True)
 
 model.n_unconstrained               # length of the unconstrained vector
 model.constrained_names             # ['mu', 'tau', 'theta[1]', ...]

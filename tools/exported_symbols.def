@@ -14,19 +14,28 @@ EXPORTS
   stanli_model_new_from_stan_with_opts
   stanli_model_new_from_stan_named
   stanli_reduce_sum_count
-  stanli_reduce_sum_fallbacks
+  stanli_n_reduce_sum_fallbacks
+  stanli_reduce_sum_fallback
   stanli_has_embedded_stanc
   stanli_stan_to_mir_with_opts
-  stanli_stan_to_mir_named
+  stanli_compile_stan
+  stanli_compilation_mir
+  stanli_compilation_error
+  stanli_compilation_n_messages
+  stanli_compilation_message_kind
+  stanli_compilation_message
+  stanli_compilation_free
   stanli_string_free
   stanli_capture_messages
   stanli_take_messages
   stanli_function_new_from_stan
   stanli_function_new_from_mir
   stanli_function_free
+  stanli_function_set_execution_report
   stanli_function_call
   stanli_function_call_values
   stanli_build_id
+  stanli_bridgestan_data
   stanli_exact_lp
   stanli_model_free
   stanli_n_unconstrained
@@ -47,7 +56,18 @@ EXPORTS
   stanli_wa_seed_chain
   stanli_wa_row
   stanli_warnings
+  stanli_model_n_compiler_messages
+  stanli_model_compiler_message_kind
+  stanli_model_compiler_message
+  stanli_n_variables
+  stanli_variable_name
+  stanli_variable_n_dims
+  stanli_variable_dim
+  stanli_n_field_layouts
+  stanli_field_layouts
   stanli_transformed_data_rng
+  stanli_n_interpreter_fallbacks
+  stanli_interpreter_fallback
   stanli_sample_opts_init
   stanli_n_stored_draws
   stanli_sample_opts_check
@@ -56,9 +76,13 @@ EXPORTS
   stanli_metric_opts_init
   stanli_sample_multi_metric
   stanli_sampler_column_name
+  stanli_n_sampler_columns
+  stanli_summary_stat_name
+  stanli_n_summary_stats
   stanli_summary_stats
   stanli_diagnose_text
   stanli_sampling_warnings
+  stanli_diagnose_counts
   stanli_optimize_opts_init
   stanli_optimize
   stanli_fixed_param_opts_init
