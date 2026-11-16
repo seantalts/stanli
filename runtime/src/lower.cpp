@@ -128,7 +128,8 @@ void Lowering::observe_indexed_rhs(const mir::Expr& rhs, const Val& v) {
     observe(v, std::move(*evaluated));
     return;
   }
-  if (rhs.type_ != "UInt" || g.slots[v.slot].len != 1) return;
+  if (!mir::is_unsized(rhs, mir::UnsizedLeaf::Int) || g.slots[v.slot].len != 1)
+    return;
   try {
     const long value = eval_int(rhs);
     DataMap::Entry en;
@@ -399,7 +400,7 @@ void Lowering::bind_data(const mir::Program& p) {
         resolved.init = mir::Expr{};
         resolved.init.kind = mir::Expr::LitInt;
         resolved.init.lit_i = sized->second;
-        resolved.init.type_ = "UInt";
+        resolved.init.unsized = {0, mir::UnsizedLeaf::Int};
         resolved.init.data_only = true;
         (void)td.exec(resolved);
         continue;
@@ -915,22 +916,30 @@ void Lowering::run_passes(const std::vector<int>& roots, const PassPlan& plan) {
 }
 CompiledModel::WriteArray Lowering::run_write_array(const mir::Program& p) {
   const auto total_time = prep.start();
-  for (const auto& f : p.fun_defs) fun_defs[f.name] = &f;
+  for (const auto& f : p.fun_defs) fun_defs[mir::function_key(f)] = &f;
   in_write_array = true;
-  output_vars = &p.output_vars;
-  // stanc3 guards the two emission groups on these flags; the sampler wants
-  // both, so pin them and let the data-only IfElse fold them away.
+  output_cursor = mir::OutputCursor(p.output_vars);
+  // The readers drop stanc3's section guards on these flags; a guard they
+  // did not recognize still folds away with both pinned on.
   int_env["emit_transformed_parameters__"] = 1;
   int_env["emit_generated_quantities__"] = 1;
   CompiledModel::WriteArray wa;
   DumpOnThrow guard{*this};
   const auto lower_time = prep.start();
-  for (const auto& s : p.generate_quantities) {
+  for (size_t i = 0; i < p.generate_quantities.size(); ++i) {
+    const mir::Stmt& s = p.generate_quantities[i];
+    if (i == p.transformed_parameters_begin)
+      wa_section = mir::OutputVar::Block::TransformedParameters;
+    if (i == p.generated_quantities_begin)
+      wa_section = mir::OutputVar::Block::GeneratedQuantities;
     const auto mark = wa_mark();
     const auto fail_section = [&](const std::string& what) {
-      const char* section = mark.n_gq_start   ? "generated quantities"
-                            : mark.n_tp_start ? "transformed parameters"
-                                              : "write_array";
+      const char* section =
+          wa_section == mir::OutputVar::Block::GeneratedQuantities
+              ? "generated quantities"
+          : wa_section == mir::OutputVar::Block::TransformedParameters
+              ? "transformed parameters"
+              : "write_array";
       wa_rollback(mark);
       // Keep the valid prefix for diagnostics, but drivers select WaInterp
       // whenever this marker is set and it evaluates the whole section from
@@ -971,11 +980,10 @@ CompiledModel::WriteArray Lowering::run_write_array(const mir::Program& p) {
              out.n_unconstrained);
   guard.done = true;
   wa.graph = std::move(g);
-  // A section stanc did not emit a guard for (or one lowering stopped
-  // short of) has no columns of its own: it starts where the CSV ends.
-  // The transformed-parameter boundary falls back to the generated
-  // quantities one rather than to the end, so a missing first guard
-  // cannot order the two backwards and hand a reader a negative count.
+  // A section with no columns (or one lowering stopped short of) starts
+  // where the next one does; the transformed-parameter boundary falls back
+  // to the generated-quantities one, so the two cannot come out ordered
+  // backwards and hand a reader a negative count.
   wa.n_gq_start = n_gq_start.value_or(out.views.size());
   wa.n_tp_start = n_tp_start.value_or(wa.n_gq_start);
   wa.columns = std::move(out.views);
@@ -985,7 +993,7 @@ CompiledModel::WriteArray Lowering::run_write_array(const mir::Program& p) {
 CompiledModel Lowering::run(const mir::Program& p) {
   DumpOnThrow guard{*this};
   const auto total_time = prep.start();
-  for (const auto& f : p.fun_defs) fun_defs[f.name] = &f;
+  for (const auto& f : p.fun_defs) fun_defs[mir::function_key(f)] = &f;
   const auto bind_time = prep.start();
   if (!data_prepared) bind_data(p);
   prep.graph(prep_graph, "bind_data", bind_time, g, out.fills,
@@ -1049,9 +1057,7 @@ bool bounded_specialization_candidate(Lowering& lo, const mir::Program& p) {
     // Expansion gains were established for single selectors. Range/gather
     // bodies also expose different reduction/fusion choices; keep their
     // established representation until that separate arithmetic is proved.
-    if (e.kind == mir::Expr::FunApp && e.name.compare(0, 5, "Index") == 0 &&
-        e.name != "IndexSingle")
-      return false;
+    if (mir::is_index(e) && e.kind != mir::Expr::IndexSingle) return false;
     if (e.kind == mir::Expr::FunApp && e.fn_lib == mir::Expr::Lib::UserDefined)
       return false;
     for (const auto& a : e.args)
@@ -1062,8 +1068,8 @@ bool bounded_specialization_candidate(Lowering& lo, const mir::Program& p) {
     return shape(e) && !lo.expr_effectful(e);
   };
   std::function<bool(const mir::Stmt&)> statement = [&](const mir::Stmt& s) {
-    if (s.kind == mir::Stmt::NRFunApp && s.fn_name != "FnCheck" &&
-        s.fn_name != "FnValidateSize")
+    if (s.kind == mir::Stmt::NRFunApp && mir::internal_name(s) != "FnCheck" &&
+        mir::internal_name(s) != "FnValidateSize")
       return false;
     if ((s.kind == mir::Stmt::For || s.kind == mir::Stmt::While) &&
         lo.region_runtime_control(s))
@@ -1093,7 +1099,7 @@ std::optional<CompiledModel> try_bounded_specialization(Lowering& lo,
   if ((policy && std::string_view(policy) != "1") ||
       lo.structured_policy != StructuredMode::Auto)
     return {};
-  for (const auto& f : p.fun_defs) lo.fun_defs[f.name] = &f;
+  for (const auto& f : p.fun_defs) lo.fun_defs[mir::function_key(f)] = &f;
   if (!bounded_specialization_candidate(lo, p)) return {};
   // Transformed data, including its RNG and observable effects, runs once.
   // Both paths start after it; the trial owns every mutable lowering field.

@@ -22,7 +22,7 @@ function fail(message) {
 }
 
 function portablePayload(encoded, name) {
-  if (!encoded.startsWith("STANLI2:"))
+  if (!encoded.startsWith("STANLI3:"))
     fail(name + ": missing compact portable-MIR envelope");
   const text = encoded.slice(8);
   const payload = Buffer.from(text, "base64");
@@ -65,7 +65,7 @@ if (typeof classic.stanli_compile !== "function" ||
 const classicResult = classic.stanli_compile(
     "embedded_model", "parameters { real x; } model { x ~ std_normal(); }");
 if (classicResult.errors ||
-    !String(classicResult.result).startsWith("STANLI2:"))
+    !String(classicResult.result).startsWith("STANLI3:"))
   fail("classic-script portable compilation failed");
 
 let fallback = null;

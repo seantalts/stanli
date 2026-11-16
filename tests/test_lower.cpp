@@ -1491,6 +1491,36 @@ static void test_udf_data_call_o1() {
 // caller's propto, so the `~` inside prior_lp drops its constant terms while
 // the explicit normal_lpdf in scaled_lp keeps them. A `return;` ends only the
 // call: weighted_lp skips k == 2 and the loop continues.
+// stanc3 renames a function whose name is a C++ keyword (`public` becomes
+// `_stan_public`), and a void call names its function in the statement. Both
+// names, and one longer than sixty characters, must resolve.
+static void test_udf_void_names() {
+  using namespace stanli;
+  CompiledModel cm;
+  try {
+    cm = compile_model(slurp("tests/fixtures/udf_void_names.tmir.sexp"),
+                       DataMap());
+  } catch (const std::exception& error) {
+    check(false, std::string("udf void names compile: ") + error.what());
+    return;
+  }
+  Executor ex(cm.graph);
+  cm.bind(ex);
+  for (const auto& [y, want] : std::vector<std::pair<double, std::string>>{
+           {0.5, "public saw 0.5"}, {-0.5, "long name saw -0.5"}}) {
+    ex.params_data()[0] = y;
+    double grad = 0.0;
+    std::string got;
+    try {
+      (void)ex.gradient(&grad);
+    } catch (const std::domain_error& e) {
+      got = e.what();
+    }
+    check(got.find(want) != std::string::npos,
+          "udf void names reject: want '" + want + "', got '" + got + "'");
+  }
+}
+
 static void test_udf_void_statements() {
   using namespace stanli;
   const std::string mir = slurp("tests/fixtures/udf_void_statements.tmir.sexp");
@@ -9027,6 +9057,7 @@ int main() {
   test_udf_lp_branch_propto();
   test_udf_branch_kernels();
   test_udf_data_call_o1();
+  test_udf_void_names();
   test_udf_void_statements();
   test_structured_vector_return();
   test_structured_dead_after_break();

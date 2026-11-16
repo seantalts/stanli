@@ -82,6 +82,7 @@ Stmt structured_check(Transform::Kind kind, UnsizedLeaf leaf,
   Stmt s;
   s.kind = Stmt::NRFunApp;
   s.fn_name = "FnCheck";
+  s.fn_lib = stanli::mir::Expr::Lib::Internal;
   s.check_var_name = "x";
   Transform t;
   t.kind = kind;

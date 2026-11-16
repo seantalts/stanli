@@ -3,7 +3,7 @@
 # every package-checking host exercises source compilation.
 
 portable_payload <- function(mir) {
-  expect_true(startsWith(mir, "STANLI2:"))
+  expect_true(startsWith(mir, "STANLI3:"))
   jsonlite::base64_dec(substring(mir, 9L))
 }
 
@@ -96,7 +96,7 @@ test_that("the V8 helper prefers portable output and never retries its errors", 
     globalThis.__stanli_calls.arguments = arguments.length;
     globalThis.__stanli_calls.name = name;
     globalThis.__stanli_calls.source = source;
-    return {result: 'STANLI2:ZmFrZQ==', warnings: ['warning with θ']};
+    return {result: 'STANLI3:ZmFrZQ==', warnings: ['warning with θ']};
   };
   globalThis.stanc = function() {
     globalThis.__stanli_calls.classic += 1;
@@ -108,7 +108,7 @@ test_that("the V8 helper prefers portable output and never retries its errors", 
   expect_warning(
     mir <- stanli:::mir_from_js(source, enc2utf8("portable_π")),
     "warning with θ", fixed = TRUE)
-  expect_identical(mir, "STANLI2:ZmFrZQ==")
+  expect_identical(mir, "STANLI3:ZmFrZQ==")
   calls <- jsonlite::fromJSON(
     ctx$eval("JSON.stringify(globalThis.__stanli_calls)"))
   expect_identical(calls$portable, 1L)
@@ -120,7 +120,7 @@ test_that("the V8 helper prefers portable output and never retries its errors", 
   ctx$eval("globalThis.stanli_compile = function(name, source, includes, file) {
     globalThis.__stanli_calls.arguments = arguments.length;
     globalThis.__stanli_calls.file = file;
-    return {result: 'STANLI2:ZmFrZQ==', warnings: []};
+    return {result: 'STANLI3:ZmFrZQ==', warnings: []};
   };")
   expect_no_warning(
     stanli:::mir_from_js(source, file = "models/θ.stan"))
@@ -184,7 +184,7 @@ test_that("the native portable compiler owns flags and keeps warnings separate",
     expect_identical(source_bytes,
                      charToRaw(enc2utf8("model { // θ\r\n}\r\n")))
     con <- file(stdout, open = "wb")
-    writeChar("STANLI2:dGhldGEgzrg=", con,
+    writeChar("STANLI3:dGhldGEgzrg=", con,
               eos = NULL, useBytes = TRUE)
     close(con)
     writeLines("a successful frontend warning", stderr, useBytes = TRUE)
@@ -196,7 +196,7 @@ test_that("the native portable compiler owns flags and keeps warnings separate",
       "fake-stanli-compile", "model { // θ\r\n}\r\n",
       portable = TRUE, run_stanc = run_stanc),
     "a successful frontend warning", fixed = TRUE)
-  expect_identical(mir, "STANLI2:dGhldGEgzrg=")
+  expect_identical(mir, "STANLI3:dGhldGEgzrg=")
   expect_identical(seen$compiler, "fake-stanli-compile")
   expect_length(seen$args, 1)
   expect_false(dir.exists(seen$work))
@@ -225,7 +225,7 @@ test_that("UTF-8 Stan files survive locale-independent compiler staging", {
     staged <- file.path(dirname(stdout), "model.stan")
     expect_identical(readBin(staged, "raw", n = file.info(staged)$size),
                      expected)
-    writeChar("STANLI2:ZmFrZQ==", stdout, eos = NULL,
+    writeChar("STANLI3:ZmFrZQ==", stdout, eos = NULL,
               useBytes = TRUE)
     file.create(stderr)
     0L
@@ -233,7 +233,7 @@ test_that("UTF-8 Stan files survive locale-independent compiler staging", {
   expect_identical(
     stanli:::mir_from_binary("fake-stanli-compile", code, portable = TRUE,
                               run_stanc = run_stanc),
-    "STANLI2:ZmFrZQ==")
+    "STANLI3:ZmFrZQ==")
 })
 
 test_that("the pristine stanc fallback requests O1 optimized MIR", {
@@ -343,7 +343,7 @@ test_that("the webR helper selects by presence and never retries errors", {
     globalThis.__stanli_calls.arguments = arguments.length;
     globalThis.__stanli_calls.name = name;
     globalThis.__stanli_calls.source = source;
-    var r = {result: 'STANLI2:ZmFrZQ==', warnings: ['warning with ☃']};
+    var r = {result: 'STANLI3:ZmFrZQ==', warnings: ['warning with ☃']};
     globalThis.__stanli_calls.warnings = r.warnings.length;
     return r;
   };
@@ -376,7 +376,7 @@ test_that("the webR helper selects by presence and never retries errors", {
   expect_warning(
     mir <- stanli:::mir_from_webr(eval_js, source, model_name),
     "warning with ☃", fixed = TRUE)
-  expect_identical(mir, "STANLI2:ZmFrZQ==")
+  expect_identical(mir, "STANLI3:ZmFrZQ==")
   calls <- jsonlite::fromJSON(
     ctx$eval("JSON.stringify(globalThis.__stanli_calls)"))
   expect_identical(calls$portable, 1L)
@@ -390,7 +390,7 @@ test_that("the webR helper selects by presence and never retries errors", {
     globalThis.__stanli_calls.portable += 1;
     globalThis.__stanli_calls.arguments = arguments.length;
     globalThis.__stanli_calls.file = file;
-    return {result: 'STANLI2:ZmFrZQ==', warnings: []};
+    return {result: 'STANLI3:ZmFrZQ==', warnings: []};
   };")
   expect_no_warning(
     stanli:::mir_from_webr(eval_js, "model {}", file = "models/θ.stan"))
@@ -483,7 +483,7 @@ test_that("fast_math selects the fast producer in every compile path", {
   run_stanc <- function(compiler, args, stdout, stderr) {
     seen <<- args
     con <- file(stdout, open = "wb")
-    writeChar("STANLI2:ZmFrZQ==", con, eos = NULL, useBytes = TRUE)
+    writeChar("STANLI3:ZmFrZQ==", con, eos = NULL, useBytes = TRUE)
     close(con)
     0L
   }
@@ -507,15 +507,15 @@ test_that("fast_math selects the fast producer in every compile path", {
   ctx <- V8::v8()
   ctx$eval("globalThis.__calls = [];
   globalThis.stanli_compile = function() {
-    globalThis.__calls.push('plain'); return {result: 'STANLI2:cGxhaW4='};
+    globalThis.__calls.push('plain'); return {result: 'STANLI3:cGxhaW4='};
   };
   globalThis.stanli_compile_fast = function() {
-    globalThis.__calls.push('fast'); return {result: 'STANLI2:ZmFzdA=='};
+    globalThis.__calls.push('fast'); return {result: 'STANLI3:ZmFzdA=='};
   };")
   state$ctx <- ctx
-  expect_identical(stanli:::mir_from_js("model {}"), "STANLI2:cGxhaW4=")
+  expect_identical(stanli:::mir_from_js("model {}"), "STANLI3:cGxhaW4=")
   expect_identical(stanli:::mir_from_js("model {}", fast_math = TRUE),
-                   "STANLI2:ZmFzdA==")
+                   "STANLI3:ZmFzdA==")
   expect_identical(jsonlite::fromJSON(ctx$eval("JSON.stringify(__calls)")),
                    c("plain", "fast"))
 

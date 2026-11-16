@@ -14,12 +14,10 @@ namespace stanli {
 
 // A printed value's type: an int prints as one, and a scalar prints bare.
 inline bool message_integer(const mir::Expr& e) {
-  return e.unsized.leaf == mir::UnsizedLeaf::Int || e.type_ == "UInt";
+  return e.unsized.leaf == mir::UnsizedLeaf::Int;
 }
 inline bool message_scalar(const mir::Expr& e) {
-  return (e.unsized.depth == 0 && (e.unsized.leaf == mir::UnsizedLeaf::Int ||
-                                   e.unsized.leaf == mir::UnsizedLeaf::Real)) ||
-         e.type_ == "UInt" || e.type_ == "UReal";
+  return mir::language_scalar(e);
 }
 
 template <typename LowerValue>

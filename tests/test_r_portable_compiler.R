@@ -70,7 +70,7 @@ compile_bundled <- function(name, code) {
 }
 
 portable_payload <- function(mir) {
-  stopifnot(startsWith(mir, "STANLI2:"))
+  stopifnot(startsWith(mir, "STANLI3:"))
   jsonlite::base64_dec(substring(mir, 9L))
 }
 
@@ -92,7 +92,7 @@ second <- compile_bundled("unicode_bundled", unicode_source)
 stopifnot(
   length(first$errors) == 0L,
   is.character(first$result), length(first$result) == 1L,
-  startsWith(first$result, "STANLI2:"),
+  startsWith(first$result, "STANLI3:"),
   !grepl("[\r\n]$", first$result),
   validUTF8(first$result),
   raw_contains(portable_payload(first$result), "π"),
@@ -125,7 +125,7 @@ generated quantities {
 }"
 runtime_compilation <- compile_bundled("runtime_bundled", runtime_source)
 stopifnot(length(runtime_compilation$errors) == 0L,
-          startsWith(runtime_compilation$result, "STANLI2:"))
+          startsWith(runtime_compilation$result, "STANLI3:"))
 
 # `mir` is the public compatibility seam on the runtime version that owns this
 # producer. The appended transform_inits section is backward-compatible for

@@ -59,19 +59,6 @@ void validate_funapp_arity(const Expr& e) {
   // at all is rejected at the end of this function.
   if (function_arity_registered(e.name, e.args.size())) return;
 
-  if (named(e, {"IndexAll"})) {
-    require_arity(e, 0);
-    return;
-  }
-  if (named(e, {"IndexSingle", "IndexMulti", "IndexUpfrom"})) {
-    require_arity(e, 1);
-    return;
-  }
-  if (named(e, {"IndexBetween"})) {
-    require_arity(e, 2);
-    return;
-  }
-
   if (e.fn_lib == Expr::Lib::Internal &&
       (e.name == "FnReadData" || e.name == "FnLength")) {
     require_arity(e, 1);
@@ -223,6 +210,40 @@ UnsizedLeaf unsized_leaf(const std::string& atom) {
   return UnsizedLeaf::Unknown;
 }
 
+// stanc3's Fun_kind suffix: `FnPlain`, `(FnLpdf true)`, ...
+FnSuffix read_suffix(const Node& n, bool* propto) {
+  *propto = false;
+  const std::string& head = n.is_atom() ? n.atom : n[0].atom;
+  if (!n.is_atom() && n.size() == 2 && (head == "FnLpdf" || head == "FnLpmf")) {
+    *propto = n[1].atom == "true";
+    return head == "FnLpdf" ? FnSuffix::Lpdf : FnSuffix::Lpmf;
+  }
+  if (head == "FnRng") return FnSuffix::Rng;
+  if (head == "FnTarget") return FnSuffix::Target;
+  if (head == "FnJacobian") return FnSuffix::Jacobian;
+  if (head == "FnPlain") return FnSuffix::Plain;
+  throw std::runtime_error("mir: unknown function suffix " + head);
+}
+
+UnsizedView read_unsized(const Node& n);
+
+// (UFun ((arg types...) return-type suffix mem-pattern)): a variable that
+// names a function.
+std::optional<FunctionType> read_function_type(const Node& type) {
+  if (type.is_atom() || !type.head_is("UFun")) return std::nullopt;
+  if (type.size() != 2 || type[1].is_atom() || type[1].size() < 3 ||
+      type[1][0].is_atom())
+    throw std::runtime_error("mir: malformed function type");
+  FunctionType out;
+  for (const Node& arg : type[1][0].kids) {
+    if (arg.is_atom() || arg.size() != 2)
+      throw std::runtime_error("mir: malformed function type");
+    out.args.push_back(read_unsized(arg[1]));
+  }
+  out.suffix = read_suffix(type[1][2], &out.propto);
+  return out;
+}
+
 UnsizedView read_unsized(const Node& n) {
   UnsizedView out;
   const Node* leaf = &n;
@@ -260,24 +281,19 @@ Expr read_expr(const Node& n);
 Expr read_index(const Node& ix_n) {
   Expr ix;
   if (ix_n.is_atom() && ix_n.atom == "All") {
-    ix.kind = Expr::FunApp;
-    ix.name = "IndexAll";
+    ix.kind = Expr::IndexAll;
   } else if (!ix_n.is_atom() && ix_n.head_is("Single")) {
-    ix.kind = Expr::FunApp;
-    ix.name = "IndexSingle";
+    ix.kind = Expr::IndexSingle;
     ix.args.push_back(read_expr(ix_n[1]));
   } else if (!ix_n.is_atom() && ix_n.head_is("Between")) {
-    ix.kind = Expr::FunApp;
-    ix.name = "IndexBetween";
+    ix.kind = Expr::IndexBetween;
     ix.args.push_back(read_expr(ix_n[1]));
     ix.args.push_back(read_expr(ix_n[2]));
   } else if (!ix_n.is_atom() && ix_n.head_is("Upfrom")) {
-    ix.kind = Expr::FunApp;
-    ix.name = "IndexUpfrom";
+    ix.kind = Expr::IndexUpfrom;
     ix.args.push_back(read_expr(ix_n[1]));
   } else if (!ix_n.is_atom() && ix_n.head_is("MultiIndex")) {
-    ix.kind = Expr::FunApp;
-    ix.name = "IndexMulti";
+    ix.kind = Expr::IndexMulti;
     ix.args.push_back(read_expr(ix_n[1]));
   } else {
     ix.kind = Expr::Unsupported;
@@ -315,10 +331,7 @@ Expr read_expr_pattern(const Node& p) {
     // user function it is the value of CmdStan's propto__ template
     // argument, which the body inherits.
     auto read_propto = [&](const Node& kind) {
-      const Node& suffix = kind[2];
-      if (!suffix.is_atom() &&
-          (suffix.head_is("FnLpdf") || suffix.head_is("FnLpmf")))
-        e.fn_propto = suffix[1].atom == "true";
+      e.fn_suffix = read_suffix(kind[2], &e.fn_propto);
     };
     if (kind.head_is("StanLib")) {
       e.fn_lib = Expr::Lib::StanLib;
@@ -386,12 +399,21 @@ Expr read_expr(const Node& n) {
       if (const Node* t = field(m, "type_")) {
         const Node& type = (*t)[1];
         e.unsized = read_unsized(type);
-        if (e.unsized.leaf != UnsizedLeaf::Unknown) {
-          e.type_ = e.unsized.depth ? "UArray" : type.atom;
-        } else {
-          e.type_.clear();
-          e.raw = dump(type);
+        if (e.kind == Expr::Var) {
+          e.fn_type = read_function_type(type);
+          // A density passed as `foo_lupdf` names the definition foo_lpdf
+          // and asks for its unnormalized form, as stanc3's C++ generation
+          // reads it; the portable producer does the same.
+          if (e.fn_type && e.fn_type->propto) {
+            e.fn_propto = true;
+            for (const char* unnormalized : {"_lupdf", "_lupmf"})
+              if (e.name.size() > 6 &&
+                  e.name.compare(e.name.size() - 6, 6, unnormalized) == 0)
+                e.name.replace(e.name.size() - 6, 6,
+                               unnormalized[4] == 'd' ? "_lpdf" : "_lpmf");
+          }
         }
+        if (e.unsized.leaf == UnsizedLeaf::Unknown) e.raw = dump(type);
       }
       if (const Node* a = field(m, "adlevel"))
         e.data_only = (*a)[1].is_atom() && (*a)[1].atom == "DataOnly";
@@ -512,20 +534,14 @@ Stmt read_stmt(const Node& n) {
       s.decl_data_only = (*ad)[1].is_atom() && (*ad)[1].atom == "DataOnly";
     if (const Node* dt = field(p, "decl_type")) {
       const Node& t = (*dt)[1];  // (Sized ST) or (Unsized T)
-      s.decl_type = t.head_is("Sized") ? read_sized(t[1]) : SizedType{};
-      if (!t.head_is("Sized")) {
+      if (t.head_is("Sized"))
+        s.decl_type = read_sized(t[1]);
+      else if (t.head_is("Unsized") && t.size() == 2) {
+        const UnsizedView view = read_unsized(t[1]);
+        s.decl_type = detail::unsized_declaration(
+            view, view.leaf == UnsizedLeaf::Unknown ? dump(t[1]) : "");
+      } else
         s.decl_type.raw = dump(t);
-        // stanc3 declares scalar and container temporaries unsized. Scalars
-        // have a fixed width, so retain the historical sized spelling;
-        // container shapes are restored during finalization and supplied by
-        // their first whole-variable assignment during lowering.
-        if (t.size() > 1 && t[1].is_atom()) {
-          if (t[1].atom == "UReal")
-            s.decl_type.base = "SReal";
-          else if (t[1].atom == "UInt")
-            s.decl_type.base = "SInt";
-        }
-      }
     }
     if (const Node* init = field(p, "initialize")) {
       const Node& iv = (*init)[1];
@@ -565,9 +581,8 @@ Stmt read_stmt(const Node& n) {
     }
     s.rhs = read_expr(p[p.size() - 1]);
   } else if (head == "TargetPE" || head == "JacobianPE") {
-    // The model is always evaluated with jacobian=true, and write_array
-    // never adds to the target, so `jacobian +=` is a target increment.
     s.kind = Stmt::TargetPE;
+    s.jacobian = head == "JacobianPE";
     s.target = read_expr(p[1]);
   } else if (head == "Block") {
     s.kind = Stmt::Block;
@@ -605,6 +620,7 @@ Stmt read_stmt(const Node& n) {
     s.kind = Stmt::NRFunApp;
     const Node& kind = p[1];
     if (kind.head_is("CompilerInternal")) {
+      s.fn_lib = Expr::Lib::Internal;
       const Node& internal = kind[1];
       s.fn_name = internal.is_atom() ? internal.atom : internal[0].atom;
       if (!internal.is_atom()) {
@@ -638,8 +654,17 @@ Stmt read_stmt(const Node& n) {
       }
     } else if (kind.head_is("StanLib")) {
       s.fn_name = kind[1].atom;
+      bool propto = false;
+      if (kind.size() > 2) s.fn_suffix = read_suffix(kind[2], &propto);
+    } else if (kind.head_is("UserDefined") && kind.size() == 3) {
+      s.fn_lib = Expr::Lib::UserDefined;
+      s.fn_name = kind[1].atom;
+      bool propto = false;
+      s.fn_suffix = read_suffix(kind[2], &propto);
     } else {
-      s.fn_name = dump(kind, 60);
+      s.kind = Stmt::Unsupported;
+      s.raw = dump(p);
+      return s;
     }
     for (size_t i = 2; i < p.size(); ++i)
       for (size_t a = 0; a < p[i].size(); ++a)
@@ -652,91 +677,12 @@ Stmt read_stmt(const Node& n) {
 
 void validate_expression_shape(const Expr& e);
 
-std::string unsized_spelling(const UnsizedView& view) {
-  std::string type;
-  switch (view.leaf) {
-    case UnsizedLeaf::Int:
-      type = "UInt";
-      break;
-    case UnsizedLeaf::Real:
-      type = "UReal";
-      break;
-    case UnsizedLeaf::Complex:
-      type = "UComplex";
-      break;
-    case UnsizedLeaf::Vector:
-      type = "UVector";
-      break;
-    case UnsizedLeaf::RowVector:
-      type = "URowVector";
-      break;
-    case UnsizedLeaf::Matrix:
-      type = "UMatrix";
-      break;
-    case UnsizedLeaf::Unknown:
-      return {};
-  }
-  for (uint8_t depth = 0; depth < view.depth; ++depth)
-    type = "(UArray " + type + ")";
-  return type;
-}
-
-bool parse_unsized_spelling(std::string_view text, UnsizedView* out) {
-  size_t depth = 0;
-  constexpr std::string_view prefix = "(UArray ";
-  while (text.size() > prefix.size() &&
-         text.substr(0, prefix.size()) == prefix && text.back() == ')') {
-    if (++depth > std::numeric_limits<uint8_t>::max()) return false;
-    text.remove_prefix(prefix.size());
-    text.remove_suffix(1);
-  }
-  UnsizedLeaf leaf = UnsizedLeaf::Unknown;
-  if (text == "UInt")
-    leaf = UnsizedLeaf::Int;
-  else if (text == "UReal")
-    leaf = UnsizedLeaf::Real;
-  else if (text == "UComplex")
-    leaf = UnsizedLeaf::Complex;
-  else if (text == "UVector")
-    leaf = UnsizedLeaf::Vector;
-  else if (text == "URowVector")
-    leaf = UnsizedLeaf::RowVector;
-  else if (text == "UMatrix")
-    leaf = UnsizedLeaf::Matrix;
-  else
-    return false;
-  *out = UnsizedView{static_cast<uint8_t>(depth), leaf};
-  return true;
-}
-
-void validate_expression_metadata(const Expr& e) {
-  if (e.unsized.leaf == UnsizedLeaf::Unknown) {
-    // Unknown upstream types use the raw/unsupported channel and clear the
-    // compact type spelling. A recognized compact spelling paired with an
-    // unknown structural view would let different consumers infer different
-    // shapes.
-    if (e.type_ == "UInt" || e.type_ == "UReal" || e.type_ == "UComplex" ||
-        e.type_ == "UVector" || e.type_ == "URowVector" ||
-        e.type_ == "UMatrix" || e.type_ == "UArray")
-      malformed("expression type metadata");
-    return;
-  }
-  const std::string expected = e.unsized.depth == 0
-                                   ? unsized_spelling(e.unsized)
-                                   : std::string("UArray");
-  if (e.type_ != expected) malformed("expression type metadata");
-}
-
 void validate_index_shape(const Expr& index) {
-  if (index.kind != Expr::FunApp || index.fn_lib != Expr::Lib::StanLib ||
-      !named(index, {"IndexAll", "IndexSingle", "IndexBetween", "IndexMulti",
-                     "IndexUpfrom"}))
-    malformed("index descriptor");
+  if (!is_index(index)) malformed("index descriptor");
   validate_expression_shape(index);
 }
 
 void validate_expression_shape(const Expr& e) {
-  validate_expression_metadata(e);
   switch (e.kind) {
     case Expr::Var:
     case Expr::LitInt:
@@ -751,8 +697,8 @@ void validate_expression_shape(const Expr& e) {
     case Expr::Indexed:
       // args[0] is the base. stanc can retain a no-op Indexed wrapper with no
       // descriptors after transformations, so only the base is mandatory.
-      // Index consumers address each descriptor according to its synthetic
-      // name when descriptors are present.
+      // Index consumers address each descriptor according to its kind when
+      // descriptors are present.
       if (e.args.empty()) malformed("Indexed expression arity");
       validate_expression_shape(e.args[0]);
       for (size_t i = 1; i < e.args.size(); ++i)
@@ -769,6 +715,17 @@ void validate_expression_shape(const Expr& e) {
       break;
     case Expr::FunApp:
       validate_funapp_arity(e);
+      break;
+    case Expr::IndexAll:
+      if (!e.args.empty()) malformed("IndexAll arity");
+      break;
+    case Expr::IndexSingle:
+    case Expr::IndexUpfrom:
+    case Expr::IndexMulti:
+      if (e.args.size() != 1) malformed("index arity");
+      break;
+    case Expr::IndexBetween:
+      if (e.args.size() != 2) malformed("IndexBetween arity");
       break;
   }
   for (const Expr& arg : e.args) validate_expression_shape(arg);
@@ -879,26 +836,17 @@ void validate_statement_shape(const Stmt& statement) {
 void validate_program_shape(const Program& program) {
   for (const auto& input : program.input_vars)
     validate_sized_type_shape(input.second);
+  for (const OutputVar& output : program.output_vars)
+    validate_sized_type_shape(output.type);
   for (const std::vector<Stmt>* body :
        {&program.prepare_data, &program.log_prob, &program.generate_quantities,
         &program.transform_inits})
     for (const Stmt& statement : *body) validate_statement_shape(statement);
   for (const FunDef& function : program.fun_defs) {
     const size_t arity = function.arg_names.size();
-    if (function.arg_types.size() != arity ||
-        function.arg_views.size() != arity ||
+    if (function.arg_views.size() != arity ||
         function.arg_data_only.size() != arity)
       malformed("function argument field lengths disagree");
-    for (size_t i = 0; i < arity; ++i) {
-      UnsizedView parsed;
-      const bool recognized =
-          parse_unsized_spelling(function.arg_types[i], &parsed);
-      const UnsizedView& view = function.arg_views[i];
-      if ((recognized &&
-           (parsed.depth != view.depth || parsed.leaf != view.leaf)) ||
-          (!recognized && view.leaf != UnsizedLeaf::Unknown))
-        malformed("function argument type disagrees with its view");
-    }
     for (const Stmt& statement : function.body)
       validate_statement_shape(statement);
   }
@@ -1016,7 +964,7 @@ void validate_expression(const Expr& e, const Bindings& bindings,
     }
   }
   if (e.kind == Expr::FunApp && e.fn_lib == Expr::Lib::UserDefined) {
-    const auto found = functions.find(e.name);
+    const auto found = functions.find(function_key(e));
     if (found == functions.end())
       throw std::runtime_error("mir: call to unknown user function " + e.name);
     const FunDef& function = *found->second;
@@ -1053,7 +1001,9 @@ void validate_bindings(const Stmt& s, Bindings& bindings, BindingScope* scope,
   for_each_expr(s, [&](const Expr& e) {
     validate_expression(e, bindings, functions, strict_variable_metadata);
   });
-  if (s.kind == Stmt::NRFunApp && s.fn_name == "FnCheck") {
+  if (const auto call = user_defined_statement_call(s))
+    validate_expression(*call, bindings, functions, strict_variable_metadata);
+  if (internal_name(s) == "FnCheck") {
     if (!s.check_transform)
       throw std::runtime_error("mir: FnCheck has no transform");
     const Transform::Kind kind = s.check_transform->kind;
@@ -1143,11 +1093,10 @@ void validate_bindings(const std::vector<Stmt>& body, Bindings& bindings,
 
 // stanc3 keeps every overload of a user function under one fdname, and calls
 // carry only that name, so the by-name function maps downstream would
-// collide (last definition wins). Give each overload a distinct internal
-// name and rewrite every call site to the overload its argument types
-// select. stanc3 already ran overload resolution and inserted promotions at
-// typecheck time, so a call's (leaf, depth) views match exactly one
-// signature; parenthesized signatures cannot collide with Stan identifiers.
+// collide (last definition wins). Give each overload its signature and
+// point every call site at the overload its argument types select. stanc3
+// already ran overload resolution and inserted promotions at typecheck
+// time, so a call's (leaf, depth) views match exactly one signature.
 
 using Overloads = std::map<std::string, std::vector<FunDef*>>;
 
@@ -1215,43 +1164,25 @@ std::string resolve_overload(const Overloads::value_type& candidates,
   if (!match)
     throw std::runtime_error("mir: no overload of " + candidates.first +
                              " matches its call");
-  return match->name;
-}
-
-// A function passed by name, as to ode_rk45, is typed
-// (UFun ((arg types...) (ReturnType ...) ...)) in its raw metadata.
-std::vector<UnsizedView> function_argument_views(const std::string& raw) {
-  const Node type = sexp::parse(raw);
-  if (!type.head_is("UFun") || type.size() != 2 || type[1].is_atom() ||
-      type[1].size() == 0 || type[1][0].is_atom())
-    throw std::runtime_error("mir: malformed function type " + raw);
-  std::vector<UnsizedView> views;
-  for (const Node& arg : type[1][0].kids) {
-    if (arg.is_atom() || arg.size() != 2)
-      throw std::runtime_error("mir: malformed function type " + raw);
-    views.push_back(read_unsized(arg[1]));
-  }
-  return views;
+  return match->overload;
 }
 
 void resolve_calls(Expr& e, const Overloads& overloads) {
   for (Expr& a : e.args) resolve_calls(a, overloads);
   const bool call =
       e.kind == Expr::FunApp && e.fn_lib == Expr::Lib::UserDefined;
-  const bool callback = e.kind == Expr::Var && e.raw.rfind("(UFun ", 0) == 0;
+  const bool callback = e.kind == Expr::Var && e.fn_type;
   if (!call && !callback) return;
   const auto it = overloads.find(e.name);
   if (it == overloads.end()) return;
-  e.name = call ? resolve_overload(*it, e.args)
-                : resolve_overload(*it, function_argument_views(e.raw));
+  e.fn_overload = call ? resolve_overload(*it, e.args)
+                       : resolve_overload(*it, e.fn_type->args);
 }
 
 void resolve_calls(Stmt& s, const Overloads& overloads) {
-  if (const auto name = user_defined_statement_name(s.fn_name)) {
-    const auto it = overloads.find(s.fn_name.substr(name->first, name->second));
-    if (it != overloads.end())
-      s.fn_name.replace(name->first, name->second,
-                        resolve_overload(*it, s.fn_args));
+  if (s.kind == Stmt::NRFunApp && s.fn_lib == Expr::Lib::UserDefined) {
+    const auto it = overloads.find(s.fn_name);
+    if (it != overloads.end()) s.fn_overload = resolve_overload(*it, s.fn_args);
   }
   for_each_expr(s, [&](Expr& e) { resolve_calls(e, overloads); });
   for (Stmt& k : s.body) resolve_calls(k, overloads);
@@ -1292,33 +1223,10 @@ void unmangle(Program& prog) {
     for (std::string& arg : f.arg_names) unmangle(arg);
     for (Stmt& s : f.body) unmangle(s);
   }
-  for (std::string& name : prog.output_vars) unmangle(name);
-}
-
-void restore_unsized_decls(Stmt& s, bool strict) {
-  if (s.kind == Stmt::Decl && s.decl_type.base.empty()) {
-    const std::string& raw = s.decl_type.raw;
-    const bool looks_unsized = raw.compare(0, 8, "(Unsized") == 0;
-    const bool wrapped = raw.size() > 10 &&
-                         raw.compare(0, 9, "(Unsized ") == 0 &&
-                         raw.back() == ')';
-    bool parsed = false;
-    if (wrapped) {
-      const std::string_view spelling(raw.data() + 9, raw.size() - 10);
-      parsed = parse_unsized_spelling(spelling, &s.decl_type.unsized);
-    }
-    if (strict && looks_unsized && !parsed)
-      malformed("unsized declaration type");
+  for (OutputVar& var : prog.output_vars) {
+    unmangle(var.name);
+    unmangle(var.type);
   }
-  for (Stmt& child : s.body) restore_unsized_decls(child, strict);
-}
-
-void restore_unsized_decls(Program& prog, bool strict) {
-  for (auto* body : {&prog.prepare_data, &prog.log_prob,
-                     &prog.generate_quantities, &prog.transform_inits})
-    for (Stmt& s : *body) restore_unsized_decls(s, strict);
-  for (FunDef& f : prog.fun_defs)
-    for (Stmt& s : f.body) restore_unsized_decls(s, strict);
 }
 
 void resolve_overloads(Program& prog) {
@@ -1332,10 +1240,9 @@ void resolve_overloads(Program& prog) {
         if (views_match(defs[i]->arg_views, defs[j]->arg_views))
           throw std::runtime_error("mir: indistinguishable overloads of " +
                                    name);
-    for (FunDef* f : defs) f->name += signature(f->arg_views);
+    for (FunDef* f : defs) f->overload = signature(f->arg_views);
     overloads[name] = std::move(defs);
   }
-  if (overloads.empty()) return;
   for (auto& [name, type] : prog.input_vars)
     for (Expr& d : type.dims) resolve_calls(d, overloads);
   for (auto* body : {&prog.prepare_data, &prog.log_prob,
@@ -1347,23 +1254,24 @@ void resolve_overloads(Program& prog) {
 
 }  // namespace
 
+SizedType detail::unsized_declaration(const UnsizedView& view,
+                                      std::string raw) {
+  SizedType type;
+  type.raw = std::move(raw);
+  if (view.depth == 0 && view.leaf == UnsizedLeaf::Int)
+    type.base = "SInt";
+  else if (view.depth == 0 && view.leaf == UnsizedLeaf::Real)
+    type.base = "SReal";
+  else
+    type.unsized = view;
+  return type;
+}
+
 void detail::validate_portable_program(const Program& prog) {
   validate_program_shape(prog);
 }
 
 namespace {
-
-// The portable format has no JacobianPE statement; it carries the statement
-// as stanc3's s-expression.
-void read_jacobian_statements(Stmt& s) {
-  if (s.kind == Stmt::Unsupported && s.raw.rfind("(JacobianPE ", 0) == 0) {
-    const Node pattern = sexp::parse(s.raw);
-    if (pattern.size() != 2) malformed("JacobianPE statement");
-    s.kind = Stmt::TargetPE;
-    s.target = read_expr(pattern[1]);
-  }
-  for (Stmt& child : s.body) read_jacobian_statements(child);
-}
 
 // stanc3 wraps an argument in eval() to force an Eigen expression; the value
 // is the argument's.
@@ -1381,33 +1289,27 @@ void strip_eval(Stmt& s) {
   for (Stmt& child : s.body) strip_eval(child);
 }
 
-void read_jacobian_statements(Program& prog) {
+void strip_eval(Program& prog) {
   for (auto* body : {&prog.prepare_data, &prog.log_prob,
                      &prog.generate_quantities, &prog.transform_inits})
-    for (Stmt& s : *body) {
-      read_jacobian_statements(s);
-      strip_eval(s);
-    }
+    for (Stmt& s : *body) strip_eval(s);
   for (FunDef& f : prog.fun_defs)
-    for (Stmt& s : f.body) {
-      read_jacobian_statements(s);
-      strip_eval(s);
-    }
+    for (Stmt& s : f.body) strip_eval(s);
 }
 
 }  // namespace
 
 void detail::finalize_program(Program& prog, bool strict_variable_metadata) {
-  read_jacobian_statements(prog);
+  strip_eval(prog);
   unmangle(prog);
-  restore_unsized_decls(prog, strict_variable_metadata);
   resolve_overloads(prog);
   Functions functions;
   for (const auto& f : prog.fun_defs) {
-    const auto inserted = functions.emplace(f.name, &f);
+    const auto inserted = functions.emplace(function_key(f), &f);
     if (!inserted.second)
       throw std::runtime_error(
-          "mir: duplicate function name after overload resolution: " + f.name);
+          "mir: duplicate function name after overload resolution: " +
+          function_key(f));
   }
   Bindings inputs;
   for (const auto& [name, type] : prog.input_vars)
@@ -1433,6 +1335,47 @@ void detail::finalize_program(Program& prog, bool strict_variable_metadata) {
     validate_bindings(f.body, args, nullptr, functions,
                       strict_variable_metadata);
   }
+}
+
+// stanc3 separates write_array's three sections with top-level early-return
+// guards on its emit flags:
+//   if (!(emit_transformed_parameters__ || emit_generated_quantities__))
+//     return;                                 <- transformed parameters start
+//   if (!emit_generated_quantities__) return; <- generated quantities start
+// stanli always emits every section, so drop the guards and keep where they
+// were, as the portable producer does.
+void read_write_array(const Node& list, Program& prog) {
+  const auto mentions = [](const auto& self, const Expr& e,
+                           const char* name) -> bool {
+    if (e.kind == Expr::Var && e.name == name) return true;
+    for (const Expr& arg : e.args)
+      if (self(self, arg, name)) return true;
+    return false;
+  };
+  std::optional<size_t> tp_begin, gq_begin;
+  for (size_t i = 0; i < list.size(); ++i) {
+    Stmt s = read_stmt(list[i]);
+    const size_t here = prog.generate_quantities.size();
+    if (s.kind == Stmt::IfElse && s.cond.kind == Expr::FunApp &&
+        s.cond.args.size() == 1 && s.cond.args[0].kind == Expr::Var &&
+        s.cond.args[0].name == "emit_generated_quantities__") {
+      if (!gq_begin) {
+        gq_begin = here;
+        continue;
+      }
+    } else if (s.kind == Stmt::IfElse &&
+               mentions(mentions, s.cond, "emit_transformed_parameters__")) {
+      if (!tp_begin) {
+        tp_begin = here;
+        continue;
+      }
+    }
+    prog.generate_quantities.push_back(std::move(s));
+  }
+  prog.generated_quantities_begin =
+      gq_begin.value_or(prog.generate_quantities.size());
+  prog.transformed_parameters_begin =
+      tp_begin.value_or(prog.generated_quantities_begin);
 }
 
 Program read_program(const sexp::Node& root) {
@@ -1461,8 +1404,6 @@ Program read_program(const sexp::Node& root) {
           f.arg_views.push_back(read_unsized(args[a][2]));
           f.arg_data_only.push_back(args[a][0].is_atom() &&
                                     args[a][0].atom == "DataOnly");
-          f.arg_types.push_back(args[a][2].is_atom() ? args[a][2].atom
-                                                     : dump(args[a][2], 40));
         }
       }
       if (const Node* fb2 = field(fd, "fdbody"))
@@ -1474,7 +1415,7 @@ Program read_program(const sexp::Node& root) {
   if (!lp) throw std::runtime_error("mir: no log_prob section");
   read_stmt_list((*lp)[1], prog.log_prob);
   if (const Node* gq = field(root, "generate_quantities"))
-    read_stmt_list((*gq)[1], prog.generate_quantities);
+    read_write_array((*gq)[1], prog);
   // stanc3's inverse parameter transforms. Absent from a hand-written or
   // pre-backend-transform MIR, in which case constrained-scale inits stay
   // unavailable for this model rather than becoming an error here.
@@ -1483,14 +1424,30 @@ Program read_program(const sexp::Node& root) {
     read_stmt_list((*ti)[1], prog.transform_inits);
   }
   if (const Node* ov = field(root, "output_vars")) {
-    // ((name <opaque> (...)) ...): parameters, transformed parameters and
-    // generated quantities in declaration order -- the order FnWriteParam
-    // statements emit them in. Only the names matter here; they are the
-    // naming fallback for a write whose variable reference the optimizer
-    // replaced with the value itself.
+    // ((name <opaque> ((out_unconstrained_st ST) (out_constrained_st ST)
+    // (out_block B) (out_trans T))) ...)
     const Node& vars = (*ov)[1];
-    for (size_t i = 0; i < vars.size(); ++i)
-      prog.output_vars.push_back(vars[i][0].atom);
+    for (size_t i = 0; i < vars.size(); ++i) {
+      const Node& v = vars[i];
+      const Node* type =
+          v.size() == 3 ? field(v[2], "out_constrained_st") : nullptr;
+      const Node* block = v.size() == 3 ? field(v[2], "out_block") : nullptr;
+      if (!type || !block || !(*block)[1].is_atom())
+        throw std::runtime_error("mir: malformed output variable");
+      OutputVar out;
+      out.name = v[0].atom;
+      out.type = read_sized((*type)[1]);
+      const std::string& b = (*block)[1].atom;
+      if (b == "Parameters")
+        out.block = OutputVar::Block::Parameters;
+      else if (b == "TransformedParameters")
+        out.block = OutputVar::Block::TransformedParameters;
+      else if (b == "GeneratedQuantities")
+        out.block = OutputVar::Block::GeneratedQuantities;
+      else
+        throw std::runtime_error("mir: unknown output block " + b);
+      prog.output_vars.push_back(std::move(out));
+    }
   }
   prog.nesting = nesting_meter.peak;
   detail::finalize_program(prog);

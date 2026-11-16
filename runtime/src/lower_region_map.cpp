@@ -112,7 +112,7 @@ class ParameterControl {
       return true;
     if (e.kind == mir::Expr::FunApp &&
         e.fn_lib == mir::Expr::Lib::UserDefined &&
-        call(e.name, pattern(e.args, env), depth + 1))
+        call(mir::function_key(e), pattern(e.args, env), depth + 1))
       return true;
     for (const auto& a : e.args)
       if (expression(a, env, depth + 1)) return true;
@@ -126,8 +126,8 @@ class ParameterControl {
     if (s.kind == mir::Stmt::For &&
         (dependent(s.lower, env) || dependent(s.upper, env)))
       return true;
-    if (s.kind == mir::Stmt::NRFunApp && defs_.count(s.fn_name) &&
-        call(s.fn_name, pattern(s.fn_args, env), depth + 1))
+    if (s.fn_lib == mir::Expr::Lib::UserDefined &&
+        call(mir::function_key(s), pattern(s.fn_args, env), depth + 1))
       return true;
     for (const mir::Expr* value :
          {&s.init, &s.rhs, &s.target, &s.lower, &s.upper, &s.cond})
@@ -251,7 +251,8 @@ bool accumulate_as_target(mir::Stmt& s, const std::string& name,
   if (s.kind == mir::Stmt::Assignment && s.lhs == name) {
     const mir::Expr& rhs = s.rhs;
     if (!s.lhs_idx.empty() || rhs.kind != mir::Expr::FunApp ||
-        rhs.name != "Plus__" || rhs.args.size() != 2 || rhs.type_ != "UReal" ||
+        rhs.name != "Plus__" || rhs.args.size() != 2 ||
+        !mir::is_unsized(rhs, mir::UnsizedLeaf::Real) ||
         rhs.args[0].kind != mir::Expr::Var || rhs.args[0].name != name ||
         Lowering::expr_references(rhs.args[1], name))
       return false;
@@ -505,7 +506,7 @@ bool Lowering::lower_region_map(const mir::Stmt& s, long lo, long hi) {
     push_target_term(op.out);
   } else {
     const std::string sum = "(region map sum " + std::to_string(op.out) + ")";
-    SlotInfo si = view_of("UReal");
+    SlotInfo si = view_of(mir::UnsizedView{0, mir::UnsizedLeaf::Real});
     si.param_free = false;
     bind_synthetic(sum, Val{op.out, scalar_autodiff(), si},
                    DeclView{1, scalar_autodiff(), si, false, false});

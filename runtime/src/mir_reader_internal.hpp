@@ -10,8 +10,13 @@ namespace mir {
 namespace detail {
 
 // Apply the name resolution and binding checks shared by both wire formats.
-// This mutates overloaded user-function names and their call sites.
+// This records the overload each user-function call site selects.
 void finalize_program(Program& program, bool strict_variable_metadata = false);
+
+// The SizedType of a declaration stanc3 left unsized. A scalar has a fixed
+// width and keeps the sized spelling; a container carries its view, and its
+// first whole-variable assignment supplies the shape.
+SizedType unsized_declaration(const UnsizedView& view, std::string raw);
 
 // Compact portable MIR is a closed-world format, so reject inconsistent
 // kind-specific shapes and redundant type metadata before finalization. The
@@ -19,7 +24,7 @@ void finalize_program(Program& program, bool strict_variable_metadata = false);
 // fallbacks accept some unusual debug-MIR shapes.
 void validate_portable_program(const Program& program);
 
-Program read_portable_v2_program(std::string_view bytes);
+Program read_portable_program(std::string_view bytes);
 
 }  // namespace detail
 }  // namespace mir

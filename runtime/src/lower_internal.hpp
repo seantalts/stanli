@@ -683,7 +683,7 @@ struct Lowering {
     }
 
     long require_constant_int(const char* role) {
-      if (expr().data_only && expr().type_ == "UInt") {
+      if (expr().data_only && mir::is_unsized(expr(), mir::UnsizedLeaf::Int)) {
         Cache& c = cache();
         if (!c.constant_int) c.constant_int = owner->eval_int(expr());
         return *c.constant_int;
@@ -931,17 +931,17 @@ struct Lowering {
   // Set while try_lower_region considers a write_array loop that
   // write_array_loop_retained selected.
   bool retaining_write_array_loop = false;
-  // The declared emission order, and the last name emitted from it: what a
-  // write whose variable --O1 substituted away is called.
-  const std::vector<std::string>* output_vars = nullptr;
-  std::string last_written;
+  // Which output variable each FnWriteParam writes, and which section of
+  // write_array the statement being lowered belongs to.
+  mir::OutputCursor output_cursor;
+  mir::OutputVar::Block wa_section = mir::OutputVar::Block::Parameters;
   // Read once per lowering. The automatic parent path stays legacy until its
   // cheap outer-loop hazard gate fires, so ordinary expressions and loops pay
   // no repeated environment lookup or recursive scan.
   StructuredMode structured_policy = read_structured_mode();
-  // Where the emission guards fell, as counts of columns emitted before
-  // each. Unset until the guard is reached (a section can be missing from
-  // the MIR entirely), which run_write_array then reads as "at the end".
+  // How many columns precede the first transformed parameter and the first
+  // generated quantity. Unset until such a column is emitted (a section can
+  // be empty), which run_write_array then reads as "at the end".
   std::optional<size_t> n_tp_start, n_gq_start;
   // CmdStan's propto__ template parameter, threaded by lower_call_udf: a
   // density inside an inlined user function is unnormalized only if the
@@ -1097,14 +1097,15 @@ struct Lowering {
     int64_t lo, hi;
   };
   static bool is_range(const mir::Expr& ix) {
-    return ix.name == "IndexBetween" || ix.name == "IndexUpfrom";
+    return ix.kind == mir::Expr::IndexBetween ||
+           ix.kind == mir::Expr::IndexUpfrom;
   }
   std::optional<StaticRange> static_range(const mir::Expr& ix, int64_t extent) {
-    if (ix.name == "IndexBetween")
+    if (ix.kind == mir::Expr::IndexBetween)
       return StaticRange{eval_int(ix.args[0]), eval_int(ix.args[1])};
-    if (ix.name == "IndexUpfrom")
+    if (ix.kind == mir::Expr::IndexUpfrom)
       return StaticRange{eval_int(ix.args[0]), extent};
-    if (ix.name == "IndexAll") return StaticRange{1, extent};
+    if (ix.kind == mir::Expr::IndexAll) return StaticRange{1, extent};
     return std::nullopt;
   }
   // Every index the lowering sees is a bind-time constant, so what CmdStan
@@ -1217,16 +1218,16 @@ struct Lowering {
 
   SlotInfo view_of(const mir::SizedType& t, bool param_free = false);
 
-  static void stamp_kind(SlotInfo* si, const std::string& type) {
-    if (type == "UVector") {
+  static void stamp_kind(SlotInfo* si, const mir::UnsizedView& type) {
+    if (mir::is_unsized(type, mir::UnsizedLeaf::Vector)) {
       si->kind = ViewKind::Vector;
       si->rows = si->cols = 0;
-    } else if (type == "URowVector") {
+    } else if (mir::is_unsized(type, mir::UnsizedLeaf::RowVector)) {
       si->kind = ViewKind::RowVector;
       si->rows = si->cols = 0;
     }
   }
-  static SlotInfo view_of(const std::string& type) {
+  static SlotInfo view_of(const mir::UnsizedView& type) {
     SlotInfo si;
     stamp_kind(&si, type);
     return si;
@@ -1271,7 +1272,7 @@ struct Lowering {
     return geometry;
   }
   SlotInfo indexed_view(const SlotInfo& base, size_t n_single, int64_t out_len,
-                        const std::string& out_type);
+                        const mir::UnsizedView& out_type);
 
   bool same_view(const SlotInfo& a, int64_t alen, const SlotInfo& b,
                  int64_t blen) const;
@@ -1404,14 +1405,19 @@ struct Lowering {
   }
   Val lower_dims(const mir::Expr& e, CallArguments& actuals);
 
-  SlotInfo view_for_dims(const std::string& type, LogicalDims d,
+  SlotInfo view_for_dims(const mir::UnsizedView& type, LogicalDims d,
                          bool param_free = false) {
-    if (type == "UMatrix") return matrix_view(d.rows, d.cols, param_free);
+    if (mir::is_unsized(type, mir::UnsizedLeaf::Matrix))
+      return matrix_view(d.rows, d.cols, param_free);
     SlotInfo si = view_of(type);
     si.param_free = param_free;
-    if (type == "UVector" && d.cols == 1) return si;
-    if (type == "URowVector" && d.rows == 1) return si;
-    if ((type == "UReal" || type == "UInt" || type == "UComplex") &&
+    if (mir::is_unsized(type, mir::UnsizedLeaf::Vector) && d.cols == 1)
+      return si;
+    if (mir::is_unsized(type, mir::UnsizedLeaf::RowVector) && d.rows == 1)
+      return si;
+    if ((mir::is_unsized(type, mir::UnsizedLeaf::Real) ||
+         mir::is_unsized(type, mir::UnsizedLeaf::Int) ||
+         mir::is_unsized(type, mir::UnsizedLeaf::Complex)) &&
         d.rows == 1 && d.cols == 1)
       return si;
     fail("result type does not match logical rows/cols");
@@ -1569,8 +1575,8 @@ struct Lowering {
     // compile-time values.
     std::vector<bool> out_is_int;
     // The register view of each live-out as the region compiler left it:
-    // the authority on shape when the outside declaration was the --O1
-    // inliner's zero-length sentinel and the region's assignment sized it.
+    // the authority on shape when the outside declaration was zero-size
+    // and the region's assignment sized it.
     std::vector<Range> out_views;
     bool has_target = false;  // the region contributed to the target
     // A print or reject is observable even when every data live-out is empty,
@@ -1858,14 +1864,11 @@ struct Lowering {
       int64_t count, int64_t grain, bool fixed_partition);
   bool reduce_sum_effectful(const mir::Expr& e) {
     if (e.args.empty() || e.args[0].kind != mir::Expr::Var) return true;
-    bool propto = false;
-    const mir::FunDef* f = mir::resolve_callback(
-        fun_defs, mir::reduce_sum_partial_name(e.args[0].name, &propto),
-        mir::reduce_sum_partial_views(e));
+    const mir::FunDef* f = mir::find_function(fun_defs, e.args[0]);
     // A functor this cannot resolve is refused at lowering. Until it gets
     // there, assume the worst rather than fold away a call whose body has
     // never been examined.
-    return f == nullptr || fun_effectful(f->name);
+    return f == nullptr || fun_effectful(mir::function_key(*f));
   }
   bool stmt_effectful(const mir::Stmt& s);
 
@@ -1944,9 +1947,6 @@ struct Lowering {
   }
   StaticProbe<StaticSelector> try_static_selector(const mir::Expr& index,
                                                   int64_t extent);
-  static bool is_scalar_type(const std::string& type) {
-    return type == "UReal" || type == "UInt";
-  }
   StaticProbe<StaticView> try_static_broadcast_view(const mir::Expr& e);
 
   // Logical geometry only: this probe must never materialize a data value or
@@ -2047,10 +2047,10 @@ struct Lowering {
                                  bool allow_promoted = false) {
     // Parsing folds a scalar int-to-real Promotion onto the call. Its
     // integer-array argument still selects Stan's integer sum overload.
-    const bool scalar_result =
-        (e.type_ == "UInt" && e.unsized.leaf == mir::UnsizedLeaf::Int) ||
-        (allow_promoted && e.promoted && e.type_ == "UReal" &&
-         e.unsized.leaf == mir::UnsizedLeaf::Real);
+    const bool scalar_result = mir::is_unsized(e, mir::UnsizedLeaf::Int) ||
+                               (allow_promoted && e.promoted &&
+                                mir::is_unsized(e, mir::UnsizedLeaf::Real) &&
+                                e.unsized.leaf == mir::UnsizedLeaf::Real);
     return e.kind == mir::Expr::FunApp && e.fn_lib == mir::Expr::Lib::StanLib &&
            e.name == "sum" && e.args.size() == 1 && scalar_result &&
            e.unsized.depth == 0 &&
@@ -2211,6 +2211,7 @@ struct Lowering {
   // `out` only grow as well.
   struct WaMark {
     std::optional<size_t> n_tp_start, n_gq_start;
+    mir::OutputCursor output_cursor;
     size_t n_fills = 0, n_ops = 0, n_slots = 0, n_idata = 0, n_udata = 0,
            td_mark = 0;
     size_t n_param_names = 0, n_views = 0, n_unc_params = 0,
@@ -2232,6 +2233,7 @@ struct Lowering {
     WaMark m;
     m.n_tp_start = n_tp_start;
     m.n_gq_start = n_gq_start;
+    m.output_cursor = output_cursor;
     m.n_fills = out.fills.size();
     m.n_ops = g.ops.size();
     m.n_synthetic_names = synthetic_names.size();
@@ -2252,6 +2254,7 @@ struct Lowering {
   void wa_rollback(const WaMark& m) {
     n_tp_start = m.n_tp_start;
     n_gq_start = m.n_gq_start;
+    output_cursor = m.output_cursor;
     const auto truncate = [](auto& v, size_t n) {
       v.erase(v.begin() + (std::ptrdiff_t)n, v.end());
     };

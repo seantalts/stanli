@@ -266,8 +266,8 @@ int main() {
   mir::Expr untyped_choose;
   untyped_choose.name = "choose";
   untyped_choose.args.resize(2);
-  untyped_choose.args[0].type_ = "UInt";
-  untyped_choose.args[1].type_ = "UInt";
+  untyped_choose.args[0].unsized = {0, mir::UnsizedLeaf::Int};
+  untyped_choose.args[1].unsized = {0, mir::UnsizedLeaf::Int};
   if (function_spec(untyped_choose) == nullptr) {
     std::printf("FAIL missing result metadata lookup\n");
     return 1;
@@ -289,13 +289,11 @@ int main() {
     e.kind = mir::Expr::FunApp;
     e.name = std::move(name);
     e.args = std::move(args);
-    e.type_ = "UInt";
     e.unsized.leaf = mir::UnsizedLeaf::Int;
     return e;
   };
   mir::Expr real;
   real.kind = mir::Expr::Var;
-  real.type_ = "UReal";
   real.unsized.leaf = mir::UnsizedLeaf::Real;
   const auto cdf = call("normal_lcdf", {real, real, real});
   const auto normalizer = call("log_diff_exp", {cdf, cdf});
@@ -308,7 +306,6 @@ int main() {
   }
   mir::Expr integer;
   integer.kind = mir::Expr::LitInt;
-  integer.type_ = "UInt";
   integer.unsized.leaf = mir::UnsizedLeaf::Int;
   const auto integer_negated = call("PMinus__", {integer});
   if (function_spec(call("PMinus__", {integer_negated}))->result() !=
@@ -328,7 +325,6 @@ int main() {
   }
   auto promoted = integer_negated;
   promoted.promoted = true;
-  promoted.type_ = "UReal";
   promoted.unsized.leaf = mir::UnsizedLeaf::Real;
   auto user_call = normalizer;
   user_call.fn_lib = mir::Expr::Lib::UserDefined;

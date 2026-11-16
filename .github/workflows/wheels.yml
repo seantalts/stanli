@@ -696,7 +696,7 @@ jobs:
               --legacy-output /tmp/stanli-$name.legacy-mir \
               --output /tmp/stanli-$name.portable-mir \
               /tmp/stanli-portable-$name.stan
-            head -c 8 /tmp/stanli-$name.portable-mir | grep -q '^STANLI2:'
+            head -c 8 /tmp/stanli-$name.portable-mir | grep -q '^STANLI3:'
           done
           build-rel/test_mir_decode \
             /tmp/stanli-es.legacy-mir /tmp/stanli-es.portable-mir
@@ -1560,7 +1560,7 @@ jobs:
           install -m 755 browser-compilers/stanli_compiler_cli \
             deps/stanc3/stanli-compile
           deps/stanc3/stanli-compile tests/fixtures/es.stan > /tmp/es.portable-mir
-          head -c 8 /tmp/es.portable-mir | grep -q '^STANLI2:'
+          head -c 8 /tmp/es.portable-mir | grep -q '^STANLI3:'
       # Both fatal runs of this job died at the same place -- the density
       # shards -- with "the runner has received a shutdown signal" while
       # the sibling manylinux job on its own runner sailed on. That is the

@@ -24,11 +24,11 @@ std::vector<int64_t> Lowering::index_positions(const mir::Expr& ix,
                                                int64_t extent, const char* what,
                                                const std::string& raw) {
   std::vector<int64_t> out;
-  if (ix.name == "IndexAll") {
+  if (ix.kind == mir::Expr::IndexAll) {
     for (int64_t i = 0; i < extent; ++i) out.push_back(i);
     return out;
   }
-  if (ix.name == "IndexSingle") {
+  if (ix.kind == mir::Expr::IndexSingle) {
     const int64_t i = eval_int(ix.args[0]);
     check_index(i, extent, what, raw);
     return {i - 1};
@@ -39,7 +39,7 @@ std::vector<int64_t> Lowering::index_positions(const mir::Expr& ix,
     for (int64_t i = range.lo; i <= range.hi; ++i) out.push_back(i - 1);
     return out;
   }
-  if (ix.name == "IndexMulti") {
+  if (ix.kind == mir::Expr::IndexMulti) {
     DataMap::Entry iv = eval_pure(ix.args[0], "an index list");
     if (!iv.is_int) fail(std::string(what) + " needs int data", raw);
     for (int i : iv.i) {
@@ -48,7 +48,7 @@ std::vector<int64_t> Lowering::index_positions(const mir::Expr& ix,
     }
     return out;
   }
-  if (ix.name == "IndexUpfrom") {
+  if (ix.kind == mir::Expr::IndexUpfrom) {
     const int64_t lo = eval_int(ix.args[0]);
     check_range(lo, extent, extent, what, raw);
     for (int64_t i = lo; i <= extent; ++i) out.push_back(i - 1);
@@ -245,7 +245,7 @@ long Lowering::eval_int(const mir::Expr& e) {
                 en->is_int ? en->i.size() == en->r.size() : en->i.empty();
       const size_t stored = !en ? 0 : en->is_int ? en->i.size() : en->r.size();
       for (size_t k = 1; all_single && k < e.args.size(); ++k)
-        all_single = e.args[k].name == "IndexSingle";
+        all_single = e.args[k].kind == mir::Expr::IndexSingle;
       const size_t rank = en ? std::max<size_t>(en->dims.size(), 1) : 0;
       if (all_single && e.args.size() - 1 == rank) {
         size_t offset = 0, stride = 1;
@@ -267,7 +267,7 @@ long Lowering::eval_int(const mir::Expr& e) {
       // sequence, then index it.
       {
         std::vector<int> vals = const_ints(e.args[0]);
-        if (e.args.size() == 2 && e.args[1].name == "IndexSingle") {
+        if (e.args.size() == 2 && e.args[1].kind == mir::Expr::IndexSingle) {
           const long ix = eval_int(e.args[1].args[0]);
           if (ix >= 1 && (size_t)ix <= vals.size()) return vals[ix - 1];
         }
@@ -319,15 +319,17 @@ long Lowering::eval_int(const mir::Expr& e) {
       }
       // Stock stanc's --O1 folds an integer a * b + c into fma(a, b, c).
       if (e.name == "fma" && e.args.size() == 3 &&
-          std::all_of(e.args.begin(), e.args.end(),
-                      [](const mir::Expr& a) { return a.type_ == "UInt"; }))
+          std::all_of(e.args.begin(), e.args.end(), [](const mir::Expr& a) {
+            return mir::is_unsized(a, mir::UnsizedLeaf::Int);
+          }))
         return eval_int(e.args[0]) * eval_int(e.args[1]) + eval_int(e.args[2]);
       if (const BuiltinSpec* pred =
               e.args.size() == 2 ? shaped_builtin_spec(
                                        e.name, 2, BuiltinShapePolicy::Predicate)
                                  : nullptr) {
         const auto scalar = [&](const mir::Expr& arg) -> double {
-          if (arg.type_ == "UInt") return (double)eval_int(arg);
+          if (mir::is_unsized(arg, mir::UnsizedLeaf::Int))
+            return (double)eval_int(arg);
           if (auto evaluated = try_eval_pure(arg)) {
             if (evaluated->r.size() == 1) return evaluated->r[0];
           }
@@ -449,7 +451,8 @@ SlotInfo Lowering::view_of(const mir::SizedType& t, bool param_free) {
   return si;
 }
 SlotInfo Lowering::indexed_view(const SlotInfo& base, size_t n_single,
-                                int64_t out_len, const std::string& out_type) {
+                                int64_t out_len,
+                                const mir::UnsizedView& out_type) {
   SlotInfo si = view_of(out_type);
   si.param_free = base.param_free;
   if (!is_array(base)) return si;
@@ -586,7 +589,7 @@ Lowering::Val Lowering::lower_extrema_reduction(const mir::Expr& e,
   const IntRange range =
       int_array ? prove_runtime_int_extrema(e, value, len) : IntRange{};
   Val result =
-      with_layout(emit_value(OP_EXTREMA_VEC, {value}, 1, view_of(e.type_),
+      with_layout(emit_value(OP_EXTREMA_VEC, {value}, 1, view_of(e.unsized),
                              reduction_phase_idata(value, grouping, "min/max")),
                   ExpressionLayout::scalar());
   if (in_write_array || int_array) result.autodiff = false;
@@ -611,7 +614,8 @@ Lowering::Val Lowering::lower_extrema_pair(const mir::Expr& e,
     fail("min/max scalar overload needs two scalar int arguments", e.raw);
   const bool maximum = kind == mir::ExtremaKind::Max;
   Val result = with_layout(
-      emit_value(maximum ? OP_FMAX : OP_FMIN, {x, y}, 1, view_of("UInt")),
+      emit_value(maximum ? OP_FMAX : OP_FMIN, {x, y}, 1,
+                 view_of(mir::UnsizedView{0, mir::UnsizedLeaf::Int})),
       ExpressionLayout::scalar());
   result.autodiff = false;
   result.si.param_free = false;
@@ -777,7 +781,6 @@ Lowering::Val Lowering::lower_expr_impl(const mir::Expr& e) {
       // type instead of rejecting the stale intermediate matrix type.
       if (e.args.size() == 1 && e.args[0].kind == mir::Expr::Indexed) {
         mir::Expr composed = e.args[0];
-        composed.type_ = e.type_;
         composed.unsized = e.unsized;
         composed.data_only = e.data_only;
         composed.promoted = e.promoted;
@@ -789,15 +792,16 @@ Lowering::Val Lowering::lower_expr_impl(const mir::Expr& e) {
       // O1 drops a full-span read's All indices, so `m[:, :]` arrives as an
       // Indexed node with none left.
       if (e.args.size() == 1) return base;
-      if (e.args.size() == 2 && e.args[1].name == "IndexAll") return base;
+      if (e.args.size() == 2 && e.args[1].kind == mir::Expr::IndexAll)
+        return base;
       const bool dynamic_slice = in_write_array && e.args.size() == 2 &&
-                                 e.args[1].name == "IndexSingle" &&
+                                 e.args[1].kind == mir::Expr::IndexSingle &&
                                  runtime_int_value(e.args[1].args[0]);
       if (!(dynamic_slice && write_array_unregioned()) &&
           std::any_of(
               e.args.begin() + 1, e.args.end(),
               [&](const mir::Expr& ix) { return runtime_selector(ix); }))
-        return region_index(base, {e.args.begin() + 1, e.args.end()}, e.type_,
+        return region_index(base, {e.args.begin() + 1, e.args.end()},
                             e.unsized);
       if (dynamic_slice) {
         const Val index = lower_expr(e.args[1].args[0]);
@@ -820,7 +824,7 @@ Lowering::Val Lowering::lower_expr_impl(const mir::Expr& e) {
         }
         if (count <= 0 || width <= 0 || g.slots[base.slot].len != count * width)
           fail("runtime index has an invalid base shape", e.raw);
-        SlotInfo si = indexed_view(base.si, 1, width, e.type_);
+        SlotInfo si = indexed_view(base.si, 1, width, e.unsized);
         Val value =
             emit_value(OP_DYNAMIC_SLICE, {base, index}, width, si,
                        {checked_immediate(count, "runtime index extent")});
@@ -830,14 +834,14 @@ Lowering::Val Lowering::lower_expr_impl(const mir::Expr& e) {
       }
       bool all_single = true;
       for (size_t k = 1; k < e.args.size(); ++k)
-        if (e.args[k].name != "IndexSingle") all_single = false;
+        if (e.args[k].kind != mir::Expr::IndexSingle) all_single = false;
       const std::vector<int64_t>* bdims = nullptr;
       if (is_array(base.si)) bdims = &array_shape(base.si).dims;
       const size_t n_idx = e.args.size() - 1;
       // One index on a matrix selects rows. A range or gather is not a
       // contiguous slice in column-major storage, so spell its gather.
       if (e.args.size() == 2 && is_matrix(base.si) &&
-          (is_range(e.args[1]) || e.args[1].name == "IndexMulti")) {
+          (is_range(e.args[1]) || e.args[1].kind == mir::Expr::IndexMulti)) {
         std::vector<int> rows;
         if (auto range = static_range(e.args[1], base.si.rows)) {
           check_range(range->lo, range->hi, base.si.rows, "matrix row range",
@@ -901,14 +905,14 @@ Lowering::Val Lowering::lower_expr_impl(const mir::Expr& e) {
         const int64_t len = hi >= lo ? hi - lo + 1 : 0;
         const int64_t offset = len ? lo - 1 : 0;
         return with_layout(
-            emit_value(OP_SLICE, {base}, len, view_of(e.type_),
+            emit_value(OP_SLICE, {base}, len, view_of(e.unsized),
                        {checked_immediate(offset, "range offset")}),
             contiguous_layout(base, offset, "range"));
       }
       // A data gather over the outer array dimension copies whole outer
       // elements, which graph storage keeps contiguous.
       if (e.args.size() == 2 && is_array(base.si) &&
-          e.args[1].name == "IndexMulti") {
+          e.args[1].kind == mir::Expr::IndexMulti) {
         const ArrayShape& sh = array_shape(base.si);
         DataMap::Entry iv = eval_pure(e.args[1].args[0], "a gather index");
         if (!iv.is_int || iv.i.size() != iv.r.size())
@@ -932,7 +936,7 @@ Lowering::Val Lowering::lower_expr_impl(const mir::Expr& e) {
                            owning_layout(si));
       }
       // Gather by a data int array: v[idx].
-      if (e.args.size() == 2 && e.args[1].name == "IndexMulti") {
+      if (e.args.size() == 2 && e.args[1].kind == mir::Expr::IndexMulti) {
         // An empty index is a legitimate data-dependent gather (a slice
         // whose computed length is zero); an int-flagged entry whose int
         // mirror disagrees with its values is not.
@@ -946,28 +950,31 @@ Lowering::Val Lowering::lower_expr_impl(const mir::Expr& e) {
                                      "vector[multi] indexing", e.raw) -
                           1);
         return with_layout(emit_value(OP_GATHER, {base}, (int64_t)idata.size(),
-                                      view_of(e.type_), idata),
+                                      view_of(e.unsized), idata),
                            ExpressionLayout::scalar());
       }
       // Matrix row/column slices use the explicit logical view; physical
       // storage remains column-major even when either extent is zero.
       if (e.args.size() == 3 && is_matrix(base.si) &&
-          e.args[1].name == "IndexSingle" && e.args[2].name == "IndexAll") {
+          e.args[1].kind == mir::Expr::IndexSingle &&
+          e.args[2].kind == mir::Expr::IndexAll) {
         const int64_t i = eval_int(e.args[1].args[0]);
         check_uni_index(i, base.si.rows, "matrix[uni] indexing", e.raw);
         return with_layout(
-            emit_value(OP_SLICE_STRIDED, {base}, base.si.cols, view_of(e.type_),
+            emit_value(OP_SLICE_STRIDED, {base}, base.si.cols,
+                       view_of(e.unsized),
                        {checked_immediate(i - 1, "matrix row offset"),
                         checked_immediate(base.si.rows, "matrix row stride")}),
             ExpressionLayout::scalar());
       }
       if (e.args.size() == 3 && is_matrix(base.si) &&
-          e.args[1].name == "IndexAll" && e.args[2].name == "IndexSingle") {
+          e.args[1].kind == mir::Expr::IndexAll &&
+          e.args[2].kind == mir::Expr::IndexSingle) {
         const int64_t j = stan_index(eval_int(e.args[2].args[0]), base.si.cols,
                                      "matrix[..., uni] column indexing", e.raw);
         const int64_t offset = (j - 1) * base.si.rows;
         return with_layout(
-            emit_value(OP_SLICE, {base}, base.si.rows, view_of(e.type_),
+            emit_value(OP_SLICE, {base}, base.si.rows, view_of(e.unsized),
                        {checked_immediate(offset, "matrix column offset")}),
             contiguous_layout(base, offset, "matrix column"));
       }
@@ -975,7 +982,8 @@ Lowering::Val Lowering::lower_expr_impl(const mir::Expr& e) {
       // each outer element is contiguous, so successive rows sit S apart.
       if (e.args.size() == 3 && is_array(base.si) && bdims &&
           array_shape(base.si).leaf == ViewKind::Flat && bdims->size() == 2 &&
-          e.args[1].name == "IndexAll" && e.args[2].name == "IndexSingle") {
+          e.args[1].kind == mir::Expr::IndexAll &&
+          e.args[2].kind == mir::Expr::IndexSingle) {
         const int64_t k = eval_int(e.args[2].args[0]) - 1;
         const int64_t N = (*bdims)[0], S = (*bdims)[1];
         if (k < 0 || k >= S) fail("array column out of bounds", e.raw);
@@ -991,7 +999,7 @@ Lowering::Val Lowering::lower_expr_impl(const mir::Expr& e) {
           (array_shape(base.si).leaf == ViewKind::Flat ||
            array_shape(base.si).leaf == ViewKind::Vector ||
            array_shape(base.si).leaf == ViewKind::RowVector) &&
-          bdims->size() == 2 && e.args[1].name == "IndexSingle" &&
+          bdims->size() == 2 && e.args[1].kind == mir::Expr::IndexSingle &&
           is_range(e.args[2])) {
         const int64_t i = eval_int(e.args[1].args[0]);
         const int64_t S = (*bdims)[1];
@@ -1003,7 +1011,7 @@ Lowering::Val Lowering::lower_expr_impl(const mir::Expr& e) {
         const int64_t len = hi >= lo ? hi - lo + 1 : 0;
         SlotInfo si = array_shape(base.si).leaf == ViewKind::Flat
                           ? array_view({len}, ViewKind::Flat)
-                          : view_of(e.type_);
+                          : view_of(e.unsized);
         const int64_t offset = len ? (i - 1) * S + lo - 1 : 0;
         const ExpressionLayout layout =
             array_shape(base.si).leaf == ViewKind::Flat
@@ -1020,13 +1028,13 @@ Lowering::Val Lowering::lower_expr_impl(const mir::Expr& e) {
       if (e.args.size() == 3 && is_array(base.si) && bdims &&
           (array_shape(base.si).leaf == ViewKind::Vector ||
            array_shape(base.si).leaf == ViewKind::RowVector) &&
-          bdims->size() == 2 && e.args[1].name == "IndexSingle" &&
-          e.args[2].name == "IndexAll") {
+          bdims->size() == 2 && e.args[1].kind == mir::Expr::IndexSingle &&
+          e.args[2].kind == mir::Expr::IndexAll) {
         const int64_t i = eval_int(e.args[1].args[0]);
         const int64_t count = (*bdims)[0], width = (*bdims)[1];
         check_uni_index(i, count, "array[uni, ...] index", e.raw);
         const int64_t offset = (i - 1) * width;
-        SlotInfo si = view_of(e.type_);
+        SlotInfo si = view_of(e.unsized);
         return with_layout(
             emit_value(OP_SLICE, {base}, width, si,
                        {checked_immediate(offset, "array vector offset")}),
@@ -1034,7 +1042,7 @@ Lowering::Val Lowering::lower_expr_impl(const mir::Expr& e) {
       }
       // Row-range column read M[a:b, j] (contiguous within the column).
       if (e.args.size() == 3 && is_matrix(base.si) && is_range(e.args[1]) &&
-          e.args[2].name == "IndexSingle") {
+          e.args[2].kind == mir::Expr::IndexSingle) {
         const StaticRange range = *static_range(e.args[1], base.si.rows);
         const int64_t lo = range.lo;
         const int64_t hi = range.hi;
@@ -1045,7 +1053,7 @@ Lowering::Val Lowering::lower_expr_impl(const mir::Expr& e) {
         const int64_t len = hi >= lo ? hi - lo + 1 : 0;
         const int64_t offset = len ? (j - 1) * base.si.rows + lo - 1 : 0;
         return with_layout(
-            emit_value(OP_SLICE, {base}, len, view_of(e.type_),
+            emit_value(OP_SLICE, {base}, len, view_of(e.unsized),
                        {checked_immediate(offset, "matrix row range offset")}),
             contiguous_layout(base, offset, "matrix row range"));
       }
@@ -1055,13 +1063,14 @@ Lowering::Val Lowering::lower_expr_impl(const mir::Expr& e) {
       // selected columns are outer and selected rows are inner in the flat
       // gather list.
       const auto is_matrix_selector = [](const mir::Expr& index) {
-        return index.name == "IndexAll" || index.name == "IndexSingle" ||
-               is_range(index) || index.name == "IndexMulti";
+        return index.kind == mir::Expr::IndexAll ||
+               index.kind == mir::Expr::IndexSingle || is_range(index) ||
+               index.kind == mir::Expr::IndexMulti;
       };
       if (e.args.size() == 3 && is_matrix(base.si) &&
           is_matrix_selector(e.args[1]) && is_matrix_selector(e.args[2]) &&
-          (e.args[1].name != "IndexSingle" ||
-           e.args[2].name != "IndexSingle")) {
+          (e.args[1].kind != mir::Expr::IndexSingle ||
+           e.args[2].kind != mir::Expr::IndexSingle)) {
         const std::vector<int64_t> rows = index_positions(
             e.args[1], base.si.rows, "matrix row gather", e.raw);
         const std::vector<int64_t> cols = index_positions(
@@ -1072,9 +1081,9 @@ Lowering::Val Lowering::lower_expr_impl(const mir::Expr& e) {
           for (int64_t i : rows)
             gather.push_back(checked_immediate(j * base.si.rows + i,
                                                "matrix gather offset"));
-        SlotInfo si = view_of(e.type_);
+        SlotInfo si = view_of(e.unsized);
         si.param_free = base.si.param_free;
-        if (e.type_ == "UMatrix")
+        if (mir::is_unsized(e, mir::UnsizedLeaf::Matrix))
           si = matrix_view((int64_t)rows.size(), (int64_t)cols.size(),
                            base.si.param_free);
         return with_layout(
@@ -1097,19 +1106,19 @@ Lowering::Val Lowering::lower_expr_impl(const mir::Expr& e) {
         if (a.stride != 1)
           return with_layout(
               emit_value(OP_SLICE_STRIDED, {base}, a.len,
-                         indexed_view(base.si, n_idx, a.len, e.type_),
+                         indexed_view(base.si, n_idx, a.len, e.unsized),
                          {checked_immediate(a.off, "indexed offset"),
                           checked_immediate(a.stride, "indexed stride")}),
               ExpressionLayout::scalar());
         if (a.len == 1)
           return with_layout(
               emit_value(OP_INDEX, {base}, 1,
-                         indexed_view(base.si, n_idx, 1, e.type_),
+                         indexed_view(base.si, n_idx, 1, e.unsized),
                          {checked_immediate(a.off, "indexed offset")}),
               ExpressionLayout::scalar());
         // One whole matrix out of the array keeps its shape, so a later
         // index on it can take the column-major paths above.
-        SlotInfo si = indexed_view(base.si, n_idx, a.len, e.type_);
+        SlotInfo si = indexed_view(base.si, n_idx, a.len, e.unsized);
         return with_layout(
             emit_value(OP_SLICE, {base}, a.len, si,
                        {checked_immediate(a.off, "indexed offset")}),
@@ -1126,10 +1135,12 @@ Lowering::Val Lowering::lower_expr_impl(const mir::Expr& e) {
                     array_shape(base.si).leaf == ViewKind::RowVector)) {
         const size_t n_arr = bdims->size() - 1;
         const mir::Expr& last = e.args.back();
-        bool prefix_single = e.args.size() == n_arr + 2 &&
-                             (is_range(last) || last.name == "IndexAll");
+        bool prefix_single =
+            e.args.size() == n_arr + 2 &&
+            (is_range(last) || last.kind == mir::Expr::IndexAll);
         for (size_t d = 0; prefix_single && d < n_arr; ++d)
-          if (e.args[1 + d].name != "IndexSingle") prefix_single = false;
+          if (e.args[1 + d].kind != mir::Expr::IndexSingle)
+            prefix_single = false;
         if (prefix_single) {
           std::vector<int64_t> ix;
           ix.reserve(n_arr);
@@ -1148,7 +1159,7 @@ Lowering::Val Lowering::lower_expr_impl(const mir::Expr& e) {
             check_range(lo, hi, a.len, "array leaf range", e.raw);
           }
           const int64_t len = hi >= lo ? hi - lo + 1 : 0;
-          SlotInfo si = view_of(e.type_);
+          SlotInfo si = view_of(e.unsized);
           const int64_t offset = len ? a.off + lo - 1 : a.off;
           const ExpressionLayout layout =
               ranged ? ExpressionLayout::direct(len ? lo - 1 : 0)
@@ -1166,8 +1177,9 @@ Lowering::Val Lowering::lower_expr_impl(const mir::Expr& e) {
       // this is a strided read of one scalar out of every element.
       if (e.args.size() == 4 && is_array(base.si) && bdims &&
           bdims->size() == 3 && array_shape(base.si).leaf == ViewKind::Matrix &&
-          e.args[1].name == "IndexAll" && e.args[2].name == "IndexSingle" &&
-          e.args[3].name == "IndexSingle") {
+          e.args[1].kind == mir::Expr::IndexAll &&
+          e.args[2].kind == mir::Expr::IndexSingle &&
+          e.args[3].kind == mir::Expr::IndexSingle) {
         const int64_t N = (*bdims)[0], R = (*bdims)[1], C = (*bdims)[2];
         const int64_t ri = eval_int(e.args[2].args[0]);
         const int64_t cj = eval_int(e.args[3].args[0]);
@@ -1183,11 +1195,13 @@ Lowering::Val Lowering::lower_expr_impl(const mir::Expr& e) {
       }
       // Row of a column-major data matrix / 2-D array: strided slice.
       if (all_single && e.args.size() == 2 && is_matrix(base.si) &&
-          e.type_ != "UReal" && e.type_ != "UInt") {
+          !mir::is_unsized(e, mir::UnsizedLeaf::Real) &&
+          !mir::is_unsized(e, mir::UnsizedLeaf::Int)) {
         const int64_t t = stan_index(eval_int(e.args[1].args[0]), base.si.rows,
                                      "matrix[uni] indexing", e.raw);
         return with_layout(
-            emit_value(OP_SLICE_STRIDED, {base}, base.si.cols, view_of(e.type_),
+            emit_value(OP_SLICE_STRIDED, {base}, base.si.cols,
+                       view_of(e.unsized),
                        {checked_immediate(t - 1, "matrix row offset"),
                         checked_immediate(base.si.rows, "matrix row stride")}),
             ExpressionLayout::scalar());
@@ -1200,15 +1214,14 @@ Lowering::Val Lowering::lower_expr_impl(const mir::Expr& e) {
         if (auto v = fold_const(e)) return *v;
       }
       int64_t flat = 0;
-      if (all_single && e.args.size() == 2 &&
-          (e.type_ == "UReal" || e.type_ == "UInt")) {
+      if (all_single && e.args.size() == 2 && mir::language_scalar(e)) {
         flat = stan_index(eval_int(e.args[1].args[0]), g.slots[base.slot].len,
                           is_array(base.si) ? "array[uni, ...] index"
                                             : "vector[uni] indexing",
                           e.raw) -
                1;
       } else if (all_single && e.args.size() == 3 && is_matrix(base.si) &&
-                 (e.type_ == "UReal" || e.type_ == "UInt")) {
+                 mir::language_scalar(e)) {
         const int64_t ri = stan_index(eval_int(e.args[1].args[0]), base.si.rows,
                                       "matrix[uni,uni] row indexing", e.raw);
         const int64_t cj = stan_index(eval_int(e.args[2].args[0]), base.si.cols,
@@ -1226,7 +1239,8 @@ Lowering::Val Lowering::lower_expr_impl(const mir::Expr& e) {
             builtin_argument_shape(e.args[0], base);
         const size_t indexes = e.args.size() - 1;
         if (indexes > shape.dimensions.size())
-          fail("unsupported index expression: too many indexes for " + e.type_,
+          fail("unsupported index expression: too many indexes for " +
+                   mir::type_spelling(e.unsized),
                e.raw);
         std::vector<std::vector<int64_t>> selected;
         std::vector<bool> drops;
@@ -1235,7 +1249,7 @@ Lowering::Val Lowering::lower_expr_impl(const mir::Expr& e) {
         for (size_t k = 0; k < indexes; ++k) {
           selected.push_back(index_positions(e.args[1 + k], shape.dimensions[k],
                                              "index", e.raw));
-          drops.push_back(e.args[1 + k].name == "IndexSingle");
+          drops.push_back(e.args[1 + k].kind == mir::Expr::IndexSingle);
         }
         BuiltinIndexMap map;
         try {
@@ -1246,12 +1260,13 @@ Lowering::Val Lowering::lower_expr_impl(const mir::Expr& e) {
                e.raw);
         }
         SlotInfo si;
-        if (e.type_ == "UReal" || e.type_ == "UInt") {
-          si = view_of(e.type_);
-        } else if (e.type_ == "UVector" || e.type_ == "URowVector") {
-          si = view_of(e.type_);
+        if (mir::language_scalar(e)) {
+          si = view_of(e.unsized);
+        } else if (mir::is_unsized(e, mir::UnsizedLeaf::Vector) ||
+                   mir::is_unsized(e, mir::UnsizedLeaf::RowVector)) {
+          si = view_of(e.unsized);
           si.param_free = base.si.param_free;
-        } else if (e.type_ == "UMatrix") {
+        } else if (mir::is_unsized(e, mir::UnsizedLeaf::Matrix)) {
           if (map.dimensions.size() != 2)
             fail("unsupported index expression: matrix shape", e.raw);
           si = matrix_view(map.dimensions[0], map.dimensions[1],
@@ -1267,7 +1282,7 @@ Lowering::Val Lowering::lower_expr_impl(const mir::Expr& e) {
         }
         switch (map.kind) {
           case BuiltinSliceMap::Kind::Contiguous:
-            if (map.count == 1 && (e.type_ == "UReal" || e.type_ == "UInt"))
+            if (map.count == 1 && mir::language_scalar(e))
               return with_layout(
                   emit_value(OP_INDEX, {base}, 1, si,
                              {checked_immediate(map.offset, "index offset")}),
@@ -1293,7 +1308,7 @@ Lowering::Val Lowering::lower_expr_impl(const mir::Expr& e) {
           }
         }
       }
-      return with_layout(emit_value(OP_INDEX, {base}, 1, view_of(e.type_),
+      return with_layout(emit_value(OP_INDEX, {base}, 1, view_of(e.unsized),
                                     {checked_immediate(flat, "index offset")}),
                          ExpressionLayout::scalar());
     }
@@ -1454,9 +1469,9 @@ std::optional<DataMap::Entry> Lowering::try_eval_interpreter(
 }
 Lowering::StaticProbe<Lowering::StaticSelector> Lowering::try_static_selector(
     const mir::Expr& index, int64_t extent) {
-  if (index.name == "IndexAll")
+  if (index.kind == mir::Expr::IndexAll)
     return {StaticProbeState::Known, {extent, false}, {}};
-  if (index.name == "IndexSingle" && index.args.size() == 1) {
+  if (index.kind == mir::Expr::IndexSingle && index.args.size() == 1) {
     const auto at = try_static_int(index.args[0]);
     if (at.state == StaticProbeState::Invalid) return {at.state, {}, at.error};
     // A single index drops its dimension whichever element it selects.
@@ -1467,7 +1482,7 @@ Lowering::StaticProbe<Lowering::StaticSelector> Lowering::try_static_selector(
           StaticProbeState::Invalid, {}, "static matrix index out of bounds"};
     return {StaticProbeState::Known, {1, true}, {}};
   }
-  if (index.name == "IndexBetween" && index.args.size() == 2) {
+  if (index.kind == mir::Expr::IndexBetween && index.args.size() == 2) {
     const auto lo = try_static_int(index.args[0]);
     if (lo.state != StaticProbeState::Known) return {lo.state, {}, lo.error};
     const auto hi = try_static_int(index.args[1]);
@@ -1480,7 +1495,7 @@ Lowering::StaticProbe<Lowering::StaticSelector> Lowering::try_static_selector(
           StaticProbeState::Invalid, {}, "static matrix range out of bounds"};
     return {StaticProbeState::Known, {hi.value - lo.value + 1, false}, {}};
   }
-  if (index.name == "IndexUpfrom" && index.args.size() == 1) {
+  if (index.kind == mir::Expr::IndexUpfrom && index.args.size() == 1) {
     const auto lo = try_static_int(index.args[0]);
     if (lo.state != StaticProbeState::Known) return {lo.state, {}, lo.error};
     if (extent < lo.value) return {StaticProbeState::Known, {0, false}, {}};
@@ -1489,7 +1504,7 @@ Lowering::StaticProbe<Lowering::StaticSelector> Lowering::try_static_selector(
           StaticProbeState::Invalid, {}, "static matrix range out of bounds"};
     return {StaticProbeState::Known, {extent - lo.value + 1, false}, {}};
   }
-  if (index.name == "IndexMulti" && index.args.size() == 1) {
+  if (index.kind == mir::Expr::IndexMulti && index.args.size() == 1) {
     auto evaluated = try_eval_interpreter(index.args[0]);
     if (!evaluated) return {};
     if (!evaluated->is_int || evaluated->i.size() != evaluated->r.size())
@@ -1511,7 +1526,8 @@ Lowering::StaticProbe<Lowering::StaticSelector> Lowering::try_static_selector(
 Lowering::StaticProbe<Lowering::StaticView> Lowering::try_static_broadcast_view(
     const mir::Expr& e) {
   for (const mir::Expr& arg : e.args) {
-    if (arg.type_ != e.type_) continue;
+    if (mir::type_spelling(arg.unsized) != mir::type_spelling(e.unsized))
+      continue;
     const auto view = try_static_view(arg);
     if (view.state == StaticProbeState::Known) return view;
   }
@@ -1550,22 +1566,24 @@ Lowering::StaticProbe<Lowering::StaticView> Lowering::try_static_view(
   if (e.kind == mir::Expr::FunApp) {
     if (e.name == "FnMakeRowVec" && !e.args.empty() &&
         std::all_of(e.args.begin(), e.args.end(), [](const mir::Expr& a) {
-          return is_scalar_type(a.type_);
+          return mir::language_scalar(a);
         })) {
-      SlotInfo si = view_of("URowVector");
+      SlotInfo si = view_of(mir::UnsizedView{0, mir::UnsizedLeaf::RowVector});
       si.param_free = e.data_only;
       return {StaticProbeState::Known, {(int64_t)e.args.size(), si}, {}};
     }
     if ((e.name == "rep_vector" || e.name == "rep_row_vector") &&
-        e.args.size() == 2 && is_scalar_type(e.args[0].type_)) {
+        e.args.size() == 2 && mir::language_scalar(e.args[0])) {
       const auto n = try_static_int(e.args[1]);
       if (n.state != StaticProbeState::Known || n.value < 0) return {};
-      SlotInfo si = view_of(e.name == "rep_vector" ? "UVector" : "URowVector");
+      SlotInfo si = view_of(mir::UnsizedView{
+          0, e.name == "rep_vector" ? mir::UnsizedLeaf::Vector
+                                    : mir::UnsizedLeaf::RowVector});
       si.param_free = e.data_only;
       return {StaticProbeState::Known, {n.value, si}, {}};
     }
     if (e.name == "rep_matrix" && e.args.size() == 3 &&
-        is_scalar_type(e.args[0].type_)) {
+        mir::language_scalar(e.args[0])) {
       const auto m = try_static_int(e.args[1]);
       const auto n = try_static_int(e.args[2]);
       if (m.state != StaticProbeState::Known ||
@@ -1599,7 +1617,7 @@ Lowering::StaticProbe<Lowering::StaticView> Lowering::try_static_view(
       return try_static_view(e.args[0]);
     const bool scalar_factor =
         e.args.size() == 2 &&
-        (is_scalar_type(e.args[0].type_) || is_scalar_type(e.args[1].type_));
+        (mir::language_scalar(e.args[0]) || mir::language_scalar(e.args[1]));
     if (elementwise != nullptr || (e.name == "fma" && e.args.size() == 3) ||
         ((e.name == "Times__" || e.name == "multiply") && scalar_factor))
       return try_static_broadcast_view(e);
@@ -1628,32 +1646,32 @@ Lowering::StaticProbe<Lowering::StaticView> Lowering::try_static_view(
                             "static matrix subview");
   out.si.param_free = base.value.si.param_free;
   if (!rd && !cd) {
-    if (e.type_ != "UMatrix")
+    if (!mir::is_unsized(e, mir::UnsizedLeaf::Matrix))
       return {StaticProbeState::Invalid,
               {},
               "static matrix subview has an inconsistent result type"};
     out.si = matrix_view(rows.value.count, cols.value.count,
                          base.value.si.param_free);
   } else if (rd && !cd) {
-    if (e.type_ != "URowVector")
+    if (!mir::is_unsized(e, mir::UnsizedLeaf::RowVector))
       return {StaticProbeState::Invalid,
               {},
               "static matrix row has an inconsistent result type"};
-    out.si = view_of("URowVector");
+    out.si = view_of(mir::UnsizedView{0, mir::UnsizedLeaf::RowVector});
     out.si.param_free = base.value.si.param_free;
   } else if (!rd && cd) {
-    if (e.type_ != "UVector")
+    if (!mir::is_unsized(e, mir::UnsizedLeaf::Vector))
       return {StaticProbeState::Invalid,
               {},
               "static matrix column has an inconsistent result type"};
-    out.si = view_of("UVector");
+    out.si = view_of(mir::UnsizedView{0, mir::UnsizedLeaf::Vector});
     out.si.param_free = base.value.si.param_free;
   } else {
-    if (e.type_ != "UReal")
+    if (!mir::is_unsized(e, mir::UnsizedLeaf::Real))
       return {StaticProbeState::Invalid,
               {},
               "static matrix element has an inconsistent result type"};
-    out.si = view_of("UReal");
+    out.si = view_of(mir::UnsizedView{0, mir::UnsizedLeaf::Real});
     out.si.param_free = base.value.si.param_free;
   }
   return {StaticProbeState::Known, out, {}};
@@ -1712,7 +1730,6 @@ bool Lowering::specialize_static_shapes(mir::Expr* e) {
       mir::Expr literal;
       literal.kind = mir::Expr::LitInt;
       literal.lit_i = static_cast<long>(value.value);
-      literal.type_ = "UInt";
       literal.unsized = {0, mir::UnsizedLeaf::Int};
       literal.data_only = true;
       literal.raw = e->raw;
@@ -1736,8 +1753,8 @@ std::optional<Lowering::Val> Lowering::fold_const(const mir::Expr& e) {
   auto evaluated = try_eval_pure(e);
   if (!evaluated) return std::nullopt;
   DataMap::Entry en = std::move(*evaluated);
-  if (en.r.size() == 1 &&
-      (e.type_ == "UReal" || e.type_ == "UInt" || e.type_ == "UComplex"))
+  if (en.r.size() == 1 && (mir::language_scalar(e) ||
+                           mir::is_unsized(e, mir::UnsizedLeaf::Complex)))
     return constant(en.r[0]);
   SlotInfo si;
   si.param_free = true;
@@ -1752,14 +1769,14 @@ std::optional<Lowering::Val> Lowering::fold_const(const mir::Expr& e) {
     if (en.dims.empty()) en.dims = {(int64_t)en.r.size()};
     si = array_view(en.dims, leaf, true);
   } else {
-    stamp_kind(&si, e.type_);
+    stamp_kind(&si, e.unsized);
   }
-  if (e.type_ == "UMatrix" && en.dims.size() == 2)
+  if (mir::is_unsized(e, mir::UnsizedLeaf::Matrix) && en.dims.size() == 2)
     si = matrix_view(en.dims[0], en.dims[1], true);
   const bool nested_matrix =
       e.unsized.depth != 0 && e.unsized.leaf == mir::UnsizedLeaf::Matrix;
-  std::vector<double> vals =
-      graph_order(en, e.type_ == "UMatrix", nested_matrix);
+  std::vector<double> vals = graph_order(
+      en, mir::is_unsized(e, mir::UnsizedLeaf::Matrix), nested_matrix);
   const int s = add_slot((int64_t)vals.size(), false);
   out.fills.emplace_back(s, std::move(vals));
   Val v{s, false, si, owning_layout(si)};

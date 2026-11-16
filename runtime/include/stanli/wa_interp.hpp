@@ -137,10 +137,9 @@ class WaInterp {
   size_t n_gq_start_ = 0;
   bool saw_tp_ = false, saw_gq_ = false;
   bool have_cols_ = false;
-  // The variable the last FnWriteParam named, while columns are being
-  // discovered: the anchor for naming a write whose variable reference
-  // the optimizer substituted away (see write_param).
-  std::string last_written_;
+  // Which output variable each FnWriteParam writes, while columns are being
+  // discovered.
+  mir::OutputCursor output_cursor_;
 };
 
 // Evaluates `interp` on `ex` at the probe points until one succeeds, with a
