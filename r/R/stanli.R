@@ -216,10 +216,12 @@ looks_like_path <- function(x) {
 build_model <- function(code, data_json, is_mir, seed,
                         model_name = "stanli_model", model_code = character(0),
                         threads_per_chain = 1, fast_math = FALSE,
-                        allow_interpreter = TRUE, file = NULL) {
+                        allow_interpreter = TRUE, file = NULL,
+                        whitening = NULL) {
   ptr <- .Call("stanli_r_model_new", code, data_json, is_mir,
                as.numeric(seed), as.integer(threads_per_chain), fast_math,
                allow_interpreter, file)
+  if (!is.null(whitening)) ptr <- apply_whitening(ptr, whitening)
   variables <- runtime_variables(ptr, parameters = FALSE)
   structure(list(ptr = ptr,
                  n_unconstrained = .Call("stanli_r_n_unconstrained", ptr),
@@ -233,7 +235,8 @@ build_model <- function(code, data_json, is_mir, seed,
                  fast_math = fast_math, allow_interpreter = allow_interpreter,
                  reduce_sum_count = .Call("stanli_r_reduce_sum_count", ptr),
                  reduce_sum_fallbacks =
-                   .Call("stanli_r_reduce_sum_fallbacks", ptr)),
+                   .Call("stanli_r_reduce_sum_fallbacks", ptr),
+                 whitening = whitening),
             class = "stanli_model")
 }
 
@@ -249,7 +252,7 @@ with_run_seed <- function(model, seed, threads_per_chain = model$threads_per_cha
   build_model(model$source$code, model$source$data_json,
               model$source$is_mir, seed, model$model_name, model$model_code,
               threads_per_chain, model$fast_math,
-              !isFALSE(model$allow_interpreter))
+              !isFALSE(model$allow_interpreter), whitening = model$whitening)
 }
 
 # The declared variables behind a model's columns, from the runtime: a named
