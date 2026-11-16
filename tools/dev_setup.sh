@@ -11,7 +11,7 @@
 #   tools/dev_setup.sh --no-build    stop before cmake (CI builds separately)
 #   tools/dev_setup.sh --no-test     build without ctest (CI tests separately)
 #
-# Core needs: git, curl, python3 (or python), and opam (the OCaml 5.5.0 switch for the
+# Core needs: git, curl, python3 (or python), and opam (the OCaml 5.5.2 switch for the
 # pinned stanc is built automatically). The default C++ build additionally
 # needs CMake plus clang/clang++. Windows uses MSYS2's CLANG64 libraries on
 # x86_64 and CLANGARM64 on ARM64.

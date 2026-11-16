@@ -48,8 +48,13 @@ else
   out="$repo_root/deps/stanc3/stanc-pinned"
   record="$out.src"
 fi
-switch=${1:-$OPAM_SWITCH}
-ocaml_version=$OCAML_VERSION
+if [[ "$out" == */stanc-pinned ]]; then
+  switch=${1:-$STANC3_UPSTREAM_OPAM_SWITCH}
+  ocaml_version=$STANC3_UPSTREAM_OCAML_VERSION
+else
+  switch=${1:-$OPAM_SWITCH}
+  ocaml_version=$OCAML_VERSION
+fi
 # dune subst stamps `git describe`, which changes when a release tag for this
 # commit is published after an earlier build.
 version_matches() {
@@ -101,6 +106,11 @@ fi
 eval "$(opam env --switch="$switch" --set-switch)"
 opam pin add -n dune "$DUNE_VERSION" --confirm-level="$opam_confirm"
 (cd "$src_dir" && opam install . --deps-only --confirm-level="$opam_confirm")
+# stanc3 master builds against grace, which its stanc.opam does not list
+# (its scripts/install_build_deps.sh installs it). v2.40.0 does not use it.
+if [[ "$out" != */stanc-pinned ]]; then
+  opam install grace.0.4.1 --confirm-level="$opam_confirm"
+fi
 # Fill the %%NAME%%/%%VERSION%% placeholders from git, as the release
 # pipeline would; without this every source build answers --version
 # identically and conformance reports cannot tell two pins apart.

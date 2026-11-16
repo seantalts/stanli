@@ -1955,7 +1955,7 @@ jobs:
           (cd deps/stanc3-src &&
            opam pin add --switch=stancjs -y -n dune "$DUNE_VERSION" &&
            opam install . --switch=stancjs --deps-only -y &&
-           opam install --switch=stancjs -y \
+           opam install --switch=stancjs -y grace.0.4.1 \
              js_of_ocaml.6.4.1 js_of_ocaml-compiler.6.4.1 \
              js_of_ocaml-ppx.6.4.1 &&
            eval "$(opam env --switch=stancjs)" &&
