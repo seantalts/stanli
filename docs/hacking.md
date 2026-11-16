@@ -262,7 +262,7 @@ The tools you will reach for most:
   compiles a model. It writes the graph after every lowering pass to
   `<dir>/NN-<graph>-<stage>.txt`, numbered so `ls` sorts in pass order, plus
   the input MIR document as `00-mir.sexp` (the shipped compilers write an
-  encoded `STANLI3:` document there rather than an S-expression). Diff two consecutive files to see exactly
+  encoded `STANLI4:` document there rather than an S-expression). Diff two consecutive files to see exactly
   what one pass did. A pass that throws still leaves
   `NN-<graph>-FAILED-after-<stage>.txt` with the graph it died on.
 

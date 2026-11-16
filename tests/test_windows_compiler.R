@@ -49,7 +49,7 @@ main <- function() {
   Encoding(model) <- "UTF-8"
 
   portable <- mir_from_binary_test(portable_compiler, model)
-  if (!startsWith(portable, "STANLI3:"))
+  if (!startsWith(portable, "STANLI4:"))
     stop("the portable compiler did not emit the versioned envelope")
   if (endsWith(portable, "\n") || endsWith(portable, "\r"))
     stop("the portable compiler emitted a final newline")

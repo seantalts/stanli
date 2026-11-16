@@ -74,6 +74,8 @@ EXPORTS
   stanli_variable_name
   stanli_variable_n_dims
   stanli_variable_dim
+  stanli_variable_n_annotations
+  stanli_variable_annotation
   stanli_n_field_layouts
   stanli_field_layouts
   stanli_transformed_data_rng

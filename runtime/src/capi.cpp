@@ -69,6 +69,7 @@ struct CompilerMessage {
 struct Variable {
   std::string name;
   std::vector<int64_t> dims;
+  std::vector<std::string> annotations;
 };
 
 // Scalar element views of one variable (`a[i, j]` written per element) join
@@ -115,6 +116,15 @@ std::vector<Variable> variables_of(
     i = end;
   }
   return out;
+}
+
+void annotate(
+    std::vector<Variable>& vars,
+    const std::vector<std::pair<std::string, std::vector<std::string>>>&
+        annotations) {
+  for (Variable& var : vars)
+    for (const auto& entry : annotations)
+      if (entry.first == var.name) var.annotations = entry.second;
 }
 
 struct stanli_compilation {
@@ -507,6 +517,7 @@ static stanli_model* model_new(const char* tmir_sexp, const char* data_json,
     for (const auto& v : m->cm.views) m->n_con += v.len;
     m->flat_names = stanli::CompiledModel::csv_names(m->cm.views);
     m->con_vars = variables_of(m->cm.views);
+    annotate(m->con_vars, m->cm.annotations);
     std::string probe_failure;
     if (m->cm.write_array) {
       auto& wa = *m->cm.write_array;
@@ -519,6 +530,7 @@ static stanli_model* model_new(const char* tmir_sexp, const char* data_json,
           const auto& cols = m->wa_interp->columns();
           m->wa_names = stanli::CompiledModel::csv_names(cols);
           m->wa_vars = variables_of(cols);
+          annotate(m->wa_vars, m->cm.annotations);
           m->wa_gq_start =
               scalar_column_start(cols, m->wa_interp->n_gq_start());
         }
@@ -529,6 +541,7 @@ static stanli_model* model_new(const char* tmir_sexp, const char* data_json,
         m->wa_cols = wa.columns;
         m->wa_names = stanli::CompiledModel::csv_names(wa.columns);
         m->wa_vars = variables_of(wa.columns);
+        annotate(m->wa_vars, m->cm.annotations);
         for (const auto& c : wa.columns) m->wa_n += c.len;
         m->wa_gq_start = scalar_column_start(wa.columns, wa.n_gq_start);
       }
@@ -1983,6 +1996,20 @@ int64_t stanli_variable_dim(const stanli_model* m, int set, int64_t i,
   const Variable* v = variable_at(m, set, i);
   if (v == nullptr || k < 0 || k >= (int64_t)v->dims.size()) return 0;
   return v->dims[(size_t)k];
+}
+
+int64_t stanli_variable_n_annotations(const stanli_model* m, int set,
+                                      int64_t i) {
+  const Variable* v = variable_at(m, set, i);
+  return v == nullptr ? 0 : (int64_t)v->annotations.size();
+}
+
+const char* stanli_variable_annotation(const stanli_model* m, int set,
+                                       int64_t i, int64_t k) {
+  const Variable* v = variable_at(m, set, i);
+  if (v == nullptr || k < 0 || k >= (int64_t)v->annotations.size())
+    return nullptr;
+  return v->annotations[(size_t)k].c_str();
 }
 
 #define STANLI_FIELD(T, f) \

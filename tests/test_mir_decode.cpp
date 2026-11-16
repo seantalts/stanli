@@ -84,7 +84,7 @@ std::string encode_base64(std::string_view bytes) {
 }
 
 std::string v2_wire(std::string_view payload) {
-  return "STANLI3:" + encode_base64(payload);
+  return "STANLI4:" + encode_base64(payload);
 }
 
 void append_bool(std::string& bytes, bool value) {
@@ -329,6 +329,10 @@ std::string write_v2(const mir::Program& value) {
                 append_string(out, var.name);
                 append_u8(out, static_cast<uint8_t>(var.block));
                 append_sized(out, var.type);
+                append_list(out, var.annotations,
+                            [](std::string& list, const std::string& name) {
+                              append_string(list, name);
+                            });
               });
   append_stmt_list(payload, value.transform_inits);
   return v2_wire(payload);
@@ -660,7 +664,8 @@ json write_fun_def(const mir::FunDef& value) {
 json write_output_var(const mir::OutputVar& value) {
   return {{"name", value.name},
           {"block", static_cast<int>(value.block)},
-          {"type", write_sized_type(value.type)}};
+          {"type", write_sized_type(value.type)},
+          {"annotations", write_strings(value.annotations)}};
 }
 
 json write_program_object(const mir::Program& value) {
@@ -1256,6 +1261,43 @@ void check_exact_float_bits() {
   }
 }
 
+void check_output_annotations() {
+  std::string text = slurp("tests/fixtures/es.tmir.sexp");
+  const std::string plain = "(out_annotations ())";
+  const size_t at = text.find(plain);
+  check(at != std::string::npos, "fixture has an unannotated output variable");
+  if (at == std::string::npos) return;
+  text.replace(at, plain.size(),
+               "(out_annotations (((name latent) (args ()) (loc <opaque>))"
+               " ((name foo) (args (a b)) (loc <opaque>))))");
+  const std::vector<std::string> want = {"latent", "foo"};
+
+  const mir::Program legacy = decode_program(text);
+  const mir::Program portable = decode_program(write_v2(legacy));
+  check(!legacy.output_vars.empty(), "annotated fixture has output variables");
+  if (legacy.output_vars.empty()) return;
+  check(legacy.output_vars[0].annotations == want,
+        "sexp reader keeps output annotation names");
+  check(portable.output_vars[0].annotations == want,
+        "portable reader keeps output annotation names");
+  for (size_t i = 1; i < legacy.output_vars.size(); ++i)
+    check(legacy.output_vars[i].annotations.empty() &&
+              portable.output_vars[i].annotations.empty(),
+          "unannotated output variables stay empty");
+  check(write_program_object(portable) == write_program_object(legacy),
+        "annotated portable fields match sexp fields");
+
+  DataMap data;
+  data.set_int("J", 8);
+  data.set_real_array("y", {28, 8, -3, 7, -1, 1, 18, 12}, {8});
+  data.set_real_array("sigma", {15, 10, 16, 11, 9, 11, 10, 18}, {8});
+  const CompiledModel model = compile_model(text, data);
+  check(model.annotations.size() == 1 &&
+            model.annotations[0].first == legacy.output_vars[0].name &&
+            model.annotations[0].second == want,
+        "compiled model carries output annotations");
+}
+
 void check_structural_rejections() {
   mir::Expr indexed;
   indexed.kind = mir::Expr::Indexed;
@@ -1473,13 +1515,15 @@ void check_structural_rejections() {
 }
 
 void check_v2_rejections() {
-  expect_error("STANLI4:", "is from a different stanli compiler",
+  expect_error("STANLI5:", "is from a different stanli compiler",
                "unknown portable version");
+  expect_error("STANLI3:AAAAAA==", "is from a different stanli compiler",
+               "retired portable v3 envelope");
   expect_error("STANLI2:AAAAAA==", "is from a different stanli compiler",
                "retired portable v2 envelope");
   expect_error("{\"stanli_ir\":1}", "unrecognized input format",
                "retired portable v1 envelope");
-  expect_error(" STANLI3:", "unrecognized input format",
+  expect_error(" STANLI4:", "unrecognized input format",
                "v2 leading whitespace");
   expect_error("[]", "unrecognized input format", "unknown input format");
   expect_error(" \n\t", "empty input", "empty input");
@@ -1555,14 +1599,14 @@ void check_v2_rejections() {
   check_real_bits(UINT64_C(0x7ff8000000000042),
                   "v2 preserves binary64 NaN payload bits");
 
-  expect_error("STANLI3:AAA", "multiple of 4", "v2 incomplete base64 quartet");
-  expect_error("STANLI3:!!!!", "invalid base64 character",
+  expect_error("STANLI4:AAA", "multiple of 4", "v2 incomplete base64 quartet");
+  expect_error("STANLI4:!!!!", "invalid base64 character",
                "v2 invalid base64 character");
-  expect_error("STANLI3:AA==AAAA", "padding before final quartet",
+  expect_error("STANLI4:AA==AAAA", "padding before final quartet",
                "v2 early base64 padding");
-  expect_error("STANLI3:AB==", "non-canonical base64 tail",
+  expect_error("STANLI4:AB==", "non-canonical base64 tail",
                "v2 non-canonical one-byte tail");
-  expect_error("STANLI3:AAB=", "non-canonical base64 tail",
+  expect_error("STANLI4:AAB=", "non-canonical base64 tail",
                "v2 non-canonical two-byte tail");
 
   std::string truncated = empty_v2_payload();
@@ -1767,6 +1811,7 @@ int main(int argc, char** argv) {
   check_overload_finalization();
   check_exact_float_bits();
   check_nullary_math_constants();
+  check_output_annotations();
   check_structural_rejections();
   check_v2_rejections();
 

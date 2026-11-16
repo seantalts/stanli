@@ -86,12 +86,12 @@ test_that("the R JavaScript compiler uses Stan's nested include semantics", {
   on.exit(unlink(f$root, recursive = TRUE), add = TRUE)
   compile <- function(code) stanli:::mir_from_js(code, include_paths = f$root)
   mir <- compile(f$code)
-  expect_true(startsWith(mir, "STANLI3:"))
+  expect_true(startsWith(mir, "STANLI4:"))
   # Comments and string literals must never become filesystem dependencies.
   harmless <- paste0('/* #include absent.stan */\n// #include absent.stan\n',
                       'model { print("#include absent.stan"); }')
   expect_identical(stanli:::stan_include_sources(harmless, f$root), list())
-  expect_true(startsWith(compile(harmless), "STANLI3:"))
+  expect_true(startsWith(compile(harmless), "STANLI4:"))
   expect_error(compile("#include absent.stan\n"), "absent.stan", fixed = TRUE)
   writeLines("#include cycle.stan", file.path(f$root, "cycle.stan"))
   expect_error(compile("#include cycle.stan\n"), "recursively included", fixed = TRUE)
@@ -102,13 +102,13 @@ test_that("the R JavaScript compiler uses Stan's nested include semantics", {
   for (directive in c('#include "spaced π.stan"\r\n',
                        '#include\n<spaced π.stan>\n',
                        '#include\t"spaced π.stan" // comment\n'))
-    expect_true(startsWith(compile(directive), "STANLI3:"))
+    expect_true(startsWith(compile(directive), "STANLI4:"))
   # The bare alternative wins when it consumes more than the delimited form.
   # These filename characters are valid on Unix, but forbidden on Windows.
   if (.Platform$OS.type != "windows") {
     for (name in c('"body"tail', '<body>tail>')) {
       writeLines(f$expanded, file.path(f$root, name), useBytes = TRUE)
-      expect_true(startsWith(compile(paste0("#include ", name, "\n")), "STANLI3:"))
+      expect_true(startsWith(compile(paste0("#include ", name, "\n")), "STANLI4:"))
     }
   }
   if (stanli_available())

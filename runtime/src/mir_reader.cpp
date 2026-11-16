@@ -1449,6 +1449,15 @@ Program read_program(const sexp::Node& root) {
       OutputVar out;
       out.name = v[0].atom;
       out.type = read_sized((*type)[1]);
+      if (const Node* notes = field(v[2], "out_annotations")) {
+        const Node& list = (*notes)[1];
+        for (size_t k = 0; k < list.size(); ++k) {
+          const Node* name = field(list[k], "name");
+          if (!name || !(*name)[1].is_atom())
+            throw mir::MirError("mir: malformed output annotation");
+          out.annotations.push_back((*name)[1].atom);
+        }
+      }
       const std::string& b = (*block)[1].atom;
       if (b == "Parameters")
         out.block = OutputVar::Block::Parameters;

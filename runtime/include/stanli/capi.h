@@ -945,6 +945,15 @@ const char* stanli_variable_name(const stanli_model* m, int set, int64_t i);
 int64_t stanli_variable_n_dims(const stanli_model* m, int set, int64_t i);
 int64_t stanli_variable_dim(const stanli_model* m, int set, int64_t i,
                             int64_t k);
+/* The declaration annotations on variable i, by name without the `@` and in
+ * source order (`@latent` is "latent"). Only parameters appear in
+ * STANLI_CONSTRAINED_COLUMNS; STANLI_WRITE_ARRAY_COLUMNS also lists
+ * transformed parameters and generated quantities. Strings are owned by the
+ * model; out-of-range indices return 0 or null. */
+int64_t stanli_variable_n_annotations(const stanli_model* m, int set,
+                                      int64_t i);
+const char* stanli_variable_annotation(const stanli_model* m, int set,
+                                       int64_t i, int64_t k);
 
 /* The layout of every struct this header declares, for bindings that mirror
  * them and cannot include it (R's C glue copies them, Python declares ctypes
