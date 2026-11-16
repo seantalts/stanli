@@ -470,6 +470,7 @@ jobs:
           fi
           cmake -B build-rel -DCMAKE_BUILD_TYPE=Release \
             -DSTANLI_STAN_DENSITY_ORACLE=OFF \
+            -DSTANLI_DEBUG_SWITCHES=OFF \
             "${compiler_args[@]}" \
             -DCMAKE_C_COMPILER_LAUNCHER=ccache \
             -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
@@ -544,10 +545,11 @@ jobs:
           echo "runner: $cores cores, testing -j$cores"
           ctest --test-dir build-rel --timeout 600 --parallel "$cores" --output-on-failure
 
-      # build-rel is the shipped configuration and has no Stan Math kernels for
-      # the fused densities. This builds the same sources with them kept, to
-      # run the differential tests and the STANLI_NO_FUSED_DENSITY oracle
-      # switch. One platform is enough: the comparison is of two kernels.
+      # build-rel is the shipped configuration: no Stan Math kernels for the
+      # fused densities and no developer switches, so ctest there skips the
+      # tests labeled debug_switches. This builds the same sources with both
+      # kept, to run the differential tests, the STANLI_NO_FUSED_DENSITY
+      # oracle and the switch tests. One platform is enough.
       - name: Differential tests against Stan Math
         if: matrix.plat == 'manylinux_2_28_x86_64'
         run: |
@@ -559,12 +561,15 @@ jobs:
           fi
           cmake -B build-oracle -DCMAKE_BUILD_TYPE=Release \
             -DSTANLI_STAN_DENSITY_ORACLE=ON \
+            -DSTANLI_DEBUG_SWITCHES=ON \
             "${compiler_args[@]}" \
             -DCMAKE_C_COMPILER_LAUNCHER=ccache \
             -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
             -DSTANLI_EMBED_STANC=ON
-          cmake --build build-oracle -j ${{ matrix.build_jobs }} \
-            --target test_density_fused
+          cmake --build build-oracle -j ${{ matrix.build_jobs }}
+          cores=$(nproc 2>/dev/null || echo 2)
+          ctest --test-dir build-oracle --timeout 600 --parallel "$cores" \
+            --output-on-failure -L debug_switches
           ctest --test-dir build-oracle --timeout 600 --output-on-failure \
             -R '^test_density_fused$'
 
@@ -728,7 +733,7 @@ jobs:
             for format in legacy portable; do
               for sample in 1 2 3 4 5; do
                 echo "format=$format sample=$sample"
-                STANLI_PROFILE_PREP=1 build-rel/bench_grad \
+                STANLI_PROFILE_PREP=1 build-oracle/bench_grad \
                   "/tmp/stanli-es.${format}-mir" \
                   tests/fixtures/eight_schools.json --prep
               done
@@ -1392,6 +1397,7 @@ jobs:
           ccache -z
           cmake -B build-rel -G Ninja -DCMAKE_BUILD_TYPE=Release \
             -DSTANLI_STAN_DENSITY_ORACLE=OFF \
+            -DSTANLI_DEBUG_SWITCHES=OFF \
             -DCMAKE_C_COMPILER_LAUNCHER=ccache \
             -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
           cmake --build build-rel -j4
@@ -1599,7 +1605,7 @@ jobs:
           # SUNDIALS C is instrumented on the same terms as the kernels.
           cmake -B build-asan -DCMAKE_BUILD_TYPE=None \
             -DCMAKE_C_FLAGS="-O1 -g1" -DCMAKE_CXX_FLAGS="-O1 -g1" \
-            -DSTANLI_SANITIZE=address \
+            -DSTANLI_SANITIZE=address -DSTANLI_DEBUG_SWITCHES=ON \
             -DCMAKE_C_COMPILER="$CC" -DCMAKE_CXX_COMPILER="$CXX" \
             -DCMAKE_C_COMPILER_LAUNCHER=ccache \
             -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
@@ -1709,7 +1715,7 @@ jobs:
         run: |
           cmake -B build-tsan -DCMAKE_BUILD_TYPE=None \
             -DCMAKE_C_FLAGS="-O1 -g1" -DCMAKE_CXX_FLAGS="-O1 -g1" \
-            -DSTANLI_SANITIZE=thread \
+            -DSTANLI_SANITIZE=thread -DSTANLI_DEBUG_SWITCHES=ON \
             -DCMAKE_C_COMPILER="$CC" -DCMAKE_CXX_COMPILER="$CXX"
           cmake --build build-tsan -j4 \
             --target test_capi test_pool test_multichain \
@@ -1717,7 +1723,7 @@ jobs:
       - name: ctest
         run: >-
           ctest --test-dir build-tsan --timeout 600 --output-on-failure
-          -R '^(test_capi|test_pool|test_multichain|test_wa_parallel|test_wa_parallel_abi)$'
+          -R '^(test_capi|test_pool|test_multichain|test_wa_parallel|test_wa_parallel_switches|test_wa_parallel_abi)$'
 
   # Build and link the browser runtime after merge, nightly, on demand, and
   # on tags. Pages and release jobs consume the artifact and run end-to-end
@@ -1782,7 +1788,7 @@ jobs:
           export CCACHE_BASEDIR="$(dirname "$RUNNER_TEMP")"
           ccache -z
           emcmake cmake -B build-wasm -DCMAKE_BUILD_TYPE=Release \
-            -DSTANLI_STAN_DENSITY_ORACLE=OFF \
+            -DSTANLI_STAN_DENSITY_ORACLE=OFF -DSTANLI_DEBUG_SWITCHES=OFF \
             -DCMAKE_C_COMPILER_LAUNCHER=ccache \
             -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
           cmake --build build-wasm -j4
@@ -1864,7 +1870,7 @@ jobs:
           export CCACHE_BASEDIR="$(dirname "$RUNNER_TEMP")"
           ccache -z
           emcmake cmake -B build-wasm-side -DCMAKE_BUILD_TYPE=Release \
-            -DSTANLI_STAN_DENSITY_ORACLE=OFF \
+            -DSTANLI_STAN_DENSITY_ORACLE=OFF -DSTANLI_DEBUG_SWITCHES=OFF \
             -DSTANLI_WASM_SIDE=ON -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
             -DCMAKE_C_COMPILER_LAUNCHER=ccache \
             -DCMAKE_CXX_COMPILER_LAUNCHER=ccache

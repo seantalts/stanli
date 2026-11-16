@@ -149,8 +149,12 @@ Step by step:
    `write_array` is lowered from the prepared data, so in a build with
    threads and a model with enough to lower on both sides it runs on a
    second thread beside the log density and is joined before
-   `compile_model` returns. `STANLI_PARALLEL_WA=0` lowers the two one after
-   the other and `STANLI_PARALLEL_WA=1` always uses the second thread.
+   `compile_model` returns. `CompileOptions::parallel_write_array` (and
+   `parallel_write_array` in the C ABI's `stanli_model_opts`, or
+   `bench_grad --parallel-wa=`) chooses: `Off` lowers the two one after the
+   other and `Force` always uses the second thread. Left at `Auto`, the
+   developer switch decides: `STANLI_PARALLEL_WA=0` is `Off`, `1` or `force`
+   is `Force`, and any other value but `auto` is `Off`.
 
 4. **The passes rewrite the list.** In pipeline order: in-place
    updates, store-to-load forwarding, constant folding, loop
@@ -227,7 +231,10 @@ The tools you will reach for most:
   is intentionally stronger than the existing `STANLI_NO_INTERPRETER` policy.
   Constructions and probe entries are not instruction/evaluation counts.
 - `STANLI_EXECUTION_REPORT=1`: emit the same manifest through the diagnostic
-  sink at model compilation. The C API and BridgeStan emit a separate host
+  sink at model compilation. `CompileOptions::execution_report`,
+  `execution_report` in `stanli_model_opts`, `dump_ops --execution-report`
+  and `stanli_function_set_execution_report` for a standalone function handle
+  turn it on without the environment. The C API and BridgeStan emit a separate host
   selection event after write-array discovery, distinguishing an attached
   fallback from successful output discovery. Standalone function handles
   created with this flag emit interpreter construction traces on calls.
@@ -248,7 +255,7 @@ The tools you will reach for most:
   Only the selected write-array route is listed; a partial/unselected graph
   is not added to its executing coverage. Use existing inclusive profiles for
   time attribution, and do not sum overlapping parent/child times.
-- `STANLI_DUMP_PASSES=<dir>`: an environment variable read by anything that
+- `STANLI_DUMP_PASSES=<dir>`: a developer switch read by anything that
   compiles a model. It writes the graph after every lowering pass to
   `<dir>/NN-<graph>-<stage>.txt`, numbered so `ls` sorts in pass order, plus
   the input MIR document as `00-mir.sexp` (the shipped compilers write an
@@ -780,10 +787,24 @@ Or manually:
 ```
 ./tools/dev_setup.sh --no-build
 build_jobs=$(tools/build_jobs.sh)
-cmake -B build -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++
+cmake -B build -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++ \
+  -DSTANLI_DEBUG_SWITCHES=ON
 cmake --build build --parallel "$build_jobs"
 ctest --test-dir build --parallel "$build_jobs"
 ```
+
+The `STANLI_*` environment variables in this guide and in
+[OPTIMIZATIONS.md](../runtime/src/OPTIMIZATIONS.md) that turn a pass off,
+force an engine, set a tuning limit or print a diagnostic are developer
+switches, read through `debug_env()` in
+[`debug_switch.hpp`](../runtime/include/stanli/debug_switch.hpp). CMake's
+`STANLI_DEBUG_SWITCHES` compiles them in. It defaults to OFF, which is what
+the wheels, the R runtime and the browser builds ship: there a set switch is
+ignored, with a one-time notice. `tools/dev_setup.sh` configures both of its
+builds ON. Tests that set a switch carry the CTest label `debug_switches` and
+are disabled in an OFF build; `ctest -L debug_switches` runs them in an ON
+build. `STANLI_NO_INTERPRETER`, `STANLI_ISA`, `STANLI_NO_FUSED_DENSITY` and
+`STANLI_NO_O1_FALLBACK` are not developer switches and work in every build.
 
 `tools/build_jobs.sh` caps parallelism by CPU count and usable RAM: 4 GiB
 per concurrent Stan Math compile on macOS and Windows, 6 GiB elsewhere,
@@ -832,7 +853,8 @@ one flag locally. Its compiler uses much more memory than Release:
 
 ```
 asan_jobs=$(STANLI_JOB_MEMORY_GIB=12 tools/build_jobs.sh)
-cmake -B build-asan -DCMAKE_BUILD_TYPE=RelWithDebInfo -DSTANLI_SANITIZE=address
+cmake -B build-asan -DCMAKE_BUILD_TYPE=RelWithDebInfo -DSTANLI_SANITIZE=address \
+  -DSTANLI_DEBUG_SWITCHES=ON
 cmake --build build-asan --parallel "$asan_jobs" && \
   ctest --test-dir build-asan --parallel "$asan_jobs"
 ```

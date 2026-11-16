@@ -433,12 +433,42 @@ gradient, which must also match its analytic value within 2 ULP. The difference
 comes from adjoint ODE sensitivity integration
 ([measurements](notes/execution/2026-09-28-nested-callback-coverage.md)).
 
+## Developer switches
+
+The runtime reads about 60 `STANLI_*` environment variables that turn a pass
+off, force an engine or print a diagnostic
+([docs/hacking.md](docs/hacking.md#building)). The CMake option
+`STANLI_DEBUG_SWITCHES` compiles them in. It defaults to OFF, which is what
+the wheels, the R runtime and the browser builds ship, and
+`tools/build_wheel.sh` refuses a `build-rel/` configured ON.
+`tools/dev_setup.sh` and the sanitizer jobs configure ON.
+
+A test that sets a switch is listed in `STANLI_DEBUG_SWITCH_TESTS` in
+[`CMakeLists.txt`](CMakeLists.txt) and carries the CTest label
+`debug_switches`. In an OFF build CTest reports it as `Not Run (Disabled)` and
+the run still passes. CI runs CTest that way in the shipped `build-rel/`; the
+manylinux job's differential step builds ON and runs
+`ctest -L debug_switches`. Locally:
+
+```sh
+cmake -B build -DSTANLI_DEBUG_SWITCHES=ON
+cmake --build build --parallel "$(tools/build_jobs.sh)"
+ctest --test-dir build -L debug_switches
+```
+
+A test that only needs pass dumps, an execution report or a write_array
+thread policy sets the typed fields instead and runs in every build:
+`CompileOptions::dump_passes`, `dump_stages`, `execution_report` and
+`parallel_write_array`, the last two also in `stanli_model_opts`.
+`test_wa_parallel --switches` and `test_pass_dump --switches` are the labeled
+halves that check the environment switches themselves.
+
 ## Reproducing locally
 
 Replaying the checked-in references does not run CmdStan.
 [`tools/dev_setup.sh`](tools/dev_setup.sh) configures `build/` and `build-rel/`
-with `-DSTANLI_EMBED_STANC=ON` (`build-rel/` with the density oracle off) and
-runs CTest in `build/`. Without the embedded compiler or
+with `-DSTANLI_EMBED_STANC=ON` and `-DSTANLI_DEBUG_SWITCHES=ON` (`build-rel/`
+with the density oracle off) and runs CTest in `build/`. Without the embedded compiler or
 `deps/stanc3/stanli-compile`, every test that compiles Stan source fails.
 
 ```sh
@@ -472,6 +502,7 @@ AddressSanitizer builds compile Stan source through `stanli-compile`, which
 ```sh
 asan_jobs=$(STANLI_JOB_MEMORY_GIB=12 tools/build_jobs.sh)
 cmake -B build-asan -DCMAKE_BUILD_TYPE=RelWithDebInfo -DSTANLI_SANITIZE=address \
+  -DSTANLI_DEBUG_SWITCHES=ON \
   -DSTANLI_PORTABLE_COMPILER="$PWD/deps/stanc3/stanli-compile"
 cmake --build build-asan --parallel "$asan_jobs" && \
   ctest --test-dir build-asan --parallel "$asan_jobs"

@@ -123,6 +123,7 @@ echo library > build-rel/libstanli.so
                    if line.startswith("<-B>")]
         self.assertEqual(len(configs), 2)
         for line in configs:
+            self.assertIn("<-DSTANLI_DEBUG_SWITCHES=ON>", line)
             if embedded:
                 self.assertIn("<-DSTANLI_EMBED_STANC=ON>", line)
             else:

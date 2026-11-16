@@ -226,22 +226,25 @@ jobs:
           ccache -z
           cmake -B build-rel -DCMAKE_BUILD_TYPE=Release \
             -DSTANLI_STAN_DENSITY_ORACLE=OFF \
+            -DSTANLI_DEBUG_SWITCHES=OFF \
             -DCMAKE_C_COMPILER="$CC" \
             -DCMAKE_CXX_COMPILER="$CXX" \
             -DCMAKE_C_COMPILER_LAUNCHER=ccache \
             -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
             -DSTANLI_EMBED_STANC=ON
           cmake --build build-rel -j2
-          # The PR job's differential step rebuilds the density kernels with
-          # Stan Math's own kernels kept; seed those objects too.
+          # The PR job's differential step rebuilds everything with Stan
+          # Math's own density kernels and the developer switches kept; seed
+          # those objects too.
           cmake -B build-oracle -DCMAKE_BUILD_TYPE=Release \
             -DSTANLI_STAN_DENSITY_ORACLE=ON \
+            -DSTANLI_DEBUG_SWITCHES=ON \
             -DCMAKE_C_COMPILER="$CC" \
             -DCMAKE_CXX_COMPILER="$CXX" \
             -DCMAKE_C_COMPILER_LAUNCHER=ccache \
             -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
             -DSTANLI_EMBED_STANC=ON
-          cmake --build build-oracle -j2 --target test_density_fused
+          cmake --build build-oracle -j2
           ccache -s
 
       - name: Save the completed PR compiler cache

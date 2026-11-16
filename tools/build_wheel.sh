@@ -25,6 +25,12 @@ if ! grep -q '^STANLI_STAN_DENSITY_ORACLE:BOOL=OFF' build-rel/CMakeCache.txt 2>/
   echo "warning: build-rel keeps Stan Math's kernels for the fused densities;" \
        "configure it with -DSTANLI_STAN_DENSITY_ORACLE=OFF for a release wheel" >&2
 fi
+if grep -q '^STANLI_DEBUG_SWITCHES:BOOL=ON' build-rel/CMakeCache.txt 2>/dev/null; then
+  echo "build-rel reads the developer STANLI_* switches, which a wheel must" \
+       "not ship; configure it with -DSTANLI_DEBUG_SWITCHES=OFF:" >&2
+  echo "  cmake -B build-rel -DSTANLI_DEBUG_SWITCHES=OFF" >&2
+  exit 1
+fi
 cmake --build build-rel --parallel "$BUILD_JOBS" --target stanli_shared
 # Configure has already refused a stale embed object, so the cache entry
 # alone says whether this library carries the compiler.

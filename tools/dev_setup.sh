@@ -171,11 +171,12 @@ if [ "$WANT_BUILD" = 1 ]; then
     EMBED_FLAGS=(-DSTANLI_EMBED_STANC=ON)
   fi
   cmake -B build -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+    -DSTANLI_DEBUG_SWITCHES=ON \
     "${CMAKE_FLAGS[@]}" \
     ${EMBED_FLAGS[@]+"${EMBED_FLAGS[@]}"}
   cmake --build build --parallel "$BUILD_JOBS"
   cmake -B build-rel -DCMAKE_BUILD_TYPE=Release \
-    -DSTANLI_STAN_DENSITY_ORACLE=OFF \
+    -DSTANLI_STAN_DENSITY_ORACLE=OFF -DSTANLI_DEBUG_SWITCHES=ON \
     "${CMAKE_FLAGS[@]}" \
     ${EMBED_FLAGS[@]+"${EMBED_FLAGS[@]}"}
   cmake --build build-rel --parallel "$BUILD_JOBS" \
