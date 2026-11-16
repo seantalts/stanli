@@ -383,8 +383,8 @@ side to update.
 
 The macOS and Linux runtimes embed the Stan compiler. On Windows it runs as a
 short-lived `stanli-compile.exe` subprocess beside the runtime. Without either,
-R falls back to stock `stanc` beside the runtime or on `PATH`, and finally to the bundled JavaScript compiler through V8,
-which is also what webR uses.
+R uses the bundled JavaScript build of the same compiler through V8, which is
+also what webR uses.
 
 ## Limits
 

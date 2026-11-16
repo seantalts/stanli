@@ -1,23 +1,15 @@
-// Exercise the worker's compiler selection without loading the WASM runtime.
+// Exercise the worker's compile command without loading the WASM runtime.
 // importScripts is replaced with a loader for the actual generated compiler
-// artifacts; the compile command needs only the runtime's resolved promise.
+// artifact; the compile command needs only the runtime's resolved promise.
 //
-//   node tests/test_worker_compiler.cjs custom worker.js portable.js stock.js
-//   node tests/test_worker_compiler.cjs fallback worker.js portable.js stock.js
+//   node tests/test_worker_compiler.cjs worker.js stanli-compiler.js
 "use strict";
 
 const fs = require("fs");
 const path = require("path");
 
-const mode = process.argv[2];
-const workerPath = path.resolve(process.argv[3]);
-const portablePath = path.resolve(process.argv[4]);
-const stockPath = path.resolve(process.argv[5]);
-
-if (mode !== "custom" && mode !== "fallback") {
-  console.error("mode must be custom or fallback");
-  process.exit(2);
-}
+const workerPath = path.resolve(process.argv[2]);
+const compilerPath = path.resolve(process.argv[3]);
 
 const imports = [];
 const messages = [];
@@ -29,12 +21,7 @@ globalThis.importScripts = (asset) => {
     return;
   }
   if (asset === "stanli-compiler.js") {
-    if (mode === "fallback") throw new Error("portable compiler unavailable");
-    Object.assign(globalThis, require(portablePath));
-    return;
-  }
-  if (asset === "stancjs.bc.js") {
-    Object.assign(globalThis, require(stockPath));
+    Object.assign(globalThis, require(compilerPath));
     return;
   }
   throw new Error("unexpected importScripts asset: " + asset);
@@ -54,49 +41,59 @@ data { int<lower=0> N; vector[N] x; vector[N] y; }
 parameters { real a; real b; real<lower=0> sigma; }
 model { y ~ normal(a + b * x, sigma); }`;
 
-Promise.resolve(globalThis.onmessage({data: {cmd: "compile", code}}))
-    .then(() => {
-      const completed = messages.filter((message) => message.done);
-      if (completed.length !== 1 || typeof completed[0].done.mir !== "string")
-        throw new Error("worker did not return one compiled MIR document");
+const warningCode =
+    "parameters { real x; } model { if (0 < x < 1) target += 0; }";
 
-      const mir = completed[0].done.mir;
-      const portable = mir.startsWith("STANLI3:");
-      if ((mode === "custom") !== portable)
-        throw new Error(mode + " selected the wrong MIR producer");
+// Past the compiler's structural budget, so O1 is skipped.
+const budgetCode = "parameters { real x; }\nmodel {\nreal s = 0;\n" +
+    Array.from({length: 9}, (_, d) => `for (i${d} in 1:1) {\n`).join("") +
+    "s += 1;\n".repeat(2100) + "}\n".repeat(9) + "x ~ normal(s, 1);\n}\n";
 
-      const expected = mode === "custom" ?
-          ["stanli.js", "stanli-compiler.js"] :
-          ["stanli.js", "stanli-compiler.js", "stancjs.bc.js"];
-      if (JSON.stringify(imports) !== JSON.stringify(expected))
-        throw new Error("unexpected import order: " + JSON.stringify(imports));
+async function reply(request) {
+  const before = messages.length;
+  await globalThis.onmessage({data: request});
+  const results = messages.slice(before).filter((m) => m.done || m.error);
+  if (results.length !== 1)
+    throw new Error("expected one reply, got " + JSON.stringify(results));
+  if (results[0].error) throw new Error(results[0].error);
+  return results[0].done;
+}
 
-      return globalThis.onmessage({data: {cmd: "compile", code: fastCode}})
-          .then(() => globalThis.onmessage(
-              {data: {cmd: "compile", code: fastCode, fastMath: true}}));
-    })
-    .then(() => {
-      const results = messages.filter((message) => message.done || message.error)
-                          .slice(1);
-      if (results.length !== 2) throw new Error("expected two more replies");
-      if (mode === "fallback") {
-        if (results[0].error || !results[1].error ||
-            !/fastMath/.test(results[1].error))
-          throw new Error("fastMath without the portable compiler must fail " +
-                          "naming fastMath: " + JSON.stringify(results[1]).slice(0, 200));
-        console.log("test_worker_compiler " + mode + " OK");
-        return;
-      }
-      const [plain, fast] = results.map((message) => message.done);
-      if (!plain || !fast) throw new Error("fast compile failed: " +
-                                           JSON.stringify(results).slice(0, 200));
-      if (plain.fastMath !== false || fast.fastMath !== true)
-        throw new Error("compile did not report fastMath");
-      if (!fast.mir.startsWith("STANLI3:") || fast.mir === plain.mir)
-        throw new Error("fastMath did not change the compiled MIR");
-      console.log("test_worker_compiler " + mode + " OK");
-    })
-    .catch((error) => {
-      console.error("FAIL " + String(error && error.stack || error));
-      process.exit(1);
-    });
+(async () => {
+  const plain = await reply({cmd: "compile", code});
+  if (typeof plain.mir !== "string" || !plain.mir.startsWith("STANLI3:"))
+    throw new Error("worker did not return portable MIR");
+  if (JSON.stringify(imports) !==
+      JSON.stringify(["stanli.js", "stanli-compiler.js"]))
+    throw new Error("unexpected import order: " + JSON.stringify(imports));
+  if (plain.o1Fallback !== null || !Array.isArray(plain.warnings) ||
+      plain.warnings.length !== 0)
+    throw new Error("a small clean model reported compiler messages: " +
+                    JSON.stringify([plain.warnings, plain.o1Fallback]));
+
+  const slow = await reply({cmd: "compile", code: fastCode});
+  const fast = await reply({cmd: "compile", code: fastCode, fastMath: true});
+  if (slow.fastMath !== false || fast.fastMath !== true)
+    throw new Error("compile did not report fastMath");
+  if (!fast.mir.startsWith("STANLI3:") || fast.mir === slow.mir)
+    throw new Error("fastMath did not change the compiled MIR");
+
+  const warned = await reply({cmd: "compile", code: warningCode});
+  if (warned.warnings.length !== 1 ||
+      !warned.warnings[0].includes("chained comparison") ||
+      warned.o1Fallback !== null)
+    throw new Error("unexpected warnings: " + JSON.stringify(warned.warnings));
+
+  const budget = await reply({cmd: "compile", code: budgetCode});
+  if (typeof budget.o1Fallback !== "string" ||
+      !budget.o1Fallback.includes("skipped O1"))
+    throw new Error("the O1 fallback was not reported: " +
+                    JSON.stringify(budget.o1Fallback));
+  if (budget.warnings.some((w) => w.includes("skipped O1")))
+    throw new Error("the O1 fallback notice is also in the warnings");
+
+  console.log("test_worker_compiler OK");
+})().catch((error) => {
+  console.error("FAIL " + String(error && error.stack || error));
+  process.exit(1);
+});

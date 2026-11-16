@@ -3,9 +3,10 @@ let () =
   let fast_math = ref false in
   let include_paths = ref [] in
   let filename = ref None in
+  let messages_json = ref None in
   let model = ref None in
   let usage =
-    "usage: stanli_compiler_cli [--model-only] [--fast-math] [--include-path DIR]... [--filename NAME] MODEL.stan" in
+    "usage: stanli_compiler_cli [--model-only] [--fast-math] [--include-path DIR]... [--filename NAME] [--messages-json PATH] MODEL.stan" in
   Arg.parse
     [ ("--model-only", Arg.Set model_only, "compile only model entry points")
     ; ("--fast-math", Arg.Set fast_math, "enable partial evaluation")
@@ -14,7 +15,11 @@ let () =
       , "directory to search for Stan includes (repeatable)" )
     ; ( "--filename"
       , Arg.String (fun name -> filename := Some name)
-      , "file name to print in diagnostics instead of 'string'" ) ]
+      , "file name to print in diagnostics instead of 'string'" )
+    ; ( "--messages-json"
+      , Arg.String (fun path -> messages_json := Some path)
+      , "also write the warnings and the O1 fallback notice to PATH as JSON" )
+    ]
     (fun path ->
       match !model with
       | None -> model := Some path
@@ -39,6 +44,25 @@ let () =
     (fun diagnostic ->
       prerr_endline (Stanli_pipeline.diagnostic_message diagnostic))
     compilation.diagnostics;
+  let o1_fallback = Stanli_pipeline.o1_fallback compilation in
+  Option.iter
+    (fun path ->
+      let warning w =
+        `String
+          (String.trim
+             (Fmt.str "%a"
+                (Frontend.Warnings.pp ?printed_filename:!filename ~code)
+                w)) in
+      let json =
+        `Assoc
+          [ ("warnings", `List (List.map warning compilation.warnings))
+          ; ( "o1_fallback"
+            , match o1_fallback with Some m -> `String m | None -> `Null ) ]
+      in
+      Out_channel.with_open_bin path (fun out ->
+          Yojson.Basic.to_channel out json;
+          Out_channel.output_char out '\n'))
+    !messages_json;
   match compilation.result with
   | Ok encoded -> print_string encoded
   | Error (Stanli_pipeline.Internal_error message) ->

@@ -1,5 +1,7 @@
 #pragma once
 
+#include <stanli/stanc_result.hpp>
+
 #include <stdexcept>
 #include <string>
 
@@ -19,12 +21,14 @@ struct CompileError : std::runtime_error {
 std::string run_stanc_process(const std::string& stanc,
                               const std::string& model);
 
-// Run stanli-compile, the shipped pipeline as an executable, on one model and
-// return the portable MIR it prints. Errors and warnings name the model by
-// the path given here, as stanc does; failures throw CompileError.
-std::string run_portable_compiler(const std::string& compiler,
-                                  const std::string& model,
-                                  bool fast_math = false);
+// Run stanli-compile, the shipped pipeline as an executable, on one model.
+// The result holds the portable MIR it prints and the warnings and O1
+// fallback notice it writes to its --messages-json file. Errors and warnings
+// name the model by the path given here, as stanc does; failures throw
+// CompileError with the compiler's stderr.
+stanli::StancResult run_portable_compiler(const std::string& compiler,
+                                          const std::string& model,
+                                          bool fast_math = false);
 
 // The directory holding the running executable.
 std::string executable_directory();

@@ -37,6 +37,7 @@ _BIN = pathlib.Path(__file__).parent / "_bin"
 _ABI_VERSION = 6
 
 # stanli_compiler_message_kind in capi.h.
+_COMPILER_WARNING = 0
 _COMPILER_O1_FALLBACK = 1
 # The column sets of stanli_n_variables.
 _CONSTRAINED_COLUMNS = 0
@@ -533,36 +534,21 @@ def _pathfinder_init_options(value):
 
 
 def _compiler_command(model_path: pathlib.Path, include_paths=(),
-                      fast_math=False, filename=None):
-    """The packaged compiler argv, preferring stanli's portable producer."""
+                      fast_math=False, filename=None, messages_json=None):
+    """The argv for the packaged stanli-compile."""
     suffix = ".exe" if sys.platform == "win32" else ""
     portable = _BIN / ("stanli-compile" + suffix)
-    if portable.is_file():
-        flags = [arg for path in include_paths for arg in ("--include-path", path)]
-        if fast_math:
-            flags.insert(0, "--fast-math")
-        if filename is not None:
-            flags.extend(["--filename", filename])
-        return [str(portable), *flags, str(model_path)]
-
-    # One-cycle rollback path: pristine stanc3 emits the legacy s-expression
-    # that the runtime continues to accept. Only absence selects it. A broken
-    # portable compiler must fail loudly rather than being hidden by a retry.
-    stanc = _BIN / ("stanc" + suffix)
-    if stanc.is_file():
-        if fast_math:
-            raise RuntimeError("fast_math requires the portable stanli-compile "
-                               f"compiler, which is missing from {_BIN}")
-        if any("," in path for path in include_paths):
-            raise ValueError("the legacy stanc compiler cannot use include_paths "
-                             "containing commas")
-        flags = ["--include-paths=" + ",".join(include_paths)] if include_paths else []
-        if filename is not None:
-            flags.append("--filename-in-msg=" + filename)
-        return [str(stanc), "--O1", "--debug-optimized-mir", *flags, str(model_path)]
-    raise RuntimeError(
-        "the bundled Stan compiler is missing "
-        f"(expected {portable.name} or {stanc.name} in {_BIN})")
+    if not portable.is_file():
+        raise RuntimeError("the bundled Stan compiler is missing "
+                           f"(expected {portable.name} in {_BIN})")
+    flags = [arg for path in include_paths for arg in ("--include-path", path)]
+    if fast_math:
+        flags.insert(0, "--fast-math")
+    if filename is not None:
+        flags.extend(["--filename", filename])
+    if messages_json is not None:
+        flags.extend(["--messages-json", str(messages_json)])
+    return [str(portable), *flags, str(model_path)]
 
 
 def _warn_compile(text, category=RuntimeWarning):
@@ -582,18 +568,32 @@ def _warn_compiler_messages(kinds_and_texts):
                       else RuntimeWarning)
 
 
+def _read_compiler_messages(path):
+    """stanli-compile's --messages-json file as (kind, text) pairs."""
+    import json
+    messages = json.loads(pathlib.Path(path).read_text(encoding="utf-8"))
+    out = [(_COMPILER_WARNING, text) for text in messages["warnings"]]
+    if messages["o1_fallback"] is not None:
+        out.append((_COMPILER_O1_FALLBACK, messages["o1_fallback"]))
+    return out
+
+
 def _stanc_mir(model_path: pathlib.Path, include_paths=(), fast_math=False,
                filename=None) -> str:
-    argv = _compiler_command(model_path, include_paths, fast_math, filename)
-    try:
-        r = subprocess.run(argv, capture_output=True, text=True,
-                           encoding="utf-8")
-    except OSError as exc:
-        raise RuntimeError(f"could not run the bundled Stan compiler: {exc}") \
-            from exc
-    if r.returncode != 0 or not r.stdout:
-        raise RuntimeError(f"stanc failed:\n{r.stderr}")
-    _warn_compile(r.stderr.strip())
+    import tempfile
+    with tempfile.TemporaryDirectory(prefix="stanli-messages-") as tmpdir:
+        messages = pathlib.Path(tmpdir) / "messages.json"
+        argv = _compiler_command(model_path, include_paths, fast_math,
+                                 filename, messages)
+        try:
+            r = subprocess.run(argv, capture_output=True, text=True,
+                               encoding="utf-8")
+        except OSError as exc:
+            raise RuntimeError(
+                f"could not run the bundled Stan compiler: {exc}") from exc
+        if r.returncode != 0 or not r.stdout:
+            raise RuntimeError(f"stanc failed:\n{r.stderr}")
+        _warn_compiler_messages(_read_compiler_messages(messages))
     return r.stdout
 
 
@@ -604,8 +604,7 @@ def _subprocess_mir(stan_code: str, include_paths=(), fast_math=False,
     with tempfile.TemporaryDirectory(prefix="stanli-compile-") as tmpdir:
         source = pathlib.Path(tmpdir) / "model.stan"
         # Binary UTF-8 avoids the locale-dependent encoding and CRLF rewriting
-        # of text-mode files on Windows. Stock stanc also writes model.hpp next
-        # to this file; TemporaryDirectory removes that rollback-path artifact.
+        # of text-mode files on Windows.
         source.write_bytes(stan_code.encode("utf-8"))
         extra = {} if filename is None else {"filename": filename}
         if fast_math:
@@ -658,10 +657,8 @@ def stan_to_mir(stan_code: str, include_paths=None, fast_math=False) -> str:
 
     The first half of compiling a model, on its own. Useful when the MIR
     is what you want to keep -- to cache it, ship it, or hand it to
-    ``Model(mir=...)`` in another process. Embedded builds and the preferred
-    bundled compiler return stanli's versioned portable format. The one-cycle
-    stock-compiler fallback returns a legacy stanc3 s-expression, which the
-    runtime also accepts.
+    ``Model(mir=...)`` in another process. The result is stanli's versioned
+    portable format.
 
     ``include_paths`` is a directory or an iterable of directories searched
     in order for ``#include`` files, followed by the current directory.

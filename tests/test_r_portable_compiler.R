@@ -14,30 +14,21 @@ suppressPackageStartupMessages(library(stanli))
 compiler <- normalizePath(stanli:::stanc_js_path(), mustWork = TRUE)
 
 # Put the installed package's exact artifact in the context cached by
-# mir_from_js(). Wrap both exports so each helper call proves which producer ran
-# and records the portable warnings that the source-compilation API leaves
-# internal on success.
+# mir_from_js(). Wrap the export so each helper call is counted and records
+# the warnings that the source-compilation API leaves internal on success.
 ctx <- V8::v8()
 ctx$source(compiler)
 ctx$eval("(function () {
   var portable = globalThis.stanli_compile;
-  var classic = globalThis.stanc;
   if (typeof portable !== 'function')
     throw new Error('no stanli_compile() export');
-  if (typeof classic !== 'function') throw new Error('no stanc() export');
-  globalThis.__stanli_bundled = {
-    portable_calls: 0, classic_calls: 0, warnings: []
-  };
+  globalThis.__stanli_bundled = {portable_calls: 0, warnings: []};
   globalThis.stanli_compile = function() {
     globalThis.__stanli_bundled.portable_calls += 1;
     var r = portable.apply(this, arguments);
     globalThis.__stanli_bundled.warnings = r.warnings
       ? Array.prototype.map.call(r.warnings, String) : [];
     return r;
-  };
-  globalThis.stanc = function() {
-    globalThis.__stanli_bundled.classic_calls += 1;
-    return classic.apply(this, arguments);
   };
 })()")
 
@@ -60,9 +51,8 @@ compile_bundled <- function(name, code) {
       NULL
     })
   after <- compiler_state()
-  if (!identical(after$portable_calls, before$portable_calls + 1L) ||
-      !identical(after$classic_calls, before$classic_calls))
-    stop("the R helper did not use exactly one bundled portable compiler call",
+  if (!identical(after$portable_calls, before$portable_calls + 1L))
+    stop("the R helper did not make exactly one bundled compiler call",
          call. = FALSE)
   list(result = result,
        errors = if (is.null(error)) character() else error,
@@ -110,8 +100,23 @@ stopifnot(length(warning_result$errors) == 0L,
 bad <- compile_bundled(
   "malformed_bundled", "parameters { real x } model {}")
 stopifnot(is.null(bad$result), length(bad$errors) > 0L,
-          grepl("stanli_compile", bad$errors, fixed = TRUE),
-          compiler_state()$classic_calls == 0L)
+          grepl("stanli_compile", bad$errors, fixed = TRUE))
+
+loops <- paste0("for (i", 1:9, " in 1:1) {", collapse = "\n")
+budget_source <- paste("parameters { real x; }", "model {", "real s = 0;",
+                       loops, strrep("s += 1;\n", 2100), strrep("}\n", 9),
+                       "x ~ normal(s, 1);", "}", sep = "\n")
+o1 <- NULL
+budget <- withCallingHandlers(
+  compile_bundled("budget_bundled", budget_source),
+  stanli_o1_fallback = function(w) {
+    o1 <<- c(o1, conditionMessage(w))
+    invokeRestart("muffleWarning")
+  })
+stopifnot(length(budget$errors) == 0L,
+          startsWith(budget$result, "STANLI3:"),
+          length(o1) == 1L, grepl("skipped O1", o1, fixed = TRUE),
+          !any(grepl("skipped O1", budget$warnings, fixed = TRUE)))
 
 if (!stanli_available())
   stop("the real stanli runtime is required for this check", call. = FALSE)

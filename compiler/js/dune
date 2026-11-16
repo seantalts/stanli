@@ -21,7 +21,7 @@
 
 (executable
  (name stanli_compiler_cli)
- (libraries fmt frontend stanli_compiler)
+ (libraries fmt yojson frontend stanli_compiler)
  (modules stanli_compiler_cli))
 
 (env

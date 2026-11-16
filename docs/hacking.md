@@ -101,8 +101,10 @@ Step by step:
    optimization policy: upstream O1 plus the separately selected upstream
    `vectorize_loops` pass. Before O1's dataflow passes, it isolates function
    inlining and measures the maximum statement-depth cost of any procedure.
-   A cost over 20,000 uses the untouched transformed O0 MIR and emits a
-   diagnostic; `STANLI_NO_O1_FALLBACK=1` restores unconditional O1 for an A/B
+   A cost over 20,000 uses the untouched transformed O0 MIR and reports an
+   O1 fallback notice, separate from the warnings (`O1FallbackWarning` in
+   Python, a `stanli_o1_fallback` condition in R, `o1Fallback` in the npm
+   package); `STANLI_NO_O1_FALLBACK=1` restores unconditional O1 for an A/B
    compiler run. This avoids known pathological O1 behavior without a timeout,
    compiler-thread cancellation, or partial-output recovery. It passes the
    selected typed MIR value to
@@ -110,7 +112,11 @@ Step by step:
    runtime's consumed slice. [`compiler/native/`](../compiler/native/) is the
    callback linked into native libraries; [`compiler/js/`](../compiler/js/)
    exports the same pipeline through js_of_ocaml and provides the CLI entry
-   point cross-built for Windows as `stanli-compile.exe`.
+   point cross-built for Windows as `stanli-compile.exe`. The CLI prints MIR
+   on stdout and messages for people on stderr; with `--messages-json PATH`
+   it also writes `{"warnings": [...], "o1_fallback": null or "..."}` to
+   PATH, which the Python, R and native-tool callers read. The JavaScript
+   export returns the same notice in an `o1_fallback` field.
 
    One of the fork's commits fixes integer folding. Upstream's partial
    evaluator folds with the host OCaml `int` width (63 bits natively and 32
@@ -121,22 +127,19 @@ Step by step:
    the correction cannot silently disappear.
 
 2. **[`mir_decode.cpp`](../runtime/src/mir_decode.cpp) selects a decoder.**
-   Native embedded compilation, the preferred browser compiler, and Windows
-   `stanli-compile.exe` emit the stanli-owned compact portable format. Stock
-   browser and Windows rollback compilers, the R JavaScript compiler, and
-   user-supplied stock stanc emit the legacy stanc3 s-expression. Both decode
-   into the same plain C++ structs (`mir::Stmt`, `mir::Expr`) and share name
+   Native embedded compilation, the browser and R JavaScript compiler, and
+   `stanli-compile` emit the stanli-owned compact portable format. Stock
+   stanc's `--debug-optimized-mir` output, which the test fixtures and the
+   native tools' `--stanc PATH` use, is the legacy stanc3 s-expression. Both
+   decode into the same plain C++ structs (`mir::Stmt`, `mir::Expr`) and share name
    resolution and validation. Anything they do not recognize is a loud error,
    never a guess.
 
-   The Windows wheel keeps the compiler outside `stanli.dll`: it packages the
-   preferred `stanli-compile.exe` and stock `stanc.exe` rollback as
-   short-lived subprocesses, with no OCaml compiler DLL. Python selects stock
-   only when the portable executable is absent. Native R first honors the
-   explicit `STANLI_STANC` stock override, then checks for the portable and
-   stock executables beside the runtime, then stock stanc on `PATH`, and then
-   V8. A failure from a selected compiler is surfaced without trying the next
-   one.
+   The Windows wheel keeps the compiler outside `stanli.dll`: it packages
+   `stanli-compile.exe` as a short-lived subprocess, with no OCaml compiler
+   DLL. Native R without an embedded compiler uses `stanli-compile` beside
+   the runtime, and otherwise the bundled JavaScript compiler through V8. A
+   failure from the selected compiler is surfaced without trying another.
 
 3. **[`lower.cpp`](../runtime/src/lower.cpp) turns MIR into the op
    graph.** Along the way: transformed data is evaluated once, at
@@ -197,7 +200,7 @@ ones through every stage, op list and register programs included.
 | [`runtime/src/nuts.cpp`](../runtime/src/nuts.cpp) | The sampler: Stan's own `adapt_diag_e_nuts`, configured to match CmdStan exactly. |
 | [`runtime/src/capi.cpp`](../runtime/src/capi.cpp), [`capi.h`](../runtime/include/stanli/capi.h) | The C ABI. [`python/stanli/__init__.py`](../python/stanli/__init__.py) is a thin ctypes wrapper over it. |
 | [`runtime/src/stanc_embed_c.cpp`](../runtime/src/stanc_embed_c.cpp), [`tools/stanc_embed/`](../tools/stanc_embed/) | The native OCaml-runtime bridge plus exact-source overlay, provenance, and Windows cross-build tooling. |
-| [`js/`](../js/), [`web/`](../web/) | The npm package (a one-call `sample()` over a worker) and the demo page. The worker prefers the portable compiler and keeps stock stancjs as a one-cycle legacy fallback. [`tools/build_web.sh`](../tools/build_web.sh) builds the page from the package, so the two cannot drift. |
+| [`js/`](../js/), [`web/`](../web/) | The npm package (a one-call `sample()` over a worker) and the demo page. The worker loads `stanli-compiler.js` when a request carries Stan source. [`tools/build_web.sh`](../tools/build_web.sh) builds the page from the package, so the two cannot drift. |
 | [`tools/`](../tools/) | Small programs and scripts; the important ones are listed below. |
 | [`harnesses/`](../harnesses/) | Corpus sweeps that need a local posteriordb: [`fn_sweep.py`](../harnesses/fn_sweep.py), benchmarks. |
 | [`tests/`](../tests/) | One `test_*.cpp` per subsystem, plus [`fixtures/`](../tests/fixtures/) with checked-in `.stan` sources. CMake generates ignored MIR before its consumers; run [`tools/gen_fixtures.sh`](../tools/gen_fixtures.sh) to do so explicitly. |

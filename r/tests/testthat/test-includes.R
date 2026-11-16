@@ -156,24 +156,18 @@ test_that("webR transports nested include files to the real JavaScript compiler"
 test_that("native subprocess compilers receive include paths without changing cwd", {
   f <- include_fixture()
   on.exit(unlink(f$root, recursive = TRUE), add = TRUE)
-  portable <- Sys.getenv("STANLI_TEST_PORTABLE_COMPILER")
-  stock <- Sys.getenv("STANLI_STANC")
-  for (compiler in list(list(path = portable, portable = TRUE),
-                        list(path = stock, portable = FALSE))) {
-    if (!nzchar(compiler$path) || !file.exists(compiler$path)) next
-    wd <- getwd()
-    mir <- stanli:::mir_from_binary(compiler$path, f$code,
-                                    portable = compiler$portable,
-                                    include_paths = f$root)
-    expect_identical(getwd(), wd)
-    expect_error(stanli:::mir_from_binary(compiler$path, "#include absent.stan\n",
-                                          portable = compiler$portable,
-                                          include_paths = f$root),
-                  "absent.stan", fixed = TRUE)
-    if (stanli_available())
-      expect_identical(log_prob_grad(stanli_model(mir = mir, seed = 41), 0.3),
-                       log_prob_grad(stanli_model(code = f$expanded, seed = 41), 0.3))
-  }
+  compiler <- Sys.getenv("STANLI_TEST_PORTABLE_COMPILER")
+  skip_if(!nzchar(compiler) || !file.exists(compiler),
+          "STANLI_TEST_PORTABLE_COMPILER does not name a stanli-compile")
+  wd <- getwd()
+  mir <- stanli:::mir_from_binary(compiler, f$code, include_paths = f$root)
+  expect_identical(getwd(), wd)
+  expect_error(stanli:::mir_from_binary(compiler, "#include absent.stan\n",
+                                        include_paths = f$root),
+                "absent.stan", fixed = TRUE)
+  if (stanli_available())
+    expect_identical(log_prob_grad(stanli_model(mir = mir, seed = 41), 0.3),
+                     log_prob_grad(stanli_model(code = f$expanded, seed = 41), 0.3))
 })
 
 test_that("CmdStanR-style sampling forwards include paths", {

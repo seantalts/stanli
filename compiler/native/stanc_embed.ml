@@ -28,11 +28,7 @@ let compile_tmir ~model_only ~fast_math ~filename ~include_paths (code : string)
            String.trim
              (Fmt.str "%a" (Frontend.Warnings.pp ?printed_filename ~code) warning))
          compilation.warnings) in
-  let o1_fallback =
-    List.find_map
-      (fun (Stanli_pipeline.O1_budget_exceeded _ as d) ->
-        Some (Stanli_pipeline.diagnostic_message d))
-      compilation.diagnostics in
+  let o1_fallback = Stanli_pipeline.o1_fallback compilation in
   let outcome =
     match compilation.result with
     | Error (Stanli_pipeline.Internal_error message) -> Error message

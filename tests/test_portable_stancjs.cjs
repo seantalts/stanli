@@ -2,11 +2,11 @@
 // js_of_ocaml must emit exactly the same canonical bytes.
 //
 //   node tests/test_portable_stancjs.cjs \
-//     path/to/stanli-compiler.js path/to/stanli_compiler_cli.exe \
-//     [path/to/stock-stancjs.bc.js]
+//     path/to/stanli-compiler.js path/to/stanli_compiler_cli.exe
 "use strict";
-const { execFileSync } = require("child_process");
+const { execFileSync, spawnSync } = require("child_process");
 const fs = require("fs");
+const os = require("os");
 const path = require("path");
 const vm = require("vm");
 const zlib = require("zlib");
@@ -14,7 +14,6 @@ const zlib = require("zlib");
 const repo = path.resolve(__dirname, "..");
 const compilerPath = path.resolve(process.argv[2]);
 const nativePath = path.resolve(process.argv[3]);
-const fallbackPath = process.argv[4] && path.resolve(process.argv[4]);
 
 function fail(message) {
   console.error("FAIL " + message);
@@ -45,11 +44,7 @@ const compileModelFast = (exported && exported.stanli_compile_model_fast) ||
 if (typeof compileFast !== "function") fail("no stanli_compile_fast() export");
 if (typeof compileModelFast !== "function")
   fail("no stanli_compile_model_fast() export");
-const compatibleStanc = (exported && exported.stanc) || globalThis.stanc;
-if (typeof compatibleStanc !== "function") fail("no compatible stanc() export");
-const customVersion = compatibleStanc("version-test", "", ["version"]);
-if (customVersion.errors ||
-    /%%(?:NAME|VERSION)%%/.test(String(customVersion.result)))
+if (/%%(?:NAME|VERSION)%%/.test(fs.readFileSync(compilerPath, "utf8")))
   fail("stanli compiler has unsubstituted version metadata");
 
 // importScripts executes a classic script with no CommonJS module. Evaluate
@@ -59,24 +54,13 @@ vm.createContext(classic);
 vm.runInContext(fs.readFileSync(compilerPath, "utf8"), classic, {
   filename: compilerPath,
 });
-if (typeof classic.stanli_compile !== "function" ||
-    typeof classic.stanc !== "function")
-  fail("classic-script compiler did not export both entry points");
+if (typeof classic.stanli_compile !== "function")
+  fail("classic-script compiler did not export stanli_compile");
 const classicResult = classic.stanli_compile(
     "embedded_model", "parameters { real x; } model { x ~ std_normal(); }");
 if (classicResult.errors ||
     !String(classicResult.result).startsWith("STANLI3:"))
   fail("classic-script portable compilation failed");
-
-let fallback = null;
-if (fallbackPath) {
-  const fallbackExported = require(fallbackPath);
-  fallback = (fallbackExported && fallbackExported.stanc) || globalThis.stanc;
-  if (typeof fallback !== "function") fail("no fallback stanc() export");
-  const version = fallback("version-test", "", ["version"]);
-  if (version.errors || /%%(?:NAME|VERSION)%%/.test(String(version.result)))
-    fail("fallback stancjs has unsubstituted version metadata");
-}
 
 const models = [
   ["ordinary", "tests/fixtures/es.stan"],
@@ -141,29 +125,10 @@ for (const [name, relative, includes] of models) {
   const repeated = compile("embedded_model", code, includes);
   if (repeated.errors || String(repeated.result) !== encoded)
     fail(name + ": repeated JS compilation changed bytes");
-
-  let legacyBytes = null;
-  let legacyGzipBytes = null;
-  if (fallback) {
-    const legacy = fallback(
-        "embedded_model", code, ["O1", "debug-optimized-mir"], includes);
-    if (legacy.errors)
-      fail(name + " fallback: " + Array.from(legacy.errors).join("\n"));
-    const legacyText = String(legacy.result);
-    legacyBytes = Buffer.byteLength(legacyText);
-    legacyGzipBytes = zlib.gzipSync(legacyText).length;
-
-    const compatible = compatibleStanc(
-        "embedded_model", code, ["O1", "debug-optimized-mir"], includes);
-    if (compatible.errors || String(compatible.result) !== legacyText)
-      fail(name + ": custom stanc() differs from stock fallback");
-  }
   measurements.push({
     model: name,
     portable_bytes: Buffer.byteLength(encoded),
     portable_gzip_bytes: zlib.gzipSync(encoded).length,
-    legacy_bytes: legacyBytes,
-    legacy_gzip_bytes: legacyGzipBytes,
   });
 }
 
@@ -194,28 +159,63 @@ for (const relative of ["tests/compiler/portable_fast_math.stan",
   }
 }
 
+// The native CLI's --messages-json and the JavaScript result carry the same
+// messages: the warnings, and the O1 fallback notice in its own field.
+function nativeMessages(code) {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "stanli-messages-"));
+  try {
+    const source = path.join(root, "model.stan");
+    const messages = path.join(root, "messages.json");
+    fs.writeFileSync(source, code);
+    const run = spawnSync(nativePath, ["--messages-json", messages, source],
+                          {encoding: "utf8", maxBuffer: 1 << 28});
+    return {status: run.status, stderr: run.stderr,
+            messages: JSON.parse(fs.readFileSync(messages, "utf8"))};
+  } finally {
+    fs.rmSync(root, {recursive: true, force: true});
+  }
+}
+
+const trimmed = (list) => Array.from(list, (w) => String(w).trimEnd());
+
 const warningCode =
     "parameters { real x; } model { if (0 < x < 1) target += 0; }";
 const portableWarning = compile("embedded_model", warningCode);
-const referenceStanc = fallback || compatibleStanc;
-const stockWarning = referenceStanc(
-    "embedded_model", warningCode, ["O1", "debug-optimized-mir"]);
-if (portableWarning.errors || stockWarning.errors ||
-    JSON.stringify(Array.from(portableWarning.warnings)) !==
-        JSON.stringify(Array.from(stockWarning.warnings)) ||
-    portableWarning.warnings.length === 0)
-  fail("portable warning output differs from stanc()");
+const nativeWarning = nativeMessages(warningCode);
+if (portableWarning.errors || nativeWarning.status !== 0 ||
+    portableWarning.warnings.length !== 1 ||
+    JSON.stringify(trimmed(portableWarning.warnings)) !==
+        JSON.stringify(nativeWarning.messages.warnings) ||
+    portableWarning.o1_fallback !== null ||
+    nativeWarning.messages.o1_fallback !== null)
+  fail("JavaScript and native warnings differ: " +
+       JSON.stringify([Array.from(portableWarning.warnings),
+                       nativeWarning.messages]));
+
+const budgetCode = "parameters { real x; }\nmodel {\nreal s = 0;\n" +
+    Array.from({length: 9}, (_, d) => `for (i${d} in 1:1) {\n`).join("") +
+    "s += 1;\n".repeat(2100) + "}\n".repeat(9) + "x ~ normal(s, 1);\n}\n";
+const portableBudget = compile("embedded_model", budgetCode);
+const nativeBudget = nativeMessages(budgetCode);
+if (portableBudget.errors || nativeBudget.status !== 0 ||
+    typeof portableBudget.o1_fallback !== "string" ||
+    !portableBudget.o1_fallback.includes("skipped O1") ||
+    portableBudget.o1_fallback !== nativeBudget.messages.o1_fallback ||
+    portableBudget.warnings.length !== 0 ||
+    nativeBudget.messages.warnings.length !== 0 ||
+    !nativeBudget.stderr.includes(portableBudget.o1_fallback))
+  fail("the O1 fallback notice differs: " +
+       JSON.stringify([portableBudget.o1_fallback, nativeBudget.messages]));
 
 const badCode = "parameters { real x } model {} ";
 const bad = compile("embedded_model", badCode);
 if (!bad.errors || bad.result !== undefined)
   fail("malformed Stan did not return an error-only object");
-const stockBad = referenceStanc(
-    "embedded_model", badCode, ["O1", "debug-optimized-mir"]);
-if (JSON.stringify(Array.from(bad.errors)) !==
-    JSON.stringify(Array.from(stockBad.errors)) ||
+const nativeBad = nativeMessages(badCode);
+if (nativeBad.status === 0 ||
+    String(bad.errors[1]).trimEnd() !== nativeBad.stderr.trimEnd() ||
     !String(bad.errors[1]).includes(badCode.trim()))
-  fail("portable frontend diagnostic differs from stanc()");
+  fail("JavaScript and native frontend diagnostics differ");
 
 console.log(JSON.stringify({portable_mir_measurements: measurements}, null, 2));
 console.log("test_portable_stancjs OK");

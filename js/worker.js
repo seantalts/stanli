@@ -11,35 +11,23 @@ importScripts("stanli.js");
 const ready = createStanli();
 
 // The stanli compiler (stanc3 plus the portable-MIR encoder) loads only when
-// a request arrives with Stan source. Keep stock stancjs beside it for one
-// compatibility cycle; it emits legacy MIR that the runtime still accepts.
-// Apps that ship a fixed model precompile it to MIR at build time and never
-// pay for either compiler.
+// a request arrives with Stan source. Apps that ship a fixed model compile it
+// to MIR ahead of time and never pay for the compiler.
 function ensureStanc() {
-  if (typeof globalThis.stanli_compile === "function" ||
-      typeof globalThis.stanc === "function") return;
-  try {
-    importScripts("stanli-compiler.js");
-  } catch (_) {
-    // An older deployment can have the worker before the new compiler
-    // artifact. Its stock compiler remains a complete fallback.
-  }
   if (typeof globalThis.stanli_compile !== "function")
-    importScripts("stancjs.bc.js");
+    importScripts("stanli-compiler.js");
 }
 
+// The MIR, the compiler's warnings, and the O1 fallback notice (null unless
+// O1 was skipped for the structural budget). Throws on a compile error.
 function compileMir(code, fastMath) {
   ensureStanc();
-  if (fastMath) {
-    if (typeof globalThis.stanli_compile_fast !== "function")
-      throw new Error("fastMath needs the portable stanli compiler with the " +
-                      "stanli_compile_fast export");
-    return globalThis.stanli_compile_fast("embedded_model", code);
-  }
-  if (typeof globalThis.stanli_compile === "function")
-    return globalThis.stanli_compile("embedded_model", code);
-  return globalThis.stanc(
-      "browser_model", code, ["O1", "debug-optimized-mir"]);
+  const sc = fastMath ? globalThis.stanli_compile_fast("embedded_model", code)
+                      : globalThis.stanli_compile("embedded_model", code);
+  if (sc.errors) throw new Error(Array.from(sc.errors).join("\n"));
+  const warnings = Array.from(sc.warnings || [], String);
+  const o1Fallback = sc.o1_fallback == null ? null : String(sc.o1_fallback);
+  return { mir: String(sc.result), warnings, o1Fallback };
 }
 
 // Reuse the native report (including rank-normalized R-hat and bulk/tail
@@ -158,8 +146,7 @@ onmessage = async (e) => {
       if (req.stanc) ensureStanc();
       await ready;
       postMessage({ done: { warmed: true,
-                            stanc: typeof globalThis.stanli_compile === "function" ||
-                                   typeof globalThis.stanc === "function",
+                            stanc: typeof globalThis.stanli_compile === "function",
                             ms: { preload: performance.now() - t0 } } });
       return;
     }
@@ -167,10 +154,9 @@ onmessage = async (e) => {
       // Compile once here, sample everywhere: chain workers take the MIR
       // and never load the compiler.
       say("compiling Stan -> MIR (stanc3)");
-      ensureStanc();
       const sc = compileMir(req.code, !!req.fastMath);
-      if (sc.errors) throw new Error(Array.from(sc.errors).join("\n"));
-      postMessage({ done: { mir: String(sc.result), fastMath: !!req.fastMath,
+      postMessage({ done: { mir: sc.mir, fastMath: !!req.fastMath,
+                            warnings: sc.warnings, o1Fallback: sc.o1Fallback,
                             ms: { stanc: performance.now() - t0 } } });
       return;
     }
@@ -180,12 +166,10 @@ onmessage = async (e) => {
       return;
     }
     let mir = req.mir;
+    let o1Fallback = null;
     if (!mir) {
       say("compiling Stan -> MIR (stanc3)");
-      ensureStanc();
-      const sc = compileMir(req.code, !!req.fastMath);
-      if (sc.errors) throw new Error(Array.from(sc.errors).join("\n"));
-      mir = String(sc.result);
+      ({ mir, o1Fallback } = compileMir(req.code, !!req.fastMath));
     }
     const tStanc = performance.now();
 
@@ -327,7 +311,7 @@ onmessage = async (e) => {
     postMessage({
       done: {
         names, samples, generatedStart, pathfinder: pf,
-        fastMath: !!req.fastMath,
+        fastMath: !!req.fastMath, o1Fallback,
         sampler: pathfinder ? "pathfinder" : walnuts ? "walnuts" : "nuts",
         maxDepth: pathfinder ? null : 10,
         samplerStats: samplerStats ? samplerStats.buffer : null,

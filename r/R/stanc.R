@@ -5,10 +5,10 @@
 # straight to it and none of this runs.
 #
 # When it does not (a source build, or the Windows runtime), native hosts
-# first use a compiler executable. The Windows runtime ships stanli-compile,
-# which emits portable MIR through the shared OCaml pipeline, beside pristine
-# stanc for one rollback cycle. Without either, the fallback is stanc3 compiled
-# to JavaScript and run through V8. js_of_ocaml turns the OCaml into one
+# first use the stanli-compile executable beside the runtime, which emits
+# portable MIR through the shared OCaml pipeline. Without it, the fallback is
+# the same compiler built to JavaScript and run through V8. js_of_ocaml turns
+# the OCaml into one
 # 3.0 MB file with no toolchain or platform-specific binary, and the same
 # artifact can execute inside webR. CI checks that this generated file comes
 # from the exact configured stanc3 source revision, and the R tests compile
@@ -17,12 +17,10 @@
 # Under webR there is no V8 package and no process to run a binary in,
 # but the host already IS a JavaScript engine: the webr support
 # package's eval_js() evaluates in the worker's global scope, and the
-# same bundled stanc.js defines stanli_compile() and its stanc-compatible export
-# there once per session. Both native V8 and webR select the shared portable
-# producer by export presence.
+# same bundled stanc.js defines stanli_compile() there once per session.
 #
-# An explicit stanc in STANLI_STANC still wins for compiler bisects. Otherwise
-# the runtime-adjacent stanli-compile wins, followed by adjacent or PATH stanc.
+# Every path reports the compiler's warnings as one R warning and the O1
+# fallback notice as a warning of class "stanli_o1_fallback".
 
 stanc_js_ctx <- new.env(parent = emptyenv())
 
@@ -88,15 +86,20 @@ warn_compiler <- function(text) {
   invisible(NULL)
 }
 
+warn_o1_fallback <- function(text) {
+  for (t in text)
+    warning(structure(class = c("stanli_o1_fallback", "warning", "condition"),
+                      list(message = t, call = NULL)))
+  invisible(NULL)
+}
+
 # Compiler messages from the runtime: list(kind, text). Warnings go out as
-# one warning, as the subprocess compilers' stderr does; the O1 fallback
-# notice is its own warning with class "stanli_o1_fallback".
+# one warning; the O1 fallback notice is its own warning with class
+# "stanli_o1_fallback".
 warn_compiler_messages <- function(messages) {
   if (is.null(messages)) return(invisible(NULL))
   warn_compiler(messages$text[messages$kind == "warning"])
-  for (text in messages$text[messages$kind == "o1_fallback"])
-    warning(structure(class = c("stanli_o1_fallback", "warning", "condition"),
-                      list(message = text, call = NULL)))
+  warn_o1_fallback(messages$text[messages$kind == "o1_fallback"])
   invisible(NULL)
 }
 
@@ -110,9 +113,8 @@ stanc_js <- function() {
   if (!is.null(stanc_js_ctx$ctx)) return(stanc_js_ctx$ctx)
   if (!requireNamespace("V8", quietly = TRUE))
     stop("compiling Stan source needs either a runtime with the embedded ",
-         "compiler, a packaged native compiler, a stanc3 binary ",
-         "(STANLI_STANC), or the V8 package for the bundled JavaScript ",
-         "compiler.", call. = FALSE)
+         "compiler, the stanli-compile executable beside the runtime, or the ",
+         "V8 package for the bundled JavaScript compiler.", call. = FALSE)
   js <- stanc_js_path()
   if (!nzchar(js) || !file.exists(js))
     stop("the bundled stanc.js is missing from the installed package",
@@ -132,9 +134,6 @@ mir_from_js <- function(code, name = "stanli_model", include_paths = character()
   ctx$assign("stanli_includes", stan_include_sources(code, include_paths))
   ctx$assign("stanli_named", !is.null(file))
   ctx$assign("stanli_file", if (is.null(file)) "" else enc2utf8(file))
-  # Prefer the portable producer by export presence. Once selected, its
-  # diagnostics are final: a bad model must not be compiled again through the
-  # legacy producer and accidentally turn a real error into different output.
   out <- ctx$eval(
     "(function () {
        function exported(name) {
@@ -145,83 +144,55 @@ mir_from_js <- function(code, name = "stanli_model", include_paths = character()
            return {present: true, value: common[name]};
          return {present: false, value: null};
        }
-       var portable_name = stanli_fast ? 'stanli_compile_fast' : 'stanli_compile';
-       var portable_export = exported(portable_name);
-       if (stanli_fast && !portable_export.present)
-         return JSON.stringify({e: 'fast_math needs a stanc.js with the ' +
-                                   'stanli_compile_fast export',
+       var name = stanli_fast ? 'stanli_compile_fast' : 'stanli_compile';
+       var found = exported(name);
+       if (!found.present)
+         return JSON.stringify({e: stanli_fast
+                                     ? 'fast_math needs a stanc.js with the ' +
+                                       'stanli_compile_fast export'
+                                     : 'no stanli_compile() export',
                                 c: 'JavaScript compiler'});
-       var classic_export = exported('stanc');
-       var compiler = portable_export.present ? portable_name : 'stanc';
-       var selected = portable_export.present ? portable_export
-                                              : classic_export;
-       if (!selected.present)
-         return JSON.stringify({e: 'no stanli_compile() or stanc() export',
-                                c: 'JavaScript compiler'});
-       if (typeof selected.value !== 'function')
-         return JSON.stringify({e: 'export is not a function', c: compiler});
+       var compile = found.value;
+       if (typeof compile !== 'function')
+         return JSON.stringify({e: 'export is not a function', c: name});
        try {
-         var named = stanli_named;
-         var r = portable_export.present
-           ? (named ? selected.value(stanli_name, stanli_src, stanli_includes,
-                                     stanli_file)
-                    : selected.value(stanli_name, stanli_src, stanli_includes))
-           : selected.value(stanli_name, stanli_src,
-                            named ? ['O1', 'debug-optimized-mir',
-                                     'filename-in-msg=' + stanli_file]
-                                  : ['O1', 'debug-optimized-mir'],
-                            stanli_includes);
+         var r = stanli_named
+           ? compile(stanli_name, stanli_src, stanli_includes, stanli_file)
+           : compile(stanli_name, stanli_src, stanli_includes);
          if (!r || typeof r !== 'object')
            return JSON.stringify({e: 'compiler returned no result object',
-                                  c: compiler});
+                                  c: name});
          if (r.errors)
-           return JSON.stringify({e: String(r.errors), c: compiler});
+           return JSON.stringify({e: String(r.errors), c: name});
          if (typeof r.result === 'undefined')
-           return JSON.stringify({e: 'compiler returned no MIR', c: compiler});
-         return JSON.stringify({r: String(r.result), c: compiler,
-                                w: (r.warnings || []).map(String)});
+           return JSON.stringify({e: 'compiler returned no MIR', c: name});
+         return JSON.stringify({r: String(r.result), c: name,
+                                w: (r.warnings || []).map(String),
+                                o1: r.o1_fallback == null ? null
+                                                          : String(r.o1_fallback)});
        } catch (e) {
-         return JSON.stringify({e: String(e), c: compiler});
+         return JSON.stringify({e: String(e), c: name});
        }
      })()")
   parsed <- jsonlite::fromJSON(out, simplifyVector = TRUE)
   if (!is.null(parsed$e))
     stop(parsed$c, ": ", paste(parsed$e, collapse = "\n"), call. = FALSE)
   warn_compiler(parsed$w)
+  warn_o1_fallback(parsed$o1)
   parsed$r
 }
 
-# A native compiler, when one is packaged, configured, or on the PATH. The
-# portable producer is deliberately only discovered beside the runtime: unlike
-# stock stanc's legacy format it is a versioned stanli/runtime contract, so an
-# unrelated stanli-compile on PATH must not silently pair with this library.
-# Not under webR: there are no processes to run, and Sys.which warns about the
-# missing `which` on every call there.
+# The stanli-compile executable beside the runtime, or NULL. It is only
+# looked for there: its output is a versioned stanli/runtime contract, so an
+# unrelated stanli-compile on PATH must not pair with this library.
+# Not under webR: there are no processes to run.
 find_native_compiler <- function(
     sysname = Sys.info()[["sysname"]],
-    runtime = stanli_runtime_path(),
-    from_env = Sys.getenv("STANLI_STANC", ""),
-    find_on_path = Sys.which) {
+    runtime = stanli_runtime_path()) {
   if (identical(sysname, "Emscripten")) return(NULL)
-
-  # Preserve the explicit legacy-compiler override used for stanc3 bisects.
-  if (nzchar(from_env)) return(list(path = from_env, portable = FALSE))
-
   suffix <- if (identical(sysname, "Windows")) ".exe" else ""
-  runtime_dir <- dirname(runtime)
-  portable <- file.path(runtime_dir, paste0("stanli-compile", suffix))
-  if (file.exists(portable) && !dir.exists(portable))
-    return(list(path = portable, portable = TRUE))
-
-  stanc_name <- paste0("stanc", suffix)
-  stanc <- file.path(runtime_dir, stanc_name)
-  if (file.exists(stanc) && !dir.exists(stanc))
-    return(list(path = stanc, portable = FALSE))
-
-  found <- find_on_path(stanc_name)
-  if (nzchar(found))
-    return(list(path = unname(found), portable = FALSE))
-  NULL
+  portable <- file.path(dirname(runtime), paste0("stanli-compile", suffix))
+  if (file.exists(portable) && !dir.exists(portable)) portable else NULL
 }
 
 # Read compiler output as explicit UTF-8 bytes. Captured system2 output is
@@ -245,12 +216,9 @@ js_string_literal <- function(value) {
   encodeString(enc2utf8(value), quote = "'")
 }
 
-mir_from_binary <- function(compiler, code, portable = FALSE,
-                            run_stanc = system2, include_paths = character(),
-                            fast_math = FALSE, file = NULL) {
-  if (fast_math && !portable)
-    stop("fast_math needs the portable stanli-compile compiler; the legacy ",
-         "stanc cannot produce fast-mode MIR", call. = FALSE)
+mir_from_binary <- function(compiler, code, run_stanc = system2,
+                            include_paths = character(), fast_math = FALSE,
+                            file = NULL) {
   work <- tempfile("stanli-compile-")
   if (!dir.create(work))
     stop("could not create a temporary compiler directory", call. = FALSE)
@@ -261,18 +229,12 @@ mir_from_binary <- function(compiler, code, portable = FALSE,
 
   stdout_file <- file.path(work, "stdout")
   stderr_file <- file.path(work, "stderr")
-  if (!portable && any(grepl(",", include_paths, fixed = TRUE)))
-    stop("the legacy stanc compiler cannot use include_paths containing commas",
-         call. = FALSE)
-  include_args <- if (!length(include_paths)) character() else if (portable)
-    as.vector(rbind("--include-path", shQuote(include_paths))) else
-    shQuote(paste0("--include-paths=", paste(include_paths, collapse = ",")))
-  name_args <- if (is.null(file)) character() else if (portable)
-    c("--filename", shQuote(file)) else
-    shQuote(paste0("--filename-in-msg=", file))
-  args <- c(if (!portable) c("--O1", "--debug-optimized-mir"),
-            if (fast_math) "--fast-math", name_args, include_args,
-            shQuote(source))
+  messages_file <- file.path(work, "messages.json")
+  include_args <- as.vector(rbind(rep("--include-path", length(include_paths)),
+                                  shQuote(include_paths)))
+  name_args <- if (is.null(file)) character() else c("--filename", shQuote(file))
+  args <- c(if (fast_math) "--fast-math", name_args, include_args,
+            "--messages-json", shQuote(messages_file), shQuote(source))
   status <- tryCatch(
     suppressWarnings(run_stanc(compiler, args, stdout = stdout_file,
                                stderr = stderr_file)),
@@ -286,8 +248,11 @@ mir_from_binary <- function(compiler, code, portable = FALSE,
     stop("stanc failed:\n",
          if (nzchar(diagnostics)) diagnostics else "stanc produced no MIR",
          call. = FALSE)
-  warn_compiler(diagnostics)
-  if (portable) out else sub("\\r?\\n$", "", out)
+  messages <- jsonlite::fromJSON(read_compiler_output(messages_file),
+                                 simplifyVector = TRUE)
+  warn_compiler(as.character(messages$warnings))
+  warn_o1_fallback(messages$o1_fallback)
+  out
 }
 
 # The webR path. Source and MIR travel through the shared Emscripten
@@ -341,9 +306,9 @@ mir_from_webr <- function(eval_js, code, name = "stanli_model",
   # whether compilation failed; the error and each warning are then read as
   # separate values, since eval_js converts only scalars.
   failed <- eval_js(sprintf("(() => {
-    const done = (error, warnings) => {
+    const done = (error, warnings, o1) => {
       globalThis.__stanli_webr = {failed: error !== null, error: error,
-                                  warnings: warnings};
+                                  warnings: warnings, o1_fallback: o1};
       return error !== null;
     };
     const src = Module.FS.readFile(%s, {encoding: 'utf8'});
@@ -357,41 +322,33 @@ mir_from_webr <- function(eval_js, code, name = "stanli_model",
         return {present: true, value: common[name]};
       return {present: false, value: null};
     }
-    const portableName = %s ? 'stanli_compile_fast' : 'stanli_compile';
-    const portableExport = exported(portableName);
-    if (%s && !portableExport.present)
-      return done('JavaScript compiler: fast_math needs a stanc.js with the stanli_compile_fast export', []);
-    const classicExport = exported('stanc');
-    const compiler = portableExport.present ? portableName : 'stanc';
-    const selected = portableExport.present ? portableExport : classicExport;
-    if (!selected.present)
-      return done('JavaScript compiler: no stanli_compile() or stanc() export', []);
-    if (typeof selected.value !== 'function')
-      return done(compiler + ': export is not a function', []);
+    const fast = %s;
+    const name = fast ? 'stanli_compile_fast' : 'stanli_compile';
+    const found = exported(name);
+    if (!found.present)
+      return done(fast ? 'JavaScript compiler: fast_math needs a stanc.js with the stanli_compile_fast export'
+                       : 'JavaScript compiler: no stanli_compile() export', [], null);
+    const compile = found.value;
+    if (typeof compile !== 'function')
+      return done(name + ': export is not a function', [], null);
     const file = %s;
     try {
-      const r = portableExport.present
-        ? (file === null ? selected.value(%s, src, includes)
-                         : selected.value(%s, src, includes, file))
-        : selected.value(%s, src,
-                         file === null ? ['O1', 'debug-optimized-mir']
-                           : ['O1', 'debug-optimized-mir',
-                              'filename-in-msg=' + file],
-                         includes);
+      const r = file === null ? compile(%s, src, includes)
+                              : compile(%s, src, includes, file);
       if (!r || typeof r !== 'object')
-        return done(compiler + ': compiler returned no result object', []);
-      if (r.errors) return done(compiler + ': ' + String(r.errors), []);
+        return done(name + ': compiler returned no result object', [], null);
+      if (r.errors) return done(name + ': ' + String(r.errors), [], null);
       if (typeof r.result === 'undefined')
-        return done(compiler + ': compiler returned no MIR', []);
+        return done(name + ': compiler returned no MIR', [], null);
       Module.FS.writeFile(%s, String(r.result));
-      return done(null, (r.warnings || []).map(String));
+      return done(null, (r.warnings || []).map(String),
+                  r.o1_fallback == null ? null : String(r.o1_fallback));
     } catch (e) {
-      return done(compiler + ': ' + String(e), []);
+      return done(name + ': ' + String(e), [], null);
     }
   })()", src_js, paste(include_js, collapse = "\n"),
     if (isTRUE(fast_math)) "true" else "false",
-    if (isTRUE(fast_math)) "true" else "false",
-    file_js, name_js, name_js, name_js, mirf_js))
+    file_js, name_js, name_js, mirf_js))
   # V8 hands every value back as a string, webR as the R scalar.
   if (isTRUE(as.logical(failed)))
     stop(eval_js("globalThis.__stanli_webr.error"), call. = FALSE)
@@ -399,6 +356,8 @@ mir_from_webr <- function(eval_js, code, name = "stanli_model",
   warn_compiler(vapply(seq_len(n) - 1L, function(i)
     eval_js(sprintf("globalThis.__stanli_webr.warnings[%d]", i)),
     character(1)))
+  if (isTRUE(as.logical(eval_js("globalThis.__stanli_webr.o1_fallback !== null"))))
+    warn_o1_fallback(eval_js("globalThis.__stanli_webr.o1_fallback"))
   read_compiler_output(mirf)
 }
 
@@ -406,9 +365,7 @@ stanc_mir <- function(code, include_paths = character(), fast_math = FALSE,
                       file = NULL) {
   compiler <- find_native_compiler()
   if (!is.null(compiler))
-    return(mir_from_binary(compiler$path, code,
-                           portable = compiler$portable,
-                           include_paths = include_paths,
+    return(mir_from_binary(compiler, code, include_paths = include_paths,
                            fast_math = fast_math, file = file))
   ejs <- webr_eval_js()
   if (!is.null(ejs))

@@ -15,7 +15,7 @@
 #
 # --stanli builds stanli's compiler instead, STANC3_SRC_REPO at
 # STANC3_SRC_SHA: the fork the wheels embed, built as stock stanc for the
-# MIR fixtures, the signature generators and the packaged rollback.
+# MIR fixtures and the signature generators.
 # Output: deps/stanc3/stanc, from deps/stanc3-src.
 #
 # Each output has a .src file beside it recording the revision it was built
