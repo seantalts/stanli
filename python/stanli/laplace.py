@@ -80,6 +80,17 @@ class LaplaceWhitenReport:
     repair: str = ""
 
 
+def _annotated_latent(model):
+    names = [name for name, notes in model.parameter_annotations().items()
+             if "latent" in notes]
+    if not names:
+        raise ValueError(
+            "no parameter is annotated @latent; pass latent=[...] or "
+            "declare the random effects with @latent, for example "
+            "'@latent vector[J] a;'")
+    return names
+
+
 def _block_index(model, latent):
     if isinstance(latent, str) or not hasattr(latent, "__iter__"):
         raise TypeError("latent must be a list of parameter names")
@@ -541,7 +552,7 @@ def _sparse_whiten(model, q_hat, Q, floor, keep_precision, n_clipped_warning):
             rank)
 
 
-def laplace_whiten(model, latent, *, init=None, seed=1, max_outer=60,
+def laplace_whiten(model, latent=None, *, init=None, seed=1, max_outer=60,
                    inner_iter=2000, pattern_tolerance=1e-6,
                    threshold=1e-6, repair="abs", clip=None,
                    hessian="coloured", keep_precision=False):
@@ -552,6 +563,10 @@ def laplace_whiten(model, latent, *, init=None, seed=1, max_outer=60,
     effects u; every other parameter is a hyperparameter theta. Within the
     unconstrained vector the latent block is those parameters' entries, in
     declaration order, so a simplex of K entries contributes K - 1.
+
+    With `latent=None` the latent parameters are the ones declared `@latent`
+    (`model.parameter_annotations()`), and a model with none raises. A
+    `latent` list wins over the annotations when both are present.
 
     Steps, with the harness' fixed thresholds as defaults:
 
@@ -606,6 +621,8 @@ def laplace_whiten(model, latent, *, init=None, seed=1, max_outer=60,
         raise ValueError('hessian must be "coloured" or "dense"')
     if clip is None:
         clip = 1e-3 if repair == "clip" else 1e-8
+    if latent is None:
+        latent = _annotated_latent(model)
     iu = _block_index(model, latent)
     n = model.n_unconstrained
     it = np.setdiff1d(np.arange(n), iu)

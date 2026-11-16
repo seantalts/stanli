@@ -284,6 +284,12 @@ def _load_lib():
     lib.stanli_variable_dim.restype = ctypes.c_int64
     lib.stanli_variable_dim.argtypes = [ctypes.c_void_p, ctypes.c_int,
                                         ctypes.c_int64, ctypes.c_int64]
+    lib.stanli_variable_n_annotations.restype = ctypes.c_int64
+    lib.stanli_variable_n_annotations.argtypes = [ctypes.c_void_p,
+                                                  ctypes.c_int, ctypes.c_int64]
+    lib.stanli_variable_annotation.restype = ctypes.c_char_p
+    lib.stanli_variable_annotation.argtypes = [ctypes.c_void_p, ctypes.c_int,
+                                               ctypes.c_int64, ctypes.c_int64]
     lib.stanli_model_new_from_stan_named.restype = ctypes.c_void_p
     lib.stanli_model_new_from_stan_named.argtypes = [
         ctypes.c_char_p, ctypes.c_char_p, ctypes.c_char_p,
@@ -1719,6 +1725,28 @@ class Model:
             shapes.append((_lib.stanli_variable_name(m, which, i).decode(),
                            dims))
         return _variables_from_shapes(shapes)
+
+    def parameter_annotations(self):
+        """The declaration annotations on each parameter.
+
+        A {name: [annotation, ...]} of the parameters that carry at least
+        one, in source order and without the `@`: `@latent vector[J] a;`
+        gives {"a": ["latent"]}. Transformed parameters and generated
+        quantities are not listed; an annotation on one has no effect.
+        """
+        m = self._m
+        found = {}
+        for i in range(_lib.stanli_n_variables(m, _CONSTRAINED_COLUMNS)):
+            count = _lib.stanli_variable_n_annotations(
+                m, _CONSTRAINED_COLUMNS, i)
+            if count:
+                name = _lib.stanli_variable_name(
+                    m, _CONSTRAINED_COLUMNS, i).decode()
+                found[name] = [
+                    _lib.stanli_variable_annotation(
+                        m, _CONSTRAINED_COLUMNS, i, k).decode()
+                    for k in range(count)]
+        return found
 
     def optimize(self, *, seed=1, iter=2000, jacobian=True, init=None,
                  init_radius=2.0):
