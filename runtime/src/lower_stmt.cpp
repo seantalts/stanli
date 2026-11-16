@@ -1,4 +1,5 @@
 #include "lower_internal.hpp"
+#include <stanli/debug_switch.hpp>
 
 namespace stanli {
 namespace lower_detail {
@@ -595,7 +596,7 @@ void Lowering::finalize_island_program_once(IslandProg& prog, bool native,
   }
   // Generated quantities have no backward consumer.
   prog.native_adj = native && gen_adjoint(prog, keep_every_clear) &&
-                    !std::getenv("STANLI_NO_NATIVE_ADJ");
+                    !debug_env("STANLI_NO_NATIVE_ADJ");
 }
 // Compile `s` (a statement region) or `e` (a ternary) into a program.
 void Lowering::lower_island(const mir::Stmt* s, const mir::Expr* e,
@@ -788,7 +789,7 @@ void Lowering::emit_island(const std::shared_ptr<IslandProg>& prog,
   // A single nonempty live-out already occupies this entire fresh slot.
   // Keep it distinct from all live-ins, but avoid an identity extraction.
   if (out_lens.size() == 1 && out_lens[0] > 0 &&
-      !std::getenv("STANLI_NO_REGION_DIRECT_OUTPUT")) {
+      !debug_env("STANLI_NO_REGION_DIRECT_OUTPUT")) {
     out_slots->push_back(is.out);
     return;
   }
@@ -1191,17 +1192,21 @@ void Lowering::emit_error(MessageError error, const std::string& message) {
   g.ops.push_back(op);
 }
 void Lowering::assign_plain(const mir::Stmt& s) {
-  Val rhs = lower_expr(s.rhs);
-  auto old = scope.find(s.lhs);
+  const Val rhs = assign_value(s.lhs, lower_expr(s.rhs), s.raw);
+  sync_data_local(s.lhs, s.rhs, rhs);
+}
+Lowering::Val Lowering::assign_value(const std::string& lhs, Val rhs,
+                                     const std::string& raw) {
+  auto old = scope.find(lhs);
   if (old != scope.end()) {
     rhs = checked_binding(rhs, g.slots[old->second.slot].len, old->second.si,
-                          s.lhs, s.raw);
+                          lhs, raw);
     const bool param_free = rhs.si.param_free;
     rhs.autodiff = old->second.autodiff;
     rhs.si = old->second.si;
     rhs.si.param_free = param_free;
   } else {
-    auto dl = decls.find(s.lhs);
+    auto dl = decls.find(lhs);
     if (dl != decls.end()) {
       if (dl->second.deferred_shape) {
         dl->second.len = g.slots[rhs.slot].len;
@@ -1220,7 +1225,7 @@ void Lowering::assign_plain(const mir::Stmt& s) {
         dl->second.si = rhs.si;
       } else {
         SlotInfo expected = dl->second.si;
-        rhs = checked_binding(rhs, dl->second.len, expected, s.lhs, s.raw);
+        rhs = checked_binding(rhs, dl->second.len, expected, lhs, raw);
         const bool pf = rhs.si.param_free;
         rhs.si = expected;
         rhs.si.param_free = pf;
@@ -1229,8 +1234,8 @@ void Lowering::assign_plain(const mir::Stmt& s) {
     }
   }
   rhs.layout = owning_layout(rhs.si);
-  scope[s.lhs] = rhs;
-  sync_data_local(s.lhs, s.rhs, rhs);
+  scope[lhs] = rhs;
+  return rhs;
 }
 // The statements that hold no child statements, so none of them can leave a
 // loop or a function.
@@ -1925,7 +1930,7 @@ Lowering::Flow Lowering::lower_stmt_impl(const mir::Stmt& s) {
       // nothing. Kept as a region its counters would exist only at run
       // time, and a later declaration sized by one could not be laid out.
       const bool bookkeeping = static_int_bookkeeping(s.body);
-      if (bookkeeping && std::getenv("STANLI_STRUCTURED_LOOP_DIAGNOSTICS") &&
+      if (bookkeeping && debug_env("STANLI_STRUCTURED_LOOP_DIAGNOSTICS") &&
           region_auto_profitable(s, std::pair<int64_t, int64_t>{lo, hi}))
         emit_diagnostic(
             "stanli_structured counting loop evaluated at compile "

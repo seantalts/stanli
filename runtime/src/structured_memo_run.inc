@@ -265,7 +265,8 @@ bool Execution::memo_key(RecordingProgram& program,
     context.scratch = scratch.data() + length;
     try {
       node->forward(context);
-    } catch (const std::exception&) {
+    } catch (const std::exception& e) {
+      if (is_internal_error(e)) throw;
       return false;
     }
     for (int64_t i = 0; i < length; ++i) key.push_back(bits(scratch[i]));

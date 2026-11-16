@@ -291,7 +291,7 @@ void test_write_array_receives_data_views() {
   CompiledModel model = compile_model(fixture("view_gq_data_matrix"), data);
   check(model.write_array.has_value(), "GQ data-view write_array exists");
   if (!model.write_array) return;
-  check(model.write_array->truncated.empty(),
+  check(!model.write_array->truncated,
         "GQ data-view lowering stays on compiled path");
   check(!model.write_array->interp,
         "GQ data-view lowering needs no interpreter fallback");
@@ -330,7 +330,7 @@ void test_empty_data_array_matrix() {
 
   check(model.write_array.has_value(), "empty array-matrix write_array exists");
   if (!model.write_array) return;
-  check(model.write_array->truncated.empty(),
+  check(!model.write_array->truncated,
         "empty array-matrix stays on graph write_array path");
   check(!model.write_array->interp,
         "empty array-matrix needs no write_array fallback");
@@ -365,8 +365,7 @@ void test_udf_array_matrix_order() {
 
   check(model.write_array.has_value(), "UDF array-matrix write_array exists");
   if (!model.write_array) return;
-  check(model.write_array->truncated.empty(),
-        "UDF array-matrix write_array compiled");
+  check(!model.write_array->truncated, "UDF array-matrix write_array compiled");
   stanli::Executor wx(std::move(model.write_array->graph));
   model.write_array->bind(wx);
   wx.params_data()[0] = 0.25;
@@ -469,6 +468,42 @@ void test_data_size_effect_runs_once() {
   check(captured.finish().empty(), "data size print absent at evaluation");
 }
 
+// Two data sizes and a transformed-data statement spell the same printing
+// call. CmdStan prints once per site: three lines.
+void test_data_size_effect_runs_once_per_site() {
+  auto data = stanli::DataMap::from_json_file(
+      "tests/fixtures/data_size_print_sites.json");
+  std::string printed;
+  {
+    stanli_test::StdoutCapture captured;
+    (void)stanli::compile_model(fixture("data_size_print_sites"), data);
+    printed = captured.finish();
+  }
+  check(printed == "sizing 3\nsizing 3\nsizing 3\n",
+        "data size print fires once per site, got '" + printed + "'");
+}
+
+// A size that fails the data check still printed first in CmdStan: the size
+// of w prints, then w's dimension check fails, and v is never reached.
+void test_data_size_effect_prints_before_dimension_error() {
+  auto data = stanli::DataMap::from_json_file(
+      "tests/fixtures/data_size_print_sites_bad.json");
+  std::string printed;
+  bool failed = false;
+  {
+    stanli_test::StdoutCapture captured;
+    try {
+      (void)stanli::compile_model(fixture("data_size_print_sites"), data);
+    } catch (const std::exception&) {
+      failed = true;
+    }
+    printed = captured.finish();
+  }
+  check(failed, "short w fails its dimension check");
+  check(printed == "sizing 3\n",
+        "data size prints before the dimension error, got '" + printed + "'");
+}
+
 std::string lower_dump(const std::string& stem, const std::string& dir) {
   std::filesystem::remove_all(dir);
   test_setenv("STANLI_DUMP_PASSES", dir.c_str(), 1);
@@ -506,6 +541,10 @@ int main() {
   run_case("effectful data UDF", test_effectful_data_udf);
   run_case("effectful int UDF", test_effectful_int_udf_is_not_observed);
   run_case("data size effect runs once", test_data_size_effect_runs_once);
+  run_case("data size effect runs once per site",
+           test_data_size_effect_runs_once_per_site);
+  run_case("data size effect prints before a dimension error",
+           test_data_size_effect_prints_before_dimension_error);
   run_case("while fallback leaves no trace",
            test_while_fallback_leaves_no_trace);
   if (failures == 0) std::printf("test_lower_views OK\n");

@@ -117,7 +117,7 @@ double reference_normal_glm(KernelCtx& ctx) {
   // whole var tape in the forward, throw it away, and build it again in
   // the backward to call grad() -- 90.9% of diamonds' gradient, and more
   // work than CmdStan does for the same statement.
-  if (!values_only()) {
+  if (!values_only(ctx)) {
     stan::math::grad(out.vi_);
     double* s = ctx.scratch;
     if (y_var) {

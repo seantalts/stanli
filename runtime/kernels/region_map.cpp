@@ -1,3 +1,4 @@
+#include <stanli/rejection.hpp>
 #include <stanli/adjoint.hpp>
 #include <stanli/graph.hpp>
 #include <stanli/island.hpp>
@@ -80,9 +81,7 @@ template <bool ReuseCallCtx>
 void run_once(const RegionMapProg& p, KernelCtx& ctx) {
   try {
     run_program_impl<ReuseCallCtx>(p, ctx.scratch, ctx.eval_state);
-  } catch (const std::out_of_range& e) {
-    if (std::string_view(e.what()) != "register-program index out of range")
-      throw;
+  } catch (const ProgramIndexError&) {
     throw std::out_of_range("structured index out of range");
   }
 }
@@ -129,7 +128,8 @@ void run_lane_forward(const RegionMapProg& p, KernelCtx& ctx) {
   try {
     region_map_lanes_forward(p, ctx, lane_region(p, ctx));
     return;
-  } catch (...) {
+  } catch (const std::exception& e) {
+    if (is_internal_error(e)) throw;
     original = std::current_exception();
   }
   seed_registers(p, ctx);
@@ -152,8 +152,7 @@ void sweep(const RegionMapProg& p, KernelCtx& ctx, double* adj) {
   const int64_t target = p.adj.adj_reg[(size_t)p.out_regs[0]];
   const double* saved = ctx.scratch + p.n_regs + p.adj.n_regs;
   std::vector<char> exempt;
-  const bool verify =
-      p.recompute && std::getenv("STANLI_REGION_MAP_CHECK_CLEAN") != nullptr;
+  const bool verify = p.recompute && p.check_clean;
   if (verify) exempt = region_map_clean_exempt_cells(p);
   for (int64_t i = p.count; i-- > 0;) {
     ctx.scratch[p.iter_reg] = static_cast<double>(p.lo + i);

@@ -327,9 +327,10 @@ int main(int argc, char** argv) {
   // comparison against CmdStan's (verify_refs.py --wa-headers).
   if (columns_only) {
     if (!cm.write_array || cm.write_array->columns.empty()) {
-      std::printf("NO_COLUMNS %s\n", cm.write_array
-                                         ? cm.write_array->truncated.c_str()
-                                         : "no generate_quantities section");
+      std::printf("NO_COLUMNS %s\n",
+                  cm.write_array
+                      ? cm.write_array->truncated.value_or("").c_str()
+                      : "no generate_quantities section");
       return 1;
     }
     std::string h;
@@ -339,8 +340,9 @@ int main(int argc, char** argv) {
       h += n;
     }
     std::printf("%s\n", h.c_str());
-    if (!cm.write_array->truncated.empty())
-      std::fprintf(stderr, "TRUNCATED %s\n", cm.write_array->truncated.c_str());
+    if (cm.write_array->truncated.has_value())
+      std::fprintf(stderr, "TRUNCATED %s\n",
+                   cm.write_array->truncated.value_or("").c_str());
     return 0;
   }
 
@@ -415,7 +417,8 @@ int main(int argc, char** argv) {
                        "WA %zu vars %lld values %lld nonfinite complete "
                        "(interpreted: %s)\n",
                        wi.columns().size(), (long long)row.size(),
-                       (long long)bad, cm.write_array->truncated.c_str());
+                       (long long)bad,
+                       cm.write_array->truncated.value_or("").c_str());
           if (wa_values) {
             std::string joined;
             for (const auto& nm :
@@ -435,7 +438,7 @@ int main(int argc, char** argv) {
         }
       } else if (cm.write_array->columns.empty()) {
         std::fprintf(stderr, "WA empty %s\n",
-                     cm.write_array->truncated.c_str());
+                     cm.write_array->truncated.value_or("").c_str());
       } else {
         try {
           if (!wex_store) {
@@ -464,9 +467,10 @@ int main(int argc, char** argv) {
           std::fprintf(
               stderr, "WA %zu vars %lld values %lld nonfinite %s\n",
               cm.write_array->columns.size(), (long long)width, (long long)bad,
-              cm.write_array->truncated.empty()
+              !cm.write_array->truncated
                   ? "complete"
-                  : ("truncated: " + cm.write_array->truncated).c_str());
+                  : ("truncated: " + cm.write_array->truncated.value_or(""))
+                        .c_str());
           if (wa_values) {
             std::string joined;
             for (const auto& nm :

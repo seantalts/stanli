@@ -26,6 +26,7 @@
 // Active outputs instead retain their slot identity and reverse callback.
 // Only their primal and read-only forward scratch are shared: summing seeds
 // before a nonlinear pullback would change floating-point accumulation.
+#include <stanli/debug_switch.hpp>
 #include <stanli/cse.hpp>
 #include <stanli/optable.hpp>
 
@@ -55,7 +56,7 @@ CseStats cse(Graph& g,
              std::vector<int>& target_terms,
              const std::vector<int>& extra_roots, bool merge_active) {
   CseStats st;
-  if (std::getenv("STANLI_NO_CSE")) return st;
+  if (debug_env("STANLI_NO_CSE")) return st;
 
   const size_t n_slots = g.slots.size();
   std::vector<int> writes(n_slots, 0);

@@ -19,6 +19,7 @@ using stan::math::var;
 
 struct AdjointRhs {
   const OdeAdjointSpec* spec;
+  EvalState* eval_state = nullptr;
   mutable RhsWorkspace workspace;
 
   template <typename T_time, typename T_y, typename T_param>
@@ -35,7 +36,7 @@ struct AdjointRhs {
     Eigen::Matrix<T, Eigen::Dynamic, 1> out(state.size());
     if (spec->prog.ok) {
       run_rhs_into<T>(spec->prog, t, state.data(), theta.data(), theta.size(),
-                      x_r.data(), out.data(), workspace.get<T>());
+                      x_r.data(), out.data(), workspace.get<T>(), eval_state);
       return out;
     }
 
@@ -51,7 +52,7 @@ struct AdjointRhs {
 template <typename T_y0, typename T_t0, typename T_ts, typename T_theta>
 auto solve(const OdeAdjointSpec& spec, const T_y0& y0, const T_t0& t0,
            const std::vector<T_ts>& ts, const std::vector<T_theta>& theta,
-           const double* controls = nullptr) {
+           const double* controls, EvalState* state) {
   const Eigen::Index S = y0.size();
   Eigen::Map<const Eigen::VectorXd> atol_forward(
       controls ? controls + 1 : spec.absolute_tolerance_forward.data(),
@@ -60,7 +61,7 @@ auto solve(const OdeAdjointSpec& spec, const T_y0& y0, const T_t0& t0,
       controls ? controls + S + 2 : spec.absolute_tolerance_backward.data(),
       controls ? S : (Eigen::Index)spec.absolute_tolerance_backward.size());
   return stan::math::ode_adjoint_tol_ctl(
-      AdjointRhs{&spec}, y0, t0, ts,
+      AdjointRhs{&spec, state}, y0, t0, ts,
       controls ? controls[0] : spec.relative_tolerance_forward, atol_forward,
       controls ? controls[S + 1] : spec.relative_tolerance_backward,
       atol_backward,
@@ -88,7 +89,8 @@ void ode_adjoint_fwd(KernelCtx& ctx) {
     throw std::invalid_argument(
         "runtime adjoint ODE controls require a value-only solve");
   const auto solution =
-      solve(spec, y0, t0, ts, theta, ctx.n_in == 5 ? ctx.in[4].data : nullptr);
+      solve(spec, y0, t0, ts, theta, ctx.n_in == 5 ? ctx.in[4].data : nullptr,
+            ctx.eval_state);
   if ((int64_t)solution.size() * S != ctx.out.len)
     throw std::runtime_error(
         "ode_adjoint_tol_ctl: result shape disagrees with output times");
@@ -117,7 +119,7 @@ void ode_adjoint_bwd(KernelCtx& ctx) {
   theta.reserve((size_t)P);
   for (int64_t i = 0; i < P; ++i) theta.emplace_back(ctx.in[3].data[i]);
 
-  const auto solution = solve(spec, y0, t0, ts, theta);
+  const auto solution = solve(spec, y0, t0, ts, theta, nullptr, ctx.eval_state);
   var weighted = 0.0;
   for (int64_t n = 0; n < N; ++n)
     for (int64_t i = 0; i < S; ++i)

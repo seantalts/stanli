@@ -3121,7 +3121,7 @@ static double written_s(const CompiledModel& model,
         CompiledModel::csv_names(model.write_array->interp->columns());
     for (size_t i = 0; i < names.size() && i < row.size(); ++i)
       if (names[i] == "s") return row[i];
-  } else if (model.write_array && model.write_array->truncated.empty()) {
+  } else if (model.write_array && !model.write_array->truncated) {
     Executor wex(model.write_array->graph);
     model.write_array->bind(wex);
     std::copy(point.begin(), point.end(), wex.params_data());

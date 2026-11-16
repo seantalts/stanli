@@ -38,6 +38,7 @@
 // The rewrite makes the op's output slot BE its input slot, so `bind_()`
 // gives them one offset with no executor change, and later references to
 // the dead output slot are renamed to the input.
+#include <stanli/debug_switch.hpp>
 #include <stanli/inplace.hpp>
 #include <stanli/optable.hpp>
 
@@ -120,7 +121,7 @@ bool backward_ignores_values(uint16_t opcode) {
 }
 
 int make_inplace_updates(Graph& g, const std::vector<int>& roots) {
-  if (std::getenv("STANLI_NO_INPLACE")) return 0;
+  if (debug_env("STANLI_NO_INPLACE")) return 0;
 
   const int n_slots = static_cast<int>(g.slots.size());
   // Last op index that reads each slot.
@@ -224,7 +225,7 @@ int make_inplace_updates(Graph& g, const std::vector<int>& roots) {
 }
 
 int forward_stores_to_loads(Graph& g, const std::vector<int>& roots) {
-  if (std::getenv("STANLI_NO_INPLACE")) return 0;
+  if (debug_env("STANLI_NO_INPLACE")) return 0;
 
   std::unordered_set<int> root_set(roots.begin(), roots.end());
   if (g.result_slot >= 0) root_set.insert(g.result_slot);
@@ -316,7 +317,7 @@ int forward_stores_to_loads(Graph& g, const std::vector<int>& roots) {
 }
 
 int elide_full_extent_stores(Graph& g, const std::vector<int>& roots) {
-  if (std::getenv("STANLI_NO_INPLACE")) return 0;
+  if (debug_env("STANLI_NO_INPLACE")) return 0;
 
   std::unordered_set<int> root_set(roots.begin(), roots.end());
   if (g.result_slot >= 0) root_set.insert(g.result_slot);

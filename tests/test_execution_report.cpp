@@ -221,6 +221,24 @@ int main() {
   test_unsetenv("STANLI_NO_INTERPRETER");
   check(rejected,
         "legacy callback notes participate in existing refusal policy");
+  CompileOptions strict;
+  strict.allow_interpreter = false;
+  rejected = false;
+  try {
+    compile_model(source, data, 1, strict);
+  } catch (const CompileError& e) {
+    rejected = has(e.what(), "graph_rhs");
+  }
+  check(rejected, "allow_interpreter=false refuses interpreter fallbacks");
+  test_setenv("STANLI_NO_INTERPRETER", "0", 1);
+  rejected = false;
+  try {
+    compile_model(source, data);
+  } catch (const CompileError&) {
+    rejected = true;
+  }
+  test_unsetenv("STANLI_NO_INTERPRETER");
+  check(!rejected, "STANLI_NO_INTERPRETER=0 leaves the interpreter allowed");
 
   // Diagnostics must not alter either selected graph or gradient bytes.
   std::vector<std::string> diagnostics;

@@ -112,6 +112,11 @@ class MirInterp {
 
   std::map<std::string, Value>& env() { return env_; }
 
+  // min/max of a real container use Stan Math's Eigen reduction, as
+  // CmdStan's generated code does, instead of a scalar fold. For the
+  // interpreters whose values are the model's own results.
+  void set_native_extrema(bool on) { native_extrema_ = on; }
+
   // A host may bind a typed value directly and skip stanc's generated input
   // declaration/rebuild statements. Keep the declaration-owned geometry
   // that FnCheck needs separately: an empty JSON array cannot encode trailing
@@ -1173,6 +1178,7 @@ class MirInterp {
 
   const std::map<std::string, const mir::FunDef*>& funs_;
   std::string where_;
+  bool native_extrema_ = false;
   MirHooks hooks_;
   std::map<std::string, Value> env_;
   Value returned_;
@@ -1695,6 +1701,7 @@ class MirInterp {
   MirInterp function_scope(bool propto) {
     if (udf_depth_ > 64) fail("UDF recursion too deep");
     MirInterp sub(funs_, where_, hooks_);
+    sub.native_extrema_ = native_extrema_;
     sub.udf_depth_ = udf_depth_ + 1;
     sub.propto_ctx_ = propto;
     return sub;
@@ -2886,11 +2893,9 @@ class MirInterp {
       return r;
     }
     if (e.name == "max" || e.name == "min") {
-      const bool owning_container_context =
-          where_ == "write_array" || where_ == "prepare_data";
-      const mir::ExtremaCall native =
-          owning_container_context && udf_depth_ == 0 ? mir::extrema_call(e)
-                                                      : mir::ExtremaCall{};
+      const mir::ExtremaCall native = native_extrema_ && udf_depth_ == 0
+                                          ? mir::extrema_call(e)
+                                          : mir::ExtremaCall{};
       const bool real_container =
           native.surface == mir::ExtremaSurface::RealVector ||
           native.surface == mir::ExtremaSurface::RealMatrix ||

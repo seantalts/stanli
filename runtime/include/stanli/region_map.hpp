@@ -112,6 +112,9 @@ struct RegionMapProg : IslandProg {
   std::vector<std::pair<int, int>> saved;
   int saved_cells = 0;
   bool recompute = false;
+  // Check after each backward iteration that the adjoint cells it should
+  // have cleared are zero (STANLI_REGION_MAP_CHECK_CLEAN, read at lowering).
+  bool check_clean = false;
   RegionMapLanePlan lanes;
   std::string label;
 };

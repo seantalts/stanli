@@ -3,6 +3,7 @@
 #include "build_id.hpp"
 #include "lower_work.hpp"
 #include "lower_worker.hpp"
+#include <stanli/debug_switch.hpp>
 #include <stanli/gp_cov_fusion.hpp>
 #include <stanli/execution_report.hpp>
 #include <stanli/large_stack.hpp>
@@ -10,13 +11,14 @@
 
 #include <stan/math/rev/core/chainablestack.hpp>
 
+#include <cstring>
 #include <thread>
 
 namespace stanli {
 namespace lower_detail {
 
 StructuredMode read_structured_mode() {
-  const char* flag = std::getenv("STANLI_STRUCTURED_LOOPS");
+  const char* flag = debug_env("STANLI_STRUCTURED_LOOPS");
   if (!flag || !*flag || std::string_view(flag) == "auto")
     return StructuredMode::Auto;
   if (std::string_view(flag) == "0") return StructuredMode::Off;
@@ -33,7 +35,9 @@ Lowering::Lowering(const DataMap& d, PrepTrace& p, PassDumper& dump_to,
       prep(p),
       dumper(dump_to),
       prep_graph(graph_name),
-      td_rng(std::move(stream)) {}
+      td_rng(std::move(stream)) {
+  td.set_native_extrema(true);
+}
 template <typename Map>
 static void copy_named(Map& to, const Map& from,
                        const std::set<std::string>* names) {
@@ -293,7 +297,7 @@ void Lowering::omit_zero_size(const std::string& name,
 void Lowering::bind_data(const mir::Program& p) {
   std::set<std::string> input_names;
   bool all_inputs_bound = true;
-  bool use_prebound = std::getenv("STANLI_NO_DATA_PRELOAD") == nullptr;
+  bool use_prebound = debug_env("STANLI_NO_DATA_PRELOAD") == nullptr;
   for (const auto& [name, type] : p.input_vars) {
     input_names.insert(name);
     if (!data_entry(name)) omit_zero_size(name, type);
@@ -366,8 +370,28 @@ void Lowering::bind_data(const mir::Program& p) {
   {
     ExtentScope extents(data_extent_scope);
     for (const auto& [name, type] : p.input_vars) {
-      record(name, type);
-      validate_data_dims(name, type);
+      try {
+        record(name, type);
+        validate_data_dims(name, type);
+      } catch (const std::exception&) {
+        // CmdStan computes each size, printing if it prints, before it
+        // checks that input. Print the sizes prepare_data computes ahead of
+        // the failing input's declaration, then report its error.
+        data_extent_scope = false;
+        for (const auto& st : p.prepare_data) {
+          if (st.kind != mir::Stmt::Decl) continue;
+          if (st.decl_id == name) break;
+          if (!st.has_init || input_names.count(st.decl_id) ||
+              expr_effects(st.init) != kMessageEffect)
+            continue;
+          try {
+            (void)td.exec(st);
+          } catch (const std::exception&) {
+            break;
+          }
+        }
+        throw;
+      }
     }
   }
   for (const auto& st : p.prepare_data) {
@@ -393,19 +417,6 @@ void Lowering::bind_data(const mir::Program& p) {
          canonical_input_rebuild(st, input_names)))
       continue;
     record_interpreter_event("prepare_data", "statement_entry");
-    if (st.kind == mir::Stmt::Decl && st.has_init) {
-      const auto sized = data_extent_memo.find(expr_signature(st.init));
-      if (sized != data_extent_memo.end()) {
-        mir::Stmt resolved = st;
-        resolved.init = mir::Expr{};
-        resolved.init.kind = mir::Expr::LitInt;
-        resolved.init.lit_i = sized->second;
-        resolved.init.unsized = {0, mir::UnsizedLeaf::Int};
-        resolved.init.data_only = true;
-        (void)td.exec(resolved);
-        continue;
-      }
-    }
     (void)td.exec(st);
   }
   // The interpreter keeps a block's locals after the block ends. Drop them,
@@ -856,7 +867,7 @@ void Lowering::run_passes(const std::vector<int>& roots, const PassPlan& plan) {
     // After re-roll, which builds the vector terms this reads; before
     // partition, CSE and islands, which then work on what is left.
     const auto collapse_time = prep.start();
-    const bool report_terms = std::getenv("STANLI_COLLAPSE_REPORT") != nullptr;
+    const bool report_terms = debug_env("STANLI_COLLAPSE_REPORT") != nullptr;
     CollapseReport report;
     const CollapseStats collapsed = collapse_observations(
         g, out.fills, target_terms, roots, report_terms ? &report : nullptr);
@@ -962,7 +973,7 @@ CompiledModel::WriteArray Lowering::run_write_array(const mir::Program& p) {
   roots.insert(roots.end(), extra_roots.begin(), extra_roots.end());
   prep.graph(prep_graph, "lower", lower_time, g, out.fills, target_terms.size(),
              out.views.size(), PrepTrace::Extra::Truncated,
-             !wa.truncated.empty());
+             wa.truncated.has_value());
   dump("lower", roots);
 
   run_passes(roots, kWriteArrayPasses);
@@ -1094,7 +1105,7 @@ bool bounded_specialization_candidate(Lowering& lo, const mir::Program& p) {
 
 std::optional<CompiledModel> try_bounded_specialization(Lowering& lo,
                                                         const mir::Program& p) {
-  const char* policy = std::getenv("STANLI_BOUNDED_SPECIALIZATION");
+  const char* policy = debug_env("STANLI_BOUNDED_SPECIALIZATION");
   // Explicit zero/unknown values keep the established path for ablation.
   if ((policy && std::string_view(policy) != "1") ||
       lo.structured_policy != StructuredMode::Auto)
@@ -1146,7 +1157,7 @@ constexpr uint64_t kParallelWriteArrayMaxDataBytes = uint64_t{64} << 20;
 enum class ParallelWriteArray { Off, Auto, Force };
 
 ParallelWriteArray read_parallel_write_array() {
-  const char* v = std::getenv("STANLI_PARALLEL_WA");
+  const char* v = debug_env("STANLI_PARALLEL_WA");
   if (!v || !*v || std::string_view(v) == "auto")
     return ParallelWriteArray::Auto;
   if (std::string_view(v) == "1" || std::string_view(v) == "force")
@@ -1269,10 +1280,10 @@ CompiledModel compile_model(const std::string& mir_text, const DataMap& data,
   if (options.reduce_sum_threads < 1 || options.reduce_sum_min_chunk_ns < 0 ||
       options.reduce_sum_max_chunks < 1)
     throw std::invalid_argument("invalid reduce_sum compilation options");
-  const char* prep_env = std::getenv("STANLI_PROFILE_PREP");
+  const char* prep_env = debug_env("STANLI_PROFILE_PREP");
   PrepTrace prep(prep_env && prep_env[0] != '0');
-  PassDumper dumper(std::getenv("STANLI_DUMP_PASSES"),
-                    std::getenv("STANLI_DUMP_STAGES"));
+  PassDumper dumper(debug_env("STANLI_DUMP_PASSES"),
+                    debug_env("STANLI_DUMP_STAGES"));
   if (dumper.enabled()) dumper.write("mir", "mir.sexp", mir_text);
   const auto compile_time = prep.start();
   // Shared because the interpreted write_array fallback, when needed,
@@ -1293,6 +1304,9 @@ CompiledModel compile_model(const std::string& mir_text, const DataMap& data,
              static_cast<int64_t>(mir_text.size()));
   Lowering lo(data, prep, dumper, "log_prob", WaRng(seed));
   lo.compile_options = options;
+  if (const char* refuse = std::getenv("STANLI_NO_INTERPRETER");
+      refuse != nullptr && refuse[0] != '\0' && std::strcmp(refuse, "0") != 0)
+    lo.compile_options.allow_interpreter = false;
   // A second lowering, over the transformed data the first one already
   // interpreted: re-running prepare_data would double preparation time on
   // the models where preparation is the cost (nn_rbm1bJ100, 20.7 s).
@@ -1326,7 +1340,7 @@ CompiledModel compile_model(const std::string& mir_text, const DataMap& data,
       w.truncated = "write_array reads " + std::to_string(w.n_unconstrained) +
                     " unconstrained values, log_prob reads " +
                     std::to_string(cm.n_unconstrained) +
-                    (w.truncated.empty() ? "" : "; " + w.truncated);
+                    (w.truncated ? "; " + *w.truncated : "");
       w.columns.clear();
       w.n_tp_start = w.n_gq_start = 0;
     }
@@ -1339,7 +1353,7 @@ CompiledModel compile_model(const std::string& mir_text, const DataMap& data,
     // set it in a shipped environment: drivers PREFER an attached
     // interpreter (capi.cpp, bridgestan_abi.cpp), so it moves every caller
     // onto the slow per-draw path.
-    if (!w.truncated.empty() || std::getenv("STANLI_WA_FORCE_INTERP")) {
+    if (w.truncated || debug_env("STANLI_WA_FORCE_INTERP")) {
       // The graph could not express the whole section; hand the model the
       // per-draw interpreter, seeded with data + transformed data and the
       // emission flags the guard blocks test.
@@ -1356,8 +1370,8 @@ CompiledModel compile_model(const std::string& mir_text, const DataMap& data,
                                             std::move(flags));
     }
     cm.write_array = std::move(w);
-    if (!cm.write_array->truncated.empty())
-      add_interpreter_fallback(cm, cm.write_array->truncated);
+    if (cm.write_array->truncated)
+      add_interpreter_fallback(cm, *cm.write_array->truncated);
   }
   if (prog->has_transform_inits) {
     // The inverse parameter transforms. Nothing is interpreted here: the
@@ -1405,12 +1419,13 @@ CompiledModel compile_model(const std::string& mir_text, const DataMap& data,
         params.push_back(std::move(p));
       }
     }
-    if (ti.truncated.empty())
+    if (!ti.truncated)
       ti.interp = std::make_shared<InitInterp>(prog, shared_interp_env(),
                                                std::move(params));
     cm.transform_inits = std::move(ti);
   }
-  if (!cm.interpreter_fallbacks.empty() && std::getenv("STANLI_NO_INTERPRETER"))
+  if (!cm.interpreter_fallbacks.empty() &&
+      !lo.compile_options.allow_interpreter)
     throw CompileError(interpreter_error(cm));
   prep.plain("compile", "total", compile_time);
   prep.report();
@@ -1422,10 +1437,11 @@ CompiledModel compile_model(const std::string& mir_text, const DataMap& data,
 }
 
 std::string interpreter_error(const CompiledModel& cm) {
-  return "stanli: STANLI_NO_INTERPRETER is set and parts of this model have "
-         "no compiled path: " +
+  return "stanli: the MIR interpreter is not allowed (allow_interpreter is "
+         "false, or STANLI_NO_INTERPRETER is set) and parts of this model "
+         "have no compiled path: " +
          fallback_items(cm) +
-         ". Unset it to run them through the MIR interpreter, which is far "
+         ". Allow it to run them through the MIR interpreter, which is far "
          "slower. " +
          report_request();
 }

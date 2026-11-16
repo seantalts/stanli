@@ -861,6 +861,10 @@ struct Lowering {
                      fun_defs, e,
                      [&in](const mir::Expr& arg) { return in.eval(arg); },
                      result);
+               },
+               [this](const mir::Stmt& st) {
+                 return data_extent_scope && st.kind == mir::Stmt::NRFunApp &&
+                        message_action(st.fn_name) == MessageAction::Print;
                }}};
   Graph g;
   CompiledModel out;
@@ -897,7 +901,9 @@ struct Lowering {
   // return use the promoted type, but a direct formal reference keeps its own.
   std::map<std::string, bool> udf_formal_autodiff;
   std::map<std::string, unsigned> effectful_cache;
-  std::map<std::string, long> data_extent_memo;
+  // Set while bind_data computes the data block's sizes to check the input.
+  // A size that prints prints when prepare_data reaches its declaration, as
+  // in CmdStan, so these early evaluations skip print statements.
   bool data_extent_scope = false;
   std::set<std::string> int_locals;
   // SInt locals in log_prob (data-only)
@@ -1480,6 +1486,16 @@ struct Lowering {
                        const Val& v);
 
   void assign_plain(const mir::Stmt& s);
+  // Bind lhs to an already lowered right-hand side, checked against lhs's
+  // declared view as an assignment is. Returns the binding.
+  Val assign_value(const std::string& lhs, Val rhs, const std::string& raw);
+  // a + b for two real scalars, the graph Plus__ builds for them.
+  Val add_real_scalars(const Val& a, const Val& b) {
+    SlotInfo si = a.si;
+    si.param_free = a.si.param_free && b.si.param_free;
+    return with_layout(emit_value(OP_ADD, {a, b}, 1, si),
+                       elementwise_layout({a, b}));
+  }
 
   void sync_indexed_data_local(const std::string& name, const Val& v) {
     td_erase(name);
@@ -1847,7 +1863,6 @@ struct Lowering {
   static constexpr unsigned kStatefulEffect = 2;
   bool expr_effectful(const mir::Expr& e);
   unsigned expr_effects(const mir::Expr& e);
-  static std::string expr_signature(const mir::Expr& e);
   unsigned fun_effects(const std::string& name);
 
   struct UdfBinding {

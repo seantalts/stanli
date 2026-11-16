@@ -375,6 +375,7 @@ std::vector<double> WaInterp::eval(
                out);
   };
   MirInterp<double> in(funs_, "write_array", std::move(h));
+  in.set_native_extrema(true);
   cur = &in;
   in.set_parent_env(shared_env_.get());
   in.env() = base_env_;

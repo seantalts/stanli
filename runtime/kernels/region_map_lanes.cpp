@@ -1,3 +1,5 @@
+#include <stanli/debug_switch.hpp>
+#include <stanli/rejection.hpp>
 #include <stanli/adjoint.hpp>
 #include <stanli/adjoint_rules.hpp>
 #include <stanli/program_density.hpp>
@@ -1408,7 +1410,8 @@ bool tile_call_forward(const RegionMapLanePlan::CallWindow& w,
   ctx.scratch = scratch;
   try {
     call.forward(ctx);
-  } catch (...) {
+  } catch (const std::exception& e) {
+    if (is_internal_error(e)) throw;
     return false;
   }
   if (!lanes.direct) {
@@ -1573,7 +1576,7 @@ void lane_instruction(const RegionMapProg& p, const TileState& t, int pc,
             const double raw = idx[l];
             if (!std::isfinite(raw) || std::trunc(raw) != raw || raw < 1.0 ||
                 raw > len)
-              throw std::out_of_range("register-program index out of range");
+              throw ProgramIndexError();
             d[l] = read(static_cast<int32_t>(raw) - 1, l);
           });
         };
@@ -2456,7 +2459,7 @@ void region_map_lanes_backward(const RegionMapProg& p, KernelCtx& ctx,
   KernelCtx call_ctx;
   std::vector<Mask> entry;
   entry.reserve(plan.blocks.size() + 1);
-  const bool verify = std::getenv("STANLI_REGION_MAP_CHECK_CLEAN") != nullptr;
+  const bool verify = p.check_clean;
   RegionMapTally tally;
   RegionMapTally* counting = plan.profile ? &tally : nullptr;
   struct DirtyOnThrow {
@@ -2549,13 +2552,13 @@ void plan_region_map_lanes(RegionMapProg& p, bool enabled,
   }
   try {
     int64_t recompute_cells = std::numeric_limits<int64_t>::max();
-    if (const char* v = std::getenv("STANLI_REGION_MAP_TILE_CELLS"))
+    if (const char* v = debug_env("STANLI_REGION_MAP_TILE_CELLS"))
       recompute_cells = std::strtoll(v, nullptr, 10);
-    const char* tile_env = std::getenv("STANLI_REGION_MAP_TILE_CALLS");
+    const char* tile_env = debug_env("STANLI_REGION_MAP_TILE_CALLS");
     const bool tile_calls = !(tile_env && std::string_view(tile_env) == "0");
     Analysis(p, storage_limit, recompute_cells, tile_calls).run();
     p.lanes.active = true;
-    if (std::getenv("STANLI_REGION_MAP_PROFILE"))
+    if (debug_env("STANLI_REGION_MAP_PROFILE"))
       p.lanes.profile = make_profile(p);
   } catch (const Refusal& r) {
     p.lanes = RegionMapLanePlan{};

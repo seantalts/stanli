@@ -3,6 +3,7 @@
 // (walnutpie is written against concepts); it deliberately includes no
 // stan-math, only the executor interface and Eigen, so the newer
 // standard never touches the rest of the build.
+#include <stanli/rejection.hpp>
 #include <stanli/walnuts.hpp>
 
 #include <Eigen/Dense>
@@ -36,7 +37,8 @@ struct ExecLogpGrad {
     // NoExceptLogpGrad, harmlessly.
     try {
       logp = ex->gradient(grad.data());
-    } catch (const std::exception&) {
+    } catch (const std::exception& e) {
+      if (is_internal_error(e)) throw;
       logp = -std::numeric_limits<double>::infinity();
     }
     // walnutpie assumes the density throws or is finite: its acceptance

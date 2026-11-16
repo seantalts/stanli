@@ -10,7 +10,6 @@
 #include <thread>
 
 namespace stanli {
-bool values_only();
 struct ReduceExecutionContext::Impl {
  public:
   explicit Impl(int threads) : threads_(threads) {
@@ -229,7 +228,7 @@ void forward(KernelCtx& c) {
   auto& state = *static_cast<ReductionState*>(c.state);
   state.ready = false;
   state.context = &c;
-  state.values_only = stanli::values_only();
+  state.values_only = values_only(c);
   state.run(ReductionState::forward_job);
   double sum = 0;
   for (const auto& child : state.children) sum += child.value;

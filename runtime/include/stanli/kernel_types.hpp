@@ -31,6 +31,10 @@ struct KernelState {
 struct EvalState {
   WaRng* wa_rng = nullptr;
   ReduceExecutionContext* reduce = nullptr;
+  // Executor::forward_value_only(), CmdStan's log_prob<double>: a kernel may
+  // skip work whose only consumer is its own backward, and takes the double
+  // overload where Stan Math's double and var overloads differ.
+  bool values_only = false;
 };
 
 // A view of one contiguous buffer. len == 1 means scalar.
@@ -102,6 +106,12 @@ struct KernelCtx {
   int8_t dyn_extent_in = -1;
   uint8_t dyn_lengths = 0;
 };
+
+// The evaluation's EvalState::values_only. A context run outside an
+// evaluation (no EvalState) is a full forward.
+inline bool values_only(const KernelCtx& ctx) {
+  return ctx.eval_state != nullptr && ctx.eval_state->values_only;
+}
 
 inline void apply_dynamic_length(KernelCtx& c) {
   assert(c.in[c.dyn_extent_in].len == 1);

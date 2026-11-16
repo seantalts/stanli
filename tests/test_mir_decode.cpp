@@ -1172,9 +1172,9 @@ void check_full_span_assignment_lowering() {
           "full-span generated-vector write_array exists");
     if (legacy_model.write_array && portable_model.write_array) {
       check(!legacy_model.write_array->interp &&
-                legacy_model.write_array->truncated.empty() &&
+                !legacy_model.write_array->truncated &&
                 !portable_model.write_array->interp &&
-                portable_model.write_array->truncated.empty(),
+                !portable_model.write_array->truncated,
             "full-span generated-vector write_array lowers completely");
       check(CompiledModel::csv_names(legacy_model.write_array->columns) ==
                 CompiledModel::csv_names(portable_model.write_array->columns),

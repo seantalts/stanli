@@ -165,6 +165,19 @@ if(NOT STANLI_STAN_DENSITY_ORACLE)
   target_compile_definitions(stanmath INTERFACE STANLI_FUSED_ONLY=1)
 endif()
 
+# The STANLI_* environment variables that turn passes off, force paths, set
+# tuning limits or print diagnostics (runtime/include/stanli/debug_switch.hpp).
+# Tests and investigations use them. OFF compiles them out, so the runtime's
+# behavior cannot change through the environment. The differential and
+# pass-switch tests need them, so ctest is meant for an ON build.
+# STANLI_NO_INTERPRETER, STANLI_ISA and STANLI_NO_FUSED_DENSITY are not
+# developer switches.
+option(STANLI_DEBUG_SWITCHES
+  "Read the developer STANLI_* environment switches" ON)
+if(NOT STANLI_DEBUG_SWITCHES)
+  target_compile_definitions(stanmath INTERFACE STANLI_NO_DEBUG_SWITCHES=1)
+endif()
+
 # Chains in threads. stan-math's autodiff stack is a plain static unless
 # STAN_THREADS is defined, in which case it is thread_local (__thread on
 # gcc/clang). The legacy kernels and tape islands build NESTED var tapes
@@ -414,8 +427,8 @@ endif()
 
 # Optional AVX2 copies of the dense-matrix kernels, for a fast mode. The
 # default build is unchanged: this is OFF, and the baseline kernels stay the
-# default even when it is ON (STANLI_FAST_MATH=1 opts in at run time, only on
-# a CPU that can run them). Each kernel file is compiled twice, a baseline
+# default even when it is ON (STANLI_ISA=avx2 opts in at run time, only on a
+# CPU that can run them). Each kernel file is compiled twice, a baseline
 # copy with its registration entry points renamed *_base and an AVX2 copy
 # (-march=x86-64-v3) in its own Eigen namespace (-DEigen=EigenAvx2): Eigen's
 # templates have identical mangled names but different packet sizes and

@@ -1083,7 +1083,7 @@ down (`accel_gp` 12 to 2, `accel_splines` 119 to 3, `prophet` 11520 to 256),
 since CmdStan runs the same Eigen gemv. Against the previous kernel the
 change is 1-4 ULP per element, inside the 10 ULP reassociation budget.
 
-## Compiled ODE right-hand sides (`ode_prog.cpp`, report fallbacks: `STANLI_DEBUG_ODE=1`)
+## Compiled ODE right-hand sides (`ode_prog.cpp`)
 
 An ODE model passes a user function (the right-hand side) to a solver
 that decides at run time when to call it, so this one function cannot
@@ -1097,7 +1097,7 @@ list: variables become numbered cells, known-bound loops unroll,
 run-time conditions become jumps, and a call is one loop over the
 instructions with no lookups and no allocation. Anything the translator
 cannot handle falls back to the old interpreter (slower, never less
-supported); `STANLI_DEBUG_ODE=1` prints when that happens. A test runs
+supported); the model's interpreter-fallback warning names the function. A test runs
 every supported construct through both implementations and requires
 bit-identical results.
 
@@ -1946,7 +1946,7 @@ Gradients are unchanged to the bit where they were before, and
 reading the jacobian out of the same solve that produced the values
 removes a second, independently stepped solve. Anything the compiler
 cannot express keeps the interpreter, so coverage never shrinks;
-`STANLI_DEBUG_ODE=1` reports when that happens.
+the model's interpreter-fallback warning reports when that happens.
 
 A later mixed-activity specialization also preserves Stan Math's separate
 scalar types for the initial state and parameters. Previously either active

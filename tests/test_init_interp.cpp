@@ -48,10 +48,11 @@ void round_trip(stanli::CompiledModel& cm, int variant) {
   const std::string tag = "round trip variant " + std::to_string(variant);
 
   if (!cm.transform_inits || !cm.transform_inits->interp) {
-    check(false, tag + ": the model has no init interpreter (" +
-                     (cm.transform_inits ? cm.transform_inits->truncated
-                                         : std::string("no section")) +
-                     ")");
+    check(false,
+          tag + ": the model has no init interpreter (" +
+              (cm.transform_inits ? cm.transform_inits->truncated.value_or("")
+                                  : std::string("no section")) +
+              ")");
     return;
   }
 
@@ -200,8 +201,9 @@ int main() {
   check(cm.transform_inits.has_value(),
         "a backend-transformed MIR carries an init section");
   if (cm.transform_inits)
-    check(cm.transform_inits->truncated.empty(),
-          "the init section is usable: " + cm.transform_inits->truncated);
+    check(!cm.transform_inits->truncated,
+          "the init section is usable: " +
+              cm.transform_inits->truncated.value_or(""));
 
   round_trip(cm, 0);
   round_trip(cm, 1);

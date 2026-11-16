@@ -18,6 +18,7 @@
 // vector is always correct, so the proof each rule needs is local. The ops
 // that built the full-length arguments are then removed if nothing else
 // reads them.
+#include <stanli/debug_switch.hpp>
 #include <stanli/collapse.hpp>
 #include <stanli/density_registry.hpp>
 #include <stanli/message_sink.hpp>
@@ -2381,7 +2382,7 @@ CollapseStats collapse_observations(Graph& g, Fills& fills,
                                     const std::vector<int>& extra_roots,
                                     CollapseReport* report) {
   CollapseStats st;
-  if (std::getenv("STANLI_NO_COLLAPSE")) return st;
+  if (debug_env("STANLI_NO_COLLAPSE")) return st;
   // The kernels this pass emits are registered here, on first use, and
   // not with the built-in ones: executor.cpp then compiles to the code it
   // had before this pass existed, which keeps the default path's timing

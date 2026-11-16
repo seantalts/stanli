@@ -32,6 +32,7 @@
 // cumsum([0, ta - b_1, ...])[j] = j*t*a - sum_{i<=j} b_i. Buckets refine on
 // the subtracted vector -- the item -- and the slope is whichever of the two
 // scalars that refinement holds still.
+#include <stanli/debug_switch.hpp>
 #include <stanli/builtin_registry.hpp>
 #include <stanli/density_registry.hpp>
 #include <stanli/optable.hpp>
@@ -170,7 +171,7 @@ PartitionStats partition_lanes(Graph& g, Fills& fills,
                                const std::vector<int>& extra_roots,
                                bool fuse_shared_params) {
   PartitionStats st;
-  if (std::getenv("STANLI_NO_PARTITION")) return st;
+  if (debug_env("STANLI_NO_PARTITION")) return st;
   const size_t n_ops = g.ops.size();
   if (n_ops < 2 * (size_t)kMinLanes) return st;
 
