@@ -455,12 +455,9 @@ static stanli_model* model_new(const char* tmir_sexp, const char* data_json,
     stanli::CompileOptions options;
     options.reduce_sum_threads = threads_per_chain;
     options.fast_math = fast_math;
+    options.allow_interpreter = allow_interpreter;
     m->cm = stanli::compile_model(tmir_sexp, data, seed, options);
     data = stanli::DataMap();
-    // TODO(merge with fix/runtime-hacks): set options.allow_interpreter from
-    // the argument once CompileOptions has the field, and drop this check.
-    if (!allow_interpreter && !m->cm.interpreter_fallbacks.empty())
-      throw stanli::CompileError(stanli::interpreter_error(m->cm));
     // Resume records name the posterior they continue: the program text, the
     // data text, fast_math, and the construction seed only when transformed
     // data drew from it (otherwise the seed changes nothing).

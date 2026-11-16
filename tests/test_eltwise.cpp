@@ -1087,13 +1087,11 @@ void test_extrema_rule_is_not_the_label() {
   mir::Expr arg;
   arg.kind = mir::Expr::Var;
   arg.name = "a";
-  arg.type_ = "UVector";
   arg.unsized.leaf = mir::UnsizedLeaf::Vector;
   mir::Expr call;
   call.kind = mir::Expr::FunApp;
   call.name = "max";
   call.fn_lib = mir::Expr::Lib::StanLib;
-  call.type_ = "UReal";
   call.unsized.leaf = mir::UnsizedLeaf::Real;
   call.args = {arg};
   DataMap::Entry values;
