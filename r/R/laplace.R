@@ -217,6 +217,172 @@ lw_sparse_hessian <- function(grad, q, plan, cols) {
   lw_sparse(unlist(ti), unlist(tj), unlist(tx), m)
 }
 
+lw_probe_groups <- 48L
+lw_probe_rounds <- 4L
+lw_probe_noise <- 1e3 * .Machine$double.eps
+
+lw_with_seed <- function(seed, f) {
+  old <- if (exists(".Random.seed", envir = globalenv()))
+    get(".Random.seed", envir = globalenv())
+  on.exit(if (is.null(old)) rm(".Random.seed", envir = globalenv()) else
+    assign(".Random.seed", old, envir = globalenv()))
+  set.seed(seed)
+  f()
+}
+
+# Whether a forward difference of the gradient along random weights on the
+# columns `js` moves each entry by more than rounding noise.
+lw_probe_response <- function(grad, q, iu, g0, step, js) {
+  w <- runif(length(js), 0.5, 1.5) * sample(c(-1, 1), length(js), TRUE)
+  e <- numeric(length(q))
+  e[iu[js]] <- step[js] * w
+  gp <- grad(q + e)$grad[iu]
+  abs(gp - g0) > lw_probe_noise * (abs(gp) + abs(g0))
+}
+
+# The (row, column) pairs that responded in every round, or NULL when there
+# are more than `budget`.
+lw_probe_intersect <- function(resps, labels, groups, budget) {
+  rounds <- nrow(labels)
+  by_group <- split(seq_len(ncol(labels)), factor(labels[1L, ], 0:(groups - 1L)))
+  out_r <- list()
+  out_c <- list()
+  total <- 0
+  for (g in seq_len(groups)) {
+    cols <- by_group[[g]]
+    rows <- which(resps[[1L]][g, ])
+    if (!length(cols) || !length(rows)) next
+    chunk <- max(1L, 4000000L %/% length(cols))
+    for (start in seq(1L, length(rows), by = chunk)) {
+      rr <- rows[start:min(length(rows), start + chunk - 1L)]
+      keep <- matrix(TRUE, length(rr), length(cols))
+      for (t in seq_len(rounds)[-1L]) {
+        idx <- outer(rr, labels[t, cols] + 1L, function(r, l) l + groups * (r - 1))
+        keep <- keep & matrix(resps[[t]][as.vector(idx)], length(rr))
+      }
+      hit <- which(keep, arr.ind = TRUE)
+      total <- total + nrow(hit)
+      if (!is.null(budget) && total > budget) return(NULL)
+      out_r[[length(out_r) + 1L]] <- rr[hit[, 1L]]
+      out_c[[length(out_c) + 1L]] <- cols[hit[, 2L]]
+    }
+  }
+  list(i = unlist(out_r), j = unlist(out_c))
+}
+
+# A symmetric pattern with the diagonal that contains every nonzero of the
+# Hessian block over `iu`: group probes with random weights, intersected over
+# rounds, with groups four times as many whenever the candidates outgrow a
+# budget and one column per probe (exact) once probes would outnumber columns.
+lw_probe_candidates <- function(grad, q, iu, g0, step) {
+  m <- length(iu)
+  budget <- 32 * m + 100000
+  groups <- lw_probe_groups
+  repeat {
+    if (groups * lw_probe_rounds >= m) {
+      i <- list()
+      j <- list()
+      for (col in seq_len(m)) {
+        rows <- which(lw_probe_response(grad, q, iu, g0, step, col))
+        i[[col]] <- rows
+        j[[col]] <- rep(col, length(rows))
+      }
+      pairs <- list(i = unlist(i), j = unlist(j))
+      break
+    }
+    labels <- t(vapply(seq_len(lw_probe_rounds), function(r)
+      sample(m) %% groups, numeric(m)))
+    resps <- lapply(seq_len(lw_probe_rounds), function(r) {
+      out <- matrix(FALSE, groups, m)
+      for (g in seq_len(groups)) {
+        js <- which(labels[r, ] == g - 1L)
+        if (length(js)) out[g, ] <- lw_probe_response(grad, q, iu, g0, step, js)
+      }
+      out
+    })
+    pairs <- lw_probe_intersect(resps, labels, groups, budget)
+    if (!is.null(pairs)) break
+    groups <- groups * 4L
+  }
+  i <- c(pairs$i, pairs$j, seq_len(m))
+  j <- c(pairs$j, pairs$i, seq_len(m))
+  lw_sparse(i, j, rep(1, length(i)), m)
+}
+
+# Whether the coloured Hessian H predicts central differences of the gradient
+# along three random directions to within what a missing entry of the size
+# the pattern keeps would change.
+lw_probe_agrees <- function(grad, q, iu, H, step, tol) {
+  dH <- Matrix::diag(H)
+  for (k in 1:3) {
+    v <- step * rnorm(length(iu))
+    e <- numeric(length(q))
+    e[iu] <- v
+    gp <- grad(q + e)$grad[iu]
+    gm <- grad(q - e)$grad[iu]
+    miss <- abs((gp - gm) - 2 * as.numeric(H %*% v))
+    noise <- lw_probe_noise * (abs(gp) + abs(gm))
+    signal <- 0.25 * tol * abs(dH) * sqrt(mean(v * v))
+    if (any(miss > pmax(noise, signal))) return(FALSE)
+  }
+  TRUE
+}
+
+# lw_pattern for a sparse H.
+lw_threshold_pattern <- function(H, tol) {
+  m <- nrow(H)
+  tr <- lw_triplets(H)
+  d <- sqrt(abs(Matrix::diag(H)))
+  scale <- d[tr$i] * d[tr$j]
+  if (length(tr$x)) scale[scale == 0] <- max(abs(tr$x))
+  keep <- abs(tr$x) > tol * scale
+  i <- c(tr$i[keep], tr$j[keep], seq_len(m))
+  j <- c(tr$j[keep], tr$i[keep], seq_len(m))
+  lw_sparse(i, j, rep(1, length(i)), m)
+}
+
+# The pattern lw_pattern would give for the Hessian block over `iu` at q
+# without the dense Hessian, or NULL when the verification fails.
+lw_probe_pattern <- function(model, q, iu, tol, counter, seed) {
+  grad <- function(x) {
+    counter$n <- counter$n + 1L
+    log_prob_grad(model, x)
+  }
+  lw_with_seed(seed, function() {
+    g0 <- grad(q)$grad[iu]
+    if (!all(is.finite(g0))) return(NULL)
+    step <- 1e-4 * pmax(1, abs(q[iu]))
+    C <- lw_probe_candidates(grad, q, iu, g0, step)
+    H <- lw_sparse_hessian(grad, q, lw_plan(C), iu)
+    if (!all(is.finite(H@x))) return(NULL)
+    if (!lw_probe_agrees(grad, q, iu, H, step, tol)) return(NULL)
+    lw_threshold_pattern(H, tol)
+  })
+}
+
+lw_start_pattern <- function(model, q, iu, tol, mode, seed, counter) {
+  if (mode == "probe") {
+    P <- lw_probe_pattern(model, q, iu, tol, counter, seed)
+    if (!is.null(P)) return(P)
+    warning("laplace_whiten: the sparsity probe disagreed with a gradient ",
+            "difference (or met a non-finite value); using the dense Hessian ",
+            "pattern instead", call. = FALSE)
+  }
+  counter$n <- counter$n + 1L + 2L * length(q)
+  H <- log_prob_hessian(model, q)$hessian
+  if (!all(is.finite(H)))
+    stop("the Hessian at the starting point is not finite", call. = FALSE)
+  lw_pattern(H, tol)[iu, iu, drop = FALSE]
+}
+
+# The n by n pattern with `pattern_uu` on the `iu` block and only the diagonal
+# elsewhere.
+lw_embed_pattern <- function(pattern_uu, iu, n) {
+  tr <- lw_triplets(pattern_uu)
+  rest <- setdiff(seq_len(n), iu)
+  lw_sparse(c(iu[tr$i], rest), c(iu[tr$j], rest), rep(1, length(tr$i) + length(rest)), n)
+}
+
 # Sparse LDL' of the symmetric matrix whose lower triangle is that of A:
 # P A P' = L diag(d) L' with L unit lower triangular and P v = v[perm + 1].
 lw_ldlt <- function(A, perm = NULL) {
@@ -558,8 +724,8 @@ lw_pathfinder_mean <- function(model, seed, n) {
 #' present.
 #'
 #' The steps, with the defaults the Python builder and its benchmark use: start
-#' at the Pathfinder mean (or `init`) and take the sparsity pattern of the
-#' dense Hessian there; maximize over `theta` the marginal
+#' at the Pathfinder mean (or `init`) and find the sparsity pattern of the
+#' Hessian there; maximize over `theta` the marginal
 #' `log p(theta, u_hat(theta)) - log det(-H_uu) / 2` by L-BFGS, with `H_uu`
 #' from central differences of the gradient along the pattern; at the result
 #' take `Q = -H`, drop entries below `threshold` relative to
@@ -585,6 +751,10 @@ lw_pathfinder_mean <- function(model, seed, n) {
 #' @param repair,clip How a `Q` that is not positive definite is repaired.
 #' @param hessian `"coloured"` (default) or `"dense"`, which calls
 #'   [log_prob_hessian()] at the mode.
+#' @param pattern `"probe"` (default) finds the pattern from a few dozen
+#'   gradients and checks it against three random gradient differences,
+#'   falling back to the dense Hessian with a warning if the check fails;
+#'   `"dense"` calls [log_prob_hessian()] at the start point.
 #' @return A list with `model`, the whitened model, and `report`: counts of
 #'   gradient evaluations by stage, `theta_hat`, the fill of the factor
 #'   (`nnz_L`), the repaired eigenvalue count (`n_clipped`) and `rank`, and
@@ -594,12 +764,14 @@ laplace_whiten <- function(model, latent = NULL, init = NULL, seed = 1,
                            max_outer = 60L, inner_iter = 2000L,
                            pattern_tolerance = 1e-6, threshold = 1e-6,
                            repair = c("abs", "abs_dense", "clip"), clip = NULL,
-                           hessian = c("coloured", "dense")) {
+                           hessian = c("coloured", "dense"),
+                           pattern = c("probe", "dense")) {
   require_matrix()
   if (!inherits(model, "stanli_model"))
     stop("model must be a stanli_model", call. = FALSE)
   repair <- match.arg(repair)
   hessian <- match.arg(hessian)
+  pattern <- match.arg(pattern)
   if (is.null(clip)) clip <- if (repair == "clip") 1e-3 else 1e-8
   if (is.null(latent)) {
     notes <- parameter_annotations(model)
@@ -625,13 +797,12 @@ laplace_whiten <- function(model, latent = NULL, init = NULL, seed = 1,
       stop("init must be a numeric vector of length ", n, call. = FALSE)
     q_start <- as.double(init)
   }
-  H_start <- log_prob_hessian(model, q_start)$hessian
-  if (!all(is.finite(H_start)))
-    stop("the Hessian at the starting point is not finite", call. = FALSE)
-  pattern_full <- lw_pattern(H_start, pattern_tolerance)
-  rm(H_start)
-  pattern_uu <- pattern_full[iu, iu, drop = FALSE]
   counter <- new.env()
+  counter$n <- 0L
+  pattern_uu <- lw_start_pattern(model, q_start, iu, pattern_tolerance, pattern,
+                                 seed, counter)
+  pattern_grads <- counter$n
+  pattern_full <- lw_embed_pattern(pattern_uu, iu, n)
   counter$n <- 0L
   mode <- lw_marginal_mode(model, q_start, iu, it, pattern_uu, max_outer,
                            inner_iter, counter)
@@ -679,7 +850,7 @@ laplace_whiten <- function(model, latent = NULL, init = NULL, seed = 1,
     lw_sparse_whiten(model, q_hat, Q, clip, warn) else
     lw_dense_whiten(model, q_hat, Q, if (repair == "clip") "clip" else "abs",
                     clip, warn)
-  gradients <- list(pattern_hessian = 1L + 2L * n,
+  gradients <- list(pattern_hessian = pattern_grads,
                     marginal_mode = marginal_grads,
                     final_hessian = final_grads)
   gradients$total <- sum(unlist(gradients))

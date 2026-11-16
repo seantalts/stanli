@@ -15,7 +15,8 @@ laplace_whiten(
   threshold = 1e-06,
   repair = c("abs", "abs_dense", "clip"),
   clip = NULL,
-  hessian = c("coloured", "dense")
+  hessian = c("coloured", "dense"),
+  pattern = c("probe", "dense")
 )
 }
 \arguments{
@@ -36,6 +37,11 @@ pattern and for the entries of `Q`.}
 
 \item{hessian}{`"coloured"` (default) or `"dense"`, which calls
 [log_prob_hessian()] at the mode.}
+
+\item{pattern}{`"probe"` (default) finds the pattern from a few dozen
+gradients and checks it against three random gradient differences,
+falling back to the dense Hessian with a warning if the check fails;
+`"dense"` calls [log_prob_hessian()] at the start point.}
 }
 \value{
 A list with `model`, the whitened model, and `report`: counts of
@@ -55,8 +61,8 @@ present.
 }
 \details{
 The steps, with the defaults the Python builder and its benchmark use: start
-at the Pathfinder mean (or `init`) and take the sparsity pattern of the
-dense Hessian there; maximize over `theta` the marginal
+at the Pathfinder mean (or `init`) and find the sparsity pattern of the
+Hessian there; maximize over `theta` the marginal
 `log p(theta, u_hat(theta)) - log det(-H_uu) / 2` by L-BFGS, with `H_uu`
 from central differences of the gradient along the pattern; at the result
 take `Q = -H`, drop entries below `threshold` relative to

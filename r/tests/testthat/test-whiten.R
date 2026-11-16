@@ -177,6 +177,26 @@ test_that("parameter_annotations lists annotated parameters", {
   expect_identical(parameter_annotations(es_whiten_model()), setNames(list(), character(0)))
 })
 
+test_that("the whitening routines leave R's protect stack balanced", {
+  skip_without_whiten()
+  inner <- es_whiten_model()
+  n <- inner$n_unconstrained
+  A <- Matrix::sparseMatrix(i = c(1:n, 2:n), j = c(1:n, 1:(n - 1)),
+                            x = c(rep(2, n), rep(-0.5, n - 1)), dims = c(n, n))
+  U <- matrix(c(1, rep(0, n - 1)), n, 1)
+  noise <- capture.output(type = "message", {
+    for (i in 1:3) {
+      f <- stanli:::lw_ldlt(A)
+      stanli:::lw_lowrank(f, U)
+      whitened <- whiten(inner, numeric(n), seq_len(n), Matrix::Diagonal(n))
+      parameter_annotations(inner)
+      parameter_annotations(whitened)
+      stanli:::lw_latent_index(inner, "mu")
+    }
+  })
+  expect_false(any(grepl("imbalance", noise)), info = paste(noise, collapse = "\n"))
+})
+
 CENTRED_STAN <- "
   data { int<lower=1> J; int<lower=1> N; array[N] int<lower=1, upper=J> g;
          vector[N] y; }
@@ -228,6 +248,44 @@ test_that("a latent argument wins over annotations and bad names are refused", {
   expect_error(laplace_whiten(m, latent = c("a", "a")), "twice")
   plain <- stanli_model(code = "parameters { real x; } model { x ~ normal(0, 1); }")
   expect_error(laplace_whiten(plain), "@latent")
+})
+
+test_that("the gradient probe finds the dense Hessian's pattern", {
+  skip_without_whiten()
+  code <- "data { int<lower=1> K; vector[K] y; }
+    parameters { real<lower=0> s; real<lower=0> sy; @latent vector[K] x; }
+    model { s ~ normal(0, 1); sy ~ normal(0, 1); x[1] ~ normal(0, 3);
+      x[2:K] ~ normal(x[1:(K - 1)], s); y ~ normal(x, sy); }"
+  set.seed(2)
+  for (K in c(40L, 600L)) {
+    m <- suppressWarnings(stanli_model(code = code, data = list(
+      K = K, y = cumsum(rnorm(K, 0, 0.3)))))
+    iu <- stanli:::lw_latent_index(m, "x")
+    q <- 0.3 * rnorm(m$n_unconstrained)
+    counter <- new.env()
+    counter$n <- 0L
+    P <- stanli:::lw_probe_pattern(m, q, iu, 1e-6, counter, 1)
+    dense <- stanli:::lw_pattern(log_prob_hessian(m, q)$hessian, 1e-6)[iu, iu]
+    expect_identical(as.matrix(P) != 0, as.matrix(dense) != 0)
+    expect_lt(counter$n, 1 + 2 * m$n_unconstrained)
+    step <- 1e-4 * pmax(1, abs(q[iu]))
+    H <- Matrix::Matrix(log_prob_hessian(m, q)$hessian[iu, iu], sparse = TRUE)
+    grad <- function(x) log_prob_grad(m, x)
+    expect_true(stanli:::lw_probe_agrees(grad, q, iu, H, step, 1e-6))
+    expect_false(stanli:::lw_probe_agrees(grad, q, iu, Matrix::Diagonal(x = Matrix::diag(H)),
+                                          step, 1e-6))
+  }
+})
+
+test_that("probe and dense patterns give the same whitening", {
+  skip_without_whiten()
+  m <- centred_model()
+  a <- laplace_whiten(m, seed = 3)$report
+  b <- laplace_whiten(m, seed = 3, pattern = "dense")$report
+  expect_equal(a$q_hat, b$q_hat, tolerance = 1e-8)
+  expect_identical(a$nnz_L, b$nnz_L)
+  expect_lt(a$gradients$pattern_hessian, b$gradients$pattern_hessian)
+  expect_identical(b$gradients$pattern_hessian, 1L + 2L * 15L)
 })
 
 test_that("a whitened hierarchical model samples to the default posterior", {
