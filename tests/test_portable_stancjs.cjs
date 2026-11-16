@@ -169,7 +169,8 @@ function nativeMessages(code) {
     fs.writeFileSync(source, code);
     const run = spawnSync(nativePath, ["--messages-json", messages, source],
                           {encoding: "utf8", maxBuffer: 1 << 28});
-    return {status: run.status, stderr: run.stderr,
+    // A Windows build writes stderr in text mode, with CRLF line ends.
+    return {status: run.status, stderr: run.stderr.replace(/\r\n/g, "\n"),
             messages: JSON.parse(fs.readFileSync(messages, "utf8"))};
   } finally {
     fs.rmSync(root, {recursive: true, force: true});
