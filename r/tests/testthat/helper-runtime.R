@@ -1,6 +1,6 @@
-# These need a runtime. Point STANLI_RUNTIME at a build (and
-# STANLI_STANC at a stanc3 if that build does not embed one) to run them;
-# they skip otherwise, so R CMD check passes on a machine with neither.
+# These need a runtime. Point STANLI_RUNTIME at a build (with stanli-compile
+# beside it if that build does not embed the compiler) to run them; they skip
+# otherwise, so R CMD check passes on a machine with neither.
 # STANLI_REQUIRE_RUNTIME=1 makes a missing runtime a failure, for CI jobs
 # where one was installed on purpose.
 skip_without_runtime <- function(available = stanli_available()) {

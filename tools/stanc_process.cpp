@@ -1,12 +1,19 @@
 #include "stanc_process.hpp"
 
+#include <nlohmann_json.hpp>
+
 #include <array>
+#include <atomic>
+#include <chrono>
 #include <cerrno>
 #include <climits>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <filesystem>
+#include <fstream>
+#include <sstream>
 #include <stdexcept>
 #include <string>
 #include <thread>
@@ -298,10 +305,11 @@ ProcessResult run_process_posix(const std::string& exe,
 
 #endif
 
-// A failing compiler's stderr is its error message; a succeeding one's is
-// warnings, which pass through to ours.
+// A failing compiler's stderr is its error message, thrown as CompileError.
+// A succeeding one's is returned in `stderr_text` without its final newline.
 std::string run_compiler(const std::string& exe,
-                         const std::vector<std::string>& args) {
+                         const std::vector<std::string>& args,
+                         std::string& stderr_text) {
 #ifdef _WIN32
   ProcessResult result = run_process_windows(exe, args);
 #else
@@ -314,9 +322,52 @@ std::string run_compiler(const std::string& exe,
     throw CompileError(message.empty() ? exe + " failed with exit status " +
                                              std::to_string(result.status)
                                        : message);
-  if (!message.empty()) std::fprintf(stderr, "%s\n", message.c_str());
+  stderr_text = std::move(message);
   return result.out;
 }
+
+// A path for the compiler's --messages-json file, removed when this goes out
+// of scope.
+class MessagesFile {
+ public:
+  MessagesFile() {
+    static std::atomic<unsigned> counter{0};
+    const auto now =
+        std::chrono::steady_clock::now().time_since_epoch().count();
+#ifdef _WIN32
+    const unsigned long pid = GetCurrentProcessId();
+#else
+    const unsigned long pid = static_cast<unsigned long>(getpid());
+#endif
+    path_ = std::filesystem::temp_directory_path() /
+            ("stanli-messages-" + std::to_string(pid) + "-" +
+             std::to_string(now) + "-" + std::to_string(counter++) + ".json");
+  }
+  MessagesFile(const MessagesFile&) = delete;
+  MessagesFile& operator=(const MessagesFile&) = delete;
+  ~MessagesFile() {
+    std::error_code ignored;
+    std::filesystem::remove(path_, ignored);
+  }
+  std::string string() const { return path_.u8string(); }
+
+  void read_into(stanli::StancResult& result) const {
+    std::ifstream in(path_, std::ios::binary);
+    if (!in)
+      throw std::runtime_error("the compiler wrote no messages file " +
+                               string());
+    std::stringstream text;
+    text << in.rdbuf();
+    const nlohmann::json messages = nlohmann::json::parse(text.str());
+    for (const auto& warning : messages.at("warnings"))
+      result.warnings.push_back(warning.get<std::string>());
+    const auto& o1 = messages.at("o1_fallback");
+    if (!o1.is_null()) result.o1_fallback = o1.get<std::string>();
+  }
+
+ private:
+  std::filesystem::path path_;
+};
 
 bool is_executable_file(const std::string& path) {
 #ifdef _WIN32
@@ -334,15 +385,26 @@ bool is_executable_file(const std::string& path) {
 
 std::string run_stanc_process(const std::string& stanc,
                               const std::string& model) {
-  return run_compiler(stanc, {"--O1", "--debug-optimized-mir", model});
+  std::string warnings;
+  std::string mir =
+      run_compiler(stanc, {"--O1", "--debug-optimized-mir", model}, warnings);
+  if (!warnings.empty()) std::fprintf(stderr, "%s\n", warnings.c_str());
+  return mir;
 }
 
-std::string run_portable_compiler(const std::string& compiler,
-                                  const std::string& model, bool fast_math) {
+stanli::StancResult run_portable_compiler(const std::string& compiler,
+                                          const std::string& model,
+                                          bool fast_math) {
+  const MessagesFile messages;
   std::vector<std::string> args = {"--model-only"};
   if (fast_math) args.push_back("--fast-math");
-  args.insert(args.end(), {"--filename", model, model});
-  return run_compiler(compiler, args);
+  args.insert(args.end(), {"--filename", model, "--messages-json",
+                           messages.string(), model});
+  std::string human_text;
+  stanli::StancResult result;
+  result.mir = run_compiler(compiler, args, human_text);
+  messages.read_into(result);
+  return result;
 }
 
 std::string executable_directory() {

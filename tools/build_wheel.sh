@@ -55,30 +55,27 @@ rm -f /tmp/binary-size.$$
 strip -x "python/stanli/_bin/$(basename "$LIB")" 2>/dev/null || true
 cp THIRD_PARTY_LICENSES.md LICENSE python/stanli/
 
-# Without the embedded compiler the package needs subprocess compilers. Windows
-# ships stanli's portable-MIR producer and keeps stock stanc beside it
-# for one rollback cycle; other non-embedded development builds keep stock stanc.
+# Without the embedded compiler the package compiles through stanli-compile.
+# Windows ships the provenance-checked artifact from the workflow; other
+# non-embedded development builds take the one dev_setup.sh --no-embed builds.
 if [ "$EMBED_SETTING" != ON ]; then
-  if [ ! -f deps/stanc3/stanc ] || [ ! -f deps/stanc3/stanc.src ] ||
-     [ "$(cat deps/stanc3/stanc.src 2>/dev/null || true)" != "$STANC3_SRC_SHA" ]; then
-    echo "wheel needs a compiler built from $STANC3_SRC_SHA" >&2
-    echo "run ./tools/dev_setup.sh --no-build first" >&2
-    exit 1
-  fi
+  PORTABLE_COMPILER=deps/stanc3/stanli-compile
   case "$(uname -s)" in
     MINGW*|MSYS*|CYGWIN*)
-      PORTABLE_COMPILER=deps/stanc3/stanli-compile
       if ! stanli_windows_cli_artifact_matches "$PORTABLE_COMPILER" \
           "$STANC3_SRC_REPO" "$STANC3_SRC_SHA"; then
         echo "$PORTABLE_COMPILER has absent or mismatched provenance" >&2
         echo "use the windows-compilers artifact from this workflow run" >&2
         exit 1
       fi
-      cp deps/stanc3/stanc python/stanli/_bin/stanc.exe
       cp "$PORTABLE_COMPILER" python/stanli/_bin/stanli-compile.exe
       ;;
-    *) cp deps/stanc3/stanc python/stanli/_bin/stanc
-       chmod +x python/stanli/_bin/stanc ;;
+    *)
+      if [ ! -f "$PORTABLE_COMPILER" ]; then
+        echo "wheel needs $PORTABLE_COMPILER; run ./tools/dev_setup.sh --no-embed --no-build first" >&2
+        exit 1
+      fi
+      install -m 755 "$PORTABLE_COMPILER" python/stanli/_bin/stanli-compile ;;
   esac
 fi
 

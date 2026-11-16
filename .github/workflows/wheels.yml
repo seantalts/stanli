@@ -1102,9 +1102,10 @@ jobs:
           name: r-first-posterior-${{ matrix.runtime }}
           path: r-first-posterior.csv
 
-  # The Windows wheel cannot embed the native compiler yet. Cross-build both
-  # the stock rollback executable and stanli's portable-MIR executable from
-  # the same stanc3 fork revision the other wheels embed, using stanc3's own
+  # The Windows wheel cannot embed the native compiler yet. Cross-build
+  # stanli's portable-MIR executable, which the wheel ships, and stock stanc,
+  # which the Windows test build uses for its MIR fixtures, from the same
+  # stanc3 fork revision the other wheels embed, using stanc3's own
   # Linux-to-Windows recipe. Their provenance is checked before packaging.
   stanc-windows:
     name: cross-build Windows compilers
@@ -1286,11 +1287,9 @@ jobs:
             windows-compilers/stanli-compile.exe
           node tests/test_portable_stancjs.cjs \
             browser-compilers/stanli-compiler.js \
-            windows-compilers/stanli-compile.exe \
-            browser-compilers/stancjs.bc.js
+            windows-compilers/stanli-compile.exe
           Rscript tests/test_windows_compiler.R \
-            windows-compilers/stanli-compile.exe \
-            windows-compilers/stanc.exe
+            windows-compilers/stanli-compile.exe
 
   # Source PRs require the same Windows wheel build, CTest suite, and installed
   # Python checks that main, nightly, manual, and release runs exercise.
@@ -1404,9 +1403,7 @@ jobs:
           ./tools/build_wheel.sh
           test -f python/stanli/_bin/stanli.dll
           test -f python/stanli/_bin/stanli-compile.exe
-          test -f python/stanli/_bin/stanc.exe
           unzip -l dist/*.whl | grep -F 'stanli/_bin/stanli-compile.exe'
-          unzip -l dist/*.whl | grep -F 'stanli/_bin/stanc.exe'
 
       # The wheel must work from python.org's CPython, not just msys2's:
       # that is the interpreter Windows users actually have.
@@ -1428,8 +1425,8 @@ jobs:
           name: wheel-win_amd64
           path: dist/*.whl
 
-      # As above, for the R package. This _bin/ has both compiler executables
-      # as well as the DLL, because the Windows build does not embed one.
+      # As above, for the R package. This _bin/ has stanli-compile.exe as
+      # well as the DLL, because the Windows build does not embed a compiler.
       - name: Runtime tarball
         run: |
           mkdir -p runtime-dist
@@ -1438,10 +1435,10 @@ jobs:
           members=$(tar tzf \
             runtime-dist/stanli-runtime-windows-x86_64.tar.gz)
           printf '%s\n' "$members"
-          for file in stanli.dll stanli-compile.exe stanc.exe; do
+          for file in stanli.dll stanli-compile.exe; do
             printf '%s\n' "$members" | grep -Eq "(^|/)${file}$"
           done
-          test "$(printf '%s\n' "$members" | grep -vc '/$')" -eq 3
+          test "$(printf '%s\n' "$members" | grep -vc '/$')" -eq 2
 
       - uses: actions/upload-artifact@v4
         with:
@@ -1904,8 +1901,7 @@ jobs:
           path: runtime-dist/*.tar.gz
 
   # One exact-source compiler build shared by pull-request parity, Pages, and
-  # npm. The stanli producer and its native CLI compile the same OCaml modules;
-  # stock stancjs is retained in the artifact as the legacy rollback path.
+  # npm. The stanli producer and its native CLI compile the same OCaml modules.
   browser-compiler:
     name: portable browser compiler
     needs: changes
@@ -1924,14 +1920,12 @@ jobs:
         uses: actions/cache@v4
         with:
           path: |
-            deps/stanc3/stancjs.bc.js
-            deps/stanc3/stancjs.bc.js.stamp
             deps/stanc3/stanli-compiler.js
             deps/stanc3/stanli-compiler.js.stamp
             deps/stanc3/stanli_compiler_cli
             deps/stanc3/stanli_compiler_cli.stamp
           key: >-
-            browser-compilers-v2-${{ env.STANC3_SRC_SHA }}-ocaml${{ env.OCAML_VERSION }}-dune${{ env.DUNE_VERSION }}-jsoo6.4.1-${{ hashFiles('compiler/ocaml/**', 'compiler/js/**', 'tools/stanc_embed/**') }}
+            browser-compilers-v3-${{ env.STANC3_SRC_SHA }}-ocaml${{ env.OCAML_VERSION }}-dune${{ env.DUNE_VERSION }}-jsoo6.4.1-${{ hashFiles('compiler/ocaml/**', 'compiler/js/**', 'tools/stanc_embed/**') }}
 
       - name: opam ${{ env.OPAM_VERSION }}
         if: steps.stancjs-cache.outputs.cache-hit != 'true'
@@ -1959,11 +1953,8 @@ jobs:
              js_of_ocaml.6.4.1 js_of_ocaml-compiler.6.4.1 \
              js_of_ocaml-ppx.6.4.1 &&
            eval "$(opam env --switch=stancjs)" &&
-           dune subst &&
-           dune build --profile release src/stancjs/stancjs.bc.js)
+           dune subst)
           mkdir -p deps/stanc3
-          cp deps/stanc3-src/_build/default/src/stancjs/stancjs.bc.js \
-            deps/stanc3/
           tools/stanc_embed/install_overlay.sh js deps/stanc3-src
           (cd deps/stanc3-src &&
            eval "$(opam env --switch=stancjs)" &&
@@ -1976,8 +1967,6 @@ jobs:
             deps/stanc3/stanli_compiler_cli
           chmod +x deps/stanc3/stanli_compiler_cli
           source tools/stanc_embed/provenance.sh
-          stancjs_expected_stamp "$STANC3_SRC_REPO" "$STANC3_SRC_SHA" \
-            stancjs > deps/stanc3/stancjs.bc.js.stamp
           stanli_stancjs_expected_stamp "$STANC3_SRC_REPO" "$STANC3_SRC_SHA" \
             stancjs > deps/stanc3/stanli-compiler.js.stamp
           cp deps/stanc3/stanli-compiler.js.stamp \
@@ -1987,19 +1976,15 @@ jobs:
 
       - name: Keep static on one line for Safari 17
         run: |
-          tools/stanc_embed/fix_static_newline.sh \
-            deps/stanc3/stancjs.bc.js deps/stanc3/stanli-compiler.js
+          tools/stanc_embed/fix_static_newline.sh deps/stanc3/stanli-compiler.js
 
       - name: Validate browser compiler provenance
         run: |
           source tools/stanc_embed/provenance.sh
-          stancjs_artifact_matches deps/stanc3/stancjs.bc.js \
-            "$STANC3_SRC_REPO" "$STANC3_SRC_SHA" stancjs
           stanli_stancjs_artifact_matches deps/stanc3/stanli-compiler.js \
             "$STANC3_SRC_REPO" "$STANC3_SRC_SHA" stancjs
           stanli_stancjs_artifact_matches deps/stanc3/stanli_compiler_cli \
             "$STANC3_SRC_REPO" "$STANC3_SRC_SHA" stancjs
-          cat deps/stanc3/stancjs.bc.js.stamp
           cat deps/stanc3/stanli-compiler.js.stamp
 
       - name: Native and JavaScript compilers emit identical bytes
@@ -2007,15 +1992,11 @@ jobs:
           {
             node tests/test_portable_stancjs.cjs \
               deps/stanc3/stanli-compiler.js \
-              deps/stanc3/stanli_compiler_cli \
-              deps/stanc3/stancjs.bc.js
-            node tests/test_worker_compiler.cjs custom js/worker.js \
-              deps/stanc3/stanli-compiler.js deps/stanc3/stancjs.bc.js
-            node tests/test_worker_compiler.cjs fallback js/worker.js \
-              deps/stanc3/stanli-compiler.js deps/stanc3/stancjs.bc.js
-            wc -c deps/stanc3/stanli-compiler.js deps/stanc3/stancjs.bc.js
+              deps/stanc3/stanli_compiler_cli
+            node tests/test_worker_compiler.cjs js/worker.js \
+              deps/stanc3/stanli-compiler.js
+            wc -c deps/stanc3/stanli-compiler.js
             gzip -c deps/stanc3/stanli-compiler.js | wc -c
-            gzip -c deps/stanc3/stancjs.bc.js | wc -c
           } 2>&1 | tee /tmp/portable-mir-browser-measurements.txt
 
       # Exercise the R/JavaScript bridge without the post-submit side-module
@@ -2030,8 +2011,6 @@ jobs:
           mkdir -p browser-dist
           cp deps/stanc3/stanli-compiler.js \
             deps/stanc3/stanli-compiler.js.stamp \
-            deps/stanc3/stancjs.bc.js \
-            deps/stanc3/stancjs.bc.js.stamp \
             deps/stanc3/stanli_compiler_cli \
             deps/stanc3/stanli_compiler_cli.stamp browser-dist/
 
@@ -2090,8 +2069,7 @@ jobs:
           fi
 
   # The public demo: web/ plus the runtime and compiler artifacts, deployed
-  # to GitHub Pages on every main push. The stanli compiler emits portable
-  # MIR; stock stancjs remains beside it as the legacy rollback path.
+  # to GitHub Pages on every main push.
   pages:
     name: deploy the browser demo
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
@@ -2132,15 +2110,13 @@ jobs:
 
       - name: Compile and sample through the browser compiler
         run: |
-          node tests/test_wasm.cjs web/stanli.js \
-            web/stanli-compiler.js web/stancjs.bc.js
+          node tests/test_wasm.cjs web/stanli.js web/stanli-compiler.js
           node tests/test_worker_diagnostics.cjs web/stanli.js \
             web/stanli-compiler.js
 
       - name: Assemble the page and the npm package
         run: |
-          cp web/stanli.js web/stanli.wasm web/stanli-compiler.js \
-            web/stancjs.bc.js js/
+          cp web/stanli.js web/stanli.wasm web/stanli-compiler.js js/
           cp js/index.mjs web/stanli.mjs
           cp js/worker.js web/
           (cd js && npm pack --pack-destination ..)
@@ -2217,12 +2193,12 @@ jobs:
       - name: Compile and sample through the packaged browser compiler
         run: |
           node tests/test_wasm.cjs npm-dist/stanli.js \
-            npm-dist/stanli-compiler.js npm-dist/stancjs.bc.js
+            npm-dist/stanli-compiler.js
 
       - name: Assemble the npm package
         run: |
           cp npm-dist/stanli.js npm-dist/stanli.wasm \
-            npm-dist/stanli-compiler.js npm-dist/stancjs.bc.js js/
+            npm-dist/stanli-compiler.js js/
 
       # Deliberately no registry-url: setup-node writes an .npmrc with a
       # placeholder _authToken when it is given one, npm sees credentials

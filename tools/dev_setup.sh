@@ -226,9 +226,9 @@ if [ "$WANT_CONFORMANCE" = 1 ]; then
   echo "reference client ready under $("$VENV_PYTHON" -V)"
 
   # The harness never loads anything out of the build tree; it drives stanli
-  # through the public Python package, which finds its library and its stanc
-  # in python/stanli/_bin. Staging those is what makes the printed command
-  # work straight after setup, and it is the same pair the nightly stages.
+  # through the public Python package, which finds its library (and, without
+  # the embedded compiler, stanli-compile) in python/stanli/_bin. Staging
+  # those is what makes the printed command work straight after setup.
   # Restage after every rebuild: an unstaged rebuild silently measures the
   # library from before it.
   if [ "$WANT_BUILD" = 1 ]; then
@@ -242,7 +242,6 @@ if [ "$WANT_CONFORMANCE" = 1 ]; then
     [ -n "$LIB" ] || { echo "no shared library in build-rel/"; exit 1; }
     mkdir -p python/stanli/_bin
     cp "$LIB" python/stanli/_bin/
-    install -m 755 deps/stanc3/stanc-pinned "python/stanli/_bin/stanc$EXE_SUFFIX"
     if [ "$WANT_EMBED" = 0 ]; then
       install -m 755 "deps/stanc3/stanli-compile$EXE_SUFFIX" \
         "python/stanli/_bin/stanli-compile$EXE_SUFFIX"
@@ -256,7 +255,6 @@ if [ "$WANT_CONFORMANCE" = 1 ]; then
     else
       echo "  cp build-rel/libstanli.* python/stanli/_bin/"
     fi
-    echo "  cp deps/stanc3/stanc-pinned python/stanli/_bin/stanc$EXE_SUFFIX"
     if [ "$WANT_EMBED" = 0 ]; then
       echo "  cp deps/stanc3/stanli-compile$EXE_SUFFIX python/stanli/_bin/"
     fi

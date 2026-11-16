@@ -30,10 +30,7 @@ The browser build is a different binary with no embedded stanc3, because
 the compiler ships separately as JavaScript. `stanli-compiler.js` contains
 stanc3 plus the shared stanli OCaml pipeline and emits portable MIR. It is
 2,990,736 bytes raw and 425,026 bytes gzipped in the current measured
-build. For one rollback cycle the package also carries stock
-`stancjs.bc.js` (2,971,677 bytes raw, 418,847 bytes gzipped), which emits
-O1 legacy MIR and loads only if the portable compiler is unavailable. A
-page that ships precompiled MIR fetches neither compiler.
+build. A page that ships precompiled MIR does not fetch it.
 
 `stanli.wasm` is 5.79 MB raw and 1.52 MB gzipped. Densities are 55% of the
 compressed runtime payload, measured by stubbing every density kernel and

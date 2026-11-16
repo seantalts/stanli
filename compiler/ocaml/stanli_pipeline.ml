@@ -23,6 +23,11 @@ type 'a compilation =
   ; warnings: Frontend.Warnings.t list
   ; diagnostics: diagnostic list }
 
+let o1_fallback compilation =
+  List.find_map
+    (fun (O1_budget_exceeded _ as d) -> Some (diagnostic_message d))
+    compilation.diagnostics
+
 type pass_selection =
   { vectorize_loops: bool
   ; partial_evaluation: bool

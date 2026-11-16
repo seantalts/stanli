@@ -309,7 +309,8 @@ The compiler runs as a native executable, as JavaScript and as a Windows
 executable, and all three must emit the same compact MIR bytes.
 [`tests/test_portable_stancjs.cjs`](tests/test_portable_stancjs.cjs) checks
 this on the [compiler fixtures](tests/compiler/README.md), along with repeat
-determinism, error and warning parity, and the stock `stanc()` API.
+determinism and parity of errors, warnings and the O1 fallback notice between
+the JavaScript result and the CLI's `--messages-json` file.
 
 ## Testing Stan language coverage
 

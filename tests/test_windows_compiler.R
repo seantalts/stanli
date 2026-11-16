@@ -1,11 +1,11 @@
-# Exercise the real Windows subprocess path in r/R/stanc.R. Both PE files and
+# Exercise the real Windows subprocess path in r/R/stanc.R. The compiler and
 # the staged Stan source live below paths containing spaces; the compiler path
 # also has a Unicode component, catching quoting and path conversion at both
 # ends of system2().
 main <- function() {
   args <- commandArgs(trailingOnly = TRUE)
-  if (length(args) != 2L)
-    stop("usage: test_windows_compiler.R STANLI-COMPILE.EXE STANC.EXE")
+  if (length(args) != 1L)
+    stop("usage: test_windows_compiler.R STANLI-COMPILE.EXE")
   if (!identical(Sys.info()[["sysname"]], "Windows"))
     stop("test_windows_compiler.R must run on Windows")
 
@@ -34,11 +34,9 @@ main <- function() {
   environment(mir_from_binary_test) <- compiler_env
 
   portable_compiler <- file.path(compiler_dir, "stanli-compile.exe")
-  stock_compiler <- file.path(compiler_dir, "stanc.exe")
   if (!file.copy(normalizePath(args[[1L]], mustWork = TRUE),
-                 portable_compiler) ||
-      !file.copy(normalizePath(args[[2L]], mustWork = TRUE), stock_compiler))
-    stop("could not copy the Windows compilers into the test directory")
+                 portable_compiler))
+    stop("could not copy the Windows compiler into the test directory")
 
   # Deliberate CRLF input exercises byte-preserving source staging on Windows;
   # the non-ASCII string must survive the process boundary and output capture.
@@ -50,7 +48,7 @@ main <- function() {
     "model { x ~ std_normal(); }\r\n")
   Encoding(model) <- "UTF-8"
 
-  portable <- mir_from_binary_test(portable_compiler, model, portable = TRUE)
+  portable <- mir_from_binary_test(portable_compiler, model)
   if (!startsWith(portable, "STANLI3:"))
     stop("the portable compiler did not emit the versioned envelope")
   if (endsWith(portable, "\n") || endsWith(portable, "\r"))
@@ -63,16 +61,6 @@ main <- function() {
   }, logical(1)))
   if (!has_unicode)
     stop("the portable compiler did not preserve Unicode source bytes")
-
-  legacy <- mir_from_binary_test(stock_compiler, model, portable = FALSE)
-  if (!startsWith(legacy, "((functions_block"))
-    stop("stock stanc did not emit legacy optimized MIR")
-  if (startsWith(legacy, "STANLI3:"))
-    stop("the stock rollback compiler was replaced by the portable producer")
-  # Legacy MIR renders non-ASCII string bytes as decimal backslash escapes.
-  legacy_unicode <- paste0("\\", as.integer(charToRaw(unicode)), collapse = "")
-  if (!grepl(legacy_unicode, legacy, fixed = TRUE))
-    stop("stock stanc did not preserve the Unicode source bytes")
 
   message("test_windows_compiler OK")
 }

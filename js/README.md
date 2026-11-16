@@ -105,7 +105,7 @@ mode does no PSIS resampling.
 | Function | Does |
 | --- | --- |
 | `sample({code \| mir, data, seed, warmup, samples, delta, sampler, maxError, pathfinderInit, fastMath, onProgress, onLive})` | Compile (unless `mir` is given) and draw. Defaults: `seed` 1, `warmup` 1000, `samples` 1000, `delta` 0.8, `sampler` `"nuts"`. |
-| `compile({code, fastMath})` | Compile Stan source to portable MIR once, for reuse across `sample()` calls. |
+| `compile({code, fastMath})` | Compile Stan source to portable MIR once, for reuse across `sample()` calls. Returns `{mir, warnings, o1Fallback}`; `o1Fallback` is null unless the model was too large for O1 and was compiled from unoptimized MIR. |
 | `diagnose(fit \| fits)` | Text diagnostic report for NUTS fits. |
 | `diagnoseReport(fit \| fits)` | `{ text, failed, unavailable }`: the report and its verdict as counts. |
 | `preload({chains})` | Start loading the compiler and WASM runtime in the background. |
@@ -117,12 +117,11 @@ Pathfinder), for live plots.
 ## Platforms
 
 The compiler loads only when a call passes Stan source. It is about 3 MB raw
-and 425 KB gzipped. The package also carries the stock `stancjs.bc.js` of
-about the same size for one release cycle, loaded only if the preferred
-compiler is unavailable. `preload()` at page idle lets the first `sample()`
-skip the fetch and parse. An app with a fixed model can compile it at build
-time (`stanc --O1 --debug-optimized-mir model.stan`) and pass `mir`; then no
-compiler loads and the WASM runtime alone is about 1.5 MB gzipped.
+and 425 KB gzipped. `preload()` at page idle lets the first `sample()`
+skip the fetch and parse. An app with a fixed model can save the `mir` that
+`compile()` returns (or that `stanli.stan_to_mir()` returns in Python) and
+pass it to `sample()`; then no compiler loads and the WASM runtime alone is
+about 1.5 MB gzipped.
 
 ## Limits
 

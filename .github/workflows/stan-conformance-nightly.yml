@@ -61,10 +61,10 @@ jobs:
             deps/bridgestan
           key: conformance-deps-linux-x86_64-${{ hashFiles('deps/pins.env', 'deps/fetch.sh', 'harnesses/conformance/fetch_cmdstan.sh', 'harnesses/conformance/build_stanc.sh', 'tools/dev_setup.sh') }}
 
-      # Only exercised when the cache misses: fetch_cmdstan.sh builds
-      # the pinned stanc from source then, and the build needs opam.
-      # Same pinned opam release the wheels use.
-      - name: opam (for a cold stanc build)
+      # fetch_cmdstan.sh builds the pinned stanc from source when the cache
+      # misses, and stanli-compile is always built from source below. Same
+      # pinned opam release the wheels use.
+      - name: opam
         run: |
           url=https://github.com/ocaml/opam/releases/download
           curl -fsSL --retry 5 --retry-all-errors --retry-delay 2 \
@@ -80,6 +80,23 @@ jobs:
           ./deps/fetch.sh
           ./harnesses/conformance/fetch_cmdstan.sh --bridgestan
 
+      # The runtime does not embed a compiler here, so the package compiles
+      # through stanli-compile, built from the fork as tools/dev_setup.sh
+      # --no-embed builds it.
+      - name: Build stanli-compile
+        run: |
+          source deps/pins.env
+          if [ "$(git -C deps/stanc3-src rev-parse HEAD 2>/dev/null || true)" != \
+               "$STANC3_SRC_SHA" ] ||
+             ! opam switch list --short 2>/dev/null | grep -qx "$OPAM_SWITCH"; then
+            rm -f deps/stanc3/stanc deps/stanc3/stanc.src
+          fi
+          ./harnesses/conformance/build_stanc.sh --stanli "$OPAM_SWITCH"
+          tools/stanc_embed/install_overlay.sh js deps/stanc3-src
+          (cd deps/stanc3-src &&
+           opam exec --switch="$OPAM_SWITCH" -- dune build -j 2 \
+             --profile release src/stanli_stancjs/stanli_compiler_cli.exe)
+
       - name: Build the public stanli Python runtime
         run: |
           cmake -B build-rel -DCMAKE_BUILD_TYPE=Release \
@@ -89,7 +106,9 @@ jobs:
           cmake --build build-rel --target stanli_shared -j2
           mkdir -p python/stanli/_bin
           cp build-rel/libstanli.so python/stanli/_bin/
-          cp deps/stanc3/stanc-pinned python/stanli/_bin/stanc
+          install -m 755 \
+            deps/stanc3-src/_build/default/src/stanli_stancjs/stanli_compiler_cli.exe \
+            python/stanli/_bin/stanli-compile
 
       - name: Emit the deterministic partition manifest
         run: |
@@ -159,7 +178,7 @@ jobs:
           path: python/stanli/_bin
 
       - name: Restore executable mode stripped by artifact transport
-        run: chmod +x python/stanli/_bin/stanc
+        run: chmod +x python/stanli/_bin/stanli-compile
 
       - name: Install the conformance runtime
         run: |

@@ -16,6 +16,9 @@ type 'a compilation =
   ; warnings: Frontend.Warnings.t list
   ; diagnostics: diagnostic list }
 
+val o1_fallback : 'a compilation -> string option
+(** The notice for an O1 pass skipped for the structural budget, if any. *)
+
 (** Source-level MIR passes added to upstream's stability-preserving O1 policy. *)
 type pass_selection =
   { vectorize_loops: bool

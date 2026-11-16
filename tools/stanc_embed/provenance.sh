@@ -136,55 +136,6 @@ stanc_embed_artifact_matches() {
     [[ -n "$(_stanc_embed_stamp_value "$stamp" dune_version)" ]]
 }
 
-stancjs_expected_stamp() {
-  local src_repo=${1:?stanc3 source repository}
-  local src_sha=${2:?stanc3 source revision}
-  local opam_switch=${3:?opam switch}
-  local jsoo_version
-  jsoo_version=$(_stanc_embed_package_version "$opam_switch" js_of_ocaml)
-  printf '%s\n' \
-    'format=stanli-stancjs-v3' \
-    "stanc3_src_repo=$src_repo" \
-    "stanc3_src_sha=$src_sha" \
-    "opam_switch=$opam_switch" \
-    "ocaml_version=$(_stanc_embed_ocaml_version "$opam_switch")" \
-    "ocaml_target=$(_stanc_embed_ocaml_target "$opam_switch")" \
-    "dune_version=$(_stanc_embed_package_version "$opam_switch" dune)" \
-    "js_of_ocaml_version=$jsoo_version" \
-    'dune_profile=release' \
-    'dune_subst=1'
-}
-
-stancjs_artifact_matches() {
-  local artifact=${1:?stancjs artifact}
-  local src_repo=${2:?stanc3 source repository}
-  local src_sha=${3:?stanc3 source revision}
-  local opam_switch=${4:?opam switch}
-  local stamp="${artifact}.stamp"
-  [[ -f "$artifact" && -f "$stamp" ]] || return 1
-  if _stanc_embed_switch_exists "$opam_switch"; then
-    [[ "$(cat "$stamp")" == \
-       "$(stancjs_expected_stamp "$src_repo" "$src_sha" "$opam_switch")" ]]
-    return
-  fi
-
-  [[ "$(_stanc_embed_stamp_value "$stamp" format)" == \
-       'stanli-stancjs-v3' ]] &&
-    [[ "$(_stanc_embed_stamp_value "$stamp" stanc3_src_repo)" == \
-       "$src_repo" ]] &&
-    [[ "$(_stanc_embed_stamp_value "$stamp" stanc3_src_sha)" == \
-       "$src_sha" ]] &&
-    [[ "$(_stanc_embed_stamp_value "$stamp" opam_switch)" == \
-       "$opam_switch" ]] &&
-    [[ "$(_stanc_embed_stamp_value "$stamp" ocaml_version)" == \
-       "$(stanc_embed_read_setup OCAML_VERSION)" ]] &&
-    [[ -n "$(_stanc_embed_stamp_value "$stamp" ocaml_target)" ]] &&
-    [[ -n "$(_stanc_embed_stamp_value "$stamp" dune_version)" ]] &&
-    [[ -n "$(_stanc_embed_stamp_value "$stamp" js_of_ocaml_version)" ]] &&
-    [[ "$(_stanc_embed_stamp_value "$stamp" dune_profile)" == release ]] &&
-    [[ "$(_stanc_embed_stamp_value "$stamp" dune_subst)" == 1 ]]
-}
-
 # What the portable JavaScript compiler is built from: the overlay sources
 # and the scripts build_web.sh runs. The native embed's build scripts live
 # in the same directory but never feed this artifact, so they are listed
