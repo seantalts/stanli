@@ -288,6 +288,16 @@ test_that("probe and dense patterns give the same whitening", {
   expect_identical(b$gradients$pattern_hessian, 1L + 2L * 15L)
 })
 
+test_that("the eigenpair search finds a negative eigenvalue among many positive ones", {
+  skip_without_whiten()
+  d <- seq(1, 400, length.out = 300)
+  d[150] <- -80
+  Q <- Matrix::Diagonal(x = d)
+  r <- stanli:::lw_bad_eigenpairs(Q, 1e-8, 1L)
+  expect_equal(r$w, -80)
+  expect_equal(abs(as.numeric(r$V)), as.numeric(seq_len(300) == 150))
+})
+
 test_that("a whitened hierarchical model samples to the default posterior", {
   skip_without_whiten()
   m <- centred_model()

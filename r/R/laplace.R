@@ -116,10 +116,11 @@ parameter_annotations <- function(model) {
 
 # ---- builder ----------------------------------------------------------------
 
-lw_triplets <- function(M) {
-  M <- methods::as(methods::as(M, "CsparseMatrix"), "generalMatrix")
-  Matrix::mat2triplet(M)
-}
+lw_general <- function(M)
+  methods::as(methods::as(M, "CsparseMatrix"), "generalMatrix")
+
+lw_triplets <- function(M)
+  Matrix::mat2triplet(lw_general(M))
 
 lw_sparse <- function(i, j, x, n, m = n)
   Matrix::sparseMatrix(i = i, j = j, x = x, dims = c(n, m))
@@ -478,19 +479,19 @@ lw_bad_eigenpairs <- function(Q, floor, n_negative) {
   top <- lw_top_eigenvalue(Q)
   sigma <- -floor * abs(top)
   shifted <- Q - sigma * Matrix::Diagonal(n)
-  lu <- Matrix::lu(methods::as(shifted, "CsparseMatrix"))
+  lu <- Matrix::lu(lw_general(shifted))
   op <- function(v) as.numeric(Matrix::solve(lu, v))
   k <- min(max(2L * n_negative, n_negative + 4L), n - 2L)
   m <- min(n, 2L * k + 20L)
   for (attempt in 1:8) {
-    r <- lw_lanczos(op, n, m, lw_normal(n, attempt))
-    by_size <- order(-abs(r$values))
-    converged <- r$residual[by_size] <= 1e-9 * abs(r$values[by_size[1L]])
-    ready <- if (all(converged)) length(converged) else
-      which(!converged)[1L] - 1L
-    if (ready < k && m < n) {
+    repeat {
+      r <- lw_lanczos(op, n, m, lw_normal(n, attempt))
+      by_size <- order(-abs(r$values))
+      converged <- r$residual[by_size] <= 1e-9 * abs(r$values[by_size[1L]])
+      ready <- if (all(converged)) length(converged) else
+        which(!converged)[1L] - 1L
+      if (ready >= k || m >= n) break
       m <- min(n, 2L * m)
-      next
     }
     take <- by_size[seq_len(min(k, ready))]
     w <- sigma + 1 / r$values[take]
@@ -517,7 +518,7 @@ lw_try_grad <- function(model, q)
 
 # Maximize the marginal log p(theta, u_hat(theta)) - log det(-H_uu) / 2 over
 # theta: u_hat from an inner L-BFGS, H_uu from the coloured Hessian, theta from
-# an outer L-BFGS with forward-difference gradients.
+# BFGS with forward-difference gradients.
 lw_marginal_mode <- function(model, q_start, iu, it, pattern_uu, max_outer,
                              inner_iter, counter) {
   n <- length(q_start)
@@ -537,7 +538,9 @@ lw_marginal_mode <- function(model, q_start, iu, it, pattern_uu, max_outer,
       qq[iu] <- u
       counter$n <- counter$n + 1L
       r <- lw_try_grad(model, qq)
-      value <- if (is.null(r) || !is.finite(r$lp)) NULL else r
+      value <- if (is.null(r) || !is.finite(r$lp) || abs(r$lp) > 1e100 ||
+                    !all(is.finite(r$grad)) || max(abs(r$grad)) > 1e100)
+        NULL else r
       last <<- list(u = u, value = value)
       value
     }
