@@ -3,7 +3,7 @@
 library(stanli)
 stopifnot(stanli_available())
 results <- testthat::test_package(
-  "stanli", filter = "bayesplot|loo|posterior-ecosystem|ecosystem-registration|stanfit",
+  "stanli", filter = "bayesplot|bridgesampling|loo|posterior-ecosystem|ecosystem-registration|stanfit",
   reporter = "summary"
 )
 counts <- as.data.frame(results)

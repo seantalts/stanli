@@ -982,7 +982,7 @@ jobs:
           working-directory: r
           extra-packages: >-
             any::testthat, any::posterior, any::V8, any::jsonlite,
-            any::bayesplot, any::loo, any::tidybayes, any::callr, any::rstan, any::shinystan, any::cmdstanr, any::nutpieR
+            any::bayesplot, any::loo, any::bridgesampling, any::tidybayes, any::callr, any::rstan, any::shinystan, any::cmdstanr, any::nutpieR
           dependencies: '"hard"'
 
       # Through R CMD check rather than testthat directly, so the tests run
@@ -1098,7 +1098,7 @@ jobs:
           working-directory: r
           extra-packages: >-
             any::testthat, any::posterior, any::V8, any::jsonlite,
-            any::bayesplot, any::loo, any::tidybayes, any::callr, any::rstan, any::shinystan, any::cmdstanr
+            any::bayesplot, any::loo, any::bridgesampling, any::tidybayes, any::callr, any::rstan, any::shinystan, any::cmdstanr
           dependencies: '"hard"'
       - name: Install and run ecosystem acceptance (no skips)
         run: |
