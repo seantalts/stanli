@@ -2083,6 +2083,35 @@ def test_compiler_warnings_reach_python_once():
             assert not _recorded(lambda: stanli.Model(stan_code=clean))
 
 
+ANNOTATED_HIERARCHY = """
+data { int<lower=1> J; vector[J] y; }
+parameters {
+  @latent vector[J] a;
+  real mu;
+  real<lower=0> sigma;
+}
+model { a ~ normal(mu, sigma); y ~ normal(a, 1); }
+"""
+
+
+def test_declaration_annotations():
+    data = {"J": 3, "y": [0.4, -1.2, 2.5]}
+    plain = ANNOTATED_HIERARCHY.replace("@latent ", "")
+    unknown = ANNOTATED_HIERARCHY.replace("  real mu;", "  @foo real mu;")
+    q = np.array([0.3, -0.7, 1.1, 0.2, -0.4])
+    for path in _compiler_paths():
+        with path():
+            built = []
+            seen = _recorded(lambda: built.append(
+                stanli.Model(stan_code=ANNOTATED_HIERARCHY, data=data)))
+            assert not seen, seen
+            seen = _recorded(lambda: stanli.Model(stan_code=unknown, data=data))
+            assert len(seen) == 1 and "Unknown annotation '@foo'" in seen[0], seen
+            reference = stanli.Model(stan_code=plain, data=data)
+            got, want = built[0].log_prob_grad(q), reference.log_prob_grad(q)
+            assert got[0] == want[0] and (got[1] == want[1]).all()
+
+
 def test_compile_errors_name_the_model_file():
     broken = "parameters { real x }\nmodel { x ~ normal(0, 1); }\n"
     for path in _compiler_paths():
