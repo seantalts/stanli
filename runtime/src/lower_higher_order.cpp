@@ -338,15 +338,15 @@ bool Lowering::lower_program_ode(ProgramCompiler& c, const mir::Expr& e,
   if (call->legacy) {
     std::vector<Range> inputs{z0, theta};
     if (runtime_controls) inputs.push_back(controls);
-    *out_range = c.kernel_call(OP_ODE, inputs, result,
-                               static_cast<uint8_t>(0x4u | activity), activity,
-                               {(int)N, S}, spec, e.name);
+    *out_range =
+        c.kernel_call(OP_ODE, inputs, result, SolverActivity{activity}.byte(),
+                      activity, {(int)N, S}, spec, e.name);
   } else {
     std::vector<Range> inputs{z0, theta, t0, ts};
     if (runtime_controls) inputs.push_back(controls);
-    *out_range = c.kernel_call(OP_ODE, inputs, result,
-                               static_cast<uint8_t>(0x10u | activity), activity,
-                               {(int)N, S}, spec, e.name);
+    *out_range =
+        c.kernel_call(OP_ODE, inputs, result, SolverActivity{activity}.byte(),
+                      activity, {(int)N, S}, spec, e.name);
   }
   return true;
 }
@@ -446,8 +446,8 @@ bool Lowering::lower_program_ode_adjoint(ProgramCompiler& c, const mir::Expr& e,
   std::vector<Range> inputs{y0, t0, ts, theta};
   if (in_write_array) inputs.push_back(controls);
   *out_range = c.kernel_call(OP_ODE_ADJOINT, inputs, result,
-                             static_cast<uint8_t>(0x10u | activity), activity,
-                             {N, S}, spec, e.name);
+                             SolverActivity{activity}.byte(), activity, {N, S},
+                             spec, e.name);
   return true;
 }
 bool Lowering::lower_program_dae(ProgramCompiler& c, const mir::Expr& e,
@@ -507,9 +507,9 @@ bool Lowering::lower_program_dae(ProgramCompiler& c, const mir::Expr& e,
                                             (parameter_count != 0 ? 0x4u : 0u));
   std::vector<Range> inputs{y0, yp0, theta};
   if (runtime_controls) inputs.push_back(controls);
-  *out_range = c.kernel_call(OP_DAE, inputs, result,
-                             static_cast<uint8_t>(0x8u | activity), activity,
-                             {(int)N, S}, spec, e.name);
+  *out_range =
+      c.kernel_call(OP_DAE, inputs, result, SolverActivity{activity}.byte(),
+                    activity, {(int)N, S}, spec, e.name);
   return true;
 }
 bool Lowering::lower_program_higher_order(ProgramCompiler& c,
@@ -1260,13 +1260,17 @@ Lowering::Val Lowering::lower_quadrature_fn(const mir::Expr& e,
   Val b = actuals.at(2).value();
   if (!is_scalar(a) || !is_scalar(b))
     fail(e.name + ": integration bounds must be scalar", e.raw);
-  const uint8_t variant = static_cast<uint8_t>(
-      (a.autodiff ? 0x1u : 0u) | (b.autodiff ? 0x2u : 0u) |
-      (!in_write_array && spec->parameter_count != 0 ? 0x4u : 0u));
+  const uint8_t variant =
+      SolverActivity{
+          static_cast<uint8_t>(
+              (a.autodiff ? 0x1u : 0u) | (b.autodiff ? 0x2u : 0u) |
+              (!in_write_array && spec->parameter_count != 0 ? 0x4u : 0u))}
+          .byte();
   SlotInfo si = view_of(e.unsized);
-  si.param_free = variant == 0;
+  const bool any_active = SolverActivity::of(variant).any();
+  si.param_free = !any_active;
   Val result = emit_raw(OP_QUADRATURE, {a.slot, b.slot, theta.slot}, 1, si, {},
-                        -1, variant != 0);
+                        -1, any_active);
   g.ops.back().variant = variant;
   g.ops.back().udata = spec.get();
   g.udata_pool.push_back(std::move(spec));
@@ -1379,16 +1383,12 @@ Lowering::Val Lowering::emit_ode(std::shared_ptr<OdeSpec> spec, const Val& z0,
                                 {(int)N, (int)S})
                    : emit_value(OP_ODE, {z0, theta}, N * S, result_si,
                                 {(int)N, (int)S});
-  // The new four-input form uses bit 4 as its marker and includes initial
-  // and output-time scalar types in bits 2 and 3. The old two-input form
-  // retains its bit-2 compatibility encoding.
   g.ops.back().variant =
-      t0 && ts
-          ? (uint8_t)(0x10u | (z0.autodiff ? 0x1u : 0u) |
-                      (theta.autodiff ? 0x2u : 0u) |
-                      (t0->autodiff ? 0x4u : 0u) | (ts->autodiff ? 0x8u : 0u))
-          : (uint8_t)(0x4u | (z0.autodiff ? 0x1u : 0u) |
-                      (theta.autodiff ? 0x2u : 0u));
+      SolverActivity{(uint8_t)((z0.autodiff ? 0x1u : 0u) |
+                               (theta.autodiff ? 0x2u : 0u) |
+                               (t0 && t0->autodiff ? 0x4u : 0u) |
+                               (ts && ts->autodiff ? 0x8u : 0u))}
+          .byte();
   g.ops.back().udata = spec.get();
   g.udata_pool.push_back(std::move(spec));
   return v;

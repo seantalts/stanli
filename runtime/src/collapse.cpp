@@ -176,7 +176,7 @@ Shape classify(const Graph& g, const Op& op) {
 
 // The outcome layout of an integer density: `width` observations, each
 // reading one value per group. Flat immediates are one group; binomial-style
-// immediates are [len, vals...] groups with len == -1 marking a scalar.
+// immediates are IntGroups (density_layout.hpp).
 struct Outcomes {
   bool ok = true;
   bool grouped = false;
@@ -200,16 +200,15 @@ Outcomes outcomes_of(const Op& op) {
     return o;
   }
   o.grouped = true;
-  for (int64_t m = 0; m < op.n_idata;) {
-    const int64_t len = op.idata[m] == -1 ? 1 : op.idata[m];
-    if (len < 1 || m + 1 + len > op.n_idata ||
-        (len != 1 && o.width != 1 && o.width != len)) {
+  const IntGroups groups = int_groups(op.idata, op.n_idata, 2);
+  for (int k = 0; k < groups.n; ++k) {
+    const int64_t len = groups.group[k].count;
+    if (len < 1 || (len != 1 && o.width != 1 && o.width != len)) {
       o.ok = false;
       return o;
     }
     if (len != 1) o.width = len;
-    o.groups.emplace_back(op.idata + m + 1, len);
-    m += 1 + len;
+    o.groups.emplace_back(groups.group[k].values, len);
   }
   return o;
 }
@@ -1276,17 +1275,14 @@ Analysis analyze(const Graph& g, const Fills& fills,
             stat.statistics =
                 grouped_statistics(values, member, stat.rep.size());
           }
-          // An unset variant is the full density, every argument active.
+          const DensityMode mode = density_mode(op);
           stat.scale = op.in[2];
-          stat.propto = (op.variant & 0x80u) != 0;
-          stat.variant = (uint8_t)((op.variant == 0 || (op.variant & 0x02u)
-                                        ? kGroupedLocationActive
-                                        : 0) |
-                                   (op.variant == 0 || (op.variant & 0x04u)
-                                        ? kGroupedScaleActive
-                                        : 0) |
-                                   (lognormal ? kGroupedLognormal : 0) |
-                                   (stat.propto ? kGroupedPropto : 0));
+          stat.propto = mode.propto;
+          stat.variant =
+              (uint8_t)((mode.is_active(1) ? kGroupedLocationActive : 0) |
+                        (mode.is_active(2) ? kGroupedScaleActive : 0) |
+                        (lognormal ? kGroupedLognormal : 0) |
+                        (stat.propto ? kGroupedPropto : 0));
           by_line = try_line && line_data(stat, affine, lines);
         }
         const int kind = family_of_opcode(op.opcode);
@@ -1347,13 +1343,12 @@ Analysis analyze(const Graph& g, const Fills& fills,
             for (size_t k = 0; k < 2 * groups; ++k)
               stat.statistics[groups + k] = sum[k].value();
             stat.variate_constant = constant.value();
-            stat.propto = (op.variant & 0x80u) != 0;
-            // An unset variant is the full density, every argument active.
+            const DensityMode mode = density_mode(op);
+            stat.propto = mode.propto;
             stat.variant = stat.propto ? kFamilyPropto : 0;
             for (int k = 0; k < family_parameters(kind); ++k) {
               stat.parameters.push_back(op.in[first_parameter + k]);
-              if (op.variant == 0 ||
-                  (op.variant & (1u << (first_parameter + k))) != 0)
+              if (mode.is_active(first_parameter + k))
                 stat.variant |=
                     k == 0 ? kFamilyFirstActive : kFamilySecondActive;
             }
@@ -1382,26 +1377,27 @@ Analysis analyze(const Graph& g, const Fills& fills,
     }
 
     if (op.opcode == OP_NORMAL_ID_GLM_LPDF && op_active[i] && op.n_in == 5 &&
-        op.n_idata >= 2 && op.out >= 0 && op.udata == nullptr) {
+        op.out >= 0 && op.udata == nullptr) {
       // The same density with its locations already written as a design
       // times a vector: a quadratic form or nothing.
-      const int64_t rows = op.idata[0], cols = op.idata[1];
+      const GlmLayout layout = glm_layout(op.idata, op.n_idata);
+      const int64_t rows = layout.rows, cols = layout.cols;
       CollapseTerm t;
       t.op = (int)i;
       t.opcode = op.opcode;
       t.ops = 1;
       t.n = t.rows = rows;
-      t.variate_is_data = (op.variant & 0x01u) == 0;
+      const DensityMode mode = density_mode(op);
+      t.variate_is_data = !mode.is_active(0);
       const auto* y = num.data_of(op.in[0]);
       const auto* x = num.data_of(op.in[1]);
       const auto in_len = [&](int j) { return g.slots[(size_t)op.in[j]].len; };
-      bool usable = y != nullptr && x != nullptr && (op.variant & 0x03u) == 0 &&
-                    !op.dyn_lengths && !(op.n_idata >= 5 && op.idata[4] == 1) &&
-                    in_len(0) == rows && in_len(1) == rows * cols &&
-                    (in_len(2) == 1 || in_len(2) == rows) &&
-                    in_len(3) == cols && in_len(4) == 1 &&
-                    g.slots[(size_t)op.out].len == 1 &&
-                    rows >= kCollapseMinObservations;
+      bool usable =
+          y != nullptr && x != nullptr && (mode.active & 0x03u) == 0 &&
+          !op.dyn_lengths && !layout.row_vector_design() && in_len(0) == rows &&
+          in_len(1) == rows * cols && (in_len(2) == 1 || in_len(2) == rows) &&
+          in_len(3) == cols && in_len(4) == 1 &&
+          g.slots[(size_t)op.out].len == 1 && rows >= kCollapseMinObservations;
       for (int64_t obs = 0; usable && obs < rows; ++obs)
         usable = std::isfinite((*y)[(size_t)obs]);
       StatisticPlan stat;
@@ -1441,7 +1437,7 @@ Analysis analyze(const Graph& g, const Fills& fills,
           // This kernel binds its scale as a parameter whatever it is, so
           // Stan keeps the scale's log term under propto too.
           stat.scale = op.in[4];
-          stat.propto = (op.variant & 0x80u) != 0;
+          stat.propto = mode.propto;
           stat.variant =
               (uint8_t)(kGroupedLocationActive | kGroupedScaleActive |
                         kGroupedGlm | (stat.propto ? kGroupedPropto : 0));
@@ -1462,21 +1458,16 @@ Analysis analyze(const Graph& g, const Fills& fills,
     int glm_kind = -1;
     if (count_glm(op.opcode, &glm_kind) && op_active[i] && op.out >= 0 &&
         op.udata == nullptr) {
-      // A GLM over integer outcomes, idata = [y..., rows, cols], or
-      // [successes..., trials..., rows, cols] for the binomial. With a data
+      // A GLM over integer outcomes, a GlmLayout over y or, for the
+      // binomial, successes then trials. With a data
       // design, two observations are the same row when their design rows
       // and intercepts are.
       const bool by_rows = glm_kind < 0;
       const bool binomial = op.opcode == OP_BINOMIAL_LOGIT_GLM_LPMF;
-      // An optional tail says which integer arguments are scalars: none
-      // may be.
-      const bool tailed =
-          op.n_idata >= 4 && op.idata[op.n_idata - 2] == kGlmScalarLayoutMarker;
-      const int tail = tailed ? 4 : 2;
-      const bool vectors = !tailed || op.idata[op.n_idata - 1] == 0;
-      const int64_t rows = op.n_idata >= tail ? op.idata[op.n_idata - tail] : 0;
-      const int64_t cols =
-          op.n_idata >= tail ? op.idata[op.n_idata - tail + 1] : 0;
+      // No integer argument may be a scalar, nor the design a row_vector.
+      const GlmLayout layout = glm_layout(op.idata, op.n_idata);
+      const bool vectors = layout.flags == 0;
+      const int64_t rows = layout.rows, cols = layout.cols;
       CollapseTerm t;
       t.op = (int)i;
       t.opcode = op.opcode;
@@ -1488,7 +1479,7 @@ Analysis analyze(const Graph& g, const Fills& fills,
       const auto in_len = [&](int j) { return g.slots[(size_t)op.in[j]].len; };
       const auto* x = usable ? num.data_of(op.in[0]) : nullptr;
       usable = x != nullptr && vectors && rows >= 0 && cols >= 1 &&
-               op.n_idata == (binomial ? 2 : 1) * rows + tail &&
+               layout.n_outcomes == (binomial ? 2 : 1) * rows &&
                in_len(0) == rows * cols &&
                (in_len(1) == 1 || in_len(1) == rows) && in_len(2) == cols &&
                (!by_rows || in_len(3) == 1 || in_len(3) == rows) &&
@@ -1499,7 +1490,7 @@ Analysis analyze(const Graph& g, const Fills& fills,
       plan.kind = glm_kind;
       plan.cols = cols;
       plan.observations = rows;
-      plan.propto = (op.variant & 0x80u) != 0;
+      plan.propto = density_mode(op).propto;
       bool valid = enough;
       const int64_t ratio =
           by_rows ? kCollapseRecorderRatio : kCollapseNativeRatio;
@@ -1787,10 +1778,9 @@ Analysis analyze(const Graph& g, const Fills& fills,
         stat.statistics[groups + k] = sum[k].value();
       stat.variate_constant = constant.value();
     }
-    stat.propto = (first.variant & 0x80u) != 0;
-    const auto is_active = [&](int k) {
-      return first.variant == 0 || (first.variant & (1u << (base + k))) != 0;
-    };
+    const DensityMode mode = density_mode(first);
+    stat.propto = mode.propto;
+    const auto is_active = [&](int k) { return mode.is_active(base + k); };
     if (kind < 0)
       stat.variant = (uint8_t)((is_active(0) ? kGroupedLocationActive : 0) |
                                (is_active(1) ? kGroupedScaleActive : 0) |
@@ -2423,10 +2413,7 @@ CollapseStats collapse_observations(Graph& g, Fills& fills,
 
     Op e = d;
     e.primal_source = -1;
-    // An unset mask means every argument is active; the elementwise form
-    // reads the mask as written.
-    if (e.variant == 0) e.variant = (uint8_t)((1u << d.n_in) - 1u);
-    e.variant = (uint8_t)(e.variant | 0x40u);
+    e.variant = elementwise_density(e.variant);
     int64_t n = outcomes.width;
     for (int j = 0; j < d.n_in; ++j) {
       n = std::max(n, g.slots[(size_t)d.in[j]].len);
@@ -2434,14 +2421,20 @@ CollapseStats collapse_observations(Graph& g, Fills& fills,
     }
     if (!outcomes.groups.empty()) {
       std::vector<int> idata;
-      for (const auto& group : outcomes.groups) {
-        if (outcomes.grouped)
-          idata.push_back(group.second == 1 ? -1 : (int)rows);
-        if (group.second == 1)
+      int scalar_mask = 0;
+      for (size_t q = 0; q < outcomes.groups.size(); ++q) {
+        const auto& group = outcomes.groups[q];
+        const bool one = group.second == 1;
+        if (outcomes.grouped) {
+          idata.push_back(one ? 1 : (int)rows);
+          if (one) scalar_mask |= 1 << q;
+        }
+        if (one)
           idata.push_back(group.first[0]);
         else
           for (int obs : plan.rep) idata.push_back(group.first[obs]);
       }
+      if (outcomes.grouped) idata.push_back(scalar_mask);
       rw.attach(e, std::move(idata));
     }
     if (unpaid(plan.term, rows, n)) {
@@ -2635,7 +2628,7 @@ CollapseStats collapse_observations(Graph& g, Fills& fills,
       // GLM binds its predictor and precision as parameters whatever they
       // are, and so does this.
       e.opcode = OP_NEG_BINOMIAL_2_LOG_LPMF;
-      e.variant = (uint8_t)(0x40u | 0x03u | (plan.propto ? 0x80u : 0u));
+      e.variant = DensityMode{0x3u, true, plan.propto}.byte();
       e.n_in = 2;
       e.in[0] = eta;
       e.in[1] = kept(d.in[3]);
@@ -2684,8 +2677,7 @@ CollapseStats collapse_observations(Graph& g, Fills& fills,
 
     Op e = d;
     e.primal_source = -1;
-    if (e.variant == 0) e.variant = (uint8_t)((1u << d.n_in) - 1u);
-    e.variant = (uint8_t)(e.variant | 0x40u);
+    e.variant = elementwise_density(e.variant);
     bool ok = true;
     for (int j = 0; j < d.n_in && ok; ++j) {
       // One scalar for every piece is passed as it is.
@@ -2722,20 +2714,23 @@ CollapseStats collapse_observations(Graph& g, Fills& fills,
     }
     if (!outcomes[0].groups.empty()) {
       std::vector<int> idata;
+      int scalar_mask = 0;
       for (size_t q = 0; q < outcomes[0].groups.size(); ++q) {
         // A group that is one scalar, the same in every piece, stays one.
         bool scalar = true;
         for (const Outcomes& o : outcomes)
           scalar &= o.groups[q].second == 1 &&
                     o.groups[q].first[0] == outcomes[0].groups[q].first[0];
-        if (outcomes[0].grouped) idata.push_back(scalar ? -1 : (int)rows);
+        if (outcomes[0].grouped) idata.push_back(scalar ? 1 : (int)rows);
         if (scalar && outcomes[0].grouped) {
+          scalar_mask |= 1 << q;
           idata.push_back(outcomes[0].groups[q].first[0]);
           continue;
         }
         for (size_t k = 0; k < plan.ops.size(); ++k)
           for (int obs : plan.rep[k]) idata.push_back(outcomes[k].at(q, obs));
       }
+      if (outcomes[0].grouped) idata.push_back(scalar_mask);
       rw.attach(e, std::move(idata));
     }
     e.out = g.add_slot(rows, false);

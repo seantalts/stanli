@@ -317,7 +317,6 @@ constexpr BuiltinSpec ordering_builtin(
 
 DensitySpec all_integer_spec(int arity, AllIntegerDensity density) {
   DensitySpec spec{OP_ALL_INTEGER_DENSITY, arity, arity};
-  spec.fixed_variant = static_cast<uint8_t>(density);
   spec.evaluation = DensityEvaluationPolicy::AllInteger;
   spec.all_integer = density;
   return spec;
@@ -850,22 +849,25 @@ const std::vector<FunctionSpec>& function_specs() {
     density(
         "ordered_logistic_lpmf",
         {OP_ORDERED_LOGISTIC_LPMF, 3, 1, false, DensityShape::VectorizedVectors,
-         -1, false, 0, 0, DensityEvaluationPolicy::GraphKernel,
+         -1, false, 0, DensityEvaluationPolicy::GraphKernel,
          AllIntegerDensity::None, 0x2});
     density("bernoulli_lpmf",
             {OP_BERNOULLI_LPMF, 2, 1, false, DensityShape::Plain, -1, true});
     density("categorical_lpmf",
             {OP_CATEGORICAL, 2, 0, false, DensityShape::Categorical});
-    density("categorical_logit_lpmf",
-            {OP_CATEGORICAL, 2, 0, false, DensityShape::Categorical, -1, false,
-             0, kCategoricalLogit});
-    for (const auto& entry : {std::pair{"poisson_binomial_lpmf", 0},
-                              std::pair{"poisson_binomial_cdf", 2},
-                              std::pair{"poisson_binomial_lcdf", 4},
-                              std::pair{"poisson_binomial_lccdf", 6}}) {
+    density("categorical_logit_lpmf", [] {
+      DensitySpec spec{OP_CATEGORICAL, 2, 0, false, DensityShape::Categorical};
+      spec.categorical_logit = true;
+      return spec;
+    }());
+    for (const auto& entry :
+         {std::pair{"poisson_binomial_lpmf", PoissonBinomialKind::Lpmf},
+          std::pair{"poisson_binomial_cdf", PoissonBinomialKind::Cdf},
+          std::pair{"poisson_binomial_lcdf", PoissonBinomialKind::Lcdf},
+          std::pair{"poisson_binomial_lccdf", PoissonBinomialKind::Lccdf}}) {
       DensitySpec spec{OP_POISSON_BINOMIAL, 2, 1, false,
                        DensityShape::PoissonBinomial};
-      spec.fixed_variant = entry.second;
+      spec.poisson_binomial = entry.second;
       density(entry.first, spec);
     }
     density("poisson_lpmf",
@@ -894,7 +896,7 @@ const std::vector<FunctionSpec>& function_specs() {
                                    DensityShape::Plain, -1, false, 1});
     density("dirichlet_lpdf",
             {OP_DIRICHLET_LPDF, 2, 0, false, DensityShape::VectorizedVectors,
-             -1, false, 0, 0, DensityEvaluationPolicy::GraphKernel,
+             -1, false, 0, DensityEvaluationPolicy::GraphKernel,
              AllIntegerDensity::None, 0x3});
     density("multi_normal_cholesky_lpdf",
             vectorized_mvt_spec(OP_MULTI_NORMAL_CHOL_LPDF, 3, 0x3));
@@ -924,7 +926,7 @@ const std::vector<FunctionSpec>& function_specs() {
             {OP_DIRICHLET_MULTINOMIAL_LPMF, 2, 1, false, DensityShape::Plain});
     density("ordered_probit_lpmf", {OP_ORDERED_PROBIT_LPMF, 3, 1, false,
                                     DensityShape::VectorizedVectors, 0x3, false,
-                                    0, 0, DensityEvaluationPolicy::GraphKernel,
+                                    0, DensityEvaluationPolicy::GraphKernel,
                                     AllIntegerDensity::None, 0x2});
     density("wiener_lpdf", {OP_WIENER_LPDF, 5, 0, false, DensityShape::Plain});
     density("wishart_lpdf",

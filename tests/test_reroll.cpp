@@ -1,5 +1,6 @@
 // Re-roll pass: unrolled scalar-loop regions collapse to vector ops with
 // gradients preserved (up to summation order, 1e-12 rel).
+#include "density_ops.hpp"
 #include "env_helpers.hpp"
 #include "graph_helpers.hpp"
 #include <stanli/compile.hpp>
@@ -161,7 +162,8 @@ static void test_radon_shape() {
     const int idx = g.add_slot(1, false);
     g.add_op(OP_INDEX, {base}, idx, {n});
     const int lp = g.add_slot(1, false);
-    const int id = g.add_op(OP_NORMAL_LPDF, {yconst[n], idx, sigma}, lp);
+    const int id = stanli::testutil::add_density(g, OP_NORMAL_LPDF,
+                                                 {yconst[n], idx, sigma}, lp);
     g.ops[id].variant = 0x06;
     terms.push_back(lp);
   }
@@ -223,7 +225,8 @@ static void test_ark_shape() {
       mu = acc;
     }
     const int lp = g.add_slot(1, false);
-    const int id = g.add_op(OP_NORMAL_LPDF, {yobs[l], mu, sigma}, lp);
+    const int id = stanli::testutil::add_density(g, OP_NORMAL_LPDF,
+                                                 {yobs[l], mu, sigma}, lp);
     g.ops[id].variant = 0x86;  // propto + mu,sigma active, like real arK
     terms.push_back(lp);
   }
@@ -258,7 +261,8 @@ static void test_bail_recurrence() {
     const int nx = g.add_slot(1, false);
     g.add_op(OP_MUL, {prev, sigma}, nx);
     const int lp = g.add_slot(1, false);
-    const int id = g.add_op(OP_NORMAL_LPDF, {nx, prev, sigma}, lp);
+    const int id =
+        stanli::testutil::add_density(g, OP_NORMAL_LPDF, {nx, prev, sigma}, lp);
     g.ops[id].variant = 0x06;
     terms.push_back(lp);
     prev = nx;  // <- lane l+1 reads lane l's out
@@ -291,10 +295,12 @@ static void test_gauss_mix_shape() {
   for (int l = 0; l < L; ++l) {
     const int y = cslot(0.4 * l - 1.1);
     const int lp1 = g.add_slot(1, false);
-    const int i1 = g.add_op(OP_NORMAL_LPDF, {y, mu1, sig1}, lp1);
+    const int i1 =
+        stanli::testutil::add_density(g, OP_NORMAL_LPDF, {y, mu1, sig1}, lp1);
     g.ops[i1].variant = 0x06;
     const int lp2 = g.add_slot(1, false);
-    const int i2 = g.add_op(OP_NORMAL_LPDF, {y, mu2, sig2}, lp2);
+    const int i2 =
+        stanli::testutil::add_density(g, OP_NORMAL_LPDF, {y, mu2, sig2}, lp2);
     g.ops[i2].variant = 0x06;
     const int t = g.add_slot(1, false);
     g.add_op(OP_LOG_MIX, {theta, lp1, lp2}, t);
@@ -321,6 +327,49 @@ static void test_gauss_mix_shape() {
     expect_close(("gmix v" + std::to_string(i)).c_str(), got[i], want[i]);
 }
 
+// A density whose variant byte is left at zero must mean the same thing in
+// its summed form and in the elementwise form the reroll emits.
+static void test_unset_variant_survives_elementwise_fusion() {
+  const int L = 6;
+  Graph g;
+  Fills fills;
+  const int theta = g.add_slot(1, true);
+  const int mu1 = g.add_slot(1, true);
+  const int sig1 = g.add_slot(1, true);
+  const int mu2 = g.add_slot(1, true);
+  const int sig2 = g.add_slot(1, true);
+  auto cslot = [&](double v) {
+    const int s = g.add_slot(1, false);
+    fills.emplace_back(s, std::vector<double>{v});
+    return s;
+  };
+  std::vector<int> terms;
+  for (int l = 0; l < L; ++l) {
+    const int y = cslot(0.4 * l - 1.1);
+    const int lp1 = g.add_slot(1, false);
+    g.add_op(OP_NORMAL_LPDF, {y, mu1, sig1}, lp1);
+    const int lp2 = g.add_slot(1, false);
+    g.add_op(OP_NORMAL_LPDF, {y, mu2, sig2}, lp2);
+    const int t = g.add_slot(1, false);
+    g.add_op(OP_LOG_MIX, {theta, lp1, lp2}, t);
+    terms.push_back(t);
+  }
+  Graph ref = g;
+  reduce_into_result(ref, terms);
+  const std::vector<double> want = run_grad(std::move(ref), fills);
+
+  std::vector<int> tt = terms;
+  Fills f2 = fills;
+  const RerollStats st = reroll(g, f2, tt, {});
+  expect("unset variant fused", st.element_density == 2);
+  g.result_slot = tt[0];
+  const std::vector<double> got = run_grad(std::move(g), f2);
+  expect("unset variant sizes", got.size() == want.size());
+  for (size_t i = 0; i < want.size() && i < got.size(); ++i)
+    expect_close(("unset variant v" + std::to_string(i)).c_str(), got[i],
+                 want[i]);
+}
+
 // Gap 3 (docs/internal/archive/plans/2026-09-11-lane-layout-unification.md):
 // the gauss_mix idiom above, but each lane's density result is a row rather
 // than a scalar, the way a per-subject mixture over several binary items looks
@@ -345,10 +394,12 @@ static void test_row_mixture_shape() {
       outcomes2[(size_t)k] = (l + k + 1) % 2;
     }
     const int lp1 = g.add_slot(1, false);
-    const int i1 = g.add_op(OP_BERNOULLI_LOGIT_LPMF, {row}, lp1, outcomes1);
+    const int i1 = stanli::testutil::add_density(g, OP_BERNOULLI_LOGIT_LPMF,
+                                                 {row}, lp1, outcomes1);
     g.ops[(size_t)i1].variant = 0x81;
     const int lp2 = g.add_slot(1, false);
-    const int i2 = g.add_op(OP_BERNOULLI_LOGIT_LPMF, {row}, lp2, outcomes2);
+    const int i2 = stanli::testutil::add_density(g, OP_BERNOULLI_LOGIT_LPMF,
+                                                 {row}, lp2, outcomes2);
     g.ops[(size_t)i2].variant = 0x81;
     const int t = g.add_slot(1, false);
     g.add_op(OP_LOG_MIX, {theta, lp1, lp2}, t);
@@ -398,7 +449,8 @@ static void test_row_mixture_shape_column_major() {
     std::vector<int> outcomes(C);
     for (int k = 0; k < C; ++k) outcomes[(size_t)k] = (l + k) % 2;
     const int lp = g.add_slot(1, false);
-    const int id = g.add_op(OP_BERNOULLI_LOGIT_LPMF, {row}, lp, outcomes);
+    const int id = stanli::testutil::add_density(g, OP_BERNOULLI_LOGIT_LPMF,
+                                                 {row}, lp, outcomes);
     g.ops[(size_t)id].variant = 0x81;
     const int zero = g.add_slot(1, false);
     fills.emplace_back(zero, std::vector<double>{0.0});
@@ -454,8 +506,8 @@ static void test_logistic_elt_shape() {
   std::vector<int> terms;
   for (int l = 0; l < L; ++l) {
     const int lp = g.add_slot(1, false);
-    const int id =
-        g.add_op(OP_LOGISTIC_LPDF, {cslot(0.35 * l - 0.8), mu, sigma}, lp);
+    const int id = stanli::testutil::add_density(
+        g, OP_LOGISTIC_LPDF, {cslot(0.35 * l - 0.8), mu, sigma}, lp);
     g.ops[(size_t)id].variant = 0x06;
     const int term = g.add_slot(1, false);
     g.add_op(OP_ADD, {lp, cslot(0.1 * l - 0.25)}, term);
@@ -500,7 +552,8 @@ static void test_elt_lpmf_shape() {
     const int a = g.add_slot(1, false);
     g.add_op(OP_INDEX, {alpha}, a, {l});
     const int lp = g.add_slot(1, false);
-    const int id = g.add_op(OP_BERNOULLI_LOGIT_LPMF, {a}, lp, {l % 2});
+    const int id = stanli::testutil::add_density(g, OP_BERNOULLI_LOGIT_LPMF,
+                                                 {a}, lp, {l % 2});
     g.ops[id].variant = 0x81;
     const int t = g.add_slot(1, false);
     g.add_op(OP_ADD, {lp, cslot(0.2 * l)}, t);
@@ -542,7 +595,8 @@ static void test_elt_scalar_density_hoists() {
   std::vector<int> terms;
   for (int l = 0; l < L; ++l) {
     const int lp = g.add_slot(1, false);
-    const int id = g.add_op(OP_NORMAL_LPDF, {y, mu, sigma}, lp);
+    const int id =
+        stanli::testutil::add_density(g, OP_NORMAL_LPDF, {y, mu, sigma}, lp);
     g.ops[id].variant = 0x06;
     const int t = g.add_slot(1, false);
     g.add_op(OP_ADD, {lp, cslot(0.3 * l - 0.5)}, t);
@@ -584,7 +638,8 @@ static void test_bail_cross_lane_density() {
   int prev_lp = -1;
   for (int l = 0; l < L; ++l) {
     const int lp = g.add_slot(1, false);
-    const int id = g.add_op(OP_NORMAL_LPDF, {cslot(0.1 * l), mu, sigma}, lp);
+    const int id = stanli::testutil::add_density(
+        g, OP_NORMAL_LPDF, {cslot(0.1 * l), mu, sigma}, lp);
     g.ops[id].variant = 0x06;
     const int t = g.add_slot(1, false);
     // Lane 0 consumes its own lp; every later lane consumes the PREVIOUS
@@ -616,7 +671,8 @@ static void test_bail_escaping_density() {
   std::vector<int> lps;
   for (int l = 0; l < L; ++l) {
     const int lp = g.add_slot(1, false);
-    const int id = g.add_op(OP_NORMAL_LPDF, {cslot(0.1 * l), mu, sigma}, lp);
+    const int id = stanli::testutil::add_density(
+        g, OP_NORMAL_LPDF, {cslot(0.1 * l), mu, sigma}, lp);
     g.ops[id].variant = 0x06;
     const int sq = g.add_slot(1, false);
     g.add_op(OP_SQUARE, {lp}, sq);  // in-lane consumer, keeps shape periodic
@@ -652,7 +708,8 @@ static void test_partial_range_slices() {
     const int idx = g.add_slot(1, false);
     g.add_op(OP_INDEX, {base}, idx, {START + l});
     const int lp = g.add_slot(1, false);
-    const int id = g.add_op(OP_NORMAL_LPDF, {cslot(0.2 * l), idx, sigma}, lp);
+    const int id = stanli::testutil::add_density(
+        g, OP_NORMAL_LPDF, {cslot(0.2 * l), idx, sigma}, lp);
     g.ops[id].variant = 0x06;
     terms.push_back(lp);
   }
@@ -693,8 +750,8 @@ static void test_data_index_gathers() {
     const int a = g.add_slot(1, false);
     g.add_op(OP_INDEX, {alpha}, a, {idx[l]});
     const int lp = g.add_slot(1, false);
-    const int id =
-        g.add_op(OP_NORMAL_LPDF, {cslot(0.3 * l - 1.0), a, sigma}, lp);
+    const int id = stanli::testutil::add_density(
+        g, OP_NORMAL_LPDF, {cslot(0.3 * l - 1.0), a, sigma}, lp);
     g.ops[id].variant = 0x06;
     terms.push_back(lp);
   }
@@ -742,8 +799,8 @@ static void test_cost_model_declines_small_gather() {
     const int a = g.add_slot(1, false);
     g.add_op(OP_INDEX, {alpha}, a, {idx[l]});
     const int lp = g.add_slot(1, false);
-    const int id =
-        g.add_op(OP_NORMAL_LPDF, {cslot(0.3 * l - 1.0), a, sigma}, lp);
+    const int id = stanli::testutil::add_density(
+        g, OP_NORMAL_LPDF, {cslot(0.3 * l - 1.0), a, sigma}, lp);
     g.ops[id].variant = 0x06;
     terms.push_back(lp);
   }
@@ -768,7 +825,8 @@ static void test_env_disable() {
     const int c = g.add_slot(1, false);
     fills.emplace_back(c, std::vector<double>{0.1 * l});
     const int lp = g.add_slot(1, false);
-    const int id = g.add_op(OP_NORMAL_LPDF, {c, mu, sigma}, lp);
+    const int id =
+        stanli::testutil::add_density(g, OP_NORMAL_LPDF, {c, mu, sigma}, lp);
     g.ops[id].variant = 0x06;
     terms.push_back(lp);
   }
@@ -805,7 +863,8 @@ static void test_first_lane_anomalous() {
       fills.emplace_back(y, std::vector<double>{0.1 * l});
     }
     const int lp = g.add_slot(1, false);
-    const int id = g.add_op(OP_NORMAL_LPDF, {y, mu, sigma}, lp);
+    const int id =
+        stanli::testutil::add_density(g, OP_NORMAL_LPDF, {y, mu, sigma}, lp);
     g.ops[id].variant = 0x06;
     terms.push_back(lp);
   }
@@ -845,7 +904,8 @@ static void test_block_structured() {
       const int idx = g.add_slot(1, false);
       g.add_op(OP_INDEX, {theta}, idx, {l});  // restarts every block
       const int lp = g.add_slot(1, false);
-      const int id = g.add_op(OP_NORMAL_LPDF, {y, idx, sigma}, lp);
+      const int id =
+          stanli::testutil::add_density(g, OP_NORMAL_LPDF, {y, idx, sigma}, lp);
       g.ops[id].variant = 0x06;
       terms.push_back(lp);
     }
@@ -909,7 +969,8 @@ Built build(int L, int start, int stride = 1) {
     g.add_op(OP_SET_INDEX_INPLACE, {b.y_hat, v}, b.y_hat, {start + l * stride});
   }
   const int lp = g.add_slot(1, false);
-  const int id = g.add_op(OP_NORMAL_LPDF, {ydata, b.y_hat, b.sigma}, lp);
+  const int id = stanli::testutil::add_density(g, OP_NORMAL_LPDF,
+                                               {ydata, b.y_hat, b.sigma}, lp);
   g.ops[(size_t)id].variant = 0x06;
   b.terms.push_back(lp);
   return b;
@@ -1317,7 +1378,7 @@ static SparseCandidateCost sparse_candidate_cost(int n) {
   const int mu = g.add_slot(1, true);
   const int sigma = g.add_slot(1, true);
   const int lp = g.add_slot(1, false);
-  g.add_op(OP_NORMAL_LPDF, {y, mu, sigma}, lp);
+  stanli::testutil::add_density(g, OP_NORMAL_LPDF, {y, mu, sigma}, lp);
   std::vector<int> terms{lp};
   const int row = g.add_slot(5, true);
   terms.reserve((size_t)n + 1);
@@ -1397,7 +1458,8 @@ static ManyRegionsCost many_regions_cost(int groups) {
       const int mu = g.add_slot(1, false);
       g.add_op(OP_ADD, {m, a}, mu);
       const int lp = g.add_slot(1, false);
-      const int id = g.add_op(OP_NORMAL_LPDF, {y, mu, sigma}, lp);
+      const int id =
+          stanli::testutil::add_density(g, OP_NORMAL_LPDF, {y, mu, sigma}, lp);
       g.ops[id].variant = 0x06;
       terms.push_back(lp);
     }
@@ -1510,7 +1572,8 @@ static void test_write_fusion_bails() {
     fills.emplace_back(extra, std::vector<double>{2.5});
     g.add_op(OP_SET_INDEX_INPLACE, {yh, extra}, yh, {0});
     const int lp = g.add_slot(1, false);
-    const int id = g.add_op(OP_NORMAL_LPDF, {yd, yh, sigma}, lp);
+    const int id =
+        stanli::testutil::add_density(g, OP_NORMAL_LPDF, {yd, yh, sigma}, lp);
     g.ops[(size_t)id].variant = 0x06;
     std::vector<int> terms{lp};
 
@@ -1548,7 +1611,8 @@ static void test_write_fusion_bails() {
       g2.add_op(OP_INDEX, {yh}, peek, {0});  // mid-run reader
     }
     const int lp = g2.add_slot(1, false);
-    const int id = g2.add_op(OP_NORMAL_LPDF, {yd, yh, sigma}, lp);
+    const int id =
+        stanli::testutil::add_density(g2, OP_NORMAL_LPDF, {yd, yh, sigma}, lp);
     g2.ops[(size_t)id].variant = 0x06;
     terms.push_back(lp);
     std::vector<int> tt = terms;
@@ -1599,7 +1663,8 @@ Built build(int L, int start = 0, int stride = 1, int read_shift = 0,
     g.add_op(OP_SET_INDEX_INPLACE, {b.mu, v}, b.mu, {e});
   }
   const int lp = g.add_slot(1, false);
-  const int id = g.add_op(OP_NORMAL_LPDF, {ydata, b.mu, b.sigma}, lp);
+  const int id = stanli::testutil::add_density(g, OP_NORMAL_LPDF,
+                                               {ydata, b.mu, b.sigma}, lp);
   g.ops[(size_t)id].variant = 0x06;
   b.terms.push_back(lp);
   return b;
@@ -1694,7 +1759,8 @@ static void adjacent_loops(int L, Graph& g, Fills& fills,
   }
   for (int v = 0; v < 2; ++v) {
     const int lp = g.add_slot(1, false);
-    const int id = g.add_op(OP_NORMAL_LPDF, {ys[v], mus[v], sigma}, lp);
+    const int id = stanli::testutil::add_density(g, OP_NORMAL_LPDF,
+                                                 {ys[v], mus[v], sigma}, lp);
     g.ops[(size_t)id].variant = 0x06;
     terms.push_back(lp);
   }
@@ -1786,7 +1852,8 @@ static void test_post_reroll_slice_inplace() {
     g.add_op(OP_SET_INDEX_INPLACE, {yh, v}, yh, {1 + 2 * l});
   }
   const int lp = g.add_slot(1, false);
-  const int id = g.add_op(OP_NORMAL_LPDF, {yd, yh, sigma}, lp);
+  const int id =
+      stanli::testutil::add_density(g, OP_NORMAL_LPDF, {yd, yh, sigma}, lp);
   g.ops[(size_t)id].variant = 0x06;
   std::vector<int> terms{sep, lp};
 
@@ -1853,7 +1920,8 @@ static void test_write_fusion_scalar_chain() {
     g.add_op(OP_SET_INDEX_INPLACE, {yh, m}, yh, {l});
   }
   const int lp = g.add_slot(1, false);
-  const int id = g.add_op(OP_NORMAL_LPDF, {yd, yh, sigma}, lp);
+  const int id =
+      stanli::testutil::add_density(g, OP_NORMAL_LPDF, {yd, yh, sigma}, lp);
   g.ops[(size_t)id].variant = 0x06;
   std::vector<int> terms{lp};
 
@@ -1966,7 +2034,8 @@ Built build_density(int L, int C, Rows rows, int extra_rows = 0) {
     std::vector<int> y((size_t)C);
     for (int k = 0; k < C; ++k) y[(size_t)k] = (l * 7 + k * 3) % 2;
     const int lp = g.add_slot(1, false);
-    const int id = g.add_op(OP_BERNOULLI_LOGIT_LPMF, {row}, lp, y);
+    const int id =
+        stanli::testutil::add_density(g, OP_BERNOULLI_LOGIT_LPMF, {row}, lp, y);
     g.ops[(size_t)id].variant = 0x81;
     b.outcomes.push_back(y);
     b.terms.push_back(lp);
@@ -1995,7 +2064,8 @@ Built build_density_shared_row(int L, int C, Rows rows) {
     std::vector<int> y((size_t)C);
     for (int k = 0; k < C; ++k) y[(size_t)k] = (l * 7 + k * 3) % 2;
     const int lp = g.add_slot(1, false);
-    const int id = g.add_op(OP_BERNOULLI_LOGIT_LPMF, {combined}, lp, y);
+    const int id = stanli::testutil::add_density(g, OP_BERNOULLI_LOGIT_LPMF,
+                                                 {combined}, lp, y);
     g.ops[(size_t)id].variant = 0x81;
     b.outcomes.push_back(y);
     b.terms.push_back(lp);
@@ -2049,7 +2119,8 @@ Built build_store(int L, int C, Rows rows, int extra_rows = 0,
       g.add_op(OP_SET_SLICE_INPLACE, {b.base, extra}, b.base, {2 * C});
   }
   const int lp = g.add_slot(1, false);
-  const int id = g.add_op(OP_NORMAL_LPDF, {ydata, b.base, sigma}, lp);
+  const int id = stanli::testutil::add_density(g, OP_NORMAL_LPDF,
+                                               {ydata, b.base, sigma}, lp);
   g.ops[(size_t)id].variant = 0x06;
   b.terms.push_back(lp);
   return b;
@@ -2207,7 +2278,8 @@ static void test_read_modify_write_rows() {
                  {base, v}, base, row_idata(l));
       }
       const int lp = g.add_slot(1, false);
-      const int id = g.add_op(OP_NORMAL_LPDF, {ydata, base, sigma}, lp);
+      const int id = stanli::testutil::add_density(g, OP_NORMAL_LPDF,
+                                                   {ydata, base, sigma}, lp);
       g.ops[(size_t)id].variant = 0x06;
       std::vector<int> terms{lp};
 
@@ -2298,7 +2370,8 @@ static void test_row_lanes_bail() {
       const int y = g.add_slot(1, false);
       fills.emplace_back(y, std::vector<double>{0.1 * l});
       const int lp = g.add_slot(1, false);
-      const int id = g.add_op(OP_NORMAL_LPDF, {y, d, sigma}, lp);
+      const int id =
+          stanli::testutil::add_density(g, OP_NORMAL_LPDF, {y, d, sigma}, lp);
       g.ops[(size_t)id].variant = 0x06;
       terms.push_back(lp);
     }
@@ -2325,8 +2398,9 @@ static void test_row_lanes_bail() {
       const int s = g.add_slot(C, false);
       g.add_op(OP_ADD, {row, mu}, s);
       const int lp = g.add_slot(1, false);
-      const int id = g.add_op(OP_BERNOULLI_LOGIT_LPMF, {s}, lp,
-                              std::vector<int>((size_t)C, l % 2));
+      const int id =
+          stanli::testutil::add_density(g, OP_BERNOULLI_LOGIT_LPMF, {s}, lp,
+                                        std::vector<int>((size_t)C, l % 2));
       g.ops[(size_t)id].variant = 0x81;
       terms.push_back(lp);
     }
@@ -2409,7 +2483,8 @@ static void test_gather_lane_partial_row() {
     const int w = g.add_slot(2, false);
     g.add_op(OP_GATHER, {m}, w, {i + N, i + 2 * N});
     const int lp = g.add_slot(1, false);
-    const int id = g.add_op(OP_NORMAL_LPDF, {w, mu, sigma}, lp);
+    const int id =
+        stanli::testutil::add_density(g, OP_NORMAL_LPDF, {w, mu, sigma}, lp);
     g.ops[(size_t)id].variant = 0x07;
     terms.push_back(lp);
   }
@@ -2457,7 +2532,8 @@ static void test_shared_vector_mean_row_major() {
     const int row = g.add_slot(C, false);
     g.add_op(OP_SLICE, {base}, row, {l * C});
     const int lp = g.add_slot(1, false);
-    const int id = g.add_op(OP_NORMAL_LPDF, {row, mu, sigma}, lp);
+    const int id =
+        stanli::testutil::add_density(g, OP_NORMAL_LPDF, {row, mu, sigma}, lp);
     g.ops[(size_t)id].variant = 0x07;
     terms.push_back(lp);
   }
@@ -2826,8 +2902,8 @@ static void test_bail_extra_root() {
       scaled[l] = g.add_slot(1, false);
       g.add_op(OP_MUL, {alpha, cslot(0.3 + 0.1 * l)}, scaled[l]);
       const int lp = g.add_slot(1, false);
-      const int id =
-          g.add_op(OP_NORMAL_LPDF, {cslot(0.2 * l), scaled[l], sigma}, lp);
+      const int id = stanli::testutil::add_density(
+          g, OP_NORMAL_LPDF, {cslot(0.2 * l), scaled[l], sigma}, lp);
       g.ops[id].variant = 0x06;
       terms.push_back(lp);
     }
@@ -2871,7 +2947,8 @@ static void test_bail_categorical_ops() {
     const int y = g.add_slot(1, false);
     fills.emplace_back(y, std::vector<double>{0.1 * lane});
     const int lp = g.add_slot(1, false);
-    const int density = g.add_op(OP_NORMAL_LPDF, {y, mu, sigma}, lp);
+    const int density =
+        stanli::testutil::add_density(g, OP_NORMAL_LPDF, {y, mu, sigma}, lp);
     g.ops[(size_t)density].variant = 0x06;
     terms.push_back(lp);
   }
@@ -2898,7 +2975,8 @@ static void test_bail_message_ops() {
       const int y = g.add_slot(1, false);
       fills.emplace_back(y, std::vector<double>{0.1 * lane});
       const int lp = g.add_slot(1, false);
-      const int density = g.add_op(OP_NORMAL_LPDF, {y, mu, sigma}, lp);
+      const int density =
+          stanli::testutil::add_density(g, OP_NORMAL_LPDF, {y, mu, sigma}, lp);
       g.ops[(size_t)density].variant = 0x06;
       terms.push_back(lp);
     }
@@ -3092,7 +3170,7 @@ static RerollStats fast_poisson_lanes(int L, int period, bool varied_per_lane,
       const int out = g.add_slot(1, false);
       const int y =
           varied_per_lane ? lane * period + p : (lane / (p + 1) + p) % 3 + 1;
-      g.add_op(OP_POISSON_LPMF, {parameter}, out, {y});
+      stanli::testutil::add_density(g, OP_POISSON_LPMF, {parameter}, out, {y});
       terms.push_back(out);
     }
   const RerollStats st = reroll(g, fills, terms, {}, true);
@@ -3122,6 +3200,7 @@ int main() {
   test_ark_shape();
   test_bail_recurrence();
   test_gauss_mix_shape();
+  test_unset_variant_survives_elementwise_fusion();
   test_row_mixture_shape();
   test_row_mixture_shape_column_major();
   test_logistic_elt_shape();

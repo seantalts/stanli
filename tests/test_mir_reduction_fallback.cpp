@@ -231,7 +231,7 @@ void check(const std::string& name, std::vector<Arg> args, Expected expected) {
   }
 }
 
-// idata is the outcome (lpmf1) or outcome-and-trials (lpmf2) int group(s).
+// idata is the outcome (lpmf1) or the outcome and trials IntGroups (lpmf2).
 auto lpmf1(uint16_t opcode) {
   return [opcode](auto& a) {
     using T = typename decltype(a[0].r)::value_type;
@@ -239,7 +239,8 @@ auto lpmf1(uint16_t opcode) {
     std::vector<const std::vector<T>*> in;
     for (size_t k = 1; k < a.size(); ++k) in.push_back(&a[k].r);
     const std::vector<int> idata(a[0].i.begin(), a[0].i.end());
-    call_kernel<T>(opcode, 0, 0x3f, idata, in, r.r);
+    call_kernel<T>(opcode, DensityMode::all_active((int)in.size()).byte(), 0x3f,
+                   idata, in, r.r);
     return r;
   };
 }
@@ -251,8 +252,10 @@ auto lpmf2(uint16_t opcode) {
     idata.insert(idata.end(), a[0].i.begin(), a[0].i.end());
     idata.push_back((int)a[1].i.size());
     idata.insert(idata.end(), a[1].i.begin(), a[1].i.end());
+    idata.push_back(0);  // neither group is a scalar
     const std::vector<const std::vector<T>*> in{&a[2].r};
-    call_kernel<T>(opcode, 0, 0x3f, idata, in, r.r);
+    call_kernel<T>(opcode, DensityMode::all_active(1).byte(), 0x3f, idata, in,
+                   r.r);
     return r;
   };
 }

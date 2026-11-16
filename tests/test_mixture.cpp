@@ -6,6 +6,7 @@
 //  2. The fused op is bit-identical to the unrolled graph it will replace
 //     under re-rolling: INDEX -> scalar op -> SET_INDEX chain -> SUM_VEC.
 //     This includes the broadcast-adjoint accumulation order.
+#include "density_ops.hpp"
 #include "expect.hpp"
 #include "graph_helpers.hpp"
 
@@ -549,7 +550,7 @@ static void check_softmax() {
   const int sm = g.add_slot(N, false);
   const int lp = g.add_slot(1, false);
   g.add_op(OP_SOFTMAX, {v}, sm);
-  g.add_op(OP_NORMAL_LPDF, {ys, sm, half}, lp);
+  stanli::testutil::add_density(g, OP_NORMAL_LPDF, {ys, sm, half}, lp);
   g.result_slot = lp;
   Executor ex(std::move(g));
   for (int i = 0; i < N; ++i) ex.param_ptr(v)[i] = vv[i];

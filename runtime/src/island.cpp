@@ -173,7 +173,7 @@ bool callable(const Graph& g, const Op& op) {
       break;
   }
   if (op.udata != nullptr || op.out2 >= 0) return false;
-  if (op.variant & 0x80u) return false;
+  if (density_mode(op).propto) return false;
   if (g.slots[op.out].len != 1) return false;
   return op.opcode != OP_NONE_ && find_kernel(op.opcode) != nullptr;
 }
@@ -229,7 +229,7 @@ bool in_vocab(const Graph& g, const Op& op, bool strict = false) {
       // Propto term-dropping depends on argument TYPES; the island binds
       // every argument as T, which only matches the <false> instantiation.
       if (program_density_id_by_opcode(op.opcode) >= 0)
-        return (op.variant & 0x80u) == 0 && scalar_ins(g, op);
+        return !density_mode(op).propto && scalar_ins(g, op);
       return callable(g, op);
   }
 }

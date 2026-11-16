@@ -1275,8 +1275,8 @@ Lowering::Val Lowering::lower_funapp(const mir::Expr& e) {
 std::optional<Lowering::Val> Lowering::lower_density_fn(
     const mir::Expr& e, CallArguments& actuals, const DensitySpec* selected) {
   // Leading integer arguments become idata; the rest become real slots.
-  // Layouts: one integer group = raw values; two groups =
-  // [len, vals..., len, vals...]; glm = [y..., rows, cols].
+  // One integer group is the raw values; the other layouts are in
+  // density_layout.hpp.
   const stanli::DensitySpec* density = selected;
   if (density != nullptr) {
     const stanli::DensitySpec& spec = *density;

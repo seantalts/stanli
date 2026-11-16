@@ -175,8 +175,9 @@ OdeActivityRun kernel_activity_run(
   ctx.out = Desc{out.value.data(), (int64_t)out.value.size()};
   ctx.scratch = out.jacobian.empty() ? nullptr : out.jacobian.data();
   ctx.udata = &spec;
-  ctx.variant =
-      (uint8_t)(0x4u | (YAutodiff ? 0x1u : 0u) | (ThetaAutodiff ? 0x2u : 0u));
+  ctx.variant = SolverActivity{(uint8_t)((YAutodiff ? 0x1u : 0u) |
+                                         (ThetaAutodiff ? 0x2u : 0u))}
+                    .byte();
   if (controls) {
     ctx.n_in = runtime_times ? 5 : 3;
     const int at = runtime_times ? 4 : 2;
@@ -185,7 +186,7 @@ OdeActivityRun kernel_activity_run(
       ctx.in[2] = Desc{const_cast<double*>(&spec.t0), 1};
       ctx.in[3] =
           Desc{const_cast<double*>(spec.ts.data()), (int64_t)spec.ts.size()};
-      ctx.variant = 0x10u;
+      ctx.variant = SolverActivity{}.byte();
     }
   }
   // Both buffers deliberately exist for every case. The variant records the
@@ -500,11 +501,9 @@ int main() {
   bool log_has_vv = false, log_has_vd = false, log_has_dv = false;
   for (const Op& op : cm.graph.ops)
     if (op.opcode == OP_ODE) {
-      expect_true("lowered log_prob ODE has an explicit type mask",
-                  (op.variant & 0x4u) != 0);
-      log_has_vv = log_has_vv || op.variant == 0x7u;
-      log_has_vd = log_has_vd || op.variant == 0x5u;
-      log_has_dv = log_has_dv || op.variant == 0x6u;
+      log_has_vv = log_has_vv || op.variant == 0x3u;
+      log_has_vd = log_has_vd || op.variant == 0x1u;
+      log_has_dv = log_has_dv || op.variant == 0x2u;
     }
   expect_true("log_prob contains a var/var ODE", log_has_vv);
   expect_true("log_prob contains an active-y/data-theta ODE", log_has_vd);
@@ -514,9 +513,7 @@ int main() {
   if (cm.write_array)
     for (const Op& op : cm.write_array->graph.ops)
       if (op.opcode == OP_ODE) {
-        expect_true("lowered write_array ODE has an explicit type mask",
-                    (op.variant & 0x4u) != 0);
-        write_has_dd = write_has_dd || op.variant == 0x4u;
+        write_has_dd = write_has_dd || op.variant == 0;
       }
   expect_true("write_array contains a double/double ODE", write_has_dd);
 

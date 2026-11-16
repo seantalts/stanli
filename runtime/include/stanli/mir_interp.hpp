@@ -827,7 +827,7 @@ class MirInterp {
       result.r = {T(evaluate_packed_all_integer_density(
           spec.all_integer, plan.idata.data(),
           static_cast<int64_t>(plan.idata.size()),
-          (plan.variant & 0x80u) != 0))};
+          AllIntegerMode::of(plan.variant).propto))};
       return result;
     }
     if (plan.empty_result) {

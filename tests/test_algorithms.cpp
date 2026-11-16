@@ -8,6 +8,7 @@
 // stanli code between, so a wrong generator, a wrong chain id, a draw taken
 // out of order or a generator copied instead of advanced all show up as
 // different numbers rather than as a slightly different distribution.
+#include "density_ops.hpp"
 #include <stanli/algorithms.hpp>
 #include <stanli/compile.hpp>
 #include <stanli/graph.hpp>
@@ -109,7 +110,7 @@ static void test_laplace_stream() {
   const int zero = g.add_slot(1, false);
   const int one = g.add_slot(1, false);
   const int lp = g.add_slot(1, false);
-  g.add_op(OP_NORMAL_LPDF, {x, zero, one}, lp);
+  stanli::testutil::add_density(g, OP_NORMAL_LPDF, {x, zero, one}, lp);
   g.result_slot = lp;
   Executor ex(std::move(g));
   ex.value_ptr(zero)[0] = 0.0;
@@ -160,7 +161,7 @@ static void test_rejected_row() {
   const int zero = g.add_slot(1, false);
   const int one = g.add_slot(1, false);
   const int lp = g.add_slot(1, false);
-  g.add_op(OP_NORMAL_LPDF, {x, zero, one}, lp);
+  stanli::testutil::add_density(g, OP_NORMAL_LPDF, {x, zero, one}, lp);
   g.result_slot = lp;
   Executor ex(std::move(g));
   ex.value_ptr(zero)[0] = 0.0;
@@ -210,7 +211,7 @@ static void test_pathfinder_single_only() {
   const int zero = g.add_slot(1, false);
   const int one = g.add_slot(1, false);
   const int lp = g.add_slot(1, false);
-  g.add_op(OP_NORMAL_LPDF, {x, zero, one}, lp);
+  stanli::testutil::add_density(g, OP_NORMAL_LPDF, {x, zero, one}, lp);
   g.result_slot = lp;
   Executor ex(std::move(g));
   ex.value_ptr(zero)[0] = 0.0;

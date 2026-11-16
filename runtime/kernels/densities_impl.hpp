@@ -105,7 +105,7 @@ void mask_dispatch(unsigned mask, KernelCtx& ctx, F&& f) {
   }
 }
 
-// Element binding for the elementwise variant (bit 6): every argument is
+// Element binding for the elementwise mode: every argument is
 // bound as a SCALAR -- element n of a len-N argument, the single value of a
 // len-1 one. This is the same instantiation the per-lane scalar ops use, so
 // element n's value and partials are bit-identical to a lone scalar op.
@@ -161,15 +161,16 @@ void full_form_elt(unsigned mask, KernelCtx& ctx, int64_t n, F&& ff) {
   }
 }
 
-// Elementwise-lp forward (variant bit 6): out is len N, out[n] is element
-// n's lp instead of the sum. One recorder call per element; the sink's
+// Elementwise-lp forward (DensityMode::elementwise): out is len N, out[n] is
+// element n's lp instead of the sum. One recorder call per element; the sink's
 // buffers aim each argument's single-double partial straight at its slot in
 // the [k * N + n] scratch layout, so nothing is copied afterward.
 template <int NArgs, int Tier, typename FProp, typename FFull>
 void density_fwd_elt(KernelCtx& ctx, FProp&& fp, FFull&& ff) {
   sink s;
   const int64_t N = ctx.out.len;
-  const unsigned mask = ctx.variant & 0x3fu;
+  const DensityMode mode = density_mode(ctx);
+  const unsigned mask = mode.active;
   for (int64_t n = 0; n < N; ++n) {
     for (int k = 0; k < NArgs; ++k) {
       s.buf[k] = ctx.scratch + static_cast<int64_t>(k) * N + n;
@@ -179,7 +180,7 @@ void density_fwd_elt(KernelCtx& ctx, FProp&& fp, FFull&& ff) {
     {
       sink_scope active(s);
       if constexpr ((Tier & STANLI_DENSITY_PROPTO) != 0) {
-        if (ctx.variant & 0x80u) {
+        if (mode.propto) {
           mask_dispatch_elt<NArgs>(mask, ctx, n, fp);
         } else {
           full_form_elt<NArgs, Tier>(mask, ctx, n, ff);
@@ -205,13 +206,12 @@ void density_fwd_elt(KernelCtx& ctx, FProp&& fp, FFull&& ff) {
 template <int NArgs, int Tier, unsigned VecMask, typename FProp, typename FFull>
 void density_fwd_sum(KernelCtx& ctx, FProp&& fp, FFull&& ff) {
   sink s = sink_for_args(ctx, NArgs);
-  const unsigned mask = ctx.variant == 0
-                            ? (1u << NArgs) - 1  // default: all active
-                            : (ctx.variant & 0x3fu);
+  const DensityMode mode = density_mode(ctx);
+  const unsigned mask = mode.active;
   {
     sink_scope active(s);
     if constexpr ((Tier & STANLI_DENSITY_PROPTO) != 0) {
-      if (ctx.variant & 0x80u) {
+      if (mode.propto) {
         mask_dispatch<NArgs, VecMask>(mask, ctx, fp);
       } else {
         full_form<NArgs, Tier, VecMask>(mask, ctx, ff);
@@ -232,10 +232,10 @@ void density_fwd_v(KernelCtx& ctx, FProp&& fp, FFull&& ff) {
   // never fuses these (they are in neither of its opt-in lists), so the
   // bit cannot arrive; refuse rather than write one element of N.
   if constexpr (VecMask != 0) {
-    if (ctx.variant & 0x40u)
+    if (density_mode(ctx).elementwise)
       throw std::runtime_error(
           "density: elementwise variant on a vector-argument density");
-  } else if (ctx.variant & 0x40u) {
+  } else if (density_mode(ctx).elementwise) {
     // Real-argument densities reuse the same lambdas: scalar bindings
     // instantiate the same generic templates.
     density_fwd_elt<NArgs, Tier>(
@@ -265,9 +265,9 @@ STANLI_NOINLINE inline void accumulate_partial(double* adj, double out_adj,
 // fused op replaces (bit-identical accumulation).
 template <int NArgs>
 void density_bwd(KernelCtx& ctx) {
-  const unsigned mask =
-      ctx.variant == 0 ? (1u << NArgs) - 1 : (ctx.variant & 0x3fu);
-  if (ctx.variant & 0x40u) {
+  const DensityMode mode = density_mode(ctx);
+  const unsigned mask = mode.active;
+  if (mode.elementwise) {
     const int64_t N = ctx.out.len;
     const double* connected = ctx.scratch + static_cast<int64_t>(NArgs) * N;
     for (int k = 0; k < NArgs; ++k) {
@@ -306,9 +306,9 @@ void density_bwd(KernelCtx& ctx) {
 
 template <int NArgs>
 bool density_micro(const KernelCtx& ctx, std::vector<BwdMicro>& out) {
-  if ((ctx.variant & 0x40u) != 0 || ctx.out.len != 1) return false;
-  const unsigned mask =
-      ctx.variant == 0 ? (1u << NArgs) - 1 : (ctx.variant & 0x3fu);
+  const DensityMode mode = density_mode(ctx);
+  if (mode.elementwise || ctx.out.len != 1) return false;
+  const unsigned mask = mode.active;
   int64_t n_partials = 0;
   for (int k = 0; k < NArgs; ++k) n_partials += ctx.in[k].len;
   for (int k = 0; k < NArgs; ++k)
@@ -331,7 +331,7 @@ bool density_micro(const KernelCtx& ctx, std::vector<BwdMicro>& out) {
 // broadcast scalars (each element scales by its own adjoint).
 template <int NArgs>
 int64_t density_scratch(const Op& op, const Slot* slots) {
-  if (op.variant & 0x40u) return (NArgs + 1) * slots[op.out].len;
+  if (density_mode(op).elementwise) return (NArgs + 1) * slots[op.out].len;
   return sum_in_lens(op, slots) + 1;
 }
 
@@ -340,7 +340,7 @@ int64_t density_scratch(const Op& op, const Slot* slots) {
 // summed path keeps the whole-vector call. STANLI_LPMF_FWD expands both.
 #define STANLI_LPMF_FWD_T(fname, dist, NARGS, TIER)                          \
   void fname(KernelCtx& ctx) {                                               \
-    if (ctx.variant & 0x40u) {                                               \
+    if (density_mode(ctx).elementwise) {                                     \
       density_fwd_elt<NARGS, TIER>(                                          \
           ctx,                                                               \
           [&](int64_t n, const auto&... a) {                                 \
@@ -383,7 +383,7 @@ int64_t density_scratch(const Op& op, const Slot* slots) {
 
 // Distribution functions: one form, no propto, and no elementwise
 // variant either. reroll.cpp only ever fuses opcodes it opts in by name,
-// and cdfs are not among them, so variant bit 6 cannot arrive -- writing
+// and cdfs are not among them, so the elementwise mode cannot arrive -- writing
 // this separately from density_fwd_v is what keeps the per-lane binding
 // from being instantiated for 75 functions that will never use it. It is
 // not merely wasted code: some cdfs do not survive being handed a bare
@@ -394,7 +394,7 @@ void cdf_fwd(KernelCtx& ctx, F&& f) {
   // opcode and cdfs are in neither list -- but the failure if it ever did
   // would be silent: out would be len N and only element 0 written. Say
   // so instead. The branch costs nothing next to an incomplete beta.
-  if (ctx.variant & 0x40u)
+  if (density_mode(ctx).elementwise)
     throw std::runtime_error("cdf: elementwise variant not implemented");
   // Tier here never carries the propto bit, so the first lambda is never
   // instantiated; it exists to satisfy the shared signature.

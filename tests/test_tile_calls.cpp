@@ -131,8 +131,7 @@ void test_kernel(const Entry& e, uint8_t scalar_variant, int lanes, Rng& rng) {
   }
   const int n = e.nargs;
   const int n_scratch = n + 1;
-  const uint8_t eltv =
-      tile_call_variant(TileCallKind::Density, scalar_variant, n);
+  const uint8_t eltv = tile_call_variant(TileCallKind::Density, scalar_variant);
 
   std::vector<std::vector<double>> in((size_t)n);
   std::vector<bool> shared((size_t)n);
@@ -261,7 +260,7 @@ void test_density_kernels() {
     if (stanli::tile_call_kind(e.opcode) != stanli::TileCallKind::Density)
       continue;
     Rng rng(0x9e3779b97f4a7c15ull ^ e.opcode);
-    std::vector<uint8_t> variants = {0};
+    std::vector<uint8_t> variants;
     for (unsigned m = 0; m < (1u << e.nargs); ++m) {
       variants.push_back((uint8_t)m);
       variants.push_back((uint8_t)(m | 0x80u));
@@ -377,7 +376,8 @@ void test_nan_adjoints() {
                                0x7ff8000000000123ull, 0xfff8000000000456ull};
   const Kernel* k = find_kernel(OP_NORMAL_LPDF);
   const int n = 3;
-  const uint8_t eltv = tile_call_variant(TileCallKind::Density, 0, n);
+  const uint8_t all = DensityMode::all_active(n).byte();
+  const uint8_t eltv = tile_call_variant(TileCallKind::Density, all);
   for (int lanes : {1, 5}) {
     for (uint64_t pa : payloads)
       for (uint64_t pb : payloads)
@@ -421,7 +421,7 @@ void test_nan_adjoints() {
                 }
                 double o = 0.0;
                 ctx.out = Desc{&o, 1};
-                ctx.variant = 0;
+                ctx.variant = all;
                 ctx.scratch = sc;
                 ctx.out_adj = oa;
                 ctx.out_adj_vec = Desc{&oa, 1};

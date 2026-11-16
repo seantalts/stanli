@@ -21,7 +21,8 @@ void student_t_lpdf_fused(KernelCtx& ctx);
 void lognormal_lpdf_fused(KernelCtx& ctx);
 void beta_lpdf_fused(KernelCtx& ctx);
 void gamma_lpdf_fused(KernelCtx& ctx);
-void ordered_logistic_lpmf_fused(KernelCtx& ctx);
+// The first n outcomes of idata, one shared cutpoint vector.
+void ordered_logistic_lpmf_fused(KernelCtx& ctx, int64_t n);
 
 void normal_lpdf_fwd_gen(KernelCtx& ctx);
 void cauchy_lpdf_fwd_gen(KernelCtx& ctx);

@@ -1072,7 +1072,7 @@ class Analysis {
     const int scratch = kind == TileCallKind::Density ? call.n_in + 1 : 0;
     if (call.scratch_len != scratch) return false;
     if (kind == TileCallKind::Unary && call.n_in != 1) return false;
-    if (call.variant & 0x40u) return false;
+    if (!tile_call_accepts(kind, call.variant)) return false;
     if (!call.idata.empty() || call.udata_owner) return false;
     for (int k = 0; k < call.n_in; ++k)
       if (call.in_len[k] != 1) return false;
@@ -1385,7 +1385,7 @@ bool tile_call_forward(const RegionMapLanePlan::CallWindow& w,
   double* const rows = t.mutable_base();
   const TileLanes lanes(t, m);
   const int n = lanes.n;
-  ctx.variant = tile_call_variant(w.tile, call.variant, n_in);
+  ctx.variant = tile_call_variant(w.tile, call.variant);
   ctx.n_in = n_in;
   double buf[kTileCallColumns * kTile];
   double* at = buf;
@@ -1836,7 +1836,7 @@ void tile_call_backward(const RegionMapLanePlan::CallWindow& w,
   const TileLanes lanes(f, m);
   const int n = lanes.n;
   ctx.n_in = n_in;
-  ctx.variant = tile_call_variant(w.tile, call.variant, n_in);
+  ctx.variant = tile_call_variant(w.tile, call.variant);
   ctx.idata = call.idata.data();
   ctx.n_idata = (int64_t)call.idata.size();
   ctx.udata = call.udata_owner.get();

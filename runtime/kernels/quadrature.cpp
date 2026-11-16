@@ -106,10 +106,10 @@ void quadrature_fwd(KernelCtx& ctx) {
   if (ctx.n_in == 4 &&
       (ctx.in[3].len !=
            (spec.method == mir::QuadratureMethod::Integrate1D ? 1 : 3) ||
-       (ctx.variant & 0x7u) != 0))
+       solver_activity(ctx).any()))
     throw std::invalid_argument(
         "runtime quadrature controls require a value-only solve");
-  switch (ctx.variant & 0x7u) {
+  switch (solver_activity(ctx).byte() & 0x7u) {
     case 0:
       quadrature_eval<false, false, false>(ctx, spec);
       break;
@@ -138,7 +138,7 @@ void quadrature_fwd(KernelCtx& ctx) {
 }
 
 void quadrature_bwd(KernelCtx& ctx) {
-  if ((ctx.variant & 0x7u) == 0) return;
+  if (!solver_activity(ctx).any()) return;
   int64_t at = 0;
   for (int k = 0; k < ctx.n_in; ++k) {
     for (int64_t i = 0; i < ctx.in[k].len; ++i, ++at)
@@ -148,7 +148,7 @@ void quadrature_bwd(KernelCtx& ctx) {
 }
 
 int64_t quadrature_scratch(const Op& op, const Slot* slots) {
-  if ((op.variant & 0x7u) == 0) return 0;
+  if (!solver_activity(op).any()) return 0;
   return sum_in_lens(op, slots);
 }
 
