@@ -15,10 +15,20 @@ time converted to gradients at A's rate (A's gradients per second). A run
 counts as zero ESS when a posterior mean is more than 0.3 reference sd from
 the reference mean or the maximum R-hat exceeds 1.05.
 
-Needs numpy and scipy and the benchmark findings directory, which holds the
-brms and ecology models and the reference means:
+Everything comes from the repository. The radon and irt_2pl models and data
+are read from deps/posteriordb. The other four are generated:
+tools/laplace_whiten_stan/ holds their Stan code and tools/laplace_whiten_models.py
+simulates their data with fixed seeds (the benchmark drew its data in R, so
+the values differ and the ratios agree only approximately). The reference
+means come from a long default-sampler run (diag_e, warmup 2000, 4 chains x
+5000 draws, seed 9001) made on first use and cached under build-acceptance/,
+which git ignores. The checkout of posteriordb that dev_setup.sh makes has no
+reference draws, so none are read from there.
 
-    python tools/laplace_whiten_acceptance.py --findings ~/claud/stanli-issue540-findings
+Needs numpy, scipy and a built runtime (python/stanli/_bin):
+
+    uv run --no-project --python 3.11 --with numpy --with scipy \\
+        python tools/laplace_whiten_acceptance.py
 """
 import argparse
 import concurrent.futures as cf
@@ -28,7 +38,6 @@ import multiprocessing
 import os
 import pathlib
 import sys
-import tarfile
 import tempfile
 import time
 import warnings
@@ -37,48 +46,65 @@ import zipfile
 import numpy as np
 
 REPO = pathlib.Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 SEEDS = (1, 2)
+REFERENCE_SEED = 9001
 
-# name, kind, files, latent parameters, benchmark M200 ratio (per_model2.csv)
+# name, kind (pdb: posteriordb, gen: tools/laplace_whiten_models.py), latent
+# parameters, benchmark M200 ratio (per_model2.csv)
 MODELS = [
     dict(name="radon_all-radon_hierarchical_intercept_centered", kind="pdb",
          model="radon_hierarchical_intercept_centered", data="radon_all",
          latent=["alpha"], bench=76.68),
-    dict(name="crossed_c", kind="brms", stan="crossed_c.stan",
-         data="crossed.json", latent=["r_1_1", "r_2_1"], bench=34.26),
-    dict(name="gauss_slopes", kind="brms", stan="gauss_slopes.stan",
-         data="gauss_slopes.json", latent=["z_1"], bench=12.34),
-    dict(name="bern_glmm", kind="brms", stan="bern_glmm.stan",
-         data="bern_glmm.json", latent=["z_1"], bench=1.461),
+    dict(name="crossed_c", kind="gen", gen="crossed_c", latent=["r_1_1", "r_2_1"], bench=34.26),
+    dict(name="gauss_slopes", kind="gen", gen="gauss_slopes", latent=["z_1"], bench=12.34),
+    dict(name="bern_glmm", kind="gen", gen="bern_glmm", latent=["z_1"], bench=1.461),
     dict(name="irt_2pl-irt_2pl", kind="pdb", model="irt_2pl", data="irt_2pl",
          latent=["theta", "a", "b"], bench=0.02975),
-    dict(name="spatial_binom_gmrf", kind="eco", stan="spatial_binom_gmrf.stan",
-         data="spatial_binom_gmrf.data.json", latent=["phi"], bench=3.186),
+    dict(name="spatial_binom_gmrf", kind="gen", gen="spatial_binom_gmrf", latent=["phi"], bench=3.186),
 ]
 MODELS_BY_NAME = {m["name"]: m for m in MODELS}
 
 
-def _inputs(spec, findings, pdb, tmp):
-    findings = pathlib.Path(findings)
+def _inputs(spec, pdb, tmp):
     if spec["kind"] == "pdb":
         pdb = pathlib.Path(pdb)
         code = (pdb / "models" / "stan" / (spec["model"] + ".stan")).read_text()
         with zipfile.ZipFile(pdb / "data" / "data" / (spec["data"] + ".json.zip")) as z:
             data = pathlib.Path(tmp) / (spec["data"] + ".json")
             data.write_bytes(z.read(z.namelist()[0]))
-    else:
-        sub = "brms" if spec["kind"] == "brms" else "eco"
-        base = findings / "precond2" / sub
-        code = (base / spec["stan"]).read_text()
-        data = base / spec["data"]
-    name = spec["name"]
-    ref = findings / "precond2" / "results" / f"{name}.ref.json"
-    if ref.exists():
-        reference = json.loads(ref.read_text())
-    else:
-        with tarfile.open(findings / "results-csv-json.tgz") as t:
-            reference = json.load(t.extractfile(f"results/{name}.ref.json"))
-    return code, data, reference
+        return code, data
+    import laplace_whiten_models
+    return laplace_whiten_models.generate(spec["gen"], tmp)
+
+
+def _reference_path(cache, name):
+    return pathlib.Path(cache) / f"{name}.ref.json"
+
+
+def make_reference(args):
+    """Reference posterior means and sds (name -> [mean, sd]) from a long
+    default-sampler run, cached under `cache`."""
+    name, pdb, cache = args
+    out = _reference_path(cache, name)
+    if out.exists():
+        return name, "cached"
+    os.environ.update(VECLIB_MAXIMUM_THREADS="1", OMP_NUM_THREADS="1",
+                      OPENBLAS_NUM_THREADS="1")
+    sys.path.insert(0, str(REPO / "python"))
+    import stanli
+    with tempfile.TemporaryDirectory() as tmp:
+        code, data = _inputs(MODELS_BY_NAME[name], pdb, tmp)
+        model = stanli.Model(stan_code=code, data=data)
+        fit = model.sample(chains=4, warmup=2000, samples=5000,
+                           seed=REFERENCE_SEED, parallel_chains=1, refresh=0,
+                           metric="diag_e")
+    draws = fit.draws().reshape(-1, len(fit.names))
+    ref = {nm: [float(draws[:, j].mean()), float(draws[:, j].std(ddof=1))]
+           for j, nm in enumerate(fit.names) if nm != "lp__"}
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(json.dumps(ref))
+    return name, "made"
 
 
 def _sample(model, warmup, seed, **kw):
@@ -119,7 +145,7 @@ def _score(post, reference):
 
 
 def run_task(args):
-    name, seed, mode, findings, pdb, repair = args
+    name, seed, mode, pdb, cache, repair = args
     os.environ.update(VECLIB_MAXIMUM_THREADS="1", OMP_NUM_THREADS="1",
                       OPENBLAS_NUM_THREADS="1")
     sys.path.insert(0, str(REPO / "python"))
@@ -128,7 +154,8 @@ def run_task(args):
     out = dict(model=name, seed=seed, mode=mode)
     try:
         with tempfile.TemporaryDirectory() as tmp:
-            code, data, reference = _inputs(spec, findings, pdb, tmp)
+            code, data = _inputs(spec, pdb, tmp)
+            reference = json.loads(_reference_path(cache, name).read_text())
             m = stanli.Model(stan_code=code, data=data)
             out["n"] = m.n_unconstrained
             t = time.time()
@@ -185,8 +212,11 @@ def fmt(x):
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
-    ap.add_argument("--findings", required=True, type=pathlib.Path,
-                    help="the #540 benchmark findings directory")
+    ap.add_argument("--cache", type=pathlib.Path,
+                    default=REPO / "build-acceptance",
+                    help="where reference means are kept (default "
+                    "build-acceptance/, which git ignores); delete a "
+                    "file there to recompute it")
     ap.add_argument("--posteriordb", type=pathlib.Path,
                     default=REPO / "deps" / "posteriordb" / "posterior_database")
     ap.add_argument("--models", nargs="*", default=[m["name"] for m in MODELS])
@@ -196,10 +226,14 @@ def main():
     ap.add_argument("--jobs", type=int, default=28)
     ap.add_argument("--json", type=pathlib.Path, help="write raw per-run results here")
     a = ap.parse_args()
-    tasks = [(nm, s, mode, str(a.findings), str(a.posteriordb), a.repair)
+    tasks = [(nm, s, mode, str(a.posteriordb), str(a.cache), a.repair)
              for nm in a.models for s in SEEDS for mode in ("A", "M")]
     ctx = multiprocessing.get_context("spawn")
     with cf.ProcessPoolExecutor(a.jobs, mp_context=ctx) as ex:
+        for nm, how in ex.map(make_reference,
+                              [(nm, str(a.posteriordb), str(a.cache))
+                               for nm in a.models]):
+            print(f"reference {nm}: {how}", file=sys.stderr, flush=True)
         results = list(ex.map(run_task, tasks))
     if a.json:
         a.json.write_text(json.dumps(results, indent=1, default=float))
