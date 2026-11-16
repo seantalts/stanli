@@ -20,7 +20,7 @@ fi
 
 source deps/emsdk/emsdk_env.sh >/dev/null 2>&1
 emcmake cmake -B build-wasm -DCMAKE_BUILD_TYPE=Release \
-  -DSTANLI_STAN_DENSITY_ORACLE=OFF >/dev/null
+  -DSTANLI_STAN_DENSITY_ORACLE=OFF -DSTANLI_DEBUG_SWITCHES=OFF >/dev/null
 cmake --build build-wasm --parallel "$BUILD_JOBS" --target stanli_wasm
 
 # Keep the browser compiler in a separately stamped artifact. Build it in a

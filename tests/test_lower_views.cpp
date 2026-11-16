@@ -7,7 +7,6 @@
 #include <stanli/optable.hpp>
 #include <stanli/sexp.hpp>
 
-#include "env_helpers.hpp"
 #include "stdout_capture.hpp"
 
 #include <cmath>
@@ -506,16 +505,11 @@ void test_data_size_effect_prints_before_dimension_error() {
 
 std::string lower_dump(const std::string& stem, const std::string& dir) {
   std::filesystem::remove_all(dir);
-  test_setenv("STANLI_DUMP_PASSES", dir.c_str(), 1);
   auto data = stanli::DataMap::from_json_file(
       "tests/fixtures/while_fallback_unroll.json");
-  try {
-    stanli::compile_model(fixture(stem), data);
-  } catch (...) {
-    test_unsetenv("STANLI_DUMP_PASSES");
-    throw;
-  }
-  test_unsetenv("STANLI_DUMP_PASSES");
+  stanli::CompileOptions options;
+  options.dump_passes = dir;
+  stanli::compile_model(fixture(stem), data, 1, options);
   return slurp(dir + "/02-log_prob-lower.txt");
 }
 

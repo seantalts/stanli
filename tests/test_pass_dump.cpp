@@ -1,4 +1,4 @@
-// STANLI_DUMP_PASSES: one graph dump per lowering pass, so consecutive
+// CompileOptions::dump_passes: one graph dump per lowering pass, so consecutive
 // stages can be diffed. The dumps are a debugging aid, so the property that
 // matters most is that turning them on does not change what is compiled.
 #include "env_helpers.hpp"
@@ -61,7 +61,35 @@ static const char* kExpected[] = {"00-mir.sexp",
                                   "20-write_array-cse.txt",
                                   "21-write_array-finalize.txt"};
 
-int main() {
+stanli::CompiledModel compile_dumping(const std::string& mir,
+                                      const stanli::DataMap& data,
+                                      const std::string& dir,
+                                      const std::string& stages = "") {
+  stanli::CompileOptions options;
+  options.dump_passes = dir;
+  options.dump_stages = stages;
+  return stanli::compile_model(mir, data, 1, options);
+}
+
+// STANLI_DUMP_PASSES and STANLI_DUMP_STAGES select what the options do.
+int environment_switches(const std::string& mir, const stanli::DataMap& data,
+                         const std::filesystem::path& root) {
+  const std::filesystem::path typed = root / "typed";
+  const std::filesystem::path from_env = root / "env";
+  compile_dumping(mir, data, typed.string(), "log_prob:reroll,constfold");
+  test_setenv("STANLI_DUMP_PASSES", from_env.string().c_str(), 1);
+  test_setenv("STANLI_DUMP_STAGES", "log_prob:reroll,constfold", 1);
+  stanli::compile_model(mir, data);
+  test_unsetenv("STANLI_DUMP_PASSES");
+  test_unsetenv("STANLI_DUMP_STAGES");
+  expect("the switches dump what the options dump",
+         listing(from_env) == listing(typed) && !listing(typed).empty());
+  std::filesystem::remove_all(root);
+  if (failures == 0) std::printf("test_pass_dump --switches OK\n");
+  return failures == 0 ? 0 : 1;
+}
+
+int main(int argc, char** argv) {
   using namespace stanli;
 
   // Constant folding removes nine of this model's sixteen ops, so the
@@ -73,14 +101,13 @@ int main() {
   const std::filesystem::path root =
       std::filesystem::temp_directory_path() / "stanli_pass_dump_test";
   std::filesystem::remove_all(root);
+  if (argc > 1 && std::string(argv[1]) == "--switches")
+    return environment_switches(mir, data, root);
 
-  test_unsetenv("STANLI_DUMP_PASSES");
   CompiledModel plain = compile_model(mir, data);
 
   const std::filesystem::path on_dir = root / "on";
-  test_setenv("STANLI_DUMP_PASSES", on_dir.string().c_str(), 1);
-  CompiledModel dumped = compile_model(mir, data);
-  test_unsetenv("STANLI_DUMP_PASSES");
+  CompiledModel dumped = compile_dumping(mir, data, on_dir.string());
 
   const std::vector<std::string> got = listing(on_dir);
   const std::vector<std::string> want(std::begin(kExpected),
@@ -100,15 +127,11 @@ int main() {
                                             after.substr(0, after.find('\n')));
 
   compile_model(mir, data);
-  expect("no dumps once unset", listing(on_dir) == want);
+  expect("no dumps without the option", listing(on_dir) == want);
 
   const auto listing_with = [&](const char* stages, const char* name) {
     const std::filesystem::path dir = root / name;
-    test_setenv("STANLI_DUMP_PASSES", dir.string().c_str(), 1);
-    test_setenv("STANLI_DUMP_STAGES", stages, 1);
-    compile_model(mir, data);
-    test_unsetenv("STANLI_DUMP_PASSES");
-    test_unsetenv("STANLI_DUMP_STAGES");
+    compile_dumping(mir, data, dir.string(), stages);
     return listing(dir);
   };
 
@@ -135,11 +158,7 @@ int main() {
   std::string captured;
   {
     stanli_test::StdoutCapture capture;
-    test_setenv("STANLI_DUMP_PASSES", "-", 1);
-    test_setenv("STANLI_DUMP_STAGES", "reroll", 1);
-    compile_model(mir, data);
-    test_unsetenv("STANLI_DUMP_PASSES");
-    test_unsetenv("STANLI_DUMP_STAGES");
+    compile_dumping(mir, data, "-", "reroll");
     captured = capture.finish();
   }
 

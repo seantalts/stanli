@@ -6,7 +6,6 @@ a literal condition never takes. Preparation still reads, decodes and probes
 the whole log_prob block, so a per-node walk of every subtree is quadratic in
 the depth: seconds here, tens of milliseconds when linear.
 """
-import os
 from pathlib import Path
 import subprocess
 import sys
@@ -103,16 +102,17 @@ def live_model(kind, depth, gq_depth=0):
 """
 
 
-def prepare(text, env=None):
+def prepare(text, parallel_wa="auto"):
     with tempfile.TemporaryDirectory() as directory:
         mir = Path(directory) / "deep.sexp"
         data = Path(directory) / "data.json"
         mir.write_text(text)
         data.write_text("{}")
         start = time.perf_counter()
-        run = subprocess.run([BENCH_GRAD, str(mir), str(data), "--prep"],
+        run = subprocess.run([BENCH_GRAD, str(mir), str(data), "--prep",
+                              f"--parallel-wa={parallel_wa}"],
                              capture_output=True, text=True,
-                             preexec_fn=default_stack, env=dict(os.environ, STANLI_PROFILE_PREP="0", **(env or {})))
+                             preexec_fn=default_stack)
         return run, time.perf_counter() - start
 
 
@@ -141,19 +141,19 @@ class DeepExpressionPrep(unittest.TestCase):
 
     def test_deep_generated_quantities_prepare_beside_log_prob(self):
         for kind in ("sum", "call"):
-            cases = [(2, "force")] + [(DEPTH, mode) for mode in ("auto", "0")]
+            cases = [(2, "force")] + [(DEPTH, mode) for mode in ("auto", "off")]
             for depth, mode in cases:
                 with self.subTest(kind=kind, depth=depth, mode=mode):
                     run, _ = prepare(live_model(kind, depth, gq_depth=DEPTH),
-                                     {"STANLI_PARALLEL_WA": mode})
+                                     mode)
                     self.assertEqual(run.returncode, 0, run.stderr[-400:])
 
     def test_excessive_generated_quantities_depth_is_the_same_error(self):
         for kind in ("sum", "call"):
             with self.subTest(kind=kind):
                 text = live_model(kind, 2, gq_depth=TOO_DEEP)
-                beside, _ = prepare(text, {"STANLI_PARALLEL_WA": "force"})
-                alone, _ = prepare(text, {"STANLI_PARALLEL_WA": "0"})
+                beside, _ = prepare(text, "force")
+                alone, _ = prepare(text, "off")
                 self.assertEqual(beside.returncode, 1, f"signal {-beside.returncode}")
                 self.assertIn("nested too deeply", beside.stderr)
                 self.assertEqual(beside.stderr, alone.stderr)

@@ -25,6 +25,12 @@ stanli_function* stanli_function_new_from_mir(const char* mir_text,
                                               const char* function_name,
                                               char* err, size_t err_len);
 void stanli_function_free(stanli_function* function);
+// Nonzero makes each later call emit its function selection and interpreter
+// trace through the diagnostic sink. Handles start with it off, unless the
+// developer switch STANLI_EXECUTION_REPORT is set. Set it before calling,
+// not while another thread calls the handle.
+void stanli_function_set_execution_report(stanli_function* function,
+                                          int enabled);
 
 // Results are borrowed only for the duration of this callback. Keeping the
 // copy on the caller side avoids transferring STL-owned storage across the
@@ -87,6 +93,10 @@ class Function {
       handle_ = std::exchange(other.handle_, nullptr);
     }
     return *this;
+  }
+
+  void set_execution_report(bool enabled) {
+    stanli_function_set_execution_report(handle_, enabled ? 1 : 0);
   }
 
   DataMap::Entry operator()(const DataMap& arguments) const {

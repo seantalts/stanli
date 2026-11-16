@@ -270,10 +270,11 @@ createStanli().then((M) => {
     const buildWithOpts = (mirText, fastMath) => {
       const mirP = M.stringToNewUTF8(mirText);
       const dataP = M.stringToNewUTF8(regData);
-      const optsP = M._malloc(16);
+      const optsP = M._malloc(24);
       M._stanli_model_opts_init(optsP);
-      const fields = new Int32Array(M.HEAPF64.buffer, optsP, 4);
-      if (fields[0] !== 1 || fields[1] !== 1 || fields[2] !== 0 || fields[3] !== 1)
+      const fields = new Int32Array(M.HEAPF64.buffer, optsP, 6);
+      if (fields[0] !== 1 || fields[1] !== 1 || fields[2] !== 0 || fields[3] !== 1 ||
+          fields[4] !== 0 || fields[5] !== 0)
         fail("model_opts_init wrote " + Array.from(fields));
       fields[2] = fastMath ? 1 : 0;
       const m = M._stanli_model_new_with_opts(mirP, dataP, optsP, errPtr,

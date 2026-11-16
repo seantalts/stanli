@@ -34,7 +34,8 @@ int stanli_abi_version(void);
 int stanli_has_embedded_stanc(void);
 
 /* Model construction options. Call stanli_model_opts_init before setting
- * fields: seed 1, one thread per chain, fast_math 0, allow_interpreter 1.
+ * fields: seed 1, one thread per chain, fast_math 0, allow_interpreter 1,
+ * execution_report 0, parallel_write_array STANLI_PARALLEL_WA_AUTO.
  *
  * seed is the model-construction seed: RNG calls in transformed data draw from
  * create_rng(seed, 0) once, when the model is built, exactly as CmdStan's
@@ -55,12 +56,29 @@ int stanli_has_embedded_stanc(void);
  *
  * allow_interpreter 0 makes construction fail, naming the parts, when parts
  * of the model have no compiled path and would run through the MIR
- * interpreter. */
+ * interpreter.
+ *
+ * execution_report 1 emits the execution manifest, then the host's
+ * write_array selection, through the diagnostic sink while the model is
+ * built.
+ *
+ * parallel_write_array says where write_array is lowered while the model is
+ * built: AUTO on a second thread when the build has threads and the model has
+ * enough to lower on both sides, OFF on the calling thread after log_prob,
+ * FORCE on a second thread whenever the build has threads. Results are the
+ * same either way. */
+typedef enum {
+  STANLI_PARALLEL_WA_AUTO = 0,
+  STANLI_PARALLEL_WA_OFF = 1,
+  STANLI_PARALLEL_WA_FORCE = 2
+} stanli_parallel_wa;
 typedef struct {
   uint32_t seed;
   int threads_per_chain;
   int fast_math;
   int allow_interpreter;
+  int execution_report;
+  int parallel_write_array; /* a stanli_parallel_wa */
 } stanli_model_opts;
 void stanli_model_opts_init(stanli_model_opts* o);
 

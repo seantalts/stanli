@@ -167,16 +167,19 @@ endif()
 
 # The STANLI_* environment variables that turn passes off, force paths, set
 # tuning limits or print diagnostics (runtime/include/stanli/debug_switch.hpp).
-# Tests and investigations use them. OFF compiles them out, so the runtime's
-# behavior cannot change through the environment. The differential and
-# pass-switch tests need them, so ctest is meant for an ON build.
-# STANLI_NO_INTERPRETER, STANLI_ISA and STANLI_NO_FUSED_DENSITY are not
-# developer switches.
+# Tests and investigations use them. OFF, the default and what packaging
+# builds use, compiles them out, so the runtime's behavior cannot change
+# through the environment. The tests that need them carry the debug_switches
+# label and are disabled in an OFF build (STANLI_DEBUG_SWITCH_TESTS below);
+# tools/dev_setup.sh configures ON. STANLI_NO_INTERPRETER, STANLI_ISA,
+# STANLI_NO_FUSED_DENSITY and STANLI_NO_O1_FALLBACK are not developer
+# switches.
 option(STANLI_DEBUG_SWITCHES
-  "Read the developer STANLI_* environment switches" ON)
+  "Read the developer STANLI_* environment switches" OFF)
 if(NOT STANLI_DEBUG_SWITCHES)
   target_compile_definitions(stanmath INTERFACE STANLI_NO_DEBUG_SWITCHES=1)
 endif()
+set(STANLI_DEBUG_SWITCH_TESTS)
 
 # Chains in threads. stan-math's autodiff stack is a plain static unless
 # STAN_THREADS is defined, in which case it is thread_local (__thread on
@@ -1021,6 +1024,7 @@ foreach(_stanli_cogmod_source IN LISTS STANLI_COGMOD_SOURCES)
   set_tests_properties(test_cross_path_${_stanli_cogmod} PROPERTIES
     PASS_REGULAR_EXPRESSION "CROSS OK "
     FAIL_REGULAR_EXPRESSION "CROSS (FAIL|SKIP)")
+  list(APPEND STANLI_DEBUG_SWITCH_TESTS test_cross_path_${_stanli_cogmod})
 endforeach()
 add_executable(bench_grad tools/bench_grad.cpp
   $<TARGET_OBJECTS:stanli_tbb_stub>)
@@ -1184,6 +1188,7 @@ if(NOT EMSCRIPTEN)
     if(exit_fixture MATCHES "^structured_callback_")
       set_tests_properties(${exit_fixture}_reference PROPERTIES
         ENVIRONMENT "STANLI_STRUCTURED_LOOPS=force")
+      list(APPEND STANLI_DEBUG_SWITCH_TESTS ${exit_fixture}_reference)
     endif()
   endforeach()
   add_test(NAME callback_geometry
@@ -1375,6 +1380,11 @@ if(STANLI_STAN_DENSITY_ORACLE)
 endif()
 foreach(STANLI_TEST IN LISTS STANLI_TESTS)
   stanli_add_test(${STANLI_TEST})
+endforeach()
+# The parts of these two that check the environment switches themselves.
+foreach(_stanli_split test_wa_parallel test_pass_dump)
+  add_test(NAME ${_stanli_split}_switches COMMAND ${_stanli_split} --switches
+           WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
 endforeach()
 set_tests_properties(test_ode_prog PROPERTIES TIMEOUT 180)
 target_link_libraries(test_region_map PRIVATE stanli_stanc_process)
@@ -1723,4 +1733,29 @@ if(Python3_Interpreter_FOUND)
              WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
   endif()
 endif()
+
+# Tests that set developer switches, to turn a pass off for a differential
+# check, force an engine, or read a diagnostic. An OFF build ignores the
+# switches, so these would fail or check nothing there: they carry the
+# debug_switches label (ctest -L debug_switches) and are disabled.
+list(APPEND STANLI_DEBUG_SWITCH_TESTS
+  test_execution_report test_sampler_parity test_lower test_region_map
+  test_reroll test_inplace test_pass_safety test_structured_checks
+  test_structured_loop test_constfold test_collapse test_cse test_fast_math
+  test_partition test_solve_reuse test_cross_path test_write_array
+  test_island test_odevariadic test_algebra test_brmsmono
+  test_wa_parallel_switches test_pass_dump_switches
+  test_prep_profile_reroll_dispositions test_write_array_semantics
+  hypergeometric_1f0_register_reference
+  hypergeometric_1f0_structured_reference callback_geometry
+  test_run_rng test_ctsem_engine test_data_loop_memo)
+foreach(_stanli_switch_test IN LISTS STANLI_DEBUG_SWITCH_TESTS)
+  if(TEST ${_stanli_switch_test})
+    set_property(TEST ${_stanli_switch_test} APPEND PROPERTY
+                 LABELS debug_switches)
+    if(NOT STANLI_DEBUG_SWITCHES)
+      set_property(TEST ${_stanli_switch_test} PROPERTY DISABLED TRUE)
+    endif()
+  endif()
+endforeach()
 endif()  # NOT EMSCRIPTEN

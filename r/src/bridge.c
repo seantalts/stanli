@@ -201,6 +201,8 @@ typedef struct {
   int threads_per_chain;
   int fast_math;
   int allow_interpreter;
+  int execution_report;
+  int parallel_write_array;
 } stanli_model_opts;
 /* Mirrors stanli_field_layout. */
 typedef struct {
@@ -409,6 +411,8 @@ static const field_layout k_layouts[] = {
     LAYOUT(stanli_model_opts, threads_per_chain),
     LAYOUT(stanli_model_opts, fast_math),
     LAYOUT(stanli_model_opts, allow_interpreter),
+    LAYOUT(stanli_model_opts, execution_report),
+    LAYOUT(stanli_model_opts, parallel_write_array),
 };
 #undef LAYOUT
 
@@ -605,9 +609,12 @@ SEXP stanli_r_model_new(SEXP code, SEXP data_json, SEXP is_mir, SEXP seed,
   const uint32_t construction_seed = (uint32_t)asReal(seed);
   const int threads = asInteger(threads_per_chain);
   if (threads < 1) error("threads_per_chain must be positive");
-  stanli_model_opts opts = {construction_seed, threads,
+  stanli_model_opts opts = {construction_seed,
+                            threads,
                             asLogical(fast_math) == TRUE,
-                            asLogical(allow_interpreter) == TRUE};
+                            asLogical(allow_interpreter) == TRUE,
+                            0,
+                            0};
   const char* label = file_label(file);
   if (asLogical(is_mir))
     m = p_model_new_with_opts(text, data, &opts, err, sizeof err);

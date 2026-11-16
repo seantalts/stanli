@@ -1154,9 +1154,9 @@ std::string report_request() {
 constexpr uint64_t kParallelWriteArrayMinWork = 1000;
 constexpr uint64_t kParallelWriteArrayMaxDataBytes = uint64_t{64} << 20;
 
-enum class ParallelWriteArray { Off, Auto, Force };
-
-ParallelWriteArray read_parallel_write_array() {
+ParallelWriteArray parallel_write_array(const CompileOptions& options) {
+  if (options.parallel_write_array != ParallelWriteArray::Auto)
+    return options.parallel_write_array;
   const char* v = debug_env("STANLI_PARALLEL_WA");
   if (!v || !*v || std::string_view(v) == "auto")
     return ParallelWriteArray::Auto;
@@ -1168,8 +1168,13 @@ ParallelWriteArray read_parallel_write_array() {
 class WriteArrayLowering {
  public:
   WriteArrayLowering(const DataMap& data, const mir::Program& prog,
-                     bool trace_prep, PassDumper& dumper)
-      : data_(data), prog_(prog), trace_(trace_prep), dumper_(dumper) {}
+                     bool trace_prep, PassDumper& dumper,
+                     ParallelWriteArray policy)
+      : data_(data),
+        prog_(prog),
+        trace_(trace_prep),
+        dumper_(dumper),
+        policy_(policy) {}
 
   void begin(Lowering& log_prob) {
     if (!should_run_alongside(log_prob)) {
@@ -1210,7 +1215,7 @@ class WriteArrayLowering {
 
  private:
   bool should_run_alongside(Lowering& log_prob) {
-    const ParallelWriteArray policy = read_parallel_write_array();
+    const ParallelWriteArray policy = policy_;
     if (policy == ParallelWriteArray::Off || !thread_safe_build() ||
         std::thread::hardware_concurrency() == 1 || dumper_.enabled() ||
         execution_trace_active())
@@ -1255,6 +1260,7 @@ class WriteArrayLowering {
   PrepTrace trace_;
   PassDumper off_{nullptr, nullptr};
   PassDumper& dumper_;
+  ParallelWriteArray policy_;
   std::vector<std::string> bound_env_, bound_decls_;
   std::optional<Lowering> wa_;
   std::optional<CompiledModel::WriteArray> result_;
@@ -1273,7 +1279,8 @@ CompiledModel compile_model(const std::string& mir_text, const DataMap& data,
   std::optional<stan::math::ChainableStack> autodiff_stack_of_caller;
   if (thread_safe_build() && stan::math::ChainableStack::instance_ == nullptr)
     autodiff_stack_of_caller.emplace();
-  const bool report_enabled = execution_reporting_enabled();
+  const bool report_enabled =
+      options.execution_report || execution_reporting_enabled();
   ExecutionTrace execution_trace;
   std::optional<ExecutionTraceScope> execution_scope;
   if (report_enabled) execution_scope.emplace(execution_trace);
@@ -1315,7 +1322,8 @@ CompiledModel compile_model(const std::string& mir_text, const DataMap& data,
   // the models where preparation is the cost (nn_rbm1bJ100, 20.7 s).
   std::optional<WriteArrayLowering> wa_lowering;
   if (!prog->generate_quantities.empty()) {
-    wa_lowering.emplace(data, *prog, prep.enabled(), dumper);
+    wa_lowering.emplace(data, *prog, prep.enabled(), dumper,
+                        parallel_write_array(options));
     lo.after_data_prepared = [&] { wa_lowering->begin(lo); };
   }
   auto specialized = try_bounded_specialization(lo, *prog);
@@ -1432,6 +1440,7 @@ CompiledModel compile_model(const std::string& mir_text, const DataMap& data,
     throw CompileError(interpreter_error(cm));
   prep.plain("compile", "total", compile_time);
   prep.report();
+  cm.execution_report = report_enabled;
   if (report_enabled) {
     execution_trace.check();
     emit_diagnostic(execution_report(cm, &execution_trace));

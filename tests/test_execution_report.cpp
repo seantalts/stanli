@@ -244,8 +244,14 @@ int main() {
   std::vector<std::string> diagnostics;
   set_diagnostic_sink(
       [&](const char* p, size_t n) { diagnostics.emplace_back(p, n); });
+  CompileOptions reporting;
+  reporting.execution_report = true;
+  auto observed = compile_model(source, data, 1, reporting);
+  check(!diagnostics.empty() && observed.execution_report,
+        "the execution_report option emits a manifest");
+  diagnostics.clear();
   test_setenv("STANLI_EXECUTION_REPORT", "1", 1);
-  auto observed = compile_model(source, data);
+  compile_model(source, data);
   test_unsetenv("STANLI_EXECUTION_REPORT");
   set_diagnostic_sink(nullptr);
   check(!diagnostics.empty(), "environment opt-in emits a manifest");

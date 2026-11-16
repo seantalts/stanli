@@ -44,19 +44,36 @@ static std::string slurp(const char* p) {
 
 int benchmark_main(int argc, char** argv) {
   bool fast_math = false;
+  stanli::ParallelWriteArray parallel_wa = stanli::ParallelWriteArray::Auto;
   std::vector<char*> kept;
   for (int i = 0; i < argc; ++i) {
-    if (i >= 4 && std::string(argv[i]) == "--fast-math")
+    const std::string arg = argv[i];
+    if (i >= 4 && arg == "--fast-math") {
       fast_math = true;
-    else
+    } else if (i >= 4 && arg.rfind("--parallel-wa=", 0) == 0) {
+      const std::string mode = arg.substr(sizeof("--parallel-wa=") - 1);
+      if (mode == "auto") {
+        parallel_wa = stanli::ParallelWriteArray::Auto;
+      } else if (mode == "off") {
+        parallel_wa = stanli::ParallelWriteArray::Off;
+      } else if (mode == "force") {
+        parallel_wa = stanli::ParallelWriteArray::Force;
+      } else {
+        std::fprintf(stderr,
+                     "bench_grad: --parallel-wa is auto, off or force\n");
+        return 2;
+      }
+    } else {
       kept.push_back(argv[i]);
+    }
   }
   argc = static_cast<int>(kept.size());
   argv = kept.data();
   if (argc < 4) {
     std::fprintf(stderr,
                  "usage: bench_grad mir.sexp data.json N|--prep|--timed "
-                 "[--fast-math] [--warmup-ms N --measure-ms N --points N | "
+                 "[--fast-math] [--parallel-wa=auto|off|force] [--warmup-ms N "
+                 "--measure-ms N --points N | "
                  "--points-file PATH]\n");
     return 2;
   }
@@ -105,6 +122,7 @@ int benchmark_main(int argc, char** argv) {
     pt = prep_now();
     stanli::CompileOptions compile_options;
     compile_options.fast_math = fast_math;
+    compile_options.parallel_write_array = parallel_wa;
     cm = stanli::compile_model(mir_text, data, 1, compile_options);
     compile_ns = prep_ns(pt);
   }
