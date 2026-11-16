@@ -1914,7 +1914,9 @@ jobs:
     if: >-
       github.event_name != 'pull_request' ||
       needs.changes.outputs.heavy == 'true'
-    runs-on: ubuntu-latest
+    # stanli_compiler_cli from this job runs on the ubuntu-24.04 sanitizer
+    # jobs, so it must be linked against that image's glibc or older.
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
@@ -1931,7 +1933,7 @@ jobs:
             deps/stanc3/stanli_compiler_cli
             deps/stanc3/stanli_compiler_cli.stamp
           key: >-
-            browser-compilers-v3-${{ env.STANC3_SRC_SHA }}-ocaml${{ env.OCAML_VERSION }}-dune${{ env.DUNE_VERSION }}-jsoo6.4.1-${{ hashFiles('compiler/ocaml/**', 'compiler/js/**', 'tools/stanc_embed/**') }}
+            browser-compilers-v4-ubuntu-24.04-${{ env.STANC3_SRC_SHA }}-ocaml${{ env.OCAML_VERSION }}-dune${{ env.DUNE_VERSION }}-jsoo6.4.1-${{ hashFiles('compiler/ocaml/**', 'compiler/js/**', 'tools/stanc_embed/**') }}
 
       - name: opam ${{ env.OPAM_VERSION }}
         if: steps.stancjs-cache.outputs.cache-hit != 'true'
