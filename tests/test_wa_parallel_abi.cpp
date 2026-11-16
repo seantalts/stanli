@@ -64,11 +64,12 @@ struct Model {
   std::string name, mir, data;
 };
 
-std::string account(const Model& m) {
+std::string account(const Model& m, int parallel_write_array) {
   std::ostringstream o;
   stanli_model_opts opts;
   stanli_model_opts_init(&opts);
   opts.seed = 7;
+  opts.parallel_write_array = parallel_write_array;
   char err[8192]{};
   stanli_model* model = stanli_model_new_with_opts(
       m.mir.c_str(), m.data.c_str(), &opts, err, sizeof err);
@@ -149,14 +150,11 @@ int main() {
   }
 
   std::map<std::string, std::string> sequential;
-  {
-    EnvGuard seq("STANLI_PARALLEL_WA", "0");
-    for (const Model& m : models) sequential[m.name] = account(m);
-  }
-  EnvGuard force("STANLI_PARALLEL_WA", "1");
+  for (const Model& m : models)
+    sequential[m.name] = account(m, STANLI_PARALLEL_WA_OFF);
   for (const Model& m : models) {
-    expect_same("C ABI " + m.name + ": parallel vs sequential", account(m),
-                sequential[m.name]);
+    expect_same("C ABI " + m.name + ": parallel vs sequential",
+                account(m, STANLI_PARALLEL_WA_FORCE), sequential[m.name]);
   }
   expect(sequential["conj"].find("sample rc 0") != std::string::npos,
          "the reference run samples");
@@ -170,13 +168,11 @@ int main() {
   {
     EnvGuard strict("STANLI_NO_INTERPRETER", "1");
     std::map<std::string, std::string> want;
-    {
-      EnvGuard seq("STANLI_PARALLEL_WA", "0");
-      for (const Model& m : models) want[m.name] = account(m);
-    }
+    for (const Model& m : models)
+      want[m.name] = account(m, STANLI_PARALLEL_WA_OFF);
     for (const Model& m : models)
       expect_same("C ABI " + m.name + " under STANLI_NO_INTERPRETER",
-                  account(m), want[m.name]);
+                  account(m, STANLI_PARALLEL_WA_FORCE), want[m.name]);
     expect(want["wapar_wa_fallback"].find("STANLI_NO_INTERPRETER") !=
                std::string::npos,
            "the strict switch refuses the fallback model");
@@ -197,7 +193,7 @@ int main() {
                 same_model
                     ? models[0]
                     : models[(i + static_cast<size_t>(t)) % models.size()];
-            if (account(m) != sequential[m.name]) {
+            if (account(m, STANLI_PARALLEL_WA_FORCE) != sequential[m.name]) {
               ++mismatches;
               std::lock_guard<std::mutex> lock(print_mutex);
               std::printf("FAIL concurrent C ABI construction of %s differs\n",

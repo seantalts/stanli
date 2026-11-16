@@ -557,6 +557,11 @@ stanli_function* stanli_function_new_from_stan(const char* stan_code,
 
 void stanli_function_free(stanli_function* function) { delete function; }
 
+void stanli_function_set_execution_report(stanli_function* function,
+                                          int enabled) {
+  if (function != nullptr) function->report_execution = enabled != 0;
+}
+
 int stanli_function_call(const stanli_function* function,
                          const stanli::DataMap* arguments,
                          stanli_function_result_writer write_result,

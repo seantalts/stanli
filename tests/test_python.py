@@ -2220,8 +2220,8 @@ def test_variables_come_from_the_runtime():
 
 def test_models_construct_concurrently_from_python_threads():
     source = (FIXTURES / "wapar_wa_fallback.stan").read_text()
-    with mock.patch.dict(os.environ, {"STANLI_PARALLEL_WA": "0"}):
-        reference = stanli.Model(stan_code=source, data=WA_FALLBACK_DATA)
+    reference = stanli.Model(stan_code=source, data=WA_FALLBACK_DATA,
+                             _parallel_write_array="off")
     names = reference.constrained_names
     q = np.array([0.3, -0.2])
     want = reference.log_prob_grad(q)
@@ -2229,15 +2229,15 @@ def test_models_construct_concurrently_from_python_threads():
 
     def build(_):
         barrier.wait()
-        model = stanli.Model(stan_code=source, data=WA_FALLBACK_DATA)
+        model = stanli.Model(stan_code=source, data=WA_FALLBACK_DATA,
+                             _parallel_write_array="force")
         got = model.log_prob_grad(q)
         assert model.constrained_names == names
         assert got[0] == want[0] and (got[1] == want[1]).all()
 
     # warnings.catch_warnings is process-wide, so it wraps the whole pool
     # instead of each thread.
-    with mock.patch.dict(os.environ, {"STANLI_PARALLEL_WA": "1"}), \
-            warnings.catch_warnings(record=True) as caught:
+    with warnings.catch_warnings(record=True) as caught:
         warnings.simplefilter("always")
         with concurrent.futures.ThreadPoolExecutor(max_workers=6) as pool:
             list(pool.map(build, range(6)))

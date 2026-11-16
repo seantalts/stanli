@@ -134,7 +134,13 @@ class _ModelOpts(ctypes.Structure):
     _fields_ = [("seed", ctypes.c_uint32),
                 ("threads_per_chain", ctypes.c_int),
                 ("fast_math", ctypes.c_int),
-                ("allow_interpreter", ctypes.c_int)]
+                ("allow_interpreter", ctypes.c_int),
+                ("execution_report", ctypes.c_int),
+                ("parallel_write_array", ctypes.c_int)]
+
+
+# stanli_parallel_wa: where write_array is lowered while a model is built.
+_PARALLEL_WRITE_ARRAY = {"auto": 0, "off": 1, "force": 2}
 
 
 class _FieldLayout(ctypes.Structure):
@@ -1378,8 +1384,13 @@ class Model:
 
     def __init__(self, stan_file=None, data=None, stan_code=None, mir=None,
                  seed=1, threads_per_chain=1, include_paths=None,
-                 fast_math=False, allow_interpreter=True):
+                 fast_math=False, allow_interpreter=True,
+                 _parallel_write_array="auto"):
         threads_per_chain = _threads_per_chain(threads_per_chain)
+        if _parallel_write_array not in _PARALLEL_WRITE_ARRAY:
+            raise ValueError("_parallel_write_array must be one of "
+                             + ", ".join(_PARALLEL_WRITE_ARRAY))
+        self._parallel_write_array = _PARALLEL_WRITE_ARRAY[_parallel_write_array]
         seed = _seed_arg(seed)
         self._fast_math = _check_fast_math(fast_math)
         if not isinstance(allow_interpreter, bool):
@@ -1421,7 +1432,8 @@ class Model:
         mir, stan_code, data_json = self._source
         err = ctypes.create_string_buffer(8192)
         opts = _ModelOpts(seed, threads_per_chain, int(self._fast_math),
-                          int(self._allow_interpreter))
+                          int(self._allow_interpreter), 0,
+                          self._parallel_write_array)
         with _native_output():
             if mir is not None:
                 m = _lib.stanli_model_new_with_opts(

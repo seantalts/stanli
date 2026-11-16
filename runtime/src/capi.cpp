@@ -440,9 +440,11 @@ void copy_out(double* to, const std::vector<double>& from) {
 extern "C" {
 
 static stanli_model* model_new(const char* tmir_sexp, const char* data_json,
-                               uint32_t seed, int threads_per_chain,
-                               bool fast_math, bool allow_interpreter,
-                               char* err, size_t err_len) {
+                               const stanli_model_opts& opts, char* err,
+                               size_t err_len) {
+  const uint32_t seed = opts.seed;
+  const int threads_per_chain = opts.threads_per_chain;
+  const bool fast_math = opts.fast_math != 0;
   try {
     if (threads_per_chain < 1)
       throw std::invalid_argument("threads_per_chain must be positive");
@@ -455,7 +457,21 @@ static stanli_model* model_new(const char* tmir_sexp, const char* data_json,
     stanli::CompileOptions options;
     options.reduce_sum_threads = threads_per_chain;
     options.fast_math = fast_math;
-    options.allow_interpreter = allow_interpreter;
+    options.allow_interpreter = opts.allow_interpreter != 0;
+    options.execution_report = opts.execution_report != 0;
+    switch (opts.parallel_write_array) {
+      case STANLI_PARALLEL_WA_AUTO:
+        options.parallel_write_array = stanli::ParallelWriteArray::Auto;
+        break;
+      case STANLI_PARALLEL_WA_OFF:
+        options.parallel_write_array = stanli::ParallelWriteArray::Off;
+        break;
+      case STANLI_PARALLEL_WA_FORCE:
+        options.parallel_write_array = stanli::ParallelWriteArray::Force;
+        break;
+      default:
+        throw std::invalid_argument("unknown parallel_write_array");
+    }
     m->cm = stanli::compile_model(tmir_sexp, data, seed, options);
     data = stanli::DataMap();
     // Resume records name the posterior they continue: the program text, the
@@ -533,6 +549,8 @@ void stanli_model_opts_init(stanli_model_opts* o) {
   o->threads_per_chain = 1;
   o->fast_math = 0;
   o->allow_interpreter = 1;
+  o->execution_report = 0;
+  o->parallel_write_array = STANLI_PARALLEL_WA_AUTO;
 }
 
 stanli_model* stanli_model_new_with_opts(const char* mir_text,
@@ -542,8 +560,7 @@ stanli_model* stanli_model_new_with_opts(const char* mir_text,
   stanli_model_opts o;
   stanli_model_opts_init(&o);
   if (opts != nullptr) o = *opts;
-  return model_new(mir_text, data_json, o.seed, o.threads_per_chain,
-                   o.fast_math != 0, o.allow_interpreter != 0, err, err_len);
+  return model_new(mir_text, data_json, o, err, err_len);
 }
 
 #ifdef STANLI_EMBED_STANC
@@ -566,11 +583,11 @@ std::vector<CompilerMessage> compiler_messages(const stanli::StancResult& r) {
 
 static stanli_model* model_new_from_stan(const char* stan_code,
                                          const char* filename,
-                                         const char* data_json, uint32_t seed,
-                                         int threads_per_chain, bool fast_math,
-                                         bool allow_interpreter, char* err,
-                                         size_t err_len) {
+                                         const char* data_json,
+                                         const stanli_model_opts& opts,
+                                         char* err, size_t err_len) {
 #ifdef STANLI_EMBED_STANC
+  const bool fast_math = opts.fast_math != 0;
   const stanli::StancResult compiled = stanli::embedded_stanc_compile(
       stan_code, filename, nullptr, 0,
       stanli::kStancModelOnly | (fast_math ? stanli::kStancFastMath : 0));
@@ -579,18 +596,14 @@ static stanli_model* model_new_from_stan(const char* stan_code,
     return nullptr;
   }
   stanli_model* m =
-      model_new(compiled.mir->c_str(), data_json, seed, threads_per_chain,
-                fast_math, allow_interpreter, err, err_len);
+      model_new(compiled.mir->c_str(), data_json, opts, err, err_len);
   if (m != nullptr) m->compiler_messages = compiler_messages(compiled);
   return m;
 #else
   (void)stan_code;
   (void)filename;
   (void)data_json;
-  (void)seed;
-  (void)threads_per_chain;
-  (void)fast_math;
-  (void)allow_interpreter;
+  (void)opts;
   put_err(err, err_len, "this build does not embed stanc3");
   return nullptr;
 #endif
@@ -611,9 +624,7 @@ stanli_model* stanli_model_new_from_stan_named(const char* stan_code,
   stanli_model_opts o;
   stanli_model_opts_init(&o);
   if (opts != nullptr) o = *opts;
-  return model_new_from_stan(stan_code, filename, data_json, o.seed,
-                             o.threads_per_chain, o.fast_math != 0,
-                             o.allow_interpreter != 0, err, err_len);
+  return model_new_from_stan(stan_code, filename, data_json, o, err, err_len);
 }
 
 stanli_compilation* stanli_compile_stan(const char* stan_code,
@@ -1831,6 +1842,8 @@ const stanli_field_layout kFieldLayouts[] = {
     STANLI_FIELD(stanli_model_opts, threads_per_chain),
     STANLI_FIELD(stanli_model_opts, fast_math),
     STANLI_FIELD(stanli_model_opts, allow_interpreter),
+    STANLI_FIELD(stanli_model_opts, execution_report),
+    STANLI_FIELD(stanli_model_opts, parallel_write_array),
     STANLI_FIELD(stanli_sample_opts, seed),
     STANLI_FIELD(stanli_sample_opts, chains),
     STANLI_FIELD(stanli_sample_opts, chain_id),

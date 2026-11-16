@@ -1,7 +1,7 @@
 // write_array is lowered on a second thread while log_prob is lowered.
 //
 // What has to hold: the lowered programs, columns, names, notes, warnings and
-// errors are those of a sequential construction (STANLI_PARALLEL_WA=0),
+// errors are those of a sequential construction (ParallelWriteArray::Off),
 // whichever side fails and whenever; the second thread is always joined; and
 // constructing many models at once, from several threads, gives each caller
 // what it would have got alone.
@@ -167,10 +167,18 @@ struct Run {
   bool has_write_array = false;
 };
 
-Run construct(const Fixture& f, unsigned seed = 1, bool values = true) {
+using stanli::ParallelWriteArray;
+
+Run construct(const Fixture& f, unsigned seed = 1, bool values = true,
+              ParallelWriteArray policy = ParallelWriteArray::Auto,
+              const std::string& dump_passes = "") {
   Run r;
   try {
-    stanli::CompiledModel cm = stanli::compile_model(f.mir, f.data, seed);
+    stanli::CompileOptions options;
+    options.parallel_write_array = policy;
+    options.dump_passes = dump_passes;
+    stanli::CompiledModel cm =
+        stanli::compile_model(f.mir, f.data, seed, options);
     r.has_write_array = cm.write_array.has_value();
     r.parallel = cm.write_array && cm.write_array->lowered_in_parallel;
     // Evaluating a graph needs an autodiff stack on this thread; the
@@ -186,14 +194,12 @@ Run construct(const Fixture& f, unsigned seed = 1, bool values = true) {
 }
 
 Run construct_sequential(const Fixture& f, unsigned seed = 1) {
-  EnvGuard seq("STANLI_PARALLEL_WA", "0");
-  return construct(f, seed);
+  return construct(f, seed, true, ParallelWriteArray::Off);
 }
 
 Run construct_parallel(const Fixture& f, unsigned seed = 1,
                        bool values = true) {
-  EnvGuard force("STANLI_PARALLEL_WA", "1");
-  return construct(f, seed, values);
+  return construct(f, seed, values, ParallelWriteArray::Force);
 }
 
 const bool kThreaded =
@@ -252,10 +258,32 @@ void test_default_choice(const std::vector<Fixture>& fixtures) {
          "a model with a lot to lower on both sides uses a second thread");
   expect_same("heavy model by default vs sequential", construct(*heavy).text,
               construct_sequential(*heavy).text);
+  expect(construct_parallel(*tiny).parallel == kThreaded,
+         "Force uses the second thread for any model");
+}
+
+// STANLI_PARALLEL_WA sets the policy when the options leave it at Auto.
+void test_environment_switch(const std::vector<Fixture>& fixtures) {
+  const Fixture* tiny = find(fixtures, "conj");
+  const Fixture* heavy = find(fixtures, "wapar_heavy");
+  if (!tiny || !heavy) return;
   {
     EnvGuard force("STANLI_PARALLEL_WA", "force");
     expect(construct(*tiny).parallel == kThreaded,
            "STANLI_PARALLEL_WA=force uses the second thread for any model");
+  }
+  {
+    EnvGuard force("STANLI_PARALLEL_WA", "1");
+    expect(construct(*tiny).parallel == kThreaded,
+           "STANLI_PARALLEL_WA=1 uses the second thread for any model");
+  }
+  {
+    EnvGuard seq("STANLI_PARALLEL_WA", "0");
+    expect(!construct(*heavy).parallel,
+           "STANLI_PARALLEL_WA=0 keeps one thread");
+    expect(construct(*tiny, 1, true, ParallelWriteArray::Force).parallel ==
+               kThreaded,
+           "an explicit policy wins over STANLI_PARALLEL_WA");
   }
   {
     EnvGuard automatic("STANLI_PARALLEL_WA", "auto");
@@ -366,8 +394,8 @@ void test_gates(const std::vector<Fixture>& fixtures) {
     // Dump file numbers advance across both lowerings in order.
     const fs::path dir = fs::temp_directory_path() / "stanli_wa_parallel_dump";
     fs::remove_all(dir);
-    EnvGuard dump("STANLI_DUMP_PASSES", dir.string().c_str());
-    const Run dumped = construct_parallel(*model);
+    const Run dumped =
+        construct(*model, 1, true, ParallelWriteArray::Force, dir.string());
     expect(!dumped.parallel, "pass dumping stays sequential");
     expect_same("dumping construction", dumped.text, alone.text);
     fs::remove_all(dir);
@@ -696,7 +724,6 @@ void test_concurrent_constructions(const std::vector<Fixture>& fixtures) {
   expect(!with_gq.empty(), "concurrent test has models");
   if (with_gq.empty()) return;
 
-  EnvGuard force("STANLI_PARALLEL_WA", "1");
   constexpr int kThreads = 6;
   std::mutex out_mutex;
   std::atomic<int> mismatches{0}, constructed{0};
@@ -708,7 +735,7 @@ void test_concurrent_constructions(const std::vector<Fixture>& fixtures) {
     for (size_t i = 0; i < with_gq.size(); i += 2 * kStride) {
       const Fixture& f =
           same_model ? *with_gq[0] : *with_gq[(i + id) % with_gq.size()];
-      const Run r = construct(f);
+      const Run r = construct(f, 1, true, ParallelWriteArray::Force);
       ++constructed;
       if (r.text != reference[f.name]) {
         ++mismatches;
@@ -731,10 +758,22 @@ void test_concurrent_constructions(const std::vector<Fixture>& fixtures) {
 
 }  // namespace
 
-int main() {
+// With --switches, only the checks that set STANLI_PARALLEL_WA: its parsing,
+// and the BridgeStan facade, which has no option for the policy.
+int main(int argc, char** argv) {
   std::setvbuf(stdout, nullptr, _IOLBF, 0);
   const std::vector<Fixture> fixtures = load_fixtures();
   expect(fixtures.size() > 100, "fixtures found");
+  if (argc > 1 && std::string(argv[1]) == "--switches") {
+    test_environment_switch(fixtures);
+    test_bridgestan_facade(fixtures);
+    if (failures) {
+      std::printf("%d failure(s)\n", failures);
+      return 1;
+    }
+    std::printf("OK\n");
+    return 0;
+  }
   const auto start = std::chrono::steady_clock::now();
   const auto phase = [&](const char* name) {
     std::printf(
@@ -760,8 +799,6 @@ int main() {
   test_worker();
   phase("helper threads floating point");
   test_helper_threads_floating_point(fixtures);
-  phase("bridgestan facade");
-  test_bridgestan_facade(fixtures);
   phase("concurrent constructions");
   test_concurrent_constructions(fixtures);
   if (failures) {

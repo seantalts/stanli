@@ -233,6 +233,8 @@ struct CompiledModel {
   // Each part of the model that has no compiled path and would run through
   // the MIR interpreter, with the lowering's reason.
   std::vector<std::string> interpreter_fallbacks;
+  // Compiled with execution reporting on, so hosts report their selection.
+  bool execution_report = false;
   // Reasons opt-in within-chain reduction sites kept ordinary lowering.
   std::vector<std::string> reduce_sum_fallbacks;
   // Set when a serial compile has a reduce_sum that threads_per_chain > 1
@@ -253,6 +255,11 @@ struct CompiledModel {
 // The default matches the reference drivers and BridgeStan's convention.
 // Native opt-in. Retained fixed-shape reductions reuse caller-owned teams;
 // unsupported/small calls keep whole-slice lowering. See reduce_sum.hpp.
+// Where write_array is lowered. Auto uses a second thread when the build has
+// threads and both sides have enough to lower; Off always lowers the two one
+// after the other; Force uses the second thread whenever the build has one.
+enum class ParallelWriteArray { Auto, Off, Force };
+
 struct CompileOptions {
   int reduce_sum_threads = 1;
   int64_t reduce_sum_min_chunk_ns = 30000;
@@ -267,6 +274,13 @@ struct CompileOptions {
   // STANLI_DUMP_STAGES does.
   std::string dump_passes;
   std::string dump_stages;
+  // Emit the execution manifest (execution_report.hpp) through the
+  // diagnostic sink, and let hosts emit their selection event. False leaves
+  // the choice to STANLI_EXECUTION_REPORT.
+  bool execution_report = false;
+  // Auto leaves the choice to STANLI_PARALLEL_WA: 1 or force is Force, auto
+  // or empty is Auto, anything else is Off.
+  ParallelWriteArray parallel_write_array = ParallelWriteArray::Auto;
 };
 CompiledModel compile_model(const std::string& mir_text, const DataMap& data,
                             unsigned seed = 1);
