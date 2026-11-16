@@ -48,7 +48,14 @@ if (!compilerOnly) {
               'stanli_exact_lp', 'stanli_grad', 'stanli_hessian',
               'stanli_sample_multi_metric',
               'stanli_sample_opts_check', 'stanli_resume_size',
-              'stanli_optimize', 'stanli_diagnose_text', 'stanli_wa_row')
+              'stanli_optimize', 'stanli_diagnose_text', 'stanli_wa_row',
+              'stanli_model_whiten', 'stanli_model_whiten_lowrank',
+              'stanli_sparse_factor_new', 'stanli_sparse_factor_nnz',
+              'stanli_sparse_factor_stats', 'stanli_sparse_factor_get',
+              'stanli_sparse_factor_lowrank', 'stanli_sparse_factor_free',
+              'stanli_variable_n_annotations', 'stanli_variable_annotation',
+              'stanli_n_param_blocks', 'stanli_param_block_name',
+              'stanli_param_block_size')
     syms[!vapply(syms, is.loaded, logical(1))]
   `);
   const missing = (await res.toJs()).values;
@@ -109,7 +116,7 @@ if (compilerPath) {
       unicode_ok <- eval_js('(() => {
         const mir = Module.FS.readFile("/tmp/portable-bundled.mir",
                                        {encoding: "utf8"});
-        if (!mir.startsWith("STANLI3:"))
+        if (!mir.startsWith("STANLI4:"))
           return "FAIL missing portable envelope";
         const payload = Uint8Array.from(atob(mir.slice(8)),
                                         c => c.charCodeAt(0));
@@ -122,7 +129,7 @@ if (compilerPath) {
         }
         return "FAIL UTF-8 changed";
       })()')
-      good <- if (!startsWith(mir, "STANLI3:")) {
+      good <- if (!startsWith(mir, "STANLI4:")) {
         "FAIL missing portable envelope"
       } else {
         unicode_ok
@@ -153,7 +160,7 @@ if (compilerPath) {
           return("FAIL missing include lost its filename")
         "ok"
       }
-      portable_includes <- check_includes("STANLI3:")
+      portable_includes <- check_includes("STANLI4:")
 
       instrumented <- eval_js('(() => {
         const portable = globalThis.stanli_compile;
@@ -176,7 +183,7 @@ if (compilerPath) {
       warning_mir <- mir_from_webr(eval_js, warning_source, "webr_warning")
       warning_calls <- eval_js(
         'JSON.stringify(globalThis.__stanli_helper_calls)')
-      warning_ok <- if (!startsWith(warning_mir, "STANLI3:")) {
+      warning_ok <- if (!startsWith(warning_mir, "STANLI4:")) {
         "FAIL warning source produced no portable MIR"
       } else if (!grepl('"warnings":[1-9]', warning_calls)) {
         "FAIL portable warning was not observed"
@@ -196,7 +203,7 @@ if (compilerPath) {
           o1 <<- c(o1, conditionMessage(w))
           invokeRestart("muffleWarning")
         })
-      o1_ok <- if (!startsWith(budget_mir, "STANLI3:")) {
+      o1_ok <- if (!startsWith(budget_mir, "STANLI4:")) {
         "FAIL budget source produced no portable MIR"
       } else if (length(o1) != 1L || !grepl("skipped O1", o1, fixed = TRUE)) {
         "FAIL O1 fallback was not a stanli_o1_fallback condition"

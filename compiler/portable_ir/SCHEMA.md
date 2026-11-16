@@ -17,7 +17,8 @@ embedded-NUL problems. The payload avoids a JSON DOM, repeated field names,
 inactive fields, and decimal parsing.
 
 Portable MIR v1 was a pre-release JSON format and v2 (`STANLI2:`) the layout
-before every stanc3 fact the runtime reads became a typed field. Neither is
+before every stanc3 fact the runtime reads became a typed field. v3
+(`STANLI3:`) lacked the per-output-variable annotation list. None of them is
 accepted by this runtime; a `STANLI<n>:` document of another version is
 rejected with a request to recompile the model. The legacy stanc3
 S-expression reader remains a separate input path.
@@ -27,16 +28,16 @@ S-expression reader remains a separate input path.
 A canonical document is:
 
 ```text
-STANLI3:<base64 payload>
+STANLI4:<base64 payload>
 ```
 
-`STANLI3:` is the eight-byte ASCII version marker. The remainder is standard
+`STANLI4:` is the eight-byte ASCII version marker. The remainder is standard
 RFC 4648 base64 using `A-Z`, `a-z`, `0-9`, `+`, and `/`, with required `=`
 padding. There is no whitespace, BOM, or final newline.
 
 The multi-format decoder dispatches as follows:
 
-1. An exact `STANLI3:` prefix selects this decoder.
+1. An exact `STANLI4:` prefix selects this decoder.
 2. Any other `STANLI` prefix is a document of another version and is
    rejected.
 3. Otherwise, after the four ASCII whitespace bytes are skipped, `(` selects
@@ -348,6 +349,7 @@ is
 string name
 u8 block
 SizedType constrained_type
+list<string> annotations
 ```
 
 | `block` | Meaning |
@@ -355,6 +357,10 @@ SizedType constrained_type
 | 0 | `Parameters` |
 | 1 | `TransformedParameters` |
 | 2 | `GeneratedQuantities` |
+
+`annotations` holds the names of the declaration annotations on the
+variable (`@latent` is `latent`), in source order, without their arguments;
+it is empty for an unannotated variable.
 
 `output_vars` lists the parameters, transformed parameters and generated
 quantities in the order `generate_quantities` writes them, which is CmdStan's
@@ -438,7 +444,7 @@ and anything deeper is rejected as nested too deeply.
 For a fixed stanc3 revision, source, include map, and pass selection, every
 producer must emit identical bytes. Canonical encoding requires:
 
-1. the exact `STANLI3:` prefix;
+1. the exact `STANLI4:` prefix;
 2. the tag numbers and field order in this document;
 3. little-endian fixed-width scalars;
 4. original list order;
@@ -454,4 +460,4 @@ user functions, warnings, and frontend errors. Windows uses the same encoder
 and participates in the same byte comparison.
 
 A future incompatible layout gets a new ASCII header and a new decoder. It
-must never reuse `STANLI3:` with different tag meanings or field order.
+must never reuse `STANLI4:` with different tag meanings or field order.

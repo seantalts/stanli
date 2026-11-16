@@ -231,7 +231,8 @@ namespace stanli {
   X(OP_QUANTILE)                      \
   X(OP_CSR_MATRIX_TIMES_VECTOR)       \
   X(OP_CSR_TO_DENSE_MATRIX)           \
-  X(OP_CHECK_LUB_FREE)
+  X(OP_CHECK_LUB_FREE)                \
+  X(OP_AFFINE_WHITEN)
 
 // Scalar densities, one line each: this list generates the opcode, the
 // name, the kernel, its registration, and the lowering table entry

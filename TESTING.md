@@ -133,7 +133,10 @@ timing pair only when both engines agree within 1e-9 scaled error.
 <a id="installed-clients"></a>
 
 The wheel jobs run `tests/test_python.py` and `tests/test_bridgestan_embed.py`
-on the installed wheel. The Linux R job runs `R CMD check` with the runtime and
+on the installed wheel, then install scipy and run the four Laplace whitening
+and annotation tests (`test_whiten.py`, `test_laplace_whiten.py`,
+`test_sparse_laplace.py`, `test_annotations.py`). Each skips with a message when
+scipy is missing. The Linux R job runs `R CMD check` with the runtime and
 then [`tools/test_r_ecosystem.R`](tools/test_r_ecosystem.R), and the macOS and
 Windows R jobs run only the latter. Its testthat files (bayesplot, loo,
 posterior, stanfit) must pass with no skip, failure, error or warning, so a test

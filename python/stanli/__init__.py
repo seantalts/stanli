@@ -5,6 +5,7 @@ or a bundled compiler executable as a subprocess where it is not), lowers it
 to an op graph in-process, and samples with NUTS. No C++ toolchain, no model
 compilation on this machine.
 """
+import base64
 import ctypes
 from collections.abc import Mapping
 import json
@@ -23,9 +24,11 @@ import warnings
 import numpy as np
 
 __all__ = ["Model", "Function", "Fit", "Summary", "OptimizeResult",
+           "laplace_whiten", "LaplaceWhitenReport",
            "exact_lp", "thread_safe", "stan_to_mir", "build_id",
            "bridgestan_model", "bridgestan_data", "runtime_path",
-           "SAMPLER_COLUMNS", "O1FallbackWarning", "__version__"]
+           "SAMPLER_COLUMNS", "O1FallbackWarning", "ExperimentalWarning",
+           "__version__"]
 # The one place the version lives. setup.py and the release workflow both
 # read it from here.
 __version__ = "0.26.0"
@@ -50,6 +53,26 @@ class O1FallbackWarning(RuntimeWarning):
     Issued when the model's structure exceeds stanli's O1 budget. The model
     is correct but may be slower; ``STANLI_NO_O1_FALLBACK=1`` forces O1.
     """
+
+
+class ExperimentalWarning(UserWarning):
+    """An experimental feature was used. Issued once per process per feature."""
+
+
+_experimental_notified = set()
+
+
+def _experimental(feature, advice):
+    if feature in _experimental_notified:
+        return
+    _experimental_notified.add(feature)
+    warnings.warn(f"{feature} is experimental. {advice}",
+                  ExperimentalWarning, stacklevel=3)
+
+
+_LAPLACE_WHITENING_ADVICE = (
+    "A whitened fit can be wrong without any sampler warning, so compare it "
+    "against one fit with the default sampler. See docs/laplace-whitening.md.")
 
 
 class _OptimizeOpts(ctypes.Structure):
@@ -207,6 +230,20 @@ def _load_lib():
                                    ctypes.POINTER(ctypes.c_double),
                                    ctypes.POINTER(ctypes.c_double),
                                    ctypes.c_char_p, ctypes.c_size_t]
+    lib.stanli_model_whiten.restype = ctypes.c_void_p
+    lib.stanli_model_whiten.argtypes = [
+        ctypes.c_void_p, ctypes.POINTER(ctypes.c_double), ctypes.c_int64,
+        ctypes.POINTER(ctypes.c_int64), ctypes.POINTER(ctypes.c_int64),
+        ctypes.POINTER(ctypes.c_int64), ctypes.POINTER(ctypes.c_double),
+        ctypes.c_int64, ctypes.c_char_p, ctypes.c_size_t]
+    lib.stanli_model_whiten_lowrank.restype = ctypes.c_void_p
+    lib.stanli_model_whiten_lowrank.argtypes = [
+        ctypes.c_void_p, ctypes.POINTER(ctypes.c_double), ctypes.c_int64,
+        ctypes.POINTER(ctypes.c_int64), ctypes.POINTER(ctypes.c_int64),
+        ctypes.POINTER(ctypes.c_int64), ctypes.POINTER(ctypes.c_double),
+        ctypes.c_int64, ctypes.c_int64, ctypes.POINTER(ctypes.c_double),
+        ctypes.POINTER(ctypes.c_double), ctypes.POINTER(ctypes.c_double),
+        ctypes.c_char_p, ctypes.c_size_t]
     lib.stanli_unconstrain_inits.restype = ctypes.c_int
     lib.stanli_unconstrain_inits.argtypes = [ctypes.c_void_p, ctypes.c_char_p,
                                              ctypes.POINTER(ctypes.c_double),
@@ -215,6 +252,12 @@ def _load_lib():
     lib.stanli_n_constrained.argtypes = [ctypes.c_void_p]
     lib.stanli_constrained_name.restype = ctypes.c_char_p
     lib.stanli_constrained_name.argtypes = [ctypes.c_void_p, ctypes.c_int64]
+    lib.stanli_n_param_blocks.restype = ctypes.c_int64
+    lib.stanli_n_param_blocks.argtypes = [ctypes.c_void_p]
+    lib.stanli_param_block_name.restype = ctypes.c_char_p
+    lib.stanli_param_block_name.argtypes = [ctypes.c_void_p, ctypes.c_int64]
+    lib.stanli_param_block_size.restype = ctypes.c_int64
+    lib.stanli_param_block_size.argtypes = [ctypes.c_void_p, ctypes.c_int64]
     lib.stanli_has_embedded_stanc.restype = ctypes.c_int
     lib.stanli_exact_lp.restype = ctypes.c_int
     lib.stanli_reduce_sum_count.restype = ctypes.c_int
@@ -263,6 +306,12 @@ def _load_lib():
     lib.stanli_variable_dim.restype = ctypes.c_int64
     lib.stanli_variable_dim.argtypes = [ctypes.c_void_p, ctypes.c_int,
                                         ctypes.c_int64, ctypes.c_int64]
+    lib.stanli_variable_n_annotations.restype = ctypes.c_int64
+    lib.stanli_variable_n_annotations.argtypes = [ctypes.c_void_p,
+                                                  ctypes.c_int, ctypes.c_int64]
+    lib.stanli_variable_annotation.restype = ctypes.c_char_p
+    lib.stanli_variable_annotation.argtypes = [ctypes.c_void_p, ctypes.c_int,
+                                               ctypes.c_int64, ctypes.c_int64]
     lib.stanli_model_new_from_stan_named.restype = ctypes.c_void_p
     lib.stanli_model_new_from_stan_named.argtypes = [
         ctypes.c_char_p, ctypes.c_char_p, ctypes.c_char_p,
@@ -764,11 +813,35 @@ def bridgestan_data(stan_file=None, stan_code=None, mir=None, data=None,
     ``Model``.
     """
     mir, name = _resolve_program(stan_file, stan_code, mir, name, include_paths)
-    payload = json.loads(_data_to_json(data))
+    return _bridgestan_payload(mir, name, _data_to_json(data), None)
+
+
+def _bridgestan_payload(mir, name, data_json, whitening):
+    payload = json.loads(data_json)
     if not isinstance(payload, dict):
         raise ValueError("data must be a JSON object")
-    payload["__stanli"] = {"build_id": build_id(), "mir": mir, "name": name}
+    manifest = {"build_id": build_id(), "mir": mir, "name": name}
+    if whitening is not None:
+        manifest["whiten"] = _whitening_manifest(whitening)
+    payload["__stanli"] = manifest
     return json.dumps(payload)
+
+
+def _whitening_manifest(whitening):
+    q_hat, perm, col_ptr, row_idx, values, lowrank = whitening
+
+    def pack(a, dtype):
+        raw = np.ascontiguousarray(a, dtype=dtype).tobytes()
+        return base64.b64encode(raw).decode("ascii")
+
+    out = {"q_hat": pack(q_hat, "<f8"), "perm": pack(perm, "<i8"),
+           "col_ptr": pack(col_ptr, "<i8"), "row_idx": pack(row_idx, "<i8"),
+           "values": pack(values, "<f8")}
+    if lowrank is not None:
+        c, b, w = lowrank
+        out.update(k=int(b.shape[1]), c=pack(c, "<f8"), b=pack(b, "<f8"),
+                   w=pack(w, "<f8"))
+    return out
 
 
 def bridgestan_model(stan_file=None, stan_code=None, mir=None, data=None,
@@ -1401,6 +1474,7 @@ class Model:
                 mir = _compile_stan(stan_code, paths, self._fast_math,
                                     self._label)
         self._source = (mir, stan_code, _data_to_json(data))
+        self._whitening = None
         self._m = None
         self._adopt(self._construct(seed, threads_per_chain), seed, threads_per_chain)
         _warn_compiler_messages(
@@ -1443,7 +1517,144 @@ class Model:
                     data_json.encode(), ctypes.byref(opts), err, len(err))
         if not m:
             raise RuntimeError(err.value.decode())
+        if self._whitening is not None:
+            whitened = self._apply_whitening(m)
+            _lib.stanli_model_free(m)
+            m = whitened
         return m
+
+    def _apply_whitening(self, inner):
+        q_hat, perm, col_ptr, row_idx, values, lowrank = self._whitening
+        err = ctypes.create_string_buffer(4096)
+        if lowrank is None:
+            c = b = w = None
+            k = 0
+        else:
+            c, b, w = lowrank
+            k = b.shape[1]
+            c, b, w = (_dptr(c), _dptr(b), _dptr(w))
+        m = _lib.stanli_model_whiten_lowrank(
+            inner,
+            q_hat.ctypes.data_as(ctypes.POINTER(ctypes.c_double)),
+            q_hat.size,
+            perm.ctypes.data_as(ctypes.POINTER(ctypes.c_int64)),
+            col_ptr.ctypes.data_as(ctypes.POINTER(ctypes.c_int64)),
+            row_idx.ctypes.data_as(ctypes.POINTER(ctypes.c_int64)),
+            values.ctypes.data_as(ctypes.POINTER(ctypes.c_double)),
+            values.size, k, c, b, w, err, len(err))
+        if not m:
+            raise ValueError(err.value.decode())
+        return m
+
+    def bridgestan_data(self, name=None):
+        """The data argument that makes the runtime serve this model to BridgeStan.
+
+        Like the module-level ``bridgestan_data``, for the program and data
+        this model was built from. On a model returned by ``whiten`` the
+        manifest also carries the whitening (``q_hat``, the permutation, L
+        and any low-rank factors, as exact little-endian bytes), so a
+        BridgeStan client sees the same free vector z and the same log
+        density, gradient and constrain/unconstrain maps as this object.
+        Unconstrained parameter names are ``z.1``, ``z.2``, ... for a
+        whitened model.
+
+        The log density is the one the runtime computes by default;
+        ``fast_math`` is a runtime option BridgeStan has no way to pass, so
+        a model built with it is refused.
+        """
+        if self._fast_math:
+            raise ValueError("a fast_math model has no BridgeStan route: "
+                             "the option is not part of the manifest")
+        mir, stan_code, data_json = self._source
+        if mir is None:
+            mir = _compile_stan(stan_code, [], False, self._label)
+        if name is None:
+            name = (pathlib.Path(self._label).stem if self._label
+                    else "stanli_model")
+        return _bridgestan_payload(mir, name, data_json, self._whitening)
+
+    def bridgestan_model(self, name=None, **kw):
+        """A ``bridgestan.StanModel`` over ``bridgestan_data(name)``."""
+        import bridgestan
+
+        kw.setdefault("warn", False)
+        return bridgestan.StanModel(runtime_path(), self.bridgestan_data(name),
+                                    **kw)
+
+    def whiten(self, q_hat, perm, L, lowrank=None):
+        """EXPERIMENTAL. A new Model over whitened coordinates z.
+
+        With q this model's unconstrained vector, the new model's free
+        vector z satisfies ``q = q_hat + P.T @ inv(L.T) @ z`` where
+        ``(P v)[i] = v[perm[i]]`` and ``L`` is a lower triangular Cholesky
+        factor with ``P Q P.T = L L.T``; Q is typically the negative Hessian
+        of the log density at ``q_hat``, so z is close to standard normal.
+        The log density is this model's at q(z) with the constant
+        ``log|det L|`` dropped. Every algorithm (sample, optimize, pathfinder,
+        laplace, log_prob_grad, log_prob_hessian) runs on z unchanged, and
+        sampler settings such as ``metric="unit_e"`` apply to z.
+
+        Columns, constrained names and output rows are this model's own, at
+        q(z). ``unconstrain`` returns z for given constrained values.
+        Unconstrained inits, modes and Hessians passed in or read back are in
+        z. The result does not depend on this model afterwards.
+
+        ``L`` is a scipy.sparse matrix (any format; converted to CSC) or a
+        ``(indptr, indices, data)`` tuple of CSC arrays. It must be lower
+        triangular with a nonzero diagonal. scipy is not imported by this
+        package; pass the tuple form to avoid needing it.
+
+        ``lowrank=(c, B, W)`` inserts the factor ``C = diag(c) +
+        tril(W B.T, -1)`` (``B`` and ``W`` are n by k): ``q = q_hat + P.T @
+        inv(L.T) @ inv(C.T) @ z``. With ``L`` unit lower triangular and ``C
+        C.T = D + W W.T`` the whitened precision is ``P.T L (D + W W.T) L.T
+        P``. The per-gradient cost is O(nnz(L) + n k).
+        """
+        _experimental("Laplace whitening", _LAPLACE_WHITENING_ADVICE)
+        n = self.n_unconstrained
+        q_hat = np.ascontiguousarray(q_hat, dtype=np.float64)
+        if q_hat.shape != (n,):
+            raise ValueError(f"q_hat has shape {q_hat.shape}, the model has "
+                             f"{n} unconstrained parameters")
+        perm = np.ascontiguousarray(perm, dtype=np.int64)
+        if perm.shape != (n,):
+            raise ValueError(f"perm has shape {perm.shape}, expected ({n},)")
+        if hasattr(L, "tocsc"):
+            if tuple(L.shape) != (n, n):
+                raise ValueError(f"L has shape {tuple(L.shape)}, expected "
+                                 f"({n}, {n})")
+            L = L.tocsc().copy()
+            L.sum_duplicates()
+            L.sort_indices()
+            parts = (L.indptr, L.indices, L.data)
+        else:
+            parts = tuple(L)
+            if len(parts) != 3:
+                raise ValueError("L must be a scipy.sparse matrix or an "
+                                 "(indptr, indices, data) tuple")
+        col_ptr = np.ascontiguousarray(parts[0], dtype=np.int64)
+        row_idx = np.ascontiguousarray(parts[1], dtype=np.int64)
+        values = np.ascontiguousarray(parts[2], dtype=np.float64)
+        if col_ptr.shape != (n + 1,) or row_idx.shape != values.shape:
+            raise ValueError(f"L is not an {n} by {n} CSC matrix")
+        if lowrank is not None:
+            c, B, W = (np.ascontiguousarray(a, dtype=np.float64)
+                       for a in lowrank)
+            if (c.shape != (n,) or B.ndim != 2 or B.shape[0] != n
+                    or B.shape != W.shape or B.shape[1] < 1):
+                raise ValueError(f"lowrank must be (c, B, W) with c of "
+                                 f"shape ({n},) and B, W of shape ({n}, k)")
+            lowrank = (c.copy(), B.copy(), W.copy())
+        out = Model.__new__(Model)
+        out._fast_math = self._fast_math
+        out._label = self._label
+        out._source = self._source
+        out._whitening = (q_hat.copy(), perm.copy(), col_ptr.copy(),
+                          row_idx.copy(), values.copy(), lowrank)
+        out._m = None
+        out._adopt(out._apply_whitening(self._handle), self._seed,
+                   self._threads_per_chain)
+        return out
 
     @property
     def _handle(self):
@@ -1565,6 +1776,16 @@ class Model:
             raise ValueError(err.value.decode())
         return q
 
+    def _unconstrained_layout(self):
+        """[(parameter name, unconstrained entries)] in vector order.
+
+        Empty for a whitened model, whose vector is not in the declared
+        parameters' terms.
+        """
+        return [(_lib.stanli_param_block_name(self._handle, i).decode(),
+                 _lib.stanli_param_block_size(self._handle, i))
+                for i in range(_lib.stanli_n_param_blocks(self._handle))]
+
     def _column_names(self):
         """The CSV columns for a draw, and whether write_array supplies them.
 
@@ -1586,6 +1807,28 @@ class Model:
             shapes.append((_lib.stanli_variable_name(m, which, i).decode(),
                            dims))
         return _variables_from_shapes(shapes)
+
+    def parameter_annotations(self):
+        """The declaration annotations on each parameter.
+
+        A {name: [annotation, ...]} of the parameters that carry at least
+        one, in source order and without the `@`: `@latent vector[J] a;`
+        gives {"a": ["latent"]}. Transformed parameters and generated
+        quantities are not listed; an annotation on one has no effect.
+        """
+        m = self._m
+        found = {}
+        for i in range(_lib.stanli_n_variables(m, _CONSTRAINED_COLUMNS)):
+            count = _lib.stanli_variable_n_annotations(
+                m, _CONSTRAINED_COLUMNS, i)
+            if count:
+                name = _lib.stanli_variable_name(
+                    m, _CONSTRAINED_COLUMNS, i).decode()
+                found[name] = [
+                    _lib.stanli_variable_annotation(
+                        m, _CONSTRAINED_COLUMNS, i, k).decode()
+                    for k in range(count)]
+        return found
 
     def optimize(self, *, seed=1, iter=2000, jacobian=True, init=None,
                  init_radius=2.0):
@@ -1955,3 +2198,4 @@ class Model:
 
 # Kept separate from Model's JSON data path: functions bind typed buffers.
 from ._function import Function  # noqa: E402
+from .laplace import LaplaceWhitenReport, laplace_whiten  # noqa: E402

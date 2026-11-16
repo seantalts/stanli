@@ -2668,6 +2668,23 @@ void test_declaration_annotations() {
     for (int i = 0; i < 5; ++i)
       expect_true("annotations leave the gradient bitwise equal",
                   g_a[i] == g_b[i]);
+    const int set = STANLI_CONSTRAINED_COLUMNS;
+    expect_true("variable a is first",
+                std::string(stanli_variable_name(a, set, 0)) == "a");
+    expect_true("a has one annotation",
+                stanli_variable_n_annotations(a, set, 0) == 1);
+    const char* note = stanli_variable_annotation(a, set, 0, 0);
+    expect_true("a is annotated latent",
+                note != nullptr && std::string(note) == "latent");
+    expect_true("no annotation past the end",
+                stanli_variable_annotation(a, set, 0, 1) == nullptr);
+    expect_true("mu is unannotated",
+                stanli_variable_n_annotations(a, set, 1) == 0);
+    expect_true("out-of-range variable has no annotations",
+                stanli_variable_n_annotations(a, set, 9) == 0);
+    for (int64_t i = 0; i < stanli_n_variables(b, set); ++i)
+      expect_true("plain model has no annotations",
+                  stanli_variable_n_annotations(b, set, i) == 0);
   }
   stanli_model_free(a);
   stanli_model_free(b);

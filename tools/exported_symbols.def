@@ -42,12 +42,23 @@ EXPORTS
   stanli_unconstrain_inits
   stanli_grad
   stanli_hessian
+  stanli_model_whiten
+  stanli_model_whiten_lowrank
+  stanli_sparse_factor_new
+  stanli_sparse_factor_nnz
+  stanli_sparse_factor_stats
+  stanli_sparse_factor_get
+  stanli_sparse_factor_lowrank
+  stanli_sparse_factor_free
   stanli_sample_stream_stats_init
   stanli_sample_walnuts_stream
   stanli_run_pathfinder
   stanli_pathfinder_inits
   stanli_n_constrained
   stanli_constrained_name
+  stanli_n_param_blocks
+  stanli_param_block_name
+  stanli_param_block_size
   stanli_constrain
   stanli_wa_n_columns
   stanli_wa_n_generated_start
@@ -63,6 +74,8 @@ EXPORTS
   stanli_variable_name
   stanli_variable_n_dims
   stanli_variable_dim
+  stanli_variable_n_annotations
+  stanli_variable_annotation
   stanli_n_field_layouts
   stanli_field_layouts
   stanli_transformed_data_rng

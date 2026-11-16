@@ -23,8 +23,10 @@
 #include <stanli/executor_pool.hpp>
 #include <stanli/nuts.hpp>
 #include <stanli/wa_interp.hpp>
+#include <stanli/whiten.hpp>
 
 #include <cmath>
+#include <cstdint>
 #include <cstdio>
 #include <cstring>
 #include <fstream>
@@ -981,6 +983,216 @@ void test_embedded_manifest() {
   bs_free_error_msg(err);
 }
 
+std::string base64_of(const void* data, size_t bytes) {
+  static const char* digits =
+      "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+  const unsigned char* p = static_cast<const unsigned char*>(data);
+  std::string out;
+  for (size_t i = 0; i < bytes; i += 3) {
+    const uint32_t a = p[i], b = i + 1 < bytes ? p[i + 1] : 0,
+                   c = i + 2 < bytes ? p[i + 2] : 0;
+    const uint32_t word = a << 16 | b << 8 | c;
+    out.push_back(digits[word >> 18 & 63]);
+    out.push_back(digits[word >> 12 & 63]);
+    out.push_back(i + 1 < bytes ? digits[word >> 6 & 63] : '=');
+    out.push_back(i + 2 < bytes ? digits[word & 63] : '=');
+  }
+  return out;
+}
+
+template <class T>
+std::string base64_of(const std::vector<T>& v) {
+  return base64_of(v.data(), v.size() * sizeof(T));
+}
+
+void check_whitened_bridge(const std::string& label, int64_t k) {
+  using namespace stanli;
+  const std::string mir = slurp("tests/fixtures/conj.tmir.sexp");
+  const std::string json = slurp("tests/fixtures/conj.json");
+  const int64_t n = 2;
+  const std::vector<double> q_hat = {5.9, -0.31};
+  const std::vector<int64_t> perm = {1, 0};
+  const std::vector<int64_t> col_ptr = {0, 2, 3};
+  const std::vector<int64_t> row_idx = {0, 1, 1};
+  const std::vector<double> values = {1.3, 0.4, 0.9};
+  const std::vector<double> c = {1.1, 0.8}, b = {0.3, 0.2}, w = {0.5, -0.7};
+  const auto spec = make_whiten_spec(
+      q_hat.data(), n, perm.data(), col_ptr.data(), row_idx.data(),
+      values.data(), 3, k, k > 0 ? c.data() : nullptr,
+      k > 0 ? b.data() : nullptr, k > 0 ? w.data() : nullptr);
+
+  DataMap data = DataMap::from_json_file("tests/fixtures/conj.json");
+  CompiledModel cm = compile_model(mir, data);
+  Executor inner(std::move(cm.graph));
+  cm.bind(inner);
+  Executor ref(whiten_graph(inner.graph(), spec), inner);
+
+  char* err = nullptr;
+  bs_model* plain =
+      bs_model_from_mir(mir.c_str(), "tests/fixtures/conj.json", 1234, &err);
+  if (plain == nullptr) {
+    fail(label + ": plain construction: " + (err ? err : "(no message)"));
+    bs_free_error_msg(err);
+    return;
+  }
+
+  nlohmann::json root = nlohmann::json::parse(json);
+  nlohmann::json whiten = {{"q_hat", base64_of(q_hat)},
+                           {"perm", base64_of(perm)},
+                           {"col_ptr", base64_of(col_ptr)},
+                           {"row_idx", base64_of(row_idx)},
+                           {"values", base64_of(values)}};
+  if (k > 0) {
+    whiten["k"] = k;
+    whiten["c"] = base64_of(c);
+    whiten["b"] = base64_of(b);
+    whiten["w"] = base64_of(w);
+  }
+  root["__stanli"] = {{"build_id", stanli::runtime_build_id()},
+                      {"mir", mir},
+                      {"name", "conj_whitened"},
+                      {"whiten", whiten}};
+  const std::string data_text = root.dump();
+  bs_model* m = bs_model_construct(data_text.c_str(), 1234, &err);
+  if (m == nullptr) {
+    fail(label + ": bs_model_construct: " + (err ? err : "(no message)"));
+    bs_free_error_msg(err);
+    bs_model_destruct(plain);
+    return;
+  }
+  expect_eq_int(label + " unconstrained count", bs_param_unc_num(m), n);
+  expect_eq_str(label + " unconstrained names", bs_param_unc_names(m),
+                "z.1,z.2");
+
+  const std::vector<std::vector<double>> points = {
+      {0.0, 0.0}, {0.3, -0.17}, {-1.2, 0.8}, {2.5, -2.1}};
+  for (size_t t = 0; t < points.size(); ++t) {
+    const std::string at = label + " point " + std::to_string(t);
+    const std::vector<double>& z = points[t];
+
+    for (int64_t i = 0; i < n; ++i) ref.params_data()[i] = z[(size_t)i];
+    std::vector<double> want_g((size_t)n);
+    const double want_lp = ref.gradient(want_g.data());
+    double lp = 0;
+    std::vector<double> g((size_t)n);
+    expect_eq_int(
+        at + " gradient rc",
+        bs_log_density_gradient(m, true, true, z.data(), &lp, g.data(), &err),
+        0);
+    expect_bitwise(at + " lp", lp, want_lp);
+    for (int64_t i = 0; i < n; ++i)
+      expect_bitwise(at + " grad[" + std::to_string(i) + "]", g[(size_t)i],
+                     want_g[(size_t)i]);
+
+    std::vector<double> q((size_t)n);
+    spec->to_q(z.data(), q.data());
+    const int cols = bs_param_num(plain, true, true);
+    std::vector<double> want_row((size_t)cols), row((size_t)cols);
+    bs_rng* rng = bs_rng_construct(1, &err);
+    expect_eq_int(at + " inner constrain rc",
+                  bs_param_constrain(plain, true, true, q.data(),
+                                     want_row.data(), rng, &err),
+                  0);
+    expect_eq_int(
+        at + " constrain rc",
+        bs_param_constrain(m, true, true, z.data(), row.data(), rng, &err), 0);
+    bs_rng_destruct(rng);
+    expect_eq_int(at + " constrained count", bs_param_num(m, true, true), cols);
+    for (int i = 0; i < cols; ++i)
+      expect_bitwise(at + " row[" + std::to_string(i) + "]", row[(size_t)i],
+                     want_row[(size_t)i]);
+
+    std::vector<double> inner_q((size_t)n), want_back((size_t)n);
+    const std::vector<double> flat = {want_row[0], want_row[1]};
+    expect_eq_int(
+        at + " inner unconstrain rc",
+        bs_param_unconstrain(plain, flat.data(), inner_q.data(), &err), 0);
+    spec->to_z(inner_q.data(), want_back.data());
+    std::vector<double> back((size_t)n);
+    expect_eq_int(at + " unconstrain rc",
+                  bs_param_unconstrain(m, flat.data(), back.data(), &err), 0);
+    for (int64_t i = 0; i < n; ++i)
+      expect_bitwise(at + " unconstrain[" + std::to_string(i) + "]",
+                     back[(size_t)i], want_back[(size_t)i]);
+
+    const std::string inits =
+        "{\"mu_c\": " + nlohmann::json(want_row[0]).dump() +
+        ", \"sigma\": " + nlohmann::json(want_row[1]).dump() + "}";
+    std::vector<double> back_json((size_t)n);
+    expect_eq_int(
+        at + " unconstrain_json rc",
+        bs_param_unconstrain_json(m, inits.c_str(), back_json.data(), &err), 0);
+    std::vector<double> inner_json((size_t)n), want_json((size_t)n);
+    expect_eq_int(at + " inner unconstrain_json rc",
+                  bs_param_unconstrain_json(plain, inits.c_str(),
+                                            inner_json.data(), &err),
+                  0);
+    spec->to_z(inner_json.data(), want_json.data());
+    for (int64_t i = 0; i < n; ++i)
+      expect_bitwise(at + " unconstrain_json[" + std::to_string(i) + "]",
+                     back_json[(size_t)i], want_json[(size_t)i]);
+  }
+
+  const std::string start = "{\"mu_c\": 5.9, \"sigma\": 0.7}";
+  std::vector<double> inner_start((size_t)n), want((size_t)n), got((size_t)n);
+  bs_param_unconstrain_json(plain, start.c_str(), inner_start.data(), &err);
+  spec->to_z(inner_start.data(), want.data());
+  bs_rng* rng = bs_rng_construct(7, &err);
+  expect_eq_int(label + " initialize rc",
+                bs_param_initialize(m, start.c_str(), rng, 2.0, 10, true,
+                                    got.data(), &err),
+                0);
+  bs_rng_destruct(rng);
+  for (int64_t i = 0; i < n; ++i)
+    expect_bitwise(label + " initialize[" + std::to_string(i) + "]",
+                   got[(size_t)i], want[(size_t)i]);
+
+  bs_model_destruct(m);
+  bs_model_destruct(plain);
+}
+
+void test_whitened_manifest() {
+  check_whitened_bridge("whitened", 0);
+  check_whitened_bridge("whitened lowrank", 1);
+
+  stanli::BsManifest man;
+  std::string err;
+  const std::string base = std::string("{\"build_id\": \"") +
+                           stanli::runtime_build_id() + "\", \"mir\": \"x\"";
+  if (!stanli::bs_read_manifest(base + "}", &man, &err) || man.whiten)
+    fail("a manifest with no whiten member reads as unwhitened");
+  if (stanli::bs_read_manifest(base + ", \"whiten\": 3}", &man, &err))
+    fail("a non-object whiten member was accepted");
+  if (stanli::bs_read_manifest(base + ", \"whiten\": {}}", &man, &err) ||
+      err.find("q_hat") == std::string::npos)
+    fail("an empty whiten member did not name the missing q_hat: " + err);
+  const std::string bad = base +
+                          ", \"whiten\": {\"q_hat\": \"!!!!\", \"perm\": \"\", "
+                          "\"col_ptr\": \"\", \"row_idx\": \"\", \"values\": "
+                          "\"\"}}";
+  if (stanli::bs_read_manifest(bad, &man, &err) ||
+      err.find("base64") == std::string::npos)
+    fail("invalid base64 in whiten was not refused as base64: " + err);
+  const std::vector<double> one = {1.0};
+  const std::vector<int64_t> p0 = {0}, cp = {0, 1}, ri = {0};
+  const std::string tail = ", \"whiten\": {\"q_hat\": \"" + base64_of(one) +
+                           "\", \"perm\": \"" + base64_of(p0) +
+                           "\", \"col_ptr\": \"" + base64_of(cp) +
+                           "\", \"row_idx\": \"" + base64_of(ri) +
+                           "\", \"values\": \"" + base64_of(one) + "\"}}";
+  if (!stanli::bs_read_manifest(base + tail, &man, &err) || !man.whiten ||
+      man.whiten->n != 1)
+    fail("a one-parameter whiten member was not read: " + err);
+  const std::vector<double> zero = {0.0};
+  const std::string singular = ", \"whiten\": {\"q_hat\": \"" + base64_of(one) +
+                               "\", \"perm\": \"" + base64_of(p0) +
+                               "\", \"col_ptr\": \"" + base64_of(cp) +
+                               "\", \"row_idx\": \"" + base64_of(ri) +
+                               "\", \"values\": \"" + base64_of(zero) + "\"}}";
+  if (stanli::bs_read_manifest(base + singular, &man, &err))
+    fail("a whitening with a zero diagonal was accepted");
+}
+
 void test_construct_errors() {
   char* err = nullptr;
   // A model that cannot be compiled fails as a null return with a message,
@@ -1134,6 +1346,7 @@ int main() {
   test_necessity_effects();
   test_manifest();
   test_embedded_manifest();
+  test_whitened_manifest();
   test_construct_errors();
   if (failures == 0) std::printf("test_bridgestan OK\n");
   return failures == 0 ? 0 : 1;

@@ -3,7 +3,7 @@
 # every package-checking host exercises source compilation.
 
 portable_payload <- function(mir) {
-  expect_true(startsWith(mir, "STANLI3:"))
+  expect_true(startsWith(mir, "STANLI4:"))
   jsonlite::base64_dec(substring(mir, 9L))
 }
 
@@ -121,7 +121,7 @@ test_that("the V8 helper calls stanli_compile and reports its messages", {
     globalThis.__stanli_calls.arguments = arguments.length;
     globalThis.__stanli_calls.name = name;
     globalThis.__stanli_calls.source = source;
-    return {result: 'STANLI3:ZmFrZQ==', warnings: ['warning with θ'],
+    return {result: 'STANLI4:ZmFrZQ==', warnings: ['warning with θ'],
             o1_fallback: null};
   };")
   state$ctx <- ctx
@@ -130,7 +130,7 @@ test_that("the V8 helper calls stanli_compile and reports its messages", {
   expect_warning(
     mir <- stanli:::mir_from_js(source, enc2utf8("portable_π")),
     "warning with θ", fixed = TRUE)
-  expect_identical(mir, "STANLI3:ZmFrZQ==")
+  expect_identical(mir, "STANLI4:ZmFrZQ==")
   calls <- jsonlite::fromJSON(
     ctx$eval("JSON.stringify(globalThis.__stanli_calls)"))
   expect_identical(calls$portable, 1L)
@@ -141,7 +141,7 @@ test_that("the V8 helper calls stanli_compile and reports its messages", {
   ctx$eval("globalThis.stanli_compile = function(name, source, includes, file) {
     globalThis.__stanli_calls.arguments = arguments.length;
     globalThis.__stanli_calls.file = file;
-    return {result: 'STANLI3:ZmFrZQ==', warnings: []};
+    return {result: 'STANLI4:ZmFrZQ==', warnings: []};
   };")
   expect_no_warning(
     stanli:::mir_from_js(source, file = "models/θ.stan"))
@@ -161,7 +161,7 @@ test_that("the V8 helper calls stanli_compile and reports its messages", {
   expect_identical(calls$portable, 2L)
 
   ctx$eval("globalThis.stanli_compile = function() {
-    return {result: 'STANLI3:ZmFrZQ==', warnings: ['a warning'],
+    return {result: 'STANLI4:ZmFrZQ==', warnings: ['a warning'],
             o1_fallback: 'stanli compiler: skipped O1'};
   };")
   o1 <- NULL
@@ -198,7 +198,7 @@ test_that("the native compiler reports messages from its JSON file", {
     expect_identical(source_bytes,
                      charToRaw(enc2utf8("model { // θ\r\n}\r\n")))
     con <- file(stdout, open = "wb")
-    writeChar("STANLI3:dGhldGEgzrg=", con,
+    writeChar("STANLI4:dGhldGEgzrg=", con,
               eos = NULL, useBytes = TRUE)
     close(con)
     writeLines("text for people on stderr", stderr, useBytes = TRUE)
@@ -211,7 +211,7 @@ test_that("the native compiler reports messages from its JSON file", {
       "fake-stanli-compile", "model { // θ\r\n}\r\n",
       run_stanc = run_stanc),
     "a successful frontend warning θ", fixed = TRUE)
-  expect_identical(mir, "STANLI3:dGhldGEgzrg=")
+  expect_identical(mir, "STANLI4:dGhldGEgzrg=")
   expect_identical(seen$compiler, "fake-stanli-compile")
   expect_length(seen$args, 3)
   expect_identical(seen$args[[1]], "--messages-json")
@@ -251,7 +251,7 @@ test_that("UTF-8 Stan files survive locale-independent compiler staging", {
     staged <- file.path(dirname(stdout), "model.stan")
     expect_identical(readBin(staged, "raw", n = file.info(staged)$size),
                      expected)
-    writeChar("STANLI3:ZmFrZQ==", stdout, eos = NULL,
+    writeChar("STANLI4:ZmFrZQ==", stdout, eos = NULL,
               useBytes = TRUE)
     file.create(stderr)
     write_messages(args)
@@ -260,7 +260,7 @@ test_that("UTF-8 Stan files survive locale-independent compiler staging", {
   expect_identical(
     stanli:::mir_from_binary("fake-stanli-compile", code,
                               run_stanc = run_stanc),
-    "STANLI3:ZmFrZQ==")
+    "STANLI4:ZmFrZQ==")
 })
 
 test_that("a failing compiler is not hidden by partial output", {
@@ -327,7 +327,7 @@ test_that("the webR helper calls stanli_compile and reports its messages", {
     globalThis.__stanli_calls.arguments = arguments.length;
     globalThis.__stanli_calls.name = name;
     globalThis.__stanli_calls.source = source;
-    var r = {result: 'STANLI3:ZmFrZQ==', warnings: ['warning with ☃'],
+    var r = {result: 'STANLI4:ZmFrZQ==', warnings: ['warning with ☃'],
              o1_fallback: null};
     globalThis.__stanli_calls.warnings = r.warnings.length;
     return r;
@@ -358,7 +358,7 @@ test_that("the webR helper calls stanli_compile and reports its messages", {
   expect_warning(
     mir <- stanli:::mir_from_webr(eval_js, source, model_name),
     "warning with ☃", fixed = TRUE)
-  expect_identical(mir, "STANLI3:ZmFrZQ==")
+  expect_identical(mir, "STANLI4:ZmFrZQ==")
   calls <- jsonlite::fromJSON(
     ctx$eval("JSON.stringify(globalThis.__stanli_calls)"))
   expect_identical(calls$portable, 1L)
@@ -371,7 +371,7 @@ test_that("the webR helper calls stanli_compile and reports its messages", {
     globalThis.__stanli_calls.portable += 1;
     globalThis.__stanli_calls.arguments = arguments.length;
     globalThis.__stanli_calls.file = file;
-    return {result: 'STANLI3:ZmFrZQ==', warnings: []};
+    return {result: 'STANLI4:ZmFrZQ==', warnings: []};
   };")
   expect_no_warning(
     stanli:::mir_from_webr(eval_js, "model {}", file = "models/θ.stan"))
@@ -391,7 +391,7 @@ test_that("the webR helper calls stanli_compile and reports its messages", {
   expect_identical(calls$portable, 3L)
 
   ctx$eval("globalThis.stanli_compile = function() {
-    return {result: 'STANLI3:ZmFrZQ==', warnings: ['a warning'],
+    return {result: 'STANLI4:ZmFrZQ==', warnings: ['a warning'],
             o1_fallback: 'stanli compiler: skipped O1'};
   };")
   o1 <- NULL
@@ -455,7 +455,7 @@ test_that("fast_math selects the fast producer in every compile path", {
   run_stanc <- function(compiler, args, stdout, stderr) {
     seen <<- args
     con <- file(stdout, open = "wb")
-    writeChar("STANLI3:ZmFrZQ==", con, eos = NULL, useBytes = TRUE)
+    writeChar("STANLI4:ZmFrZQ==", con, eos = NULL, useBytes = TRUE)
     close(con)
     write_messages(args)
     0L
@@ -475,15 +475,15 @@ test_that("fast_math selects the fast producer in every compile path", {
   ctx <- V8::v8()
   ctx$eval("globalThis.__calls = [];
   globalThis.stanli_compile = function() {
-    globalThis.__calls.push('plain'); return {result: 'STANLI3:cGxhaW4='};
+    globalThis.__calls.push('plain'); return {result: 'STANLI4:cGxhaW4='};
   };
   globalThis.stanli_compile_fast = function() {
-    globalThis.__calls.push('fast'); return {result: 'STANLI3:ZmFzdA=='};
+    globalThis.__calls.push('fast'); return {result: 'STANLI4:ZmFzdA=='};
   };")
   state$ctx <- ctx
-  expect_identical(stanli:::mir_from_js("model {}"), "STANLI3:cGxhaW4=")
+  expect_identical(stanli:::mir_from_js("model {}"), "STANLI4:cGxhaW4=")
   expect_identical(stanli:::mir_from_js("model {}", fast_math = TRUE),
-                   "STANLI3:ZmFzdA==")
+                   "STANLI4:ZmFzdA==")
   expect_identical(jsonlite::fromJSON(ctx$eval("JSON.stringify(__calls)")),
                    c("plain", "fast"))
 

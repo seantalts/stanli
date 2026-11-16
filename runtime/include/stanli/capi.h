@@ -239,6 +239,81 @@ int stanli_grad(stanli_model* m, const double* q, double* lp, double* grad);
 int stanli_hessian(stanli_model* m, const double* q, double* lp, double* grad,
                    double* hessian, char* err, size_t err_len);
 
+/* EXPERIMENTAL. A new model over whitened coordinates z, with
+ *     q = q_hat + P^T L^{-T} z,   (P v)[i] = v[perm[i]],
+ * where q is `inner`'s unconstrained vector and L is a lower triangular
+ * Cholesky factor with P Q P^T = L L^T for some precision Q (typically the
+ * negative Hessian at q_hat). The new model's log density is the inner one at
+ * q(z) with the constant log|det L| dropped, so every entry point that takes
+ * the unconstrained vector (stanli_grad, stanli_hessian, the samplers,
+ * stanli_optimize, ...) works on z unchanged.
+ *
+ * What comes OUT stays in the inner model's terms: constrained names, output
+ * rows (stanli_constrain, stanli_wa_row, sampler draws) are the inner model's
+ * parameters, transformed parameters and generated quantities at q(z).
+ * stanli_unconstrain_inits returns the z that corresponds to the given
+ * constrained values. Unconstrained inits, modes and Hessians the caller
+ * passes in or reads back are in z.
+ *
+ * L is given in compressed sparse column form: col_ptr[n + 1], and row_idx and
+ * values of length nnz. Each column must begin with its (nonzero) diagonal
+ * entry, followed by strictly increasing row indices below it. perm[n] must be
+ * a permutation of 0..n-1. n must equal stanli_n_unconstrained(inner).
+ *
+ * The arrays are copied. The result does not refer to `inner`, which can be
+ * freed independently. Whitening an already-whitened model is refused.
+ * Returns null with a message in `err` on invalid input. Free the result with
+ * stanli_model_free. */
+stanli_model* stanli_model_whiten(const stanli_model* inner,
+                                  const double* q_hat, int64_t n,
+                                  const int64_t* perm, const int64_t* col_ptr,
+                                  const int64_t* row_idx, const double* values,
+                                  int64_t nnz, char* err, size_t err_len);
+
+/* EXPERIMENTAL. Like stanli_model_whiten, with the factor
+ * C = diag(c) + tril(W B^T, -1) of a diagonal-plus-low-rank matrix inserted:
+ *     q = q_hat + P^T L^{-T} C^{-T} z.
+ * With L unit lower triangular and C C^T = D + W0 W0^T this whitens a
+ * precision Q' = P^T L (D + W0 W0^T) L^T P, as stanli_sparse_factor_lowrank
+ * computes. c has n entries; b and w are n by k, row-major. Per-gradient cost
+ * is O(nnz(L) + n k). With k = 0, b and w may be null. */
+stanli_model* stanli_model_whiten_lowrank(
+    const stanli_model* inner, const double* q_hat, int64_t n,
+    const int64_t* perm, const int64_t* col_ptr, const int64_t* row_idx,
+    const double* values, int64_t nnz, int64_t k, const double* c,
+    const double* b, const double* w, char* err, size_t err_len);
+
+/* EXPERIMENTAL. Sparse LDL^T of a symmetric matrix A, given as the lower
+ * triangle in compressed sparse column form (entries above the diagonal are
+ * ignored). With perm null the ordering is approximate minimum degree;
+ * otherwise perm[n] is used as given. With (P v)[i] = v[perm[i]]:
+ *     P A P^T = L diag(d) L^T,
+ * L unit lower triangular with each column's diagonal entry first. d may have
+ * negative entries when A is indefinite; there is no pivoting. Returns null
+ * with a message in `err` on invalid input or a zero pivot. Free with
+ * stanli_sparse_factor_free. */
+typedef struct stanli_sparse_factor stanli_sparse_factor;
+stanli_sparse_factor* stanli_sparse_factor_new(
+    int64_t n, const int64_t* col_ptr, const int64_t* row_idx,
+    const double* values, const int64_t* perm, char* err, size_t err_len);
+/* Entries stored in L, diagonal included. */
+int64_t stanli_sparse_factor_nnz(const stanli_sparse_factor* f);
+/* Number of negative d entries and the sum of log|d|, i.e. log|det A|. */
+void stanli_sparse_factor_stats(const stanli_sparse_factor* f,
+                                int64_t* n_negative, double* log_abs_det);
+/* perm[n], col_ptr[n + 1], row_idx[nnz], values[nnz] and d[n]. */
+void stanli_sparse_factor_get(const stanli_sparse_factor* f, int64_t* perm,
+                              int64_t* col_ptr, int64_t* row_idx,
+                              double* values, double* d);
+/* For u, an n by k column-major matrix in A's own ordering, writes the
+ * arguments of stanli_model_whiten_lowrank (c[n], b[n * k], w[n * k]) for
+ * A + u u^T, with W0 = L^{-1} P u. Returns nonzero with a message when
+ * A + u u^T is not positive definite. */
+int stanli_sparse_factor_lowrank(const stanli_sparse_factor* f, int64_t k,
+                                 const double* u, double* c, double* b,
+                                 double* w, char* err, size_t err_len);
+void stanli_sparse_factor_free(stanli_sparse_factor* f);
+
 /* ---- multi-chain sampling ------------------------------------------------
  *
  * Everything below packs draws CHAIN-MAJOR: draw i of chain c, column j
@@ -579,6 +654,15 @@ int stanli_optimize(stanli_model* m, const stanli_optimize_opts* opts,
  * n_constrained gives the output length; names are "mu", "theta.1", ... */
 int64_t stanli_n_constrained(const stanli_model* m);
 const char* stanli_constrained_name(const stanli_model* m, int64_t i);
+
+/* The unconstrained vector as declared parameters, in declaration order:
+ * block i is stanli_param_block_size(m, i) consecutive entries and belongs to
+ * the parameter stanli_param_block_name(m, i). A simplex of K entries is one
+ * block of K - 1. A whitened model reports no blocks, because its vector is
+ * not in the declared parameters' terms. */
+int64_t stanli_n_param_blocks(const stanli_model* m);
+const char* stanli_param_block_name(const stanli_model* m, int64_t i);
+int64_t stanli_param_block_size(const stanli_model* m, int64_t i);
 int stanli_constrain(stanli_model* m, const double* q, double* out);
 
 /* Single-chain NUTS with diagonal-metric adaptation. `cb`, when non-null,
@@ -861,6 +945,15 @@ const char* stanli_variable_name(const stanli_model* m, int set, int64_t i);
 int64_t stanli_variable_n_dims(const stanli_model* m, int set, int64_t i);
 int64_t stanli_variable_dim(const stanli_model* m, int set, int64_t i,
                             int64_t k);
+/* The declaration annotations on variable i, by name without the `@` and in
+ * source order (`@latent` is "latent"). Only parameters appear in
+ * STANLI_CONSTRAINED_COLUMNS; STANLI_WRITE_ARRAY_COLUMNS also lists
+ * transformed parameters and generated quantities. Strings are owned by the
+ * model; out-of-range indices return 0 or null. */
+int64_t stanli_variable_n_annotations(const stanli_model* m, int set,
+                                      int64_t i);
+const char* stanli_variable_annotation(const stanli_model* m, int set,
+                                       int64_t i, int64_t k);
 
 /* The layout of every struct this header declares, for bindings that mirror
  * them and cannot include it (R's C glue copies them, Python declares ctypes

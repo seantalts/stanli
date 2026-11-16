@@ -20,7 +20,7 @@ namespace mir {
 namespace detail {
 namespace {
 
-constexpr std::string_view kMagic = "STANLI3:";
+constexpr std::string_view kMagic = "STANLI4:";
 constexpr size_t kMaxInputBytes = size_t{256} * 1024 * 1024;
 constexpr size_t kMaxStringBytes = size_t{16} * 1024 * 1024;
 constexpr size_t kMaxTotalStringBytes = size_t{256} * 1024 * 1024;
@@ -46,7 +46,7 @@ std::string decode_payload(std::string_view wire) {
   if (wire.size() > kMaxInputBytes)
     fail_wire(0, "input exceeds 268435456 bytes");
   if (wire.size() < kMagic.size() || wire.substr(0, kMagic.size()) != kMagic)
-    fail_wire(0, "missing STANLI3 header");
+    fail_wire(0, "missing STANLI4 header");
   const std::string_view encoded = wire.substr(kMagic.size());
   if (encoded.size() % 4 != 0)
     fail_wire(wire.size(), "base64 length is not a multiple of 4");
@@ -577,6 +577,7 @@ OutputVar read_output_var(Reader& reader) {
   const uint8_t block = reader.u8();
   value.block = read_tag(reader, block, kBlockTags, "unknown output-block tag");
   value.type = read_sized(reader);
+  value.annotations = reader.list<std::string>([&] { return reader.string(); });
   return value;
 }
 
