@@ -401,15 +401,9 @@ int main(int argc, char** argv) {
   std::function<void(const mir::Stmt&)> iwalk = [&](const mir::Stmt& s) {
     if (s.kind == mir::Stmt::NRFunApp && s.fn_name == "FnWriteParam")
       free_writes.push_back(&s);
-    if (s.kind == mir::Stmt::Assignment) {
-      std::function<void(const mir::Expr&)> scan = [&](const mir::Expr& e) {
-        if (e.kind == mir::Expr::FunApp && e.name == "FnReadData" &&
-            !e.args.empty())
-          init_reads.push_back(e.args[0].lit_s);
-        for (const auto& a : e.args) scan(a);
-      };
-      scan(s.rhs);
-    }
+    if (s.kind == mir::Stmt::NRFunApp && s.fn_name == "FnReadData" &&
+        s.fn_args.size() == 3)
+      init_reads.push_back(s.fn_args[2].lit_s);
     for (const auto& k : s.body) iwalk(k);
   };
   for (const auto& s : p.transform_inits) iwalk(s);

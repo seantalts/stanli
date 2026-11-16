@@ -235,7 +235,8 @@ PartitionStats partition_lanes(Graph& g, Fills& fills,
     if (!term_delim && !is_element_store(op)) continue;
     // Reach back over the ops whose values never leave the lane. An op that
     // is read later is not part of any lane: it stays where it is, and the
-    // lane starts after it.
+    // lane starts after it. Nor is an op nothing reads, such as an inlined
+    // argument a branch did not use: it would decide the bucket.
     size_t begin = u;
     while (begin > run_begin) {
       ++st.segment_steps;
@@ -243,7 +244,7 @@ PartitionStats partition_lanes(Graph& g, Fills& fills,
       const int o = prev.out;
       if (o < 0 || prev.out2 >= 0 || g.slots[(size_t)o].is_param ||
           term_set.count(o) != 0 || root_set.count(o) != 0 ||
-          writers[(size_t)o].size() != 1 ||
+          writers[(size_t)o].size() != 1 || uses[(size_t)o].empty() ||
           any_at_or_after(uses[(size_t)o], u + 1, st.list_steps))
         break;
       --begin;

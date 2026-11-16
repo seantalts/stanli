@@ -39,6 +39,8 @@ def scan(section):
             continue
         if n[0] == "StanLib" and len(n) > 1:
             funcs[n[1]] += 1
+        elif n[0] == "Operator" and len(n) > 1:
+            funcs[n[1] + "__"] += 1
         elif n[0] == "UserDefined" and len(n) > 1:
             funcs["user:" + n[1]] += 1
         elif n[0] == "constrain" and len(n) > 1:

@@ -116,7 +116,7 @@ struct Expr {
   std::string name;  // Var name or FunApp function name
   enum class Lib { StanLib, Internal, UserDefined } fn_lib = Lib::StanLib;
   FnSuffix fn_suffix = FnSuffix::Plain;
-  // (FnLpdf true) / (FnLpmf true): the call was written `_lupdf`/`_lupmf`.
+  // (FnDist _ Unnormalized), or the older (FnLpdf true): the call was written `_lupdf`/`_lupmf`.
   // On a callback Var, the reference was.
   bool fn_propto = false;
   // A user function call, or a Var naming one, that selects one overload of

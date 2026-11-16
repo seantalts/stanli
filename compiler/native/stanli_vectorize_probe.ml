@@ -68,7 +68,7 @@ let () =
         (Frontend.Include_files.FileSystemPaths [Filename.dirname model]) in
   List.iter
     (fun warning ->
-      Fmt.epr "%a@." (Frontend.Warnings.pp ?printed_filename:None) warning)
+      Fmt.epr "%a@." (Frontend.Warnings.pp ?printed_filename:None ~code) warning)
     compilation.warnings;
   List.iter
     (fun diagnostic ->

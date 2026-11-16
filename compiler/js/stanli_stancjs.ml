@@ -9,10 +9,10 @@ let invoke_driver model_name model flags =
     Return.with_return @@ fun return ->
     let output_callback : Driver.Entry.other_output -> unit = function
       | Warnings w -> warnings := !warnings @ w
+      | Info i -> return (Ok (Yojson.Basic.pretty_to_string i))
       | Formatted s
        |DebugOutput s
        |Memory_patterns s
-       |Info s
        |Version s
        |Generated s ->
           return (Ok s) in
@@ -31,14 +31,11 @@ let stan2cpp_wrapped name code flags includes : stancReturn Js.t =
     (result, warnings, driver_flags.filename_in_msg, code, color_output) in
   match compilation_result with
   | Ok (result, warnings, printed_filename, code, color_output) ->
-      let warnings =
-        include_reader_warnings
-        @ List.map
-            ~f:(str_color ~color_output "%a" (Warnings.pp ?printed_filename))
-            warnings in
+      let warnings = include_reader_warnings @ warnings in
       wrap_result ?printed_filename ~color_output ~code result ~warnings
   | Error non_compilation_error ->
-      wrap_error ~warnings:include_reader_warnings non_compilation_error
+      wrap_error ~color_output:false ~warnings:include_reader_warnings
+        non_compilation_error
 
 let compile_portable ~model_only ~fast_math name code includes filename :
     stancReturn Js.t =
@@ -51,28 +48,30 @@ let compile_portable ~model_only ~fast_math name code includes filename :
     | None -> Js.array [|Js.string "O1"|] in
   let flags = Js.some flags in
   match process_flags name code flags includes with
-  | Error message -> wrap_error ~warnings:include_reader_warnings message
+  | Error message ->
+      wrap_error ~color_output:false ~warnings:include_reader_warnings message
   | Ok {name; code; driver_flags; color_output} ->
       let compilation =
         Stanli_pipeline.compile_portable ~model_only ~fast_math ~model_name:name code
           ~include_source:driver_flags.include_source in
-      let warnings =
-        include_reader_warnings
-        @ List.map compilation.warnings ~f:(fun warning ->
-              str_color ~color_output "%a"
-                (Warnings.pp ?printed_filename:driver_flags.filename_in_msg)
-                warning)
-        @ List.map compilation.diagnostics
-            ~f:Stanli_pipeline.diagnostic_message in
-      (match compilation.result with
-      | Ok encoded ->
-          wrap_result ?printed_filename:driver_flags.filename_in_msg ~code
-            ~color_output ~warnings (Ok encoded)
-      | Error (Stanli_pipeline.Frontend_error error) ->
-          wrap_result ?printed_filename:driver_flags.filename_in_msg ~code
-            ~color_output ~warnings (Error error)
-      | Error (Stanli_pipeline.Internal_error message) ->
-          wrap_error ~warnings message)
+      let warnings = include_reader_warnings @ compilation.warnings in
+      let printed_filename = driver_flags.filename_in_msg in
+      let returned =
+        match compilation.result with
+        | Ok encoded ->
+            wrap_result ?printed_filename ~code ~color_output ~warnings
+              (Ok encoded)
+        | Error (Stanli_pipeline.Frontend_error error) ->
+            wrap_result ?printed_filename ~code ~color_output ~warnings
+              (Error error)
+        | Error (Stanli_pipeline.Internal_error message) ->
+            wrap_error ?printed_filename ~code ~color_output ~warnings message
+      in
+      List.iter compilation.diagnostics ~f:(fun diagnostic ->
+          ignore
+            (returned##.warnings##push
+               (Js.string (Stanli_pipeline.diagnostic_message diagnostic))));
+      returned
 
 let dump_stan_math_signatures () =
   Js.string @@ Fmt.str "%a" Stan_math_signatures.pretty_print_all_math_sigs ()

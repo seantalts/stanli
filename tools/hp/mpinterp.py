@@ -367,6 +367,8 @@ class Interp:
         ev = [self.expr(a) for a in args]
         if kind == "CompilerInternal":
             return self.internal(node, fn, args, ev)
+        if kind == "Operator":
+            return self.operator(fn[1] + "__", ev)
         name = fn[1]
         if kind == "UserDefined":
             return self.user_call(name, fn, args, ev)
@@ -377,8 +379,9 @@ class Interp:
             return self.user_call(pat(args[0])[1], fn, None, ev2, flags2)
         suffix = fn[2]
         flags = [ad_of(a) for a in args]
-        if isinstance(suffix, list) and suffix[0] in ("FnLpdf", "FnLpmf"):
-            propto = suffix[1] == "true"
+        if isinstance(suffix, list) and suffix[0] in ("FnDist", "FnLpdf", "FnLpmf"):
+            propto = (suffix[2] == "Unnormalized" if suffix[0] == "FnDist"
+                      else suffix[1] == "true")
             base = name
             for s in ("_lpdf", "_lpmf", "_lupdf", "_lupmf"):
                 if base.endswith(s):
@@ -783,12 +786,40 @@ class Interp:
                     def rj(env):
                         raise StanReject("reject")
                     return rj
+                if nm == "FnReadData":
+                    return self.read_data_stmt(p[2])
                 return lambda env: None
             if fn[0] == "UserDefined":
                 ev = self.funapp_node_nr(p)
                 return ev
             return lambda env: None
         raise Unsupported("stmt " + k)
+
+    def read_data_stmt(self, args):
+        """FnReadData__(x, context__, "x"): the named input, whole, into the
+        declared x, whose default value gives the shape to fill."""
+        var = args[0][0][1][1]
+        key = args[2][0][1][2]
+
+        def scalar(template, value):
+            value = jflat(value, isinstance(template, int))[0]
+            return value
+
+        def fill(template, value):
+            if isinstance(template, (Vec, RVec)):
+                return type(template)([scalar(mpf(0), v) for v in value])
+            if isinstance(template, Mat):
+                return Mat([[scalar(mpf(0), v) for v in row] for row in value])
+            if isinstance(template, list):
+                inner = template[0] if template else None
+                return [fill(inner, v) for v in value]
+            return scalar(template, value)
+
+        def rd(env):
+            if key not in self.data:
+                raise RuntimeError("missing data " + key)
+            env[var] = fill(env[var], self.data[key])
+        return rd
 
     def funapp_node_nr(self, p):
         fn = p[1]

@@ -26,7 +26,7 @@ let compile_tmir ~model_only ~fast_math ~filename ~include_paths (code : string)
       (List.map
          (fun warning ->
            String.trim
-             (Fmt.str "%a" (Frontend.Warnings.pp ?printed_filename) warning))
+             (Fmt.str "%a" (Frontend.Warnings.pp ?printed_filename ~code) warning))
          compilation.warnings) in
   let o1_fallback =
     List.find_map

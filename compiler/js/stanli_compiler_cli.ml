@@ -33,7 +33,7 @@ let () =
   in
   List.iter
     (fun warning ->
-      Fmt.epr "%a@." (Frontend.Warnings.pp ?printed_filename:!filename) warning)
+      Fmt.epr "%a@." (Frontend.Warnings.pp ?printed_filename:!filename ~code) warning)
     compilation.warnings;
   List.iter
     (fun diagnostic ->

@@ -2,9 +2,9 @@
 """Check stanli's compile errors against stanc3's own expected output.
 
 Every model in stanc3's test/integration/bad has its stanc output recorded in
-a stanc.expected file. This runs each model through stanli_check the way
-stanc3's test runner runs stanc (from the model's directory, with the bare
-file name), and requires stanli's error text, exit status 1, and a
+expected_errors/<model>.txt beside it. This runs each model through
+stanli_check the way stanc3's test runner runs stanc (from a directory below
+the model, as ../file), and requires stanli's error text, exit status, and a
 `COMPILE_FAIL <first line>` protocol line on stdout.
 
 A model whose output differs must be listed in tests/stanc3_bad_ledger.json
@@ -30,8 +30,7 @@ import toolchain
 REPO = pathlib.Path(__file__).resolve().parents[1]
 EMPTY = REPO / "tests/function_coverage/empty.json"
 LEDGER = REPO / "tests/stanc3_bad_ledger.json"
-BLOCK = re.compile(r"^  \$ stanc (.*)$")
-EXIT = re.compile(r"^\[exit \d+\]$")
+HEADER = re.compile(r"^/\* \$ stanc \.\./(\S+) : \[exit (\d+)\] \*/$")
 
 
 def check_pin(src):
@@ -40,28 +39,21 @@ def check_pin(src):
     toolchain.require_stanc3_src(src)
 
 
-def parse_expected(path):
-    """{file name as given to stanc: expected output lines}"""
-    blocks = {}
-    name = None
-    for line in path.read_text().splitlines():
-        match = BLOCK.match(line)
-        if match:
-            if name is not None:
-                sys.exit(f"{path}: block '{name}' has no [exit N] line")
-            name = match.group(1)
-            if name in blocks:
-                sys.exit(f"{path}: '{name}' appears twice")
-            blocks[name] = []
-            continue
-        if name is None:
-            sys.exit(f"{path}: text before the first '$ stanc' line")
-        blocks[name].append(line)
-        if EXIT.match(line):
-            name = None
-    if name is not None:
-        sys.exit(f"{path}: block '{name}' has no [exit N] line")
-    return blocks
+def expected_path(directory, name):
+    """stanc3 keeps foo.stan's output in expected_errors/foo.txt, and
+    foo.stanfunctions's in expected_errors/foo.stanfunctions.txt."""
+    stem = name[:-len(".stan")] if name.endswith(".stan") else name
+    return directory / "expected_errors" / f"{stem}.txt"
+
+
+def parse_expected(path, name):
+    """stanc's expected output lines, ending in its [exit N] line"""
+    lines = path.read_text().splitlines()
+    match = HEADER.match(lines[0]) if lines else None
+    if not match or match.group(1) != name:
+        sys.exit(f"{path}: first line is not '/* $ stanc ../{name} : "
+                 "[exit N] */'")
+    return lines[1:] + [f"[exit {match.group(2)}]"]
 
 
 def collect(bad):
@@ -70,31 +62,34 @@ def collect(bad):
     unmatched = []
     for directory in sorted({p.parent for p in bad.rglob("*")
                              if p.is_file() and p.suffix in
-                             (".stan", ".stanfunctions")}
-                            | {p.parent for p in bad.rglob("stanc.expected")}):
-        expected_file = directory / "stanc.expected"
-        on_disk = {p.name for p in directory.iterdir()
-                   if p.is_file() and p.suffix in (".stan", ".stanfunctions")}
-        blocks = parse_expected(expected_file) if expected_file.exists() \
-            else {}
+                             (".stan", ".stanfunctions")
+                             and p.parent.name != "expected_errors"}):
         rel = directory.relative_to(bad).as_posix()
-        for name in sorted(on_disk - blocks.keys()):
-            unmatched.append(f"{rel}/{name}: no stanc.expected block")
-        for name in sorted(blocks.keys() - on_disk):
-            unmatched.append(f"{rel}/{name}: expected block, no such file")
-        for name in sorted(on_disk & blocks.keys()):
-            label = name if rel == "." else f"{rel}/{name}"
-            cases.append((label, directory, name, blocks[name]))
+        for path in sorted(directory.iterdir()):
+            if not (path.is_file() and
+                    path.suffix in (".stan", ".stanfunctions")):
+                continue
+            expected = expected_path(directory, path.name)
+            if not expected.exists():
+                unmatched.append(f"{rel}/{path.name}: no "
+                                 f"{expected.relative_to(directory)}")
+                continue
+            label = path.name if rel == "." else f"{rel}/{path.name}"
+            cases.append((label, directory, path.name,
+                          parse_expected(expected, path.name)))
     if unmatched:
-        sys.exit("expected blocks and model files do not match:\n  " +
+        sys.exit("expected outputs and model files do not match:\n  " +
                  "\n  ".join(unmatched))
     return cases
 
 
 def run(case, check):
+    """stanli_check runs where stanc3's runner runs stanc: one directory
+    down, naming the model as ../file, so file names print the same."""
     label, directory, name, _ = case
-    proc = subprocess.run([str(check), name, str(EMPTY)], cwd=directory,
-                          text=True, capture_output=True, timeout=300)
+    proc = subprocess.run([str(check), f"../{name}", str(EMPTY)],
+                          cwd=directory / "expected_errors", text=True,
+                          capture_output=True, timeout=300)
     lines = proc.stderr.splitlines() + [f"[exit {proc.returncode}]"]
     protocol = None
     if proc.returncode != 0:

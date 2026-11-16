@@ -200,28 +200,33 @@ let internal_name : Expr.Typed.t Internal_fun.t -> string = function
   | FnResizeToMatch -> "FnResizeToMatch"
   | FnNaN -> "FnNaN"
   | FnDeepCopy -> "FnDeepCopy"
+  | FnToRef -> "FnToRef"
+  | FnReturnSoA _ -> "FnReturnSoA"
   | FnReadWriteEventsOpenCL _ -> "FnReadWriteEventsOpenCL"
 
 let internal_has_payload : Expr.Typed.t Internal_fun.t -> bool = function
   | Internal_fun.FnReadParam _ | FnWriteParam _ | FnCheck _
-   |FnReadWriteEventsOpenCL _ ->
+   |FnReadWriteEventsOpenCL _ | FnReturnSoA _ ->
       true
   | FnLength | FnMakeArray | FnMakeTuple | FnMakeRowVec | FnNegInf
    |FnReadData | FnReadDeserializer | FnValidateSize | FnValidateSizePositive
    |FnValidateSizeUnitVector | FnPrint | FnReject | FnFatalError
-   |FnResizeToMatch | FnNaN | FnDeepCopy ->
+   |FnResizeToMatch | FnNaN | FnDeepCopy | FnToRef ->
       false
 
 let propto = function
-  | Fun_kind.FnLpdf true | FnLpmf true -> true
-  | FnPlain | FnRng | FnLpdf false | FnLpmf false | FnTarget | FnJacobian ->
-      false
+  | Fun_kind.FnDist (_, Unnormalized) -> true
+  | FnPlain | FnRng | FnDist (_, Normalized) | FnTarget | FnJacobian -> false
 
-let suffix_tag : bool Fun_kind.suffix -> int = function
+(* Operators keep the StanLib spelling they had before stanc3 gave them their
+   own function kind, so portable MIR is unchanged. *)
+let operator_name op = Sexplib0.Sexp.to_string (Operator.sexp_of_t op) ^ "__"
+
+let suffix_tag : Fun_kind.suffix -> int = function
   | Fun_kind.FnPlain -> 0
   | FnRng -> 1
-  | FnLpdf _ -> 2
-  | FnLpmf _ -> 3
+  | FnDist (Density, _) -> 2
+  | FnDist (Mass, _) -> 3
   | FnTarget -> 4
   | FnJacobian -> 5
 
@@ -298,13 +303,19 @@ let rec expr_of_t (expr : Expr.Typed.t) =
 and fun_app_of_t kind args =
   let args = List.map ~f:expr_of_t args in
   match kind with
-  | Fun_kind.StanLib (name, suffix, _) ->
+  | Fun_kind.StanLib (name, suffix) ->
       { (default_expr ()) with
         e_kind= "FunApp"
       ; e_name= name
       ; e_fn_lib= "StanLib"
       ; e_fn_suffix= suffix_tag suffix
       ; e_fn_propto= propto suffix
+      ; e_args= args }
+  | Operator op ->
+      { (default_expr ()) with
+        e_kind= "FunApp"
+      ; e_name= operator_name op
+      ; e_fn_lib= "StanLib"
       ; e_args= args }
   | CompilerInternal internal ->
       { (default_expr ()) with
@@ -525,11 +536,16 @@ and nr_fun_app_of_t kind args =
       ; st_fn_name= name
       ; st_fn_args= ordinary_args
       ; st_payload= payload }
-  | StanLib (name, suffix, _) ->
+  | StanLib (name, suffix) ->
       { (default_stmt ()) with
         st_kind= "NRFunApp"
       ; st_fn_name= name
       ; st_fn_suffix= suffix_tag suffix
+      ; st_fn_args= ordinary_args }
+  | Operator op ->
+      { (default_stmt ()) with
+        st_kind= "NRFunApp"
+      ; st_fn_name= operator_name op
       ; st_fn_args= ordinary_args }
   | UserDefined (name, suffix) ->
       { (default_stmt ()) with

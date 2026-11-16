@@ -210,10 +210,18 @@ UnsizedLeaf unsized_leaf(const std::string& atom) {
   return UnsizedLeaf::Unknown;
 }
 
-// stanc3's Fun_kind suffix: `FnPlain`, `(FnLpdf true)`, ...
+// stanc3's Fun_kind suffix: `FnPlain`, `(FnDist Density Unnormalized)`, ...
+// Older stanc3 spelled densities `(FnLpdf true)`, as some hand-written test
+// MIR still does.
 FnSuffix read_suffix(const Node& n, bool* propto) {
   *propto = false;
   const std::string& head = n.is_atom() ? n.atom : n[0].atom;
+  if (!n.is_atom() && n.size() == 3 && head == "FnDist") {
+    *propto = n[2].atom == "Unnormalized";
+    if (n[1].atom == "Density") return FnSuffix::Lpdf;
+    if (n[1].atom == "Mass") return FnSuffix::Lpmf;
+    throw mir::MirError("mir: unknown density support " + n[1].atom);
+  }
   if (!n.is_atom() && n.size() == 2 && (head == "FnLpdf" || head == "FnLpmf")) {
     *propto = n[1].atom == "true";
     return head == "FnLpdf" ? FnSuffix::Lpdf : FnSuffix::Lpmf;
@@ -325,11 +333,12 @@ Expr read_expr_pattern(const Node& p) {
   } else if (p.head_is("FunApp")) {
     e.kind = Expr::FunApp;
     const Node& kind = p[1];
-    // (StanLib normal_lpdf (FnLpdf true) AoS) and
-    // (UserDefined f_lpdf (FnLpdf true)) spell the propto flag the same
-    // way, and it means the same thing on both: `_lupdf` was written. On a
-    // user function it is the value of CmdStan's propto__ template
-    // argument, which the body inherits.
+    // (StanLib normal_lpdf (FnDist Density Unnormalized)) and
+    // (UserDefined f_lpdf (FnDist Density Unnormalized)) spell the propto
+    // flag the same way, and it means the same thing on both: `_lupdf` was
+    // written. On a user function it is the value of CmdStan's propto__
+    // template argument, which the body inherits. Older stanc3 spelled it
+    // (FnLpdf true), as some hand-written test MIR still does.
     auto read_propto = [&](const Node& kind) {
       e.fn_suffix = read_suffix(kind[2], &e.fn_propto);
     };
@@ -337,6 +346,10 @@ Expr read_expr_pattern(const Node& p) {
       e.fn_lib = Expr::Lib::StanLib;
       e.name = kind[1].atom;
       read_propto(kind);
+    } else if (kind.head_is("Operator")) {
+      // (Operator Plus) is the StanLib function Plus__.
+      e.fn_lib = Expr::Lib::StanLib;
+      e.name = kind[1].atom + "__";
     } else if (kind.head_is("CompilerInternal")) {
       e.fn_lib = Expr::Lib::Internal;
       const Node& internal = kind[1];
@@ -661,6 +674,8 @@ Stmt read_stmt(const Node& n) {
       s.fn_name = kind[1].atom;
       bool propto = false;
       s.fn_suffix = read_suffix(kind[2], &propto);
+    } else if (kind.head_is("Operator")) {
+      s.fn_name = kind[1].atom + "__";
     } else {
       s.kind = Stmt::Unsupported;
       s.raw = dump(p);

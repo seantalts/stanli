@@ -365,10 +365,11 @@ variable, skipping zero-width variables before it. Column names, CSV section
 boundaries and the complex-output check all come from the variable so
 assigned, so a write the optimizer turned into a literal is named correctly.
 
-`transform_inits` is stanc3's inverse parameter-transform section: its
-`FnReadData` calls name PARAMETERS read from a caller-supplied init context
-rather than model data, and each parameter ends in an `FnWriteParam` carrying
-the transform to invert.
+`FnReadData` is a statement, `FnReadData(x, context__, "x")`, that reads the
+named input whole into the declared `x`. `transform_inits` is stanc3's inverse
+parameter-transform section: its `FnReadData` statements name PARAMETERS read
+from a caller-supplied init context rather than model data, and each parameter
+ends in an `FnWriteParam` carrying the transform to invert.
 
 Every section is required, `transform_inits` included; a model without
 parameters writes it as an empty list.

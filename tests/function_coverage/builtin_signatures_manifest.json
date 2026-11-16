@@ -933,6 +933,9 @@
       "yule_simon_rng(row_vector)=>array[]int",
       "yule_simon_rng(vector)=>array[]int"
     ],
+    "the reference stanc (CmdStan 2.40) predates diag_matrix(row_vector)": [
+      "diag_matrix(row_vector)=>matrix"
+    ],
     "unsupported argument type": [
       "abs(array[,,,,,,]complex)=>array[,,,,,,]real",
       "abs(array[,,,,,,]complex_matrix)=>array[,,,,,,]matrix",
@@ -1043,6 +1046,7 @@
       "cumulative_sum(array[]complex)=>array[]complex",
       "cumulative_sum(complex_row_vector)=>complex_row_vector",
       "cumulative_sum(complex_vector)=>complex_vector",
+      "diag_matrix(complex_row_vector)=>complex_matrix",
       "diag_matrix(complex_vector)=>complex_matrix",
       "diagonal(complex_matrix)=>complex_vector",
       "dims(array[,,,,,,,]complex)=>array[]int",
@@ -1458,7 +1462,7 @@
       "transpose(complex_vector)=>complex_row_vector"
     ]
   },
-  "excluded_signature_count": 1444,
+  "excluded_signature_count": 1446,
   "generator": "tools/generate_builtin_signature_models.py",
   "missing_from_stanc": [
     "Divide__",
@@ -2025,8 +2029,8 @@
     }
   ],
   "registry_name_count": 262,
-  "signature_dump_sha256": "acc42ed71be9740fb5c4b644954c04fa250063f01e81372e8dc1eaeadef5aaee",
-  "stanc_build_id": "stanc3 v2.40.0-10-geacefa6",
+  "signature_dump_sha256": "e9d528c1e275a200679eee49cf7bd132c0b9be1574b50da891b2bf8d6cd49234",
+  "stanc_build_id": "stanc3 v2.40.0-144-g9f5c452",
   "tested_case_count": 12753,
   "tested_signature_count": 7486
 }

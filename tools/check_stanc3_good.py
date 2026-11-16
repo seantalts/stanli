@@ -31,7 +31,7 @@ import time
 REPO = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO / "tools"))
 import check_status  # noqa: E402
-from corpus_inventory import source_digest  # noqa: E402
+from corpus_inventory import source_digest, stanc3_good_models  # noqa: E402
 import toolchain  # noqa: E402
 from verify_refs import pair_dev  # noqa: E402
 
@@ -90,8 +90,7 @@ def check_corpus(corpus=CORPUS):
 
 
 def corpus_models(corpus=CORPUS):
-    return sorted(p.relative_to(corpus).as_posix()
-                  for p in corpus.rglob("*.stan"))
+    return stanc3_good_models(corpus)
 
 
 def model_input(path, overrides, data, corpus=CORPUS):

@@ -1,7 +1,8 @@
 # stanc3's test models against CmdStan
 
-stanc3 keeps 1,244 models in `test/integration/good` to test that they
-compile. They cover syntax and type combinations that posteriordb and the
+stanc3 keeps 1,380 models in `test/integration/good` to test that they
+compile, not counting the pretty-printed copies in its `expected_*`
+directories. They cover syntax and type combinations that posteriordb and the
 signature generators never produce. This suite runs every one of them
 through stanli and compares the results with CmdStan's answers at five
 unconstrained points (`eval_point` variants 0 to 4 in
