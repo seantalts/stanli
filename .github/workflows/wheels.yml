@@ -1278,7 +1278,7 @@ jobs:
             > windows-compilers/stock-overflow.mir
           # The fork folds with int32 arithmetic, so the overflowing product
           # stays unfolded rather than becoming 2500000000.
-          grep -Fq 'Times__' windows-compilers/stock-overflow.mir
+          grep -Fq '(Operator Times)' windows-compilers/stock-overflow.mir
           if grep -Fq '2500000000' windows-compilers/stock-overflow.mir; then
             echo "stock stanc folded past int32" >&2
             exit 1
