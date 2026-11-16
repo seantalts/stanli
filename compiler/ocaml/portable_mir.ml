@@ -528,7 +528,7 @@ and nr_fun_app_of_t kind args =
          |FnReadData | FnReadDeserializer | FnReadParam _ | FnValidateSize
          |FnValidateSizePositive | FnValidateSizeUnitVector | FnPrint
          |FnReject | FnFatalError | FnResizeToMatch | FnNaN | FnDeepCopy
-         |FnReadWriteEventsOpenCL _ ->
+         |FnReadWriteEventsOpenCL _ | FnToRef | FnReturnSoA _ ->
             No_payload in
       { (default_stmt ()) with
         st_kind= "NRFunApp"
