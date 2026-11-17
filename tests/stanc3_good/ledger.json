@@ -70,7 +70,7 @@
   "status": "unsupported"
  },
  "code-gen/return-position-types.stan": {
-  "cause": "this variable type is not supported yet (in variable inline_baz_return_sym11__) | in: (STuple ((SArray SReal ((pattern (Lit Int 0)) (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly))))) SReal))",
+  "cause": "complex numbers are not supported yet (in variable z2)",
   "status": "unsupported"
  },
  "compiler-optimizations/dce-fail.stan": {
@@ -120,7 +120,7 @@
   "status": "unsupported"
  },
  "function-signatures/math/functions/generate_laplace_options.stan": {
-  "cause": "this variable type is not supported yet (in variable transformed_data_tols) | in: (STuple ((SVector AoS ((pattern (Var d_int)) (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly))))) SReal SInt SInt SInt SInt))",
+  "cause": "generate_laplace_options, which returns a tuple, is not supported yet | in: (UTuple (UVector UReal UInt UInt UInt UInt))",
   "status": "unsupported"
  },
  "function-signatures/math/functions/get_imag.stan": {
@@ -177,10 +177,6 @@
  },
  "function-signatures/math/matrix/conj.stan": {
   "cause": "mir: malformed sized declaration type",
-  "status": "unsupported"
- },
- "function-signatures/math/matrix/csr_extract.stan": {
-  "cause": "this variable type is not supported yet (in variable td_wvu) | in: (STuple ((SVector AoS ((pattern (Lit Int 3)) (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly))))) (SArray SInt ((pattern (Lit Int 5)) (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly))))) (SArray SInt ((pattern (Lit Int 5)) ",
   "status": "unsupported"
  },
  "function-signatures/math/matrix/csr_extract_v.stan": {
@@ -418,11 +414,7 @@
   }
  },
  "tuples/arrays-tuples-nested.stan": {
-  "cause": "mir: an array of tuples as a parameter is not supported yet",
-  "status": "unsupported"
- },
- "tuples/tuple-constraints-params.stan": {
-  "cause": "mir: an array of tuples as a parameter is not supported yet",
+  "cause": "complex numbers are not supported yet (in variable very_deep.2.2.1)",
   "status": "unsupported"
  },
  "tuples/tuple-promotion.stan": {
