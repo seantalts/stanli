@@ -424,15 +424,13 @@ let multi_call_of_t env (expr : Expr.Typed.t) =
       Some (with_meta expr (fun_app_of_t env kind args))
   | _ -> None
 
-(* Sized types are only ever read in the empty environment: a tuple temporary
-   is never a size. *)
-let rec sized_of_t sized =
-  let expr_of_t = expr_of_t String.Map.empty in
+let rec sized_of_t env sized =
+  let expr_of_t = expr_of_t env in
   match sized with
   | SizedType.STuple components ->
       { (default_sized ()) with
         s_base= "STuple"
-      ; s_components= List.map ~f:sized_of_t components }
+      ; s_components= List.map ~f:(sized_of_t env) components }
   | SizedType.SInt -> {(default_sized ()) with s_base= "SInt"}
   | SReal -> {(default_sized ()) with s_base= "SReal"}
   | SComplex -> {(default_sized ()) with s_base= "SComplex"}
@@ -445,7 +443,7 @@ let rec sized_of_t sized =
         s_base= "SMatrix"
       ; s_dims= List.map ~f:expr_of_t [rows; cols] }
   | SArray (inner, dim) ->
-      let inner = sized_of_t inner in
+      let inner = sized_of_t env inner in
       { (default_sized ()) with
         s_base= "SArray"
       ; s_dims= expr_of_t dim :: inner.s_dims
@@ -644,7 +642,7 @@ and stmt_of_t names (env : env) (stmt : Stmt.Located.t) : env * wire_stmt list
                 ; st_decl_id= leaf
                 ; st_decl_type=
                     (match component with
-                    | Type.Sized sized -> sized_of_t sized
+                    | Type.Sized sized -> sized_of_t env sized
                     | Unsized _ -> default_sized ())
                 ; st_decl_unsized= decl_unsized_of_type component
                 ; st_decl_data_only= is_data_only level }) in
@@ -671,7 +669,7 @@ and stmt_of_t names (env : env) (stmt : Stmt.Located.t) : env * wire_stmt list
           ; st_decl_id= decl_id
           ; st_decl_type=
               (match decl_type with
-              | Type.Sized sized -> sized_of_t sized
+              | Type.Sized sized -> sized_of_t env sized
               | Unsized _ -> default_sized ())
           ; st_decl_unsized= decl_unsized_of_type decl_type
           ; st_decl_data_only= is_data_only decl_adtype
@@ -1351,7 +1349,7 @@ let encode (program : Program.Typed.t) =
         , List.map out_annotations ~f:(fun (a : Annotation.t) -> a.name) )) in
   let buffer = Buffer.create 32768 in
   add_v2_list add_v2_input buffer
-    (List.map inputs ~f:(fun (name, sized) -> (name, sized_of_t sized)));
+    (List.map inputs ~f:(fun (name, sized) -> (name, sized_of_t String.Map.empty sized)));
   add_v2_list add_v2_stmt buffer (procedure program.prepare_data);
   add_v2_list add_v2_stmt buffer (procedure program.log_prob);
   let write_array, tp_begin, gq_begin =
@@ -1370,7 +1368,7 @@ let encode (program : Program.Typed.t) =
     (List.map ~f:(fun_of_t names) program.functions_block);
   add_v2_list add_v2_output buffer
     (List.map outputs ~f:(fun (name, block, sized, annotations) ->
-         (name, block, sized_of_t sized, annotations)));
+         (name, block, sized_of_t String.Map.empty sized, annotations)));
   add_v2_list add_v2_stmt buffer (procedure program.transform_inits);
   add_v2_list add_tuple_leaf buffer
     (List.concat_map ~f:tuple_leaves_of
