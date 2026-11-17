@@ -5,26 +5,27 @@ sampling minutes after installing R.
 
 ## Before the first class
 
-Students with supported macOS or Windows R installations need two lines. The
-first also installs the tutorial packages from binaries:
+On a supported macOS or Windows R installation, students run two lines. The
+first line also installs the tutorial packages from binaries:
 
 ```r
 install.packages(c("stanli", "posterior", "bayesplot", "loo", "tidybayes"), repos = c("https://seantalts.r-universe.dev", "https://cloud.r-project.org"), type = "binary")
 stanli::stanli_install()
 ```
 
-`stanli_install()` downloads the prebuilt runtime, compiler included, from the
-release the package is pinned to. Run it once per machine and again after a
-package upgrade. Compiling and sampling make no downloads. See the
+`stanli_install()` downloads the prebuilt runtime, which includes the Stan
+compiler. It downloads from the release that matches the installed package.
+Run it once per machine, and again after a package upgrade. Compiling and
+sampling do not download anything. See the
 [R package install notes](../r/README.md#install) for source installs and
 `STANLI_RUNTIME`.
 
 ### Linux labs
 
-On Linux the ordinary repository URL selects source packages. R-universe's
-Linux binary target is Ubuntu 26.04 (resolute), for R-release and R-devel on
-x86_64 and arm64. Other distributions need a prepared lab image or a hosted
-session; see the
+On Linux, the usual repository URL installs source packages. R-universe
+builds Linux binaries for Ubuntu 26.04 (resolute), for R-release and R-devel
+on x86_64 and arm64. Other distributions need a prepared lab image or a
+hosted session. See the
 [R-universe binary guide](https://docs.r-universe.dev/install/binaries.html).
 On that Ubuntu target, replace the first line with:
 
@@ -38,8 +39,9 @@ image before students arrive.
 
 ## Five-line eight-schools example
 
-Paste these lines after installation. No model file or data download is
-needed. The model is the noncentered eight-schools parameterization.
+Paste these lines after installation. You do not need a model file or a
+data download. The model is the noncentered parameterization of eight
+schools.
 
 ```r
 library(stanli)
@@ -54,15 +56,16 @@ If the report flags divergences, rerun with `delta = 0.99` and check again.
 including initial values, posterior predictive checks, LOO, tidybayes, and
 saving a fit.
 
-A fresh R session reaches this posterior in well under a second on current
-hardware. `tools/bench_r_first_posterior.R` in the repository times it; run it
-on the classroom machines before promising a number to students.
+In a fresh R session on current hardware, this example finishes in well
+under a second. The script `tools/bench_r_first_posterior.R` in the
+repository times it. Run it on the classroom machines before you promise
+students a number.
 
 ## Models from brms
 
 Generate the Stan code and data with brms, then sample with stanli. Pass the
-same formula, data, family and priors to both calls, and leave the generated
-Stan text unedited:
+same formula, data, family and priors to both calls, and do not edit the
+generated Stan code:
 
 ```r
 library(stanli)
@@ -76,10 +79,10 @@ fit <- sample_model(model, chains = 4, seed = 1, refresh = 0)
 stanli_diagnose(fit)
 ```
 
-This gives a `stanli_fit` with brms's parameter names; see `fit$columns`. To
-get a full `brmsfit`, hand the converted fit to brms's `"mock"` backend. This
-works with released brms (2.23) and needs RStan installed for the `stanfit`
-class, but no C++ toolchain:
+The result is a `stanli_fit` that uses brms's parameter names, which are
+listed in `fit$columns`. To get a full `brmsfit`, pass the converted fit to
+brms's `"mock"` backend. This works with released brms (2.23). It needs RStan
+installed for the `stanfit` class. It does not need a C++ toolchain:
 
 ```r
 bf <- brms::brm(y ~ x, data = d, family = gaussian(),
@@ -92,11 +95,12 @@ brms::loo(bf)
 `summary()`, `posterior_predict()`, `log_lik()`, `loo()`,
 `conditional_effects()` and `pp_check()` work on such a fit. Methods that
 sample again (`update()`, `kfold()`) do not, because brms does not know how
-the fit was made. A `backend = "stanli"` for brms itself is on the branch
-[`stanli-backend`](https://github.com/seantalts/brms/tree/stanli-backend),
-outside any brms release;
+the fit was made. The development version of brms on GitHub also has
+`backend = "stanli"`
+([paul-buerkner/brms#1966](https://github.com/paul-buerkner/brms/pull/1966)).
+It is not in a CRAN release yet.
 [output/brms-end-to-end](../output/brms-end-to-end/README.md) compares it with
-the cmdstanr backend on the corpus's brms formulas.
+the cmdstanr backend on the brms formulas in the corpus.
 
 ## Models from Rethinking
 
@@ -112,19 +116,21 @@ fit <- stanli::sample_model(model, chains = 4, seed = 1, refresh = 0)
 stanli::stanli_diagnose(fit)
 ```
 
-The result is a `stanli_fit`, so `ulam` methods do not apply to it. For a book model, keep its
-data preparation. A model the book makes difficult on purpose has the same
-poor diagnostics here; a different engine does not fix an unidentified model.
+The result is a `stanli_fit`, so `ulam` methods do not apply to it. For a
+model from the book, keep the book's data preparation. Some book models are
+hard to sample on purpose. They show the same poor diagnostics in stanli,
+because a different sampler does not fix an unidentified model.
 
-The brms and Rethinking models in the [corpus](corpus-status.md) are checked
-against CmdStan in CI.
+stanli's CI checks the brms and Rethinking models in the
+[corpus](corpus-status.md) against CmdStan.
 
 ## Offline labs
 
-Install R, stanli and the tutorial packages on the lab image while online, and
-keep the binary installers or a repository snapshot for rebuilding it. The
-runtime is a separate download: prepare one tarball per R architecture in the
-room, from the release the installed package is pinned to.
+Install R, stanli and the tutorial packages on the lab image while you are
+online. Keep the binary installers or a repository snapshot so that you can
+rebuild the image. The runtime is a separate download. Prepare one tarball
+for each R architecture in the room, from the release that matches the
+installed package.
 
 | R platform | Runtime tarball | Library inside |
 |---|---|---|
@@ -143,8 +149,9 @@ asset <- "stanli-runtime-darwin-arm64.tar.gz"
 download.file(paste0("https://github.com/seantalts/stanli/releases/download/", tag, "/", asset), asset, mode = "wb")
 ```
 
-Copy the tarball to the lab. Before loading stanli, extract all of its files;
-on Windows the compiler and supporting DLLs must stay beside the runtime:
+Copy the tarball to the lab. Before you load stanli, extract all of its
+files. On Windows, the compiler and supporting DLLs must stay in the same
+folder as the runtime:
 
 ```r
 dir.create("~/stanli-runtime", showWarnings = FALSE)
@@ -153,13 +160,13 @@ Sys.setenv(STANLI_RUNTIME = path.expand("~/stanli-runtime/libstanli.dylib"))
 library(stanli)
 ```
 
-Put an absolute `STANLI_RUNTIME` path in the lab's `.Renviron` to keep it
-across sessions, and skip `stanli_install()`. For R running under Rosetta, use
-the Intel runtime even on Apple Silicon.
+To keep the setting across sessions, put an absolute `STANLI_RUNTIME` path
+in the lab's `.Renviron`, and skip `stanli_install()`. For R running under
+Rosetta, use the Intel runtime even on Apple Silicon.
 
 ## Students without a laptop
 
 The [browser build](https://seantalts.github.io/stanli/) runs Stan in a web
-browser with model presets, sampling, plots and diagnostics, and needs no
-install. R exercises still need an R session, such as a lab computer or a
-hosted classroom environment.
+browser and needs no install. It has model presets, sampling, plots and
+diagnostics. R exercises still need an R session, such as one on a lab
+computer or in a hosted classroom environment.

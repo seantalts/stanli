@@ -6,23 +6,23 @@ artifact.
 
 ## What takes the space
 
-The densities dominate. A distribution is instantiated once per activity
-mask (which arguments are autodiff), twice for propto, and again for the
-elementwise form. That is `4 * 2^N` templates per distribution, about
-630 KB of object each. This is the standing cost of shipping precompiled
-math. CmdStan instantiates only the combination your model uses and pays
-for it with a per-model compile.
+Most of the space goes to the densities. A distribution is instantiated
+once per activity mask (which arguments are autodiff), twice for propto,
+and again for the elementwise form. That is `4 * 2^N` templates per
+distribution, about 630 KB of object each. This is the cost of shipping
+precompiled math. CmdStan instantiates only the combination that your
+model uses, but it compiles each model separately.
 
-Each density chooses how much of that ladder to instantiate
-(`STANLI_SCALAR_DENSITY_LIST` in
-[`optable.hpp`](../runtime/include/stanli/optable.hpp)). The thirteen
-distributions models lean on take all of it, the long tail takes less,
-and the 72 distribution functions take one instantiation each.
+`STANLI_SCALAR_DENSITY_LIST` in
+[`optable.hpp`](../runtime/include/stanli/optable.hpp) sets how many of
+these templates each density gets. The thirteen distributions that models
+use most get all of them, less common ones get fewer, and each of the 72
+distribution functions gets one instantiation.
 
-The interpreter and NUTS together are about 410 KB. Shrinking further was
-measured and declined. Dead-code stripping cannot reach inside the OCaml
-object, and compiling stanc3 to bytecode saves 3.7 MB at the cost of
-about 8x slower model compilation.
+The interpreter and NUTS together are about 410 KB. We measured two ways
+to shrink the library further and did not adopt them. Dead-code stripping
+does not work inside the OCaml object. Compiling stanc3 to bytecode saves
+3.7 MB but makes model compilation about 8x slower.
 
 ## The browser build
 
@@ -30,21 +30,22 @@ The browser build is a different binary with no embedded stanc3, because
 the compiler ships separately as JavaScript. `stanli-compiler.js` contains
 stanc3 plus the shared stanli OCaml pipeline and emits portable MIR. It is
 2,990,736 bytes raw and 425,026 bytes gzipped in the current measured
-build. A page that ships precompiled MIR does not fetch it.
+build. A page that ships precompiled MIR does not need to download it.
 
-`stanli.wasm` is 5.79 MB raw and 1.52 MB gzipped. Densities are 55% of the
-compressed runtime payload, measured by stubbing every density kernel and
-relinking. Loading the uncommon densities on demand was built and
-removed. The measurements and the emscripten limitation that blocks it
-are in [density-pack.md](internal/archive/density-pack.md).
+`stanli.wasm` is 5.79 MB raw and 1.52 MB gzipped. Densities make up 55%
+of the compressed runtime. We measured this by replacing every density
+kernel with a stub and relinking. We built on-demand loading for the
+uncommon densities and then removed it. The measurements and the
+emscripten limitation that blocks it are in
+[density-pack.md](internal/archive/density-pack.md).
 
 ## Measuring it
 
 `tools/build_wheel.sh` runs [`tools/binary_size.py`](../tools/binary_size.py)
 on the library just before stripping it, and CI publishes the per-symbol
 breakdown as the `binary-size` artifact of the manylinux x86_64 wheel
-build. It has to be measured there. The shipped library exports a few
-hundred C ABI names and carries no static symbol table, so the
-attribution cannot be reconstructed from the wheel or the runtime tarball
+build. The size must be measured at that step. The shipped library
+exports a few hundred C ABI names and has no static symbol table, so you
+cannot work out per-symbol sizes from the wheel or the runtime tarball
 afterwards. To measure locally, run `tools/binary_size.py` on an
 unstripped build.
