@@ -4232,6 +4232,69 @@ struct ProgramCompiler {
     return Path::Open;
   }
 
+  // The statements a call returning several values needs, kept out of
+  // compile_stmt: a register-program refusal unwinds through every
+  // compile_stmt frame, and each statement compiled inline there makes every
+  // such unwind slower.
+  [[gnu::noinline]] Path compile_multi_return(const mir::Stmt& s,
+                                              bool runtime_exit) {
+    std::vector<Range> values;
+    for (const auto& value : s.fn_args) values.push_back(expr(value));
+    if (return_frame && (runtime_exit || return_frame->has_result)) {
+      emit_function_return(values, true);
+      return Path::Ended;
+    }
+    if (!return_frame) bail("return without a function scope");
+    return_frame->results = std::move(values);
+    return Path::Returned;
+  }
+
+  [[gnu::noinline]] Path compile_multi_assign(const mir::Stmt& s) {
+    std::vector<Range> values;
+    if (s.rhs.fn_lib == mir::Expr::Lib::StanLib) {
+      const BuiltinSpec* matrix = shaped_builtin_spec(
+          s.rhs.name, s.rhs.args.size(), BuiltinShapePolicy::MatrixOp);
+      if (matrix == nullptr)
+        bail(s.rhs.name +
+             ", which returns a tuple, is not supported in a "
+             "runtime-control region");
+      BuiltinMatrixMap map;
+      const Range packed = matrix_op_call(s.rhs, matrix, &map);
+      int offset = 0;
+      for (const BuiltinArgumentShape& part : map.parts) {
+        values.push_back(
+            shaped(Range{packed.reg + offset, (int)part.storage_size}, part));
+        offset += (int)part.storage_size;
+      }
+    } else if (s.rhs.fn_lib == mir::Expr::Lib::UserDefined) {
+      auto it = funs.find(mir::function_key(s.rhs));
+      if (it == funs.end()) bail("unknown function " + s.rhs.name);
+      (void)inline_call(*it->second, inline_arguments(s.rhs.args), false,
+                        propto_ctx && mir::inherits_propto(s.rhs), &values);
+    } else {
+      bail(s.rhs.name + ", which returns a tuple, is not supported yet");
+    }
+    if (values.size() != s.fn_args.size())
+      bail(s.rhs.name + " returned the wrong number of values");
+    // Each result is assigned as `target = value`, the value bound to a
+    // name no Stan variable can have for the one assignment.
+    for (size_t k = 0; k < values.size(); ++k) {
+      const std::string bound = std::string(1, '\0') + "result";
+      reals[bound] = values[k];
+      mir::Stmt assign;
+      assign.kind = mir::Stmt::Assignment;
+      assign.lhs = s.fn_args[k].name;
+      assign.rhs.kind = mir::Expr::Var;
+      assign.rhs.name = bound;
+      assign.rhs.unsized = s.fn_args[k].unsized;
+      assign.raw = s.raw;
+      const Path path = compile_stmt(assign);
+      reals.erase(bound);
+      if (path != Path::Open) bail("a MultiAssign target left the scope");
+    }
+    return Path::Open;
+  }
+
   Path compile_stmt(const mir::Stmt& s) {
     switch (s.kind) {
       case mir::Stmt::Decl: {
@@ -4734,18 +4797,7 @@ struct ProgramCompiler {
           for (size_t i = return_frame->loop_base; i < loops.size(); ++i)
             runtime_exit = runtime_exit || !loops[i].breaks.empty() ||
                            !loops[i].continues.empty();
-        if (!s.fn_args.empty()) {
-          // A function with several results: one range each.
-          std::vector<Range> values;
-          for (const auto& value : s.fn_args) values.push_back(expr(value));
-          if (return_frame && (runtime_exit || return_frame->has_result)) {
-            emit_function_return(values, true);
-            return Path::Ended;
-          }
-          if (!return_frame) bail("return without a function scope");
-          return_frame->results = std::move(values);
-          return Path::Returned;
-        }
+        if (!s.fn_args.empty()) return compile_multi_return(s, runtime_exit);
         if (return_frame && (runtime_exit || return_frame->has_result)) {
           emit_function_return(s.has_init ? expr(s.rhs) : Range{0, 0});
           return Path::Ended;
@@ -4976,51 +5028,8 @@ struct ProgramCompiler {
         }
         bail("statement function " + s.fn_name +
              " requires the MIR interpreter");
-      case mir::Stmt::MultiAssign: {
-        std::vector<Range> values;
-        if (s.rhs.fn_lib == mir::Expr::Lib::StanLib) {
-          const BuiltinSpec* matrix = shaped_builtin_spec(
-              s.rhs.name, s.rhs.args.size(), BuiltinShapePolicy::MatrixOp);
-          if (matrix == nullptr)
-            bail(s.rhs.name +
-                 ", which returns a tuple, is not supported in a "
-                 "runtime-control region");
-          BuiltinMatrixMap map;
-          const Range packed = matrix_op_call(s.rhs, matrix, &map);
-          int offset = 0;
-          for (const BuiltinArgumentShape& part : map.parts) {
-            values.push_back(shaped(
-                Range{packed.reg + offset, (int)part.storage_size}, part));
-            offset += (int)part.storage_size;
-          }
-        } else if (s.rhs.fn_lib == mir::Expr::Lib::UserDefined) {
-          auto it = funs.find(mir::function_key(s.rhs));
-          if (it == funs.end()) bail("unknown function " + s.rhs.name);
-          (void)inline_call(*it->second, inline_arguments(s.rhs.args), false,
-                            propto_ctx && mir::inherits_propto(s.rhs), &values);
-        } else {
-          bail(s.rhs.name + ", which returns a tuple, is not supported yet");
-        }
-        if (values.size() != s.fn_args.size())
-          bail(s.rhs.name + " returned the wrong number of values");
-        // Each result is assigned as `target = value`, the value bound to a
-        // name no Stan variable can have for the one assignment.
-        for (size_t k = 0; k < values.size(); ++k) {
-          const std::string bound = std::string(1, '\0') + "result";
-          reals[bound] = values[k];
-          mir::Stmt assign;
-          assign.kind = mir::Stmt::Assignment;
-          assign.lhs = s.fn_args[k].name;
-          assign.rhs.kind = mir::Expr::Var;
-          assign.rhs.name = bound;
-          assign.rhs.unsized = s.fn_args[k].unsized;
-          assign.raw = s.raw;
-          const Path path = compile_stmt(assign);
-          reals.erase(bound);
-          if (path != Path::Open) bail("a MultiAssign target left the scope");
-        }
-        return Path::Open;
-      }
+      case mir::Stmt::MultiAssign:
+        return compile_multi_assign(s);
       case mir::Stmt::Skip:
         return Path::Open;
       default:
