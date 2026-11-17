@@ -184,6 +184,9 @@ class Reader {
 
   unsigned peak_depth() const { return peak_; }
 
+  // Any tuple type, projection or tuple assignment was read.
+  bool saw_tuple = false;
+
   class Depth {
    public:
     explicit Depth(Reader& reader) : reader_(reader) {
@@ -340,9 +343,11 @@ UnsizedView read_view(Reader& reader) {
   view.depth = reader.u8();
   const uint8_t leaf = reader.u8();
   view.leaf = read_tag(reader, leaf, kLeafTags, "unknown unsized-view tag");
-  if (view.leaf == UnsizedLeaf::Tuple)
+  if (view.leaf == UnsizedLeaf::Tuple) {
+    reader.saw_tuple = true;
     view.components =
         reader.list<UnsizedView>([&] { return read_view(reader); });
+  }
   return view;
 }
 
@@ -429,6 +434,7 @@ Expr read_expr(Reader& reader) {
       value.args = read_exprs(reader);
       break;
     case Expr::TupleProjection:
+      reader.saw_tuple = true;
       value.args = read_exprs(reader);
       value.component = static_cast<int>(reader.u32());
       break;
@@ -466,9 +472,11 @@ SizedType read_sized(Reader& reader) {
   value.dims = read_exprs(reader);
   value.elem_base = reader.string();
   value.raw = reader.string();
-  if (is_tuple(value))
+  if (is_tuple(value)) {
+    reader.saw_tuple = true;
     value.components =
         reader.list<SizedType>([&] { return read_sized(reader); });
+  }
   return value;
 }
 
@@ -510,6 +518,7 @@ Stmt read_stmt(Reader& reader) {
       value.lhs = reader.string();
       value.lhs_idx = read_exprs(reader);
       if (tag == kTupleAssignmentTag) {
+        reader.saw_tuple = true;
         value.lhs_steps = reader.list<Stmt::TupleStep>([&] {
           Stmt::TupleStep step;
           step.component = static_cast<int>(reader.u32());
@@ -651,6 +660,7 @@ Program read_program(Reader& reader) {
   result.has_transform_inits = true;
   result.transform_inits = read_stmts(reader);
   result.nesting = (reader.peak_depth() + 1) / 2;
+  result.has_tuples = reader.saw_tuple;
   return result;
 }
 

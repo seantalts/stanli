@@ -835,6 +835,8 @@ struct Program {
   // The parameters, transformed parameters and generated quantities in
   // the order write_array emits them, which is CmdStan's column order.
   std::vector<OutputVar> output_vars;
+  // The reader met a tuple; the tuple pass then replaced every one.
+  bool has_tuples = false;
   // The leaf variables the tuple pass made, by name.
   std::map<std::string, TupleLeaf> tuple_leaves;
   // Deepest nesting of statements and expressions the reader met.

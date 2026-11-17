@@ -2415,9 +2415,9 @@
   "status": "VERIFIED"
  },
  "tuple_loops": {
-  "max_rel": 2.8268004333879923e-16,
+  "max_rel": 4.181336368041664e-16,
   "max_ulp": 2,
-  "n_values": 4,
+  "n_values": 7,
   "point": 0,
   "status": "VERIFIED"
  },

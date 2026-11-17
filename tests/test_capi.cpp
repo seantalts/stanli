@@ -2559,6 +2559,8 @@ void test_tuple_names() {
   const Compilation c = compile(
       "parameters { tuple(real, array[2] real<lower=0>) tp;"
       "  tuple(simplex[3], real) ts; }\n"
+      "transformed parameters { tuple(real<lower=0>, real) tt ="
+      "  (tp.2[1], ts.2); }\n"
       "model { tp.1 ~ normal(0, 1); tp.2 ~ exponential(1);"
       "  ts.2 ~ normal(ts.1[1], 1); }\n"
       "generated quantities { array[2] tuple(real, int) g;"
@@ -2583,9 +2585,14 @@ void test_tuple_names() {
             "tp:1,tp:2.1,tp:2.2,ts:1.1,ts:1.2,ts:2");
   expect_eq("tuple bs_param_names(F,F)", bs_param_names(m, false, false),
             "tp:1,tp:2.1,tp:2.2,ts:1.1,ts:1.2,ts:1.3,ts:2");
-  expect_eq("tuple bs_param_names(T,T)", bs_param_names(m, true, true),
+  expect_eq("tuple bs_param_names(T,F)", bs_param_names(m, true, false),
+            "tp:1,tp:2.1,tp:2.2,ts:1.1,ts:1.2,ts:1.3,ts:2,tt:1,tt:2");
+  expect_eq("tuple bs_param_names(F,T)", bs_param_names(m, false, true),
             "tp:1,tp:2.1,tp:2.2,ts:1.1,ts:1.2,ts:1.3,ts:2,g.1:1,g.1:2,"
             "g.2:1,g.2:2");
+  expect_eq("tuple bs_param_names(T,T)", bs_param_names(m, true, true),
+            "tp:1,tp:2.1,tp:2.2,ts:1.1,ts:1.2,ts:1.3,ts:2,tt:1,tt:2,g.1:1,"
+            "g.1:2,g.2:1,g.2:2");
   // A constrained draw goes back through unconstrain, which reads each
   // tuple leaf by its name.
   const double q[6] = {0.3, -0.2, 0.4, 0.1, -0.5, 0.7};

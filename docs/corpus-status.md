@@ -366,7 +366,7 @@ A model counts as passing only when tools/verify_sample.py matches CmdStan's log
 | `sw_zi_poisson` | brms | 4 | 3.9e-16 | 2 |
 | `tuple_coef_cont` | regressions | 41 | 2.2e-16 | 4 |
 | `tuple_decompositions` | regressions | 10 | 5.6e-17 | 1 |
-| `tuple_loops` | regressions | 4 | 2.8e-16 | 2 |
+| `tuple_loops` | regressions | 7 | 4.2e-16 | 2 |
 | `wells_daae_c_model` | posteriordb | 7 | 0 (bitwise) | 0 |
 | `wells_dae_c_model` | posteriordb | 6 | 0 (bitwise) | 0 |
 | `wells_dae_inter_model` | posteriordb | 8 | 0 (bitwise) | 0 |
@@ -745,7 +745,7 @@ The oracle also records CmdStan's write_array at the same point: every CSV colum
 | `sw_zi_poisson` | 5 |
 | `tuple_coef_cont` | 49 |
 | `tuple_decompositions` | 30 |
-| `tuple_loops` | 84 |
+| `tuple_loops` | 96 |
 | `wells_daae_c_model` | 6 |
 | `wells_dae_c_model` | 5 |
 | `wells_dae_inter_model` | 7 |

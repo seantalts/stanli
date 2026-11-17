@@ -1136,49 +1136,10 @@ class TupleEliminator {
   unsigned inline_depth_ = 0;
 };
 
-bool has_tuples(const UnsizedView& view) { return is_tuple(view); }
-
-bool has_tuples(const Expr& e) {
-  if (has_tuples(e.unsized) || e.kind == Expr::TupleProjection) return true;
-  if (e.fn_type)
-    for (const UnsizedView& view : e.fn_type->args)
-      if (has_tuples(view)) return true;
-  for (const Expr& arg : e.args)
-    if (has_tuples(arg)) return true;
-  return false;
-}
-
-bool has_tuples(const Stmt& s) {
-  if (mir::is_tuple(s.decl_type) || has_tuples(s.decl_type.unsized) ||
-      !s.lhs_steps.empty())
-    return true;
-  bool found = false;
-  for_each_expr(s, [&](const Expr& e) { found = found || has_tuples(e); });
-  for (const Stmt& child : s.body) found = found || has_tuples(child);
-  return found;
-}
-
-bool has_tuples(const Program& program) {
-  for (const auto& input : program.input_vars)
-    if (mir::is_tuple(input.second)) return true;
-  for (const auto* body :
-       {&program.prepare_data, &program.log_prob, &program.generate_quantities,
-        &program.transform_inits})
-    for (const Stmt& s : *body)
-      if (has_tuples(s)) return true;
-  for (const FunDef& f : program.fun_defs) {
-    for (const UnsizedView& view : f.arg_views)
-      if (has_tuples(view)) return true;
-    for (const Stmt& s : f.body)
-      if (has_tuples(s)) return true;
-  }
-  return false;
-}
-
 }  // namespace
 
 void eliminate_tuples(Program& program) {
-  if (!has_tuples(program)) return;
+  if (!program.has_tuples) return;
   TupleEliminator(program).run();
 }
 
