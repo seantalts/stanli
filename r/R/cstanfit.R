@@ -115,7 +115,8 @@ cstan_diagnostics <- function(x, inc_warmup = FALSE, format = "draws_array") {
 }
 
 cstan_metadata <- function(x) {
-  layout <- variable_layout(c(list(lp__ = integer(0)), model_variables(x)))
+  layout <- variable_layout(c(list(lp__ = integer(0)),
+                              variable_groups(model_variables(x))))
   list(method = "sample", algorithm = "hmc", engine = "nuts",
     model_name = x$model$model_name, iter_warmup = x$warmup, iter_sampling = x$samples,
     thin = x$thin, save_warmup = x$save_warmup, chains = x$chains,

@@ -185,11 +185,13 @@ stanmodel_exclude <- function(model, pars, include) {
     return(if (include) character() else names)
   if (!is.character(pars))
     stop("pars must be a character vector of variable names", call. = FALSE)
-  unknown <- setdiff(pars, c(names, "lp__"))
+  bases <- variable_base(names)
+  unknown <- setdiff(pars, c(bases, names, "lp__"))
   if (length(unknown))
     stop("pars not in the model: ", paste(unknown, collapse = ", "),
          call. = FALSE)
-  if (include) setdiff(names, pars) else intersect(names, pars)
+  named <- names %in% pars | bases %in% pars
+  if (include) names[!named] else names[named]
 }
 
 stanmodel_dots <- function(dots, allowed, what) {
