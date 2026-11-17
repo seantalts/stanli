@@ -1812,6 +1812,7 @@ void Lowering::lower_simple_stmt(const mir::Stmt& s) {
         }
         const Val v = lower_expr(s.fn_args[0]);
         const mir::detail::TupleLeaf* leaf = tuple_leaf(*base);
+        const bool named_leaf = leaf != nullptr;
         const mir::OutputVar* owner = output_cursor.take(
             leaf                           ? leaf->base
             : base->kind == mir::Expr::Var ? base->name
@@ -1825,6 +1826,13 @@ void Lowering::lower_simple_stmt(const mir::Stmt& s) {
             });
         if (owner == nullptr)
           fail("FnWriteParam matches no output variable", s.raw);
+        if (!named_leaf && mir::detail::is_tuple(owner->type)) {
+          leaf = mir::detail::leaf_at(
+              tuples, *owner, output_cursor.offset(), g.slots[v.slot].len,
+              [&](const mir::Expr& d) { return eval_int(d); });
+          if (!leaf)
+            fail("cannot name a write of part of tuple " + owner->name, s.raw);
+        }
         if (owner->block != mir::OutputVar::Block::Parameters && !n_tp_start)
           n_tp_start = out.views.size();
         if (owner->block == mir::OutputVar::Block::GeneratedQuantities &&
@@ -1872,12 +1880,31 @@ void Lowering::lower_simple_stmt(const mir::Stmt& s) {
 void Lowering::lower_multi_assign(const mir::Stmt& s) {
   if (s.rhs.fn_lib != mir::Expr::Lib::UserDefined)
     fail(s.rhs.name + ", which returns a tuple, is not supported yet", s.raw);
+  // A call without effects whose arguments are known at preparation folds
+  // there too, so an integer result can size a later declaration.
+  bool folded = false;
+  if (!expr_effectful(s.rhs) &&
+      std::all_of(s.rhs.args.begin(), s.rhs.args.end(),
+                  [](const mir::Expr& arg) { return arg.data_only; })) {
+    try {
+      (void)td.exec(s);
+      folded = true;
+    } catch (const std::exception&) {
+    }
+  }
   std::vector<Val> values;
   (void)lower_call_udf(s.rhs, {}, {}, &values);
   if (values.size() != s.fn_args.size())
     fail(s.rhs.name + " returned the wrong number of values", s.raw);
   for (size_t k = 0; k < values.size(); ++k) {
     const std::string& target = s.fn_args[k].name;
+    const auto known = folded ? td.env().find(target) : td.env().end();
+    if (int_locals.count(target) && known != td.env().end() &&
+        known->second.is_int && known->second.i.size() == 1 &&
+        known->second.dims.empty()) {
+      int_env[target] = known->second.i[0];
+      continue;
+    }
     if (int_locals.count(target) && g.slots[values[k].slot].len == 1) {
       // An integer local now holds a value known only at run time.
       Val v = values[k];
@@ -1899,6 +1926,10 @@ void Lowering::lower_multi_assign(const mir::Stmt& s) {
       td_erase(target);
     } else if (const DataMap::Entry* en = observation(bound)) {
       td_assign(target, *en);
+    } else if (known != td.env().end()) {
+      DataMap::Entry value = known->second;
+      td_assign(target, value);
+      observe(bound, std::move(value));
     } else {
       td_erase(target);
     }

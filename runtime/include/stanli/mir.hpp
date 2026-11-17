@@ -1029,15 +1029,29 @@ class OutputCursor {
   explicit OutputCursor(const std::vector<OutputVar>& vars) : vars_(&vars) {}
 
   // `named` is the variable the write reads, or empty when there is none.
-  // `columns(var)` evaluates a variable's column count; it is called only
-  // for a write that names no variable. Returns null when the write fits
+  // `columns(var)` evaluates a variable's column count. Returns null when the write fits
   // no output variable.
   template <class Columns>
   const OutputVar* take(const std::string& named, int64_t width,
                         Columns columns) {
+    const OutputVar* var = take_impl(named, width, columns);
+    offset_ = written_ - width;
+    return var;
+  }
+
+  // The column of its variable the last write taken began at.
+  int64_t offset() const { return offset_; }
+
+ private:
+  template <class Columns>
+  const OutputVar* take_impl(const std::string& named, int64_t width,
+                             Columns columns) {
     if (!vars_) return nullptr;
     for (size_t k = next_; !named.empty() && k < vars_->size(); ++k)
       if ((*vars_)[k].name == named) {
+        // The optimizer may have made a later variable a copy of this
+        // one, which is then already written.
+        if (k == next_ && written_ + width > columns((*vars_)[k])) break;
         if (k != next_) {
           next_ = k;
           written_ = 0;
@@ -1063,6 +1077,7 @@ class OutputCursor {
   const std::vector<OutputVar>* vars_ = nullptr;
   size_t next_ = 0;
   int64_t written_ = 0;  // columns of vars_[next_] written so far
+  int64_t offset_ = 0;
 };
 
 Program read_program(const sexp::Node& root);

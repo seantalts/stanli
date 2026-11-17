@@ -441,12 +441,12 @@ bool WaInterp::write_param(MirInterp<double>& in, const mir::Stmt& s,
       }
       base = &base->args[0];
     }
-    const mir::detail::TupleLeaf* tuple =
+    const mir::detail::TupleLeaf* tuple_named =
         base->kind == mir::Expr::Var
             ? mir::detail::tuple_leaf(*prog_, base->name)
             : nullptr;
     const mir::OutputVar* owner = output_cursor_.take(
-        tuple                          ? tuple->base
+        tuple_named                    ? tuple_named->base
         : base->kind == mir::Expr::Var ? base->name
                                        : std::string(),
         len, [&](const mir::OutputVar& var) {
@@ -456,6 +456,15 @@ bool WaInterp::write_param(MirInterp<double>& in, const mir::Stmt& s,
         });
     if (owner == nullptr)
       throw CompileError("an output write matches no output variable");
+    const mir::detail::TupleLeaf* tuple = tuple_named;
+    if (!tuple && mir::detail::is_tuple(owner->type)) {
+      tuple = mir::detail::leaf_at(
+          prog_->tuples.get(), *owner, output_cursor_.offset(), len,
+          [&in](const mir::Expr& dim) { return in.as_int(dim); });
+      if (!tuple)
+        throw CompileError("cannot name a write of part of tuple " +
+                           owner->name);
+    }
     if (mir::is_complex(owner->type))
       throw CompileError("complex numbers are not supported yet (in output " +
                          owner->name + ")");

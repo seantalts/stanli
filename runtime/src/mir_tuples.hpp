@@ -123,6 +123,28 @@ int64_t output_columns(const TupleInterface* tuples, const OutputVar& var,
   return columns;
 }
 
+// The leaf of tuple output `var` that a write of `width` columns starting at
+// column `offset` writes whole, for a write that reads no leaf variable (the
+// optimizer may turn one into a literal). Null when an array of tuples
+// holds the leaves, or the write is not one whole leaf.
+template <class Extent>
+const TupleLeaf* leaf_at(const TupleInterface* tuples, const OutputVar& var,
+                         int64_t offset, int64_t width, const Extent& extent) {
+  if (!tuples) return nullptr;
+  const auto found = tuples->leaves_of.find(var.name);
+  if (found == tuples->leaves_of.end()) return nullptr;
+  int64_t start = 0;
+  for (const std::string& name : found->second) {
+    const TupleLeaf& leaf = tuples->leaves.at(name);
+    if (leaf.in_array()) return nullptr;
+    int64_t columns = 1;
+    for (const Expr& dim : leaf.type.dims) columns *= extent(dim);
+    if (start == offset) return columns == width ? &leaf : nullptr;
+    start += columns;
+  }
+  return nullptr;
+}
+
 // CmdStan's name for the values one write produces: the output variable,
 // then each array index and tuple slot of the write (`p.3:2`). `variable` is
 // the part naming one CSV variable, the name up to the last tuple slot, and

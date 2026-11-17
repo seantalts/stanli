@@ -1060,16 +1060,11 @@ void validate_expression(const Expr& e, const Bindings& bindings,
     validate_expression(arg, bindings, functions, strict_variable_metadata);
 }
 
-// The number of values a library function returning a tuple returns.
+// The number of values a supported library function returning a tuple
+// returns. Lowering refuses the others.
 std::optional<size_t> library_results(const std::string& name) {
   static const std::map<std::string, size_t> results = {
-      {"qr", 2},
-      {"qr_thin", 2},
-      {"eigendecompose_sym", 2},
-      {"eigendecompose", 2},
-      {"svd", 3},
-      {"csr_extract", 3},
-      {"complex_schur_decompose", 2}};
+      {"qr", 2}, {"qr_thin", 2}, {"eigendecompose_sym", 2}};
   const auto found = results.find(name);
   return found == results.end() ? std::nullopt
                                 : std::optional<size_t>(found->second);

@@ -1670,9 +1670,10 @@ void check_decompositions() {
               std::string::npos;
   }
   check(refused, "svd in a MultiAssign is refused at lowering");
-  svd.log_prob[3].fn_args.pop_back();
-  expect_error(write_v2(svd), "svd returns 3 values, not 2",
-               "a library decomposition with too few targets");
+  mir::Program short_qr = svd;
+  short_qr.log_prob[3].rhs.name = "qr_thin";
+  expect_error(write_v2(short_qr), "qr_thin returns 2 values, not 3",
+               "a library decomposition with too many targets");
 }
 
 // `array[3] tuple(int, vector[2]) d` arrives as two leaf variables with the
