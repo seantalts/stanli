@@ -84,6 +84,21 @@ def test_function_source_file_and_cached_mir():
             raise AssertionError("native function handles must not be duplicated")
 
 
+def test_function_tuple_leaves():
+    # A tuple argument is one argument per leaf; a tuple result comes back
+    # as a Python tuple of its leaves.
+    f = stanli.Function("scaled", stan_code="""
+functions {
+  tuple(real, vector) scaled(real x, tuple(real, int) p) {
+    return (x * p.1, rep_vector(x, p.2));
+  }
+}
+""")
+    first, second = f({"x": 1.5, "p.1": 4.0, "p.2": 3})
+    assert first == 6.0
+    np.testing.assert_array_equal(second, [1.5, 1.5, 1.5])
+
+
 def test_function_scalar_types_overloads_and_nonfinite():
     mir = stanli.stan_to_mir(FUNCTION_SOURCE)
     integer = stanli.Function("int_identity", mir=mir)
