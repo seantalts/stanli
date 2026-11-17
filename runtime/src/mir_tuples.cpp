@@ -58,6 +58,17 @@ SlotKey slot_key(const std::vector<TupleSlot>& path) {
   return key;
 }
 
+void record_reads(const Stmt& s, TupleInterface& tuples) {
+  if (s.kind == Stmt::Decl && s.read_transform) {
+    const auto found = tuples.leaves.find(s.decl_id);
+    if (found != tuples.leaves.end()) {
+      found->second.read_transform = s.read_transform;
+      found->second.read_dims = s.read_dims;
+    }
+  }
+  for (const Stmt& child : s.body) record_reads(child, tuples);
+}
+
 void check_read_keys(const Stmt& s, const TupleInterface& tuples) {
   if (internal_name(s) == "FnReadData" && s.fn_args.size() >= 3 &&
       s.fn_args[0].kind == Expr::Var) {
@@ -135,6 +146,46 @@ void attach_tuple_interface(
   program.input_vars = std::move(inputs);
   for (const Stmt& s : program.prepare_data) check_read_keys(s, *tuples);
   program.tuples = std::move(tuples);
+}
+
+void record_tuple_reads(Program& program) {
+  if (!program.tuples) return;
+  auto tuples = std::make_shared<TupleInterface>(*program.tuples);
+  for (const Stmt& s : program.log_prob) record_reads(s, *tuples);
+  program.tuples = std::move(tuples);
+}
+
+std::vector<size_t> reader_order(const TupleLeaf& leaf,
+                                 const std::vector<int64_t>& dims) {
+  // Each slot ends a group of dimensions; the outermost group varies
+  // slowest in the reader's layout.
+  std::vector<size_t> ends;
+  for (const TupleSlot& slot : leaf.path)
+    if (slot.before > (ends.empty() ? 0 : ends.back()))
+      ends.push_back(slot.before);
+  if (ends.empty() || ends.back() > dims.size()) return {};
+  if (ends.back() < dims.size()) ends.push_back(dims.size());
+  if (ends.size() < 2) return {};
+  int64_t len = 1;
+  for (int64_t d : dims) len *= d;
+  std::vector<size_t> source((size_t)len);
+  std::vector<int64_t> at(dims.size(), 0);
+  for (int64_t target = 0; target < len; ++target) {
+    int64_t offset = 0;
+    size_t begin = 0;
+    for (size_t end : ends) {
+      int64_t within = 0, stride = 1;
+      for (size_t d = begin; d < end; ++d) {
+        within += at[d] * stride;
+        stride *= dims[d];
+      }
+      offset = offset * stride + within;
+      begin = end;
+    }
+    source[(size_t)target] = (size_t)offset;
+    for (size_t d = 0; d < at.size() && ++at[d] == dims[d]; ++d) at[d] = 0;
+  }
+  return source;
 }
 
 namespace {

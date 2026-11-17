@@ -1454,6 +1454,7 @@ void detail::finalize_program(Program& prog, bool strict_variable_metadata) {
   unmangle(prog);
   resolve_overloads(prog);
   finish_multi_assigns(prog);
+  record_tuple_reads(prog);
   Functions functions;
   for (const auto& f : prog.fun_defs) {
     const auto inserted = functions.emplace(function_key(f), &f);

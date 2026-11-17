@@ -471,47 +471,50 @@ CompiledModel::ParamView Lowering::parameter_view(const mir::Stmt& s, int slot,
   }
   return view;
 }
-void Lowering::lower_read_param(const mir::Stmt& s) {
-  if (const mir::detail::TupleLeaf* leaf = tuple_leaf(s.decl_id);
-      leaf && leaf->in_array())
-    fail("an array of tuples as a parameter (" + leaf->base +
-             ") is not supported yet",
-         s.raw);
-  const mir::Transform& tr = *s.read_transform;
-  const std::vector<int64_t> declared_dims = sized_dims(s.decl_type);
-  const ViewKind leaf = s.decl_type.base == "SArray"
-                            ? leaf_kind(s.decl_type.elem_base)
-                            : leaf_kind(s.decl_type.base);
+Lowering::ParamShape Lowering::param_shape(
+    const mir::SizedType& type, const mir::Transform& tr,
+    const std::vector<mir::Expr>& read_dims, const std::string& raw) {
+  ParamShape shape;
+  std::vector<int64_t>& declared_dims = shape.declared_dims;
+  declared_dims = sized_dims(type);
+  ViewKind& leaf = shape.leaf;
+  leaf =
+      type.base == "SArray" ? leaf_kind(type.elem_base) : leaf_kind(type.base);
   const size_t leaf_dims = static_cast<size_t>(leaf_rank(leaf));
   if (declared_dims.size() < leaf_dims)
-    fail("parameter declaration has incomplete leaf dimensions", s.raw);
+    fail("parameter declaration has incomplete leaf dimensions", raw);
   const std::vector<int64_t> outer_dims(declared_dims.begin(),
                                         declared_dims.end() - leaf_dims);
-  const int64_t n_batch = checked_product(outer_dims, "parameter batch");
+  int64_t& n_batch = shape.n_batch;
+  n_batch = checked_product(outer_dims, "parameter batch");
 
   // Unstructured transforms use FnReadParam's declared raw shape. A
   // structured leaf replaces only its innermost dimensions below; the
   // outer array geometry remains declaration-owned and orthogonal.
-  std::vector<int64_t> raw_dims;
-  for (const auto& d : s.read_dims) raw_dims.push_back(eval_int(d));
+  std::vector<int64_t>& raw_dims = shape.raw_dims;
+  for (const auto& d : read_dims) raw_dims.push_back(eval_int(d));
   std::vector<int64_t> expected_read_dims = declared_dims;
   if (tr.kind == mir::Transform::CholeskyCorr ||
       tr.kind == mir::Transform::Correlation ||
       tr.kind == mir::Transform::Covariance) {
     if (leaf != ViewKind::Matrix || expected_read_dims.size() < 2)
-      fail("matrix parameter transform has a non-matrix declaration", s.raw);
+      fail("matrix parameter transform has a non-matrix declaration", raw);
     expected_read_dims.pop_back();
   }
   if (raw_dims != expected_read_dims)
-    fail("parameter read dimensions do not match its declaration", s.raw);
-  int64_t con_len = checked_product(raw_dims, "parameter read shape");
-  int64_t raw_len = con_len;
-  int64_t inner_raw = 0, inner_con = 0;
-  int64_t matrix_rows = 0, matrix_cols = 0;
+    fail("parameter read dimensions do not match its declaration", raw);
+  int64_t& con_len = shape.con_len;
+  int64_t& raw_len = shape.raw_len;
+  int64_t& inner_raw = shape.inner_raw;
+  int64_t& inner_con = shape.inner_con;
+  int64_t& matrix_rows = shape.matrix_rows;
+  int64_t& matrix_cols = shape.matrix_cols;
+  con_len = checked_product(raw_dims, "parameter read shape");
+  raw_len = con_len;
 
   auto vector_leaf = [&](int64_t free_size) {
     if (leaf != ViewKind::Vector || declared_dims.empty())
-      fail("vector parameter transform has a non-vector declaration", s.raw);
+      fail("vector parameter transform has a non-vector declaration", raw);
     inner_raw = free_size;
     inner_con = declared_dims.back();
     raw_dims = outer_dims;
@@ -522,7 +525,7 @@ void Lowering::lower_read_param(const mir::Stmt& s) {
   };
   auto flat_matrix_leaf = [&](int64_t free_size) {
     if (leaf != ViewKind::Matrix || declared_dims.size() < 2)
-      fail("matrix parameter transform has a non-matrix declaration", s.raw);
+      fail("matrix parameter transform has a non-matrix declaration", raw);
     matrix_rows = declared_dims[declared_dims.size() - 2];
     matrix_cols = declared_dims.back();
     inner_raw = free_size;
@@ -554,23 +557,22 @@ void Lowering::lower_read_param(const mir::Stmt& s) {
       con_len =
           checked_product({n_batch, inner_con}, "parameter constrained shape");
     } else {
-      fail("sum-to-zero or simplex transform has an invalid declaration",
-           s.raw);
+      fail("sum-to-zero or simplex transform has an invalid declaration", raw);
     }
   } else if (tr.kind == mir::Transform::Ordered ||
              tr.kind == mir::Transform::PositiveOrdered ||
              tr.kind == mir::Transform::UnitVector) {
     if (leaf != ViewKind::Vector || declared_dims.empty())
-      fail("vector parameter transform has a non-vector declaration", s.raw);
+      fail("vector parameter transform has a non-vector declaration", raw);
     vector_leaf(declared_dims.back());
   } else if (tr.kind == mir::Transform::CholeskyCorr ||
              tr.kind == mir::Transform::Correlation ||
              tr.kind == mir::Transform::Covariance) {
     if (leaf != ViewKind::Matrix || declared_dims.size() < 2)
-      fail("matrix parameter transform has a non-matrix declaration", s.raw);
+      fail("matrix parameter transform has a non-matrix declaration", raw);
     const int64_t K = declared_dims.back();
     if (declared_dims[declared_dims.size() - 2] != K)
-      fail("square matrix transform has a rectangular declaration", s.raw);
+      fail("square matrix transform has a rectangular declaration", raw);
     const int64_t free_size = tr.kind == mir::Transform::Covariance
                                   ? K * (K + 1) / 2
                                   : K * (K - 1) / 2;
@@ -578,7 +580,7 @@ void Lowering::lower_read_param(const mir::Stmt& s) {
   } else if (tr.kind == mir::Transform::StochasticColumn ||
              tr.kind == mir::Transform::StochasticRow) {
     if (leaf != ViewKind::Matrix || declared_dims.size() < 2)
-      fail("matrix parameter transform has a non-matrix declaration", s.raw);
+      fail("matrix parameter transform has a non-matrix declaration", raw);
     matrix_rows = declared_dims[declared_dims.size() - 2];
     matrix_cols = declared_dims.back();
     const bool column = tr.kind == mir::Transform::StochasticColumn;
@@ -596,13 +598,24 @@ void Lowering::lower_read_param(const mir::Stmt& s) {
         checked_product({n_batch, inner_con}, "parameter constrained shape");
   } else if (tr.kind == mir::Transform::CholeskyCov) {
     if (leaf != ViewKind::Matrix || declared_dims.size() < 2)
-      fail("matrix parameter transform has a non-matrix declaration", s.raw);
+      fail("matrix parameter transform has a non-matrix declaration", raw);
     const int64_t M = declared_dims[declared_dims.size() - 2];
     const int64_t N = declared_dims.back();
-    if (M < N) fail("cholesky-factor-cov rows are smaller than columns", s.raw);
+    if (M < N) fail("cholesky-factor-cov rows are smaller than columns", raw);
     flat_matrix_leaf(N * (N + 1) / 2 + (M - N) * N);
   }
 
+  return shape;
+}
+void Lowering::lower_read_param(const mir::Stmt& s) {
+  const mir::Transform& tr = *s.read_transform;
+  const ParamShape shape = param_shape(s.decl_type, tr, s.read_dims, s.raw);
+  const ViewKind leaf = shape.leaf;
+  const std::vector<int64_t>& raw_dims = shape.raw_dims;
+  const int64_t n_batch = shape.n_batch, con_len = shape.con_len,
+                raw_len = shape.raw_len, inner_raw = shape.inner_raw,
+                inner_con = shape.inner_con, matrix_rows = shape.matrix_rows,
+                matrix_cols = shape.matrix_cols;
   SlotInfo psi = view_of(s.decl_type);
   const int64_t declared_len =
       sized_len(s.decl_type, nullptr, nullptr, s.decl_id);
@@ -610,32 +623,47 @@ void Lowering::lower_read_param(const mir::Stmt& s) {
     fail("parameter view length does not match constrained storage", s.raw);
   validate_view(psi, con_len, "parameter " + s.decl_id);
   decls[s.decl_id] = DeclView{con_len, scalar_autodiff(), psi};
-  const int raw = add_slot(raw_len, /*is_param=*/true);
-  out.param_names.push_back(s.decl_id);
-  {
+  const mir::detail::TupleLeaf* tuple = tuple_leaf(s.decl_id);
+  int raw = -1;
+  if (tuple) {
+    raw = tuple_leaf_free(*tuple, raw_len, s.raw);
+  } else {
+    raw = add_slot(raw_len, /*is_param=*/true);
+    out.param_names.push_back(s.decl_id);
     // The unconstrained layout the caller needs to slice a draw: how
     // long this parameter's piece is, and what it means. raw_len and
     // con_len part company for every structured transform.
     CompiledModel::UncParam u;
-    u.name = parameter_name(s.decl_id);
+    u.name = s.decl_id;
     u.len = raw_len;
     u.dims = raw_dims;
     u.transform = tr.kind;
     out.unc_params.push_back(std::move(u));
+    out.n_unconstrained += raw_len;
   }
-  out.n_unconstrained += raw_len;
+  // Whole variables for the interpreter and the inits; the columns, which
+  // a tuple parameter adds once every leaf is read.
+  const auto add_views = [&](int slot) {
+    if (in_write_array) return;
+    if (tuple) {
+      TupleBlock& block = tuple_blocks.at(tuple->base);
+      block.constrained[s.decl_id] = {slot, shape};
+      if (block.constrained.size() == tuples->leaves_of.at(tuple->base).size())
+        tuple_parameter_views(*tuple);
+      return;
+    }
+    CompiledModel::ParamView view = parameter_view(s, slot, con_len);
+    out.param_leaves.push_back({view, raw_len, tr.kind, s.decl_id});
+    out.views.push_back(std::move(view));
+  };
 
   if (tr.kind == mir::Transform::Identity) {
     Val value{raw, scalar_autodiff(), psi, owning_layout(psi)};
-    CompiledModel::ParamView serial_view = parameter_view(s, raw, raw_len);
     scope[s.decl_id] = value;
     // In write_array mode the column order is dictated by the FnWriteParam
     // statements, which come later and cover transformed parameters and
     // generated quantities too; declaration order would be wrong.
-    if (!in_write_array) {
-      serial_view.slot = value.slot;
-      out.views.push_back(std::move(serial_view));
-    }
+    add_views(value.slot);
     return;
   }
   uint16_t opcode = 0;
@@ -742,8 +770,152 @@ void Lowering::lower_read_param(const mir::Stmt& s) {
   con.layout = owning_layout(psi);
   jac_slots.push_back(jac);
   scope[s.decl_id] = con;
-  if (!in_write_array)
-    out.views.push_back(parameter_view(s, con.slot, con_len));
+  add_views(con.slot);
+}
+int Lowering::tuple_leaf_free(const mir::detail::TupleLeaf& leaf,
+                              int64_t raw_len, const std::string& raw) {
+  TupleBlock& block = tuple_blocks[leaf.base];
+  const std::vector<std::string>& names = tuples->leaves_of.at(leaf.base);
+  if (!block.laid_out) {
+    // The first leaf read lays out the whole parameter's block.
+    CompiledModel::UncParam u;
+    u.name = leaf.base;
+    for (const std::string& name : names) {
+      const mir::detail::TupleLeaf& other = tuples->leaves.at(name);
+      if (!other.read_transform)
+        fail("the tuple parameter " + leaf.base + " has a leaf without a read",
+             raw);
+      const ParamShape shape =
+          param_shape(other.type, *other.read_transform, other.read_dims, raw);
+      CompiledModel::UncParam::Leaf free;
+      for (const mir::detail::TupleSlot& slot : other.path)
+        free.path.emplace_back(slot.before, slot.component);
+      free.dims = shape.raw_dims;
+      free.len = shape.raw_len;
+      free.transform = other.read_transform->kind;
+      u.leaves.push_back(std::move(free));
+    }
+    std::vector<std::vector<int>> gathers(names.size());
+    for (size_t k = 0; k < names.size(); ++k)
+      gathers[k].resize((size_t)u.leaves[k].len);
+    int64_t next = 0;
+    u.for_each_element([&](size_t k, const std::vector<int64_t>& index) {
+      const CompiledModel::UncParam::Leaf& free = u.leaves[k];
+      const int64_t per = free.len / free.elements();
+      // The leaf holds its tuple-array elements outer-major, each one's
+      // free values together, as an array parameter does.
+      int64_t element = 0;
+      for (size_t d = 0; d < index.size(); ++d)
+        element = element * free.dims[d] + index[d];
+      for (int64_t j = 0; j < per; ++j)
+        gathers[k][(size_t)(element * per + j)] =
+            checked_immediate(next++, "tuple parameter block");
+    });
+    u.len = next;
+    bool leaf_major = true;
+    int expected = 0;
+    for (const std::vector<int>& gather : gathers)
+      for (const int at : gather) leaf_major = leaf_major && at == expected++;
+    block.laid_out = true;
+    if (!leaf_major) block.slot = add_slot(next, /*is_param=*/true);
+    for (size_t k = 0; k < names.size(); ++k)
+      block.gather[names[k]] = std::move(gathers[k]);
+    out.param_names.push_back(leaf.base);
+    out.n_unconstrained += next;
+    out.unc_params.push_back(std::move(u));
+  }
+  const std::vector<int>& gather = block.gather.at(leaf.variable);
+  if ((int64_t)gather.size() != raw_len)
+    fail("tuple parameter leaf " + leaf.variable +
+             " reads a different number of free values than its block holds",
+         raw);
+  if (block.slot < 0) {
+    // Parameter slots make the free vector in the order they are added.
+    if (block.next_leaf >= names.size() ||
+        names[block.next_leaf] != leaf.variable)
+      fail("the leaves of tuple parameter " + leaf.base +
+               " are read out of order",
+           raw);
+    ++block.next_leaf;
+    return add_slot(raw_len, /*is_param=*/true);
+  }
+  SlotInfo flat = view_of(mir::UnsizedView{0, mir::UnsizedLeaf::Vector});
+  const Val whole{block.slot, scalar_autodiff(), flat};
+  bool contiguous = true;
+  for (size_t j = 1; j < gather.size() && contiguous; ++j)
+    contiguous = gather[j] == gather[j - 1] + 1;
+  if (contiguous)
+    return emit_value(OP_SLICE, {whole}, raw_len, flat,
+                      {gather.empty() ? 0 : gather[0]})
+        .slot;
+  return emit_value(OP_GATHER, {whole}, raw_len, flat, gather).slot;
+}
+void Lowering::tuple_parameter_views(const mir::detail::TupleLeaf& leaf) {
+  using Naming = CompiledModel::ParamView::Naming;
+  const TupleBlock& block = tuple_blocks.at(leaf.base);
+  const std::vector<std::string>& names = tuples->leaves_of.at(leaf.base);
+  const CompiledModel::UncParam* free = nullptr;
+  for (const CompiledModel::UncParam& u : out.unc_params)
+    if (u.name == leaf.base) free = &u;
+  if (free == nullptr) fail("tuple parameter " + leaf.base + " has no block");
+  // The constrained geometry has the free one's tuple structure.
+  CompiledModel::UncParam constrained;
+  constrained.name = leaf.base;
+  for (size_t k = 0; k < names.size(); ++k) {
+    const mir::detail::TupleLeaf& each = tuples->leaves.at(names[k]);
+    const auto& [slot, shape] = block.constrained.at(names[k]);
+    CompiledModel::UncParam::Leaf whole = free->leaves[k];
+    whole.dims = shape.declared_dims;
+    whole.len = shape.con_len;
+    constrained.leaves.push_back(whole);
+    const bool matrix = shape.leaf == ViewKind::Matrix;
+    CompiledModel::ParamView view{names[k], slot, shape.con_len};
+    if (shape.declared_dims.empty()) {
+      view.naming = Naming::Scalar;
+    } else {
+      view.naming = matrix ? Naming::Matrix : Naming::Container;
+      view.set_serial_layout(shape.declared_dims, matrix);
+      if (matrix) view.rows = view.dims.at(view.dims.size() - 2);
+    }
+    out.param_leaves.push_back({std::move(view), free->leaves[k].len,
+                                free->leaves[k].transform, each.key});
+  }
+  constrained.for_each_element([&](size_t k,
+                                   const std::vector<int64_t>& index) {
+    const mir::detail::TupleLeaf& each = tuples->leaves.at(names[k]);
+    const auto& [slot, shape] = block.constrained.at(names[k]);
+    const CompiledModel::UncParam::Leaf& whole = constrained.leaves[k];
+    const int64_t per = whole.len / whole.elements();
+    int64_t element = 0;
+    std::vector<int64_t> position;
+    for (size_t d = 0; d < index.size(); ++d) {
+      element = element * whole.dims[d] + index[d];
+      position.push_back(index[d] + 1);
+    }
+    auto named = mir::detail::output_name(leaf.base, &each, position);
+    if (!named) fail("cannot name a column of tuple parameter " + leaf.base);
+    CompiledModel::ParamView view{std::move(named->name), slot, per};
+    view.variable = std::move(named->variable);
+    view.index = std::move(named->index);
+    view.binding = names[k];
+    const std::vector<int64_t> own(
+        whole.dims.begin() + (std::ptrdiff_t)index.size(), whole.dims.end());
+    const bool matrix = shape.leaf == ViewKind::Matrix;
+    if (own.empty()) {
+      view.naming = Naming::Scalar;
+    } else {
+      view.naming = matrix ? Naming::Matrix : Naming::Container;
+      view.set_serial_layout(own, matrix);
+      if (matrix) view.rows = own.at(own.size() - 2);
+    }
+    if (element != 0 || index.size() > 0) {
+      std::vector<int64_t> order((size_t)per);
+      for (int64_t j = 0; j < per; ++j)
+        order[(size_t)j] = element * per + view.storage_index(j);
+      view.storage_order = std::move(order);
+    }
+    out.views.push_back(std::move(view));
+  });
 }
 namespace {
 
@@ -1292,35 +1464,10 @@ std::optional<DataMap> tuple_data_in_array_order(const mir::Program& p,
     if (!leaf || !data.has(leaf->key)) continue;
     const std::string& key = leaf->key;
     const DataMap::Entry& entry = data.at(key);
-    // Each slot ends a group of dimensions; the outermost group varies
-    // slowest in the reader's layout.
-    std::vector<size_t> ends;
-    for (const mir::detail::TupleSlot& slot : leaf->path)
-      if (slot.before > (ends.empty() ? 0 : ends.back()))
-        ends.push_back(slot.before);
-    if (ends.empty() || ends.back() > entry.dims.size()) continue;
-    if (ends.back() < entry.dims.size()) ends.push_back(entry.dims.size());
-    if (ends.size() < 2) continue;
-    int64_t len = 1;
-    for (int64_t d : entry.dims) len *= d;
-    std::vector<size_t> source((size_t)len);
-    std::vector<int64_t> at(entry.dims.size(), 0);
-    for (int64_t target = 0; target < len; ++target) {
-      int64_t offset = 0;
-      size_t begin = 0;
-      for (size_t end : ends) {
-        int64_t within = 0, stride = 1;
-        for (size_t d = begin; d < end; ++d) {
-          within += at[d] * stride;
-          stride *= entry.dims[d];
-        }
-        offset = offset * stride + within;
-        begin = end;
-      }
-      source[(size_t)target] = (size_t)offset;
-      for (size_t d = 0; d < at.size() && ++at[d] == entry.dims[d]; ++d)
-        at[d] = 0;
-    }
+    const std::vector<size_t> source =
+        mir::detail::reader_order(*leaf, entry.dims);
+    if (source.empty()) continue;
+    const int64_t len = (int64_t)source.size();
     if (!out) out = data;
     if (entry.is_int) {
       std::vector<int> values((size_t)len);
@@ -1464,44 +1611,32 @@ CompiledModel compile_model(const std::string& mir_text, const DataMap& data,
     // expression this build cannot evaluate.
     CompiledModel::TransformInits ti;
     std::vector<InitParam> params;
-    if (cm.views.size() != cm.unc_params.size()) {
-      ti.truncated = "the constrained and free parameter lists disagree (" +
-                     std::to_string(cm.views.size()) + " vs " +
-                     std::to_string(cm.unc_params.size()) + ")";
-    } else {
-      for (size_t i = 0; i < cm.views.size(); ++i) {
-        const CompiledModel::ParamView& view = cm.views[i];
-        const CompiledModel::UncParam& unc = cm.unc_params[i];
-        if (view.name != unc.name) {
-          ti.truncated =
-              "constrained and free parameters are out of order at " +
-              view.name;
-          break;
-        }
-        InitParam p;
-        p.name = view.key();
-        p.dims = view.dims;
-        p.constrained_len = view.len;
-        p.free_len = unc.len;
-        // The leaf is the unit the arena keeps contiguous inside each
-        // element of the surrounding array. An innermost matrix is one
-        // whatever the transform is -- the arena stores it column-major
-        // while a serial init lists it first-index-fastest, and an
-        // elementwise transform over an array of matrices has to cross that
-        // permutation too. Otherwise only a structured transform has a leaf;
-        // an elementwise one treats each value on its own, which for a
-        // vector or a plain array is the same enumeration either way.
-        p.leaf_rank = view.matrix_storage                  ? 2
-                      : is_structured_check(unc.transform) ? 1
-                                                           : 0;
-        if ((size_t)p.leaf_rank > p.dims.size()) {
-          ti.truncated = view.name +
-                         " declares fewer dimensions than its "
-                         "transform needs";
-          break;
-        }
-        params.push_back(std::move(p));
+    for (const CompiledModel::ParamLeaf& leaf : cm.param_leaves) {
+      const CompiledModel::ParamView& view = leaf.view;
+      InitParam p;
+      p.name = view.key();
+      p.key = leaf.init_key;
+      p.dims = view.dims;
+      p.constrained_len = view.len;
+      p.free_len = leaf.free_len;
+      // The leaf is the unit the arena keeps contiguous inside each
+      // element of the surrounding array. An innermost matrix is one
+      // whatever the transform is -- the arena stores it column-major
+      // while a serial init lists it first-index-fastest, and an
+      // elementwise transform over an array of matrices has to cross that
+      // permutation too. Otherwise only a structured transform has a leaf;
+      // an elementwise one treats each value on its own, which for a
+      // vector or a plain array is the same enumeration either way.
+      p.leaf_rank = view.matrix_storage                   ? 2
+                    : is_structured_check(leaf.transform) ? 1
+                                                          : 0;
+      if ((size_t)p.leaf_rank > p.dims.size()) {
+        ti.truncated = view.name +
+                       " declares fewer dimensions than its "
+                       "transform needs";
+        break;
       }
+      params.push_back(std::move(p));
     }
     if (!ti.truncated)
       ti.interp = std::make_shared<InitInterp>(prog, shared_interp_env(),
@@ -1519,6 +1654,66 @@ CompiledModel compile_model(const std::string& mir_text, const DataMap& data,
     emit_diagnostic(execution_report(cm, &execution_trace));
   }
   return cm;
+}
+
+namespace {
+
+// The names of free values with logical shape `dims`, after `prefix`.
+// Structured matrix leaves are flat in `dims`, so a simplex contributes K-1
+// indices and a structured matrix its flat raw width.
+void append_free_names(const std::string& prefix,
+                       const std::vector<int64_t>& dims, int64_t len,
+                       std::vector<std::string>& out) {
+  int64_t prod = 1;
+  bool sane = true;
+  for (int64_t d : dims) {
+    if (d < 0) sane = false;
+    prod *= d;
+  }
+  if (sane && prod == len && !dims.empty()) {
+    // Last-index-major, the way Stan serializes everything: the FIRST
+    // index varies fastest, so matrix[2,3] m is m.1.1, m.2.1, m.1.2, ...
+    std::vector<int64_t> idx(dims.size(), 0);
+    for (int64_t k = 0; k < len; ++k) {
+      std::string s = prefix;
+      for (size_t d = 0; d < idx.size(); ++d)
+        s += "." + std::to_string(idx[d] + 1);
+      out.push_back(std::move(s));
+      for (size_t d = 0; d < idx.size(); ++d) {
+        if (++idx[d] < dims[d]) break;
+        idx[d] = 0;
+      }
+    }
+    return;
+  }
+  if (dims.empty() && len == 1) {
+    out.push_back(prefix);
+    return;
+  }
+  for (int64_t i = 0; i < len; ++i)
+    out.push_back(prefix + "." + std::to_string(i + 1));
+}
+
+}  // namespace
+
+void CompiledModel::UncParam::append_names(
+    std::vector<std::string>& out) const {
+  if (leaves.empty()) return append_free_names(name, dims, len, out);
+  // A tuple element is named by each array index before a slot and the
+  // slot after ':', then its own free values: g.2.1:2.3.
+  for_each_element([&](size_t k, const std::vector<int64_t>& index) {
+    const Leaf& leaf = leaves[k];
+    std::string prefix = name;
+    size_t used = 0;
+    for (const auto& [before, component] : leaf.path) {
+      for (; used < before; ++used)
+        prefix += "." + std::to_string(index[used] + 1);
+      prefix += ":" + std::to_string(component);
+    }
+    const std::vector<int64_t> own(leaf.dims.begin() + (std::ptrdiff_t)used,
+                                   leaf.dims.end());
+    append_free_names(prefix, own, leaf.len / leaf.elements(), out);
+  });
 }
 
 std::string interpreter_error(const CompiledModel& cm) {

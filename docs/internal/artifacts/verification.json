@@ -2400,6 +2400,13 @@
   "point": 0,
   "status": "VERIFIED"
  },
+ "tuple_array_params": {
+  "max_rel": 1.619941232945751e-16,
+  "max_ulp": 1,
+  "n_values": 55,
+  "point": 0,
+  "status": "VERIFIED"
+ },
  "tuple_coef_cont": {
   "max_rel": 2.220446049250313e-16,
   "max_ulp": 4,
@@ -2432,6 +2439,13 @@
   "max_rel": 4.181336368041664e-16,
   "max_ulp": 2,
   "n_values": 7,
+  "point": 0,
+  "status": "VERIFIED"
+ },
+ "tuple_reduce_sum": {
+  "max_rel": 0.0,
+  "max_ulp": 0,
+  "n_values": 5,
   "point": 0,
   "status": "VERIFIED"
  },

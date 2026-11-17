@@ -2248,6 +2248,36 @@ struct Lowering {
                                           int64_t len);
 
   void lower_read_param(const mir::Stmt& s);
+  // A parameter read's free and constrained geometry.
+  struct ParamShape {
+    std::vector<int64_t> declared_dims, raw_dims;
+    ViewKind leaf = ViewKind::Flat;
+    int64_t n_batch = 0, con_len = 0, raw_len = 0, inner_raw = 0, inner_con = 0,
+            matrix_rows = 0, matrix_cols = 0;
+  };
+  ParamShape param_shape(const mir::SizedType& type, const mir::Transform& tr,
+                         const std::vector<mir::Expr>& read_dims,
+                         const std::string& raw);
+  // A tuple parameter's one block of free values. Each leaf's read gathers
+  // its free values from it, so the block holds them element by element in
+  // stanc3's order while the leaf keeps the layout of an ordinary array.
+  struct TupleBlock {
+    bool laid_out = false;
+    // -1 when the leaves hold the block one after another, as a tuple not
+    // in an array does: each leaf is then its own parameter slot.
+    int slot = -1;
+    size_t next_leaf = 0;
+    std::map<std::string, std::vector<int>> gather;  // by leaf variable
+    // The constrained value of each leaf read so far, for the columns.
+    std::map<std::string, std::pair<int, ParamShape>> constrained;
+  };
+  std::map<std::string, TupleBlock> tuple_blocks;  // by tuple variable
+  // The free values of tuple leaf `leaf`, from its parameter's block.
+  int tuple_leaf_free(const mir::detail::TupleLeaf& leaf, int64_t raw_len,
+                      const std::string& raw);
+  // A tuple parameter's columns once its last leaf is read: whole leaves for
+  // the interpreter, the CmdStan columns element by element.
+  void tuple_parameter_views(const mir::detail::TupleLeaf& leaf);
 
   // The only name-keyed declaration protocol. Runtime values carry the same
   // static scalar type and SlotInfo in `scope`; this registry is needed only
@@ -2290,6 +2320,8 @@ struct Lowering {
     mir::OutputCursor output_cursor;
     size_t n_fills = 0, n_ops = 0, n_slots = 0, n_idata = 0, n_udata = 0,
            td_mark = 0;
+    std::map<std::string, TupleBlock> tuple_blocks;
+    size_t n_param_leaves = 0;
     size_t n_param_names = 0, n_views = 0, n_unc_params = 0,
            n_interpreter_fallbacks = 0, n_reduce_sum_fallbacks = 0,
            n_synthetic_names = 0;
@@ -2320,6 +2352,8 @@ struct Lowering {
     m.n_param_names = out.param_names.size();
     m.n_views = out.views.size();
     m.n_unc_params = out.unc_params.size();
+    m.n_param_leaves = out.param_leaves.size();
+    m.tuple_blocks = tuple_blocks;
     m.n_interpreter_fallbacks = out.interpreter_fallbacks.size();
     m.n_reduce_sum_fallbacks = out.reduce_sum_fallbacks.size();
     m.n_unconstrained = out.n_unconstrained;
@@ -2338,6 +2372,8 @@ struct Lowering {
     truncate(out.param_names, m.n_param_names);
     truncate(out.views, m.n_views);
     truncate(out.unc_params, m.n_unc_params);
+    truncate(out.param_leaves, m.n_param_leaves);
+    tuple_blocks = m.tuple_blocks;
     truncate(out.interpreter_fallbacks, m.n_interpreter_fallbacks);
     truncate(out.reduce_sum_fallbacks, m.n_reduce_sum_fallbacks);
     out.n_unconstrained = m.n_unconstrained;

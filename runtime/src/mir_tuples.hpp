@@ -52,6 +52,10 @@ struct TupleLeaf {
   SizedType type;
   // CmdStan's JSON key: the base name followed by each component, `p.2`.
   std::string key;
+  // A parameter leaf's read: its transform and the dimensions FnReadParam
+  // reads, from the log density's declaration of the leaf.
+  std::optional<Transform> read_transform;
+  std::vector<Expr> read_dims;
   // Whether an array of tuples encloses the leaf, so that CmdStan's
   // reader lays it out element by element.
   bool in_array() const {
@@ -101,6 +105,14 @@ void attach_tuple_interface(
     Program& program, std::map<std::string, TupleType> tuple_types,
     std::vector<std::pair<size_t, std::string>> tuple_inputs,
     std::vector<WireTupleLeaf> leaves);
+
+// For a leaf of `dims` laid out as CmdStan's JSON reader stores an array of
+// tuples -- element by element of the outermost tuple array, the first
+// index fastest, each element's values whole -- the position of each value
+// of the leaf variable, which is first index fastest across all its
+// dimensions. Empty when the two orders agree.
+std::vector<size_t> reader_order(const TupleLeaf& leaf,
+                                 const std::vector<int64_t>& dims);
 
 // How many CSV columns an output variable has.
 template <class Extent>
@@ -178,6 +190,10 @@ inline std::optional<OutputName> output_name(
 
 // Give each MultiAssign target the view and adlevel of its declaration.
 void finish_multi_assigns(Program& program);
+
+// Copy each tuple parameter leaf's read, as the finalized log density
+// declares it, into the interface.
+void record_tuple_reads(Program& program);
 
 }  // namespace detail
 }  // namespace mir

@@ -49,6 +49,12 @@ NOTES = {
         "~1e16. Every component op (eigen decomposition, transpose, matrix "
         "product, the whole chain with one operand held constant) matches "
         "CmdStan bitwise in isolation.",
+    "tuple_array_params":
+        "At the third point the gradient of grid[1, 2].1's free value is "
+        "1 - x - x^2 * sum(v^2) / 9 with x = 1 and v = (1/3, 1/3, 1/3), "
+        "which cancels to -1/27. Its terms are summed in a different "
+        "order: evaluated exactly at the same inputs, stanli is 8 ulp from "
+        "the result and CmdStan 24 ulp, 32 ulp apart.",
 }
 
 

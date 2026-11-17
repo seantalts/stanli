@@ -1,5 +1,7 @@
 #include <stanli/init_interp.hpp>
 
+#include "mir_tuples.hpp"
+
 #include <stanli/compile.hpp>
 #include <stanli/mir_interp.hpp>
 #include <stanli/unconstrain.hpp>
@@ -97,21 +99,21 @@ std::vector<double> InitInterp::eval(
   // unnoticed, its extra values silently dropped by the sequential read.
   int64_t total_free = 0;
   for (const InitParam& p : params_) {
-    const auto it = inits.find(p.name);
-    if (it == inits.end()) refuse("no starting value for parameter " + p.name);
+    const auto it = inits.find(p.key);
+    if (it == inits.end()) refuse("no starting value for parameter " + p.key);
     const int64_t got =
         (int64_t)std::max(it->second.r.size(), it->second.i.size());
     if (got != p.constrained_len)
-      refuse(p.name + " needs " + std::to_string(p.constrained_len) +
+      refuse(p.key + " needs " + std::to_string(p.constrained_len) +
              " starting values, got " + std::to_string(got));
     total_free += p.free_len;
   }
   for (const auto& supplied : inits) {
-    const std::string& name = supplied.first;
+    const std::string& key = supplied.first;
     const bool declared =
         std::any_of(params_.begin(), params_.end(),
-                    [&name](const InitParam& p) { return p.name == name; });
-    if (!declared) refuse(name + " is not a parameter of this model");
+                    [&key](const InitParam& p) { return p.key == key; });
+    if (!declared) refuse(key + " is not a parameter of this model");
   }
 
   // Give every value its declared shape before the section runs. A caller
@@ -120,12 +122,26 @@ std::vector<double> InitInterp::eval(
   // and the interpreter reaches a bare parameter declaration through the
   // same lookup as an FnReadData, so an unshaped entry would land in the
   // environment and make the section's own indexed writes fail.
+  // A leaf of an array of tuples arrives as CmdStan's reader lays it out,
+  // element by element, and goes into the leaf variable's own order.
   std::map<std::string, DataMap::Entry> shaped;
   for (const InitParam& p : params_) {
-    DataMap::Entry e = inits.at(p.name);
+    DataMap::Entry e = inits.at(p.key);
     if (e.r.empty() && !e.i.empty()) e.r.assign(e.i.begin(), e.i.end());
+    if (const mir::detail::TupleLeaf* leaf =
+            mir::detail::tuple_leaf(*prog_, p.name)) {
+      const std::vector<size_t> source =
+          mir::detail::reader_order(*leaf, p.dims);
+      if (!source.empty()) {
+        std::vector<double> values(source.size());
+        for (size_t k = 0; k < source.size(); ++k) values[k] = e.r[source[k]];
+        e.r = std::move(values);
+      }
+    }
+    e.i.clear();
+    e.is_int = false;
     e.dims = p.dims;
-    shaped.emplace(p.name, std::move(e));
+    shaped.emplace(p.key, std::move(e));
   }
 
   std::vector<double> free_values;
@@ -145,16 +161,36 @@ std::vector<double> InitInterp::eval(
   h.stmt = [&](const mir::Stmt& s) {
     if (mir::internal_name(s) != "FnWriteParam" || !s.write_transform)
       return false;
-    if (s.fn_args.empty() || s.fn_args[0].kind != mir::Expr::Var)
+    // A write names a whole parameter, or one element of a tuple leaf when
+    // the parameter is an array of tuples, which stanc3 writes element by
+    // element in the order the free values go.
+    const mir::Expr* written = s.fn_args.empty() ? nullptr : &s.fn_args[0];
+    while (written && written->kind == mir::Expr::Indexed &&
+           !written->args.empty())
+      written = &written->args[0];
+    if (written == nullptr || written->kind != mir::Expr::Var)
       refuse("a free write does not name its parameter");
-    const std::string& name = s.fn_args[0].name;
+    const std::string& name = written->name;
     const auto found = by_name.find(name);
     if (found == by_name.end())
       refuse("the init section writes unknown parameter " + name);
-    const InitParam& p = *found->second;
-
-    const DataMap::Entry* value = cur->lookup(name);
-    if (value == nullptr) refuse("no constrained value was built for " + name);
+    const InitParam& whole = *found->second;
+    InitParam p = whole;
+    DataMap::Entry element;
+    const DataMap::Entry* value = nullptr;
+    if (written == &s.fn_args[0]) {
+      value = cur->lookup(name);
+      if (value == nullptr)
+        refuse("no constrained value was built for " + name);
+    } else {
+      element = cur->eval(s.fn_args[0]);
+      value = &element;
+      p.dims = element.dims;
+      p.constrained_len = (int64_t)element.r.size();
+      if (p.dims.empty() && p.constrained_len != 1)
+        p.dims = {p.constrained_len};
+      p.leaf_rank = std::min<int>(whole.leaf_rank, (int)p.dims.size());
+    }
     if ((int64_t)value->r.size() != p.constrained_len)
       refuse(name + " built " + std::to_string(value->r.size()) +
              " constrained values, expected " +
