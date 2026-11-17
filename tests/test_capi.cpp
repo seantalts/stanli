@@ -2705,10 +2705,14 @@ void test_tuple_array_parameters() {
                                           0.30000000000000004,
                                           1.0,
                                           -0.29131261245159096,
-                                          0.0};
+                                          0.0,
+                                          0.9566279119002483};
   expect_true("tuple array unconstrained size",
               bs_param_unc_num(m) == (int)q.size());
-  std::vector<double> theta(want_theta.size()), back(q.size());
+  expect_true("tuple array constrained size",
+              bs_param_num(m, false, false) == (int)want_theta.size());
+  std::vector<double> theta((size_t)bs_param_num(m, false, false)),
+      back(q.size());
   bool ok = bs_param_constrain(m, false, false, q.data(), theta.data(), nullptr,
                                &err) == 0;
   expect_true(std::string("tuple array constrain: ") + (err ? err : ""), ok);
