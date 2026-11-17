@@ -496,6 +496,7 @@ module Wire = struct
     { inputs: string list
     ; procedures: stmt list list
     ; functions: fn list
+    ; exprs: expr list
     ; leaves: (string * string * (int * int) list) list }
 
   let decode_base64 text =
@@ -529,6 +530,7 @@ module Wire = struct
         (String.sub encoded (String.length prefix)
            (String.length encoded - String.length prefix)) in
     let pos = ref 0 in
+    let exprs = ref [] in
     let u8 () =
       let v = Char.code s.[!pos] in
       incr pos; v in
@@ -567,7 +569,9 @@ module Wire = struct
       | k -> failwith ("unknown expression kind " ^ string_of_int k));
       let v = view () in
       ignore (bool ()); ignore (bool ()); ignore (string ());
-      {kind; name= !name; args= !args; view= v; lit_s= !lit_s} in
+      let e = {kind; name= !name; args= !args; view= v; lit_s= !lit_s} in
+      exprs := e :: !exprs;
+      e in
     let transform () =
       let kind = u8 () in
       if kind > 18 then failwith ("unknown transform kind " ^ string_of_int kind);
@@ -655,7 +659,11 @@ module Wire = struct
           let path = list (fun () -> let b = u32 () in (b, u32 ())) in
           (variable, base, path)) in
     if !pos <> String.length s then failwith "trailing payload bytes";
-    {inputs; procedures= [prepare; log_prob; gq; inits]; functions; leaves}
+    { inputs
+    ; procedures= [prepare; log_prob; gq; inits]
+    ; functions
+    ; exprs= !exprs
+    ; leaves }
 
   let rec stmts_of = function
     | Body (_, body) -> body @ List.concat_map stmts_of body
@@ -676,11 +684,8 @@ module Wire = struct
     | Decl _ | Body _ | Unsupported -> []
 
   let has_unsupported program =
-    List.exists
-      (fun s ->
-        s = Unsupported
-        || List.exists (fun e -> e.kind = 10) (stmt_exprs s))
-      (all_stmts program)
+    List.mem Unsupported (all_stmts program)
+    || List.exists (fun e -> e.kind = 10) program.exprs
 end
 
 let find_function (program : Wire.program) name =
@@ -737,6 +742,20 @@ let tuple_wire_tests () =
   |})) in
   require (not (Wire.has_unsupported calls))
     "a split tuple temporary left an unsupported node";
+  (* A component read in a size, an initializer, a loop bound. *)
+  let sizes = Wire.read (encode (compile_upstream_o0 {|
+    functions { tuple(int, real) f(real x) { return (2, x); } }
+    parameters { real x; }
+    model {
+      tuple(int, real) t = f(x);
+      vector[t.1] v = rep_vector(t.2, t.1);
+      real s = t.2;
+      for (i in 1:t.1) target += v[i];
+      target += s;
+    }
+  |})) in
+  require (not (Wire.has_unsupported sizes))
+    "a component read in a size or initializer is unsupported";
   let f = find_function calls "f" in
   require (f.results = [(0, 2); (0, 4)])
     "a tuple function's results are not its leaves";
