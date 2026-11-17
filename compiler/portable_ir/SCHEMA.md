@@ -304,7 +304,9 @@ The items take the statement's arguments in order and must take all of
 them. A tuple item of depth `d` prints an array of `d` dimensions of tuples
 the way Stan prints one, `[(1,[2,3]),(4,[5,6])]`; its components take
 consecutive arguments, each an array whose first `d` dimensions are the
-tuple array's. A tuple that is not in an array is spelled with string
+tuple array's. A component item's own depth counts only the component's
+array dimensions: `array[2] tuple(real, tuple(int, vector))` is a tuple of
+depth 1 whose second component is a tuple of depth 0. A tuple that is not in an array is spelled with string
 literal arguments instead and needs no layout.
 
 ### Statement kind
@@ -443,7 +445,8 @@ The order of every list is semantic and preserved. Source locations and
 stanc3 fields absent from `stanli::mir` are not encoded.
 
 A `TupleLeaf` is one variable the compiler made from a tuple input or
-output variable:
+output variable. The list may be in any order; the compiler writes the
+inputs' leaves, then the outputs', each depth first:
 
 ```text
 string variable
