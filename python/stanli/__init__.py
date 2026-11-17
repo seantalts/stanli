@@ -391,13 +391,16 @@ def _dptr(a):
 
 
 def _bracket(name):
-    """CmdStan's dot form to CmdStanPy's bracket form: theta.1.2 -> theta[1,2]."""
+    """CmdStan's CSV name in CmdStanPy's form: theta.1.2 -> theta[1,2],
+    g.1:2.3 -> g[1].2[3]."""
     if "[" in name:
         return name
-    parts = name.split(".")
-    if len(parts) < 2 or not all(p.isdigit() for p in parts[1:]):
-        return name
-    return parts[0] + "[" + ",".join(parts[1:]) + "]"
+    parts = name.split(":")
+    for i, part in enumerate(parts):
+        head, *index = part.split(".")
+        if index:
+            parts[i] = head + "[" + ",".join(index) + "]"
+    return ".".join(parts)
 
 
 def _scalar_variables(names):
@@ -1583,8 +1586,9 @@ class Model:
         for i in range(_lib.stanli_n_variables(m, which)):
             dims = tuple(_lib.stanli_variable_dim(m, which, i, k) for k in
                          range(_lib.stanli_variable_n_dims(m, which, i)))
-            shapes.append((_lib.stanli_variable_name(m, which, i).decode(),
-                           dims))
+            shapes.append(
+                (_bracket(_lib.stanli_variable_name(m, which, i).decode()),
+                 dims))
         return _variables_from_shapes(shapes)
 
     def optimize(self, *, seed=1, iter=2000, jacobian=True, init=None,

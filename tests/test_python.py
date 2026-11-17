@@ -1066,8 +1066,8 @@ generated quantities {
 
 
 def test_tuple_variables_and_inits():
-    # CmdStan names a tuple slot with ':' and an index with '.'; each slot of
-    # an element is a variable of its own. Inits take CmdStan's tuple JSON.
+    # Names follow CmdStanPy; each slot of an element is a variable of its
+    # own. Inits take CmdStan's tuple JSON.
     m = stanli.Model(stan_code="""
         parameters { tuple(real, array[2] real<lower=0>) tp; }
         model { tp.1 ~ normal(0, 1); tp.2 ~ exponential(1); }
@@ -1075,13 +1075,50 @@ def test_tuple_variables_and_inits():
           for (i in 1:2) g[i] = (tp.1 * i, i); }
         """)
     fit = m.sample(chains=1, seed=1, warmup=50, samples=20, refresh=0)
-    assert fit.variables == {"tp:1": (), "tp:2": (2,), "g.1:1": (), "g.1:2": (),
-                             "g.2:1": (), "g.2:2": ()}
-    assert fit.names == ["tp:1", "tp:2[1]", "tp:2[2]", "g.1:1", "g.1:2",
-                         "g.2:1", "g.2:2"]
-    assert np.array_equal(fit["g.2:1"], 2 * fit["tp:1"])
+    assert fit.variables == {"tp.1": (), "tp.2": (2,), "g[1].1": (),
+                             "g[1].2": (), "g[2].1": (), "g[2].2": ()}
+    assert fit.names == ["tp.1", "tp.2[1]", "tp.2[2]", "g[1].1", "g[1].2",
+                         "g[2].1", "g[2].2"]
+    assert np.array_equal(fit["g[2].1"], 2 * fit["tp.1"])
+    assert np.array_equal(fit["g.2:1"], fit["g[2].1"])
+    assert m.constrained_names == ["tp.1", "tp.2[1]", "tp.2[2]"]
     free = m.unconstrain({"tp": {"1": 0.5, "2": [1.0, 2.0]}})
     assert np.allclose(free, [0.5, 0.0, np.log(2.0)]), free
+
+
+def test_tuple_names_match_cmdstanpy():
+    m = stanli.Model(stan_code="""
+        parameters { real mu; }
+        transformed parameters {
+          tuple(real, tuple(real, vector[2])) tp = (mu, (2 * mu, [mu, 3 * mu]'));
+        }
+        model { mu ~ normal(0, 1); }
+        generated quantities {
+          tuple(real, tuple(int, real)) q = (mu, (2, mu));
+          tuple(real, vector[3]) c = (mu, [1, 2, 3]');
+          array[2] tuple(real, real) g;
+          for (i in 1:2) g[i] = (i * mu, i);
+          array[2, 2] tuple(real, matrix[2, 2]) h;
+          for (i in 1:2) for (j in 1:2) h[i, j] = (i + j, rep_matrix(mu, 2, 2));
+        }
+        """)
+    # CmdStanPy 1.3.2's column_names for this model under CmdStan 2.40.0.
+    cmdstanpy = [
+        "mu", "tp.1", "tp.2.1", "tp.2.2[1]", "tp.2.2[2]", "q.1", "q.2.1",
+        "q.2.2", "c.1", "c.2[1]", "c.2[2]", "c.2[3]", "g[1].1", "g[1].2",
+        "g[2].1", "g[2].2", "h[1,1].1", "h[1,1].2[1,1]", "h[1,1].2[2,1]",
+        "h[1,1].2[1,2]", "h[1,1].2[2,2]", "h[2,1].1", "h[2,1].2[1,1]",
+        "h[2,1].2[2,1]", "h[2,1].2[1,2]", "h[2,1].2[2,2]", "h[1,2].1",
+        "h[1,2].2[1,1]", "h[1,2].2[2,1]", "h[1,2].2[1,2]", "h[1,2].2[2,2]",
+        "h[2,2].1", "h[2,2].2[1,1]", "h[2,2].2[2,1]", "h[2,2].2[1,2]",
+        "h[2,2].2[2,2]"]
+    fit = m.sample(chains=1, seed=1, warmup=20, samples=5, refresh=0)
+    assert fit.names == cmdstanpy, fit.names
+    assert fit.summary().names == cmdstanpy
+    assert fit.summary(["h[2,1].2"]).names == cmdstanpy[22:26]
+    assert fit.variables["h[2,1].2"] == (2, 2)
+    assert np.array_equal(fit["h.2.1:2.1.2"], fit["h[2,1].2[1,2]"])
+    assert list(m.optimize(seed=1)) == cmdstanpy
 
 
 def test_variables_are_shaped():
