@@ -100,8 +100,12 @@ class Worker:
         try:
             if self.backend == "reference":
                 import bridgestan
-                library = self.compile(lambda: _stan_call(
-                    bridgestan.compile_model, str(self.model_path)))
+                # The runners hand over the library oracle.py already built;
+                # a .stan source is compiled here.
+                library = self.compile(
+                    lambda: self.model_path if self.model_path.suffix != ".stan"
+                    else _stan_call(bridgestan.compile_model,
+                                    str(self.model_path)))
                 model = _stan_call(
                     bridgestan.StanModel,
                     str(library), data, capture_stan_prints=True,

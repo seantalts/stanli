@@ -415,6 +415,26 @@ class ConstructCatalogTests(unittest.TestCase):
         self.assertEqual(describe("stanli", stanli(), "stanli"),
                          "construction")
 
+    def test_reference_worker_loads_a_prebuilt_library(self):
+        from conformance import model_worker
+        loaded = []
+        module = types.SimpleNamespace()
+
+        def compile_model(path):
+            raise ValueError(f"File '{path}' does not end in .stan")
+
+        def construct(library, *args, **kwargs):
+            loaded.append(library)
+            raise RuntimeError("stop after construction")
+
+        module.compile_model, module.StanModel = compile_model, construct
+        with mock.patch.dict(sys.modules, {"bridgestan": module}):
+            worker = model_worker.Worker(pathlib.Path("m_model.so"),
+                                         "reference")
+            phase = worker.describe({"request_id": 1})["phase"]
+        self.assertEqual(loaded, ["m_model.so"])
+        self.assertEqual(phase, "construction")
+
     def test_worker_normalizes_public_error_categories(self):
         self.assertEqual(worker_category(RuntimeError(
             "x does not satisfy lower constraint")), "domain_error")
