@@ -64,6 +64,17 @@ static const char* dl_error(void) {
  * there for why a mismatch cannot be allowed to proceed. */
 #define STANLI_R_ABI_VERSION 6
 
+/* stanli_install() can only fetch the runtime of the release this package
+ * pins, so reinstalling it never fixes a runtime older than the package.
+ * That happens when the package comes from a commit newer than the release
+ * (#570). */
+#define OLDER_RUNTIME_ADVICE                                                 \
+  "This happens when the R package is installed from a GitHub commit newer " \
+  "than the latest stanli release. Install the released package with "       \
+  "install.packages(\"stanli\", repos = "                                    \
+  "\"https://seantalts.r-universe.dev\"), or build the runtime from source " \
+  "and set STANLI_RUNTIME to it."
+
 /* Mirrors stanli_sample_opts in runtime/include/stanli/capi.h. Field
  * order and types must match exactly; R never sees this struct, but a
  * mismatch would be a silent misread rather than an error. */
@@ -472,12 +483,15 @@ SEXP stanli_bridge_load(SEXP path) {
    * wrong offsets. Refuse instead. */
   BIND("stanli_abi_version", p_abi_version);
   if (p_abi_version() != STANLI_R_ABI_VERSION) {
-    char msg[256];
+    char msg[768];
     snprintf(msg, sizeof msg,
              "this stanli runtime speaks ABI version %d, but the R package "
-             "was built against %d. Run stanli_install(overwrite = TRUE) to "
-             "fetch a matching runtime, or update the package.",
-             p_abi_version(), STANLI_R_ABI_VERSION);
+             "was built against %d. %s",
+             p_abi_version(), STANLI_R_ABI_VERSION,
+             p_abi_version() < STANLI_R_ABI_VERSION
+                 ? OLDER_RUNTIME_ADVICE
+                 : "The runtime is newer than the package; update the "
+                   "stanli R package.");
     dl_close(g_lib);
     g_lib = NULL;
     return mkString(msg);
@@ -487,11 +501,10 @@ SEXP stanli_bridge_load(SEXP path) {
   {
     const char* bad = layout_mismatch();
     if (bad != NULL) {
-      char msg[512];
+      char msg[768];
       snprintf(msg, sizeof msg,
                "this stanli runtime lays out %s differently from the R "
-               "package's copy. Run stanli_install(overwrite = TRUE) to fetch "
-               "a matching runtime, or update the package.",
+               "package's copy. " OLDER_RUNTIME_ADVICE,
                bad);
       dl_close(g_lib);
       g_lib = NULL;
@@ -981,8 +994,7 @@ static void require_whiten(void) {
       p_param_block_name == NULL || p_param_block_size == NULL ||
       p_variable_n_annotations == NULL || p_variable_annotation == NULL)
     error(
-        "this stanli runtime has no Laplace whitening. Run "
-        "stanli_install(overwrite = TRUE) to fetch a newer runtime.");
+        "this stanli runtime has no Laplace whitening. " OLDER_RUNTIME_ADVICE);
 }
 
 /* R numbers (or integers) holding whole numbers, as the runtime's int64
