@@ -5,7 +5,8 @@
 ## 0.27.0
 
 You can now continue sampling from an existing fit, see divergence counts
-while chains run, and compute bridge sampling estimates from R. Models from
+while chains run, compute bridge sampling estimates from R, and try
+experimental Laplace whitening for models with random effects. Models from
 nine CRAN packages joined the CmdStan replay, which found and fixed several
 `lp__` constant and compile bugs. stanli no longer falls back to stock
 stanc when its own compiler is missing. The R package and runtime must be
@@ -36,6 +37,12 @@ updated together.
   `model.sample(continue_from=fit, samples=...)` continue sampling where the
   chains stopped and return a new fit with the draws appended. 1000 then
   1000 more samples give the same draws as one run of 2000 (#553).
+- Experimental Laplace whitening (#540). `laplace_whiten(model)` in R and
+  Python builds a model whose parameters are whitened by a sparse factor of
+  the Hessian at the marginal mode, and every algorithm runs on it. Mark
+  random effects with the new `@latent` annotation, or pass `latent =`.
+  The default sampler doesn't change. Compare against one default fit
+  before relying on it.
 - Sampling progress shows each chain's divergences and max-treedepth hits
   so far, once either is non-zero (#552).
 - The browser demo's editor highlights Stan syntax, shows line numbers,
@@ -72,6 +79,10 @@ updated together.
 - Internal errors in the samplers, Pathfinder, the gradient and the init
   search were treated as rejected proposals, so sampling went on around a
   bug. They are now reported.
+- When the R package came from a GitHub commit newer than the latest
+  release, loading failed with advice to rerun
+  `stanli_install(overwrite = TRUE)`, which fetched the same mismatched
+  runtime again. The error now says to install the released package (#570).
 - BridgeStan data containing NaN or Infinity failed to load.
 - Pathfinder reported a small ELBO as -0.000000.
 - A density used only through a `foo_lupdf` callback was dropped, and
@@ -94,8 +105,9 @@ updated together.
 - Each test oracle has one mechanism, about 20,000 fewer lines.
 - Information that used to travel as encoded text or sentinel values now
   travels as typed data, from the compiler through the C API. Portable MIR
-  moves to version 3.
-- stanc3 is pinned to the fork's merge of stanc3 master and built with
+  moves to version 4.
+- stanc3 is pinned to the fork, which adds declaration annotations to stanc3
+  master, and built with
   OCaml 5.5.2. Wheels and runtime tarballs no longer ship stock `stanc`.
 - Developer `STANLI_*` switches are compiled out of release builds.
   `STANLI_NO_INTERPRETER`, `STANLI_ISA`, `STANLI_NO_FUSED_DENSITY` and
