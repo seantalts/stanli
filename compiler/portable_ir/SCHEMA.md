@@ -1,4 +1,4 @@
-# Stanli portable MIR v3
+# Stanli portable MIR v4
 
 This document defines the stanli-owned wire representation of the MIR slice
 consumed by the C++ runtime. It is not a serialization of every stanc3 MIR
@@ -10,15 +10,17 @@ selected optimization policy. The decoder constructs `stanli::mir::Program`
 directly, validates it, then runs the same overload and binding finalizer used
 by the legacy S-expression reader.
 
-Version 3 is a canonical ASCII envelope around a compact, fixed-layout binary
+Version 4 is a canonical ASCII envelope around a compact, fixed-layout binary
 payload. The envelope crosses native callbacks, subprocess output, V8,
 js_of_ocaml, Web Workers, and existing C-string APIs without transcoding or
 embedded-NUL problems. The payload avoids a JSON DOM, repeated field names,
 inactive fields, and decimal parsing.
 
-Portable MIR v1 was a pre-release JSON format and v2 (`STANLI2:`) the layout
-before every stanc3 fact the runtime reads became a typed field. Neither is
-accepted by this runtime; a `STANLI<n>:` document of another version is
+Portable MIR v1 was a pre-release JSON format, v2 (`STANLI2:`) the layout
+before every stanc3 fact the runtime reads became a typed field, and v3
+(`STANLI3:`) the layout before tuples. v4 adds the tuple fields below; a
+program without a tuple encodes the same payload bytes as v3. None of the
+older versions is accepted by this runtime; a `STANLI<n>:` document of another version is
 rejected with a request to recompile the model. The legacy stanc3
 S-expression reader remains a separate input path.
 
@@ -27,24 +29,24 @@ S-expression reader remains a separate input path.
 A canonical document is:
 
 ```text
-STANLI3:<base64 payload>
+STANLI4:<base64 payload>
 ```
 
-`STANLI3:` is the eight-byte ASCII version marker. The remainder is standard
+`STANLI4:` is the eight-byte ASCII version marker. The remainder is standard
 RFC 4648 base64 using `A-Z`, `a-z`, `0-9`, `+`, and `/`, with required `=`
 padding. There is no whitespace, BOM, or final newline.
 
 The multi-format decoder dispatches as follows:
 
-1. An exact `STANLI3:` prefix selects this decoder.
+1. An exact `STANLI4:` prefix selects this decoder.
 2. Any other `STANLI` prefix is a document of another version and is
    rejected.
 3. Otherwise, after the four ASCII whitespace bytes are skipped, `(` selects
    the legacy S-expression reader.
 4. Every other input is rejected.
 
-Once the v3 prefix is seen, malformed base64 or a malformed payload is a hard
-v3 error. The decoder never retries another format.
+Once the v4 prefix is seen, malformed base64 or a malformed payload is a hard
+v4 error. The decoder never retries another format.
 
 Canonical base64 has exactly one spelling. Padding may occur only in the final
 quartet, and unused tail bits must be zero. A decoder rejects non-canonical
@@ -87,6 +89,7 @@ the wire contract.
 ```text
 u8 depth
 u8 leaf
+list<UnsizedView> components   (Tuple only)
 ```
 
 | `leaf` | Meaning |
@@ -98,8 +101,11 @@ u8 leaf
 | 4 | `Vector` |
 | 5 | `RowVector` |
 | 6 | `Matrix` |
+| 7 | `Tuple` |
 
-`depth` is the array nesting depth. Unknown leaf tags are errors.
+`depth` is the array nesting depth. Unknown leaf tags are errors. A `Tuple`
+view lists its component views, so `array[] tuple(real, vector)` is depth 1,
+`Tuple`, components `Real` and `Vector`.
 
 ### Function library
 
@@ -161,15 +167,21 @@ the common metadata suffix shown below.
 | 13 | `IndexUpfrom` | `list<Expr> args` (the lower bound) |
 | 14 | `IndexBetween` | `list<Expr> args` (the lower and upper bounds) |
 | 15 | `IndexMulti` | `list<Expr> args` (the integer array of indices) |
+| 16 | `TupleProjection` | `list<Expr> args` (the tuple), `u32 component` (from 1) |
 
 The common suffix is:
 
 ```text
 UnsizedView unsized
 bool data_only
+list<bool> leaf_data_only   (Tuple view only)
 bool promoted
 string raw
 ```
+
+stanc3 gives a tuple-typed value one adlevel per component.
+`leaf_data_only` lists whether each leaf of the tuple type is data, depth
+first; `data_only` is false for a tuple.
 
 For `LitInt`, the C++ compatibility field `Expr.lit` is reconstructed as the
 exact `double` conversion of the decoded `i32`; it is not redundantly encoded.
@@ -189,6 +201,7 @@ A transform is:
 u8 kind
 list<Expr> args
 string raw
+list<Transform> components   (Tuple only)
 ```
 
 | Tag | Kind |
@@ -212,8 +225,10 @@ string raw
 | 16 | `StochasticColumn` |
 | 17 | `StochasticRow` |
 | 18 | `Unsupported` |
+| 19 | `Tuple` |
 
-Argument arities are checked against the selected kind.
+Argument arities are checked against the selected kind. A `Tuple` transform
+has no arguments and one transform per component.
 
 ### `SizedType`
 
@@ -222,12 +237,15 @@ string base
 list<Expr> dims
 string elem_base
 string raw
+list<SizedType> components   (STuple, or SArray of STuple, only)
 ```
 
 `base` uses the runtime spellings such as `SInt`, `SReal`, `SVector`,
-`SRowVector`, `SMatrix`, and `SArray`. `elem_base` identifies the innermost
-element for an array and is empty otherwise. Dimension counts are validated
-against the base.
+`SRowVector`, `SMatrix`, `SArray`, and `STuple`. `elem_base` identifies the
+innermost element for an array and is empty otherwise. Dimension counts are
+validated against the base. An `STuple` has no dimensions; an array of
+tuples has `SArray` base, `STuple` element base, its array dimensions, and
+the tuple's component types.
 
 ### `DeclType`
 
@@ -272,7 +290,7 @@ There is no inactive-field block.
 
 | Tag | Kind | Active fields after tag |
 | ---: | --- | --- |
-| 0 | `Decl` | `string id`, `DeclType type`, `bool data_only`, `bool has_init`, optional `Expr init`, `optional<Transform> read_transform`, `list<Expr> read_dims`, `string raw` |
+| 0 | `Decl` | `string id`, `DeclType type`, `bool data_only`, `list<bool> leaf_data_only` (tuple type only), `bool has_init`, optional `Expr init`, `optional<Transform> read_transform`, `list<Expr> read_dims`, `string raw` |
 | 1 | `Assignment` | `string lhs`, `list<Expr> lhs_indices`, `Expr rhs`, `string raw` |
 | 2 | `TargetPE` | `Expr target`, `string raw` |
 | 3 | `Block` | `list<Stmt> body`, `string raw` |
@@ -287,6 +305,14 @@ There is no inactive-field block.
 | 12 | `Skip` | `string raw` |
 | 13 | `Unsupported` | `string raw` |
 | 14 | `JacobianPE` | `Expr target`, `string raw` |
+| 15 | `TupleAssignment` | `string lhs`, `list<Expr> lhs_indices`, `list<TupleStep> steps`, `Expr rhs`, `optional<Transform> read_transform`, `list<Expr> read_dims` |
+
+A `TupleAssignment` assigns through tuple projections: `x[i].2[j] = rhs` is
+`lhs` x, `lhs_indices` [i], and the one step (2, [j]). A `TupleStep` is
+`u32 component` (from 1) followed by `list<Expr> indices`. stanc3 reads a
+tuple parameter one component at a time, `x.2 = FnReadParam(...)`; such an
+assignment carries the read's transform and dimensions as `Decl` does. The
+decoder reads it as an `Assignment` with its steps.
 
 `JacobianPE` is `jacobian += target`. The decoder reads it as a `TargetPE`
 whose `jacobian` flag is set: stanli always evaluates the density with the
@@ -302,6 +328,7 @@ string name
 list<string> arg_names
 list<UnsizedView> arg_views
 list<bool> arg_data_only
+list<bool> leaf_data_only   (once per tuple argument, in order)
 list<Stmt> body
 ```
 
@@ -377,6 +404,10 @@ parameters writes it as an empty list.
 The order of every list is semantic and preserved. Source locations and
 stanc3 fields absent from `stanli::mir` are not encoded.
 
+stanc3 reads a tuple input whole, `FnReadData(d, context__, "d")`, while
+CmdStan's JSON reader keys each leaf by its slots: `d.1`, `d.2.1`. The
+finalizer, below, maps one read to the other.
+
 ## Unsupported and opaque payloads
 
 The producer must not silently omit or reinterpret an unsupported construct.
@@ -399,8 +430,12 @@ After structural decoding and before a `Program` is exposed, the runtime:
 2. checks function argument list lengths;
 3. records the overload each user-function call selects and rejects
    colliding overloads;
-4. validates variable and function bindings; and
-5. rejects trailing payload bytes.
+4. replaces each tuple variable with one variable per leaf, an array of
+   tuples becoming a tuple of arrays, inlines each function returning a
+   tuple and passes a tuple argument as one argument per leaf, so no engine
+   sees a tuple (`runtime/src/mir_tuples.cpp`);
+5. validates variable and function bindings; and
+6. rejects trailing payload bytes.
 
 Validation runs before downstream code can index positional argument vectors.
 Malformed input therefore becomes a compiler error rather than undefined
@@ -438,7 +473,7 @@ and anything deeper is rejected as nested too deeply.
 For a fixed stanc3 revision, source, include map, and pass selection, every
 producer must emit identical bytes. Canonical encoding requires:
 
-1. the exact `STANLI3:` prefix;
+1. the exact `STANLI4:` prefix;
 2. the tag numbers and field order in this document;
 3. little-endian fixed-width scalars;
 4. original list order;
@@ -454,4 +489,4 @@ user functions, warnings, and frontend errors. Windows uses the same encoder
 and participates in the same byte comparison.
 
 A future incompatible layout gets a new ASCII header and a new decoder. It
-must never reuse `STANLI3:` with different tag meanings or field order.
+must never reuse `STANLI4:` with different tag meanings or field order.

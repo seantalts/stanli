@@ -268,7 +268,7 @@ def test_function_errors_and_recovery():
 
 
 def _portable_payload(mir):
-    assert mir.startswith("STANLI3:"), mir[:80]
+    assert mir.startswith("STANLI4:"), mir[:80]
     return base64.b64decode(mir[8:], validate=True)
 
 
@@ -1065,6 +1065,25 @@ generated quantities {
 """
 
 
+def test_tuple_variables_and_inits():
+    # CmdStan names a tuple slot with ':' and an index with '.'; each slot of
+    # an element is a variable of its own. Inits take CmdStan's tuple JSON.
+    m = stanli.Model(stan_code="""
+        parameters { tuple(real, array[2] real<lower=0>) tp; }
+        model { tp.1 ~ normal(0, 1); tp.2 ~ exponential(1); }
+        generated quantities { array[2] tuple(real, int) g;
+          for (i in 1:2) g[i] = (tp.1 * i, i); }
+        """)
+    fit = m.sample(chains=1, seed=1, warmup=50, samples=20, refresh=0)
+    assert fit.variables == {"tp:1": (), "tp:2": (2,), "g.1:1": (), "g.1:2": (),
+                             "g.2:1": (), "g.2:2": ()}
+    assert fit.names == ["tp:1", "tp:2[1]", "tp:2[2]", "g.1:1", "g.1:2",
+                         "g.2:1", "g.2:2"]
+    assert np.array_equal(fit["g.2:1"], 2 * fit["tp:1"])
+    free = m.unconstrain({"tp": {"1": 0.5, "2": [1.0, 2.0]}})
+    assert np.allclose(free, [0.5, 0.0, np.log(2.0)]), free
+
+
 def test_variables_are_shaped():
     m = stanli.Model(stan_code=SHAPES_SOURCE)
     fit = m.sample(chains=2, seed=1, warmup=100, samples=50, refresh=0)
@@ -1423,7 +1442,7 @@ def _fake_compiler_run(calls, warnings=(), o1_fallback=None,
         pathlib.Path(path).write_text(json.dumps(
             {"warnings": list(warnings), "o1_fallback": o1_fallback}),
             encoding="utf-8")
-        return subprocess.CompletedProcess(argv, 0, "STANLI3:ZmFrZQ==",
+        return subprocess.CompletedProcess(argv, 0, "STANLI4:ZmFrZQ==",
                                            stderr)
     return run
 
@@ -1449,7 +1468,7 @@ def test_subprocess_compiler_contract():
             with warnings.catch_warnings(record=True) as caught:
                 warnings.simplefilter("always")
                 got = stanli._stanc_mir(source)
-        assert got == "STANLI3:ZmFrZQ=="
+        assert got == "STANLI4:ZmFrZQ=="
         assert [(w.category, str(w.message)) for w in caught] == [
             (RuntimeWarning, "a successful frontend warning"),
             (stanli.O1FallbackWarning, "stanli compiler: skipped O1")]

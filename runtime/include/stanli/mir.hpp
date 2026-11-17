@@ -36,13 +36,24 @@ enum class UnsizedLeaf : uint8_t {
   Complex,
   Vector,
   RowVector,
-  Matrix
+  Matrix,
+  Tuple
 };
 
 struct UnsizedView {
   uint8_t depth = 0;
   UnsizedLeaf leaf = UnsizedLeaf::Unknown;
+  std::vector<UnsizedView> components;  // Tuple only
 };
+
+inline bool same_view(const UnsizedView& a, const UnsizedView& b) {
+  if (a.depth != b.depth || a.leaf != b.leaf ||
+      a.components.size() != b.components.size())
+    return false;
+  for (size_t i = 0; i < a.components.size(); ++i)
+    if (!same_view(a.components[i], b.components[i])) return false;
+  return true;
+}
 
 // A non-array value of this type: stanc's UInt, UReal, UVector, ...
 inline bool is_unsized(const UnsizedView& view, UnsizedLeaf leaf) {
@@ -68,6 +79,8 @@ inline const char* leaf_spelling(UnsizedLeaf leaf) {
       return "URowVector";
     case UnsizedLeaf::Matrix:
       return "UMatrix";
+    case UnsizedLeaf::Tuple:
+      return "UTuple";
     case UnsizedLeaf::Unknown:
       break;
   }
@@ -111,7 +124,9 @@ struct Expr {
     IndexSingle,
     IndexUpfrom,
     IndexBetween,
-    IndexMulti
+    IndexMulti,
+    // `args[0].component`, numbered from 1.
+    TupleProjection
   } kind = Unsupported;
   std::string name;  // Var name or FunApp function name
   enum class Lib { StanLib, Internal, UserDefined } fn_lib = Lib::StanLib;
@@ -127,11 +142,14 @@ struct Expr {
   double lit = 0;
   std::string lit_s;
   std::vector<Expr> args;  // FunApp args; Promotion inner; Indexed base+idx;
-                           // an index's bounds
+                           // an index's bounds; a projection's tuple
+  int component = 0;       // TupleProjection
   UnsizedView unsized;
   bool data_only = false;  // adlevel DataOnly
-  bool promoted = false;   // explicit MIR Promotion to this adlevel/type
-  std::string raw;         // Unsupported diagnostics
+  // A tuple-typed value: whether each leaf is data, depth first.
+  std::vector<bool> leaf_data_only;
+  bool promoted = false;  // explicit MIR Promotion to this adlevel/type
+  std::string raw;        // Unsupported diagnostics
 };
 
 inline bool is_unsized(const Expr& e, UnsizedLeaf leaf) {
@@ -503,10 +521,12 @@ struct Transform {
     CholeskyCov,
     StochasticColumn,
     StochasticRow,
-    Unsupported
+    Unsupported,
+    Tuple
   } kind = Identity;
   std::vector<Expr> args;
   std::string raw;
+  std::vector<Transform> components;  // Tuple only
 };
 
 inline bool is_structured_check(Transform::Kind kind) {
@@ -550,7 +570,13 @@ struct SizedType {
   // stanc also uses unsized declarations for optimizer temporaries. Their
   // shape is supplied by the first whole-variable assignment.
   UnsizedView unsized;
+  // STuple, or an SArray of STuple: the component types.
+  std::vector<SizedType> components;
 };
+
+inline bool is_tuple(const SizedType& t) {
+  return t.base == "STuple" || (t.base == "SArray" && t.elem_base == "STuple");
+}
 
 inline bool is_complex(const SizedType& t) {
   const std::string& leaf = t.base == "SArray" ? t.elem_base : t.base;
@@ -578,13 +604,21 @@ struct Stmt {
   std::string decl_id;
   SizedType decl_type;
   bool decl_data_only = false;
+  std::vector<bool> decl_leaf_data_only;  // a tuple declaration's leaves
   bool has_init = false;
   Expr init;
-  std::optional<Transform> read_transform;  // set iff init is FnReadParam
-  std::vector<Expr> read_dims;              // FnReadParam dims
+  // Set iff the initializer, or an assignment's value, is FnReadParam.
+  std::optional<Transform> read_transform;
+  std::vector<Expr> read_dims;  // FnReadParam dims
   // Assignment
   std::string lhs;
   std::vector<Expr> lhs_idx;
+  // `lhs[lhs_idx].2[j]` is the step {2, [j]}.
+  struct TupleStep {
+    int component = 0;
+    std::vector<Expr> indices;
+  };
+  std::vector<TupleStep> lhs_steps;
   Expr rhs;
   // TargetPE
   Expr target;
@@ -683,17 +717,31 @@ bool instantiated_autodiff(const Expr& e, bool promoted_autodiff,
 // Every expression a statement holds itself: its own slots, the declared
 // extents and the arguments of its transforms. Child statements are the
 // caller's to walk.
+template <class TypeRef, class F>
+void for_each_dim(TypeRef& type, F&& visit) {
+  for (auto& e : type.dims) visit(e);
+  for (auto& component : type.components) for_each_dim(component, visit);
+}
+
+template <class TransformRef, class F>
+void for_each_transform_arg(TransformRef& transform, F&& visit) {
+  for (auto& e : transform.args) visit(e);
+  for (auto& component : transform.components)
+    for_each_transform_arg(component, visit);
+}
+
 template <class StmtRef, class F>
 void for_each_expr_of(StmtRef& s, F& visit) {
   for (auto* e : {&s.init, &s.rhs, &s.target, &s.lower, &s.upper, &s.cond})
     visit(*e);
-  for (auto* expressions :
-       {&s.read_dims, &s.lhs_idx, &s.fn_args, &s.decl_type.dims})
+  for (auto* expressions : {&s.read_dims, &s.lhs_idx, &s.fn_args})
     for (auto& e : *expressions) visit(e);
+  for (auto& step : s.lhs_steps)
+    for (auto& e : step.indices) visit(e);
+  for_each_dim(s.decl_type, visit);
   for (auto* transform :
        {&s.read_transform, &s.check_transform, &s.write_transform})
-    if (*transform)
-      for (auto& e : (*transform)->args) visit(e);
+    if (*transform) for_each_transform_arg(**transform, visit);
 }
 
 template <class F>
@@ -730,7 +778,22 @@ struct FunDef {
   std::vector<std::string> arg_names;
   std::vector<UnsizedView> arg_views;
   std::vector<bool> arg_data_only;
+  std::vector<std::vector<bool>> arg_leaf_data_only;  // tuple arguments
   std::vector<Stmt> body;
+};
+
+// A variable the tuple pass made for one leaf of a tuple variable. CmdStan
+// names the leaf's columns by the variable, each array index, and each slot:
+// `p.3:2.1` is element 3 of `array[] tuple(real, vector[2]) p`, slot 2,
+// element 1. `before` is how many of the leaf's array indices come before
+// that slot.
+struct TupleLeaf {
+  std::string variable;
+  struct Slot {
+    size_t before = 0;
+    int slot = 0;
+  };
+  std::vector<Slot> slots;
 };
 
 // A variable write_array emits: a parameter, transformed parameter or
@@ -772,6 +835,8 @@ struct Program {
   // The parameters, transformed parameters and generated quantities in
   // the order write_array emits them, which is CmdStan's column order.
   std::vector<OutputVar> output_vars;
+  // The leaf variables the tuple pass made, by name.
+  std::map<std::string, TupleLeaf> tuple_leaves;
   // Deepest nesting of statements and expressions the reader met.
   unsigned nesting = 0;
 };
@@ -942,6 +1007,49 @@ const FunDef* find_function(const std::map<std::string, const FunDef*>& funs,
                             const Call& call) {
   const auto found = funs.find(function_key(call));
   return found == funs.end() ? nullptr : found->second;
+}
+
+// How many CSV columns an output variable of this type has.
+template <class Extent>
+int64_t output_columns(const SizedType& type, const Extent& extent) {
+  int64_t columns = 1;
+  for (const Expr& dim : type.dims) columns *= extent(dim);
+  if (type.components.empty()) return columns;
+  int64_t per_element = 0;
+  for (const SizedType& component : type.components)
+    per_element += output_columns(component, extent);
+  return columns * per_element;
+}
+
+// CmdStan's name for the values one write produces: the output variable,
+// then each array index and tuple slot of the write (`p.3:2`). `variable` is
+// the part naming one CSV variable, the name up to the last tuple slot, and
+// `index` the indices after it. Empty when the write is not of one element
+// of each array holding a tuple.
+struct OutputName {
+  std::string name;
+  std::string variable;
+  std::vector<int64_t> index;
+};
+
+inline std::optional<OutputName> output_name(
+    const std::string& owner, const TupleLeaf* leaf,
+    const std::vector<int64_t>& indices) {
+  OutputName out{owner, owner, {}};
+  size_t used = 0;
+  for (const TupleLeaf::Slot& slot :
+       leaf ? leaf->slots : std::vector<TupleLeaf::Slot>{}) {
+    if (slot.before > indices.size()) return std::nullopt;
+    for (; used < slot.before; ++used)
+      out.name += "." + std::to_string(indices[used]);
+    out.name += ":" + std::to_string(slot.slot);
+    out.variable = out.name;
+  }
+  for (; used < indices.size(); ++used) {
+    out.name += "." + std::to_string(indices[used]);
+    out.index.push_back(indices[used]);
+  }
+  return out;
 }
 
 // Assigns each of write_array's FnWriteParam statements, in execution

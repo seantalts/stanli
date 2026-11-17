@@ -21,7 +21,7 @@ function fail(message) {
 }
 
 function portablePayload(encoded, name) {
-  if (!encoded.startsWith("STANLI3:"))
+  if (!encoded.startsWith("STANLI4:"))
     fail(name + ": missing compact portable-MIR envelope");
   const text = encoded.slice(8);
   const payload = Buffer.from(text, "base64");
@@ -59,7 +59,7 @@ if (typeof classic.stanli_compile !== "function")
 const classicResult = classic.stanli_compile(
     "embedded_model", "parameters { real x; } model { x ~ std_normal(); }");
 if (classicResult.errors ||
-    !String(classicResult.result).startsWith("STANLI3:"))
+    !String(classicResult.result).startsWith("STANLI4:"))
   fail("classic-script portable compilation failed");
 
 const models = [
@@ -76,6 +76,8 @@ const models = [
   ["same-lane-density-loop",
     "tests/compiler/portable_same_lane_density_loop.stan"],
   ["mother", "tests/stanc3_good/overrides/mother.stan"],
+  ["tuples", "tests/regressions/tuple_coef_cont.stan"],
+  ["tuple-decompositions", "tests/regressions/tuple_decompositions.stan"],
   ["folded-float", "tests/compiler/portable_folded_float.stan"],
   ["int32-overflow", "tests/compiler/portable_int32_overflow.stan"],
   ["unicode", "tests/compiler/portable_unicode.stan"],

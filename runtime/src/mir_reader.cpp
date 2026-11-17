@@ -454,6 +454,10 @@ SizedType read_sized(const Node& n) {
     // Innermost element base kept for the lowering (nested SArray chains
     // propagate it up, so array[T, N] int reports SInt).
     st.elem_base = inner.base == "SArray" ? inner.elem_base : inner.base;
+  } else if (st.base == "STuple") {
+    throw mir::MirError(
+        "mir: tuples need stanli's compiler; the stock stanc S-expression "
+        "reader does not support them");
   } else {
     st.raw = dump(n);
   }
@@ -742,6 +746,10 @@ void validate_expression_shape(const Expr& e) {
     case Expr::IndexBetween:
       if (e.args.size() != 2) malformed("IndexBetween arity");
       break;
+    case Expr::TupleProjection:
+      if (e.args.size() != 1 || e.component < 1)
+        malformed("TupleProjection expression");
+      break;
   }
   for (const Expr& arg : e.args) validate_expression_shape(arg);
 }
@@ -775,6 +783,11 @@ void validate_transform_shape(const Transform& transform) {
     case Transform::Unsupported:
       for (const Expr& arg : transform.args) validate_expression_shape(arg);
       return;
+    case Transform::Tuple:
+      if (transform.components.empty()) malformed("tuple transform");
+      for (const Transform& component : transform.components)
+        validate_transform_shape(component);
+      break;
   }
   if (transform.args.size() != arity)
     malformed("transform arity: expected " + std::to_string(arity) +
@@ -785,7 +798,13 @@ void validate_transform_shape(const Transform& transform) {
 void validate_sized_type_shape(const SizedType& type) {
   size_t arity = 0;
   bool exact = true;
-  if (type.base == "SVector" || type.base == "SRowVector") {
+  if (is_tuple(type) != !type.components.empty())
+    malformed("tuple sized type components");
+  for (const SizedType& component : type.components)
+    validate_sized_type_shape(component);
+  if (type.base == "STuple") {
+    arity = 0;
+  } else if (type.base == "SVector" || type.base == "SRowVector") {
     arity = 1;
   } else if (type.base == "SMatrix") {
     arity = 2;
@@ -822,6 +841,10 @@ void validate_statement_shape(const Stmt& statement) {
     for (const Expr& expression : *expressions)
       validate_expression_shape(expression);
   for (const Expr& index : statement.lhs_idx) validate_index_shape(index);
+  for (const Stmt::TupleStep& step : statement.lhs_steps) {
+    if (step.component < 1) malformed("tuple assignment component");
+    for (const Expr& index : step.indices) validate_index_shape(index);
+  }
   for (const std::optional<Transform>* transform :
        {&statement.read_transform, &statement.check_transform,
         &statement.write_transform})
@@ -1119,6 +1142,9 @@ std::string signature(const std::vector<UnsizedView>& views) {
   for (size_t i = 0; i < views.size(); ++i) {
     if (i) out += ',';
     switch (views[i].leaf) {
+      case UnsizedLeaf::Tuple:
+        out += "tuple" + signature(views[i].components);
+        break;
       case UnsizedLeaf::Int:
         out += "int";
         break;
@@ -1150,7 +1176,7 @@ bool views_match(const std::vector<UnsizedView>& a,
                  const std::vector<UnsizedView>& b) {
   if (a.size() != b.size()) return false;
   for (size_t i = 0; i < a.size(); ++i)
-    if (a[i].depth != b[i].depth || a[i].leaf != b[i].leaf) return false;
+    if (!same_view(a[i], b[i])) return false;
   return true;
 }
 
@@ -1158,9 +1184,7 @@ bool views_match(const std::vector<Expr>& args,
                  const std::vector<UnsizedView>& views) {
   if (args.size() != views.size()) return false;
   for (size_t i = 0; i < args.size(); ++i)
-    if (args[i].unsized.depth != views[i].depth ||
-        args[i].unsized.leaf != views[i].leaf)
-      return false;
+    if (!same_view(args[i].unsized, views[i])) return false;
   return true;
 }
 
@@ -1212,7 +1236,7 @@ void unmangle(Expr& e) {
 }
 
 void unmangle(SizedType& type) {
-  for (Expr& dim : type.dims) unmangle(dim);
+  for_each_dim(type, [](Expr& dim) { unmangle(dim); });
 }
 
 void unmangle(Stmt& s) {
@@ -1256,7 +1280,7 @@ void resolve_overloads(Program& prog) {
     overloads[name] = std::move(defs);
   }
   for (auto& [name, type] : prog.input_vars)
-    for (Expr& d : type.dims) resolve_calls(d, overloads);
+    for_each_dim(type, [&](Expr& d) { resolve_calls(d, overloads); });
   for (auto* body : {&prog.prepare_data, &prog.log_prob,
                      &prog.generate_quantities, &prog.transform_inits})
     for (Stmt& s : *body) resolve_calls(s, overloads);
@@ -1315,6 +1339,7 @@ void detail::finalize_program(Program& prog, bool strict_variable_metadata) {
   strip_eval(prog);
   unmangle(prog);
   resolve_overloads(prog);
+  eliminate_tuples(prog);
   Functions functions;
   for (const auto& f : prog.fun_defs) {
     const auto inserted = functions.emplace(function_key(f), &f);

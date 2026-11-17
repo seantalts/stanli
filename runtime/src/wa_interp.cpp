@@ -439,12 +439,18 @@ bool WaInterp::write_param(MirInterp<double>& in, const mir::Stmt& s,
       }
       base = &base->args[0];
     }
+    const auto leaf = base->kind == mir::Expr::Var
+                          ? prog_->tuple_leaves.find(base->name)
+                          : prog_->tuple_leaves.end();
+    const mir::TupleLeaf* tuple =
+        leaf == prog_->tuple_leaves.end() ? nullptr : &leaf->second;
     const mir::OutputVar* owner = output_cursor_.take(
-        base->kind == mir::Expr::Var ? base->name : std::string(), len,
-        [&in](const mir::OutputVar& var) {
-          int64_t columns = 1;
-          for (const mir::Expr& dim : var.type.dims) columns *= in.as_int(dim);
-          return columns;
+        tuple                          ? tuple->variable
+        : base->kind == mir::Expr::Var ? base->name
+                                       : std::string(),
+        len, [&in](const mir::OutputVar& var) {
+          return mir::output_columns(
+              var.type, [&in](const mir::Expr& dim) { return in.as_int(dim); });
         });
     if (owner == nullptr)
       throw CompileError("an output write matches no output variable");
@@ -460,13 +466,14 @@ bool WaInterp::write_param(MirInterp<double>& in, const mir::Stmt& s,
       n_gq_start_ = cols_.size();
       saw_gq_ = true;
     }
-    std::string name = owner->name;
-    for (auto it = ixs.rbegin(); it != ixs.rend(); ++it)
-      name += "." + std::to_string(*it);
+    const auto named = mir::output_name(
+        owner->name, tuple, std::vector<int64_t>(ixs.rbegin(), ixs.rend()));
+    if (!named)
+      throw CompileError("cannot name a write of a whole array of tuples");
     using Naming = CompiledModel::ParamView::Naming;
-    CompiledModel::ParamView pv{name, (int)row.size(), len};
-    pv.variable = owner->name;
-    pv.index.assign(ixs.rbegin(), ixs.rend());
+    CompiledModel::ParamView pv{named->name, (int)row.size(), len};
+    pv.variable = named->variable;
+    pv.index = named->index;
     if (mir::language_scalar(v) ||
         mir::is_unsized(v, mir::UnsizedLeaf::Complex)) {
       pv.naming = Naming::Scalar;

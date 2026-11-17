@@ -897,6 +897,21 @@ struct Lowering {
   std::vector<int> jac_slots;
   std::vector<int> extra_roots;
   std::map<std::string, const mir::FunDef*> fun_defs;
+  const std::map<std::string, mir::TupleLeaf>* tuple_leaves = nullptr;
+  // The tuple leaf a variable is, or null.
+  const mir::TupleLeaf* tuple_leaf(const std::string& name) const {
+    if (!tuple_leaves) return nullptr;
+    const auto found = tuple_leaves->find(name);
+    return found == tuple_leaves->end() ? nullptr : &found->second;
+  }
+  const mir::TupleLeaf* tuple_leaf(const mir::Expr& e) const {
+    return e.kind == mir::Expr::Var ? tuple_leaf(e.name) : nullptr;
+  }
+  // A parameter's name as CmdStan writes it.
+  std::string parameter_name(const std::string& decl_id) const {
+    const mir::TupleLeaf* leaf = tuple_leaf(decl_id);
+    return leaf ? mir::output_name(leaf->variable, leaf, {})->name : decl_id;
+  }
   // A generic UDF keeps one scalar template type per formal. Locals and its
   // return use the promoted type, but a direct formal reference keeps its own.
   std::map<std::string, bool> udf_formal_autodiff;

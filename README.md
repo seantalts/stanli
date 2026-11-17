@@ -78,7 +78,7 @@ same example in their language.
   is <!--gen:corpus_median-->2.17x<!--/gen--> faster than CmdStan's,
   and <!--gen:corpus_at_par-->335<!--/gen--> models are at least as fast.
   Failed or capped runs stay in the [full benchmark](docs/benchmarks.md).
-- Model coverage. <!--gen:corpus_reference_models-->366<!--/gen--> models
+- Model coverage. <!--gen:corpus_reference_models-->369<!--/gen--> models
   share one three-point CmdStan reference replay. Within the posteriordb
   subset, <!--gen:corpus_verified-->118/120<!--/gen--> models match
   CmdStan's log density and full gradient.
@@ -88,7 +88,7 @@ same example in their language.
 - Language coverage. Every model in stanc3's own test suite, for the type
   and language constructs no real posterior uses, is compared with recorded
   CmdStan answers ([tests/stanc3_good/README.md](tests/stanc3_good/README.md)),
-  and <!--gen:lang_verified-->4/4<!--/gen--> programs that once failed to
+  and <!--gen:lang_verified-->7/7<!--/gen--> programs that once failed to
   lower are verified like the corpus
   ([tests/regressions/README.md](tests/regressions/README.md)).
 - Distribution coverage. 71 of 72 densities, all 105 cdf/lcdf/lccdf

@@ -204,6 +204,13 @@ def render():
             "tests/fixtures/library_functions.stan; CmdStan references in "
             "sized_functions_references.json.gz"
         )
+    for name in ("eigendecompose_sym", "qr", "qr_thin"):
+        focused[name] = (
+            "tests/regressions/tuple_decompositions.stan in transformed data, "
+            "model and generated quantities; tuples/qr_unpack and "
+            "function-signatures/math/matrix/qr{,_thin} in tests/stanc3_good; "
+            "CmdStan references"
+        )
     for name in ("to_vector_array", "to_row_vector_array"):
         focused[name] = "tests/fixtures/stan240_containers.stan; rectangular and zero-extent round trips"
     for name in ("to_int", "to_array_2d"):

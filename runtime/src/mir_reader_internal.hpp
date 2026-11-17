@@ -26,6 +26,11 @@ void validate_portable_program(const Program& program);
 
 Program read_portable_program(std::string_view bytes);
 
+// Replace every tuple with one variable per leaf, so no later stage sees a
+// tuple. Runs after overload resolution, which tells tuple signatures
+// apart.
+void eliminate_tuples(Program& program);
+
 }  // namespace detail
 }  // namespace mir
 }  // namespace stanli

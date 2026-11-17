@@ -564,6 +564,9 @@ stanli_model* stanli_model_new_with_opts(const char* mir_text,
 }
 
 #ifdef STANLI_EMBED_STANC
+}  // extern "C"
+
+// C++ linkage: these return C++ types.
 namespace {
 char* dup_string(const std::string& text) {
   char* out = static_cast<char*>(std::malloc(text.size() + 1));
@@ -579,6 +582,8 @@ std::vector<CompilerMessage> compiler_messages(const stanli::StancResult& r) {
   return out;
 }
 }  // namespace
+
+extern "C" {
 #endif
 
 static stanli_model* model_new_from_stan(const char* stan_code,

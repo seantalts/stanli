@@ -20,7 +20,7 @@ namespace mir {
 namespace detail {
 namespace {
 
-constexpr std::string_view kMagic = "STANLI3:";
+constexpr std::string_view kMagic = "STANLI4:";
 constexpr size_t kMaxInputBytes = size_t{256} * 1024 * 1024;
 constexpr size_t kMaxStringBytes = size_t{16} * 1024 * 1024;
 constexpr size_t kMaxTotalStringBytes = size_t{256} * 1024 * 1024;
@@ -46,7 +46,7 @@ std::string decode_payload(std::string_view wire) {
   if (wire.size() > kMaxInputBytes)
     fail_wire(0, "input exceeds 268435456 bytes");
   if (wire.size() < kMagic.size() || wire.substr(0, kMagic.size()) != kMagic)
-    fail_wire(0, "missing STANLI3 header");
+    fail_wire(0, "missing STANLI4 header");
   const std::string_view encoded = wire.substr(kMagic.size());
   if (encoded.size() % 4 != 0)
     fail_wire(wire.size(), "base64 length is not a multiple of 4");
@@ -282,16 +282,18 @@ T read_tag(Reader& reader, uint8_t tag, const std::array<T, N>& values,
   return values[tag];
 }
 
-constexpr std::array<UnsizedLeaf, 7> kLeafTags = {
+constexpr std::array<UnsizedLeaf, 8> kLeafTags = {
     UnsizedLeaf::Unknown, UnsizedLeaf::Int,    UnsizedLeaf::Real,
     UnsizedLeaf::Complex, UnsizedLeaf::Vector, UnsizedLeaf::RowVector,
-    UnsizedLeaf::Matrix};
+    UnsizedLeaf::Matrix,  UnsizedLeaf::Tuple};
 
-constexpr std::array<Expr::Kind, 16> kExprTags = {
-    Expr::Var,         Expr::LitInt,      Expr::LitReal,      Expr::LitStr,
-    Expr::FunApp,      Expr::Promotion,   Expr::Indexed,      Expr::TernaryIf,
-    Expr::EOr,         Expr::EAnd,        Expr::Unsupported,  Expr::IndexAll,
-    Expr::IndexSingle, Expr::IndexUpfrom, Expr::IndexBetween, Expr::IndexMulti};
+constexpr std::array<Expr::Kind, 17> kExprTags = {
+    Expr::Var,         Expr::LitInt,         Expr::LitReal,
+    Expr::LitStr,      Expr::FunApp,         Expr::Promotion,
+    Expr::Indexed,     Expr::TernaryIf,      Expr::EOr,
+    Expr::EAnd,        Expr::Unsupported,    Expr::IndexAll,
+    Expr::IndexSingle, Expr::IndexUpfrom,    Expr::IndexBetween,
+    Expr::IndexMulti,  Expr::TupleProjection};
 
 constexpr std::array<Expr::Lib, 3> kLibraryTags = {
     Expr::Lib::StanLib, Expr::Lib::Internal, Expr::Lib::UserDefined};
@@ -300,7 +302,7 @@ constexpr std::array<FnSuffix, 6> kSuffixTags = {
     FnSuffix::Plain, FnSuffix::Rng,    FnSuffix::Lpdf,
     FnSuffix::Lpmf,  FnSuffix::Target, FnSuffix::Jacobian};
 
-constexpr std::array<Transform::Kind, 19> kTransformTags = {
+constexpr std::array<Transform::Kind, 20> kTransformTags = {
     Transform::Identity,
     Transform::Lower,
     Transform::Upper,
@@ -319,22 +321,33 @@ constexpr std::array<Transform::Kind, 19> kTransformTags = {
     Transform::CholeskyCov,
     Transform::StochasticColumn,
     Transform::StochasticRow,
-    Transform::Unsupported};
+    Transform::Unsupported,
+    Transform::Tuple};
 
-// Tag 14 is `jacobian +=`, a TargetPE with its jacobian flag set.
+// Tag 14 is `jacobian +=`, a TargetPE with its jacobian flag set. Tag 15
+// is an assignment through a tuple projection.
 constexpr uint8_t kJacobianPETag = 14;
-constexpr std::array<Stmt::Kind, 15> kStmtTags = {
+constexpr uint8_t kTupleAssignmentTag = 15;
+constexpr std::array<Stmt::Kind, 16> kStmtTags = {
     Stmt::Decl,     Stmt::Assignment,  Stmt::TargetPE, Stmt::Block,
     Stmt::SList,    Stmt::For,         Stmt::IfElse,   Stmt::While,
     Stmt::NRFunApp, Stmt::Return,      Stmt::Break,    Stmt::Continue,
-    Stmt::Skip,     Stmt::Unsupported, Stmt::TargetPE};
+    Stmt::Skip,     Stmt::Unsupported, Stmt::TargetPE, Stmt::Assignment};
 
 UnsizedView read_view(Reader& reader) {
+  Reader::Depth depth(reader);
   UnsizedView view;
   view.depth = reader.u8();
   const uint8_t leaf = reader.u8();
   view.leaf = read_tag(reader, leaf, kLeafTags, "unknown unsized-view tag");
+  if (view.leaf == UnsizedLeaf::Tuple)
+    view.components =
+        reader.list<UnsizedView>([&] { return read_view(reader); });
   return view;
+}
+
+std::vector<bool> read_bools(Reader& reader) {
+  return reader.list<bool>([&] { return reader.boolean(); });
 }
 
 Expr read_expr(Reader& reader);
@@ -361,6 +374,8 @@ std::vector<Expr> read_exprs(Reader& reader) {
 void read_meta(Reader& reader, Expr& value) {
   value.unsized = read_view(reader);
   value.data_only = reader.boolean();
+  if (value.unsized.leaf == UnsizedLeaf::Tuple)
+    value.leaf_data_only = read_bools(reader);
   value.promoted = reader.boolean();
   value.raw = reader.string();
 }
@@ -413,6 +428,10 @@ Expr read_expr(Reader& reader) {
     case Expr::IndexMulti:
       value.args = read_exprs(reader);
       break;
+    case Expr::TupleProjection:
+      value.args = read_exprs(reader);
+      value.component = static_cast<int>(reader.u32());
+      break;
     case Expr::Unsupported:
       break;
   }
@@ -427,6 +446,9 @@ Transform read_transform(Reader& reader) {
   value.kind = read_tag(reader, tag, kTransformTags, "unknown transform tag");
   value.args = read_exprs(reader);
   value.raw = reader.string();
+  if (value.kind == Transform::Tuple)
+    value.components =
+        reader.list<Transform>([&] { return read_transform(reader); });
   return value;
 }
 
@@ -444,6 +466,9 @@ SizedType read_sized(Reader& reader) {
   value.dims = read_exprs(reader);
   value.elem_base = reader.string();
   value.raw = reader.string();
+  if (is_tuple(value))
+    value.components =
+        reader.list<SizedType>([&] { return read_sized(reader); });
   return value;
 }
 
@@ -472,6 +497,9 @@ Stmt read_stmt(Reader& reader) {
       value.decl_id = reader.string();
       value.decl_type = read_decl_type(reader);
       value.decl_data_only = reader.boolean();
+      if (is_tuple(value.decl_type) ||
+          value.decl_type.unsized.leaf == UnsizedLeaf::Tuple)
+        value.decl_leaf_data_only = read_bools(reader);
       value.has_init = reader.boolean();
       if (value.has_init) value.init = read_expr(reader);
       value.read_transform = read_optional_transform(reader);
@@ -481,6 +509,20 @@ Stmt read_stmt(Reader& reader) {
     case Stmt::Assignment:
       value.lhs = reader.string();
       value.lhs_idx = read_exprs(reader);
+      if (tag == kTupleAssignmentTag) {
+        value.lhs_steps = reader.list<Stmt::TupleStep>([&] {
+          Stmt::TupleStep step;
+          step.component = static_cast<int>(reader.u32());
+          step.indices = read_exprs(reader);
+          return step;
+        });
+        value.rhs = read_expr(reader);
+        value.read_transform = read_optional_transform(reader);
+        value.read_dims = read_exprs(reader);
+        if (value.lhs_steps.empty())
+          reader.fail("tuple assignment without a projection");
+        break;
+      }
       value.rhs = read_expr(reader);
       value.raw = reader.string();
       break;
@@ -558,11 +600,15 @@ FunDef read_fun(Reader& reader) {
   value.name = reader.string();
   value.arg_names = read_strings(reader);
   value.arg_views = reader.list<UnsizedView>([&] { return read_view(reader); });
-  value.arg_data_only = reader.list<bool>([&] { return reader.boolean(); });
-  value.body = read_stmts(reader);
+  value.arg_data_only = read_bools(reader);
   const size_t arity = value.arg_names.size();
   if (value.arg_views.size() != arity || value.arg_data_only.size() != arity)
     reader.fail("function argument field lengths disagree");
+  value.arg_leaf_data_only.resize(arity);
+  for (size_t i = 0; i < arity; ++i)
+    if (value.arg_views[i].leaf == UnsizedLeaf::Tuple)
+      value.arg_leaf_data_only[i] = read_bools(reader);
+  value.body = read_stmts(reader);
   return value;
 }
 

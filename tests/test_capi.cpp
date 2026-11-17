@@ -2551,6 +2551,57 @@ Compilation compile(const std::string& code, const char* filename) {
   return out;
 }
 
+// Tuple names as CmdStan's generated constrained_param_names and
+// unconstrained_param_names spell them: ':' before a slot, '.' before an
+// index, a simplex's free values one fewer.
+void test_tuple_names() {
+  if (!stanli_has_embedded_stanc()) return;
+  const Compilation c = compile(
+      "parameters { tuple(real, array[2] real<lower=0>) tp;"
+      "  tuple(simplex[3], real) ts; }\n"
+      "model { tp.1 ~ normal(0, 1); tp.2 ~ exponential(1);"
+      "  ts.2 ~ normal(ts.1[1], 1); }\n"
+      "generated quantities { array[2] tuple(real, int) g;"
+      "  for (i in 1:2) g[i] = (tp.1 * i, i); }\n",
+      "tuples.stan");
+  expect_true("tuple model compiles: " + c.error, c.ok);
+  if (!c.ok) return;
+  char message[256] = "";
+  char* payload = stanli_bridgestan_data(nullptr, c.mir.c_str(), "tuples",
+                                         message, sizeof message);
+  expect_true(std::string("tuple payload: ") + message, payload != nullptr);
+  if (payload == nullptr) return;
+  char* err = nullptr;
+  bs_model* m = bs_model_construct(payload, 1, &err);
+  stanli_string_free(payload);
+  expect_true(std::string("tuple model constructs: ") + (err ? err : ""),
+              m != nullptr);
+  bs_free_error_msg(err);
+  err = nullptr;
+  if (m == nullptr) return;
+  expect_eq("tuple bs_param_unc_names", bs_param_unc_names(m),
+            "tp:1,tp:2.1,tp:2.2,ts:1.1,ts:1.2,ts:2");
+  expect_eq("tuple bs_param_names(F,F)", bs_param_names(m, false, false),
+            "tp:1,tp:2.1,tp:2.2,ts:1.1,ts:1.2,ts:1.3,ts:2");
+  expect_eq("tuple bs_param_names(T,T)", bs_param_names(m, true, true),
+            "tp:1,tp:2.1,tp:2.2,ts:1.1,ts:1.2,ts:1.3,ts:2,g.1:1,g.1:2,"
+            "g.2:1,g.2:2");
+  // A constrained draw goes back through unconstrain, which reads each
+  // tuple leaf by its name.
+  const double q[6] = {0.3, -0.2, 0.4, 0.1, -0.5, 0.7};
+  double theta[7], back[6];
+  const bool ok =
+      bs_param_constrain(m, false, false, q, theta, nullptr, &err) == 0 &&
+      bs_param_unconstrain(m, theta, back, &err) == 0;
+  expect_true(std::string("tuple constrain round trip: ") + (err ? err : ""),
+              ok);
+  bs_free_error_msg(err);
+  for (int i = 0; ok && i < 6; ++i)
+    expect_near("tuple unconstrain q[" + std::to_string(i) + "]", back[i],
+                q[i]);
+  bs_model_destruct(m);
+}
+
 void test_named_source_and_warnings() {
   Compilation empty = compile("", "dir/empty.stan");
   if (!stanli_has_embedded_stanc()) {
@@ -2779,6 +2830,7 @@ int main() {
   test_sample_setup_error();
   test_bridgestan_data();
   test_named_source_and_warnings();
+  test_tuple_names();
   test_declaration_annotations();
   test_fast_math_options();
   test_source_include_paths();

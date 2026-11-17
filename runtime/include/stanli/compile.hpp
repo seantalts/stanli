@@ -69,6 +69,10 @@ struct CompiledModel {
     // view is a whole variable.
     std::string variable;
     std::vector<int64_t> index;
+    // The variable holding the values, when it is not `name`: a tuple
+    // parameter's leaf `tp.1` is named `tp:1`.
+    std::string binding;
+    const std::string& key() const { return binding.empty() ? name : binding; }
     // Empty means identity. Nonidentity permutations are prepared once while
     // compiling the concrete model, so serialization performs one indexed
     // copy per value with no per-draw division or allocation.
@@ -152,7 +156,7 @@ struct CompiledModel {
       const double* stored = ex.value_ptr(view.slot);
       for (int64_t i = 0; i < view.len; ++i)
         value.r[(size_t)i] = stored[view.storage_index(i)];
-      env.emplace(view.name, std::move(value));
+      env.emplace(view.key(), std::move(value));
     }
     return env;
   }

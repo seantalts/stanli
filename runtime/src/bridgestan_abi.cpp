@@ -559,7 +559,7 @@ std::map<std::string, stanli::DataMap::Entry> inits_from_flat(
     stanli::DataMap::Entry e;
     e.dims = view.dims;
     e.r.assign(theta + at, theta + at + view.len);
-    out.emplace(view.name, std::move(e));
+    out.emplace(view.key(), std::move(e));
     at += view.len;
   }
   return out;

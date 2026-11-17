@@ -1,7 +1,7 @@
 open Std
 open Middle
 
-type unsized_view = {depth: int; leaf: string}
+type unsized_view = {depth: int; leaf: string; components: unsized_view list}
 
 type function_type =
   {ft_args: unsized_view list; ft_suffix: int; ft_propto: bool}
@@ -17,15 +17,25 @@ type wire_expr =
   ; e_lit: float
   ; e_lit_s: string
   ; e_args: wire_expr list
+  ; e_component: int
   ; e_unsized: unsized_view
   ; e_data_only: bool
+  ; e_leaf_data_only: bool list
   ; e_promoted: bool
   ; e_raw: string }
 
-type wire_transform = {t_kind: string; t_args: wire_expr list; t_raw: string}
+type wire_transform =
+  { t_kind: string
+  ; t_args: wire_expr list
+  ; t_raw: string
+  ; t_components: wire_transform list }
 
 type wire_sized =
-  {s_base: string; s_dims: wire_expr list; s_elem_base: string; s_raw: string}
+  { s_base: string
+  ; s_dims: wire_expr list
+  ; s_elem_base: string
+  ; s_raw: string
+  ; s_components: wire_sized list }
 
 (* The payload of the two statement internals that carry one: FnCheck's
    constraint, checked variable name and value, and FnWriteParam's optional
@@ -41,12 +51,14 @@ and wire_stmt =
   ; st_decl_type: wire_sized
   ; st_decl_unsized: (unsized_view * string) option
   ; st_decl_data_only: bool
+  ; st_decl_leaf_data_only: bool list
   ; st_has_init: bool
   ; st_init: wire_expr
   ; st_read_transform: wire_transform option
   ; st_read_dims: wire_expr list
   ; st_lhs: string
   ; st_lhs_idx: wire_expr list
+  ; st_lhs_steps: (int * wire_expr list) list
   ; st_rhs: wire_expr
   ; st_target: wire_expr
   ; st_fn_lib: string
@@ -66,9 +78,10 @@ type wire_fun =
   ; f_arg_names: string list
   ; f_arg_views: unsized_view list
   ; f_arg_data_only: bool list
+  ; f_arg_leaf_data_only: bool list list
   ; f_body: wire_stmt list }
 
-let unsupported_view = {depth= 0; leaf= "Unknown"}
+let unsupported_view = {depth= 0; leaf= "Unknown"; components= []}
 
 let default_expr () =
   { e_kind= "Unsupported"
@@ -81,12 +94,15 @@ let default_expr () =
   ; e_lit= 0.
   ; e_lit_s= ""
   ; e_args= []
+  ; e_component= 0
   ; e_unsized= unsupported_view
   ; e_data_only= false
+  ; e_leaf_data_only= []
   ; e_promoted= false
   ; e_raw= "" }
 
-let default_sized () = {s_base= ""; s_dims= []; s_elem_base= ""; s_raw= ""}
+let default_sized () =
+  {s_base= ""; s_dims= []; s_elem_base= ""; s_raw= ""; s_components= []}
 
 let default_stmt () =
   { st_kind= "Unsupported"
@@ -94,12 +110,14 @@ let default_stmt () =
   ; st_decl_type= default_sized ()
   ; st_decl_unsized= None
   ; st_decl_data_only= false
+  ; st_decl_leaf_data_only= []
   ; st_has_init= false
   ; st_init= default_expr ()
   ; st_read_transform= None
   ; st_read_dims= []
   ; st_lhs= ""
   ; st_lhs_idx= []
+  ; st_lhs_steps= []
   ; st_rhs= default_expr ()
   ; st_target= default_expr ()
   ; st_fn_lib= "StanLib"
@@ -137,19 +155,12 @@ let raw_expr_pattern pattern =
 let raw_internal internal =
   sexp_string (Internal_fun.sexp_of_t Expr.Typed.sexp_of_t internal)
 
-let raw_transform transform =
-  sexp_string (Transformation.sexp_of_t Expr.Typed.sexp_of_t transform)
-
 let raw_sized sized =
   sexp_string (SizedType.sexp_of_t Expr.Typed.sexp_of_t sized)
 
-let raw_stmt_pattern pattern =
-  sexp_string
-    (Stmt.Pattern.sexp_of_t Expr.Typed.sexp_of_t Stmt.Located.sexp_of_t pattern)
-
 let is_data_only = function UnsizedType.DataOnly -> true | _ -> false
 
-let unsized_view_and_raw typ =
+let rec unsized_view typ =
   let rec unwind depth = function
     | UnsizedType.UArray inner ->
         if depth = 255 then
@@ -157,20 +168,44 @@ let unsized_view_and_raw typ =
         unwind (depth + 1) inner
     | leaf -> (depth, leaf) in
   let depth, leaf_type = unwind 0 typ in
-  let leaf =
+  let leaf, components =
     match leaf_type with
-    | UnsizedType.UInt -> "Int"
-    | UReal -> "Real"
-    | UComplex -> "Complex"
-    | UVector -> "Vector"
-    | URowVector -> "RowVector"
-    | UMatrix -> "Matrix"
-    | UComplexVector | UComplexRowVector | UComplexMatrix | UTuple _ | UFun _
+    | UnsizedType.UInt -> ("Int", [])
+    | UReal -> ("Real", [])
+    | UComplex -> ("Complex", [])
+    | UVector -> ("Vector", [])
+    | URowVector -> ("RowVector", [])
+    | UMatrix -> ("Matrix", [])
+    | UTuple types -> ("Tuple", List.map ~f:unsized_view types)
+    | UComplexVector | UComplexRowVector | UComplexMatrix | UFun _
      |UMathLibraryFunction ->
-        "Unknown"
+        ("Unknown", [])
     | UArray _ -> assert false in
-  let view = {depth; leaf} in
-  if String.equal leaf "Unknown" then (view, raw_unsized typ) else (view, "")
+  {depth; leaf; components}
+
+let rec view_has_unknown view =
+  String.equal view.leaf "Unknown"
+  || List.exists ~f:view_has_unknown view.components
+
+let unsized_view_and_raw typ =
+  let view = unsized_view typ in
+  if view_has_unknown view then (view, raw_unsized typ) else (view, "")
+
+(* Whether each leaf of a tuple type is data, in depth-first order: stanc3 gives
+   a tuple one adlevel per component. *)
+let rec leaf_data_only adlevel typ =
+  match (typ : UnsizedType.t) with
+  | UArray inner -> leaf_data_only adlevel inner
+  | UTuple types -> (
+      match adlevel with
+      | UnsizedType.TupleAD levels when List.length levels = List.length types
+        ->
+          List.concat (List.map2 levels types ~f:leaf_data_only)
+      | _ -> List.concat_map types ~f:(leaf_data_only adlevel))
+  | _ -> [is_data_only adlevel]
+
+let tuple_leaf_data_only adlevel typ =
+  if UnsizedType.contains_tuple typ then leaf_data_only adlevel typ else []
 
 let canonical_int32 spelling =
   try Int32.of_string spelling |> Int32.to_string
@@ -290,14 +325,16 @@ let rec expr_of_t (expr : Expr.Typed.t) =
         { (default_expr ()) with
           e_kind= "Indexed"
         ; e_args= expr_of_t base :: List.map ~f:index_of_t indices }
-    | TupleProjection _ ->
+    | TupleProjection (tuple, component) ->
         { (default_expr ()) with
-          e_kind= "Unsupported"
-        ; e_raw= raw_expr_pattern expr.pattern } in
+          e_kind= "TupleProjection"
+        ; e_args= [expr_of_t tuple]
+        ; e_component= component } in
   let view, type_raw = unsized_view_and_raw expr.meta.type_ in
   { base with
     e_unsized= view
   ; e_data_only= is_data_only expr.meta.adlevel
+  ; e_leaf_data_only= tuple_leaf_data_only expr.meta.adlevel expr.meta.type_
   ; e_raw= (if String.is_empty type_raw then base.e_raw else type_raw) }
 
 and fun_app_of_t kind args =
@@ -350,6 +387,10 @@ and index_of_t = function
 
 let rec sized_of_t sized =
   match sized with
+  | SizedType.STuple components ->
+      { (default_sized ()) with
+        s_base= "STuple"
+      ; s_components= List.map ~f:sized_of_t components }
   | SizedType.SInt -> {(default_sized ()) with s_base= "SInt"}
   | SReal -> {(default_sized ()) with s_base= "SReal"}
   | SComplex -> {(default_sized ()) with s_base= "SComplex"}
@@ -368,21 +409,23 @@ let rec sized_of_t sized =
       ; s_dims= expr_of_t dim :: inner.s_dims
       ; s_elem_base=
           (if String.equal inner.s_base "SArray" then inner.s_elem_base
-           else inner.s_base) }
-  | (SComplexVector _ | SComplexRowVector _ | SComplexMatrix _ | STuple _) as
-    unsupported ->
+           else inner.s_base)
+      ; s_components= inner.s_components }
+  | (SComplexVector _ | SComplexRowVector _ | SComplexMatrix _) as unsupported
+    ->
       let sexp = raw_sized unsupported in
       let base =
         match unsupported with
         | SComplexVector _ -> "SComplexVector"
         | SComplexRowVector _ -> "SComplexRowVector"
         | SComplexMatrix _ -> "SComplexMatrix"
-        | STuple _ -> "STuple"
         | _ -> assert false in
       {(default_sized ()) with s_base= base; s_raw= sexp}
 
-let transform_of_t transform =
-  let supported_atom kind = {t_kind= kind; t_args= []; t_raw= kind} in
+let rec transform_of_t transform =
+  let make kind args =
+    {t_kind= kind; t_args= args; t_raw= ""; t_components= []} in
+  let supported_atom kind = {(make kind []) with t_raw= kind} in
   match transform with
   | Transformation.Identity -> supported_atom "Identity"
   | Simplex -> supported_atom "Simplex"
@@ -394,22 +437,19 @@ let transform_of_t transform =
   | Correlation -> supported_atom "Correlation"
   | Covariance -> supported_atom "Covariance"
   | CholeskyCov -> supported_atom "CholeskyCov"
-  | Lower arg -> {t_kind= "Lower"; t_args= [expr_of_t arg]; t_raw= ""}
-  | Upper arg -> {t_kind= "Upper"; t_args= [expr_of_t arg]; t_raw= ""}
+  | Lower arg -> make "Lower" [expr_of_t arg]
+  | Upper arg -> make "Upper" [expr_of_t arg]
   | LowerUpper (lower, upper) ->
-      { t_kind= "LowerUpper"
-      ; t_args= List.map ~f:expr_of_t [lower; upper]
-      ; t_raw= "" }
-  | Offset arg -> {t_kind= "Offset"; t_args= [expr_of_t arg]; t_raw= ""}
-  | Multiplier arg -> {t_kind= "Multiplier"; t_args= [expr_of_t arg]; t_raw= ""}
+      make "LowerUpper" (List.map ~f:expr_of_t [lower; upper])
+  | Offset arg -> make "Offset" [expr_of_t arg]
+  | Multiplier arg -> make "Multiplier" [expr_of_t arg]
   | OffsetMultiplier (offset, multiplier) ->
-      { t_kind= "OffsetMultiplier"
-      ; t_args= List.map ~f:expr_of_t [offset; multiplier]
-      ; t_raw= "" }
+      make "OffsetMultiplier" (List.map ~f:expr_of_t [offset; multiplier])
   | StochasticColumn -> supported_atom "StochasticColumn"
   | StochasticRow -> supported_atom "StochasticRow"
-  | TupleTransformation _ as unsupported ->
-      {t_kind= "Unsupported"; t_args= []; t_raw= raw_transform unsupported}
+  | TupleTransformation components ->
+      { (make "Tuple" []) with
+        t_components= List.map ~f:transform_of_t components }
 
 (* stanc3 declares optimizer temporaries, such as an inlined function's result,
    without sizes; the first whole assignment gives them a shape. *)
@@ -447,6 +487,8 @@ let rec stmt_of_t (stmt : Stmt.Located.t) =
           | Unsized _ -> default_sized ())
       ; st_decl_unsized= decl_unsized_of_type decl_type
       ; st_decl_data_only= is_data_only decl_adtype
+      ; st_decl_leaf_data_only=
+          tuple_leaf_data_only decl_adtype (Type.to_unsized decl_type)
       ; st_has_init= initialized
       ; st_init= init
       ; st_read_transform= read_transform
@@ -457,10 +499,23 @@ let rec stmt_of_t (stmt : Stmt.Located.t) =
       ; st_lhs= lhs
       ; st_lhs_idx= List.map ~f:index_of_t indices
       ; st_rhs= expr_of_t rhs }
-  | Assignment ((LTupleProjection _, _), _, _) ->
+  | Assignment (((LTupleProjection _, _) as lhs), _, rhs) ->
+      (* `x[i].2[j]` is x, its indices [i], and one step: slot 2, [j]. *)
+      let rec flatten steps = function
+        | Stmt.Pattern.LVariable name, indices -> (name, indices, steps)
+        | LTupleProjection (inner, component), indices ->
+            flatten ((component, List.map ~f:index_of_t indices) :: steps) inner
+      in
+      let name, indices, steps = flatten [] lhs in
+      let read_transform, read_dims = read_param_fields rhs in
       { (default_stmt ()) with
-        st_kind= "Unsupported"
-      ; st_raw= raw_stmt_pattern stmt.pattern }
+        st_kind= "TupleAssignment"
+      ; st_lhs= name
+      ; st_lhs_idx= List.map ~f:index_of_t indices
+      ; st_lhs_steps= steps
+      ; st_rhs= expr_of_t rhs
+      ; st_read_transform= read_transform
+      ; st_read_dims= read_dims }
   | TargetPE expr ->
       {(default_stmt ()) with st_kind= "TargetPE"; st_target= expr_of_t expr}
   | Block body ->
@@ -556,15 +611,18 @@ and nr_fun_app_of_t kind args =
       ; st_fn_args= ordinary_args }
 
 let fun_of_t (definition : Stmt.Located.t Program.fun_def) =
-  let arg_names, arg_views, arg_data_only =
-    List.fold_right definition.fdargs ~init:([], [], [])
-      ~f:(fun (adlevel, name, typ) (names, views, levels) ->
-        let view, _ = unsized_view_and_raw typ in
-        (name :: names, view :: views, is_data_only adlevel :: levels)) in
+  let arg_names, arg_views, arg_data_only, arg_leaf_data_only =
+    List.fold_right definition.fdargs ~init:([], [], [], [])
+      ~f:(fun (adlevel, name, typ) (names, views, levels, leaf_levels) ->
+        ( name :: names
+        , unsized_view typ :: views
+        , is_data_only adlevel :: levels
+        , tuple_leaf_data_only adlevel typ :: leaf_levels )) in
   { f_name= definition.fdname
   ; f_arg_names= arg_names
   ; f_arg_views= arg_views
   ; f_arg_data_only= arg_data_only
+  ; f_arg_leaf_data_only= arg_leaf_data_only
   ; f_body=
       Option.value_map definition.fdbody ~default:[] ~f:(fun s -> [stmt_of_t s])
   }
@@ -656,11 +714,13 @@ let v2_leaf_tag = function
   | "Vector" -> 4
   | "RowVector" -> 5
   | "Matrix" -> 6
+  | "Tuple" -> 7
   | leaf -> invalid_arg ("portable MIR: unknown unsized leaf " ^ leaf)
 
-let add_v2_view buffer {depth; leaf} =
+let rec add_v2_view buffer {depth; leaf; components} =
   add_u8 buffer depth;
-  add_u8 buffer (v2_leaf_tag leaf)
+  add_u8 buffer (v2_leaf_tag leaf);
+  if String.equal leaf "Tuple" then add_v2_list add_v2_view buffer components
 
 let add_v2_optional add_value buffer = function
   | None -> add_u8 buffer 0
@@ -676,6 +736,8 @@ let add_v2_function_type buffer {ft_args; ft_suffix; ft_propto} =
 let add_v2_meta buffer expr =
   add_v2_view buffer expr.e_unsized;
   add_v2_bool buffer expr.e_data_only;
+  if String.equal expr.e_unsized.leaf "Tuple" then
+    add_v2_list add_v2_bool buffer expr.e_leaf_data_only;
   add_v2_bool buffer expr.e_promoted;
   add_v2_string buffer expr.e_raw
 
@@ -738,6 +800,10 @@ let rec add_v2_expr buffer expr =
   | "IndexMulti" ->
       add_u8 buffer 15;
       add_v2_list add_v2_expr buffer expr.e_args
+  | "TupleProjection" ->
+      add_u8 buffer 16;
+      add_v2_list add_v2_expr buffer expr.e_args;
+      add_u32 buffer expr.e_component
   | kind -> invalid_arg ("portable MIR: unknown expression kind " ^ kind));
   add_v2_meta buffer expr
 
@@ -761,18 +827,28 @@ let v2_transform_tag = function
   | "StochasticColumn" -> 16
   | "StochasticRow" -> 17
   | "Unsupported" -> 18
+  | "Tuple" -> 19
   | kind -> invalid_arg ("portable MIR: unknown transform kind " ^ kind)
 
-let add_v2_transform buffer transform =
+let rec add_v2_transform buffer transform =
   add_u8 buffer (v2_transform_tag transform.t_kind);
   add_v2_list add_v2_expr buffer transform.t_args;
-  add_v2_string buffer transform.t_raw
+  add_v2_string buffer transform.t_raw;
+  if String.equal transform.t_kind "Tuple" then
+    add_v2_list add_v2_transform buffer transform.t_components
 
-let add_v2_sized buffer sized =
+let is_tuple_sized sized =
+  String.equal sized.s_base "STuple"
+  || String.equal sized.s_base "SArray"
+     && String.equal sized.s_elem_base "STuple"
+
+let rec add_v2_sized buffer sized =
   add_v2_string buffer sized.s_base;
   add_v2_list add_v2_expr buffer sized.s_dims;
   add_v2_string buffer sized.s_elem_base;
-  add_v2_string buffer sized.s_raw
+  add_v2_string buffer sized.s_raw;
+  if is_tuple_sized sized then
+    add_v2_list add_v2_sized buffer sized.s_components
 
 let rec add_v2_stmt buffer stmt =
   match stmt.st_kind with
@@ -788,6 +864,8 @@ let rec add_v2_stmt buffer stmt =
           add_v2_view buffer view;
           add_v2_string buffer raw);
       add_v2_bool buffer stmt.st_decl_data_only;
+      if not (List.is_empty stmt.st_decl_leaf_data_only) then
+        add_v2_list add_v2_bool buffer stmt.st_decl_leaf_data_only;
       add_v2_bool buffer stmt.st_has_init;
       if stmt.st_has_init then add_v2_expr buffer stmt.st_init;
       add_v2_optional add_v2_transform buffer stmt.st_read_transform;
@@ -863,6 +941,18 @@ let rec add_v2_stmt buffer stmt =
       add_u8 buffer 14;
       add_v2_expr buffer stmt.st_target;
       add_v2_string buffer stmt.st_raw
+  | "TupleAssignment" ->
+      add_u8 buffer 15;
+      add_v2_string buffer stmt.st_lhs;
+      add_v2_list add_v2_expr buffer stmt.st_lhs_idx;
+      add_v2_list
+        (fun buffer (component, indices) ->
+          add_u32 buffer component;
+          add_v2_list add_v2_expr buffer indices)
+        buffer stmt.st_lhs_steps;
+      add_v2_expr buffer stmt.st_rhs;
+      add_v2_optional add_v2_transform buffer stmt.st_read_transform;
+      add_v2_list add_v2_expr buffer stmt.st_read_dims
   | kind -> invalid_arg ("portable MIR: unknown statement kind " ^ kind)
 
 let add_v2_fun buffer fn =
@@ -870,6 +960,9 @@ let add_v2_fun buffer fn =
   add_v2_list add_v2_string buffer fn.f_arg_names;
   add_v2_list add_v2_view buffer fn.f_arg_views;
   add_v2_list add_v2_bool buffer fn.f_arg_data_only;
+  List.iter2 fn.f_arg_views fn.f_arg_leaf_data_only ~f:(fun view levels ->
+      if String.equal view.leaf "Tuple" then
+        add_v2_list add_v2_bool buffer levels);
   add_v2_list add_v2_stmt buffer fn.f_body
 
 let add_v2_input buffer (name, sized) =
@@ -975,4 +1068,4 @@ let encode (program : Program.Typed.t) =
        ~f:(fun (name, _, Program.{out_block; out_constrained_st; _}) ->
          (name, out_block, sized_of_t out_constrained_st)));
   add_v2_list add_v2_stmt buffer (List.map ~f:stmt_of_t program.transform_inits);
-  "STANLI3:" ^ encode_base64 (Buffer.contents buffer)
+  "STANLI4:" ^ encode_base64 (Buffer.contents buffer)

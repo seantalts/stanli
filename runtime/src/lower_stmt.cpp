@@ -1798,9 +1798,15 @@ void Lowering::lower_simple_stmt(const mir::Stmt& s) {
           base = &base->args[0];
         }
         const Val v = lower_expr(s.fn_args[0]);
+        const mir::TupleLeaf* leaf = tuple_leaf(*base);
         const mir::OutputVar* owner = output_cursor.take(
-            base->kind == mir::Expr::Var ? base->name : std::string(),
+            leaf                           ? leaf->variable
+            : base->kind == mir::Expr::Var ? base->name
+                                           : std::string(),
             g.slots[v.slot].len, [&](const mir::OutputVar& var) {
+              if (mir::is_tuple(var.type))
+                return mir::output_columns(
+                    var.type, [&](const mir::Expr& d) { return eval_int(d); });
               return sized_len(var.type, nullptr, nullptr, var.name);
             });
         if (owner == nullptr)
@@ -1810,17 +1816,18 @@ void Lowering::lower_simple_stmt(const mir::Stmt& s) {
         if (owner->block == mir::OutputVar::Block::GeneratedQuantities &&
             !n_gq_start)
           n_gq_start = out.views.size();
-        std::string name = owner->name;
-        for (auto it = ixs.rbegin(); it != ixs.rend(); ++it)
-          name += "." + std::to_string(*it);
+        const auto named = mir::output_name(
+            owner->name, leaf, std::vector<int64_t>(ixs.rbegin(), ixs.rend()));
+        if (!named) fail("FnWriteParam of a whole array of tuples", s.raw);
         // stanc peels the array dimensions, so what is left here is a
         // scalar, a vector/row_vector, or a matrix -- and its type decides
         // how CmdStan indexes the columns.
         using Naming = CompiledModel::ParamView::Naming;
         const mir::Expr& t = s.fn_args[0];
-        CompiledModel::ParamView pv{name, v.slot, g.slots[v.slot].len};
-        pv.variable = owner->name;
-        pv.index.assign(ixs.rbegin(), ixs.rend());
+        CompiledModel::ParamView pv{named->name, v.slot, g.slots[v.slot].len};
+        pv.variable = named->variable;
+        pv.index = named->index;
+        const std::string& name = named->name;
         if (mir::language_scalar(t) ||
             mir::is_unsized(t, mir::UnsizedLeaf::Complex)) {
           pv.naming = Naming::Scalar;

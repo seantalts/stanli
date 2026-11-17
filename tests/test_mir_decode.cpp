@@ -84,7 +84,7 @@ std::string encode_base64(std::string_view bytes) {
 }
 
 std::string v2_wire(std::string_view payload) {
-  return "STANLI3:" + encode_base64(payload);
+  return "STANLI4:" + encode_base64(payload);
 }
 
 void append_bool(std::string& bytes, bool value) {
@@ -101,6 +101,13 @@ void append_list(std::string& bytes, const std::vector<T>& values,
 void append_view(std::string& bytes, const mir::UnsizedView& value) {
   append_u8(bytes, value.depth);
   append_u8(bytes, static_cast<uint8_t>(value.leaf));
+  if (value.leaf == mir::UnsizedLeaf::Tuple)
+    append_list(bytes, value.components, append_view);
+}
+
+void append_bools(std::string& bytes, const std::vector<bool>& values) {
+  append_u32(bytes, static_cast<uint32_t>(values.size()));
+  for (bool value : values) append_bool(bytes, value);
 }
 
 void append_expr(std::string& bytes, const mir::Expr& value);
@@ -160,11 +167,17 @@ void append_expr(std::string& bytes, const mir::Expr& value) {
     case mir::Expr::IndexMulti:
       append_expr_list(bytes, value.args);
       break;
+    case mir::Expr::TupleProjection:
+      append_expr_list(bytes, value.args);
+      append_u32(bytes, static_cast<uint32_t>(value.component));
+      break;
     case mir::Expr::Unsupported:
       break;
   }
   append_view(bytes, value.unsized);
   append_bool(bytes, value.data_only);
+  if (value.unsized.leaf == mir::UnsizedLeaf::Tuple)
+    append_bools(bytes, value.leaf_data_only);
   append_bool(bytes, value.promoted);
   append_string(bytes, value.raw);
 }
@@ -173,6 +186,8 @@ void append_transform(std::string& bytes, const mir::Transform& value) {
   append_u8(bytes, static_cast<uint8_t>(value.kind));
   append_expr_list(bytes, value.args);
   append_string(bytes, value.raw);
+  if (value.kind == mir::Transform::Tuple)
+    append_list(bytes, value.components, append_transform);
 }
 
 void append_optional_transform(std::string& bytes,
@@ -186,6 +201,7 @@ void append_sized(std::string& bytes, const mir::SizedType& value) {
   append_expr_list(bytes, value.dims);
   append_string(bytes, value.elem_base);
   append_string(bytes, value.raw);
+  if (mir::is_tuple(value)) append_list(bytes, value.components, append_sized);
 }
 
 void append_stmt_list(std::string& bytes,
@@ -196,6 +212,20 @@ void append_stmt_list(std::string& bytes,
 }
 
 void append_stmt(std::string& bytes, const mir::Stmt& value) {
+  if (value.kind == mir::Stmt::Assignment && !value.lhs_steps.empty()) {
+    append_u8(bytes, 15);
+    append_string(bytes, value.lhs);
+    append_expr_list(bytes, value.lhs_idx);
+    append_list(bytes, value.lhs_steps,
+                [](std::string& out, const mir::Stmt::TupleStep& step) {
+                  append_u32(out, static_cast<uint32_t>(step.component));
+                  append_expr_list(out, step.indices);
+                });
+    append_expr(bytes, value.rhs);
+    append_optional_transform(bytes, value.read_transform);
+    append_expr_list(bytes, value.read_dims);
+    return;
+  }
   append_u8(bytes, value.jacobian ? 14 : static_cast<uint8_t>(value.kind));
   switch (value.kind) {
     case mir::Stmt::Decl:
@@ -210,6 +240,9 @@ void append_stmt(std::string& bytes, const mir::Stmt& value) {
         append_string(bytes, value.decl_type.raw);
       }
       append_bool(bytes, value.decl_data_only);
+      if (mir::is_tuple(value.decl_type) ||
+          value.decl_type.unsized.leaf == mir::UnsizedLeaf::Tuple)
+        append_bools(bytes, value.decl_leaf_data_only);
       append_bool(bytes, value.has_init);
       if (value.has_init) append_expr(bytes, value.init);
       append_optional_transform(bytes, value.read_transform);
@@ -302,8 +335,10 @@ void append_fun(std::string& bytes, const mir::FunDef& value) {
               [](std::string& out, const mir::UnsizedView& view) {
                 append_view(out, view);
               });
-  append_u32(bytes, static_cast<uint32_t>(value.arg_data_only.size()));
-  for (bool data_only : value.arg_data_only) append_bool(bytes, data_only);
+  append_bools(bytes, value.arg_data_only);
+  for (size_t i = 0; i < value.arg_views.size(); ++i)
+    if (value.arg_views[i].leaf == mir::UnsizedLeaf::Tuple)
+      append_bools(bytes, value.arg_leaf_data_only.at(i));
   append_stmt_list(bytes, value.body);
 }
 
@@ -424,6 +459,8 @@ const char* write_leaf(mir::UnsizedLeaf value) {
       return "RowVector";
     case mir::UnsizedLeaf::Matrix:
       return "Matrix";
+    case mir::UnsizedLeaf::Tuple:
+      return "Tuple";
   }
   return "Unknown";
 }
@@ -466,6 +503,8 @@ const char* write_expr_kind(mir::Expr::Kind value) {
       return "IndexBetween";
     case mir::Expr::IndexMulti:
       return "IndexMulti";
+    case mir::Expr::TupleProjection:
+      return "TupleProjection";
   }
   return "Unsupported";
 }
@@ -560,6 +599,8 @@ const char* write_transform_kind(mir::Transform::Kind value) {
       return "StochasticRow";
     case mir::Transform::Unsupported:
       return "Unsupported";
+    case mir::Transform::Tuple:
+      return "Tuple";
   }
   return "Unsupported";
 }
@@ -1234,6 +1275,142 @@ void check_overload_finalization() {
         "portable decoder applies legacy overload finalization once");
 }
 
+// A tuple decodes into one variable per leaf, named by its data key, with
+// its slots recorded for naming the output.
+void check_tuple_elimination() {
+  const mir::UnsizedView int_view{0, mir::UnsizedLeaf::Int};
+  const mir::UnsizedView vector_view{0, mir::UnsizedLeaf::Vector};
+  mir::UnsizedView tuple_view{1, mir::UnsizedLeaf::Tuple};
+  tuple_view.components = {int_view, vector_view};
+  mir::SizedType vector_type;
+  vector_type.base = "SVector";
+  vector_type.dims.push_back(literal(2));
+  vector_type.dims[0].kind = mir::Expr::LitInt;
+  vector_type.dims[0].lit_i = 2;
+  vector_type.dims[0].unsized = int_view;
+  mir::SizedType int_type;
+  int_type.base = "SInt";
+  mir::SizedType tuple_type;
+  tuple_type.base = "SArray";
+  tuple_type.elem_base = "STuple";
+  tuple_type.dims.push_back(vector_type.dims[0]);
+  tuple_type.components = {int_type, vector_type};
+
+  mir::Program program;
+  program.input_vars.emplace_back("d", tuple_type);
+  mir::Stmt decl;
+  decl.kind = mir::Stmt::Decl;
+  decl.decl_id = "d";
+  decl.decl_type = tuple_type;
+  decl.decl_data_only = false;
+  decl.decl_leaf_data_only = {true, true};
+  program.prepare_data.push_back(decl);
+  mir::Expr d;
+  d.kind = mir::Expr::Var;
+  d.name = "d";
+  d.unsized = tuple_view;
+  d.leaf_data_only = {true, true};
+  mir::Stmt read;
+  read.kind = mir::Stmt::NRFunApp;
+  read.fn_lib = mir::Expr::Lib::Internal;
+  read.fn_name = "FnReadData";
+  mir::Expr context;
+  context.kind = mir::Expr::Var;
+  context.name = "context__";
+  mir::Expr key;
+  key.kind = mir::Expr::LitStr;
+  key.lit_s = "d";
+  read.fn_args = {d, context, key};
+  program.prepare_data.push_back(read);
+  // target += sum(d[2].2)
+  mir::Expr element;
+  element.kind = mir::Expr::Indexed;
+  element.unsized = tuple_view;
+  element.unsized.depth = 0;
+  element.leaf_data_only = {true, true};
+  mir::Expr two;
+  two.kind = mir::Expr::IndexSingle;
+  two.args.push_back(vector_type.dims[0]);
+  element.args = {d, two};
+  mir::Expr slot;
+  slot.kind = mir::Expr::TupleProjection;
+  slot.component = 2;
+  slot.unsized = vector_view;
+  slot.data_only = true;
+  slot.args = {element};
+  mir::Expr sum;
+  sum.kind = mir::Expr::FunApp;
+  sum.name = "sum";
+  sum.unsized = {0, mir::UnsizedLeaf::Real};
+  sum.data_only = true;
+  sum.args = {slot};
+  mir::Stmt target;
+  target.kind = mir::Stmt::TargetPE;
+  target.target = sum;
+  program.log_prob.push_back(target);
+
+  const mir::Program decoded = decode_program(write_v2(program));
+  check(decoded.input_vars.size() == 2 &&
+            decoded.input_vars[0].first == "d.1" &&
+            decoded.input_vars[0].second.base == "SArray" &&
+            decoded.input_vars[0].second.elem_base == "SInt" &&
+            decoded.input_vars[1].first == "d.2" &&
+            decoded.input_vars[1].second.dims.size() == 2,
+        "a tuple input becomes one array input per leaf");
+  check(decoded.prepare_data.size() == 4 &&
+            decoded.prepare_data[2].fn_args[2].lit_s == "d.1" &&
+            decoded.prepare_data[3].fn_args[2].lit_s == "d.2",
+        "a tuple's data is read under each leaf's JSON key");
+  const mir::Expr& indexed = decoded.log_prob.at(0).target.args.at(0);
+  check(indexed.kind == mir::Expr::Indexed && indexed.args[0].name == "d.2" &&
+            indexed.unsized.leaf == mir::UnsizedLeaf::Vector &&
+            indexed.unsized.depth == 0,
+        "indexing an array of tuples indexes the leaf");
+  const auto leaf = decoded.tuple_leaves.find("d.2");
+  check(leaf != decoded.tuple_leaves.end() && leaf->second.variable == "d" &&
+            leaf->second.slots.size() == 1 &&
+            leaf->second.slots[0].before == 1 &&
+            leaf->second.slots[0].slot == 2,
+        "the leaf records its variable and slot");
+  const auto name =
+      mir::output_name("d", &leaf->second, std::vector<int64_t>{3, 1});
+  check(name && name->name == "d.3:2.1" && name->variable == "d.3:2" &&
+            name->index == std::vector<int64_t>{1},
+        "CmdStan names a tuple slot with ':' and indices with '.'");
+  check(!mir::output_name("d", &leaf->second, {}),
+        "a whole array of tuples has no single column name");
+
+  // Each write_array section keeps its first statement.
+  mir::Program sections = program;
+  mir::Stmt local = decl;
+  local.decl_id = "g";
+  local.decl_type.base = "STuple";
+  local.decl_type.dims.clear();
+  sections.generate_quantities = {local, local};
+  sections.generate_quantities[1].decl_id = "h";
+  sections.transformed_parameters_begin = 1;
+  sections.generated_quantities_begin = 1;
+  const mir::Program split = decode_program(write_v2(sections));
+  check(split.generate_quantities.size() == 4 &&
+            split.transformed_parameters_begin == 2 &&
+            split.generated_quantities_begin == 2 &&
+            split.generate_quantities[2].decl_id == "h.1",
+        "write_array sections begin at the first leaf of their statement");
+
+  mir::Program bare = program;
+  bare.log_prob.clear();
+  mir::Stmt assign;
+  assign.kind = mir::Stmt::Assignment;
+  assign.lhs = "d";
+  assign.rhs = literal();
+  mir::Stmt::TupleStep step;
+  step.component = 0;
+  assign.lhs_steps.push_back(step);
+  bare.log_prob.push_back(assign);
+  expect_error(write_v2(bare), "tuple assignment component",
+               "a tuple projection numbered from zero");
+}
+
 void check_exact_float_bits() {
   mir::Program program;
   mir::Stmt target;
@@ -1473,13 +1650,15 @@ void check_structural_rejections() {
 }
 
 void check_v2_rejections() {
-  expect_error("STANLI4:", "is from a different stanli compiler",
+  expect_error("STANLI5:", "is from a different stanli compiler",
                "unknown portable version");
+  expect_error("STANLI3:AAAAAA==", "is from a different stanli compiler",
+               "retired portable v3 envelope");
   expect_error("STANLI2:AAAAAA==", "is from a different stanli compiler",
                "retired portable v2 envelope");
   expect_error("{\"stanli_ir\":1}", "unrecognized input format",
                "retired portable v1 envelope");
-  expect_error(" STANLI3:", "unrecognized input format",
+  expect_error(" STANLI4:", "unrecognized input format",
                "v2 leading whitespace");
   expect_error("[]", "unrecognized input format", "unknown input format");
   expect_error(" \n\t", "empty input", "empty input");
@@ -1555,14 +1734,14 @@ void check_v2_rejections() {
   check_real_bits(UINT64_C(0x7ff8000000000042),
                   "v2 preserves binary64 NaN payload bits");
 
-  expect_error("STANLI3:AAA", "multiple of 4", "v2 incomplete base64 quartet");
-  expect_error("STANLI3:!!!!", "invalid base64 character",
+  expect_error("STANLI4:AAA", "multiple of 4", "v2 incomplete base64 quartet");
+  expect_error("STANLI4:!!!!", "invalid base64 character",
                "v2 invalid base64 character");
-  expect_error("STANLI3:AA==AAAA", "padding before final quartet",
+  expect_error("STANLI4:AA==AAAA", "padding before final quartet",
                "v2 early base64 padding");
-  expect_error("STANLI3:AB==", "non-canonical base64 tail",
+  expect_error("STANLI4:AB==", "non-canonical base64 tail",
                "v2 non-canonical one-byte tail");
-  expect_error("STANLI3:AAB=", "non-canonical base64 tail",
+  expect_error("STANLI4:AAB=", "non-canonical base64 tail",
                "v2 non-canonical two-byte tail");
 
   std::string truncated = empty_v2_payload();
@@ -1765,6 +1944,7 @@ int main(int argc, char** argv) {
                              argc == 3 ? argv[2] : nullptr);
   check_full_span_assignment_lowering();
   check_overload_finalization();
+  check_tuple_elimination();
   check_exact_float_bits();
   check_nullary_math_constants();
   check_structural_rejections();

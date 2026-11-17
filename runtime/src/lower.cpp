@@ -444,7 +444,8 @@ void Lowering::bind_data(const mir::Program& p) {
 CompiledModel::ParamView Lowering::parameter_view(const mir::Stmt& s, int slot,
                                                   int64_t len) {
   using Naming = CompiledModel::ParamView::Naming;
-  CompiledModel::ParamView view{s.decl_id, slot, len};
+  CompiledModel::ParamView view{parameter_name(s.decl_id), slot, len};
+  if (view.name != s.decl_id) view.binding = s.decl_id;
   if (s.decl_type.base == "SReal" || s.decl_type.base == "SInt" ||
       s.decl_type.base == "SComplex") {
     view.naming = Naming::Scalar;
@@ -608,7 +609,7 @@ void Lowering::lower_read_param(const mir::Stmt& s) {
     // long this parameter's piece is, and what it means. raw_len and
     // con_len part company for every structured transform.
     CompiledModel::UncParam u;
-    u.name = s.decl_id;
+    u.name = parameter_name(s.decl_id);
     u.len = raw_len;
     u.dims = raw_dims;
     u.transform = tr.kind;
@@ -928,6 +929,7 @@ void Lowering::run_passes(const std::vector<int>& roots, const PassPlan& plan) {
 CompiledModel::WriteArray Lowering::run_write_array(const mir::Program& p) {
   const auto total_time = prep.start();
   for (const auto& f : p.fun_defs) fun_defs[mir::function_key(f)] = &f;
+  tuple_leaves = &p.tuple_leaves;
   in_write_array = true;
   output_cursor = mir::OutputCursor(p.output_vars);
   // The readers drop stanc3's section guards on these flags; a guard they
@@ -1005,6 +1007,7 @@ CompiledModel Lowering::run(const mir::Program& p) {
   DumpOnThrow guard{*this};
   const auto total_time = prep.start();
   for (const auto& f : p.fun_defs) fun_defs[mir::function_key(f)] = &f;
+  tuple_leaves = &p.tuple_leaves;
   const auto bind_time = prep.start();
   if (!data_prepared) bind_data(p);
   prep.graph(prep_graph, "bind_data", bind_time, g, out.fills,
@@ -1268,6 +1271,60 @@ class WriteArrayLowering {
   LowerWorker worker_;
 };
 
+// CmdStan's JSON reader lays out an array of tuples element by element:
+// `z.2` of `array[3, 2] tuple(real, vector[4]) z` holds z[1, 1].2, then
+// z[2, 1].2, and so on, each vector whole. A leaf variable is an ordinary
+// array, which DataMap holds first index fastest across all its dimensions.
+std::optional<DataMap> tuple_data_in_array_order(const mir::Program& p,
+                                                 const DataMap& data) {
+  std::optional<DataMap> out;
+  for (const auto& input : p.input_vars) {
+    const auto leaf = p.tuple_leaves.find(input.first);
+    if (leaf == p.tuple_leaves.end() || !data.has(input.first)) continue;
+    const DataMap::Entry& entry = data.at(input.first);
+    // Each slot ends a group of dimensions; the outermost group varies
+    // slowest in the reader's layout.
+    std::vector<size_t> ends;
+    for (const mir::TupleLeaf::Slot& slot : leaf->second.slots)
+      if (slot.before > (ends.empty() ? 0 : ends.back()))
+        ends.push_back(slot.before);
+    if (ends.empty() || ends.back() > entry.dims.size()) continue;
+    if (ends.back() < entry.dims.size()) ends.push_back(entry.dims.size());
+    if (ends.size() < 2) continue;
+    int64_t len = 1;
+    for (int64_t d : entry.dims) len *= d;
+    std::vector<size_t> source((size_t)len);
+    std::vector<int64_t> at(entry.dims.size(), 0);
+    for (int64_t target = 0; target < len; ++target) {
+      int64_t offset = 0;
+      size_t begin = 0;
+      for (size_t end : ends) {
+        int64_t within = 0, stride = 1;
+        for (size_t d = begin; d < end; ++d) {
+          within += at[d] * stride;
+          stride *= entry.dims[d];
+        }
+        offset = offset * stride + within;
+        begin = end;
+      }
+      source[(size_t)target] = (size_t)offset;
+      for (size_t d = 0; d < at.size() && ++at[d] == entry.dims[d]; ++d)
+        at[d] = 0;
+    }
+    if (!out) out = data;
+    if (entry.is_int) {
+      std::vector<int> values((size_t)len);
+      for (int64_t k = 0; k < len; ++k) values[(size_t)k] = entry.i[source[k]];
+      out->set_int_array(input.first, std::move(values), entry.dims);
+    } else {
+      std::vector<double> values((size_t)len);
+      for (int64_t k = 0; k < len; ++k) values[(size_t)k] = entry.r[source[k]];
+      out->set_real_array(input.first, std::move(values), entry.dims);
+    }
+  }
+  return out;
+}
+
 }  // namespace
 
 CompiledModel compile_model(const std::string& mir_text, const DataMap& data,
@@ -1312,7 +1369,10 @@ CompiledModel compile_model(const std::string& mir_text, const DataMap& data,
   }
   prep.plain("compile", "parse_mir", parse_time, PrepTrace::Extra::MirBytes,
              static_cast<int64_t>(mir_text.size()));
-  Lowering lo(data, prep, dumper, "log_prob", WaRng(seed));
+  const std::optional<DataMap> reordered =
+      tuple_data_in_array_order(*prog, data);
+  const DataMap& model_data = reordered ? *reordered : data;
+  Lowering lo(model_data, prep, dumper, "log_prob", WaRng(seed));
   lo.compile_options = options;
   if (const char* refuse = std::getenv("STANLI_NO_INTERPRETER");
       refuse != nullptr && refuse[0] != '\0' && std::strcmp(refuse, "0") != 0)
@@ -1322,7 +1382,7 @@ CompiledModel compile_model(const std::string& mir_text, const DataMap& data,
   // the models where preparation is the cost (nn_rbm1bJ100, 20.7 s).
   std::optional<WriteArrayLowering> wa_lowering;
   if (!prog->generate_quantities.empty()) {
-    wa_lowering.emplace(data, *prog, prep.enabled(), dumper,
+    wa_lowering.emplace(model_data, *prog, prep.enabled(), dumper,
                         parallel_write_array(options));
     lo.after_data_prepared = [&] { wa_lowering->begin(lo); };
   }
@@ -1406,7 +1466,7 @@ CompiledModel compile_model(const std::string& mir_text, const DataMap& data,
           break;
         }
         InitParam p;
-        p.name = view.name;
+        p.name = view.key();
         p.dims = view.dims;
         p.constrained_len = view.len;
         p.free_len = unc.len;

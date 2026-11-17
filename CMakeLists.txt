@@ -381,6 +381,7 @@ set(STANLI_RUNTIME_SOURCES
   runtime/src/mir_decode.cpp
   runtime/src/large_stack.cpp
   runtime/src/portable_mir_reader.cpp
+  runtime/src/mir_tuples.cpp
   runtime/src/lower.cpp
   runtime/src/lower_expr.cpp
   runtime/src/lower_stmt.cpp
