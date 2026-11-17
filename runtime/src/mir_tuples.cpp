@@ -451,6 +451,16 @@ class TupleEliminator {
     }
     if (e.kind == Expr::Indexed && !e.args.empty() && is_tuple(e.args[0]))
       throw MirError("mir: indexing a tuple gave a non-tuple value");
+    if (e.kind == Expr::Indexed && !e.args.empty() &&
+        e.args[0].kind == Expr::TupleProjection) {
+      // `p[i].2[j]` is `p.2[i, j]`, the form an ordinary array is indexed in.
+      Expr out =
+          index_leaf(rewrite(e.args[0], pre),
+                     rewrite_all({e.args.begin() + 1, e.args.end()}, pre));
+      out.unsized = e.unsized;
+      out.data_only = e.data_only;
+      return out;
+    }
     Expr out = e;
     if (e.kind == Expr::Var && e.fn_type) {
       std::vector<UnsizedView> args;

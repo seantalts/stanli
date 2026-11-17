@@ -1371,6 +1371,29 @@ void check_tuple_elimination() {
             indexed.unsized.leaf == mir::UnsizedLeaf::Vector &&
             indexed.unsized.depth == 0,
         "indexing an array of tuples indexes the leaf");
+
+  // target += d[2].2[1]: the leaf takes both indices in one list, as
+  // `d_2[2, 1]` would.
+  mir::Expr one;
+  one.kind = mir::Expr::IndexSingle;
+  one.args.push_back(literal(1));
+  one.args[0].kind = mir::Expr::LitInt;
+  one.args[0].lit_i = 1;
+  one.args[0].unsized = int_view;
+  mir::Expr entry;
+  entry.kind = mir::Expr::Indexed;
+  entry.unsized = {0, mir::UnsizedLeaf::Real};
+  entry.data_only = true;
+  entry.args = {slot, one};
+  mir::Program nested = program;
+  nested.log_prob[0].target = entry;
+  const mir::Expr joined =
+      decode_program(write_v2(nested)).log_prob.at(0).target;
+  check(joined.kind == mir::Expr::Indexed && joined.args.size() == 3 &&
+            joined.args[0].kind == mir::Expr::Var &&
+            joined.args[0].name == "d.2" &&
+            joined.unsized.leaf == mir::UnsizedLeaf::Real,
+        "indexing a projected leaf joins the element's index");
   const auto leaf = decoded.tuple_leaves.find("d.2");
   check(leaf != decoded.tuple_leaves.end() && leaf->second.variable == "d" &&
             leaf->second.slots.size() == 1 &&
