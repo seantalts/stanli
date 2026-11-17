@@ -1,6 +1,8 @@
 type error =
   | Frontend_error of Frontend.Errors.t
   | Internal_error of string
+  | Unsupported of string
+      (** a construct stanli's compiler does not support *)
 
 type diagnostic =
   | O1_budget_exceeded of

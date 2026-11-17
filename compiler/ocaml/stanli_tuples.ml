@@ -16,7 +16,9 @@
    - an array of tuples printed by print, reject or fatal_error is passed as
      `FnMakeTuple` of its leaf arrays, typed as the original array of tuples;
    - input_vars and output_vars, which keep their declared types;
-   - any statement the pass cannot rewrite, left as it was. *)
+   - a statement the pass cannot rewrite that names no split tuple, such as
+     one over a tuple of complex values, left as it was for the runtime to
+     refuse. One naming a split tuple raises Portable_mir.Not_supported. *)
 
 open Middle
 
@@ -102,8 +104,7 @@ let rec path_tree ?(path = []) (t : UnsizedType.t) =
         Node (List.mapi (fun k part -> path_tree ~path:((k + 1) :: path) part) parts)
     | _ -> unsupported "tuple type"
 
-let suffix path = String.concat "" (List.map (fun k -> "." ^ string_of_int k) path)
-let name_tree base t = map_tree (fun path -> base ^ suffix path) (path_tree t)
+let name_tree base t = map_tree (Portable_mir.tuple_leaf_name base) (path_tree t)
 let flat_type t = UnsizedType.UTuple (leaves (type_tree t))
 let flat_ad ad t = UnsizedType.TupleAD (leaves (ad_tree ad t))
 
@@ -711,12 +712,43 @@ let rec param_reads name (s : stmt) =
 
 type proc = {tuple_params: string list}
 
+(* The split tuple variables a statement names: those it reads, assigns or
+   loops over that are bound to leaves in this scope. *)
+let split_names (s : stmt) =
+  let found = ref [] in
+  let note name =
+    match lookup name with
+    | Some _ when not (List.mem name !found) -> found := name :: !found
+    | _ -> () in
+  let rec expr (e : expr) =
+    (match e.pattern with Var name -> note name | _ -> ());
+    Expr.Pattern.fold (fun () e -> expr e) () e.pattern in
+  let rec stmt (s : stmt) =
+    (match s.pattern with
+    | Assignment (lvalue, _, _) -> note (lvalue_root lvalue)
+    | _ -> ());
+    Stmt.Pattern.fold (fun () e -> expr e) (fun () s -> stmt s) () s.pattern in
+  stmt s;
+  List.rev !found
+
+(* A statement the pass cannot rewrite is left as it was, for the runtime to
+   refuse, unless it names a tuple already split into leaves: the whole
+   variable no longer exists, so that is a compile error. *)
 let rec rewrite_stmt proc (s : stmt) : stmt list =
   try rewrite_stmt_exn proc s
-  with Unsupported _ | Invalid_argument _ | Not_found | Failure _ ->
+  with (Unsupported _ | Invalid_argument _ | Not_found | Failure _) as error ->
     (match s.pattern with
     | Decl {decl_id; _} -> bind decl_id None
     | _ -> ());
+    (match split_names s with
+    | [] -> ()
+    | names ->
+        let what =
+          match error with Unsupported what -> what | _ -> "this use of a tuple" in
+        raise
+          (Portable_mir.Not_supported
+             ( "stanli does not support " ^ what ^ " ("
+             ^ String.concat ", " names ^ ") yet" )));
     [s]
 
 and rewrite_body proc (s : stmt) : stmt =
@@ -890,7 +922,7 @@ and rewrite_nr_call loc pre (kind : expr Fun_kind.t) args =
                 (NRFunApp
                    ( kind
                    , [ leaf; context
-                     ; { pattern= Lit (Str, key ^ suffix path)
+                     ; { pattern= Lit (Str, Portable_mir.tuple_leaf_name key path)
                        ; meta= {meta with type_= leaf.meta.type_; adlevel= DataOnly} } ] )))
             (leaves tree)
             (leaves (path_tree v.meta.type_)))

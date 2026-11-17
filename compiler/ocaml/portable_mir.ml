@@ -167,6 +167,8 @@ let raw_transform transform =
 
 let is_data_only = function UnsizedType.DataOnly -> true | _ -> false
 
+exception Not_supported of string
+
 let has_tuple = UnsizedType.contains_tuple
 
 (* A tuple leaf's variable: the tuple variable's name followed by each
@@ -846,10 +848,11 @@ let check_split_overloads (functions : Stmt.Located.t Program.fun_def list) =
               String.equal name other
               && List.equal ~eq:UnsizedType.equal types other_types)
         then
-          failwith
-            ("user function " ^ name
+          raise
+            (Not_supported
+               ("user function " ^ name
            ^ " has overloads that are the same once their tuple arguments \
-              are split into components; rename one of them")
+              are split into components; rename one of them"))
         else scan rest in
   scan defined
 

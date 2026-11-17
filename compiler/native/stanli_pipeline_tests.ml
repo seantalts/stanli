@@ -381,7 +381,8 @@ let tuple_tests () =
   let fallback =
     match (compile_result ~passes:(budget 0) effect_once).result with
     | Ok mir -> mir
-    | Error (Stanli_pipeline.Internal_error m) -> failwith ("budgeted tuple model: " ^ m)
+    | Error (Stanli_pipeline.Internal_error m | Unsupported m) ->
+        failwith ("budgeted tuple model: " ^ m)
     | Error (Frontend_error e) -> failwith (Fmt.str "budgeted tuple model: %a" (fun ppf e -> Frontend.Errors.pp ppf e) e) in
   List.iter
     (fun (label, mir) ->
@@ -1061,12 +1062,107 @@ let split_overload_test () =
     | _ -> failwith "expected two overloads" in
   match encode {mir with functions_block= same} with
   | _ -> failwith "colliding overloads were encoded"
-  | exception Failure message ->
+  | exception Portable_mir.Not_supported message ->
       require
         (String.starts_with ~prefix:"user function f has overloads" message)
         ("unexpected overload message: " ^ message)
 
+(* Phase A's own failures: a promotion around a call it did not inline, a
+   statement it cannot rewrite, and overloads its split makes collide. *)
+let tuple_phase_a_tests () =
+  let unsupported_error code =
+    match
+      (Stanli_pipeline.compile_portable ~model_name:"phase_a_test" code).result
+    with
+    | Error (Stanli_pipeline.Unsupported message) -> message
+    | Error (Stanli_pipeline.Internal_error message) ->
+        failwith ("an internal error instead of a compile error: " ^ message)
+    | Error (Frontend_error _) -> failwith "a frontend error"
+    | Ok _ -> failwith "compiled" in
+  let promoted = Wire.read (compile_portable {|
+    functions {
+      tuple(int, real) g(real x) { return (2, x); }
+      real f(real x) {
+        tuple(real, real) u = g(x);
+        tuple(real, real) w;
+        w = g(x + 1);
+        return u.1 * u.2 + w.1 * w.2;
+      }
+      tuple(real, real) h(real x) { return g(x); }
+    }
+    parameters { real x; }
+    model { target += f(x); }
+  |}) in
+  require (not (Wire.has_unsupported promoted))
+    "a promotion around a tuple call left an unsupported node";
+  List.iter (fun passes ->
+  match (compile_result ~passes {|
+    functions {
+      tuple(int, real) g(real x) { return (2, x); }
+    }
+    parameters { real x; }
+    model { tuple(real, real) u = g(x); target += u.1 * u.2; }
+    generated quantities { tuple(real, real) q = g(x); }
+  |}).result with
+  | Ok mir -> require (not (Wire.has_unsupported (Wire.read (encode mir))))
+      ("a promotion around a tuple call left an unsupported node: " ^ Sexplib0.Sexp.to_string_hum (Program.Typed.sexp_of_t mir))
+  | Error _ -> failwith "promotion model did not compile") [budget 0; no_budget];
+  (* A statement Phase A cannot rewrite: a check of a whole tuple. Over a
+     split tuple it names the variable; over a tuple expression it is left
+     for the runtime to refuse. *)
+  let mir = compile_upstream_o0 {|
+    parameters { real x; }
+    model { tuple(real, real) t = (x, x); target += t.1; }
+  |} in
+  let tuple_type = UnsizedType.UTuple [UReal; UReal] in
+  let tuple_expr pattern : Expr.Typed.t =
+    { pattern
+    ; meta=
+        { Expr.Typed.Meta.empty with
+          type_= tuple_type
+        ; adlevel= TupleAD [AutoDiffable; AutoDiffable] } } in
+  let check var : Stmt.Located.t =
+    { pattern=
+        NRFunApp
+          ( CompilerInternal
+              (FnCheck {trans= Transformation.Lower (Expr.Helpers.int 0); var_name= "t"; var})
+          , [Expr.Helpers.int 0] )
+    ; meta= Location_span.empty } in
+  let with_check var =
+    let rec add (stmt : Stmt.Located.t) =
+      match stmt.pattern with
+      | Block body -> {stmt with pattern= Block (List.map add body @ [check var])}
+      | _ -> stmt in
+    {mir with log_prob= List.map add mir.log_prob} in
+  (match Stanli_tuples.scalarize (with_check (tuple_expr (Var "t"))) with
+  | _ -> failwith "a check of a split tuple was left unrewritten"
+  | exception Portable_mir.Not_supported message ->
+      require
+        (String.equal message
+           "stanli does not support checking a whole tuple (t) yet")
+        ("unexpected message: " ^ message));
+  let x = {Expr.Typed.Meta.empty with type_= UReal; adlevel= AutoDiffable} in
+  ignore
+    (Stanli_tuples.scalarize
+       (with_check
+          (tuple_expr
+             (FunApp
+                ( CompilerInternal FnMakeTuple
+                , [{pattern= Var "x"; meta= x}; {pattern= Var "x"; meta= x}] )))));
+  let message = unsupported_error {|
+    functions {
+      real f(tuple(real, real) t) { return t.1; }
+      real f(real a, real b) { return a + b; }
+    }
+    parameters { real x; }
+    model { target += f((x, x)) + f(x, x); }
+  |} in
+  require
+    (String.starts_with ~prefix:"user function f has overloads" message)
+    ("unexpected overload message: " ^ message)
+
 let () =
   tuple_wire_tests ();
   tuple_print_test ();
-  split_overload_test ()
+  split_overload_test ();
+  tuple_phase_a_tests ()
