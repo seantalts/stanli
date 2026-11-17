@@ -4232,6 +4232,15 @@ struct ProgramCompiler {
     return Path::Open;
   }
 
+  // A MultiAssign result being assigned to its target: the assignment
+  // compile_multi_assign builds for it, and the registers it assigns.
+  const mir::Stmt* given_stmt = nullptr;
+  Range given_value;
+  bool given(const mir::Stmt& s) const { return &s == given_stmt; }
+  Range assignment_value(const mir::Stmt& s) {
+    return given(s) ? given_value : expr(s.rhs);
+  }
+
   // The statements a call returning several values needs, kept out of
   // compile_stmt: a register-program refusal unwinds through every
   // compile_stmt frame, and each statement compiled inline there makes every
@@ -4276,20 +4285,21 @@ struct ProgramCompiler {
     }
     if (values.size() != s.fn_args.size())
       bail(s.rhs.name + " returned the wrong number of values");
-    // Each result is assigned as `target = value`, the value bound to a
-    // name no Stan variable can have for the one assignment.
+    // Each result is assigned as `target = value`: the assignment path takes
+    // the result's registers in place of evaluating a right side.
+    struct Given {
+      const mir::Stmt*& stmt;
+      ~Given() { stmt = nullptr; }
+    } given_scope{given_stmt};
     for (size_t k = 0; k < values.size(); ++k) {
-      const std::string bound = std::string(1, '\0') + "result";
-      reals[bound] = values[k];
       mir::Stmt assign;
       assign.kind = mir::Stmt::Assignment;
       assign.lhs = s.fn_args[k].name;
-      assign.rhs.kind = mir::Expr::Var;
-      assign.rhs.name = bound;
-      assign.rhs.unsized = s.fn_args[k].unsized;
       assign.raw = s.raw;
+      given_stmt = &assign;
+      given_value = values[k];
       const Path path = compile_stmt(assign);
-      reals.erase(bound);
+      given_stmt = nullptr;
       if (path != Path::Open) bail("a MultiAssign target left the scope");
     }
     return Path::Open;
@@ -4442,7 +4452,7 @@ struct ProgramCompiler {
       }
       case mir::Stmt::Assignment: {
         if (accumulator && s.lhs == accumulator->name) {
-          if (!s.lhs_idx.empty() || s.rhs.name != "Plus__" ||
+          if (given(s) || !s.lhs_idx.empty() || s.rhs.name != "Plus__" ||
               s.rhs.args.size() != 2 || s.rhs.args[0].name != s.lhs)
             bail("accumulator " + s.lhs + " is not only added to");
           const Range v = expr(s.rhs.args[1]);
@@ -4455,7 +4465,7 @@ struct ProgramCompiler {
           if (!s.lhs_idx.empty())
             bail("indexed assignment before unsized shape adoption for " +
                  s.lhs);
-          const Range v = expr(s.rhs);
+          const Range v = assignment_value(s);
           if (!unsized_accepts(deferred->second, v))
             bail("assignment logical view mismatch for " + s.lhs);
           auto binding = reals.find(s.lhs);
@@ -4474,8 +4484,8 @@ struct ProgramCompiler {
 
           if (int_array_names.count(s.lhs)) {
             std::vector<long> values;
-            if (fold_is_certain(s.lhs) && try_cints(s.rhs, &values) &&
-                values.size() == (size_t)v.len) {
+            if (fold_is_certain(s.lhs) && !given(s) &&
+                try_cints(s.rhs, &values) && values.size() == (size_t)v.len) {
               known_int_arrays[s.lhs] = std::move(values);
               known_int_array_dims[s.lhs] = adopted.dims;
             } else {
@@ -4494,7 +4504,8 @@ struct ProgramCompiler {
           // Reify any nonconstant scalar assignment; expr still decides
           // whether its integer operations have a supported implementation.
           const bool certain = fold_is_certain(s.lhs);
-          const bool constant = certain && try_cint(s.rhs, &ignored);
+          const bool constant =
+              certain && !given(s) && try_cint(s.rhs, &ignored);
           if (!certain || !constant) {
             if (certain && !constant && !structured_while_seen &&
                 !in_write_array)
@@ -4535,14 +4546,14 @@ struct ProgramCompiler {
         }
         if (it == reals.end()) bail("assignment to undeclared " + s.lhs);
         const Range dst = it->second;
-        const Range v = expr(s.rhs);
+        const Range v = assignment_value(s);
         // Once written here, the imported value can no longer be answered
         // from the enclosing graph's preparation-time observation.
         extern_bound.erase(s.lhs);
         if (s.lhs_idx.empty()) {
           std::vector<long> folded_ints;
           const bool have_folded_ints = int_array_names.count(s.lhs) &&
-                                        fold_is_certain(s.lhs) &&
+                                        fold_is_certain(s.lhs) && !given(s) &&
                                         try_cints(s.rhs, &folded_ints) &&
                                         folded_ints.size() == (size_t)v.len;
           if (dst.len == 0 && v.len != 0) {
@@ -4601,8 +4612,8 @@ struct ProgramCompiler {
             emit(Program::MOV, dst.reg + k, v.reg + k);
           if (int_array_names.count(s.lhs)) {
             std::vector<long> values;
-            if (fold_is_certain(s.lhs) && try_cints(s.rhs, &values) &&
-                values.size() == (size_t)v.len) {
+            if (fold_is_certain(s.lhs) && !given(s) &&
+                try_cints(s.rhs, &values) && values.size() == (size_t)v.len) {
               known_int_arrays[s.lhs] = std::move(values);
               known_int_array_dims[s.lhs] = dst.dims;
             } else {
@@ -4708,12 +4719,12 @@ struct ProgramCompiler {
             bool folded = false;
             if (offsets.size() == 1) {
               long value = 0;
-              if (try_cint(s.rhs, &value)) {
+              if (!given(s) && try_cint(s.rhs, &value)) {
                 values = {value};
                 folded = true;
               }
             } else {
-              folded = try_cints(s.rhs, &values);
+              folded = !given(s) && try_cints(s.rhs, &values);
             }
             if (fold_is_certain(s.lhs) && folded &&
                 values.size() == offsets.size() &&
@@ -4778,7 +4789,7 @@ struct ProgramCompiler {
         if (int_array_names.count(s.lhs)) {
           long value = 0;
           auto known = known_int_arrays.find(s.lhs);
-          if (fold_is_certain(s.lhs) && try_cint(s.rhs, &value) &&
+          if (fold_is_certain(s.lhs) && !given(s) && try_cint(s.rhs, &value) &&
               known != known_int_arrays.end() && flat >= 0 &&
               (size_t)flat < known->second.size())
             known->second[(size_t)flat] = value;
