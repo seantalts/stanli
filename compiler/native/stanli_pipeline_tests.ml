@@ -467,3 +467,419 @@ let () =
   require
     (log_prob_has_vector_density side_effect_on)
     "pass-on left the density beside a side effect in the loop"
+
+(* A reader for the portable MIR payload written from SCHEMA.md, independent
+   of the encoder, so the tests check the documented layout. It rejects any
+   tag the schema does not list and any trailing byte. *)
+module Wire = struct
+  type view = int * int
+
+  type expr =
+    {kind: int; name: string; args: expr list; view: view; lit_s: string}
+
+  type item = Arg | Tuple of int * item list
+
+  type stmt =
+    | Decl of {id: string; view: view option; data_only: bool}
+    | Assign of string * expr
+    | Multi of string list * expr
+    | Return of expr list
+    | Call of {name: string; args: expr list; layout: item list option}
+    | Body of int * stmt list
+    | Unsupported
+    | Other of int * expr list
+
+  type fn =
+    {fname: string; arg_views: view list; results: view list; body: stmt list}
+
+  type program =
+    { inputs: string list
+    ; procedures: stmt list list
+    ; functions: fn list
+    ; leaves: (string * string * (int * int) list) list }
+
+  let decode_base64 text =
+    let value c =
+      match c with
+      | 'A' .. 'Z' -> Char.code c - 65
+      | 'a' .. 'z' -> Char.code c - 71
+      | '0' .. '9' -> Char.code c + 4
+      | '+' -> 62
+      | '/' -> 63
+      | _ -> failwith "bad base64" in
+    let out = Buffer.create (String.length text) in
+    let n = String.length text in
+    let i = ref 0 in
+    while !i < n do
+      let q k = if text.[!i + k] = '=' then 0 else value text.[!i + k] in
+      let bits = (q 0 lsl 18) lor (q 1 lsl 12) lor (q 2 lsl 6) lor q 3 in
+      Buffer.add_char out (Char.chr (bits lsr 16));
+      if text.[!i + 2] <> '=' then
+        Buffer.add_char out (Char.chr ((bits lsr 8) land 0xff));
+      if text.[!i + 3] <> '=' then Buffer.add_char out (Char.chr (bits land 0xff));
+      i := !i + 4
+    done;
+    Buffer.contents out
+
+  let read encoded =
+    let prefix = "STANLI5:" in
+    if not (String.starts_with ~prefix encoded) then failwith "missing STANLI5:";
+    let s =
+      decode_base64
+        (String.sub encoded (String.length prefix)
+           (String.length encoded - String.length prefix)) in
+    let pos = ref 0 in
+    let u8 () =
+      let v = Char.code s.[!pos] in
+      incr pos; v in
+    let u32 () =
+      let a = u8 () in let b = u8 () in let c = u8 () in let d = u8 () in
+      a lor (b lsl 8) lor (c lsl 16) lor (d lsl 24) in
+    let skip n = pos := !pos + n in
+    let bool () =
+      match u8 () with 0 -> false | 1 -> true | _ -> failwith "bad bool" in
+    let string () =
+      let n = u32 () in
+      let v = String.sub s !pos n in
+      skip n; v in
+    let list f = List.init (u32 ()) (fun _ -> f ()) in
+    let optional f = if bool () then Some (f ()) else None in
+    let view () =
+      let depth = u8 () in
+      let leaf = u8 () in
+      if leaf > 6 then failwith ("unknown view leaf " ^ string_of_int leaf);
+      (depth, leaf) in
+    let function_type () =
+      ignore (list view); ignore (u8 ()); ignore (bool ()) in
+    let rec expr () =
+      let kind = u8 () in
+      let name = ref "" and args = ref [] and lit_s = ref "" in
+      (match kind with
+      | 0 -> name := string (); ignore (optional function_type)
+      | 1 -> skip 4
+      | 2 -> skip 8
+      | 3 -> lit_s := string ()
+      | 4 ->
+          ignore (u8 ()); name := string (); ignore (u8 ()); ignore (bool ());
+          args := list expr
+      | 10 -> ()
+      | k when k >= 5 && k <= 15 -> args := list expr
+      | k -> failwith ("unknown expression kind " ^ string_of_int k));
+      let v = view () in
+      ignore (bool ()); ignore (bool ()); ignore (string ());
+      {kind; name= !name; args= !args; view= v; lit_s= !lit_s} in
+    let transform () =
+      let kind = u8 () in
+      if kind > 18 then failwith ("unknown transform kind " ^ string_of_int kind);
+      ignore (list expr); ignore (string ()) in
+    let rec sized () =
+      let base = string () in
+      ignore (list expr);
+      let elem = string () in
+      ignore (string ());
+      if base = "STuple" || (base = "SArray" && elem = "STuple") then
+        ignore (list sized) in
+    let rec item () =
+      match u8 () with
+      | 0 -> Arg
+      | 1 -> let depth = u8 () in Tuple (depth, list item)
+      | k -> failwith ("unknown print item " ^ string_of_int k) in
+    let rec stmt () =
+      match u8 () with
+      | 0 ->
+          let id = string () in
+          let v =
+            match u8 () with
+            | 0 -> sized (); None
+            | 1 -> let v = view () in ignore (string ()); Some v
+            | _ -> failwith "bad decl type" in
+          let data_only = bool () in
+          if bool () then ignore (expr ());
+          ignore (optional transform); ignore (list expr); ignore (string ());
+          Decl {id; view= v; data_only}
+      | 1 ->
+          let lhs = string () in
+          ignore (list expr);
+          let rhs = expr () in
+          ignore (string ()); Assign (lhs, rhs)
+      | (2 | 14) as k -> let e = expr () in ignore (string ()); Other (k, [e])
+      | (3 | 4) as k -> let b = list stmt in ignore (string ()); Body (k, b)
+      | 5 ->
+          ignore (string ()); ignore (expr ()); ignore (expr ());
+          let b = list stmt in ignore (string ()); Body (5, b)
+      | (6 | 7) as k ->
+          ignore (expr ()); let b = list stmt in ignore (string ()); Body (k, b)
+      | 8 ->
+          ignore (u8 ());
+          let name = string () in
+          ignore (u8 ());
+          let args = list expr in
+          let layout =
+            match u8 () with
+            | 0 -> None
+            | 1 -> transform (); ignore (string ()); ignore (expr ()); None
+            | 2 -> ignore (optional transform); ignore (expr ()); None
+            | 3 -> Some (list item)
+            | k -> failwith ("unknown payload " ^ string_of_int k) in
+          ignore (string ()); Call {name; args; layout}
+      | 9 -> let values = list expr in ignore (string ()); Return values
+      | (10 | 11) as k -> Other (k, [])
+      | 12 -> ignore (string ()); Other (12, [])
+      | 13 -> ignore (string ()); Unsupported
+      | 15 ->
+          let targets = list string in
+          let call = expr () in
+          ignore (string ()); Multi (targets, call)
+      | k -> failwith ("unknown statement kind " ^ string_of_int k) in
+    let inputs = list (fun () -> let n = string () in sized (); n) in
+    let prepare = list stmt in
+    let log_prob = list stmt in
+    let gq = list stmt in
+    ignore (u32 ()); ignore (u32 ());
+    let functions =
+      list (fun () ->
+          let fname = string () in
+          ignore (list string);
+          let arg_views = list view in
+          ignore (list bool);
+          let results = list view in
+          {fname; arg_views; results; body= list stmt}) in
+    ignore
+      (list (fun () ->
+           ignore (string ()); ignore (u8 ()); sized (); ignore (list string)));
+    let inits = list stmt in
+    let leaves =
+      list (fun () ->
+          let variable = string () in
+          let base = string () in
+          let path = list (fun () -> let b = u32 () in (b, u32 ())) in
+          (variable, base, path)) in
+    if !pos <> String.length s then failwith "trailing payload bytes";
+    {inputs; procedures= [prepare; log_prob; gq; inits]; functions; leaves}
+
+  let rec stmts_of = function
+    | Body (_, body) -> body @ List.concat_map stmts_of body
+    | _ -> []
+
+  let all_stmts program =
+    let roots =
+      List.concat program.procedures
+      @ List.concat_map (fun fn -> fn.body) program.functions in
+    roots @ List.concat_map stmts_of roots
+
+  let rec exprs_of e = e :: List.concat_map exprs_of e.args
+
+  let stmt_exprs = function
+    | Assign (_, e) | Multi (_, e) -> exprs_of e
+    | Return es | Call {args= es; _} | Other (_, es) ->
+        List.concat_map exprs_of es
+    | Decl _ | Body _ | Unsupported -> []
+
+  let has_unsupported program =
+    List.exists
+      (fun s ->
+        s = Unsupported
+        || List.exists (fun e -> e.kind = 10) (stmt_exprs s))
+      (all_stmts program)
+end
+
+let find_function (program : Wire.program) name =
+  List.find (fun fn -> fn.Wire.fname = name) program.functions
+
+let tuple_wire_tests () =
+  require (Portable_mir.tuple_leaf_name "x" [2; 1] = "x.2.1")
+    "tuple_leaf_name did not join the components with dots";
+  require (Portable_mir.tuple_leaf_name "x" [] = "x")
+    "tuple_leaf_name changed a name without components";
+  (* Every ordinary model reads back exactly under the documented layout,
+     with no tuple tag and an empty leaf list. *)
+  List.iter
+    (fun (name, code) ->
+      let program = Wire.read (compile_portable code) in
+      require (program.leaves = []) ("tuple leaves for " ^ name))
+    o1_equivalence_models;
+  let functions = Wire.read (compile_portable {|
+    functions {
+      void hello(real x) { print(x); return; }
+      real g(real x) { if (x > 0) return x; return -x; }
+      vector h(vector v) { return 2 * v; }
+    }
+    parameters { real x; }
+    model { hello(x); target += g(x) + sum(h(rep_vector(x, 2))); }
+  |}) in
+  let returns fn =
+    List.filter_map
+      (function Wire.Return values -> Some (List.length values) | _ -> None)
+      (Wire.all_stmts {functions with procedures= []; functions= [fn]}) in
+  let hello = find_function functions "hello" in
+  let g = find_function functions "g" in
+  let h = find_function functions "h" in
+  require (hello.results = []) "a void function has a result";
+  require (returns hello = [0]) "a void return carries a value";
+  require (g.results = [(0, 2)]) "a real function's result is not one Real";
+  require (returns g = [1; 1]) "a real function's returns are not one value";
+  require (h.results = [(0, 4)]) "a vector function's result is not one Vector";
+  require (h.arg_views = [(0, 4)]) "a vector argument is not one Vector";
+  (* A tuple-returning call the compiler did not inline: its temporary becomes
+     one declaration per leaf and one MultiAssign, and each component read
+     becomes a read of its leaf. *)
+  let calls = Wire.read (encode (compile_upstream_o0 {|
+    functions {
+      tuple(real, vector) f(real x, vector v) { return (x * 2, v * x); }
+    }
+    data { matrix[3, 3] A; }
+    parameters { real x; vector[2] v; }
+    model {
+      tuple(matrix[3, 3], matrix[3, 3]) t = qr_thin(A * x);
+      tuple(real, vector[2]) u = f(x, v);
+      target += sum(t.1) + sum(t.2) + u.1 + sum(u.2);
+    }
+  |})) in
+  require (not (Wire.has_unsupported calls))
+    "a split tuple temporary left an unsupported node";
+  let f = find_function calls "f" in
+  require (f.results = [(0, 2); (0, 4)])
+    "a tuple function's results are not its leaves";
+  require (returns f = [2]) "a tuple return does not list its leaves";
+  let log_prob = List.nth calls.procedures 1 in
+  let stmts = log_prob @ List.concat_map Wire.stmts_of log_prob in
+  let multi =
+    List.filter_map
+      (function Wire.Multi (targets, call) -> Some (targets, call) | _ -> None)
+      stmts in
+  require
+    (List.map (fun (targets, call) -> (targets, call.Wire.name, call.view)) multi
+     = [ (["t.1"; "t.2"], "qr_thin", (0, 0))
+       ; (["u.1"; "u.2"], "f", (0, 0)) ])
+    "a tuple-returning call is not a MultiAssign to its leaves";
+  let decls =
+    List.filter_map
+      (function Wire.Decl {id; data_only; _} -> Some (id, data_only) | _ -> None)
+      stmts in
+  List.iter
+    (fun leaf ->
+      require (List.mem (leaf, false) decls) ("leaf " ^ leaf ^ " not declared"))
+    ["t.1"; "t.2"; "u.1"; "u.2"];
+  let reads =
+    List.concat_map Wire.stmt_exprs stmts
+    |> List.filter_map (fun e -> if e.Wire.kind = 0 then Some e.name else None) in
+  List.iter
+    (fun leaf -> require (List.mem leaf reads) ("leaf " ^ leaf ^ " not read"))
+    ["t.1"; "t.2"; "u.1"; "u.2"];
+  (* Tuple inputs and outputs list their leaves with typed paths. A model
+     whose tuples the compiler has not split yet still encodes: what cannot
+     be written becomes unsupported rather than an error. *)
+  let interface = Wire.read (compile_portable {|
+    functions {
+      tuple(real, vector) f(real x, vector v) { return (x * 2, v * x); }
+    }
+    data {
+      array[2] tuple(real, vector[2]) p;
+      tuple(real, array[3] tuple(int, real)) q;
+    }
+    parameters { tuple(real, real) r; }
+    model {
+      tuple(real, vector[2]) u = f(r.1, p[1].2);
+      target += u.1 + sum(u.2) + q.1;
+      print(p, (r.1, 3));
+    }
+    generated quantities { tuple(int, real) g = (1, r.2); }
+  |}) in
+  require
+    (interface.leaves
+     = [ ("p.1", "p", [(1, 1)]); ("p.2", "p", [(1, 2)])
+       ; ("q.1", "q", [(0, 1)]); ("q.2.1", "q", [(0, 2); (1, 1)])
+       ; ("q.2.2", "q", [(0, 2); (1, 2)])
+       ; ("r.1", "r", [(0, 1)]); ("r.2", "r", [(0, 2)])
+       ; ("g.1", "g", [(0, 1)]); ("g.2", "g", [(0, 2)]) ])
+    "tuple leaves of the inputs and outputs are wrong";
+  require (interface.inputs = ["p"; "q"]) "tuple inputs lost"
+
+(* print, reject and fatal_error take an array of tuples as its leaves and a
+   layout; a tuple outside an array as string literals around its leaves. *)
+let tuple_print_test () =
+  let mir = compile_upstream_o0 {|
+    transformed data {
+      array[2] real a;
+      array[2] vector[2] b;
+      array[2] int c;
+      real s = 1;
+      print(s);
+    }
+  |} in
+  let open UnsizedType in
+  let expr type_ pattern =
+    {Expr.meta= {Expr.Typed.Meta.empty with type_; adlevel= DataOnly}; pattern} in
+  let var type_ name = expr type_ (Expr.Pattern.Var name) in
+  let tuple type_ args =
+    expr type_ (Expr.Pattern.FunApp (Fun_kind.CompilerInternal FnMakeTuple, args)) in
+  let nested =
+    tuple (UArray (UTuple [UReal; UTuple [UInt; UVector]]))
+      [ var (UArray UReal) "a"
+      ; tuple (UArray (UTuple [UInt; UVector]))
+          [var (UArray UInt) "c"; var (UArray UVector) "b"] ] in
+  let plain = tuple (UTuple [UReal; UReal]) [var UReal "s"; var UReal "s"] in
+  let rewrite (stmt : Stmt.Located.t) =
+    match stmt.pattern with
+    | NRFunApp ((CompilerInternal FnPrint as kind), _) ->
+        { stmt with
+          pattern=
+            SList
+              [ stmt
+              ; {stmt with pattern= NRFunApp (kind, [nested; plain])} ] }
+    | _ -> stmt in
+  let program =
+    Wire.read (encode {mir with prepare_data= List.map rewrite mir.prepare_data}) in
+  let calls =
+    List.filter_map
+      (function
+        | Wire.Call {name= "FnPrint"; args; layout} ->
+            Some
+              ( List.map
+                  (fun e -> if e.Wire.kind = 3 then e.lit_s else e.name)
+                  args
+              , layout )
+        | _ -> None)
+      (Wire.all_stmts program) in
+  require
+    (calls
+     = [ (["s"], None)
+       ; ( ["a"; "c"; "b"; "("; "s"; ","; "s"; ")"]
+         , Some
+             Wire.
+               [ Tuple (1, [Arg; Tuple (0, [Arg; Arg])])
+               ; Arg; Arg; Arg; Arg; Arg ] ) ])
+    "print of tuples has the wrong arguments or layout"
+
+(* Splitting tuple arguments can make two overloads take the same arguments;
+   a forward declaration and its definition are not overloads. *)
+let split_overload_test () =
+  ignore (compile_portable {|
+    functions { real f(real a); real f(real a) { return a; } }
+    parameters { real x; }
+    model { target += f(x); }
+  |});
+  let mir = compile_upstream_o0 {|
+    functions {
+      real f(real a, real b) { return a + b; }
+      real f(real a, int b) { return a * b; }
+    }
+    parameters { real x; }
+    model { target += f(x, x) + f(x, 1); }
+  |} in
+  let same =
+    match mir.functions_block with
+    | first :: second :: rest ->
+        first :: {second with fdargs= first.fdargs} :: rest
+    | _ -> failwith "expected two overloads" in
+  match encode {mir with functions_block= same} with
+  | _ -> failwith "colliding overloads were encoded"
+  | exception Failure message ->
+      require
+        (String.starts_with ~prefix:"user function f has overloads" message)
+        ("unexpected overload message: " ^ message)
+
+let () =
+  tuple_wire_tests ();
+  tuple_print_test ();
+  split_overload_test ()
