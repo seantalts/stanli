@@ -98,7 +98,7 @@ void append_list(std::string& bytes, const std::vector<T>& values,
   for (const T& value : values) write(bytes, value);
 }
 
-void append_view(std::string& bytes, const mir::UnsizedView& value) {
+void append_view(std::string& bytes, const mir::UnsizedType& value) {
   append_u8(bytes, value.depth);
   append_u8(bytes, static_cast<uint8_t>(value.leaf));
   if (value.leaf == mir::UnsizedLeaf::Tuple)
@@ -128,7 +128,7 @@ void append_expr(std::string& bytes, const mir::Expr& value) {
       append_bool(bytes, value.fn_type.has_value());
       if (value.fn_type) {
         append_list(bytes, value.fn_type->args,
-                    [](std::string& out, const mir::UnsizedView& view) {
+                    [](std::string& out, const mir::UnsizedType& view) {
                       append_view(out, view);
                     });
         append_u8(bytes, static_cast<uint8_t>(value.fn_type->suffix));
@@ -174,10 +174,10 @@ void append_expr(std::string& bytes, const mir::Expr& value) {
     case mir::Expr::Unsupported:
       break;
   }
-  append_view(bytes, value.unsized);
+  append_view(bytes, mir::unsized_type(value));
   append_bool(bytes, value.data_only);
   if (value.unsized.leaf == mir::UnsizedLeaf::Tuple)
-    append_bools(bytes, value.leaf_data_only);
+    append_bools(bytes, mir::leaf_data_only(value));
   append_bool(bytes, value.promoted);
   append_string(bytes, value.raw);
 }
@@ -187,7 +187,7 @@ void append_transform(std::string& bytes, const mir::Transform& value) {
   append_expr_list(bytes, value.args);
   append_string(bytes, value.raw);
   if (value.kind == mir::Transform::Tuple)
-    append_list(bytes, value.components, append_transform);
+    append_list(bytes, mir::components(value), append_transform);
 }
 
 void append_optional_transform(std::string& bytes,
@@ -201,7 +201,8 @@ void append_sized(std::string& bytes, const mir::SizedType& value) {
   append_expr_list(bytes, value.dims);
   append_string(bytes, value.elem_base);
   append_string(bytes, value.raw);
-  if (mir::is_tuple(value)) append_list(bytes, value.components, append_sized);
+  if (mir::is_tuple(value))
+    append_list(bytes, mir::components(value), append_sized);
 }
 
 void append_stmt_list(std::string& bytes,
@@ -212,11 +213,11 @@ void append_stmt_list(std::string& bytes,
 }
 
 void append_stmt(std::string& bytes, const mir::Stmt& value) {
-  if (value.kind == mir::Stmt::Assignment && !value.lhs_steps.empty()) {
+  if (value.kind == mir::Stmt::Assignment && !mir::lhs_steps(value).empty()) {
     append_u8(bytes, 15);
     append_string(bytes, value.lhs);
     append_expr_list(bytes, value.lhs_idx);
-    append_list(bytes, value.lhs_steps,
+    append_list(bytes, mir::lhs_steps(value),
                 [](std::string& out, const mir::Stmt::TupleStep& step) {
                   append_u32(out, static_cast<uint32_t>(step.component));
                   append_expr_list(out, step.indices);
@@ -236,13 +237,13 @@ void append_stmt(std::string& bytes, const mir::Stmt& value) {
         append_sized(bytes, value.decl_type);
       } else {
         append_u8(bytes, 1);
-        append_view(bytes, value.decl_type.unsized);
+        append_view(bytes, mir::unsized_type(value.decl_type));
         append_string(bytes, value.decl_type.raw);
       }
       append_bool(bytes, value.decl_data_only);
       if (mir::is_tuple(value.decl_type) ||
           value.decl_type.unsized.leaf == mir::UnsizedLeaf::Tuple)
-        append_bools(bytes, value.decl_leaf_data_only);
+        append_bools(bytes, mir::decl_leaf_data_only(value));
       append_bool(bytes, value.has_init);
       if (value.has_init) append_expr(bytes, value.init);
       append_optional_transform(bytes, value.read_transform);
@@ -332,7 +333,7 @@ void append_fun(std::string& bytes, const mir::FunDef& value) {
   append_string(bytes, value.name);
   append_strings(bytes, value.arg_names);
   append_list(bytes, value.arg_views,
-              [](std::string& out, const mir::UnsizedView& view) {
+              [](std::string& out, const mir::UnsizedType& view) {
                 append_view(out, view);
               });
   append_bools(bytes, value.arg_data_only);
@@ -1280,12 +1281,39 @@ void check_overload_finalization() {
         "portable decoder applies legacy overload finalization once");
 }
 
+bool has_tuple_fields(const mir::Expr& e) {
+  if (e.tuple) return true;
+  for (const mir::Expr& arg : e.args)
+    if (has_tuple_fields(arg)) return true;
+  return false;
+}
+
+bool has_tuple_fields(const mir::Stmt& s) {
+  bool found = s.tuple || s.decl_type.tuple;
+  mir::for_each_expr(
+      s, [&](const mir::Expr& e) { found = found || has_tuple_fields(e); });
+  for (const mir::Stmt& child : s.body)
+    found = found || has_tuple_fields(child);
+  return found;
+}
+
+bool has_tuple_fields(const mir::Program& program) {
+  for (const auto& input : program.input_vars)
+    if (input.second.tuple) return true;
+  for (const auto* body :
+       {&program.prepare_data, &program.log_prob, &program.generate_quantities,
+        &program.transform_inits})
+    for (const mir::Stmt& s : *body)
+      if (has_tuple_fields(s)) return true;
+  return false;
+}
+
 // A tuple decodes into one variable per leaf, named by its data key, with
 // its slots recorded for naming the output.
 void check_tuple_elimination() {
   const mir::UnsizedView int_view{0, mir::UnsizedLeaf::Int};
   const mir::UnsizedView vector_view{0, mir::UnsizedLeaf::Vector};
-  mir::UnsizedView tuple_view{1, mir::UnsizedLeaf::Tuple};
+  mir::UnsizedType tuple_view{1, mir::UnsizedLeaf::Tuple};
   tuple_view.components = {int_view, vector_view};
   mir::SizedType vector_type;
   vector_type.base = "SVector";
@@ -1299,7 +1327,7 @@ void check_tuple_elimination() {
   tuple_type.base = "SArray";
   tuple_type.elem_base = "STuple";
   tuple_type.dims.push_back(vector_type.dims[0]);
-  tuple_type.components = {int_type, vector_type};
+  tuple_type.tuple.fill().components = {int_type, vector_type};
 
   mir::Program program;
   program.input_vars.emplace_back("d", tuple_type);
@@ -1308,13 +1336,13 @@ void check_tuple_elimination() {
   decl.decl_id = "d";
   decl.decl_type = tuple_type;
   decl.decl_data_only = false;
-  decl.decl_leaf_data_only = {true, true};
+  decl.tuple.fill().decl_leaf_data_only = {true, true};
   program.prepare_data.push_back(decl);
   mir::Expr d;
   d.kind = mir::Expr::Var;
   d.name = "d";
-  d.unsized = tuple_view;
-  d.leaf_data_only = {true, true};
+  mir::set_unsized_type(d, tuple_view);
+  d.tuple->leaf_data_only = {true, true};
   mir::Stmt read;
   read.kind = mir::Stmt::NRFunApp;
   read.fn_lib = mir::Expr::Lib::Internal;
@@ -1330,9 +1358,10 @@ void check_tuple_elimination() {
   // target += sum(d[2].2)
   mir::Expr element;
   element.kind = mir::Expr::Indexed;
-  element.unsized = tuple_view;
-  element.unsized.depth = 0;
-  element.leaf_data_only = {true, true};
+  mir::UnsizedType element_view = tuple_view;
+  element_view.depth = 0;
+  mir::set_unsized_type(element, element_view);
+  element.tuple->leaf_data_only = {true, true};
   mir::Expr two;
   two.kind = mir::Expr::IndexSingle;
   two.args.push_back(vector_type.dims[0]);
@@ -1371,6 +1400,8 @@ void check_tuple_elimination() {
             indexed.unsized.leaf == mir::UnsizedLeaf::Vector &&
             indexed.unsized.depth == 0,
         "indexing an array of tuples indexes the leaf");
+  check(has_tuple_fields(program) && !has_tuple_fields(decoded),
+        "no tuple-only field survives the tuple pass");
 
   // target += d[2].2[1]: the leaf takes both indices in one list, as
   // `d_2[2, 1]` would.
@@ -1433,7 +1464,7 @@ void check_tuple_elimination() {
   assign.rhs = literal();
   mir::Stmt::TupleStep step;
   step.component = 0;
-  assign.lhs_steps.push_back(step);
+  assign.tuple.fill().lhs_steps.push_back(step);
   bare.log_prob.push_back(assign);
   expect_error(write_v2(bare), "tuple assignment component",
                "a tuple projection numbered from zero");

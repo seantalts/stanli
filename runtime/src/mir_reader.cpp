@@ -784,8 +784,8 @@ void validate_transform_shape(const Transform& transform) {
       for (const Expr& arg : transform.args) validate_expression_shape(arg);
       return;
     case Transform::Tuple:
-      if (transform.components.empty()) malformed("tuple transform");
-      for (const Transform& component : transform.components)
+      if (components(transform).empty()) malformed("tuple transform");
+      for (const Transform& component : components(transform))
         validate_transform_shape(component);
       break;
   }
@@ -798,9 +798,9 @@ void validate_transform_shape(const Transform& transform) {
 void validate_sized_type_shape(const SizedType& type) {
   size_t arity = 0;
   bool exact = true;
-  if (is_tuple(type) != !type.components.empty())
+  if (is_tuple(type) != !components(type).empty())
     malformed("tuple sized type components");
-  for (const SizedType& component : type.components)
+  for (const SizedType& component : components(type))
     validate_sized_type_shape(component);
   if (type.base == "STuple") {
     arity = 0;
@@ -841,7 +841,7 @@ void validate_statement_shape(const Stmt& statement) {
     for (const Expr& expression : *expressions)
       validate_expression_shape(expression);
   for (const Expr& index : statement.lhs_idx) validate_index_shape(index);
-  for (const Stmt::TupleStep& step : statement.lhs_steps) {
+  for (const Stmt::TupleStep& step : lhs_steps(statement)) {
     if (step.component < 1) malformed("tuple assignment component");
     for (const Expr& index : step.indices) validate_index_shape(index);
   }
@@ -1137,7 +1137,7 @@ void validate_bindings(const std::vector<Stmt>& body, Bindings& bindings,
 
 using Overloads = std::map<std::string, std::vector<FunDef*>>;
 
-std::string signature(const std::vector<UnsizedView>& views) {
+std::string signature(const std::vector<UnsizedType>& views) {
   std::string out = "(";
   for (size_t i = 0; i < views.size(); ++i) {
     if (i) out += ',';
@@ -1172,19 +1172,18 @@ std::string signature(const std::vector<UnsizedView>& views) {
   return out + ")";
 }
 
-bool views_match(const std::vector<UnsizedView>& a,
-                 const std::vector<UnsizedView>& b) {
-  if (a.size() != b.size()) return false;
-  for (size_t i = 0; i < a.size(); ++i)
-    if (!same_view(a[i], b[i])) return false;
-  return true;
+bool views_match(const std::vector<UnsizedType>& a,
+                 const std::vector<UnsizedType>& b) {
+  return same_components(a, b);
 }
 
 bool views_match(const std::vector<Expr>& args,
-                 const std::vector<UnsizedView>& views) {
+                 const std::vector<UnsizedType>& views) {
   if (args.size() != views.size()) return false;
   for (size_t i = 0; i < args.size(); ++i)
-    if (!same_view(args[i].unsized, views[i])) return false;
+    if (!same_view(args[i].unsized, tuple_components(args[i]), views[i],
+                   views[i].components))
+      return false;
   return true;
 }
 
@@ -1290,16 +1289,19 @@ void resolve_overloads(Program& prog) {
 
 }  // namespace
 
-SizedType detail::unsized_declaration(const UnsizedView& view,
+SizedType detail::unsized_declaration(const UnsizedType& view,
                                       std::string raw) {
   SizedType type;
   type.raw = std::move(raw);
-  if (view.depth == 0 && view.leaf == UnsizedLeaf::Int)
+  if (view.depth == 0 && view.leaf == UnsizedLeaf::Int) {
     type.base = "SInt";
-  else if (view.depth == 0 && view.leaf == UnsizedLeaf::Real)
+  } else if (view.depth == 0 && view.leaf == UnsizedLeaf::Real) {
     type.base = "SReal";
-  else
+  } else {
     type.unsized = view;
+    if (!view.components.empty())
+      type.tuple.fill().unsized_components = view.components;
+  }
   return type;
 }
 

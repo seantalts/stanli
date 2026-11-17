@@ -56,19 +56,19 @@ std::vector<Expr> leaves_of(const Value& value) {
 
 // The views of a tuple view's leaves, depth first, with the outer array
 // depth moved onto each leaf.
-void leaf_views(const UnsizedView& view, uint8_t outer,
+void leaf_views(const UnsizedType& view, uint8_t outer,
                 std::vector<UnsizedView>& out) {
   if (!is_tuple(view)) {
     UnsizedView leaf = view;
     leaf.depth = static_cast<uint8_t>(leaf.depth + outer);
-    out.push_back(std::move(leaf));
+    out.push_back(leaf);
     return;
   }
-  for (const UnsizedView& component : view.components)
+  for (const UnsizedType& component : view.components)
     leaf_views(component, static_cast<uint8_t>(outer + view.depth), out);
 }
 
-std::vector<UnsizedView> leaf_views(const UnsizedView& view) {
+std::vector<UnsizedView> leaf_views(const UnsizedType& view) {
   std::vector<UnsizedView> out;
   leaf_views(view, 0, out);
   return out;
@@ -84,11 +84,11 @@ Expr literal_int(long value) {
   return e;
 }
 
-Expr variable(const std::string& name, UnsizedView view, bool data_only) {
+Expr variable(const std::string& name, UnsizedType view, bool data_only) {
   Expr e;
   e.kind = Expr::Var;
   e.name = name;
-  e.unsized = std::move(view);
+  set_unsized_type(e, std::move(view));
   e.data_only = data_only;
   return e;
 }
@@ -109,6 +109,10 @@ Stmt declaration(const std::string& name, SizedType type, bool data_only) {
   s.decl_type = std::move(type);
   s.decl_data_only = data_only;
   return s;
+}
+
+void set_decl_leaf_data_only(Stmt& s, const std::vector<bool>& levels) {
+  if (!levels.empty()) s.tuple.fill().decl_leaf_data_only = levels;
 }
 
 // The view of `view` indexed by `indices`, each addressing the next
@@ -221,15 +225,16 @@ void sized_leaves(const SizedType& type, const std::string& name,
   }
   if (type.base == "SArray")
     outer.insert(outer.end(), type.dims.begin(), type.dims.end());
-  for (size_t k = 0; k < type.components.size(); ++k) {
+  const std::vector<SizedType>& parts = components(type);
+  for (size_t k = 0; k < parts.size(); ++k) {
     std::vector<TupleLeaf::Slot> path = slots;
     path.push_back({outer.size(), static_cast<int>(k + 1)});
-    sized_leaves(type.components[k], name + "." + std::to_string(k + 1), outer,
+    sized_leaves(parts[k], name + "." + std::to_string(k + 1), outer,
                  std::move(path), out);
   }
 }
 
-void view_leaves(const UnsizedView& view, const std::string& name,
+void view_leaves(const UnsizedType& view, const std::string& name,
                  uint8_t outer, std::vector<TupleLeaf::Slot> slots,
                  std::vector<Leaf>& out) {
   if (!is_tuple(view)) {
@@ -265,7 +270,7 @@ UnsizedView declared_leaf_view(const SizedType& type) {
 }
 
 // The tree of a tuple variable's leaf variables.
-Value leaf_tree(const UnsizedView& view, std::vector<Leaf>::const_iterator& at,
+Value leaf_tree(const UnsizedType& view, std::vector<Leaf>::const_iterator& at,
                 std::vector<bool>::const_iterator& data_only) {
   Value value;
   if (!is_tuple(view)) {
@@ -274,7 +279,7 @@ Value leaf_tree(const UnsizedView& view, std::vector<Leaf>::const_iterator& at,
     ++data_only;
     return value;
   }
-  for (const UnsizedView& component : view.components)
+  for (const UnsizedType& component : view.components)
     value.components.push_back(leaf_tree(component, at, data_only));
   return value;
 }
@@ -381,7 +386,7 @@ class TupleEliminator {
                          std::vector<bool> data_only, bool default_data) {
     std::vector<Leaf> leaves;
     if (type.base.empty())
-      view_leaves(type.unsized, name, 0, {}, leaves);
+      view_leaves(unsized_type(type), name, 0, {}, leaves);
     else
       sized_leaves(type, name, {}, {}, leaves);
     for (Leaf& leaf : leaves) {
@@ -392,8 +397,8 @@ class TupleEliminator {
     }
     if (data_only.size() != leaves.size())
       data_only.assign(leaves.size(), default_data);
-    const UnsizedView view =
-        type.base.empty() ? type.unsized : tuple_view(type);
+    const UnsizedType view =
+        type.base.empty() ? unsized_type(type) : tuple_view(type);
     auto at = leaves.cbegin();
     auto level = data_only.cbegin();
     scopes_.back()[name] = leaf_tree(view, at, level);
@@ -402,13 +407,13 @@ class TupleEliminator {
     return leaves;
   }
 
-  static UnsizedView tuple_view(const SizedType& type) {
+  static UnsizedType tuple_view(const SizedType& type) {
     if (!mir::is_tuple(type)) return declared_leaf_view(type);
-    UnsizedView view;
+    UnsizedType view;
     view.leaf = UnsizedLeaf::Tuple;
     if (type.base == "SArray")
       view.depth = static_cast<uint8_t>(type.dims.size());
-    for (const SizedType& component : type.components)
+    for (const SizedType& component : components(type))
       view.components.push_back(tuple_view(component));
     return view;
   }
@@ -463,9 +468,9 @@ class TupleEliminator {
     }
     Expr out = e;
     if (e.kind == Expr::Var && e.fn_type) {
-      std::vector<UnsizedView> args;
-      for (const UnsizedView& view : e.fn_type->args)
-        for (UnsizedView& leaf : leaf_views(view)) args.push_back(leaf);
+      std::vector<UnsizedType> args;
+      for (const UnsizedType& view : e.fn_type->args)
+        for (UnsizedView leaf : leaf_views(view)) args.push_back(leaf);
       out.fn_type->args = std::move(args);
       return out;
     }
@@ -515,11 +520,12 @@ class TupleEliminator {
     Value value = component_values(e, pre);
     if (e.promoted && is_tuple(e)) {
       // A promotion retypes each leaf to the promoted component.
-      std::vector<UnsizedView> views = leaf_views(e.unsized);
+      std::vector<UnsizedView> views = leaf_views(unsized_type(e));
+      const std::vector<bool>& levels = leaf_data_only(e);
       size_t k = 0;
       for_each_leaf(value, [&](Expr& leaf) {
         if (k < views.size()) leaf.unsized = views[k];
-        if (k < e.leaf_data_only.size()) leaf.data_only = e.leaf_data_only[k];
+        if (k < levels.size()) leaf.data_only = levels[k];
         leaf.promoted = true;
         ++k;
       });
@@ -621,7 +627,7 @@ class TupleEliminator {
       unsupported("calling " + e.name + ", which returns a tuple,");
     Expr matrix = rewrite(e.args[0], pre);
     if (effectful(matrix)) matrix = hoist(std::move(matrix), pre);
-    const std::vector<UnsizedView> views = leaf_views(e.unsized);
+    const std::vector<UnsizedView> views = leaf_views(unsized_type(e));
     Value value;
     for (size_t k = 0; k < found->second.size(); ++k) {
       Value part;
@@ -640,8 +646,8 @@ class TupleEliminator {
     std::vector<std::vector<Expr>> elements;
     for (const Expr& arg : e.args)
       elements.push_back(leaves_of(value_of(arg, pre)));
-    const std::vector<UnsizedView> views = leaf_views(e.unsized);
-    Value result = shape_of(e.unsized);
+    const std::vector<UnsizedView> views = leaf_views(unsized_type(e));
+    Value result = shape_of(unsized_type(e));
     size_t k = 0;
     for_each_leaf(result, [&](Expr& leaf) {
       leaf.kind = Expr::FunApp;
@@ -662,13 +668,14 @@ class TupleEliminator {
 
   // Temporaries for a tuple value of `e`'s type.
   Value temporaries(const Expr& e, std::vector<Stmt>& pre) {
-    std::vector<UnsizedView> views = leaf_views(e.unsized);
-    Value tree = shape_of(e.unsized);
+    const UnsizedType type = unsized_type(e);
+    std::vector<UnsizedView> views = leaf_views(type);
+    const std::vector<bool>& levels = leaf_data_only(e);
+    Value tree = shape_of(type);
     size_t k = 0;
     for_each_leaf(tree, [&](Expr& leaf) {
       const std::string name = temporary();
-      const bool data_only =
-          k < e.leaf_data_only.size() ? e.leaf_data_only[k] : false;
+      const bool data_only = k < levels.size() ? levels[k] : false;
       pre.push_back(
           declaration(name, unsized_declaration(views[k], ""), data_only));
       leaf = variable(name, views[k], data_only);
@@ -677,10 +684,10 @@ class TupleEliminator {
     return tree;
   }
 
-  static Value shape_of(const UnsizedView& view) {
+  static Value shape_of(const UnsizedType& view) {
     Value value;
     if (!is_tuple(view)) return value;
-    for (const UnsizedView& component : view.components)
+    for (const UnsizedType& component : view.components)
       value.components.push_back(shape_of(component));
     if (value.components.empty()) throw MirError("mir: empty tuple type");
     return value;
@@ -723,7 +730,7 @@ class TupleEliminator {
   void rewrite_function(FunDef& f) {
     Scope scope(scopes_);
     std::vector<std::string> names;
-    std::vector<UnsizedView> views;
+    std::vector<UnsizedType> views;
     std::vector<bool> data_only;
     for (size_t i = 0; i < f.arg_names.size(); ++i) {
       if (!is_tuple(f.arg_views[i])) {
@@ -817,12 +824,13 @@ class TupleEliminator {
       throw MirError("mir: user function arity mismatch for " + call.name);
     const std::string prefix = fresh() + ".";
     std::vector<Stmt> stmts;
-    const Expr result = variable(prefix + "result", call.unsized, false);
+    const UnsizedType result_type = unsized_type(call);
+    const Expr result = variable(prefix + "result", result_type, false);
     temps_.insert(result.name);
     temps_.insert(prefix + "exited");
     Stmt result_decl =
-        declaration(result.name, unsized_declaration(call.unsized, ""), false);
-    result_decl.decl_leaf_data_only = call.leaf_data_only;
+        declaration(result.name, unsized_declaration(result_type, ""), false);
+    set_decl_leaf_data_only(result_decl, leaf_data_only(call));
     stmts.push_back(std::move(result_decl));
     const std::string exited = prefix + "exited";
     stmts.push_back(declaration(
@@ -833,9 +841,9 @@ class TupleEliminator {
     for (size_t i = 0; i < f.arg_names.size(); ++i) {
       const Expr& actual = call.args[i];
       Stmt formal = declaration(prefix + f.arg_names[i],
-                                unsized_declaration(actual.unsized, ""),
+                                unsized_declaration(unsized_type(actual), ""),
                                 actual.data_only);
-      formal.decl_leaf_data_only = actual.leaf_data_only;
+      set_decl_leaf_data_only(formal, leaf_data_only(actual));
       body.body.push_back(std::move(formal));
       body.body.push_back(assignment(prefix + f.arg_names[i], {}, actual));
     }
@@ -933,7 +941,7 @@ class TupleEliminator {
     SizedType type = s.decl_type;
     for_each_dim(type, [&](Expr& dim) { dim = rewrite(dim, out); });
     for (const Leaf& leaf :
-         bind(s.decl_id, type, s.decl_leaf_data_only, s.decl_data_only))
+         bind(s.decl_id, type, decl_leaf_data_only(s), s.decl_data_only))
       out.push_back(
           declaration(leaf.name, leaf.type, leaf_data_only_[leaf.name]));
     if (init) assign_leaves(*lookup(s.decl_id), *init, out);
@@ -953,7 +961,7 @@ class TupleEliminator {
       });
     };
     apply(indices);
-    for (const Stmt::TupleStep& step : s.lhs_steps) {
+    for (const Stmt::TupleStep& step : lhs_steps(s)) {
       if (step.component < 1 || step.component > (int)target.components.size())
         throw MirError("mir: tuple assignment component out of range");
       Value picked = std::move(target.components[step.component - 1]);
@@ -973,7 +981,7 @@ class TupleEliminator {
 
   void rewrite_assignment(const Stmt& s, std::vector<Stmt>& out) {
     if (!lookup(s.lhs)) {
-      if (!s.lhs_steps.empty())
+      if (!lhs_steps(s).empty())
         throw MirError("mir: projection of non-tuple " + s.lhs);
       Stmt a = s;
       rewrite_exprs(a, out);

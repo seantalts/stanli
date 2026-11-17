@@ -1816,7 +1816,7 @@ void Lowering::lower_simple_stmt(const mir::Stmt& s) {
         if (owner->block == mir::OutputVar::Block::GeneratedQuantities &&
             !n_gq_start)
           n_gq_start = out.views.size();
-        const auto named = mir::output_name(
+        auto named = mir::output_name(
             owner->name, leaf, std::vector<int64_t>(ixs.rbegin(), ixs.rend()));
         if (!named) fail("FnWriteParam of a whole array of tuples", s.raw);
         // stanc peels the array dimensions, so what is left here is a
@@ -1824,10 +1824,11 @@ void Lowering::lower_simple_stmt(const mir::Stmt& s) {
         // how CmdStan indexes the columns.
         using Naming = CompiledModel::ParamView::Naming;
         const mir::Expr& t = s.fn_args[0];
-        CompiledModel::ParamView pv{named->name, v.slot, g.slots[v.slot].len};
-        pv.variable = named->variable;
-        pv.index = named->index;
-        const std::string& name = named->name;
+        CompiledModel::ParamView pv{std::move(named->name), v.slot,
+                                    g.slots[v.slot].len};
+        pv.variable = std::move(named->variable);
+        pv.index = std::move(named->index);
+        const std::string& name = pv.name;
         if (mir::language_scalar(t) ||
             mir::is_unsized(t, mir::UnsizedLeaf::Complex)) {
           pv.naming = Naming::Scalar;

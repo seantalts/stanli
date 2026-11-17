@@ -11,6 +11,7 @@
 #include <cstdint>
 #include <limits>
 #include <map>
+#include <memory>
 #include <optional>
 #include <set>
 #include <stdexcept>
@@ -43,17 +44,74 @@ enum class UnsizedLeaf : uint8_t {
 struct UnsizedView {
   uint8_t depth = 0;
   UnsizedLeaf leaf = UnsizedLeaf::Unknown;
-  std::vector<UnsizedView> components;  // Tuple only
+};
+static_assert(sizeof(UnsizedView) == 2 &&
+                  std::is_trivially_copyable_v<UnsizedView>,
+              "every Expr holds an UnsizedView");
+
+// An UnsizedView with a tuple's component types. Expressions and sized types
+// keep the components in their tuple side structs instead, so that a program
+// without tuples does not pay for them in every node.
+struct UnsizedType : UnsizedView {
+  UnsizedType() = default;
+  UnsizedType(uint8_t depth, UnsizedLeaf leaf) : UnsizedView{depth, leaf} {}
+  UnsizedType(UnsizedView view, std::vector<UnsizedType> components = {})
+      : UnsizedView(view), components(std::move(components)) {}
+  std::vector<UnsizedType> components;  // Tuple only
 };
 
-inline bool same_view(const UnsizedView& a, const UnsizedView& b) {
-  if (a.depth != b.depth || a.leaf != b.leaf ||
-      a.components.size() != b.components.size())
-    return false;
-  for (size_t i = 0; i < a.components.size(); ++i)
-    if (!same_view(a.components[i], b.components[i])) return false;
+inline bool same_components(const std::vector<UnsizedType>& a,
+                            const std::vector<UnsizedType>& b);
+
+inline bool same_view(const UnsizedView& a,
+                      const std::vector<UnsizedType>& a_components,
+                      const UnsizedView& b,
+                      const std::vector<UnsizedType>& b_components) {
+  return a.depth == b.depth && a.leaf == b.leaf &&
+         same_components(a_components, b_components);
+}
+
+inline bool same_components(const std::vector<UnsizedType>& a,
+                            const std::vector<UnsizedType>& b) {
+  if (a.size() != b.size()) return false;
+  for (size_t i = 0; i < a.size(); ++i)
+    if (!same_view(a[i], a[i].components, b[i], b[i].components)) return false;
   return true;
 }
+
+// An owned value that is usually absent. Copying copies the value. When it
+// is absent, copying, moving and destroying it test one pointer. The MIR
+// nodes keep their tuple-only fields in one, so a program without tuples
+// pays almost nothing for them.
+template <class T>
+class Boxed {
+ public:
+  Boxed() = default;
+  Boxed(const Boxed& other) : value_(copy(other)) {}
+  Boxed(Boxed&&) noexcept = default;
+  Boxed& operator=(const Boxed& other) {
+    if (this != &other) value_ = copy(other);
+    return *this;
+  }
+  Boxed& operator=(Boxed&&) noexcept = default;
+
+  explicit operator bool() const { return value_ != nullptr; }
+  T* operator->() { return value_.get(); }
+  const T* operator->() const { return value_.get(); }
+  T& operator*() { return *value_; }
+  const T& operator*() const { return *value_; }
+  // The value, made empty first when absent.
+  T& fill() {
+    if (!value_) value_ = std::make_unique<T>();
+    return *value_;
+  }
+
+ private:
+  static std::unique_ptr<T> copy(const Boxed& other) {
+    return other.value_ ? std::make_unique<T>(*other.value_) : nullptr;
+  }
+  std::unique_ptr<T> value_;
+};
 
 // A non-array value of this type: stanc's UInt, UReal, UVector, ...
 inline bool is_unsized(const UnsizedView& view, UnsizedLeaf leaf) {
@@ -100,9 +158,15 @@ enum class FnSuffix : uint8_t { Plain, Rng, Lpdf, Lpmf, Target, Jacobian };
 // The type of a variable that names a function, as a higher-order callback
 // does: its argument views and the suffix of the function it denotes.
 struct FunctionType {
-  std::vector<UnsizedView> args;
+  std::vector<UnsizedType> args;
   FnSuffix suffix = FnSuffix::Plain;
   bool propto = false;  // referenced as `_lupdf` / `_lupmf`
+};
+
+// What a tuple-typed expression adds to its UnsizedView.
+struct ExprTuple {
+  std::vector<UnsizedType> components;
+  std::vector<bool> leaf_data_only;  // whether each leaf is data, depth first
 };
 
 struct Expr {
@@ -128,12 +192,21 @@ struct Expr {
     // `args[0].component`, numbered from 1.
     TupleProjection
   } kind = Unsupported;
-  std::string name;  // Var name or FunApp function name
-  enum class Lib { StanLib, Internal, UserDefined } fn_lib = Lib::StanLib;
+  int component = 0;  // TupleProjection
+  std::string name;   // Var name or FunApp function name
+  // The small fields are kept together so that they pack into one word.
+  enum class Lib : uint8_t {
+    StanLib,
+    Internal,
+    UserDefined
+  } fn_lib = Lib::StanLib;
   FnSuffix fn_suffix = FnSuffix::Plain;
   // (FnDist _ Unnormalized), or the older (FnLpdf true): the call was written
   // `_lupdf`/`_lupmf`. On a callback Var, the reference was.
   bool fn_propto = false;
+  bool data_only = false;  // adlevel DataOnly
+  bool promoted = false;   // explicit MIR Promotion to this adlevel/type
+  UnsizedView unsized;
   // A user function call, or a Var naming one, that selects one overload of
   // an overloaded name: that overload's signature. Empty otherwise.
   std::string fn_overload;
@@ -143,14 +216,39 @@ struct Expr {
   std::string lit_s;
   std::vector<Expr> args;  // FunApp args; Promotion inner; Indexed base+idx;
                            // an index's bounds; a projection's tuple
-  int component = 0;       // TupleProjection
-  UnsizedView unsized;
-  bool data_only = false;  // adlevel DataOnly
-  // A tuple-typed value: whether each leaf is data, depth first.
-  std::vector<bool> leaf_data_only;
-  bool promoted = false;  // explicit MIR Promotion to this adlevel/type
-  std::string raw;        // Unsupported diagnostics
+  Boxed<ExprTuple> tuple;  // a tuple-typed value only
+  std::string raw;         // Unsupported diagnostics
 };
+
+inline const std::vector<UnsizedType>& no_components() {
+  static const std::vector<UnsizedType> none;
+  return none;
+}
+
+inline const std::vector<bool>& no_levels() {
+  static const std::vector<bool> none;
+  return none;
+}
+
+inline const std::vector<UnsizedType>& tuple_components(const Expr& e) {
+  return e.tuple ? e.tuple->components : no_components();
+}
+
+inline const std::vector<bool>& leaf_data_only(const Expr& e) {
+  return e.tuple ? e.tuple->leaf_data_only : no_levels();
+}
+
+inline UnsizedType unsized_type(const Expr& e) {
+  return {e.unsized, tuple_components(e)};
+}
+
+inline void set_unsized_type(Expr& e, UnsizedType type) {
+  e.unsized = type;
+  if (!type.components.empty())
+    e.tuple.fill().components = std::move(type.components);
+  else if (e.tuple)
+    e.tuple->components.clear();
+}
 
 inline bool is_unsized(const Expr& e, UnsizedLeaf leaf) {
   return is_unsized(e.unsized, leaf);
@@ -526,8 +624,13 @@ struct Transform {
   } kind = Identity;
   std::vector<Expr> args;
   std::string raw;
-  std::vector<Transform> components;  // Tuple only
+  Boxed<std::vector<Transform>> components;  // Tuple only
 };
+
+inline const std::vector<Transform>& components(const Transform& t) {
+  static const std::vector<Transform> none;
+  return t.components ? *t.components : none;
+}
 
 inline bool is_structured_check(Transform::Kind kind) {
   switch (kind) {
@@ -562,6 +665,8 @@ inline bool is_matrix_only_check(Transform::Kind kind) {
   }
 }
 
+struct SizedTuple;
+
 struct SizedType {
   std::string base;        // SInt SReal SVector SRowVector SMatrix SArray ...
   std::vector<Expr> dims;  // outer-to-inner for SArray chains
@@ -570,9 +675,25 @@ struct SizedType {
   // stanc also uses unsized declarations for optimizer temporaries. Their
   // shape is supplied by the first whole-variable assignment.
   UnsizedView unsized;
+  Boxed<SizedTuple> tuple;  // a tuple type only
+};
+
+// What a tuple type adds to a SizedType.
+struct SizedTuple {
   // STuple, or an SArray of STuple: the component types.
   std::vector<SizedType> components;
+  // An unsized declaration of a tuple: the components of `unsized`.
+  std::vector<UnsizedType> unsized_components;
 };
+
+inline const std::vector<SizedType>& components(const SizedType& t) {
+  static const std::vector<SizedType> none;
+  return t.tuple ? t.tuple->components : none;
+}
+
+inline UnsizedType unsized_type(const SizedType& t) {
+  return {t.unsized, t.tuple ? t.tuple->unsized_components : no_components()};
+}
 
 inline bool is_tuple(const SizedType& t) {
   return t.base == "STuple" || (t.base == "SArray" && t.elem_base == "STuple");
@@ -583,8 +704,10 @@ inline bool is_complex(const SizedType& t) {
   return leaf.rfind("SComplex", 0) == 0;
 }
 
+struct StmtTuple;
+
 struct Stmt {
-  enum Kind {
+  enum Kind : uint8_t {
     Decl,
     Assignment,
     TargetPE,
@@ -600,12 +723,18 @@ struct Stmt {
     Skip,
     Unsupported
   } kind = Unsupported;
+  // The small fields are kept together so that they pack into one word.
+  bool decl_data_only = false;  // Decl
+  bool has_init = false;        // Decl
+  // TargetPE: `jacobian += target`, a TargetPE that belongs to the change of
+  // variables. Every evaluation includes the Jacobian, so it adds to the
+  // target alike.
+  bool jacobian = false;
+  Expr::Lib fn_lib = Expr::Lib::StanLib;  // NRFunApp
+  FnSuffix fn_suffix = FnSuffix::Plain;   // NRFunApp
   // Decl
   std::string decl_id;
   SizedType decl_type;
-  bool decl_data_only = false;
-  std::vector<bool> decl_leaf_data_only;  // a tuple declaration's leaves
-  bool has_init = false;
   Expr init;
   // Set iff the initializer, or an assignment's value, is FnReadParam.
   std::optional<Transform> read_transform;
@@ -618,17 +747,11 @@ struct Stmt {
     int component = 0;
     std::vector<Expr> indices;
   };
-  std::vector<TupleStep> lhs_steps;
   Expr rhs;
   // TargetPE
   Expr target;
-  // `jacobian += target`: a TargetPE that belongs to the change of variables.
-  // Every evaluation includes the Jacobian, so it adds to the target alike.
-  bool jacobian = false;
   // NRFunApp
   std::string fn_name;
-  Expr::Lib fn_lib = Expr::Lib::StanLib;
-  FnSuffix fn_suffix = FnSuffix::Plain;
   std::string fn_overload;  // as on Expr
   std::vector<Expr> fn_args;
   // FnCheck: the relation lives in the CompilerInternal payload rather than
@@ -651,8 +774,31 @@ struct Stmt {
   // Block / SList / For body / IfElse (then at body[0], else at body[1] if
   // present, each wrapped as its own Stmt)
   std::vector<Stmt> body;
+  Boxed<StmtTuple> tuple;  // a tuple declaration or assignment only
   std::string raw;
 };
+
+// What a tuple declaration or assignment adds to a Stmt.
+struct StmtTuple {
+  std::vector<bool> decl_leaf_data_only;  // a declaration's leaves
+  std::vector<Stmt::TupleStep> lhs_steps;
+};
+
+#ifdef _LIBCPP_VERSION
+// Lowering copies MIR nodes often, so every program pays for their size.
+// Tuple-only fields belong behind the Boxed pointers.
+static_assert(sizeof(void*) != 8 || sizeof(Expr) == 200, "Expr grew");
+static_assert(sizeof(void*) != 8 || sizeof(Stmt) == 1808, "Stmt grew");
+#endif
+
+inline const std::vector<bool>& decl_leaf_data_only(const Stmt& s) {
+  return s.tuple ? s.tuple->decl_leaf_data_only : no_levels();
+}
+
+inline const std::vector<Stmt::TupleStep>& lhs_steps(const Stmt& s) {
+  static const std::vector<Stmt::TupleStep> none;
+  return s.tuple ? s.tuple->lhs_steps : none;
+}
 
 // A user function called as a statement, as the call expression the
 // function machinery takes. It has no value, so its type stays empty.
@@ -720,14 +866,17 @@ bool instantiated_autodiff(const Expr& e, bool promoted_autodiff,
 template <class TypeRef, class F>
 void for_each_dim(TypeRef& type, F&& visit) {
   for (auto& e : type.dims) visit(e);
-  for (auto& component : type.components) for_each_dim(component, visit);
+  if (type.tuple)
+    for (auto& component : type.tuple->components)
+      for_each_dim(component, visit);
 }
 
 template <class TransformRef, class F>
 void for_each_transform_arg(TransformRef& transform, F&& visit) {
   for (auto& e : transform.args) visit(e);
-  for (auto& component : transform.components)
-    for_each_transform_arg(component, visit);
+  if (transform.components)
+    for (auto& component : *transform.components)
+      for_each_transform_arg(component, visit);
 }
 
 template <class StmtRef, class F>
@@ -736,8 +885,9 @@ void for_each_expr_of(StmtRef& s, F& visit) {
     visit(*e);
   for (auto* expressions : {&s.read_dims, &s.lhs_idx, &s.fn_args})
     for (auto& e : *expressions) visit(e);
-  for (auto& step : s.lhs_steps)
-    for (auto& e : step.indices) visit(e);
+  if (s.tuple)
+    for (auto& step : s.tuple->lhs_steps)
+      for (auto& e : step.indices) visit(e);
   for_each_dim(s.decl_type, visit);
   for (auto* transform :
        {&s.read_transform, &s.check_transform, &s.write_transform})
@@ -776,7 +926,7 @@ struct FunDef {
   // than one; empty otherwise. The reader assigns it.
   std::string overload;
   std::vector<std::string> arg_names;
-  std::vector<UnsizedView> arg_views;
+  std::vector<UnsizedType> arg_views;
   std::vector<bool> arg_data_only;
   std::vector<std::vector<bool>> arg_leaf_data_only;  // tuple arguments
   std::vector<Stmt> body;
@@ -1017,9 +1167,9 @@ template <class Extent>
 int64_t output_columns(const SizedType& type, const Extent& extent) {
   int64_t columns = 1;
   for (const Expr& dim : type.dims) columns *= extent(dim);
-  if (type.components.empty()) return columns;
+  if (components(type).empty()) return columns;
   int64_t per_element = 0;
-  for (const SizedType& component : type.components)
+  for (const SizedType& component : components(type))
     per_element += output_columns(component, extent);
   return columns * per_element;
 }
@@ -1040,14 +1190,14 @@ inline std::optional<OutputName> output_name(
     const std::vector<int64_t>& indices) {
   OutputName out{owner, owner, {}};
   size_t used = 0;
-  for (const TupleLeaf::Slot& slot :
-       leaf ? leaf->slots : std::vector<TupleLeaf::Slot>{}) {
-    if (slot.before > indices.size()) return std::nullopt;
-    for (; used < slot.before; ++used)
-      out.name += "." + std::to_string(indices[used]);
-    out.name += ":" + std::to_string(slot.slot);
-    out.variable = out.name;
-  }
+  if (leaf)
+    for (const TupleLeaf::Slot& slot : leaf->slots) {
+      if (slot.before > indices.size()) return std::nullopt;
+      for (; used < slot.before; ++used)
+        out.name += "." + std::to_string(indices[used]);
+      out.name += ":" + std::to_string(slot.slot);
+      out.variable = out.name;
+    }
   for (; used < indices.size(); ++used) {
     out.name += "." + std::to_string(indices[used]);
     out.index.push_back(indices[used]);

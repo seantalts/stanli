@@ -466,14 +466,14 @@ bool WaInterp::write_param(MirInterp<double>& in, const mir::Stmt& s,
       n_gq_start_ = cols_.size();
       saw_gq_ = true;
     }
-    const auto named = mir::output_name(
+    auto named = mir::output_name(
         owner->name, tuple, std::vector<int64_t>(ixs.rbegin(), ixs.rend()));
     if (!named)
       throw CompileError("cannot name a write of a whole array of tuples");
     using Naming = CompiledModel::ParamView::Naming;
-    CompiledModel::ParamView pv{named->name, (int)row.size(), len};
-    pv.variable = named->variable;
-    pv.index = named->index;
+    CompiledModel::ParamView pv{std::move(named->name), (int)row.size(), len};
+    pv.variable = std::move(named->variable);
+    pv.index = std::move(named->index);
     if (mir::language_scalar(v) ||
         mir::is_unsized(v, mir::UnsizedLeaf::Complex)) {
       pv.naming = Naming::Scalar;

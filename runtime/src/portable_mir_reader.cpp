@@ -337,17 +337,27 @@ constexpr std::array<Stmt::Kind, 16> kStmtTags = {
     Stmt::NRFunApp, Stmt::Return,      Stmt::Break,    Stmt::Continue,
     Stmt::Skip,     Stmt::Unsupported, Stmt::TargetPE, Stmt::Assignment};
 
-UnsizedView read_view(Reader& reader) {
-  Reader::Depth depth(reader);
+// A view without a tuple's components, which follow it on the wire.
+UnsizedView read_leaf_view(Reader& reader) {
   UnsizedView view;
   view.depth = reader.u8();
   const uint8_t leaf = reader.u8();
   view.leaf = read_tag(reader, leaf, kLeafTags, "unknown unsized-view tag");
-  if (view.leaf == UnsizedLeaf::Tuple) {
-    reader.saw_tuple = true;
-    view.components =
-        reader.list<UnsizedView>([&] { return read_view(reader); });
-  }
+  return view;
+}
+
+UnsizedType read_view(Reader& reader);
+
+std::vector<UnsizedType> read_components(Reader& reader) {
+  Reader::Depth depth(reader);
+  reader.saw_tuple = true;
+  return reader.list<UnsizedType>([&] { return read_view(reader); });
+}
+
+UnsizedType read_view(Reader& reader) {
+  UnsizedType view(read_leaf_view(reader));
+  if (view.leaf == UnsizedLeaf::Tuple)
+    view.components = read_components(reader);
   return view;
 }
 
@@ -366,7 +376,7 @@ FnSuffix read_suffix(Reader& reader) {
 FunctionType read_function_type(Reader& reader) {
   Reader::Depth depth(reader);
   FunctionType value;
-  value.args = reader.list<UnsizedView>([&] { return read_view(reader); });
+  value.args = reader.list<UnsizedType>([&] { return read_view(reader); });
   value.suffix = read_suffix(reader);
   value.propto = reader.boolean();
   return value;
@@ -377,10 +387,12 @@ std::vector<Expr> read_exprs(Reader& reader) {
 }
 
 void read_meta(Reader& reader, Expr& value) {
-  value.unsized = read_view(reader);
+  value.unsized = read_leaf_view(reader);
+  if (value.unsized.leaf == UnsizedLeaf::Tuple)
+    value.tuple.fill().components = read_components(reader);
   value.data_only = reader.boolean();
   if (value.unsized.leaf == UnsizedLeaf::Tuple)
-    value.leaf_data_only = read_bools(reader);
+    value.tuple->leaf_data_only = read_bools(reader);
   value.promoted = reader.boolean();
   value.raw = reader.string();
 }
@@ -453,7 +465,7 @@ Transform read_transform(Reader& reader) {
   value.args = read_exprs(reader);
   value.raw = reader.string();
   if (value.kind == Transform::Tuple)
-    value.components =
+    value.components.fill() =
         reader.list<Transform>([&] { return read_transform(reader); });
   return value;
 }
@@ -474,7 +486,7 @@ SizedType read_sized(Reader& reader) {
   value.raw = reader.string();
   if (is_tuple(value)) {
     reader.saw_tuple = true;
-    value.components =
+    value.tuple.fill().components =
         reader.list<SizedType>([&] { return read_sized(reader); });
   }
   return value;
@@ -485,7 +497,7 @@ SizedType read_decl_type(Reader& reader) {
   const uint8_t tag = reader.u8();
   if (tag == 0) return read_sized(reader);
   if (tag != 1) reader.fail("unknown declaration-type tag");
-  const UnsizedView view = read_view(reader);
+  UnsizedType view = read_view(reader);
   std::string raw = reader.string();
   return unsized_declaration(view, std::move(raw));
 }
@@ -507,7 +519,7 @@ Stmt read_stmt(Reader& reader) {
       value.decl_data_only = reader.boolean();
       if (is_tuple(value.decl_type) ||
           value.decl_type.unsized.leaf == UnsizedLeaf::Tuple)
-        value.decl_leaf_data_only = read_bools(reader);
+        value.tuple.fill().decl_leaf_data_only = read_bools(reader);
       value.has_init = reader.boolean();
       if (value.has_init) value.init = read_expr(reader);
       value.read_transform = read_optional_transform(reader);
@@ -519,7 +531,8 @@ Stmt read_stmt(Reader& reader) {
       value.lhs_idx = read_exprs(reader);
       if (tag == kTupleAssignmentTag) {
         reader.saw_tuple = true;
-        value.lhs_steps = reader.list<Stmt::TupleStep>([&] {
+        std::vector<Stmt::TupleStep>& steps = value.tuple.fill().lhs_steps;
+        steps = reader.list<Stmt::TupleStep>([&] {
           Stmt::TupleStep step;
           step.component = static_cast<int>(reader.u32());
           step.indices = read_exprs(reader);
@@ -528,8 +541,7 @@ Stmt read_stmt(Reader& reader) {
         value.rhs = read_expr(reader);
         value.read_transform = read_optional_transform(reader);
         value.read_dims = read_exprs(reader);
-        if (value.lhs_steps.empty())
-          reader.fail("tuple assignment without a projection");
+        if (steps.empty()) reader.fail("tuple assignment without a projection");
         break;
       }
       value.rhs = read_expr(reader);
@@ -608,7 +620,7 @@ FunDef read_fun(Reader& reader) {
   FunDef value;
   value.name = reader.string();
   value.arg_names = read_strings(reader);
-  value.arg_views = reader.list<UnsizedView>([&] { return read_view(reader); });
+  value.arg_views = reader.list<UnsizedType>([&] { return read_view(reader); });
   value.arg_data_only = read_bools(reader);
   const size_t arity = value.arg_names.size();
   if (value.arg_views.size() != arity || value.arg_data_only.size() != arity)

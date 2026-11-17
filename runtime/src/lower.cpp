@@ -1278,6 +1278,7 @@ class WriteArrayLowering {
 std::optional<DataMap> tuple_data_in_array_order(const mir::Program& p,
                                                  const DataMap& data) {
   std::optional<DataMap> out;
+  if (p.tuple_leaves.empty()) return out;
   for (const auto& input : p.input_vars) {
     const auto leaf = p.tuple_leaves.find(input.first);
     if (leaf == p.tuple_leaves.end() || !data.has(input.first)) continue;
