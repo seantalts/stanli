@@ -2,14 +2,14 @@
 
 stanli implements most Stan probability functions, the common scalar math
 functions, and the parameter transforms listed below, but not every Stan Math
-overload. It refuses an unsupported form with an error and never substitutes
-an approximation.
+overload. If you use an unsupported form, stanli stops with an error. It never
+substitutes an approximation.
 
 This page covers probability functions, real-valued scalar math, parameter
-transforms, truncation, censoring, `print` and `reject`. For whole models see
-[corpus status](corpus-status.md); for language constructs see the
-[stanc3 test models](../tests/stanc3_good/README.md); for how the checks work and
-their numerical limits see [TESTING.md](../TESTING.md).
+transforms, truncation, censoring, `print` and `reject`. For whole models, see
+[corpus status](corpus-status.md). For language constructs, see the
+[stanc3 test models](../tests/stanc3_good/README.md). For how the checks work
+and their numerical limits, see [TESTING.md](../TESTING.md).
 
 ## Coverage at a glance
 
@@ -18,8 +18,8 @@ The checked-in conformance baseline
 was produced with stanc3 2.40.0 (`d58446e6`). It holds 24,291 Stan Math
 signatures and 31 language-construct cases, of which 19,035 are verified
 against CmdStan. A separate generated replay covers 7,407 builtin and 12,131
-density signatures as 66,698 cases across 73 models, including mixed
-data/parameter arguments.
+density signatures in 66,698 cases across 73 models, including
+cases that mix data and parameter arguments.
 
 | family | name metric | verified | unexpected unsupported | generator gaps | inapplicable |
 | --- | ---: | ---: | ---: | ---: | ---: |
@@ -28,13 +28,13 @@ data/parameter arguments.
 | scalar math | 100 / 100 | 95 | 0 | 0 | 5 |
 
 The name metric counts names with no `unexpected_unsupported` signature. It is
-a regression count, and a name can pass it without every overload working.
+a regression count. A name can pass it without every overload working.
 
 The status columns count signatures. For densities and distribution functions
 they cover every signature in the inventory. The scalar-math row counts names
-that have a signature with one to five `real` arguments and a `real` result,
-excluding densities, distribution functions, RNGs and quantiles (`_qf`,
-`_log_qf`); its status columns cover only those 100 all-real signatures.
+that have a signature with one to five `real` arguments and a `real` result. It
+excludes densities, distribution functions, RNGs and quantiles (`_qf`,
+`_log_qf`). Its status columns cover only those 100 all-real signatures.
 The baseline also verifies all 256 `student_t_qf` overloads.
 
 ## How to read the classifications
@@ -43,12 +43,12 @@ Each signature receives one status:
 
 | status | meaning |
 | --- | --- |
-| `verified` | CmdStan and stanli evaluated the generated case and passed its numerical gate. |
+| `verified` | CmdStan and stanli evaluated the generated case and passed its numerical check. |
 | `unexpected_unsupported` | CmdStan accepted the case and stanli rejected it. This is implementation backlog. |
-| `generator_gap` | The harness cannot yet generate a valid differential case. This is no evidence of support. |
+| `generator_gap` | The harness cannot yet generate a valid differential case. It says nothing about support. |
 | `inapplicable` | No gradient comparison applies, for example an RNG-only case, a case with no real input or result, or a zero Stan gradient. |
-| `expected_unsupported` | A reviewed boundary, currently complex values and tuple-valued results. |
-| `mismatch` | Both answered, and the results failed the numerical or semantic gate. |
+| `expected_unsupported` | Left unsupported after review. Currently this means complex values and tuple-valued results. |
+| `mismatch` | Both answered, and the results failed the numerical or semantic check. |
 | `crashed` | The stanli worker died before returning a result. |
 | `harness_error` | The harness could not construct or compare the case. |
 
@@ -58,7 +58,7 @@ For each applicable generated signature, the nightly conformance run builds
 equivalent CmdStan and stanli models, evaluates three deterministic parameter
 points, and compares the log density, every gradient component, and whether
 either side rejects the point. The limit is 10 ULP, with reviewed exceptions
-where ULP is the wrong scale. `wiener_lpdf` uses a `1e-12` relative gate on the
+where ULP is the wrong scale. `wiener_lpdf` uses a `1e-12` relative limit on the
 log density and every gradient component, because some near-zero gradient
 lanes vary with container instantiation and compiler optimization. The policy
 is in [TESTING.md](../TESTING.md#numerical-policy).
@@ -68,7 +68,7 @@ Under `~`, stanli drops the same data-only terms as CmdStan; see
 
 ## Known unsupported forms
 
-The headline ratios hide these gaps:
+The name metric in the table above does not show these gaps:
 
 - Extended `wiener_lpdf`. The five-argument form works. The six- to
   nine-argument forms are refused because the kernel layout has five inputs
@@ -82,10 +82,10 @@ The headline ratios hide these gaps:
 - Tuple-valued results are refused by policy. The graph cannot yet represent
   or destructure tuples.
 
-GLM calls keep whether each argument was a scalar or an array, so scalar
-outcomes and trial counts use Stan Math's broadcast overload, which matters to
-the normalizing constant of functions such as `poisson_log_glm_lpmf`. Per-row
-vector intercepts work alongside scalar ones.
+stanli records whether each GLM argument was a scalar or an array. Scalar
+outcomes and trial counts then use Stan Math's broadcast overload. This
+affects the normalizing constant of functions such as `poisson_log_glm_lpmf`.
+Per-row vector intercepts work alongside scalar ones.
 
 ## Parameter transforms
 
@@ -111,9 +111,9 @@ number of elements. Offset and multiplier expressions may be data or
 parameters, scalar or per element.
 
 [`harnesses/transform_sweep.py`](../harnesses/transform_sweep.py) covers 30
-representative declarations. At three points it compares the unconstrained
-size, the total log density including the Jacobian, the full gradient, and
-rejection with CmdStan, at 2 ULP. CI separately checks representative sizes,
+representative declarations. It compares the unconstrained size, the total log
+density including the Jacobian, the full gradient, and rejection with CmdStan
+at three points, within 2 ULP. CI separately checks representative sizes,
 finite-difference gradients and constraint properties. This does not cover
 every legal array shape or dimension expression.
 
@@ -132,12 +132,13 @@ target -= log_diff_exp(normal_lcdf(upper | mu, sigma),
 stanli supports the scalar and vectorized forms in
 `tests/fixtures/trunc.stan` and `tests/fixtures/truncvec.stan`. CI compares
 them with a Stan Math reverse-mode reference: gradients exactly, the log
-density within a small rounding tolerance. By hand, CmdStan differed by 1 ULP
-in the log density on the scalar fixture and not at all on the vector one.
+density within a small rounding tolerance. In a comparison by hand, CmdStan
+differed by 1 ULP in the log density on the scalar fixture and not at all on
+the vector one.
 Truncating a parameter variate needs a parameter-dependent support check that
 stanli does not support yet.
 
-Censoring is written explicitly in Stan, and works wherever stanli supports the
+In Stan you write censoring explicitly. It works wherever stanli supports the
 CDFs and the surrounding control flow:
 
 ```stan
@@ -185,9 +186,9 @@ A Stan function reaches the runtime in one of three ways. It can lower to
 existing graph operations when that preserves the value, the validation checks
 and Stan's `propto` behavior. It can reuse an existing kernel layout when its
 shapes and activity rules match one. Otherwise a runtime operation calls the
-Stan Math template directly, recording partials into scratch space or running
-a nested Stan Math tape, at some allocation and tape cost. Adding a function is
-one X-macro entry only when an existing layout fits. See
+Stan Math template directly. That operation records partials into scratch space
+or runs a nested Stan Math tape, which costs some allocation and tape work.
+Adding a function is one X-macro entry only when an existing layout fits. See
 [the contributor guide](hacking.md) for details.
 
 ## Reproducing
@@ -211,6 +212,6 @@ every signature containing the text:
   --build build-rel --stanli-pythonpath python --filter normal_lpdf
 ```
 
-A sliced run reports `partial_run`, which describes its scope and is no
-failure. The [conformance harness README](../harnesses/conformance/README.md)
-covers setup, artifacts, gates and snapshot updates.
+A sliced run reports `partial_run`, which is not a failure. The
+[conformance harness README](../harnesses/conformance/README.md) covers setup,
+artifacts, pass and fail rules, and snapshot updates.

@@ -1,9 +1,9 @@
 # Native within-chain reductions
 
-Native C++, C, Python, R and `stanli_run` can run `reduce_sum` and
-`reduce_sum_static` in parallel within a chain. Build with
-`-DSTANLI_THREADS=ON`. The default is one thread per chain, and the web build
-stays serial within each chain.
+Native builds of stanli can run `reduce_sum` and `reduce_sum_static` in
+parallel within a chain. This works from C++, C, Python, R and `stanli_run`.
+Build with `-DSTANLI_THREADS=ON`. By default each chain uses one thread. The
+web build always runs each chain on one thread.
 
 ## Using it
 
@@ -27,25 +27,29 @@ Each example runs at most two chains at once with four threads each, so up to
 eight sampling threads are active. The thread count per chain includes the
 chain's own sampling thread. Thread counts must be positive integers.
 
-Changing the thread setting prepares a new graph before sampling. Python
-updates the model in place; R returns the prepared model in `fit$model`.
-Constructors also accept `threads_per_chain` for direct gradient calls;
-sampling has its own setting, which defaults to one. A thread count above one
-needs a thread-safe runtime.
+If you change the thread setting, stanli prepares a new graph before
+sampling. Python updates the model in place. R returns the prepared model in
+`fit$model`.
 
-The reduction count says how many `reduce_sum` calls were kept parallel; zero
-means every call uses the ordinary serial path. The fallback reasons say why a
-call was refused. Both describe graph lowering and do not cover opaque runtime
-regions. The CLI prints the count and the reasons. When a model with a large
-`reduce_sum` runs at one thread, the CLI prints a note saying so. The note is a
-cheap size check, so a call it names may still be refused when threads are
-requested.
+Constructors also accept `threads_per_chain`, which applies to direct
+gradient calls. Sampling has its own setting, which defaults to one. A thread
+count above one needs a thread-safe runtime.
 
-C callers set `threads_per_chain` in `stanli_model_opts` and pass it to
+The reduction count is the number of `reduce_sum` calls that stay parallel.
+Zero means that every call uses the ordinary serial path. The fallback reasons
+say why a call stays serial. Both describe graph lowering only, and
+they do not cover opaque runtime regions.
+
+`stanli_run` prints the count and the reasons. If a model with a large
+`reduce_sum` runs on one thread, `stanli_run` prints a note about it. The note
+comes from a quick size check. A call that the note names may still stay
+serial when you request threads.
+
+In C, set `threads_per_chain` in `stanli_model_opts`. Pass the options to
 `stanli_model_new_with_opts` or `stanli_model_new_from_stan_with_opts`, which
-also take the construction seed. The model owns its worker team, and
-multi-chain sampling gives each executor clone its own team. The default is one
-thread. `stanli_reduce_sum_count`, `stanli_n_reduce_sum_fallbacks` and
+also take the construction seed. The default is one thread. Each model owns
+its team of worker threads. In multi-chain sampling, each executor clone gets
+its own team. `stanli_reduce_sum_count`, `stanli_n_reduce_sum_fallbacks` and
 `stanli_reduce_sum_fallback` return the same diagnostics.
 
 ```cpp
@@ -62,58 +66,78 @@ executor.set_reduce_context(&workers);
 // Use executor.gradient(...) or pass executor to the native sampler.
 ```
 
-In C++ the context belongs to the caller and must outlive the evaluations that
-use it. Give each executor that runs concurrently its own context. Clones
-rebuild their private child state and start with no context attached. A
-parallel graph also runs sequentially without a context, with the same
-partition and summation order. Compiling with one thread selects the ordinary
-whole-slice lowering. C++ callers can read refusal reasons from
-`CompiledModel::reduce_sum_fallbacks`.
+In C++, the caller owns the context. The context must outlive the evaluations
+that use it. Give each executor that runs concurrently its own context. A
+clone rebuilds its private child state and starts with no context attached.
+
+Without a context, a parallel graph runs sequentially, with the same
+partition and summation order. If you compile with one thread, stanli uses
+the ordinary whole-slice lowering. C++ callers can read the fallback reasons
+from `CompiledModel::reduce_sum_fallbacks`.
 
 ## Which calls run in parallel
 
-An eligible call has fixed shapes, a known positive grainsize, a pure
-callback, and child graphs whose input reads can be bounded statically.
-Immutable bound and dimension checks are allowed, as are per-observation loops
-that lower to a region map, which is the form brms `threading()` partial sums
-take. Runtime control flow, dynamic indexing, opaque or stateful kernels,
-callback side effects and unsupported child layouts keep the serial lowering.
-So do calls inside retained control-flow regions and generated quantities.
-Nested reductions run serially inside a parallel outer child. Arguments are
-evaluated and the grainsize validated once per call.
+A call can run in parallel if it has fixed shapes, a known positive grainsize
+and a pure callback. Stanli must also be able to bound, before running, the
+inputs that each child graph reads.
 
-`reduce_sum` uses at most the requested number of chunks, and
-`reduce_sum_static` uses chunks of exactly the grainsize. Calls with more than
-`reduce_sum_max_chunks` children (default 1024), with one chunk, or with too
-little work stay serial. Work is estimated from the first child as 0.3 ns per
-region-map instruction per iteration plus 0.8 ns per element touched by any
-other operation. Each chunk must cover at least `reduce_sum_min_chunk_ns` of
-that estimate (default 30 us), so a small slice stays serial and a moderate one
-uses fewer chunks than threads. On the four callbacks used for calibration, the
-estimate ranged from 0.45x to 1.1x of the measured serial time; the refusal
-reason prints it. The actual benefit depends on callback cost and memory
-bandwidth. Dispatch costs about 8 us per thread per gradient.
+The callback may contain immutable bound and dimension checks. It may also
+contain loops over observations that lower to a region map. Partial sums from
+brms `threading()` take this form.
+
+These keep a call serial:
+
+- runtime control flow
+- dynamic indexing
+- opaque or stateful kernels
+- side effects in the callback
+- child layouts that stanli does not support
+
+Calls inside retained control-flow regions and in generated quantities also
+stay serial. A reduction nested inside a parallel outer child runs serially.
+Stanli evaluates the arguments and checks the grainsize once per call.
+
+`reduce_sum` uses at most the requested number of chunks.
+`reduce_sum_static` uses chunks of exactly the grainsize. A call stays serial
+if it has more than `reduce_sum_max_chunks` children (default 1024), if it
+has one chunk, or if it has too little work.
+
+Stanli estimates the work from the first child. The estimate is 0.3 ns per
+region-map instruction per iteration, plus 0.8 ns for each element that any
+other operation touches. Each chunk must cover at least
+`reduce_sum_min_chunk_ns` of that estimate (default 30 us). So a small slice
+stays serial, and a moderate one uses fewer chunks than threads.
+
+On the four callbacks used for calibration, the estimate was 0.45x to 1.1x of
+the measured serial time. The fallback reason shows the estimate. The speedup
+you get depends on the cost of the callback and on memory bandwidth. Sending
+work to the threads costs about 8 us per thread per gradient.
 
 ## Determinism
 
-The chunk count sets the summation order, so it depends on the data, the model
-and the thread count, and never on thread scheduling. Results are the same
-across runs with the same settings. Changing the thread count can change
-floating-point rounding and therefore the sampling trajectory.
+The chunk count sets the summation order. The chunk count depends on the
+data, the model and the thread count. It never depends on thread scheduling.
+So runs with the same settings give the same results. Changing the thread
+count can change floating-point rounding, and so the sampling trajectory.
 
-Forward and reverse passes dispatch separately, so the reverse pass uses the
-actual incoming adjoint even inside nonlinear expressions. Gradients of shared
-inputs merge in fixed child order. A failed job lets the team finish, then
-reports the first error in chunk order; a later gradient can reuse the
-executor.
+Stanli dispatches the forward and reverse passes separately. So the reverse
+pass uses the correct incoming adjoint, even inside nonlinear expressions.
+Stanli merges the gradients of shared inputs in a fixed child order.
+
+If a job fails, the other jobs in the team still finish. Stanli then reports
+the first error in chunk order. A later gradient can reuse the executor.
 
 ## Memory
 
-Each child keeps its own values, adjoints, scratch and gradient buffer. Data
-arguments known at preparation are stored once in the reduction, and every
-child and chain clone reads that copy. A child whose body lowers to a region
-map still copies the ranges it reads into its own registers when it runs.
-Parameter-dependent inputs are copied on each evaluation, limited to the
-ranges a child reads. Worker teams persist for each chain, including while it
-is idle, and buffers and threads are reused across gradients; kernels and
-error paths may still allocate.
+Each child keeps its own values, adjoints, scratch space and gradient buffer.
+Stanli stores data arguments that are known at preparation once, in the
+reduction. Every child and every chain clone reads that copy. If a child's
+body lowers to a region map, the child still copies the ranges that it reads
+into its own registers when it runs.
+
+Stanli copies inputs that depend on parameters on each evaluation. It copies
+only the ranges that a child reads.
+
+Each chain keeps its worker team, even while the chain is idle. Stanli reuses
+buffers and threads across gradients. Kernels and error paths may still
+allocate memory.

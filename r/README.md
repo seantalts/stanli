@@ -16,11 +16,10 @@ install.packages("stanli", repos = "https://seantalts.r-universe.dev")
 # R CMD INSTALL r
 ```
 
-On macOS and Windows R-universe installs a prebuilt binary. A source install
-builds a small C bridge with the toolchain R already expects for source
-packages (Xcode command line tools on macOS, `r-base-dev` on Debian and
-Ubuntu, Rtools on Windows). The sampler itself is never compiled on your
-machine.
+On macOS and Windows, R-universe installs a prebuilt binary. A source install
+compiles a small C bridge with the tools that R needs for any source package:
+Xcode command line tools on macOS, `r-base-dev` on Debian and Ubuntu, or
+Rtools on Windows. The sampler is never compiled on your machine.
 
 Then, once per machine:
 
@@ -28,11 +27,11 @@ Then, once per machine:
 stanli_install()
 ```
 
-This downloads the runtime for your platform, about 10 MB, into
-`tools::R_user_dir("stanli", "cache")`. The runtime is pinned to the release
-the package was built against, so after a package upgrade this step runs once
-more. Nothing else is downloaded. Set `STANLI_RUNTIME` to use a library you
-built yourself.
+This downloads the runtime for your platform (about 10 MB) into
+`tools::R_user_dir("stanli", "cache")`. Each package version uses the runtime
+from its own release, so run `stanli_install()` again after you upgrade the
+package. Nothing else is downloaded. To use a runtime library that you built
+yourself, set `STANLI_RUNTIME`.
 
 ## Quick start
 
@@ -47,43 +46,50 @@ stanli_diagnose(fit)  # divergences, treedepth, E-BFMI, R-hat, ESS
 as_draws_array(fit)   # a posterior::draws_array
 ```
 
-`code =` takes the model source as a string. Four chains of eight schools,
-with summary and diagnostics, take about 70 ms.
+To pass the model source as a string, use `code =` in place of `file =`.
+Sampling four chains of Eight Schools and printing the summary and
+diagnostics takes about 70 ms.
 
-`#include` directives search the directory containing `file`. Add shared
-directories with `include_paths = c("shared", "vendor/stan")`; they are
-searched in order, then the file's directory (the current directory for
-`code`). `sample_cstan()` and `cstan_model()` take `include_paths` too. A
-model keeps its compiled includes, so later sampling does not reread them.
+stanli looks for `#include` files in the directory that contains `file`. To
+add shared directories, pass `include_paths = c("shared", "vendor/stan")`.
+stanli searches them in order, then the file's directory (or the current
+directory when you use `code`). `sample_cstan()` and `cstan_model()` take
+`include_paths` too. The model keeps the included code after it compiles, so
+later sampling does not read those files again.
 
-`stanli_model(..., fast_math = TRUE)` opts in to
-[fast mode](../docs/fast-mode.md): faster gradients, with results that can
+`stanli_model(..., fast_math = TRUE)` turns on
+[fast mode](../docs/fast-mode.md). Gradients are faster, and results can
 differ from the default in the last bits.
 
 ## Sampling and diagnostics
 
-Chains run in parallel by default. Each chain owns its executor and RNG
-stream, so a parallel run is byte-identical to a sequential one. Sampling
-prints per-chain progress, elapsed times, notices for rejected proposals, and
-any divergence, maximum-treedepth or low E-BFMI warnings; `refresh = 0`
-silences it. Sampling lines show the chain's post-warmup divergences and
-maximum-treedepth hits so far, once there are any:
+Chains run in parallel by default. Each chain has its own executor and
+random number stream, so a parallel run gives exactly the same draws as a
+sequential one.
+
+While it samples, stanli prints the progress and elapsed time of each chain.
+It also prints notices for rejected proposals, and warnings for divergences,
+maximum treedepth or low E-BFMI. Set `refresh = 0` to turn this output off.
+Once a chain has post-warmup divergences or maximum-treedepth hits, its
+progress lines show the counts so far:
 
 ```text
 Chain [1] Iteration: 1100 / 2000 [ 55%]  (Sampling)  3 divergent, 12 at max treedepth (10)
 ```
 
-Exact per-chain times and problem counts are in `fit$report`. Ctrl-C (or RStudio's stop button)
-stops every chain after its current transition.
+`fit$report` holds the exact times and problem counts for each chain.
+Ctrl-C (or RStudio's stop button) stops every chain after its current
+transition.
 
 `summary()` uses Stan's own estimators (rank-normalized split R-hat, bulk and
-tail ESS, MCSE), so it matches `stansummary`. `stanli_diagnose()` runs the
-standard checks, including E-BFMI, which catches a badly explored heavy tail.
+tail ESS, MCSE), so its output matches `stansummary`. `stanli_diagnose()` runs
+the standard checks. One of them is E-BFMI, which detects a heavy tail that
+the sampler has explored badly.
 
 `init` is an unconstrained vector, or a matrix with one row per chain.
 `unconstrain(m, list(mu = 0.5, sigma = 1.2))` builds it from constrained
-values and names any parameter that is missing, the wrong size, or outside its
-support. `init_radius = 0` starts at the origin.
+values. It names any parameter that is missing, the wrong size, or outside
+its support. `init_radius = 0` starts at the origin.
 
 ### Metric and step size
 
@@ -93,8 +99,8 @@ matrix for `"dense_e"`, or a list with one per chain. `step_size` sets the
 initial step size (default 1). `adapt_engaged = FALSE` turns adaptation off,
 so the metric and step size stay as given. `adapt_metric = FALSE` keeps
 adaptation on for the step size only and leaves `inv_metric` as supplied.
-After sampling, `fit$metric`, `fit$step_size` and `fit$inv_metric` hold what
-each chain adapted:
+After sampling, `fit$metric`, `fit$step_size` and `fit$inv_metric` hold the
+values that each chain adapted. This example reuses them from a pilot run:
 
 ```r
 pilot <- sample_model(m, seed = 1, metric = "dense_e")
@@ -103,15 +109,16 @@ fit <- sample_model(m, seed = 2, metric = "dense_e", warmup = 0,
                     step_size = mean(pilot$step_size))
 ```
 
-With fewer than 150 warmup iterations Stan does not adapt the metric, and a
-supplied one is kept. With `warmup = 0` and adaptation on, Stan still runs its
-initial step size search, so use `adapt_engaged = FALSE` to sample at exactly
-`step_size`.
+With fewer than 150 warmup iterations, Stan does not adapt the metric and
+keeps any metric that you supplied. With `warmup = 0` and adaptation on, Stan
+still runs its initial search for a step size. To sample at exactly
+`step_size`, use `adapt_engaged = FALSE`.
 
-`sample_more(fit, samples = 1000)` runs more transitions of each chain from
-where it stopped, with its own step size, metric and random stream and no new
-warmup, and returns a new fit with the draws appended. The result is the same,
-bit for bit, as asking for all the samples in the first call:
+`sample_more(fit, samples = 1000)` continues each chain from where it
+stopped. Each chain keeps its step size, metric and random stream, and there
+is no new warmup. The function returns a new fit with the new draws appended.
+The draws are the same, bit for bit, as asking for all of them in the first
+call:
 
 ```r
 fit <- sample_model(m, seed = 1, samples = 1000)
@@ -120,24 +127,28 @@ fit <- sample_more(fit, samples = 1000)   # 2000 per chain
 
 ### Within-chain parallelism
 
-`threads_per_chain = 4` in `sample_model()`, `sample_cstan()` or
-`cstan_model(code)$sample()` runs eligible `reduce_sum` calls on worker
-threads. Small or unsupported calls stay serial. Changing the thread count
-prepares a new model and can change rounding and therefore the draws.
-`fit$model$reduce_sum_count` and `fit$model$reduce_sum_fallbacks` report what
-was kept. See [native reductions](../docs/native-reduce-sum.md).
+To run eligible `reduce_sum` calls on worker threads, pass
+`threads_per_chain = 4` to `sample_model()`, `sample_cstan()` or
+`cstan_model(code)$sample()`. Small or unsupported calls run serially. When
+you change the thread count, stanli prepares a new model. The rounding can
+change, and so can the draws. `fit$model$reduce_sum_count` and
+`fit$model$reduce_sum_fallbacks` report what was kept. See
+[native reductions](../docs/native-reduce-sum.md).
 
 ### Workflow packages
 
-`bayesplot`, `loo`, `tidybayes` and `posterior` are optional and work on a fit
-directly: `bayesplot::nuts_params(fit)`, `bayesplot::log_posterior(fit)`,
-`bayesplot::rhat(fit)`, `bayesplot::neff_ratio(fit)`,
-`tidybayes::spread_draws(fit, mu, theta[j])`, and `loo::loo(fit)` when the
-model declares pointwise `log_lik` in generated quantities. `neff_ratio()`
-uses bulk ESS; bayesplot's CmdStanMCMC method uses basic ESS. `summary(fit)`
-prints the stansummary table; for cmdstanr's default table use
-`posterior::summarise_draws(as_draws_array(fit))`. Saved warmup is left out
-of `as_draws_array()` and the ecosystem methods unless `inc_warmup = TRUE`.
+`bayesplot`, `loo`, `tidybayes` and `posterior` are optional. Their functions
+work on a fit directly, for example `bayesplot::nuts_params(fit)`,
+`bayesplot::log_posterior(fit)`, `bayesplot::rhat(fit)`,
+`bayesplot::neff_ratio(fit)` and `tidybayes::spread_draws(fit, mu, theta[j])`.
+`loo::loo(fit)` works when the model declares pointwise `log_lik` in
+generated quantities.
+
+stanli's `neff_ratio()` uses bulk ESS, while bayesplot's CmdStanMCMC method
+uses basic ESS. `summary(fit)` prints the stansummary table. For cmdstanr's
+default table, use `posterior::summarise_draws(as_draws_array(fit))`.
+`as_draws_array()` and the methods for these packages leave out saved warmup
+unless you pass `inc_warmup = TRUE`.
 
 [Coming from cmdstanr](../docs/from-cmdstanr.md) translates the API call by
 call. [Teaching with stanli](../docs/teaching.md) covers classroom setup,
@@ -145,7 +156,8 @@ offline labs, and models generated by brms and Rethinking.
 
 ## Other algorithms
 
-These are Stan's own implementations, run on the same model:
+stanli runs Stan's own implementations of these algorithms on the same
+model:
 
 ```r
 vi <- variational_model(m, algorithm = "meanfield")  # or "fullrank": ADVI
@@ -158,34 +170,35 @@ fit <- sample_model(m, pathfinder_init = list())     # NUTS started from Pathfin
 
 The three approximations return a `stanli_fit` with one chain of independent
 draws, so `as_draws_array()`, `summary()` and `as_stanfit()` work. Their
-`fit$sampler` holds `lp__` and `lp_approx__` (the log density and the
-approximation's). `stanli_diagnose()` and `nuts_params()` need a NUTS fit.
-Argument names follow cmdstanr. A warning repeats what Stan reports about a
-run, such as ADVI stopping at its iteration limit.
+`fit$sampler` holds `lp__` and `lp_approx__` (the log density of the model
+and of the approximation). `stanli_diagnose()` and `nuts_params()` need a NUTS
+fit. Argument names follow cmdstanr. If Stan reports a problem with a run,
+such as ADVI stopping at its iteration limit, stanli repeats it as a warning.
 
-None of the approximations checks itself against the posterior. When the
-posterior is far from normal on the unconstrained scale they can be badly
-wrong, more often in the spread than in the centre. Compare with
-`sample_model()` before relying on one.
+stanli does not check any of the approximations against the posterior. When
+the posterior is far from normal on the unconstrained scale, they can be
+badly wrong, more often in the spread than in the centre. Compare with
+`sample_model()` before you rely on one.
 
-`optimize_model()` returns the mode; its `$unconstrained` element is what
-`sample_model(init = )` takes. `pathfinder_init` accepts `num_iterations`,
-`num_elbo_draws`, `history_size` and `init_radius`, cannot be combined with
-`init`, and does no PSIS resampling.
+`optimize_model()` returns the mode. Pass its `$unconstrained` element to
+`sample_model(init = )`. `pathfinder_init` accepts `num_iterations`,
+`num_elbo_draws`, `history_size` and `init_radius`. You cannot combine it
+with `init`, and it does no PSIS resampling.
 
 ## Laplace whitening
 
 `laplace_whiten(m, latent = "a")` is experimental. It finds the Laplace mode
-of the hyperparameters and returns `$model`, a model whose random effects are
-whitened around it; sample that with `metric = "unit_e"` and
-`adapt_metric = FALSE`. It needs the Matrix package. See
+of the hyperparameters. It returns `$model`, a model whose random effects are
+whitened around that mode. Sample that model with `metric = "unit_e"` and
+`adapt_metric = FALSE`. `laplace_whiten()` needs the Matrix package. See
 [Laplace whitening](../docs/laplace-whitening.md).
 
 ## nutpie
 
-`sample_nutpie()` runs the model with [nutpie](https://github.com/pymc-devs/nutpie)'s
-sampler through the BridgeStan interface that the runtime exposes. It needs the
-nutpieR package, version 1.9.0 or later, which is not on CRAN:
+`sample_nutpie()` samples the model with the
+[nutpie](https://github.com/pymc-devs/nutpie) sampler. nutpie calls the model
+through the runtime's BridgeStan interface. You need the nutpieR package,
+version 1.9.0 or later, which is not on CRAN:
 
 ```r
 install.packages("nutpieR", repos = c("https://andytimm.r-universe.dev",
@@ -195,17 +208,18 @@ fit <- sample_nutpie(m, chains = 4, seed = 1, adaptation = "low_rank")
 
 The result is a `stanli_fit`, so `summary()`, `stanli_diagnose()`,
 `as_draws_array()`, `log_lik()` and the fit adapters work on it. Its `lp__`
-is the same quantity as in `sample_model()`. `fit$inv_metric` is `NULL`
-because nutpie's mass matrix is not one `sample_model(inv_metric = )` accepts.
-Further `nutpieR::nutpie_sample()` arguments such as `target_accept` and
-`max_treedepth` go through `...`.
+is the same quantity as in `sample_model()`. `fit$inv_metric` is `NULL`,
+because `sample_model(inv_metric = )` cannot take nutpie's mass matrix. To
+pass other `nutpieR::nutpie_sample()` arguments, such as `target_accept` and
+`max_treedepth`, use `...`.
 
 To drive any other BridgeStan client, load `stanli_runtime_path()` as the
 model library and pass `bridgestan_data(m)` as the data argument.
 
 ## Fit adapters
 
-Three views of a fit serve code written against RStan or CmdStanR:
+If you have code written for RStan or CmdStanR, three adapters turn a fit
+into the kind of object that the code expects:
 
 | Adapter | Returns | Needs | Limit |
 | --- | --- | --- | --- |
@@ -215,10 +229,10 @@ Three views of a fit serve code written against RStan or CmdStanR:
 
 ### as_stanfit
 
-`as_stanfit()` builds the object in memory from stored arrays, with no CSV and
-no C++ compilation, and keeps the model for `rstan::log_prob()`,
+`as_stanfit()` builds the object in memory from stored arrays, with no CSV
+files and no C++ compilation. It keeps the model, so `rstan::log_prob()`,
 `grad_log_prob()`, `constrain_pars()`, `unconstrain_pars()` and
-`get_num_upars()`:
+`get_num_upars()` work:
 
 ```r
 sf <- as_stanfit(fit)
@@ -229,12 +243,12 @@ rstan::unconstrain_pars(sf, rstan::constrain_pars(sf, q))
 ```
 
 Extraction, summaries, plotting, ordinary LOO, ShinyStan, and
-`loo::loo_moment_match(sf, loo = loo::loo(sf), cores = 1)` work. Density
-methods always include the parameter-transform Jacobian, so
-`adjust_transform = FALSE` is an error. Random generated quantities in
-`constrain_pars()` advance the retained model's RNG. Initial values and
-adaptation text are empty, and declarations with zero elements cannot be
-recovered from column names.
+`loo::loo_moment_match(sf, loo = loo::loo(sf), cores = 1)` work. The density
+methods always include the Jacobian of the parameter transforms, so
+`adjust_transform = FALSE` is an error. When `constrain_pars()` computes
+random generated quantities, it advances the random number generator of the
+model that the fit keeps. Initial values and adaptation text are empty.
+Declarations with zero elements cannot be recovered from column names.
 
 A fit from `variational_model()`, `pathfinder_model()` or `laplace_model()`
 converts to a one-chain `stanfit` with no warmup, no sampler statistics, and
@@ -243,9 +257,9 @@ with algorithm `"Fixed_param"`.
 
 CRAN has RStan binaries for supported macOS and Windows R versions; install
 with `install.packages("rstan", type = "binary")` to avoid a C++ toolchain.
-Linux classrooms should provision a binary install. Load RStan before
-rethinking in a fresh session, or rethinking's placeholder `stanfit` class
-gets in the way.
+Linux classrooms should set up a binary install. In a fresh session, load
+RStan before rethinking. Otherwise rethinking's placeholder `stanfit` class
+causes problems.
 
 `saveRDS()` keeps the draws but not the live model. After `readRDS()`, recreate
 the model from the same source and data and attach it:
@@ -256,9 +270,9 @@ m <- stanli_model(file = "model.stan", data = original_data)
 sf <- as_stanfit(saved, model = m)  # a saved stanli_fit or stanli_stanfit
 ```
 
-Without a model, extraction and summaries still work and density calls say how
-to attach one. Set R's seed before conversion for reproducible permuted
-extraction.
+Without a model, extraction and summaries still work, and density calls say
+how to attach one. To make permuted extraction reproducible, set R's seed
+before the conversion.
 
 ### as_rfit
 
@@ -270,11 +284,11 @@ stanli::get_sampler_params(native)    # one matrix per chain
 stanli::get_elapsed_time(native)      # chain-by-phase seconds
 ```
 
-`as_rfit()` never loads RStan and needs no runtime for saved draws. The result
-keeps class `stanli_fit`, so the bayesplot, loo and tidybayes methods still
-apply. `n_eff` and `se_mean` use posterior's basic ESS and need not match
-RStan's. Permuted extraction leaves out warmup and keeps joint draws together;
-set R's seed before `as_rfit()` to reproduce it.
+`as_rfit()` never loads RStan. It needs no runtime for saved draws. The
+result keeps class `stanli_fit`, so the bayesplot, loo and tidybayes methods
+still work. `n_eff` and `se_mean` use posterior's basic ESS, so they can
+differ from RStan's. Permuted extraction leaves out warmup and keeps joint
+draws together. To reproduce it, set R's seed before `as_rfit()`.
 
 ### as_cstanfit, sample_cstan and cstan_model
 
@@ -290,16 +304,17 @@ fit$summary("mu", "mean", "sd", "rhat", "ess_bulk")
 
 `sample_cstan()` takes CmdStanR's sampler arguments, including `metric`,
 `inv_metric`, `step_size`, `adapt_engaged` and `threads_per_chain`, and
-returns `as_cstanfit()`. Unknown options are an error. `init` is a constrained
-list, one list per chain, or a function returning a list; parameters left out
-start at random. `cstan_model(code)$sample(...)` takes the same arguments, so a
-CmdStanR sampling call can be reused by changing the constructor.
+returns the same object as `as_cstanfit()`. Unknown options are an error.
+`init` can be a constrained list, a list with one list per chain, or a
+function that returns a list. Parameters that you leave out start at random
+values. `cstan_model(code)$sample(...)` takes the same arguments, so you can
+reuse a CmdStanR sampling call by changing only the constructor.
 
-Summaries use posterior's rank-normalized R-hat and bulk/tail ESS, matching
-CmdStanR. `$metadata()` iteration counts are before thinning. Diagnostic
-columns are in alphabetical order, so select them by name. Overall wall time
-is not recorded, only per-chain times. `$stanli_fit()` returns the original
-fit.
+Summaries use posterior's rank-normalized R-hat and bulk/tail ESS, as
+CmdStanR does. `$metadata()` gives iteration counts before thinning.
+Diagnostic columns are in alphabetical order, so select them by name. stanli
+records the time for each chain but not the overall wall time.
+`$stanli_fit()` returns the original fit.
 
 ## rstan-style code
 
@@ -312,35 +327,37 @@ fit <- rstan::sampling(m, data = d, chains = 4, iter = 2000, seed = 1)
 rstan::extract(fit); print(fit); rstan::log_prob(fit, q)
 ```
 
-The result is a `stanli_stanfit`, and stanli does not change anything in
-rstan's namespace. This works for plain rstan workflows, and for packages that
-call `sampling()` on a model you can supply, such as a function taking a
-`stanmodel` argument.
+The result is a `stanli_stanfit`. stanli does not change anything in
+rstan's namespace. This works for plain rstan workflows. It also works for
+packages that call `sampling()` on a model that you supply, such as a
+function that takes a `stanmodel` argument.
 
 `iter`, `warmup`, `thin`, `chains`, `seed`, `init`, `pars`, `include`, `cores`,
 `control` and `algorithm = "Fixed_param"` follow rstan. `control` takes
-`adapt_delta`, `max_treedepth`, `stepsize`, `metric` and `adapt_engaged`; any
-other entry is an error that names it, as are `algorithm = "HMC"`,
-`sample_file` and `diagnostic_file`. `init` takes every rstan form: `"random"`,
-a radius, `"0"`, a list, a list of lists with one per chain, or a function with
-or without a `chain_id` argument. Parameters a list leaves out start at random
-points, and names that are not parameters are ignored. A start with a
-non-finite log density or gradient is redrawn up to 100 times. Your random
-seed is advanced by the default `seed` draw, as in rstan, and nothing else.
+`adapt_delta`, `max_treedepth`, `stepsize`, `metric` and `adapt_engaged`. Any
+other entry gives an error that names it. `algorithm = "HMC"`, `sample_file`
+and `diagnostic_file` also give errors.
+
+`init` takes every rstan form: `"random"`, a radius, `"0"`, a list, a list of
+lists with one per chain, or a function with or without a `chain_id`
+argument. Parameters that a list leaves out start at random points, and
+names that are not parameters are ignored. If a start has a non-finite log
+density or gradient, stanli draws a new one, up to 100 times. As in rstan,
+the default `seed` draw advances your R random seed, and nothing else does.
 
 What does not work:
 
 - Models compiled ahead of time inside other packages, such as rstanarm, RBesT,
-  OncoBayes2 and prophet. They call into their own compiled models, not
-  `sampling()` on code.
+  OncoBayes2 and prophet. They call their own compiled models and never call
+  `sampling()` on Stan code.
 - `rstan::optimizing()`. stanli's log density always includes the
-  change-of-variables Jacobian, so it would not return rstan's mode. The call
-  is an error that points to `optimize_model()`.
+  change-of-variables Jacobian, so the result would differ from rstan's mode.
+  The call gives an error that points you to `optimize_model()`.
 - `vb()` with `importance_resampling = TRUE` or `keep_every` other than 1.
 
 `as_stanfit(fit, plain = TRUE)` returns an object of class exactly `stanfit`
 for code that checks `class(x) == "stanfit"`. It keeps the draws and drops the
-model, so `log_prob()` and the other model methods stop working;
+model, so `log_prob()` and the other model methods do not work on it.
 `as_stanfit(plain_fit, model = m)` attaches a model again.
 
 ## API reference
@@ -386,15 +403,16 @@ Each function's help page (`?sample_model`) lists every argument.
 
 R-universe has binaries for macOS, Windows, and Ubuntu Linux on x86_64 and
 arm64; see [Teaching](../docs/teaching.md#linux-labs) for the Linux repository
-URL. The runtime is a separate shared library of about 30 MB holding
-stan-math, the density kernels and the interpreter. Package and runtime carry
-a layout version, and loading refuses a mismatch with a message saying which
-side to update.
+URL. The runtime is a separate shared library of about 30 MB. It contains
+stan-math, the density kernels and the interpreter. The package and the
+runtime each carry a layout version. If the versions do not match, stanli
+stops with a message that says which one to update.
 
-The macOS and Linux runtimes embed the Stan compiler. On Windows it runs as a
-short-lived `stanli-compile.exe` subprocess beside the runtime. Without either,
-R uses the bundled JavaScript build of the same compiler through V8, which is
-also what webR uses.
+The macOS and Linux runtimes include the Stan compiler. On Windows the
+compiler is a separate short-lived program, `stanli-compile.exe`, in the same
+folder as the runtime. If neither is available,
+R uses the bundled JavaScript build of the same compiler through V8. webR
+uses that build too.
 
 ## Limits
 
@@ -407,7 +425,7 @@ also what webR uses.
   single path has no importance resampling or Pareto k.
 - Standalone generated quantities over an earlier fit's draws are not
   available.
-- Draws live in memory; there are no per-chain CSV files.
+- Draws are kept in memory. There are no per-chain CSV files.
 
 How stanli works is in [docs/how-it-works.md](../docs/how-it-works.md), how it
 is tested in [TESTING.md](../TESTING.md), and how fast it is in

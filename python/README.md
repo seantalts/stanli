@@ -33,28 +33,28 @@ fit.draws("mu")         # (chains, draws), for a trace plot
 `stan_code=` takes the model source as a string. `data` is a path to a JSON
 file or a dict of Python scalars, lists and NumPy arrays.
 
-Stan `#include` directives search the directory containing `stan_file`. Add
-shared directories with `include_paths`; they are searched in order, then the
-file's directory (the current directory for `stan_code`):
+Stan `#include` directives search the directory that contains `stan_file`.
+To add shared directories, pass `include_paths`. stanli searches them in
+order, then the file's directory (the current directory for `stan_code`):
 
 ```python
 model = stanli.Model(stan_file="models/model.stan", data="data.json",
                      include_paths=["shared", "vendor/stan"])
 ```
 
-A constructed model keeps its compiled includes, so later sampling does not
-reread the files.
+A model keeps its compiled includes, so stanli does not read the included
+files again when you sample.
 
-`Model(..., fast_math=True)` opts in to
-[fast mode](https://github.com/seantalts/stanli/blob/main/docs/fast-mode.md):
-faster gradients, with results that can differ from the default in the last
+`Model(..., fast_math=True)` turns on
+[fast mode](https://github.com/seantalts/stanli/blob/main/docs/fast-mode.md).
+Gradients are faster, and results can differ from the default in the last
 bits.
 
 ## Sampling and diagnostics
 
 Four chains run in parallel by default. R-hat needs more than one chain. Each
-chain owns its executor and RNG stream, so the draws are byte-identical to a
-sequential run. Eight schools runs all four chains in about 70 ms.
+chain has its own executor and RNG stream, so the draws are byte-identical to
+a sequential run. Sampling four chains of Eight Schools takes about 70 ms.
 
 Sampling prints CmdStan-style progress every 100 transitions, then per-chain
 times:
@@ -70,21 +70,22 @@ Chain [1] Elapsed Time: 0.821 seconds (Warm-up)
                         0.990 seconds (Total)
 ```
 
-`refresh=0` silences it; another positive integer changes the interval.
-Output goes through `sys.stdout`, so notebooks and
-`contextlib.redirect_stdout()` work. Progress never changes draws or RNG
-streams. Sampling lines also show the chain's post-warmup divergences and
-maximum-treedepth hits so far, once there are any:
+`refresh=0` turns progress off, and another positive integer changes the
+interval. Output goes through `sys.stdout`, so notebooks and
+`contextlib.redirect_stdout()` work. Printing progress does not change the
+draws or the RNG streams. Once a chain has post-warmup divergences or
+transitions that hit the maximum treedepth, its sampling lines show the
+counts so far:
 
 ```text
 Chain [1] Iteration: 1100 / 2000 [ 55%]  (Sampling)  3 divergent, 12 at max treedepth (10)
 ```
 
-If any post-warmup transition diverges or hits the maximum treedepth,
-or a chain's E-BFMI is below 0.3, the final output says so in CmdStan's words.
-A proposal rejected because the model threw is reported with its chain, as in
-CmdStan. Ctrl-C stops every chain after its current
-transition and raises `KeyboardInterrupt`.
+At the end, stanli prints CmdStan's warning if any post-warmup transition
+diverges or hits the maximum treedepth, or if a chain's E-BFMI is below 0.3.
+If the model throws an error and the sampler rejects a proposal, stanli
+reports it with the chain number, as CmdStan does. Ctrl-C stops every chain
+after its current transition and raises `KeyboardInterrupt`.
 
 ```python
 print(fit.summary())
@@ -96,9 +97,9 @@ mu                4.4600     0.0532     3.1705    -0.7414     4.5519     9.5384 
 tau               3.4752     0.0635     3.1612     0.2192     2.6680     9.6313       2160       1874      1.001
 ```
 
-R-hat is rank-normalized split R-hat and ESS is the bulk/tail pair
-(Vehtari et al. 2021), computed by Stan's own estimators, so the numbers match
-`stansummary`.
+R-hat is rank-normalized split R-hat, and ESS is the bulk and tail pair
+(Vehtari et al. 2021). Stan's own estimators compute them, so the numbers
+match `stansummary`.
 
 ```python
 print(fit.diagnose())
@@ -114,10 +115,10 @@ Tail ESS is at least 100 per chain for every parameter (worst 1874, tau).
 No problems detected.
 ```
 
-E-BFMI catches a badly explored heavy tail that R-hat and ESS both miss.
-`fit.divergences`, `fit.max_treedepth_hits`, `fit.stepsize` and `fit.ebfmi()`
-are per-chain arrays, and `fit.to_arviz()` returns an ArviZ InferenceData with
-the sampler statistics attached.
+E-BFMI can detect a heavy tail that the sampler explored poorly, which R-hat
+and ESS both miss. `fit.divergences`, `fit.max_treedepth_hits`,
+`fit.stepsize` and `fit.ebfmi()` are per-chain arrays, and `fit.to_arviz()`
+returns an ArviZ InferenceData with the sampler statistics attached.
 
 ### Metric and step size
 
@@ -125,12 +126,12 @@ the sampler statistics attached.
 `inv_metric` sets the starting inverse metric: shape `(n,)` for `"diag_e"` or
 `(n, n)` for `"dense_e"`, shared by every chain, or one per chain. `step_size`
 sets the initial step size (default 1). `adapt_engaged=False` turns adaptation
-off, so the metric and step size stay as given. `adapt_metric=False` keeps
-adaptation on for the step size only and leaves `inv_metric` as supplied, for
-example a metric built from the Hessian at the mode.
+off, so the metric and step size stay as given. `adapt_metric=False` adapts
+the step size only and keeps the `inv_metric` that you supply. Use it, for
+example, with a metric built from the Hessian at the mode.
 
 After sampling, `fit.metric`, `fit.step_size` and `fit.inv_metric` hold what
-each chain adapted. A pilot fit can start a later one:
+each chain adapted. You can use them to start a new fit from a pilot fit:
 
 ```python
 pilot = model.sample(seed=1, metric="dense_e")
@@ -139,15 +140,15 @@ fit = model.sample(seed=2, metric="dense_e", warmup=0, adapt_engaged=False,
                    step_size=float(pilot.step_size.mean()))
 ```
 
-With fewer than 150 warmup iterations Stan does not adapt the metric, and a
-supplied one is kept.
+With fewer than 150 warmup iterations, Stan does not adapt the metric and
+keeps the one that you supply.
 
 ### More draws from the same chains
 
-`continue_from=fit` runs more transitions of each chain from where it stopped,
-with its own step size, metric and random stream and no new warmup, and
-returns a new fit with the draws appended. The result is the same, bit for
-bit, as asking for all the samples in the first call:
+`continue_from=fit` continues each chain from where it stopped. Each chain
+keeps its step size, metric and random stream, and there is no new warmup.
+The call returns a new fit with the new draws appended. The result is the
+same, bit for bit, as asking for all the samples in the first call:
 
 ```python
 fit = model.sample(seed=1, samples=1000)
@@ -159,12 +160,12 @@ given with `continue_from`; everything else comes from the fit.
 
 ### Within-chain parallelism
 
-For models using `reduce_sum` or `reduce_sum_static`,
+For models that use `reduce_sum` or `reduce_sum_static`,
 `model.sample(threads_per_chain=4, parallel_chains=2)` runs eligible
 reductions on up to eight threads. Small or unsupported reductions stay
-serial; `model.reduce_sum_count` and `model.reduce_sum_fallbacks` report what
-was kept. Changing the thread count rebuilds the model and can change rounding
-and therefore the draws. See
+serial. `model.reduce_sum_count` and `model.reduce_sum_fallbacks` report what
+was kept. If you change the thread count, stanli rebuilds the model. Rounding
+can then differ, so the draws can change. See
 [native reductions](https://github.com/seantalts/stanli/blob/main/docs/native-reduce-sum.md).
 
 ## Other algorithms
@@ -179,21 +180,21 @@ r.unconstrained        # the point on the sampler's scale
 fit = model.sample(inits=r.unconstrained)   # start the chains there
 ```
 
-`pathfinder_init` fits single-path Pathfinder and draws one NUTS start per
-chain from it. The sampling seed controls both stages, and `{}` uses CmdStan's
-defaults:
+`pathfinder_init` runs single-path Pathfinder and draws a NUTS starting
+point for each chain from it. The sampling seed controls both stages, and
+`{}` uses CmdStan's defaults:
 
 ```python
 fit = model.sample(chains=4, seed=303,
                    pathfinder_init={"num_iterations": 500, "num_elbo_draws": 25})
 ```
 
-The other options are `history_size` and Pathfinder's own `init_radius`. It
-cannot be combined with `inits`, and a single path does no PSIS resampling.
+The other options are `history_size` and Pathfinder's own `init_radius`. You
+cannot combine `pathfinder_init` with `inits`. A single path does no PSIS
+resampling.
 
-Standalone Pathfinder, ADVI and Laplace draws are available from the
-[R package](https://github.com/seantalts/stanli/blob/main/r/README.md#other-algorithms)
-only.
+Standalone Pathfinder, ADVI and Laplace draws are available only from the
+[R package](https://github.com/seantalts/stanli/blob/main/r/README.md#other-algorithms).
 
 ## Call a Stan function from Python
 
@@ -219,9 +220,9 @@ arguments or one mapping. Scalars come back as `float` or `int`; vectors,
 matrices and arrays come back as NumPy arrays with the declared shape.
 Integers must fit Stan's 32-bit range. Select an ambiguous overload by its
 resolved name, such as `f(real,vector)`, and pass an integer-dtype array for an
-empty integer argument. Complex, void, RNG and `_lp` functions are not
-callable this way. Reuse a `Function` handle across calls; its lookup tables
-are built once.
+empty integer argument. You cannot call complex, void, RNG or `_lp`
+functions this way. Reuse a `Function` handle across calls, because stanli
+builds its lookup tables only once.
 
 ## API reference
 
@@ -258,32 +259,34 @@ bs = stanli.bridgestan_model(stan_file="model.stan", data="data.json")
 lib, text = stanli.runtime_path(), stanli.bridgestan_data(stan_file="model.stan")
 ```
 
-`sample` returns every column CmdStan's CSV would carry: parameters,
-transformed parameters and generated quantities, named the way CmdStanPy
-names them (`theta[1]` through `theta[8]` for a `vector[8] theta`). Chain `c`
-uses CmdStan's RNG stream for `(seed, c + 1)`.
+`sample` returns every column that CmdStan's CSV would contain. These are
+the parameters, transformed parameters and generated quantities. Columns are
+named the way CmdStanPy names them (`theta[1]` through `theta[8]` for a
+`vector[8] theta`). Chain `c` uses CmdStan's RNG stream for `(seed, c + 1)`.
 
 `inits` are on the unconstrained scale: one vector for every chain, or one row
 per chain. Pass constrained values through `model.unconstrain()` first.
 `init_radius=0` starts every chain at the origin, CmdStan's `init=0`.
 
-`bridgestan_data()` returns the JSON text that makes the runtime serve a
-program to BridgeStan, and `runtime_path()` is the library to load. Pass them
-as the model library and the data argument of any BridgeStan client, nutpie
-included. `bridgestan_model()` wraps the two for the `bridgestan` package.
+You can run a stanli model from any BridgeStan client, including nutpie.
+Pass `runtime_path()` as the model library and `bridgestan_data()` as the
+data argument. `bridgestan_data()` returns JSON text that tells the runtime
+which program to serve. `bridgestan_model()` does both steps for the
+`bridgestan` package.
 
 ## Platforms
 
-Wheels for macOS (arm64, x86_64), Linux (x86_64, aarch64, manylinux_2_28) and
-Windows (x86_64). The Windows wheel is built with mingw-w64, because stan-math
-does not build under MSVC (RStan ships through RTools for the same reason).
+Wheels are available for macOS (arm64, x86_64), Linux (x86_64, aarch64,
+manylinux_2_28) and Windows (x86_64). The Windows wheel is built with
+mingw-w64, because stan-math does not build under MSVC (RStan ships through
+RTools for the same reason).
 On Windows the compiler runs as a short-lived `stanli-compile.exe` subprocess.
 
 ## Limits
 
 - `optimize(jacobian=False)`, CmdStan's default penalized maximum likelihood,
-  raises. The change-of-variables Jacobian is part of the compiled graph, so
-  `optimize()` always returns the posterior mode.
+  raises an error. The change-of-variables Jacobian is part of the compiled
+  graph, so `optimize()` always returns the posterior mode.
 - Standalone Pathfinder, ADVI, Laplace and fixed-parameter sampling are in the
   R package only.
 - Standalone generated quantities over an earlier fit's draws are not
@@ -293,15 +296,16 @@ On Windows the compiler runs as a short-lived `stanli-compile.exe` subprocess.
 
 - How it works: [docs/how-it-works.md](https://github.com/seantalts/stanli/blob/main/docs/how-it-works.md).
 - Correctness: <!--gen:corpus_verified_of-->118 of 120<!--/gen--> posteriordb
-  models match CmdStan's log density and every gradient
-  component, <!--gen:corpus_bitwise-->55<!--/gen--> of them bitwise, with a worst
-  relative error of <!--gen:corpus_worst-->7.1e-13<!--/gen-->. See
+  models match CmdStan's log density and every gradient component. Of
+  these, <!--gen:corpus_bitwise-->55<!--/gen--> match bitwise. The worst
+  relative error is <!--gen:corpus_worst-->7.1e-13<!--/gen-->. See
   [TESTING.md](https://github.com/seantalts/stanli/blob/main/TESTING.md).
-- Speed: in the <!--gen:benchmark_date-->2026-11-13<!--/gen-->
-  run, <!--gen:corpus_n_grad-->346<!--/gen--> of <!--gen:benchmark_models-->347<!--/gen-->
-  models produced paired gradient timings. The median gradient is <!--gen:corpus_median-->2.17x<!--/gen-->
-  faster than CmdStan's, and <!--gen:corpus_at_par-->335<!--/gen--> are at
-  least as fast. See
+- Speed: in the benchmark run of <!--gen:benchmark_date-->2026-11-13<!--/gen-->,
+  we timed gradients in both stanli and CmdStan
+  for <!--gen:corpus_n_grad-->346<!--/gen--> of <!--gen:benchmark_models-->347<!--/gen-->
+  models. The median gradient is <!--gen:corpus_median-->2.17x<!--/gen-->
+  faster than CmdStan's, and <!--gen:corpus_at_par-->335<!--/gen--> models are
+  at least as fast. See
   [docs/benchmarks.md](https://github.com/seantalts/stanli/blob/main/docs/benchmarks.md).
 - Source and issues: [github.com/seantalts/stanli](https://github.com/seantalts/stanli).
   License: BSD-3-Clause, matching Stan's.

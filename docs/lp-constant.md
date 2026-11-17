@@ -8,19 +8,20 @@ Stan Math decides which terms to keep from the argument types.
 `y ~ normal(mu, sigma)` with `sigma` as data drops `-log(sigma)`; with
 `sigma` as a parameter it keeps it. A stanli kernel therefore passes each data
 argument to Stan Math as `double` and each parameter as an autodiff variable.
-Every combination costs one template instantiation, so a kernel binds only the
-arguments whose type changes which terms survive. The kernels are in
+Every combination costs one template instantiation, so a kernel does this
+only for the arguments whose type changes which terms are kept. The kernels
+are in
 [`runtime/kernels/densities.cpp`](../runtime/kernels/densities.cpp) and
 [`runtime/kernels/matrix_fns.cpp`](../runtime/kernels/matrix_fns.cpp).
 
 `multi_student_t` and its Cholesky form bind every argument as autodiff and
-then subtract the `nu` and `Sigma` terms Stan Math drops when those arguments
-are data. Their `lp__` agrees with CmdStan to within rounding.
+then subtract the `nu` and `Sigma` terms that Stan Math drops when those
+arguments are data. Their `lp__` agrees with CmdStan to within rounding.
 
 ## Releases up to 0.26.0
 
-These densities bound every argument as autodiff to save binary size, kept
-terms CmdStan drops, and reported `lp__` shifted by a constant:
+These densities bound every argument as autodiff to save binary size. They
+kept terms that CmdStan drops, so their `lp__` was shifted by a constant:
 
 - `wishart`, `inv_wishart` and their Cholesky forms, `multi_gp` and its
   Cholesky form, and `lkj_cov`, whenever an argument was data;
@@ -31,8 +32,8 @@ The shift did not depend on the parameters, so gradients, `write_array` values
 and the posterior were unchanged. It was lower than CmdStan's for the Wishart
 family: `S ~ inv_wishart(4, I)` on a 2 x 2 matrix reported 3.224 less. A
 pinned seed gave a different chain from the same posterior. Binding the data
-arguments as `double` made the shared library 208 KB larger. The size
-reasoning behind the old design is in the
+arguments as `double` fixed this and made the shared library 208 KB larger.
+The size trade-off behind the old design is in the
 [earlier version of this page](https://github.com/seantalts/stanli/blob/d922c3cb8c9adf4baa22fa6706057e2455e2fef2/docs/lp-constant.md).
 
 ## How it is checked
@@ -42,6 +43,6 @@ and [`propto_multi_gp.stan`](../tests/fixtures/propto_multi_gp.stan) call
 each of the densities above under `~` with every split of its arguments into
 data and parameters, against CmdStan references.
 [`tools/gen_propto_fixtures.py`](../tools/gen_propto_fixtures.py) writes both,
-and CTest checks they are current. The corpus replay checks the
-densities corpus models use. The generated signature models do not: they call
-`foo_lpdf(...)`, which always keeps every term.
+and CTest checks that they are current. The corpus replay checks the
+densities that corpus models use. The generated signature models do not check
+this, because they call `foo_lpdf(...)`, which always keeps every term.

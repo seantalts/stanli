@@ -19,10 +19,10 @@ language: [Python](../python/README.md), [R](../r/README.md) or
 | Page | Read it when |
 | --- | --- |
 | [Testing](../TESTING.md) | You want to know what is checked, against what, and the known limits. |
-| [Corpus status](corpus-status.md) | You want to know whether a particular model runs and matches CmdStan. Generated. |
+| [Corpus status](corpus-status.md) | You want to know whether a particular model runs and matches CmdStan. This page is generated. |
 | [Distribution coverage](coverage.md) | You want to know which densities, CDFs and transforms are supported. |
 | [lp__ and dropped constants](lp-constant.md) | You want to know which terms `~` leaves out of `lp__`. |
-| [Benchmarks](benchmarks.md) | You want speed numbers and how they were measured. |
+| [Benchmarks](benchmarks.md) | You want speed numbers and to know how we measured them. |
 
 ## Understand
 
@@ -37,7 +37,7 @@ language: [Python](../python/README.md), [R](../r/README.md) or
 
 | Page | Read it when |
 | --- | --- |
-| [Hacking on stanli](hacking.md) | You want to build, change, or verify a change. |
+| [Hacking on stanli](hacking.md) | You want to build stanli, change it, or verify a change. |
 | [Runtime source map](../runtime/src/README.md) | You are looking for a file in the runtime. |
 | [Releasing](../RELEASING.md) | You are cutting a release. |
 | [Changelog](../CHANGELOG.md) | You want to know what changed between versions. |
