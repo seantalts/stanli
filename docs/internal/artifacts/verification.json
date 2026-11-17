@@ -2414,6 +2414,13 @@
   "point": 0,
   "status": "VERIFIED"
  },
+ "tuple_effect_once": {
+  "max_rel": 0.0,
+  "max_ulp": 0,
+  "n_values": 2,
+  "point": 0,
+  "status": "VERIFIED"
+ },
  "tuple_loops": {
   "max_rel": 4.181336368041664e-16,
   "max_ulp": 2,
