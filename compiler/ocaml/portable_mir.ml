@@ -583,17 +583,20 @@ let is_tuple_item = function
   | Print_tuple _ -> true
 
 (* Fresh names for the leaves of tuple temporaries, chosen against every
-   identifier of the program so far. *)
-type names = {mutable taken: String.Set.t}
+   identifier of the program so far. The identifiers are collected the first
+   time a tuple temporary needs a name, so a program without one never walks
+   them. *)
+type names = {mutable taken: String.Set.t Lazy.t}
 
 let fresh_name names base component =
   let first = tuple_leaf_name base [component] in
   let rec pick n =
     let candidate =
       if n = 0 then first else first ^ "_" ^ Int.to_string n in
-    if String.Set.mem candidate names.taken then pick (n + 1)
+    let taken = Lazy.force names.taken in
+    if String.Set.mem candidate taken then pick (n + 1)
     else (
-      names.taken <- String.Set.add candidate names.taken;
+      names.taken <- Lazy.from_val (String.Set.add candidate taken);
       candidate) in
   pick 0
 
@@ -1338,7 +1341,7 @@ let write_array_sections stmts =
 
 let encode (program : Program.Typed.t) =
   check_split_overloads program.functions_block;
-  let names = {taken= program_identifiers program} in
+  let names = {taken= lazy (program_identifiers program)} in
   let procedure stmts = scoped names String.Map.empty stmts in
   let inputs =
     List.map program.input_vars ~f:(fun (name, _, sized) -> (name, sized)) in

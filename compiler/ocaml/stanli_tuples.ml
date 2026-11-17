@@ -989,25 +989,42 @@ let rewrite_fundef (fd : stmt Program.fun_def) =
       let fdbody = Option.map (fun (body : stmt) -> block_of body.meta (rewrite_stmt proc body)) fd.fdbody in
       {fd with fdargs; fdrt; fdbody})
 
-let rec stmt_has_tuple (s : stmt) =
-  (match s.pattern with
-  | Decl {decl_type; _} -> is_tuple (Type.to_unsized decl_type)
-  | _ -> false)
-  || Stmt.Pattern.fold
-       (fun found e -> found || exists_expr is_tuple_expr e)
-       (fun found s -> found || stmt_has_tuple s)
-       false s.pattern
+exception Found_tuple
 
+(* Raises Found_tuple at the first tuple type a statement declares or an
+   expression in it has, so a program without tuples is walked once and
+   allocates nothing. *)
+let rec find_tuple_expr (e : expr) =
+  if is_tuple e.meta.type_ then raise Found_tuple;
+  Expr.Pattern.fold (fun () e -> find_tuple_expr e) () e.pattern
+
+let rec find_tuple_stmt (s : stmt) =
+  (match s.pattern with
+  | Decl {decl_type; _} when is_tuple (Type.to_unsized decl_type) ->
+      raise Found_tuple
+  | _ -> ());
+  Stmt.Pattern.fold
+    (fun () e -> find_tuple_expr e)
+    (fun () s -> find_tuple_stmt s)
+    () s.pattern
+
+(* reverse_mode_log_prob is stanc3's second copy of log_prob, so it holds a
+   tuple exactly when log_prob does. *)
 let has_tuples (mir : Program.Typed.t) =
-  List.exists
-    (fun (fd : stmt Program.fun_def) ->
-      List.exists (fun (_, _, t) -> is_tuple t) fd.fdargs
-      || (match fd.fdrt with ReturnType t -> is_tuple t | Void -> false)
-      || Option.fold ~none:false ~some:stmt_has_tuple fd.fdbody)
-    mir.functions_block
-  || List.exists (List.exists stmt_has_tuple)
-       [ mir.prepare_data; mir.log_prob; mir.reverse_mode_log_prob
-       ; mir.generate_quantities; mir.transform_inits; mir.unconstrain_array ]
+  try
+    List.iter
+      (fun (fd : stmt Program.fun_def) ->
+        if
+          List.exists (fun (_, _, t) -> is_tuple t) fd.fdargs
+          || match fd.fdrt with ReturnType t -> is_tuple t | Void -> false
+        then raise Found_tuple;
+        Option.iter find_tuple_stmt fd.fdbody)
+      mir.functions_block;
+    List.iter (List.iter find_tuple_stmt)
+      [ mir.prepare_data; mir.log_prob; mir.generate_quantities
+      ; mir.transform_inits; mir.unconstrain_array ];
+    false
+  with Found_tuple -> true
 
 let scalarize (mir : Program.Typed.t) : Program.Typed.t =
   if not (has_tuples mir) then mir
