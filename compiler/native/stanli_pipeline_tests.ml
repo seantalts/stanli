@@ -286,6 +286,173 @@ let o1_equivalence_models =
       |} )
   ; ("matching loop", matching_loop) ]
 
+(* Calls to [name] in an expression or statement, each with whether it sits
+   in a loop body or a conditional branch rather than running
+   unconditionally. *)
+let calls_of name stmts =
+  let found = ref [] in
+  let rec expr guarded (e : Expr.Typed.t) =
+    (match e.pattern with
+    | FunApp (Fun_kind.UserDefined (called, _), _) when String.equal called name ->
+        found := guarded :: !found
+    | _ -> ());
+    Expr.Pattern.fold (fun () e -> expr guarded e) () e.pattern in
+  let rec stmt guarded (s : Stmt.Located.t) =
+    match s.pattern with
+    | While (cond, body) -> expr guarded cond; stmt true body
+    | IfElse (cond, a, b) -> expr guarded cond; stmt true a; Option.iter (stmt true) b
+    | _ -> Stmt.Pattern.fold (fun () e -> expr guarded e) (fun () s -> stmt guarded s) () s.pattern in
+  List.iter (stmt false) stmts;
+  List.rev !found
+
+(* What may remain of tuples after Stanli_tuples: a flat tuple temporary
+   assigned a call and read through projections, a flat tuple return, and an
+   array of tuples printed whole. *)
+let check_tuple_boundaries (mir : Program.Typed.t) =
+  let open UnsizedType in
+  let flat = function
+    | UTuple parts -> List.for_all (fun t -> not (contains_tuple t)) parts
+    | _ -> false in
+  let temporaries = Hashtbl.create 8 in
+  let fail what = failwith ("tuple left outside a boundary form: " ^ what) in
+  let rec expr (e : Expr.Typed.t) =
+    match e.pattern with
+    | TupleProjection ({pattern= Var tmp; _}, _) when Hashtbl.mem temporaries tmp -> ()
+    | _ ->
+        if contains_tuple e.meta.type_ then fail (Fmt.str "%a" Expr.Typed.pp e);
+        Expr.Pattern.fold (fun () e -> expr e) () e.pattern in
+  let printed (e : Expr.Typed.t) =
+    match (e.pattern, e.meta.type_) with
+    | FunApp (CompilerInternal FnMakeTuple, parts), UArray _ -> List.iter expr parts
+    | _ -> expr e in
+  let rec stmt (s : Stmt.Located.t) =
+    match s.pattern with
+    | Decl {decl_id; decl_type; _} when contains_tuple (Type.to_unsized decl_type) ->
+        if not (flat (Type.to_unsized decl_type)) then fail decl_id;
+        Hashtbl.replace temporaries decl_id ()
+    | Assignment ((LVariable tmp, []), _, {pattern= FunApp ((UserDefined _ | StanLib _), args); meta})
+      when contains_tuple meta.type_ ->
+        if not (Hashtbl.mem temporaries tmp && flat meta.type_) then fail tmp;
+        List.iter expr args
+    | Return (Some {pattern= FunApp (CompilerInternal FnMakeTuple, parts); meta})
+      when flat meta.type_ ->
+        List.iter expr parts
+    | NRFunApp (CompilerInternal (FnPrint | FnReject | FnFatalError), args) ->
+        List.iter printed args
+    | Assignment ((LTupleProjection _, _), _, _) -> fail "tuple projection assignment"
+    | _ -> Stmt.Pattern.fold (fun () e -> expr e) (fun () s -> stmt s) () s.pattern in
+  List.iter
+    (fun (fn : Stmt.Located.t Program.fun_def) ->
+      List.iter (fun (_, name, t) -> if contains_tuple t then fail name) fn.fdargs;
+      (match fn.fdrt with
+      | ReturnType t when contains_tuple t && not (flat t) -> fail fn.fdname
+      | _ -> ());
+      Option.iter stmt fn.fdbody)
+    mir.functions_block;
+  List.iter (List.iter stmt)
+    [ mir.prepare_data; mir.log_prob; mir.reverse_mode_log_prob
+    ; mir.generate_quantities; mir.transform_inits; mir.unconstrain_array ]
+
+let tuple_tests () =
+  (* Overloading keeps these functions from being inlined, so each call
+     returns its tuple through a temporary. *)
+  let effect_once = {|
+    functions {
+      real pair_sum(tuple(real, real) t) { return t.1 + t.2; }
+      tuple(real, real) draw_pair_rng(real mu) {
+        print("draw_pair_rng ", mu);
+        return (normal_rng(mu, 1), 1.0);
+      }
+      tuple(real, real) draw_pair_rng(vector mu) { return (normal_rng(mu[1], 1), 2.0); }
+    }
+    transformed data { real td = pair_sum(draw_pair_rng(0.5)); }
+    parameters { real mu; }
+    model { mu ~ normal(0, 1); }
+    generated quantities {
+      real y = pair_sum(draw_pair_rng(mu));
+      tuple(real, real) both = draw_pair_rng(mu);
+      real first = draw_pair_rng(mu).1;
+    }
+  |} in
+  let fast =
+    match Stanli_pipeline.compile_mir ~fast_math:true ~model_name:"tuples" effect_once with
+    | {result= Ok mir; _} -> mir
+    | {result= Error _; _} -> failwith "Stan source did not compile" in
+  let fallback =
+    match (compile_result ~passes:(budget 0) effect_once).result with
+    | Ok mir -> mir
+    | Error (Stanli_pipeline.Internal_error m) -> failwith ("budgeted tuple model: " ^ m)
+    | Error (Frontend_error e) -> failwith (Fmt.str "budgeted tuple model: %a" (fun ppf e -> Frontend.Errors.pp ppf e) e) in
+  List.iter
+    (fun (label, mir) ->
+      check_tuple_boundaries mir;
+      require (List.length (calls_of "draw_pair_rng" mir.Program.prepare_data) = 1)
+        (label ^ ": a tuple call in transformed data did not run exactly once");
+      require (List.length (calls_of "draw_pair_rng" mir.generate_quantities) = 3)
+        (label ^ ": a generated-quantities tuple call was duplicated or lost"))
+    [("O1", compile effect_once); ("fast math", fast); ("O0 fallback", fallback)];
+  let guarded = {|
+    functions {
+      tuple(real, int) advance(real x) { return (x - 1, x > 0); }
+      tuple(real, int) advance(vector x) { return (x[1] - 1, x[1] > 0); }
+    }
+    parameters { real mu; }
+    model { mu ~ normal(0, 1); }
+    generated quantities {
+      real x = 3;
+      int n = 0;
+      while (advance(x).2 && n < 10) {
+        n += 1;
+        x = advance(x).1;
+        if (n == 2) continue;
+      }
+      int a = (n > 3) && advance(x).2;
+      int b = (n > 3) || advance(x).2;
+      real c = n > 3 ? advance(x).1 : 0;
+    }
+  |} in
+  List.iter
+    (fun (label, mir) ->
+      check_tuple_boundaries mir;
+      let calls = calls_of "advance" mir.Program.generate_quantities in
+      require (List.length calls = 5) (label ^ ": a guarded tuple call was duplicated or lost");
+      require (List.for_all Fun.id calls)
+        (label ^ ": a tuple call in a while condition, a right operand or a \
+                  ternary branch runs unconditionally"))
+    [ ("O1", compile guarded)
+    ; ( "O0 fallback"
+      , match (compile_result ~passes:(budget 0) guarded).result with
+        | Ok mir -> mir
+        | Error _ -> failwith "budgeted tuple model did not compile" ) ];
+  (* Splitting runs before pruning, so dropping an unused function must not
+     renumber the temporaries of the code that remains. *)
+  let stability = {|
+    functions {
+      tuple(real, real) pair(real x) { return (x, x + 1); }
+      tuple(real, real) pair(vector x) { return (x[1], x[1] + 1); }
+      tuple(real, real) unused(real x) { return pair(x); }
+    }
+    data { tuple(real, array[2] int) d; }
+    parameters { real mu; }
+    model { mu ~ normal(pair(mu).2 + d.1, 1); }
+    generated quantities {
+      real y = pair(mu).1;
+      tuple(real, real) z = pair(mu);
+    }
+  |} in
+  let pruned = compile ~model_only:true stability in
+  let unpruned = compile ~prune_unused_sections:false stability in
+  require (not (List.exists (fun fn -> String.equal fn.Program.fdname "unused") pruned.functions_block))
+    "the unused tuple function survived pruning";
+  let projected =
+    {unpruned with functions_block=
+       List.filter
+         (fun fn -> List.exists (fun kept -> String.equal kept.Program.fdname fn.Program.fdname)
+                      pruned.functions_block)
+         unpruned.functions_block} in
+  require (String.equal (encode pruned) (encode projected))
+    "pruning renamed a tuple temporary or changed a split procedure"
+
 let () =
   let builtin_sets = Lazy.force Stan_math_signatures.lazy_signatures_alist in
   let materialized () =
@@ -300,6 +467,7 @@ let () =
   fast_math_test ();
   repeated_scalar_argument_test ();
   inlining_effect_order_test ();
+  tuple_tests ();
   List.iter (fun code ->
       match (Stanli_pipeline.compile_mir_with_passes
         ~passes:Stanli_pipeline.default_pass_selection ~model_name:"undefined" code).result with

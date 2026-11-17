@@ -213,13 +213,16 @@ let compile_mir_with_passes_uncached ?include_source ?(prune_unused_sections = t
           let stats = max_procedure_stats inlined in
           match passes.max_o1_statement_depth_cost with
           | Some budget when stats.cost > budget ->
-              ( Ok mir
+              ( Ok (Stanli_tuples.scalarize mir)
               , [O1_budget_exceeded
                    { cost= stats.cost
                    ; budget
                    ; statements= stats.statements
                    ; max_control_depth= stats.max_control_depth }] )
           | _ ->
+              (* Tuples are split before pruning, so pruned and unpruned
+                 compiles name their temporaries alike. *)
+              let inlined = Stanli_tuples.scalarize inlined in
               let candidate =
                 if prune_unused_sections then
                   if model_only then prune_portable_procedures inlined
