@@ -97,8 +97,8 @@ BRANCH` runs it on a branch. The jobs are in
 | [corpus replay](#comparison-with-cmdstan-on-complete-models) | log density, gradient and `write_array` rows of 366 models at 3 points | recorded CmdStan values | PR on Linux x86-64; post-merge on macOS arm64 and x86-64, Linux aarch64 and Linux GCC | parameter values away from the 3 points; Windows |
 | [fast-mode replay](#fast-mode) | the same models compiled in fast mode | the same references, fast-mode limits | PR, Linux x86-64 | macOS, Windows and ARM |
 | [local corpus replays](#comparison-with-cmdstan-on-complete-models) | log density, gradient and outputs of the function, signature, fixture and other local models | recorded CmdStan values | PR (CTest) | signatures and sizes the generators exclude |
-| [stanc3 good models](#testing-stan-language-coverage) | the 1,380 models in stanc3's `good` integration tests at up to 5 points | recorded CmdStan values and messages, 1e-9; a status ledger | PR (CTest) | models whose generated data CmdStan rejects |
-| [stanc3 bad models](#testing-stan-language-coverage) | compile errors of the 1,191 models in stanc3's `bad` integration tests | stanc3's expected output; a ledger | PR (CTest) | |
+| [stanc3 good models](#testing-stan-language-coverage) | the 1,382 models in stanc3's `good` integration tests at up to 5 points | recorded CmdStan values and messages, 1e-9; a status ledger | PR (CTest) | models whose generated data CmdStan rejects |
+| [stanc3 bad models](#testing-stan-language-coverage) | compile errors of the 1,200 models in stanc3's `bad` integration tests | stanc3's expected output; a ledger | PR (CTest) | |
 | [sampling smoke](#comparison-with-cmdstan-on-complete-models) | 100 saved draws of the 13 Aalto fixtures | reference output names, draw count, finiteness | PR (CTest) | convergence |
 | [cross-path matrix](#comparing-stanli-execution-paths) | every fixture at 3 points and the 22 cogmod models at 13, under 18 execution configurations | each other, bitwise, with a ledger | PR (CTest) | transformed data, which has one engine; an error every path shares |
 | [posteriordb cross-path](#comparing-stanli-execution-paths) | the posteriordb models under the same configurations plus one pass-off set | each other, within 1e-11 | by hand after pass changes | an error present in both cells |
@@ -133,7 +133,10 @@ timing pair only when both engines agree within 1e-9 scaled error.
 <a id="installed-clients"></a>
 
 The wheel jobs run `tests/test_python.py` and `tests/test_bridgestan_embed.py`
-on the installed wheel. The Linux R job runs `R CMD check` with the runtime and
+on the installed wheel, then install scipy and run the four Laplace whitening
+and annotation tests (`test_whiten.py`, `test_laplace_whiten.py`,
+`test_sparse_laplace.py`, `test_annotations.py`). Each skips with a message when
+scipy is missing. The Linux R job runs `R CMD check` with the runtime and
 then [`tools/test_r_ecosystem.R`](tools/test_r_ecosystem.R), and the macOS and
 Windows R jobs run only the latter. Its testthat files (bayesplot, loo,
 posterior, stanfit) must pass with no skip, failure, error or warning, so a test
@@ -341,11 +344,11 @@ generators exclude.
 
 stanc3's integration tests cover syntax and type combinations that posteriordb
 and the generators miss. [`tools/check_stanc3_good.py`](tools/check_stanc3_good.py)
-runs the 1,380 models in `test/integration/good` and compares log density,
+runs the 1,382 models in `test/integration/good` and compares log density,
 gradient and `write_array` row with recorded CmdStan answers at up to five
 points under the 1e-9 limit. Where CmdStan throws, stanli must throw the same
 message. [`tools/check_stanc3_bad.py`](tools/check_stanc3_bad.py) compares the
-error text of the 1,192 models in `test/integration/bad` with stanc3's expected
+error text of the 1,200 models in `test/integration/bad` with stanc3's expected
 output. A model that does better or worse than its ledger entry
 ([good](tests/stanc3_good/ledger.json), [bad](tests/stanc3_bad_ledger.json))
 fails. See [`tests/stanc3_good/README.md`](tests/stanc3_good/README.md).

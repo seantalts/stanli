@@ -16,13 +16,13 @@ bool is_space(char c) {
 }
 
 mir::Program decode_text(std::string_view text) {
-  constexpr std::string_view magic = "STANLI3:";
+  constexpr std::string_view magic = "STANLI4:";
   if (text.substr(0, magic.size()) == magic)
     return mir::detail::read_portable_program(text);
   if (text.substr(0, 6) == "STANLI")
     throw std::runtime_error(
         "mir: portable MIR " + std::string(text.substr(0, 8)) +
-        " is from a different stanli compiler; this runtime reads STANLI3: "
+        " is from a different stanli compiler; this runtime reads STANLI4: "
         "recompile the model");
 
   size_t first = 0;

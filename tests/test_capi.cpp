@@ -2607,6 +2607,89 @@ void test_named_source_and_warnings() {
       model == nullptr && std::strstr(err, "dir/broken.stan") != nullptr);
 }
 
+const char* kAnnotatedHierarchy =
+    "data { int<lower=1> J; vector[J] y; }\n"
+    "parameters {\n"
+    "  @latent vector[J] a;\n"
+    "  real mu;\n"
+    "  real<lower=0> sigma;\n"
+    "}\n"
+    "model { a ~ normal(mu, sigma); y ~ normal(a, 1); }\n";
+
+std::string without_annotations(std::string code) {
+  const std::string tag = "@latent ";
+  for (size_t at = code.find(tag); at != std::string::npos; at = code.find(tag))
+    code.erase(at, tag.size());
+  return code;
+}
+
+void test_declaration_annotations() {
+  if (!stanli_has_embedded_stanc()) return;
+  const std::string annotated = kAnnotatedHierarchy;
+  const std::string plain = without_annotations(annotated);
+  expect_true("the plain copy has no annotation",
+              plain.find('@') == std::string::npos);
+
+  Compilation known = compile(annotated, "latent.stan");
+  expect_true("@latent compiles: " + known.error, known.ok);
+  expect_true("@latent does not warn", known.messages.empty());
+
+  std::string with_foo = annotated;
+  with_foo.replace(with_foo.find("  real mu;"), 10, "  @foo real mu;");
+  Compilation foo = compile(with_foo, "foo.stan");
+  expect_true("@foo compiles: " + foo.error, foo.ok);
+  expect_true("@foo warns once", foo.messages.size() == 1);
+  if (foo.messages.size() == 1) {
+    expect_true("the warning is a compiler warning",
+                foo.messages[0].first == STANLI_COMPILER_WARNING);
+    expect_true("the warning names the annotation: " + foo.messages[0].second,
+                foo.messages[0].second.find("Unknown annotation '@foo'") !=
+                    std::string::npos);
+  }
+
+  const char* data = "{\"J\":3,\"y\":[0.4,-1.2,2.5]}";
+  char err[8192]{};
+  stanli_model* a = stanli_model_new_from_stan_with_opts(
+      annotated.c_str(), data, nullptr, err, sizeof err);
+  expect_true(std::string("annotated model builds: ") + err, a != nullptr);
+  stanli_model* b = stanli_model_new_from_stan_with_opts(
+      plain.c_str(), data, nullptr, err, sizeof err);
+  expect_true(std::string("plain model builds: ") + err, b != nullptr);
+  if (a && b) {
+    expect_true(
+        "both models have five unconstrained parameters",
+        stanli_n_unconstrained(a) == 5 && stanli_n_unconstrained(b) == 5);
+    const double q[5] = {0.3, -0.7, 1.1, 0.2, -0.4};
+    double lp_a = 0, lp_b = 0, g_a[5]{}, g_b[5]{};
+    expect_true("annotated gradient", stanli_grad(a, q, &lp_a, g_a) == 0);
+    expect_true("plain gradient", stanli_grad(b, q, &lp_b, g_b) == 0);
+    expect_true("annotations leave the log density bitwise equal",
+                lp_a == lp_b);
+    for (int i = 0; i < 5; ++i)
+      expect_true("annotations leave the gradient bitwise equal",
+                  g_a[i] == g_b[i]);
+    const int set = STANLI_CONSTRAINED_COLUMNS;
+    expect_true("variable a is first",
+                std::string(stanli_variable_name(a, set, 0)) == "a");
+    expect_true("a has one annotation",
+                stanli_variable_n_annotations(a, set, 0) == 1);
+    const char* note = stanli_variable_annotation(a, set, 0, 0);
+    expect_true("a is annotated latent",
+                note != nullptr && std::string(note) == "latent");
+    expect_true("no annotation past the end",
+                stanli_variable_annotation(a, set, 0, 1) == nullptr);
+    expect_true("mu is unannotated",
+                stanli_variable_n_annotations(a, set, 1) == 0);
+    expect_true("out-of-range variable has no annotations",
+                stanli_variable_n_annotations(a, set, 9) == 0);
+    for (int64_t i = 0; i < stanli_n_variables(b, set); ++i)
+      expect_true("plain model has no annotations",
+                  stanli_variable_n_annotations(b, set, i) == 0);
+  }
+  stanli_model_free(a);
+  stanli_model_free(b);
+}
+
 // A model past the structural budget compiles from O0 MIR, and the notice
 // comes back as its own kind of message.
 void test_o1_fallback_message() {
@@ -2713,6 +2796,7 @@ int main() {
   test_sample_setup_error();
   test_bridgestan_data();
   test_named_source_and_warnings();
+  test_declaration_annotations();
   test_fast_math_options();
   test_source_include_paths();
   test_reduce_sum_threads();

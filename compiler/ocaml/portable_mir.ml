@@ -429,7 +429,7 @@ let read_param_fields (expr : Expr.Typed.t) =
 let rec stmt_of_t (stmt : Stmt.Located.t) =
   let open Stmt.Pattern in
   match stmt.pattern with
-  | Decl {decl_adtype; decl_id; decl_type; initialize} ->
+  | Decl {decl_adtype; decl_id; decl_type; initialize; _} ->
       let initialized, init =
         match initialize with
         | Assign expr -> (true, expr_of_t expr)
@@ -881,10 +881,11 @@ let block_tag = function
   | TransformedParameters -> 1
   | GeneratedQuantities -> 2
 
-let add_v2_output buffer (name, block, sized) =
+let add_v2_output buffer (name, block, sized, annotations) =
   add_v2_string buffer name;
   add_u8 buffer (block_tag block);
-  add_v2_sized buffer sized
+  add_v2_sized buffer sized;
+  add_v2_list add_v2_string buffer annotations
 
 let base64_alphabet =
   "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
@@ -972,7 +973,12 @@ let encode (program : Program.Typed.t) =
   add_v2_list add_v2_fun buffer (List.map ~f:fun_of_t program.functions_block);
   add_v2_list add_v2_output buffer
     (List.map program.output_vars
-       ~f:(fun (name, _, Program.{out_block; out_constrained_st; _}) ->
-         (name, out_block, sized_of_t out_constrained_st)));
+       ~f:(fun
+           (name, _, Program.{out_block; out_constrained_st; out_annotations; _})
+         ->
+         ( name,
+           out_block,
+           sized_of_t out_constrained_st,
+           List.map out_annotations ~f:(fun (a : Annotation.t) -> a.name) )));
   add_v2_list add_v2_stmt buffer (List.map ~f:stmt_of_t program.transform_inits);
-  "STANLI3:" ^ encode_base64 (Buffer.contents buffer)
+  "STANLI4:" ^ encode_base64 (Buffer.contents buffer)

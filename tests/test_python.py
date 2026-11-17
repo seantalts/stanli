@@ -268,7 +268,7 @@ def test_function_errors_and_recovery():
 
 
 def _portable_payload(mir):
-    assert mir.startswith("STANLI3:"), mir[:80]
+    assert mir.startswith("STANLI4:"), mir[:80]
     return base64.b64decode(mir[8:], validate=True)
 
 
@@ -1423,7 +1423,7 @@ def _fake_compiler_run(calls, warnings=(), o1_fallback=None,
         pathlib.Path(path).write_text(json.dumps(
             {"warnings": list(warnings), "o1_fallback": o1_fallback}),
             encoding="utf-8")
-        return subprocess.CompletedProcess(argv, 0, "STANLI3:ZmFrZQ==",
+        return subprocess.CompletedProcess(argv, 0, "STANLI4:ZmFrZQ==",
                                            stderr)
     return run
 
@@ -1449,7 +1449,7 @@ def test_subprocess_compiler_contract():
             with warnings.catch_warnings(record=True) as caught:
                 warnings.simplefilter("always")
                 got = stanli._stanc_mir(source)
-        assert got == "STANLI3:ZmFrZQ=="
+        assert got == "STANLI4:ZmFrZQ=="
         assert [(w.category, str(w.message)) for w in caught] == [
             (RuntimeWarning, "a successful frontend warning"),
             (stanli.O1FallbackWarning, "stanli compiler: skipped O1")]
@@ -2081,6 +2081,35 @@ def test_compiler_warnings_reach_python_once():
                 assert len(seen) == 1 and str(named) in seen[0], seen
             clean = "parameters { real x; } model { x ~ normal(0, 1); }"
             assert not _recorded(lambda: stanli.Model(stan_code=clean))
+
+
+ANNOTATED_HIERARCHY = """
+data { int<lower=1> J; vector[J] y; }
+parameters {
+  @latent vector[J] a;
+  real mu;
+  real<lower=0> sigma;
+}
+model { a ~ normal(mu, sigma); y ~ normal(a, 1); }
+"""
+
+
+def test_declaration_annotations():
+    data = {"J": 3, "y": [0.4, -1.2, 2.5]}
+    plain = ANNOTATED_HIERARCHY.replace("@latent ", "")
+    unknown = ANNOTATED_HIERARCHY.replace("  real mu;", "  @foo real mu;")
+    q = np.array([0.3, -0.7, 1.1, 0.2, -0.4])
+    for path in _compiler_paths():
+        with path():
+            built = []
+            seen = _recorded(lambda: built.append(
+                stanli.Model(stan_code=ANNOTATED_HIERARCHY, data=data)))
+            assert not seen, seen
+            seen = _recorded(lambda: stanli.Model(stan_code=unknown, data=data))
+            assert len(seen) == 1 and "Unknown annotation '@foo'" in seen[0], seen
+            reference = stanli.Model(stan_code=plain, data=data)
+            got, want = built[0].log_prob_grad(q), reference.log_prob_grad(q)
+            assert got[0] == want[0] and (got[1] == want[1]).all()
 
 
 def test_compile_errors_name_the_model_file():

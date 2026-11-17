@@ -12,6 +12,7 @@
  */
 #include <stddef.h>
 #include <stdint.h>
+#include <math.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -253,6 +254,29 @@ static int64_t (*p_n_unconstrained)(const void*);
 static int (*p_grad)(void*, const double*, double*, double*);
 static int (*p_hessian)(void*, const double*, double*, double*, double*, char*,
                         size_t);
+
+/* Experimental Laplace whitening. Bound when the runtime has them; a runtime
+ * from before they existed still loads and these calls say so. */
+static void* (*p_model_whiten_lowrank)(const void*, const double*, int64_t,
+                                       const int64_t*, const int64_t*,
+                                       const int64_t*, const double*, int64_t,
+                                       int64_t, const double*, const double*,
+                                       const double*, char*, size_t);
+static void* (*p_sparse_factor_new)(int64_t, const int64_t*, const int64_t*,
+                                    const double*, const int64_t*, char*,
+                                    size_t);
+static int64_t (*p_sparse_factor_nnz)(const void*);
+static void (*p_sparse_factor_stats)(const void*, int64_t*, double*);
+static void (*p_sparse_factor_get)(const void*, int64_t*, int64_t*, int64_t*,
+                                   double*, double*);
+static int (*p_sparse_factor_lowrank)(const void*, int64_t, const double*,
+                                      double*, double*, double*, char*, size_t);
+static void (*p_sparse_factor_free)(void*);
+static int64_t (*p_n_param_blocks)(const void*);
+static const char* (*p_param_block_name)(const void*, int64_t);
+static int64_t (*p_param_block_size)(const void*, int64_t);
+static int64_t (*p_variable_n_annotations)(const void*, int, int64_t);
+static const char* (*p_variable_annotation)(const void*, int, int64_t, int64_t);
 static int (*p_unconstrain_inits)(void*, const char*, double*, char*, size_t);
 static int64_t (*p_n_constrained)(const void*);
 static const char* (*p_constrained_name)(const void*, int64_t);
@@ -317,6 +341,8 @@ static int (*p_variational)(void*, const stanli_variational_opts*, double*,
       return mkString("missing symbol in stanli library: " fn); \
     }                                                           \
   } while (0)
+
+#define BIND_OPTIONAL(fn, var) *(void**)(&var) = dl_sym(g_lib, fn)
 
 /* The structs above against the runtime's own layout table. Returns the
  * name of the first struct that differs, or NULL. */
@@ -508,6 +534,18 @@ SEXP stanli_bridge_load(SEXP path) {
   BIND("stanli_n_unconstrained", p_n_unconstrained);
   BIND("stanli_grad", p_grad);
   BIND("stanli_hessian", p_hessian);
+  BIND_OPTIONAL("stanli_model_whiten_lowrank", p_model_whiten_lowrank);
+  BIND_OPTIONAL("stanli_sparse_factor_new", p_sparse_factor_new);
+  BIND_OPTIONAL("stanli_sparse_factor_nnz", p_sparse_factor_nnz);
+  BIND_OPTIONAL("stanli_sparse_factor_stats", p_sparse_factor_stats);
+  BIND_OPTIONAL("stanli_sparse_factor_get", p_sparse_factor_get);
+  BIND_OPTIONAL("stanli_sparse_factor_lowrank", p_sparse_factor_lowrank);
+  BIND_OPTIONAL("stanli_sparse_factor_free", p_sparse_factor_free);
+  BIND_OPTIONAL("stanli_n_param_blocks", p_n_param_blocks);
+  BIND_OPTIONAL("stanli_param_block_name", p_param_block_name);
+  BIND_OPTIONAL("stanli_param_block_size", p_param_block_size);
+  BIND_OPTIONAL("stanli_variable_n_annotations", p_variable_n_annotations);
+  BIND_OPTIONAL("stanli_variable_annotation", p_variable_annotation);
   BIND("stanli_unconstrain_inits", p_unconstrain_inits);
   BIND("stanli_n_constrained", p_n_constrained);
   BIND("stanli_constrained_name", p_constrained_name);
@@ -930,6 +968,247 @@ SEXP stanli_r_hessian(SEXP m, SEXP q) {
   SET_STRING_ELT(nm, 1, mkChar("grad"));
   SET_STRING_ELT(nm, 2, mkChar("hessian"));
   setAttrib(out, R_NamesSymbol, nm);
+  UNPROTECT(4);
+  return out;
+}
+
+static void require_whiten(void) {
+  require_loaded();
+  if (p_model_whiten_lowrank == NULL || p_sparse_factor_new == NULL ||
+      p_sparse_factor_nnz == NULL || p_sparse_factor_stats == NULL ||
+      p_sparse_factor_get == NULL || p_sparse_factor_lowrank == NULL ||
+      p_sparse_factor_free == NULL || p_n_param_blocks == NULL ||
+      p_param_block_name == NULL || p_param_block_size == NULL ||
+      p_variable_n_annotations == NULL || p_variable_annotation == NULL)
+    error(
+        "this stanli runtime has no Laplace whitening. Run "
+        "stanli_install(overwrite = TRUE) to fetch a newer runtime.");
+}
+
+/* R numbers (or integers) holding whole numbers, as the runtime's int64
+ * index arrays. */
+static int64_t* index_array(SEXP x, const char* what) {
+  SEXP d = PROTECT(coerceVector(x, REALSXP));
+  const R_xlen_t len = XLENGTH(d);
+  int64_t* out =
+      (int64_t*)R_alloc((size_t)(len > 0 ? len : 1), sizeof(int64_t));
+  for (R_xlen_t i = 0; i < len; ++i) {
+    const double v = REAL(d)[i];
+    if (!(v >= 0 && v < 9007199254740992.0 && v == floor(v))) {
+      UNPROTECT(1);
+      error("%s must hold non-negative whole numbers", what);
+    }
+    out[i] = (int64_t)v;
+  }
+  UNPROTECT(1);
+  return out;
+}
+
+static void sparse_factor_finalizer(SEXP ext) {
+  void* f = R_ExternalPtrAddr(ext);
+  if (f != NULL) {
+    p_sparse_factor_free(f);
+    R_ClearExternalPtr(ext);
+  }
+}
+
+static void* sparse_factor_ptr(SEXP ext) {
+  void* f = R_ExternalPtrAddr(ext);
+  if (f == NULL) error("stanli sparse factor handle is no longer valid");
+  return f;
+}
+
+/* The low-rank part is NULL, or c with b and w as n * k row-major vectors. */
+SEXP stanli_r_model_whiten(SEXP m, SEXP q_hat, SEXP perm, SEXP col_ptr,
+                           SEXP row_idx, SEXP values, SEXP lowrank_c,
+                           SEXP lowrank_b, SEXP lowrank_w) {
+  require_whiten();
+  const void* inner = model_ptr(m);
+  const int64_t n = p_n_unconstrained(inner);
+  if (TYPEOF(q_hat) != REALSXP || XLENGTH(q_hat) != n)
+    error(
+        "q_hat has %lld elements, the model has %lld unconstrained "
+        "parameters",
+        (long long)XLENGTH(q_hat), (long long)n);
+  if (XLENGTH(perm) != n)
+    error("perm has %lld elements, expected %lld", (long long)XLENGTH(perm),
+          (long long)n);
+  if (TYPEOF(values) != REALSXP || XLENGTH(row_idx) != XLENGTH(values) ||
+      XLENGTH(col_ptr) != n + 1)
+    error("L is not a %lld by %lld lower triangular CSC matrix", (long long)n,
+          (long long)n);
+  const int64_t* perm_i = index_array(perm, "perm");
+  const int64_t* col_i = index_array(col_ptr, "the column pointers of L");
+  const int64_t* row_i = index_array(row_idx, "the row indices of L");
+  int64_t k = 0;
+  const double* c = NULL;
+  const double* b = NULL;
+  const double* w = NULL;
+  if (lowrank_c != R_NilValue) {
+    if (TYPEOF(lowrank_c) != REALSXP || XLENGTH(lowrank_c) != n ||
+        TYPEOF(lowrank_b) != REALSXP || TYPEOF(lowrank_w) != REALSXP ||
+        XLENGTH(lowrank_b) != XLENGTH(lowrank_w) ||
+        XLENGTH(lowrank_b) % n != 0 || XLENGTH(lowrank_b) == 0)
+      error("lowrank must hold c of length %lld and b and w of n * k numbers",
+            (long long)n);
+    k = XLENGTH(lowrank_b) / n;
+    c = REAL(lowrank_c);
+    b = REAL(lowrank_b);
+    w = REAL(lowrank_w);
+  }
+  char err[4096];
+  err[0] = '\0';
+  void* out = p_model_whiten_lowrank(
+      inner, REAL(q_hat), n, perm_i, col_i, row_i, REAL(values),
+      (int64_t)XLENGTH(values), k, c, b, w, err, sizeof err);
+  flush_messages();
+  if (out == NULL) error("%s", err[0] ? err : "stanli: whitening failed");
+  SEXP ext = PROTECT(R_MakeExternalPtr(out, R_NilValue, R_NilValue));
+  R_RegisterCFinalizerEx(ext, model_finalizer, TRUE);
+  UNPROTECT(1);
+  return ext;
+}
+
+/* list(name = character, size = integer): the blocks of the unconstrained
+ * vector in order, empty for a whitened model. */
+SEXP stanli_r_param_blocks(SEXP m) {
+  require_whiten();
+  const void* mm = model_ptr(m);
+  const int64_t n = p_n_param_blocks(mm);
+  SEXP names = PROTECT(allocVector(STRSXP, (R_xlen_t)n));
+  SEXP sizes = PROTECT(allocVector(INTSXP, (R_xlen_t)n));
+  for (int64_t i = 0; i < n; ++i) {
+    SET_STRING_ELT(names, (R_xlen_t)i,
+                   mkCharCE(p_param_block_name(mm, i), CE_UTF8));
+    INTEGER(sizes)[i] = (int)p_param_block_size(mm, i);
+  }
+  const char* fields[] = {"name", "size", ""};
+  SEXP out = PROTECT(mkNamed(VECSXP, fields));
+  SET_VECTOR_ELT(out, 0, names);
+  SET_VECTOR_ELT(out, 1, sizes);
+  UNPROTECT(3);
+  return out;
+}
+
+/* list(name = character, annotations = list of character) for the declared
+ * parameters. */
+SEXP stanli_r_parameter_annotations(SEXP m) {
+  require_whiten();
+  const void* mm = model_ptr(m);
+  const int64_t n = p_n_variables(mm, 0);
+  SEXP names = PROTECT(allocVector(STRSXP, (R_xlen_t)n));
+  SEXP notes = PROTECT(allocVector(VECSXP, (R_xlen_t)n));
+  for (int64_t i = 0; i < n; ++i) {
+    SET_STRING_ELT(names, (R_xlen_t)i,
+                   mkCharCE(p_variable_name(mm, 0, i), CE_UTF8));
+    const int64_t count = p_variable_n_annotations(mm, 0, i);
+    SEXP v = PROTECT(allocVector(STRSXP, (R_xlen_t)count));
+    for (int64_t k = 0; k < count; ++k)
+      SET_STRING_ELT(v, (R_xlen_t)k,
+                     mkCharCE(p_variable_annotation(mm, 0, i, k), CE_UTF8));
+    SET_VECTOR_ELT(notes, (R_xlen_t)i, v);
+    UNPROTECT(1);
+  }
+  const char* fields[] = {"name", "annotations", ""};
+  SEXP out = PROTECT(mkNamed(VECSXP, fields));
+  SET_VECTOR_ELT(out, 0, names);
+  SET_VECTOR_ELT(out, 1, notes);
+  UNPROTECT(3);
+  return out;
+}
+
+/* The lower triangle of a symmetric matrix in CSC form, factored as
+ * stanli_sparse_factor_new does. perm is NULL for the runtime's ordering. */
+SEXP stanli_r_sparse_factor_new(SEXP n_, SEXP col_ptr, SEXP row_idx,
+                                SEXP values, SEXP perm) {
+  require_whiten();
+  const int64_t n = (int64_t)asReal(n_);
+  if (TYPEOF(values) != REALSXP || XLENGTH(row_idx) != XLENGTH(values) ||
+      XLENGTH(col_ptr) != n + 1)
+    error("the matrix is not an %lld by %lld CSC matrix", (long long)n,
+          (long long)n);
+  const int64_t* perm_i = NULL;
+  if (perm != R_NilValue) {
+    if (XLENGTH(perm) != n)
+      error("perm has %lld elements, expected %lld", (long long)XLENGTH(perm),
+            (long long)n);
+    perm_i = index_array(perm, "perm");
+  }
+  const int64_t* col_i = index_array(col_ptr, "the column pointers");
+  const int64_t* row_i = index_array(row_idx, "the row indices");
+  char err[4096];
+  err[0] = '\0';
+  void* f = p_sparse_factor_new(n, col_i, row_i, REAL(values), perm_i, err,
+                                sizeof err);
+  if (f == NULL) error("%s", err[0] ? err : "sparse factorization failed");
+  SEXP ext = PROTECT(R_MakeExternalPtr(f, R_NilValue, R_NilValue));
+  R_RegisterCFinalizerEx(ext, sparse_factor_finalizer, TRUE);
+  UNPROTECT(1);
+  return ext;
+}
+
+/* list(perm, col_ptr, row_idx, values, d, n_negative, log_abs_det), the
+ * index vectors 0-based. */
+SEXP stanli_r_sparse_factor_get(SEXP f, SEXP n_) {
+  require_whiten();
+  void* ff = sparse_factor_ptr(f);
+  const R_xlen_t n = (R_xlen_t)asReal(n_);
+  const R_xlen_t nnz = (R_xlen_t)p_sparse_factor_nnz(ff);
+  int64_t* perm = (int64_t*)R_alloc((size_t)n, sizeof(int64_t));
+  int64_t* col = (int64_t*)R_alloc((size_t)n + 1, sizeof(int64_t));
+  int64_t* row =
+      (int64_t*)R_alloc((size_t)(nnz > 0 ? nnz : 1), sizeof(int64_t));
+  SEXP values = PROTECT(allocVector(REALSXP, nnz));
+  SEXP d = PROTECT(allocVector(REALSXP, n));
+  p_sparse_factor_get(ff, perm, col, row, REAL(values), REAL(d));
+  int64_t negative = 0;
+  double logdet = 0;
+  p_sparse_factor_stats(ff, &negative, &logdet);
+  SEXP perm_r = PROTECT(allocVector(REALSXP, n));
+  SEXP col_r = PROTECT(allocVector(REALSXP, n + 1));
+  SEXP row_r = PROTECT(allocVector(REALSXP, nnz));
+  for (R_xlen_t i = 0; i < n; ++i) REAL(perm_r)[i] = (double)perm[i];
+  for (R_xlen_t i = 0; i <= n; ++i) REAL(col_r)[i] = (double)col[i];
+  for (R_xlen_t i = 0; i < nnz; ++i) REAL(row_r)[i] = (double)row[i];
+  const char* fields[] = {"perm", "col_ptr",    "row_idx",     "values",
+                          "d",    "n_negative", "log_abs_det", ""};
+  SEXP out = PROTECT(mkNamed(VECSXP, fields));
+  SET_VECTOR_ELT(out, 0, perm_r);
+  SET_VECTOR_ELT(out, 1, col_r);
+  SET_VECTOR_ELT(out, 2, row_r);
+  SET_VECTOR_ELT(out, 3, values);
+  SET_VECTOR_ELT(out, 4, d);
+  SET_VECTOR_ELT(out, 5, ScalarReal((double)negative));
+  SET_VECTOR_ELT(out, 6, ScalarReal(logdet));
+  UNPROTECT(6);
+  return out;
+}
+
+/* list(c, b, w) for A + u u^T, u an n by k R matrix; b and w come back as
+ * n * k row-major vectors, the layout stanli_model_whiten_lowrank reads. */
+SEXP stanli_r_sparse_factor_lowrank(SEXP f, SEXP u, SEXP n_) {
+  require_whiten();
+  void* ff = sparse_factor_ptr(f);
+  const R_xlen_t n = (R_xlen_t)asReal(n_);
+  if (TYPEOF(u) != REALSXP || n == 0 || XLENGTH(u) % n != 0)
+    error("u must be an n by k numeric matrix");
+  const R_xlen_t k = XLENGTH(u) / n;
+  SEXP c = PROTECT(allocVector(REALSXP, n));
+  SEXP b = PROTECT(allocVector(REALSXP, n * k));
+  SEXP w = PROTECT(allocVector(REALSXP, n * k));
+  char err[4096];
+  err[0] = '\0';
+  const int rc = p_sparse_factor_lowrank(ff, (int64_t)k, REAL(u), REAL(c),
+                                         REAL(b), REAL(w), err, sizeof err);
+  if (rc != 0) {
+    UNPROTECT(3);
+    error("%s", err[0] ? err : "low-rank update failed");
+  }
+  const char* fields[] = {"c", "b", "w", ""};
+  SEXP out = PROTECT(mkNamed(VECSXP, fields));
+  SET_VECTOR_ELT(out, 0, c);
+  SET_VECTOR_ELT(out, 1, b);
+  SET_VECTOR_ELT(out, 2, w);
   UNPROTECT(4);
   return out;
 }

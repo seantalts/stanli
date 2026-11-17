@@ -11,9 +11,14 @@
 #ifndef STANLI_BRIDGESTAN_INTERNAL_HPP
 #define STANLI_BRIDGESTAN_INTERNAL_HPP
 
+#include <memory>
 #include <string>
 
 class bs_model;
+
+namespace stanli {
+struct WhitenSpec;
+}
 
 // Build a model from transformed-MIR text directly. `data` follows the
 // BridgeStan convention: null or empty for no data, a path ending in ".json",
@@ -24,13 +29,24 @@ bs_model* bs_model_from_mir(const char* mir, const char* data,
                             unsigned int seed, char** error_msg,
                             const char* name = "stanli_model");
 
+// The same, then whitened by `whiten` (see stanli/whiten.hpp).
+bs_model* bs_model_from_mir_whitened(
+    const char* mir, const char* data, unsigned int seed, char** error_msg,
+    const char* name, std::shared_ptr<const stanli::WhitenSpec> whiten);
+
 namespace stanli {
 
-// The manifest's shape: {"build_id": ..., "name": ..., "mir": ...}.
+// The manifest's shape: {"build_id": ..., "name": ..., "mir": ...}, plus an
+// optional "whiten" object when the model is a whitening of the program in
+// "mir". Its members are base64 of little-endian IEEE-754 doubles (q_hat,
+// values, and the low-rank c, b, w) or little-endian int64 (perm, col_ptr,
+// row_idx), so every number round-trips bitwise; "k" is the low-rank width
+// (absent or 0 for none) and b, w are n by k, row-major.
 struct BsManifest {
   std::string build_id;
   std::string name;
   std::string mir;
+  std::shared_ptr<const WhitenSpec> whiten;
 };
 
 // Parse a manifest and check it was written for THIS runtime binary.

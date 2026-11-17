@@ -61,7 +61,7 @@ async function reply(request) {
 
 (async () => {
   const plain = await reply({cmd: "compile", code});
-  if (typeof plain.mir !== "string" || !plain.mir.startsWith("STANLI3:"))
+  if (typeof plain.mir !== "string" || !plain.mir.startsWith("STANLI4:"))
     throw new Error("worker did not return portable MIR");
   if (JSON.stringify(imports) !==
       JSON.stringify(["stanli.js", "stanli-compiler.js"]))
@@ -75,7 +75,7 @@ async function reply(request) {
   const fast = await reply({cmd: "compile", code: fastCode, fastMath: true});
   if (slow.fastMath !== false || fast.fastMath !== true)
     throw new Error("compile did not report fastMath");
-  if (!fast.mir.startsWith("STANLI3:") || fast.mir === slow.mir)
+  if (!fast.mir.startsWith("STANLI4:") || fast.mir === slow.mir)
     throw new Error("fastMath did not change the compiled MIR");
 
   const warned = await reply({cmd: "compile", code: warningCode});

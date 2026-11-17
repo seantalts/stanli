@@ -171,7 +171,9 @@ let compile_mir_at_level
   let result =
     match
       Common.ICE.with_exn_message (fun () ->
-          Driver.Entry.stan2mir model_name (`Code code) flags output)
+          Driver.Entry.stan2mir
+            ~allowed_annotations:Stan_math_backend.Annotations.recognized_annotation
+            model_name (`Code code) flags output)
     with
     | Error internal -> Error (Internal_error internal)
     | Ok (Error error) -> Error (Frontend_error error)
