@@ -66,7 +66,13 @@ namespace stanli {
 namespace {
 
 constexpr int64_t kMinLanes = detail::kMinLanes;
-constexpr int kMaxPeriod = detail::kMaxPeriod;
+// Candidate periods are the distances from a region's first anchor to its
+// next same-signature ops. All of them up to kShortPeriod ops are tried; past
+// that only the next kLongPeriods, which bounds the same-signature anchors a
+// longer loop body may hold, and never a multiple of a shorter period whose
+// signatures already repeat there.
+constexpr int kShortPeriod = 32;
+constexpr int kLongPeriods = 8;
 constexpr int kMaxClassifyAttempts = 6;
 
 using detail::reroll_plan::InKind;
@@ -719,68 +725,104 @@ RerollStats reroll(Graph& g,
   // graphs made of enormous near-periodic runs go quadratic (ldaK5:
   // 1.03M ops in 33k-lane log_sum_exp lanes hung the pass; its runs are
   // now pruned by the density pre-check before lane counting).
-  std::vector<size_t> retry_at((size_t)kMaxPeriod + 1, 0);
-  std::vector<size_t> fail_end((size_t)kMaxPeriod + 1, 0);
-  std::vector<bool> hard_failed((size_t)kMaxPeriod + 1, false);
-
-  // sig[u] is op_signature(g.ops[u]); period_fwd(P)[k] is the largest L
-  // such that sig[k] == sig[k + P] == ... == sig[k + L * P], built once
-  // per P and cached.
-  const bool prefilter_off = debug_env("STANLI_NO_REROLL_PREFILTER") != nullptr;
-  std::vector<uint64_t> sig;
-  if (!prefilter_off) {
-    sig.resize(g.ops.size());
-    for (size_t u = 0; u < g.ops.size(); ++u)
-      sig[u] = op_signature(g, g.ops[u]);
-  }
-  std::vector<std::vector<int32_t>> period_fwd_cache((size_t)kMaxPeriod + 1);
-  const auto period_fwd = [&](int P) -> const std::vector<int32_t>& {
-    std::vector<int32_t>& fwd = period_fwd_cache[(size_t)P];
-    if (fwd.empty() && !g.ops.empty()) {
-      fwd.assign(g.ops.size(), 0);
-      for (size_t k = g.ops.size(); k-- > 0;) {
-        const size_t next = k + (size_t)P;
-        fwd[k] =
-            (next < g.ops.size() && sig[k] == sig[next]) ? fwd[next] + 1 : 0;
-      }
-    }
-    return fwd;
+  struct Retry {
+    size_t retry_at = 0;
+    size_t fail_end = 0;
+    bool hard_failed = false;
   };
+  std::unordered_map<int, Retry> retries;
+
+  // A period P at i needs the first candidate op c = next_candidate[i] inside
+  // [i, i + P) and an op with c's signature at c + P. Ops sharing a candidate
+  // op's signature are grouped by signature in position order; rank[u] is u's
+  // place in `by_sig` and group_end[u] the end of its group, so the
+  // recurrences of c past any position are one binary search away.
+  std::vector<uint64_t> sig(g.ops.size());
+  std::unordered_set<uint64_t> anchor_sigs;
+  for (size_t u = 0; u < g.ops.size(); ++u) {
+    sig[u] = op_signature(g, g.ops[u]);
+    if (next_candidate[u] == u) anchor_sigs.insert(sig[u]);
+  }
+  std::vector<uint32_t> by_sig;
+  for (size_t u = 0; u < g.ops.size(); ++u)
+    if (anchor_sigs.count(sig[u])) by_sig.push_back((uint32_t)u);
+  std::sort(by_sig.begin(), by_sig.end(), [&](uint32_t a, uint32_t b) {
+    return sig[a] != sig[b] ? sig[a] < sig[b] : a < b;
+  });
+  std::vector<uint32_t> rank(g.ops.size()), group_end(g.ops.size());
+  for (size_t k = 0; k < by_sig.size();) {
+    size_t end = k;
+    while (end < by_sig.size() && sig[by_sig[end]] == sig[by_sig[k]]) ++end;
+    for (size_t r = k; r < end; ++r) {
+      rank[by_sig[r]] = (uint32_t)r;
+      group_end[by_sig[r]] = (uint32_t)end;
+    }
+    k = end;
+  }
+  // Polynomial prefix hashes of `sig`, so whether the first kMinLanes lanes
+  // of period P at i repeat each other's signatures is O(1). A collision
+  // only costs time: lane counting below compares every pair directly.
+  std::vector<uint64_t> prefix(g.ops.size() + 1, 0), power(g.ops.size() + 1, 1);
+  constexpr uint64_t kBase = 0x9e3779b97f4a7c15ull;
+  for (size_t u = 0; u < g.ops.size(); ++u) {
+    prefix[u + 1] = prefix[u] * kBase + sig[u];
+    power[u + 1] = power[u] * kBase;
+  }
+  const auto window = [&](size_t a, size_t len) {
+    return prefix[a + len] - prefix[a] * power[len];
+  };
+  const auto signatures_repeat = [&](size_t i, size_t P) {
+    ++st.candidate_steps;
+    const uint64_t first = window(i, P);
+    for (int64_t l = 1; l < kMinLanes; ++l)
+      if (window(i + (size_t)l * P, P) != first) return false;
+    return true;
+  };
+  constexpr size_t npos = std::numeric_limits<size_t>::max();
 
   std::vector<Op> result;
   result.reserve(g.ops.size());
   size_t i = 0;
   while (i < g.ops.size()) {
     bool rewrote = false;
-    for (int P = 1; P <= kMaxPeriod && i + 2 * (size_t)P <= g.ops.size(); ++P) {
-      if (i < retry_at[(size_t)P]) continue;
-      // Cheap pre-check before any lane counting: a profitable region must
-      // contain an allowlisted density (term or elementwise), a per-lane
-      // element write (which fuses into one vector store), or a widenable
-      // op whose out is a target term (log_mix lanes over already-vector
-      // lps: the region is INDEX/INDEX/LOG_MIX with no density at all).
+    const size_t c = next_candidate[i];
+    ++st.candidate_steps;
+    auto next = by_sig.end(), last = by_sig.end();
+    if (c < no_candidate) {
+      last = by_sig.begin() + group_end[c];
+      next = std::upper_bound(by_sig.begin() + rank[c] + 1, last,
+                              (uint32_t)(2 * c - i));
+    }
+    int repeating = 0;
+    for (int longer = 0; next != last; ++next) {
+      const int P = (int)(*next - c);
+      if (i + (size_t)kMinLanes * P > g.ops.size()) break;
+      if (P > kShortPeriod && ++longer > kLongPeriods) break;
       ++st.candidate_steps;
-      if (next_candidate[i] >= i + (size_t)P) continue;
+      if (P > kShortPeriod && repeating && P % repeating == 0) continue;
+      Retry& retry = retries[P];
+      const bool repeats = signatures_repeat(i, (size_t)P);
+      if (repeats && !repeating) repeating = P;
+      if (i < retry.retry_at || !repeats) continue;
 
-      // Count template-matching lanes.
-      int64_t Lcap = std::numeric_limits<int64_t>::max();
-      if (!prefilter_off) {
-        const std::vector<int32_t>& fwd = period_fwd(P);
-        Lcap = fwd[i];
-        for (int p = 1; p < P && Lcap + 1 >= kMinLanes; ++p)
-          Lcap = std::min(Lcap, (int64_t)fwd[i + (size_t)p]);
-        if (Lcap + 1 < kMinLanes) continue;
-        Lcap += 1;
-      }
+      // Count template-matching lanes. A pair that fails fails at every start
+      // that compares it, so the scan for P resumes after it.
       int64_t L = 1;
-      while (L <= Lcap && i + ((size_t)L + 1) * P <= g.ops.size()) {
-        bool match = true;
-        for (int p = 0; p < P && match; ++p)
-          match = ops_match(g, g.ops[i + p], g.ops[i + (size_t)L * P + p], L);
-        if (!match) break;
-        ++L;
+      size_t mismatch = npos;
+      while (mismatch == npos && i + ((size_t)L + 1) * P <= g.ops.size()) {
+        for (int p = 0; p < P; ++p) {
+          const size_t a = i + (size_t)p, b = a + (size_t)L * P;
+          if (sig[a] != sig[b] || !ops_match(g, g.ops[a], g.ops[b], L)) {
+            mismatch = a;
+            break;
+          }
+        }
+        if (mismatch == npos) ++L;
       }
-      if (L < kMinLanes) continue;
+      if (L < kMinLanes) {
+        retry.retry_at = mismatch + 1;
+        continue;
+      }
 
       const auto op_at = [&](int p, int64_t l) -> const Op& {
         return g.ops[i + (size_t)l * P + p];
@@ -1435,18 +1477,18 @@ RerollStats reroll(Graph& g,
         // chance one lane in, then the whole run is skipped.
         const size_t run_end = i + (size_t)P * (size_t)L;
         if (Luse > 0) {
-          retry_at[(size_t)P] = i + (size_t)P * (size_t)Luse;
-          hard_failed[(size_t)P] = false;
-        } else if (hard_failed[(size_t)P] && i < fail_end[(size_t)P]) {
-          retry_at[(size_t)P] = fail_end[(size_t)P];
+          retry.retry_at = i + (size_t)P * (size_t)Luse;
+          retry.hard_failed = false;
+        } else if (retry.hard_failed && i < retry.fail_end) {
+          retry.retry_at = retry.fail_end;
         } else if (doomed_next) {
-          fail_end[(size_t)P] = run_end;
-          hard_failed[(size_t)P] = true;
-          retry_at[(size_t)P] = run_end;
+          retry.fail_end = run_end;
+          retry.hard_failed = true;
+          retry.retry_at = run_end;
         } else {
-          fail_end[(size_t)P] = run_end;
-          hard_failed[(size_t)P] = true;
-          retry_at[(size_t)P] = i + (size_t)P;
+          retry.fail_end = run_end;
+          retry.hard_failed = true;
+          retry.retry_at = i + (size_t)P;
         }
         continue;
       }

@@ -1354,8 +1354,7 @@ static void test_no_candidate_cost() {
       small.sec > 0.0 ? big.sec / small.sec : 0.0);
 
   // Count the work rather than asserting on a machine-dependent timer. The
-  // one viability pass examines every op exactly once; the old nested period
-  // scan performed O(kMaxPeriod^2 * n) checks after reaching the same answer.
+  // one viability pass examines every op exactly once.
   expect("no-candidate small scans once", small.steps == 8000);
   expect("no-candidate big scans once", big.steps == 16000);
   expect("no-candidate work scales linearly", big.steps == 2 * small.steps);
@@ -1389,9 +1388,8 @@ static SparseCandidateCost sparse_candidate_cost(int n) {
   }
 
   const size_t n_ops = g.ops.size();
-  int64_t expected = (int64_t)n_ops;  // build the next-candidate index
-  for (size_t i = 0; i < n_ops; ++i)
-    for (int P = 1; P <= 32 && i + 2 * (size_t)P <= n_ops; ++P) ++expected;
+  // Build the next-candidate index, then one step per scan position.
+  const int64_t expected = 2 * (int64_t)n_ops;
 
   const size_t before_ops = g.ops.size();
   const std::vector<int> before_terms = terms;
@@ -1422,6 +1420,56 @@ static void test_sparse_candidate_cost() {
   expect("sparse-candidate big counts index queries",
          big.steps == big.expected);
   expect("sparse-candidate work stays linear", big.steps < 3 * small.steps);
+}
+
+// Bodies of one density each, with `filler(b)` scalar ops in front of body b.
+// Every density shares one signature, so each is an anchor recurrence of the
+// last; a filler count that keeps changing means no period ever repeats for
+// kMinLanes lanes. The period search must stay linear in the op count.
+static int64_t anchor_recurrence_steps(int bodies, int (*filler)(int)) {
+  Graph g;
+  Fills fills;
+  const int sigma = g.add_slot(1, true);
+  int x = g.add_slot(1, true);
+  std::vector<int> terms;
+  for (int b = 0; b < bodies; ++b) {
+    for (int f = 0; f < filler(b); ++f) {
+      const int next = g.add_slot(1, false);
+      g.add_op(OP_ADD, {x, sigma}, next);
+      x = next;
+    }
+    const int y = g.add_slot(1, false);
+    fills.emplace_back(y, std::vector<double>{0.1 * (b % 11)});
+    const int lp = g.add_slot(1, false);
+    stanli::testutil::add_density(g, OP_NORMAL_LPDF, {y, x, sigma}, lp);
+    terms.push_back(lp);
+  }
+  const size_t before_ops = g.ops.size();
+  const RerollStats st = reroll(g, fills, terms, {});
+  expect("anchor recurrences find no regions", st.regions == 0);
+  expect("anchor recurrences leave graph unchanged",
+         g.ops.size() == before_ops);
+  return st.candidate_steps;
+}
+
+static void test_anchor_recurrence_cost() {
+  struct Case {
+    const char* name;
+    int (*filler)(int);
+  };
+  const Case cases[] = {
+      {"diverging run", [](int b) { return 40 + (b % 3 == 2 ? 1 : 0); }},
+      {"no period",
+       [](int b) { return 30 + (int)((uint32_t)b * 2654435761u >> 27); }},
+  };
+  for (const Case& c : cases) {
+    const int64_t small = anchor_recurrence_steps(2000, c.filler);
+    const int64_t big = anchor_recurrence_steps(4000, c.filler);
+    std::printf("  %s reroll: %lld steps, twice the bodies %lld steps\n",
+                c.name, (long long)small, (long long)big);
+    expect((std::string(c.name) + " work scales linearly").c_str(),
+           big < 2 * small + small / 10);
+  }
 }
 
 // Groups chained by a scalar recurrence, each with its own run of densities:
@@ -1512,6 +1560,54 @@ static void test_write_fusion() {
     for (size_t i = 0; i < want.size() && i < got.size(); ++i)
       expect_close((tag + " v" + std::to_string(i)).c_str(), got[i], want[i]);
   }
+}
+
+// Nine stores per lane, all with one signature: the period (18 ops) is the
+// ninth recurrence of the first store, behind eight shorter distances inside
+// one body.
+static void test_write_fusion_many_stores() {
+  const int L = 8, K = 9, J = 5;
+  Graph g;
+  Fills fills;
+  const int sigma = g.add_slot(1, true);
+  std::vector<int> a(K), y(K);
+  for (int k = 0; k < K; ++k) {
+    a[k] = g.add_slot(J, true);
+    y[k] = g.add_slot(L, false);
+    fills.emplace_back(y[k], std::vector<double>((size_t)L, 0.0));
+  }
+  for (int l = 0; l < L; ++l)
+    for (int k = 0; k < K; ++k) {
+      const int v = g.add_slot(1, false);
+      g.add_op(OP_INDEX, {a[k]}, v, {(l + k) % J});
+      g.add_op(OP_SET_INDEX_INPLACE, {y[k], v}, y[k], {l});
+    }
+  const int ydata = g.add_slot(L, false);
+  std::vector<double> yv((size_t)L);
+  for (int l = 0; l < L; ++l) yv[(size_t)l] = 0.3 * l - 1.0;
+  fills.emplace_back(ydata, yv);
+  std::vector<int> terms;
+  for (int k = 0; k < K; ++k) {
+    const int lp = g.add_slot(1, false);
+    const int id = stanli::testutil::add_density(g, OP_NORMAL_LPDF,
+                                                 {ydata, y[k], sigma}, lp);
+    g.ops[(size_t)id].variant = 0x06;
+    terms.push_back(lp);
+  }
+  Graph ref = g;
+  reduce_into_result(ref, terms);
+  const std::vector<double> want = run_grad(std::move(ref), fills);
+
+  const RerollStats st = reroll(g, fills, terms, {});
+  expect("many stores regions==1", st.regions == 1);
+  expect("many stores no element writes left",
+         writefuse::count(g, OP_SET_INDEX_INPLACE) == 0);
+  reduce_into_result(g, terms);
+  const std::vector<double> got = run_grad(std::move(g), fills);
+  expect("many stores sizes", got.size() == want.size());
+  for (size_t i = 0; i < want.size() && i < got.size(); ++i)
+    expect_close(("many stores v" + std::to_string(i)).c_str(), got[i],
+                 want[i]);
 }
 
 // (j) What write-side fusion must refuse. Each case leaves the run alone:
@@ -2674,6 +2770,23 @@ static std::string rmw_recurrence_json(int N) {
          json_array(N, [](int i) { return 0.4 * std::cos(0.9 * i); }) + "}";
 }
 
+static std::string rmw_terms_json(int N, int k) {
+  std::string s =
+      "{\"N\":" + std::to_string(N) + ",\"N_1\":5,\"Y\":" +
+      json_array(N, [](int i) { return 0.3 * std::sin(1.7 * i); }) +
+      ",\"J_1\":" + json_int_array(N, [](int i) { return (i * 7) % 5 + 1; });
+  for (int j = 1; j <= k; ++j) {
+    s += ",\"Z_1_" + std::to_string(j) + "\":[";
+    for (int i = 0; i < N; ++i)
+      s += (i ? "," : "") + std::to_string(std::cos(0.3 * j + 1.1 * i));
+    s += "]";
+  }
+  return s + "}";
+}
+
+static std::string rmw_terms16_json(int N) { return rmw_terms_json(N, 16); }
+static std::string rmw_terms25_json(int N) { return rmw_terms_json(N, 25); }
+
 static void test_read_modify_write_models() {
   struct Case {
     const char* sexp;
@@ -2687,6 +2800,10 @@ static void test_read_modify_write_models() {
        "rmw_double_store", true},
       {"tests/fixtures/rmw_recurrence.tmir.sexp", rmw_recurrence_json,
        "rmw_recurrence", false},
+      {"tests/fixtures/rmw_terms16.tmir.sexp", rmw_terms16_json, "rmw_terms16",
+       true},
+      {"tests/fixtures/rmw_terms25.tmir.sexp", rmw_terms25_json, "rmw_terms25",
+       true},
   };
   for (const Case& c : cases) {
     const std::string tag = c.name;
@@ -2723,8 +2840,8 @@ static void test_read_modify_write_models() {
 // compiled models.
 static void test_signature_soundness() {
   const auto check = [&](const std::string& name, const Graph& g) {
-    const auto result = detail::check_signature_soundness(
-        g, (int64_t)detail::kMaxPeriod * detail::kMinLanes);
+    const auto result =
+        detail::check_signature_soundness(g, 32 * detail::kMinLanes);
     expect((name + " signature sound").c_str(), result.violations == 0);
   };
 
@@ -2806,80 +2923,6 @@ static bool graphs_equal(const Graph& a, const Graph& b) {
   for (size_t u = 0; u < a.ops.size(); ++u)
     if (!ops_equal(a.ops[u], b.ops[u])) return false;
   return true;
-}
-
-// The prefilter changes how many lanes the scan reaches before ops_match is
-// called, never which lanes it decides to keep: same graph, fills and
-// target terms out of reroll() with STANLI_NO_REROLL_PREFILTER off and on.
-static void expect_prefilter_matches(const std::string& name, const Graph& g,
-                                     const Fills& fills,
-                                     const std::vector<int>& terms) {
-  Graph g_on = g;
-  Fills fills_on = fills;
-  std::vector<int> terms_on = terms;
-  test_unsetenv("STANLI_NO_REROLL_PREFILTER");
-  reroll(g_on, fills_on, terms_on, {});
-
-  Graph g_off = g;
-  Fills fills_off = fills;
-  std::vector<int> terms_off = terms;
-  test_setenv("STANLI_NO_REROLL_PREFILTER", "1", 1);
-  reroll(g_off, fills_off, terms_off, {});
-  test_unsetenv("STANLI_NO_REROLL_PREFILTER");
-
-  expect((name + " prefilter ops match").c_str(), graphs_equal(g_on, g_off));
-  expect((name + " prefilter terms match").c_str(), terms_on == terms_off);
-  bool fills_match = fills_on.size() == fills_off.size();
-  for (size_t k = 0; fills_match && k < fills_on.size(); ++k)
-    fills_match = fills_on[k].first == fills_off[k].first &&
-                  fills_on[k].second == fills_off[k].second;
-  expect((name + " prefilter fills match").c_str(), fills_match);
-}
-
-static void test_prefilter_output_matches() {
-  {
-    ldashape::Built b = ldashape::build(24);
-    expect_prefilter_matches("lda", b.g, b.fills, b.terms);
-  }
-  {
-    rowlanes::Built b = rowlanes::build_density(6, 4, rowlanes::Rows::kMatrix);
-    expect_prefilter_matches("row density matrix", b.g, b.fills, b.terms);
-  }
-  {
-    rowlanes::Built b = rowlanes::build_store(6, 4, rowlanes::Rows::kArray);
-    expect_prefilter_matches("row store array", b.g, b.fills, b.terms);
-  }
-
-  const char* rdata =
-      "{\"N\":16,\"x\":[0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8,0.9,1.0,1.1,1.2,"
-      "1.3,1.4,1.5,1.6],"
-      "\"y\":[1.1,0.9,1.3,0.7,1.0,1.2,0.8,1.05,0.95,1.15,0.85,1.0,1.1,"
-      "0.92,1.08,0.98]}";
-  const char* adata =
-      "{\"K\":2,\"T\":12,\"y\":[0.3,0.5,0.2,0.6,0.4,0.55,0.35,0.45,0.5,"
-      "0.42,0.48,0.44]}";
-  struct Fixture {
-    const char* sexp;
-    const char* json;
-    const char* name;
-  };
-  const Fixture fixtures[] = {
-      {"tests/fixtures/rloop.tmir.sexp", rdata, "rloop corpus"},
-      {"tests/fixtures/arloop.tmir.sexp", adata, "arloop corpus"},
-  };
-  test_setenv("STANLI_NO_REROLL", "1", 1);
-  for (const Fixture& f : fixtures) {
-    DataMap data = DataMap::from_json(f.json);
-    CompiledModel cm = compile_model(slurp(f.sexp), data);
-    expect_prefilter_matches(f.name, cm.graph, cm.fills, {});
-  }
-  {
-    DataMap data = DataMap::from_json_file("tests/fixtures/brmsmono.json");
-    CompiledModel cm =
-        compile_model(slurp("tests/fixtures/brmsmono.tmir.sexp"), data);
-    expect_prefilter_matches("brmsmono corpus", cm.graph, cm.fills, {});
-  }
-  test_unsetenv("STANLI_NO_REROLL");
 }
 
 // (e) a lane output that is a graph root the pass is not told about. The
@@ -3222,8 +3265,10 @@ int main() {
   test_lda_shape_cost();
   test_no_candidate_cost();
   test_sparse_candidate_cost();
+  test_anchor_recurrence_cost();
   test_many_regions_cost();
   test_write_fusion();
+  test_write_fusion_many_stores();
   test_write_fusion_bails();
   test_read_modify_write_lanes();
   test_read_modify_write_recurrence_stays_scalar();
@@ -3242,7 +3287,6 @@ int main() {
   test_e2e_fixtures();
   test_read_modify_write_models();
   test_signature_soundness();
-  test_prefilter_output_matches();
   if (failures) {
     std::printf("%d failures\n", failures);
     return 1;
