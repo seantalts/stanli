@@ -1039,6 +1039,29 @@ let tuple_print_test () =
                ; Arg; Arg; Arg; Arg; Arg ] ) ])
     "print of tuples has the wrong arguments or layout"
 
+(* A nested array of tuples printed from source keeps its nesting in the
+   layout. *)
+let tuple_print_source_test () =
+  let program = Wire.read (compile_portable {|
+    parameters { real x; }
+    model { x ~ normal(0, 1); }
+    generated quantities {
+      array[2] tuple(int, tuple(real, vector[2])) g;
+      for (i in 1:2) g[i] = (i, (2 * i * x, [i * x, 2 * i * x]'));
+      print("g=", g);
+    }
+  |}) in
+  require (not (Wire.has_unsupported program))
+    "printing a nested array of tuples left an unsupported node";
+  let layouts =
+    List.filter_map
+      (function
+        | Wire.Call {name= "FnPrint"; layout; _} -> Some layout | _ -> None)
+      (Wire.all_stmts program) in
+  require
+    (layouts = [Some Wire.[Arg; Tuple (1, [Arg; Tuple (0, [Arg; Arg])])]])
+    "a nested array of tuples printed from source has the wrong layout"
+
 (* Splitting tuple arguments can make two overloads take the same arguments;
    a forward declaration and its definition are not overloads. *)
 let split_overload_test () =
@@ -1164,5 +1187,6 @@ let tuple_phase_a_tests () =
 let () =
   tuple_wire_tests ();
   tuple_print_test ();
+  tuple_print_source_test ();
   split_overload_test ();
   tuple_phase_a_tests ()

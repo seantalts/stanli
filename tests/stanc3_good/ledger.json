@@ -115,10 +115,6 @@
   "cause": "complex numbers are not supported yet (in variable z)",
   "status": "unsupported"
  },
- "compiler-optimizations/tuple-adlevels.stan": {
-  "cause": "mir: printing an array of tuples is not supported yet",
-  "status": "unsupported"
- },
  "fun-defs-lpdf.stan": {
   "cause": "complex numbers are not supported yet (in variable z)",
   "status": "unsupported"

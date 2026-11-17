@@ -4933,12 +4933,10 @@ struct ProgramCompiler {
       case mir::Stmt::NRFunApp:
         if (mir::internal_name(s) == "FnValidateSize") return Path::Open;
         if (const auto action = message_action(mir::internal_name(s))) {
-          if (!s.print_layout.empty())
-            bail("printing an array of tuples is not supported yet");
           Program::Message message;
           std::vector<MessageShape> shapes;
           message.spec = lower_message_arguments(
-              s.fn_args, [&](const mir::Expr& argument) {
+              s.fn_args, s.print_layout, [&](const mir::Expr& argument) {
                 const Range value = expr(argument);
                 message.value_reg.push_back(value.reg);
                 message.value_len.push_back(value.len);

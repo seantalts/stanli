@@ -674,7 +674,28 @@ let rec spell loc (t : UnsizedType.t) adlevel value =
             (if k > 0 then [text ","] else []) @ spell loc part ad v)
           (List.combine (List.combine parts ads) values) in
       (text "(" :: List.concat inner) @ [text ")"]
-  | UArray _, _ -> [make_tuple (leaves value) t adlevel loc]
+  | UArray _, _ -> [array_of_tuples loc t adlevel value]
+  | _ -> unsupported "printing a tuple"
+
+(* An array of tuples as the tuple of its components' leaf arrays, a nested
+   tuple component nesting, each typed as the component under the array's
+   dimensions. *)
+and array_of_tuples loc (t : UnsizedType.t) adlevel value =
+  let rec strip depth = function
+    | UnsizedType.UArray inner -> strip (depth + 1) inner
+    | inner -> (depth, inner) in
+  match (strip 0 t, value) with
+  | _, Leaf v -> v
+  | (depth, UTuple parts), Node values when List.length parts = List.length values ->
+      let ads =
+        match adlevel with
+        | UnsizedType.TupleAD l when List.length l = List.length parts -> l
+        | a -> List.map (fun _ -> a) parts in
+      make_tuple
+        (List.map2
+           (fun (part, ad) v -> array_of_tuples loc (wrap_array depth part) ad v)
+           (List.combine parts ads) values)
+        t adlevel loc
   | _ -> unsupported "printing a tuple"
 
 let read_constrain_dims constrain st =

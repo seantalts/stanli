@@ -658,12 +658,10 @@ class MirInterp {
         // Skipping it would mean stanli happily sampled a model CmdStan
         // refuses to build.
         if (const auto action = message_action(mir::internal_name(st))) {
-          if (!st.print_layout.empty())
-            fail("printing an array of tuples is not supported yet", st.raw);
           std::vector<Value> values;
           std::vector<MessageShape> shapes;
           const MessageSpec spec = lower_message_arguments(
-              st.fn_args, [&](const mir::Expr& argument) {
+              st.fn_args, st.print_layout, [&](const mir::Expr& argument) {
                 values.push_back(eval(argument));
                 MessageShape shape;
                 shape.column_major = true;

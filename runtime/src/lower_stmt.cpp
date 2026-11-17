@@ -1760,13 +1760,11 @@ void Lowering::lower_simple_stmt(const mir::Stmt& s) {
       // from the same place CmdStan's generated code throws it, so the
       // sampler counts it as a rejected proposal rather than a failure.
       if (const auto action = message_action(mir::internal_name(s))) {
-        if (!s.print_layout.empty())
-          fail("printing an array of tuples is not supported yet", s.raw);
         auto spec = std::make_shared<MessageSpec>();
         std::vector<int> ins;
         std::vector<MessageShape> shapes;
-        *spec =
-            lower_message_arguments(s.fn_args, [&](const mir::Expr& argument) {
+        *spec = lower_message_arguments(
+            s.fn_args, s.print_layout, [&](const mir::Expr& argument) {
               // Op::in holds six. Keep that backend capacity check here;
               // parsing and semantic dispatch remain shared.
               if (ins.size() >= 6)

@@ -1776,34 +1776,36 @@ void check_tuple_interface() {
   expect_error(write_v2(local, wire), "a tuple type outside",
                "a tuple type in a declaration");
 
-  // Printing an array of tuples is refused at lowering for now.
+  // An array of tuples prints as stan_print spells it.
   mir::Program printed = program;
   mir::Stmt print;
   print.kind = mir::Stmt::NRFunApp;
   print.fn_lib = mir::Expr::Lib::Internal;
-  print.fn_name = "FnPrint";
-  print.fn_args = {var("d_a", ints, true), var("d_b", vectors, true)};
+  print.fn_name = "FnReject";
+  mir::Expr label;
+  label.kind = mir::Expr::LitStr;
+  label.lit_s = "d=";
+  print.fn_args = {label, var("d_a", ints, true), var("d_b", vectors, true)};
   mir::PrintItem item;
   item.kind = mir::PrintItem::Kind::Tuple;
   item.depth = 1;
   item.components.resize(2);
-  print.print_layout = {item};
+  print.print_layout = {mir::PrintItem{}, item};
   printed.log_prob.push_back(print);
   const mir::Program decoded_print = decode_program(write_v2(printed, wire));
   check(
-      decoded_print.log_prob.back().print_layout.size() == 1 &&
-          decoded_print.log_prob.back().print_layout[0].components.size() == 2,
+      decoded_print.log_prob.back().print_layout.size() == 2 &&
+          decoded_print.log_prob.back().print_layout[1].components.size() == 2,
       "a print layout decodes");
-  bool refused = false;
+  std::string message;
   try {
-    (void)compile_model(write_v2(printed, wire), data);
+    (void)density(write_v2(printed, wire), data, 2.0);
   } catch (const std::exception& error) {
-    refused = std::string(error.what())
-                  .find("printing an array of tuples is not supported yet") !=
-              std::string::npos;
+    message = error.what();
   }
-  check(refused, "printing an array of tuples is refused at lowering");
-  printed.log_prob.back().print_layout[0].components.pop_back();
+  check(message.find("d=[(1,[1,2]),(2,[3,4]),(3,[5,6])]") != std::string::npos,
+        "an array of tuples is printed as stan_print spells it: " + message);
+  printed.log_prob.back().print_layout[1].components.pop_back();
   expect_error(write_v2(printed, wire), "print layout does not take every",
                "a print layout that leaves an argument");
 }
