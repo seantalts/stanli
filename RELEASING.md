@@ -51,7 +51,9 @@ tracks `*release`, so a new release advances the package automatically,
 after R-universe's own platform builds finish.
 `remotes::install_github("seantalts/stanli", subdir = "r")` builds the
 bridge from any commit. Both routes call `stanli_install()` to fetch the
-pinned runtime.
+pinned runtime. A commit that bumped the ABI since the last release has no
+released runtime to pin, so the bridge refuses to load (#570) until the next
+release; the R README points GitHub installs at `@*release` for this reason.
 
 Bumping `STANLI_ABI_VERSION` in `runtime/include/stanli/capi.h` means
 bumping `STANLI_R_ABI_VERSION` in `r/src/bridge.c` too; `r.yml` fails if

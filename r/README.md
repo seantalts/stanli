@@ -10,7 +10,7 @@ install.packages("stanli", repos = "https://seantalts.r-universe.dev")
 
 # or from source
 # install.packages("remotes")
-# remotes::install_github("seantalts/stanli", subdir = "r")
+# remotes::install_github("seantalts/stanli@*release", subdir = "r")
 
 # or from a checkout
 # R CMD INSTALL r
