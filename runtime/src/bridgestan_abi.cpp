@@ -675,7 +675,7 @@ std::map<std::string, stanli::DataMap::Entry> inits_from_flat(
     const stanli::CompiledModel& cm, const double* theta) {
   std::map<std::string, std::pair<std::string, std::vector<int64_t>>> keys;
   for (const auto& leaf : cm.param_leaves)
-    keys[leaf.view.key()] = {leaf.init_key, leaf.view.dims};
+    if (leaf.column < 0) keys[leaf.own.key()] = {leaf.init_key, leaf.own.dims};
   std::map<std::string, stanli::DataMap::Entry> out;
   int64_t at = 0;
   for (const auto& view : cm.views) {

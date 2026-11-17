@@ -153,7 +153,7 @@ struct CompiledModel {
       const Executor& ex) const {
     std::map<std::string, DataMap::Entry> env;
     for (const ParamLeaf& leaf : param_leaves) {
-      const ParamView& view = leaf.view;
+      const ParamView& view = leaf_view(leaf);
       DataMap::Entry value;
       value.dims = view.dims;
       value.r.resize((size_t)view.len);
@@ -241,17 +241,21 @@ struct CompiledModel {
   };
   std::vector<UncParam> unc_params;
   // Each declared parameter whole, or each leaf of a tuple parameter whole:
-  // the constrained variable the MIR interpreter reads by `view.key()`, its
-  // free values, and the CmdStan key a starting value is given under. The
-  // public columns in `views` give an array of tuples element by element
-  // instead.
+  // the constrained variable the MIR interpreter reads by its view's key, its
+  // free values, and the CmdStan key a starting value is given under. A
+  // plain parameter's view is its entry in `views`, `column`; a tuple leaf,
+  // whose columns `views` gives element by element, owns its view.
   struct ParamLeaf {
-    ParamView view;
+    int column = -1;
+    ParamView own;
     int64_t free_len = 0;
     mir::Transform::Kind transform = mir::Transform::Identity;
     std::string init_key;
   };
   std::vector<ParamLeaf> param_leaves;
+  const ParamView& leaf_view(const ParamLeaf& leaf) const {
+    return leaf.column >= 0 ? views[(size_t)leaf.column] : leaf.own;
+  }
   // Slot fills for data + constants, applied after Executor construction.
   std::vector<std::pair<int, std::vector<double>>> fills;
 

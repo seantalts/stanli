@@ -652,9 +652,9 @@ void Lowering::lower_read_param(const mir::Stmt& s) {
         tuple_parameter_views(*tuple);
       return;
     }
-    CompiledModel::ParamView view = parameter_view(s, slot, con_len);
-    out.param_leaves.push_back({view, raw_len, tr.kind, s.decl_id});
-    out.views.push_back(std::move(view));
+    out.param_leaves.push_back(
+        {(int)out.views.size(), {}, raw_len, tr.kind, s.decl_id});
+    out.views.push_back(parameter_view(s, slot, con_len));
   };
 
   if (tr.kind == mir::Transform::Identity) {
@@ -877,7 +877,7 @@ void Lowering::tuple_parameter_views(const mir::detail::TupleLeaf& leaf) {
       view.set_serial_layout(shape.declared_dims, matrix);
       if (matrix) view.rows = view.dims.at(view.dims.size() - 2);
     }
-    out.param_leaves.push_back({std::move(view), free->leaves[k].len,
+    out.param_leaves.push_back({-1, std::move(view), free->leaves[k].len,
                                 free->leaves[k].transform, each.key});
   }
   constrained.for_each_element([&](size_t k,
@@ -1612,7 +1612,7 @@ CompiledModel compile_model(const std::string& mir_text, const DataMap& data,
     CompiledModel::TransformInits ti;
     std::vector<InitParam> params;
     for (const CompiledModel::ParamLeaf& leaf : cm.param_leaves) {
-      const CompiledModel::ParamView& view = leaf.view;
+      const CompiledModel::ParamView& view = cm.leaf_view(leaf);
       InitParam p;
       p.name = view.key();
       p.key = leaf.init_key;
