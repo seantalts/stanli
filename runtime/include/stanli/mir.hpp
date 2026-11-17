@@ -806,6 +806,7 @@ struct OutputVar {
     GeneratedQuantities
   } block = Block::Parameters;
   SizedType type;
+  std::vector<std::string> annotations;
 };
 
 struct Program {

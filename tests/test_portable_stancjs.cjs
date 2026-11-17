@@ -21,7 +21,7 @@ function fail(message) {
 }
 
 function portablePayload(encoded, name) {
-  if (!encoded.startsWith("STANLI4:"))
+  if (!encoded.startsWith("STANLI5:"))
     fail(name + ": missing compact portable-MIR envelope");
   const text = encoded.slice(8);
   const payload = Buffer.from(text, "base64");
@@ -59,7 +59,7 @@ if (typeof classic.stanli_compile !== "function")
 const classicResult = classic.stanli_compile(
     "embedded_model", "parameters { real x; } model { x ~ std_normal(); }");
 if (classicResult.errors ||
-    !String(classicResult.result).startsWith("STANLI4:"))
+    !String(classicResult.result).startsWith("STANLI5:"))
   fail("classic-script portable compilation failed");
 
 const models = [
@@ -81,6 +81,7 @@ const models = [
   ["folded-float", "tests/compiler/portable_folded_float.stan"],
   ["int32-overflow", "tests/compiler/portable_int32_overflow.stan"],
   ["unicode", "tests/compiler/portable_unicode.stan"],
+  ["annotations", "tests/compiler/portable_annotations.stan"],
   ["include", "tests/compiler/portable_include.stan", {
     "portable_include_functions.stan": fs.readFileSync(
         path.join(repo, "tests/compiler/portable_include_functions.stan"),
@@ -112,6 +113,9 @@ for (const [name, relative, includes] of models) {
        !payload.includes(Buffer.from("9a9999999999c93f", "hex")) ||
        !payload.includes(Buffer.from("Plus__", "utf8"))))
     fail(name + ": source floating-point addition was not preserved");
+  if (name === "annotations" &&
+      !payload.includes(Buffer.from("06000000" + Buffer.from("latent").toString("hex"), "hex")))
+    fail(name + ": the @latent annotation was not preserved");
   if (name === "int32-overflow" &&
       (!payload.includes(Buffer.from([0x80, 0x38, 0x01, 0x00])) ||
        !payload.includes(Buffer.from("Times__", "utf8")) ||

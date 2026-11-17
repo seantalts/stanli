@@ -42,6 +42,7 @@
 #include <stanli/nuts.hpp>
 #include <stanli/optable.hpp>
 #include <stanli/wa_interp.hpp>
+#include <stanli/whiten.hpp>
 
 #include "build_id.hpp"
 #include "data_document.hpp"
@@ -161,6 +162,23 @@ class bs_model {
   stanli::CompiledModel cm;  // graph moved out into ex
   std::unique_ptr<stanli::Executor> ex;
   std::unique_ptr<stanli::ExecutorPool> pool;
+  // Set when the manifest asked for a whitening: the free vector is z.
+  std::shared_ptr<const stanli::WhitenSpec> whiten;
+
+  void unconstrain_json(const char* json, double* out) const {
+    if (!whiten) return stanli::unconstrain_inits_json(cm, json, out);
+    std::vector<double> q((size_t)whiten->n);
+    stanli::unconstrain_inits_json(cm, json, q.data());
+    whiten->to_z(q.data(), out);
+  }
+  void unconstrain_values(
+      const std::map<std::string, stanli::DataMap::Entry>& inits,
+      double* out) const {
+    if (!whiten) return stanli::unconstrain_inits(cm, inits, out);
+    std::vector<double> q((size_t)whiten->n);
+    stanli::unconstrain_inits(cm, inits, q.data());
+    whiten->to_z(q.data(), out);
+  }
 
   // The write_array side: a second graph plus its own pool, or the
   // per-draw interpreter for the sections the graph cannot express.
@@ -258,6 +276,98 @@ namespace stanli {
 
 namespace {
 
+#if defined(__BYTE_ORDER__) && __BYTE_ORDER__ != __ORDER_LITTLE_ENDIAN__
+#error "the whitening manifest stores little-endian bytes"
+#endif
+
+std::string base64_decode(const std::string& text, const char* field) {
+  auto value = [](unsigned char c) -> int {
+    if (c >= 'A' && c <= 'Z') return c - 'A';
+    if (c >= 'a' && c <= 'z') return c - 'a' + 26;
+    if (c >= '0' && c <= '9') return c - '0' + 52;
+    if (c == '+') return 62;
+    if (c == '/') return 63;
+    return -1;
+  };
+  const std::string bad = std::string("whiten.") + field + " is not base64";
+  if (text.size() % 4 != 0) throw std::runtime_error(bad);
+  std::string out;
+  out.reserve(text.size() / 4 * 3);
+  for (size_t i = 0; i < text.size(); i += 4) {
+    const bool last = i + 4 == text.size();
+    uint32_t word = 0;
+    int pad = 0;
+    for (size_t j = 0; j < 4; ++j) {
+      const char c = text[i + j];
+      int v = 0;
+      if (c == '=' && last && j >= 2) {
+        ++pad;
+      } else {
+        v = value(static_cast<unsigned char>(c));
+        if (v < 0 || pad > 0) throw std::runtime_error(bad);
+      }
+      word = word << 6 | (uint32_t)v;
+    }
+    out.push_back(static_cast<char>(word >> 16));
+    if (pad < 2) out.push_back(static_cast<char>(word >> 8));
+    if (pad < 1) out.push_back(static_cast<char>(word));
+  }
+  return out;
+}
+
+template <class T>
+std::vector<T> manifest_array(const rapidjson::Value& obj, const char* field,
+                              bool required) {
+  const auto it = obj.FindMember(field);
+  if (it == obj.MemberEnd()) {
+    if (required)
+      throw std::runtime_error(std::string("whiten has no \"") + field +
+                               "\" field");
+    return {};
+  }
+  if (!it->value.IsString())
+    throw std::runtime_error(std::string("whiten.") + field +
+                             " is not a string");
+  const std::string bytes = base64_decode(
+      std::string(it->value.GetString(), it->value.GetStringLength()), field);
+  if (bytes.size() % sizeof(T) != 0)
+    throw std::runtime_error(std::string("whiten.") + field +
+                             " is not a whole number of 8-byte values");
+  std::vector<T> out(bytes.size() / sizeof(T));
+  if (!out.empty()) std::memcpy(out.data(), bytes.data(), bytes.size());
+  return out;
+}
+
+std::shared_ptr<const WhitenSpec> read_whiten(const rapidjson::Value& obj) {
+  if (!obj.IsObject()) throw std::runtime_error("whiten is not an object");
+  const auto q_hat = manifest_array<double>(obj, "q_hat", true);
+  const auto perm = manifest_array<int64_t>(obj, "perm", true);
+  const auto col_ptr = manifest_array<int64_t>(obj, "col_ptr", true);
+  const auto row_idx = manifest_array<int64_t>(obj, "row_idx", true);
+  const auto values = manifest_array<double>(obj, "values", true);
+  int64_t k = 0;
+  const auto kit = obj.FindMember("k");
+  if (kit != obj.MemberEnd()) {
+    if (!kit->value.IsInt64() || kit->value.GetInt64() < 0)
+      throw std::runtime_error("whiten.k is not a non-negative integer");
+    k = kit->value.GetInt64();
+  }
+  const auto c = manifest_array<double>(obj, "c", k > 0);
+  const auto b = manifest_array<double>(obj, "b", k > 0);
+  const auto w = manifest_array<double>(obj, "w", k > 0);
+  const auto n = (int64_t)q_hat.size();
+  if ((int64_t)perm.size() != n || (int64_t)col_ptr.size() != n + 1 ||
+      row_idx.size() != values.size())
+    throw std::runtime_error("whiten arrays disagree on the parameter count");
+  if (k > 0 && ((int64_t)c.size() != n || (int64_t)b.size() != n * k ||
+                (int64_t)w.size() != n * k))
+    throw std::runtime_error("whiten low-rank arrays have the wrong sizes");
+  return make_whiten_spec(
+      q_hat.data(), n, perm.data(), col_ptr.data(), row_idx.data(),
+      values.data(), (int64_t)values.size(), k, k > 0 ? c.data() : nullptr,
+      k > 0 ? b.data() : nullptr, k > 0 ? w.data() : nullptr);
+}
+
 bool read_manifest(const rapidjson::Value& root, BsManifest* out,
                    std::string* err) {
   auto say = [&](const std::string& s) {
@@ -290,6 +400,15 @@ bool read_manifest(const rapidjson::Value& root, BsManifest* out,
                                                   name_field->GetStringLength())
                                     : std::string();
   if (out->name.empty()) out->name = "stanli_model";
+  out->whiten = nullptr;
+  const auto whiten = root.FindMember("whiten");
+  if (whiten != root.MemberEnd()) {
+    try {
+      out->whiten = read_whiten(whiten->value);
+    } catch (const std::exception& e) {
+      return say(e.what());
+    }
+  }
   return true;
 }
 
@@ -312,9 +431,21 @@ bool bs_read_manifest(const std::string& text, BsManifest* out,
 
 namespace {
 
-bs_model* model_from_data(const char* mir, stanli::DataMap dm,
-                          unsigned int seed, char** error_msg,
-                          const char* name) {
+std::unique_ptr<stanli::Executor> whitened_executor(
+    const stanli::Executor& inner,
+    const std::shared_ptr<const stanli::WhitenSpec>& spec) {
+  if (spec->n != inner.n_params())
+    throw std::invalid_argument("the whitening has " + std::to_string(spec->n) +
+                                " parameters, the model has " +
+                                std::to_string(inner.n_params()));
+  return std::make_unique<stanli::Executor>(
+      stanli::whiten_graph(inner.graph(), spec), inner);
+}
+
+bs_model* model_from_data(
+    const char* mir, stanli::DataMap dm, unsigned int seed, char** error_msg,
+    const char* name,
+    const std::shared_ptr<const stanli::WhitenSpec>& whiten = nullptr) {
   try {
     if (mir == nullptr) {
       set_error(error_msg, "null MIR text");
@@ -329,6 +460,10 @@ bs_model* model_from_data(const char* mir, stanli::DataMap dm,
     m->ex.reset(new stanli::Executor(std::move(m->cm.graph)));
     m->cm.bind(*m->ex);
     m->cm.fills = {};
+    if (whiten) {
+      m->ex = whitened_executor(*m->ex, whiten);
+      m->whiten = whiten;
+    }
     m->pool.reset(new stanli::ExecutorPool(*m->ex));
 
     std::string probe_failure;
@@ -347,6 +482,7 @@ bs_model* model_from_data(const char* mir, stanli::DataMap dm,
         m->wa_ex.reset(new stanli::Executor(std::move(wa.graph)));
         wa.bind(*m->wa_ex);
         wa.fills = {};
+        if (whiten) m->wa_ex = whitened_executor(*m->wa_ex, whiten);
         m->wa_pool.reset(new stanli::ExecutorPool(*m->wa_ex));
         m->cols = wa.columns;
         m->n_tp_start = wa.n_tp_start;
@@ -383,7 +519,12 @@ bs_model* model_from_data(const char* mir, stanli::DataMap dm,
     }
     {
       std::vector<std::string> flat;
-      for (const auto& p : m->cm.unc_params) append_unc_names(p, flat);
+      if (m->whiten) {
+        for (int64_t i = 1; i <= m->whiten->n; ++i)
+          flat.push_back("z." + std::to_string(i));
+      } else {
+        for (const auto& p : m->cm.unc_params) append_unc_names(p, flat);
+      }
       m->unc_names = join_csv(flat);
     }
     m->info = "stanli runtime (build id " +
@@ -408,6 +549,19 @@ bs_model* model_from_data(const char* mir, stanli::DataMap dm,
 }
 
 }  // namespace
+
+bs_model* bs_model_from_mir_whitened(
+    const char* mir, const char* data, unsigned int seed, char** error_msg,
+    const char* name, std::shared_ptr<const stanli::WhitenSpec> whiten) {
+  stanli::DataMap dm;
+  try {
+    dm = load_data(data);
+  } catch (const std::exception& e) {
+    set_error(error_msg, e.what());
+    return nullptr;
+  }
+  return model_from_data(mir, std::move(dm), seed, error_msg, name, whiten);
+}
 
 bs_model* bs_model_from_mir(const char* mir, const char* data,
                             unsigned int seed, char** error_msg,
@@ -468,7 +622,7 @@ bs_model* bs_model_construct(const char* data, unsigned int seed,
           root.EraseMember(member);
           return model_from_data(man.mir.c_str(),
                                  stanli::data_from_document(root), seed,
-                                 error_msg, man.name.c_str());
+                                 error_msg, man.name.c_str(), man.whiten);
         }
       }
     }
@@ -580,7 +734,7 @@ int bs_param_unconstrain(const bs_model* m, const double* theta,
                         " constrained values but this model reports " +
                         std::to_string(m->count(false, false)) +
                         "; theta cannot be split");
-    stanli::unconstrain_inits(m->cm, inits_from_flat(m->cm, theta), theta_unc);
+    m->unconstrain_values(inits_from_flat(m->cm, theta), theta_unc);
     return 0;
   } catch (const std::exception& e) {
     return refuse(error_msg, e.what());
@@ -592,7 +746,7 @@ int bs_param_unconstrain(const bs_model* m, const double* theta,
 int bs_param_unconstrain_json(const bs_model* m, const char* json,
                               double* theta_unc, char** error_msg) {
   try {
-    stanli::unconstrain_inits_json(m->cm, json, theta_unc);
+    m->unconstrain_json(json, theta_unc);
     return 0;
   } catch (const std::exception& e) {
     return refuse(error_msg, e.what());
@@ -610,7 +764,7 @@ int bs_param_initialize(const bs_model* m, const char* json, bs_rng* rng,
       // An explicit point is taken as given: the retries below exist to find
       // a random start in support, and silently replacing a point the caller
       // chose would hide the real problem.
-      stanli::unconstrain_inits_json(m->cm, json, theta_unc);
+      m->unconstrain_json(json, theta_unc);
       double lp = 0;
       try {
         lp = m->density(theta_unc, nullptr);

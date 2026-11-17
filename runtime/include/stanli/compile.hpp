@@ -44,6 +44,9 @@ struct StanMathCompileError : CompileError {
 struct CompiledModel {
   Graph graph;
   std::vector<std::string> param_names;  // declaration order (flat)
+  // Output variables that carry declaration annotations, by name, in
+  // declaration order; unannotated variables are absent.
+  std::vector<std::pair<std::string, std::vector<std::string>>> annotations;
   // Constrained value of each parameter, readable from the executor after a
   // forward pass (slot of the post-transform value).
   struct ParamView {

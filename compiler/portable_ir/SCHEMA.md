@@ -1,4 +1,4 @@
-# Stanli portable MIR v4
+# Stanli portable MIR v5
 
 This document defines the stanli-owned wire representation of the MIR slice
 consumed by the C++ runtime. It is not a serialization of every stanc3 MIR
@@ -10,43 +10,46 @@ selected optimization policy. The decoder constructs `stanli::mir::Program`
 directly, validates it, then runs the same overload and binding finalizer used
 by the legacy S-expression reader.
 
-Version 4 is a canonical ASCII envelope around a compact, fixed-layout binary
+Version 5 is a canonical ASCII envelope around a compact, fixed-layout binary
 payload. The envelope crosses native callbacks, subprocess output, V8,
 js_of_ocaml, Web Workers, and existing C-string APIs without transcoding or
 embedded-NUL problems. The payload avoids a JSON DOM, repeated field names,
 inactive fields, and decimal parsing.
 
-Portable MIR v1 was a pre-release JSON format, v2 (`STANLI2:`) the layout
-before every stanc3 fact the runtime reads became a typed field, and v3
-(`STANLI3:`) the layout before tuples. v4 adds the tuple fields below; a
-program without a tuple encodes the same payload bytes as v3. None of the
-older versions is accepted by this runtime; a `STANLI<n>:` document of another version is
-rejected with a request to recompile the model. The legacy stanc3
-S-expression reader remains a separate input path.
+Portable MIR v1 was a pre-release JSON format.
+v2 (`STANLI2:`) was the layout before every stanc3 fact the runtime reads
+became a typed field.
+v3 (`STANLI3:`) lacked the per-output-variable annotation list.
+v4 (`STANLI4:`) added the annotation list but had no tuple fields.
+v5 (`STANLI5:`) adds the tuple fields below; a program without a tuple encodes
+the same payload bytes as v4.
+None of the older versions is accepted by this runtime; a `STANLI<n>:`
+document of another version is rejected with a request to recompile the
+model. The legacy stanc3 S-expression reader remains a separate input path.
 
 ## Envelope and format detection
 
 A canonical document is:
 
 ```text
-STANLI4:<base64 payload>
+STANLI5:<base64 payload>
 ```
 
-`STANLI4:` is the eight-byte ASCII version marker. The remainder is standard
+`STANLI5:` is the eight-byte ASCII version marker. The remainder is standard
 RFC 4648 base64 using `A-Z`, `a-z`, `0-9`, `+`, and `/`, with required `=`
 padding. There is no whitespace, BOM, or final newline.
 
 The multi-format decoder dispatches as follows:
 
-1. An exact `STANLI4:` prefix selects this decoder.
+1. An exact `STANLI5:` prefix selects this decoder.
 2. Any other `STANLI` prefix is a document of another version and is
    rejected.
 3. Otherwise, after the four ASCII whitespace bytes are skipped, `(` selects
    the legacy S-expression reader.
 4. Every other input is rejected.
 
-Once the v4 prefix is seen, malformed base64 or a malformed payload is a hard
-v4 error. The decoder never retries another format.
+Once the v5 prefix is seen, malformed base64 or a malformed payload is a hard
+v5 error. The decoder never retries another format.
 
 Canonical base64 has exactly one spelling. Padding may occur only in the final
 quartet, and unused tail bits must be zero. A decoder rejects non-canonical
@@ -375,6 +378,7 @@ is
 string name
 u8 block
 SizedType constrained_type
+list<string> annotations
 ```
 
 | `block` | Meaning |
@@ -382,6 +386,10 @@ SizedType constrained_type
 | 0 | `Parameters` |
 | 1 | `TransformedParameters` |
 | 2 | `GeneratedQuantities` |
+
+`annotations` holds the names of the declaration annotations on the
+variable (`@latent` is `latent`), in source order, without their arguments;
+it is empty for an unannotated variable.
 
 `output_vars` lists the parameters, transformed parameters and generated
 quantities in the order `generate_quantities` writes them, which is CmdStan's
@@ -473,7 +481,7 @@ and anything deeper is rejected as nested too deeply.
 For a fixed stanc3 revision, source, include map, and pass selection, every
 producer must emit identical bytes. Canonical encoding requires:
 
-1. the exact `STANLI4:` prefix;
+1. the exact `STANLI5:` prefix;
 2. the tag numbers and field order in this document;
 3. little-endian fixed-width scalars;
 4. original list order;
@@ -489,4 +497,4 @@ user functions, warnings, and frontend errors. Windows uses the same encoder
 and participates in the same byte comparison.
 
 A future incompatible layout gets a new ASCII header and a new decoder. It
-must never reuse `STANLI4:` with different tag meanings or field order.
+must never reuse `STANLI5:` with different tag meanings or field order.

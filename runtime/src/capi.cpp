@@ -13,6 +13,8 @@
 #include <stanli/reduce_sum.hpp>
 #include <stanli/walnuts.hpp>
 #include <stanli/wa_interp.hpp>
+#include <stanli/sparse_factor.hpp>
+#include <stanli/whiten.hpp>
 
 #include "build_id.hpp"
 #include "data_document.hpp"
@@ -67,6 +69,7 @@ struct CompilerMessage {
 struct Variable {
   std::string name;
   std::vector<int64_t> dims;
+  std::vector<std::string> annotations;
 };
 
 // Scalar element views of one variable (`a[i, j]` written per element) join
@@ -115,6 +118,15 @@ std::vector<Variable> variables_of(
   return out;
 }
 
+void annotate(
+    std::vector<Variable>& vars,
+    const std::vector<std::pair<std::string, std::vector<std::string>>>&
+        annotations) {
+  for (Variable& var : vars)
+    for (const auto& entry : annotations)
+      if (entry.first == var.name) var.annotations = entry.second;
+}
+
 struct stanli_compilation {
   std::optional<std::string> mir;
   std::string error;
@@ -150,6 +162,9 @@ struct stanli_model {
   std::vector<Variable> con_vars, wa_vars;
   // Identifies the model and data for resume records; see model_new.
   uint64_t resume_hash = 0;
+  // Set when this model is a whitening of another: its unconstrained vector
+  // is z, and the graphs above already map z to the original coordinates.
+  std::shared_ptr<const stanli::WhitenSpec> whiten;
 };
 
 namespace {
@@ -502,6 +517,7 @@ static stanli_model* model_new(const char* tmir_sexp, const char* data_json,
     for (const auto& v : m->cm.views) m->n_con += v.len;
     m->flat_names = stanli::CompiledModel::csv_names(m->cm.views);
     m->con_vars = variables_of(m->cm.views);
+    annotate(m->con_vars, m->cm.annotations);
     std::string probe_failure;
     if (m->cm.write_array) {
       auto& wa = *m->cm.write_array;
@@ -514,6 +530,7 @@ static stanli_model* model_new(const char* tmir_sexp, const char* data_json,
           const auto& cols = m->wa_interp->columns();
           m->wa_names = stanli::CompiledModel::csv_names(cols);
           m->wa_vars = variables_of(cols);
+          annotate(m->wa_vars, m->cm.annotations);
           m->wa_gq_start =
               scalar_column_start(cols, m->wa_interp->n_gq_start());
         }
@@ -524,6 +541,7 @@ static stanli_model* model_new(const char* tmir_sexp, const char* data_json,
         m->wa_cols = wa.columns;
         m->wa_names = stanli::CompiledModel::csv_names(wa.columns);
         m->wa_vars = variables_of(wa.columns);
+        annotate(m->wa_vars, m->cm.annotations);
         for (const auto& c : wa.columns) m->wa_n += c.len;
         m->wa_gq_start = scalar_column_start(wa.columns, wa.n_gq_start);
       }
@@ -780,7 +798,13 @@ int64_t stanli_n_unconstrained(const stanli_model* m) {
 int stanli_unconstrain_inits(stanli_model* m, const char* inits_json, double* q,
                              char* err, size_t err_len) {
   try {
-    stanli::unconstrain_inits_json(m->cm, inits_json, q);
+    if (m->whiten) {
+      std::vector<double> inner((size_t)m->whiten->n);
+      stanli::unconstrain_inits_json(m->cm, inits_json, inner.data());
+      m->whiten->to_z(inner.data(), q);
+    } else {
+      stanli::unconstrain_inits_json(m->cm, inits_json, q);
+    }
     return 0;
   } catch (const std::exception& e) {
     put_err(err, err_len, e.what());
@@ -790,6 +814,132 @@ int stanli_unconstrain_inits(stanli_model* m, const char* inits_json, double* q,
     return 1;
   }
 }
+
+stanli_model* stanli_model_whiten(const stanli_model* inner,
+                                  const double* q_hat, int64_t n,
+                                  const int64_t* perm, const int64_t* col_ptr,
+                                  const int64_t* row_idx, const double* values,
+                                  int64_t nnz, char* err, size_t err_len) {
+  return stanli_model_whiten_lowrank(inner, q_hat, n, perm, col_ptr, row_idx,
+                                     values, nnz, 0, nullptr, nullptr, nullptr,
+                                     err, err_len);
+}
+
+stanli_model* stanli_model_whiten_lowrank(
+    const stanli_model* inner, const double* q_hat, int64_t n,
+    const int64_t* perm, const int64_t* col_ptr, const int64_t* row_idx,
+    const double* values, int64_t nnz, int64_t k, const double* c,
+    const double* b, const double* w, char* err, size_t err_len) {
+  try {
+    if (inner == nullptr) throw std::invalid_argument("null model");
+    if (inner->whiten)
+      throw std::invalid_argument("the model is already whitened");
+    if (n != inner->ex->n_params())
+      throw std::invalid_argument(
+          "q_hat has " + std::to_string(n) + " elements, the model has " +
+          std::to_string(inner->ex->n_params()) + " unconstrained parameters");
+    const auto spec = stanli::make_whiten_spec(q_hat, n, perm, col_ptr, row_idx,
+                                               values, nnz, k, c, b, w);
+    auto m = std::make_unique<stanli_model>();
+    m->cm = inner->cm;
+    m->threads_per_chain = inner->threads_per_chain;
+    m->reduce_sum_count = inner->reduce_sum_count;
+    m->reduce_sum_fallbacks = inner->reduce_sum_fallbacks;
+    m->flat_names = inner->flat_names;
+    m->n_con = inner->n_con;
+    m->wa_cols = inner->wa_cols;
+    m->wa_interp = inner->wa_interp;
+    m->wa_names = inner->wa_names;
+    m->wa_n = inner->wa_n;
+    m->wa_gq_start = inner->wa_gq_start;
+    m->warnings = inner->warnings;
+    m->compiler_messages = inner->compiler_messages;
+    m->con_vars = inner->con_vars;
+    m->wa_vars = inner->wa_vars;
+    m->whiten = spec;
+    m->ex = std::make_unique<stanli::Executor>(
+        stanli::whiten_graph(inner->ex->graph(), spec), *inner->ex);
+    if (m->reduce_sum_count > 0) {
+      m->reduce_team = std::make_unique<stanli::ReduceExecutionContext>(
+          m->threads_per_chain);
+      m->ex->set_reduce_context(m->reduce_team.get());
+    }
+    if (inner->wa_ex)
+      m->wa_ex = std::make_unique<stanli::Executor>(
+          stanli::whiten_graph(inner->wa_ex->graph(), spec), *inner->wa_ex);
+    Fnv1a hash;
+    hash.add(&inner->resume_hash, sizeof inner->resume_hash);
+    hash.add(spec->q_hat.data(), sizeof(double) * spec->q_hat.size());
+    hash.add(spec->perm.data(), sizeof(int64_t) * spec->perm.size());
+    hash.add(spec->col_ptr.data(), sizeof(int64_t) * spec->col_ptr.size());
+    hash.add(spec->row_idx.data(), sizeof(int64_t) * spec->row_idx.size());
+    hash.add(spec->values.data(), sizeof(double) * spec->values.size());
+    hash.add(&spec->k, sizeof spec->k);
+    hash.add(spec->c.data(), sizeof(double) * spec->c.size());
+    hash.add(spec->cb.data(), sizeof(double) * spec->cb.size());
+    hash.add(spec->cw.data(), sizeof(double) * spec->cw.size());
+    m->resume_hash = hash.h;
+    return m.release();
+  } catch (const std::exception& e) {
+    put_err(err, err_len, e.what());
+    return nullptr;
+  }
+}
+
+struct stanli_sparse_factor {
+  stanli::SparseFactor f;
+};
+
+stanli_sparse_factor* stanli_sparse_factor_new(
+    int64_t n, const int64_t* col_ptr, const int64_t* row_idx,
+    const double* values, const int64_t* perm, char* err, size_t err_len) {
+  try {
+    auto out = std::make_unique<stanli_sparse_factor>();
+    out->f = stanli::sparse_ldlt(n, col_ptr, row_idx, values, perm);
+    return out.release();
+  } catch (const std::exception& e) {
+    put_err(err, err_len, e.what());
+    return nullptr;
+  }
+}
+
+int64_t stanli_sparse_factor_nnz(const stanli_sparse_factor* f) {
+  return (int64_t)f->f.row_idx.size();
+}
+
+void stanli_sparse_factor_stats(const stanli_sparse_factor* f,
+                                int64_t* n_negative, double* log_abs_det) {
+  *n_negative = f->f.n_negative;
+  *log_abs_det = f->f.log_abs_det;
+}
+
+void stanli_sparse_factor_get(const stanli_sparse_factor* f, int64_t* perm,
+                              int64_t* col_ptr, int64_t* row_idx,
+                              double* values, double* d) {
+  const auto& x = f->f;
+  std::copy(x.perm.begin(), x.perm.end(), perm);
+  std::copy(x.col_ptr.begin(), x.col_ptr.end(), col_ptr);
+  std::copy(x.row_idx.begin(), x.row_idx.end(), row_idx);
+  std::copy(x.values.begin(), x.values.end(), values);
+  std::copy(x.d.begin(), x.d.end(), d);
+}
+
+int stanli_sparse_factor_lowrank(const stanli_sparse_factor* f, int64_t k,
+                                 const double* u, double* c, double* b,
+                                 double* w, char* err, size_t err_len) {
+  try {
+    const auto r = stanli::sparse_lowrank(f->f, k, u);
+    std::copy(r.c.begin(), r.c.end(), c);
+    std::copy(r.b.begin(), r.b.end(), b);
+    std::copy(r.w.begin(), r.w.end(), w);
+    return 0;
+  } catch (const std::exception& e) {
+    put_err(err, err_len, e.what());
+    return 1;
+  }
+}
+
+void stanli_sparse_factor_free(stanli_sparse_factor* f) { delete f; }
 
 int stanli_grad(stanli_model* m, const double* q, double* lp, double* grad) {
   const int64_t n = m->ex->n_params();
@@ -1782,6 +1932,21 @@ const char* stanli_constrained_name(const stanli_model* m, int64_t i) {
   return m->flat_names[i].c_str();
 }
 
+int64_t stanli_n_param_blocks(const stanli_model* m) {
+  return m->whiten ? 0 : (int64_t)m->cm.unc_params.size();
+}
+
+const char* stanli_param_block_name(const stanli_model* m, int64_t i) {
+  if (m->whiten || i < 0 || i >= (int64_t)m->cm.unc_params.size())
+    return nullptr;
+  return m->cm.unc_params[(size_t)i].name.c_str();
+}
+
+int64_t stanli_param_block_size(const stanli_model* m, int64_t i) {
+  if (m->whiten || i < 0 || i >= (int64_t)m->cm.unc_params.size()) return -1;
+  return m->cm.unc_params[(size_t)i].len;
+}
+
 int64_t stanli_wa_n_columns(const stanli_model* m) { return m->wa_n; }
 
 const char* stanli_warnings(const stanli_model* m) {
@@ -1836,6 +2001,20 @@ int64_t stanli_variable_dim(const stanli_model* m, int set, int64_t i,
   const Variable* v = variable_at(m, set, i);
   if (v == nullptr || k < 0 || k >= (int64_t)v->dims.size()) return 0;
   return v->dims[(size_t)k];
+}
+
+int64_t stanli_variable_n_annotations(const stanli_model* m, int set,
+                                      int64_t i) {
+  const Variable* v = variable_at(m, set, i);
+  return v == nullptr ? 0 : (int64_t)v->annotations.size();
+}
+
+const char* stanli_variable_annotation(const stanli_model* m, int set,
+                                       int64_t i, int64_t k) {
+  const Variable* v = variable_at(m, set, i);
+  if (v == nullptr || k < 0 || k >= (int64_t)v->annotations.size())
+    return nullptr;
+  return v->annotations[(size_t)k].c_str();
 }
 
 #define STANLI_FIELD(T, f) \

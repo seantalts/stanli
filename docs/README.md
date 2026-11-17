@@ -11,6 +11,7 @@ language: [Python](../python/README.md), [R](../r/README.md) or
 | [Coming from cmdstanr](from-cmdstanr.md) | You have cmdstanr code and want the stanli equivalent of each call. |
 | [Teaching with stanli](teaching.md) | You are setting up a class, including brms and Rethinking models. |
 | [Fast mode](fast-mode.md) | You want more speed and can accept results that differ from CmdStan in the last bits. |
+| [Laplace whitening](laplace-whitening.md) | You have a hierarchical model with many correlated random effects and want to try an experimental preconditioner. |
 | [Within-chain parallelism](native-reduce-sum.md) | Your model uses `reduce_sum` and you want more than one thread per chain. |
 
 ## Trust

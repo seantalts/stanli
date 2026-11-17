@@ -173,6 +173,14 @@ wrong, more often in the spread than in the centre. Compare with
 `num_elbo_draws`, `history_size` and `init_radius`, cannot be combined with
 `init`, and does no PSIS resampling.
 
+## Laplace whitening
+
+`laplace_whiten(m, latent = "a")` is experimental. It finds the Laplace mode
+of the hyperparameters and returns `$model`, a model whose random effects are
+whitened around it; sample that with `metric = "unit_e"` and
+`adapt_metric = FALSE`. It needs the Matrix package. See
+[Laplace whitening](../docs/laplace-whitening.md).
+
 ## nutpie
 
 `sample_nutpie()` runs the model with [nutpie](https://github.com/pymc-devs/nutpie)'s
@@ -361,6 +369,8 @@ pathfinder_model(m, draws = 1000, ...)
 laplace_model(m, mode = NULL, draws = 1000, ...)
 sample_nutpie(m, chains = 4, seed = 1, warmup = NULL, samples = 1000,
               adaptation = "diag", ...)   # needs nutpieR
+laplace_whiten(m, latent = NULL, init = NULL, seed = 1, ...)  # experimental, needs Matrix
+whiten(m, q_hat, perm, L, lowrank = NULL); parameter_annotations(m)
 bridgestan_data(m); stanli_build_id()
 
 summary(fit); stanli_diagnose(fit); log_lik(fit)

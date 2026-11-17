@@ -268,7 +268,7 @@ def test_function_errors_and_recovery():
 
 
 def _portable_payload(mir):
-    assert mir.startswith("STANLI4:"), mir[:80]
+    assert mir.startswith("STANLI5:"), mir[:80]
     return base64.b64decode(mir[8:], validate=True)
 
 
@@ -1479,7 +1479,7 @@ def _fake_compiler_run(calls, warnings=(), o1_fallback=None,
         pathlib.Path(path).write_text(json.dumps(
             {"warnings": list(warnings), "o1_fallback": o1_fallback}),
             encoding="utf-8")
-        return subprocess.CompletedProcess(argv, 0, "STANLI4:ZmFrZQ==",
+        return subprocess.CompletedProcess(argv, 0, "STANLI5:ZmFrZQ==",
                                            stderr)
     return run
 
@@ -1505,7 +1505,7 @@ def test_subprocess_compiler_contract():
             with warnings.catch_warnings(record=True) as caught:
                 warnings.simplefilter("always")
                 got = stanli._stanc_mir(source)
-        assert got == "STANLI4:ZmFrZQ=="
+        assert got == "STANLI5:ZmFrZQ=="
         assert [(w.category, str(w.message)) for w in caught] == [
             (RuntimeWarning, "a successful frontend warning"),
             (stanli.O1FallbackWarning, "stanli compiler: skipped O1")]

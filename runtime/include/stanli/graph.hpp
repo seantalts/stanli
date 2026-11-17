@@ -158,6 +158,10 @@ class Executor {
     const double* data;
   };
   Executor(Graph g, std::vector<Borrow> borrows);
+  // Binds a graph whose unwritten data slots are exactly `source`'s, in the
+  // same order, over the same shared data. Writable access detaches as for a
+  // copy.
+  Executor(Graph g, const Executor& source);
   // Copies share unwritten data slots unless a writable pointer escaped.
   // Parameters, outputs, adjoints, scratch and kernel state remain private.
   // Writable data access detaches before exposing a pointer; later clones of

@@ -1388,6 +1388,9 @@ CompiledModel compile_model(const std::string& mir_text, const DataMap& data,
   }
   auto specialized = try_bounded_specialization(lo, *prog);
   CompiledModel cm = specialized ? std::move(*specialized) : lo.run(*prog);
+  for (const mir::OutputVar& out : prog->output_vars)
+    if (!out.annotations.empty())
+      cm.annotations.emplace_back(out.name, out.annotations);
   lo.after_data_prepared = nullptr;
   // The interpreters below only read data and transformed data, and nothing
   // reads the log_prob lowering's environment after this, so they share it.

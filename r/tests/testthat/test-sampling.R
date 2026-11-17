@@ -810,7 +810,7 @@ test_that("the stanli-compile executable reports the O1 fallback as a classed wa
   got <- o1_notice(stanli:::mir_from_binary(compiler, o1_budget_code()))
   expect_length(got$seen, 1)
   expect_match(got$seen, "skipped O1", fixed = TRUE)
-  expect_true(startsWith(got$value, "STANLI4:"))
+  expect_true(startsWith(got$value, "STANLI5:"))
 })
 
 test_that("a model's variables and columns come from the runtime", {
