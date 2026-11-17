@@ -10,7 +10,7 @@
   driver
   stan_math_backend
   analysis_and_optimization)
- (modules portable_mir stanli_pipeline))
+ (modules portable_mir stanli_pipeline stanli_tuples))
 
 (executable
  (name stanli_stancjs)
