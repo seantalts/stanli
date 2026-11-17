@@ -832,3 +832,59 @@ test_that("a model's variables and columns come from the runtime", {
   expect_identical(parameter_names(model, scalars = TRUE),
                    c("mu", "v[1]", "v[2]"))
 })
+
+test_that("tuple columns have the names cmdstanr gives them", {
+  skip_without_runtime()
+  model <- stanli_model(code = "
+    parameters { real mu; }
+    transformed parameters {
+      tuple(real, tuple(real, vector[2])) tp = (mu, (2 * mu, [mu, 3 * mu]'));
+    }
+    model { mu ~ normal(0, 1); }
+    generated quantities {
+      tuple(real, tuple(int, real)) q = (mu, (2, mu));
+      tuple(real, vector[3]) c = (mu, [1, 2, 3]');
+      array[2] tuple(real, real) g;
+      for (i in 1:2) g[i] = (i * mu, i);
+      array[2, 2] tuple(real, matrix[2, 2]) h;
+      for (i in 1:2) for (j in 1:2) h[i, j] = (i + j, rep_matrix(mu, 2, 2));
+    }")
+  # The CmdStan 2.40.0 CSV header of this model, and the names cmdstanr 0.9.0
+  # gives its columns in draws(), summary() and as_draws_df().
+  csv <- c("lp__", "mu", "tp:1", "tp:2:1", "tp:2:2.1", "tp:2:2.2", "q:1",
+           "q:2:1", "q:2:2", "c:1", "c:2.1", "c:2.2", "c:2.3", "g.1:1",
+           "g.1:2", "g.2:1", "g.2:2", "h.1.1:1", "h.1.1:2.1.1",
+           "h.1.1:2.2.1", "h.1.1:2.1.2", "h.1.1:2.2.2", "h.2.1:1",
+           "h.2.1:2.1.1", "h.2.1:2.2.1", "h.2.1:2.1.2", "h.2.1:2.2.2",
+           "h.1.2:1", "h.1.2:2.1.1", "h.1.2:2.2.1", "h.1.2:2.1.2",
+           "h.1.2:2.2.2", "h.2.2:1", "h.2.2:2.1.1", "h.2.2:2.2.1",
+           "h.2.2:2.1.2", "h.2.2:2.2.2")
+  cmdstanr <- c("lp__", "mu", "tp:1", "tp:2:1", "tp:2:2[1]", "tp:2:2[2]",
+                "q:1", "q:2:1", "q:2:2", "c:1", "c:2[1]", "c:2[2]", "c:2[3]",
+                "g[1:1]", "g[1:2]", "g[2:1]", "g[2:2]", "h[1,1:1]",
+                "h[1,1:2,1,1]", "h[1,1:2,2,1]", "h[1,1:2,1,2]", "h[1,1:2,2,2]",
+                "h[2,1:1]", "h[2,1:2,1,1]", "h[2,1:2,2,1]", "h[2,1:2,1,2]",
+                "h[2,1:2,2,2]", "h[1,2:1]", "h[1,2:2,1,1]", "h[1,2:2,2,1]",
+                "h[1,2:2,1,2]", "h[1,2:2,2,2]", "h[2,2:1]", "h[2,2:2,1,1]",
+                "h[2,2:2,2,1]", "h[2,2:2,1,2]", "h[2,2:2,2,2]")
+  expect_identical(model$columns, cmdstanr[-1])
+  fit <- sample_model(model, chains = 1, warmup = 20, samples = 5, seed = 1,
+                      refresh = 0)
+  expect_identical(dimnames(fit$draws)[[3]], cmdstanr[-1])
+  skip_if_not_installed("posterior")
+  cfit <- as_cstanfit(fit)
+  expect_identical(posterior::variables(cfit$draws()), cmdstanr)
+  expect_identical(cfit$summary()$variable, cmdstanr)
+  expect_identical(posterior::variables(cfit$draws(variables = "g")),
+                   cmdstanr[startsWith(cmdstanr, "g[")])
+  expect_identical(posterior::variables(cfit$draws(variables = "h")),
+                   cmdstanr[startsWith(cmdstanr, "h[")])
+  expect_identical(posterior::variables(as_draws_array(fit)), cmdstanr[-1])
+  expect_identical(setdiff(names(posterior::as_draws_df(as_draws_array(fit))),
+                           c(".chain", ".iteration", ".draw")),
+                   cmdstanr[-1])
+  skip_if_not_installed("rstan")
+  sf <- as_stanfit(fit)
+  expect_identical(sf@sim$fnames_oi, c(cmdstanr[-1], "lp__"))
+  expect_identical(names(sf@sim$samples[[1]]), c(csv[-1], "lp__"))
+})

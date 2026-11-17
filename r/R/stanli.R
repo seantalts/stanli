@@ -259,15 +259,20 @@ runtime_variables <- function(ptr, parameters) {
   stats::setNames(v$dims, v$name)
 }
 
-# Column names in Stan's order, `theta[1,2]` for an element.
+# Column names in Stan's order, `theta[1,2]` for an element. Tuple columns
+# follow cmdstanr's repair of the CmdStan CSV name: `g.1:2.3` is `g[1:2,3]`.
 variable_columns <- function(variables) {
-  unlist(lapply(names(variables), function(name) {
+  csv <- unlist(lapply(names(variables), function(name) {
     dims <- variables[[name]]
     if (!length(dims)) return(name)
     if (prod(dims) == 0) return(character(0))
     index <- as.matrix(expand.grid(lapply(dims, seq_len)))
-    paste0(name, "[", apply(index, 1L, paste, collapse = ","), "]")
+    paste0(name, ".", apply(index, 1L, paste, collapse = "."))
   }), use.names = FALSE)
+  indexed <- grepl(".", csv, fixed = TRUE)
+  csv[indexed] <- paste0(gsub(".", ",", sub(".", "[", csv[indexed], fixed = TRUE),
+                              fixed = TRUE), "]")
+  csv
 }
 
 # The variable each column belongs to.
