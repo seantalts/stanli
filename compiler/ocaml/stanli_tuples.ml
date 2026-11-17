@@ -206,14 +206,14 @@ let assign loc name indices type_ rhs : stmt =
   stmt loc (Assignment ((LVariable name, indices), type_, rhs))
 
 (* Evaluate a non-tuple expression once, into a temporary. *)
+let copy pre (e : expr) =
+  let name = fresh () in
+  declare pre e.meta.loc name e.meta.adlevel e.meta.type_;
+  emit pre (assign e.meta.loc name [] e.meta.type_ e);
+  variable name e.meta.type_ e.meta.adlevel e.meta.loc
+
 let hoist pre (e : expr) =
-  match e.pattern with
-  | Var _ | Lit _ -> e
-  | _ ->
-      let name = fresh () in
-      declare pre e.meta.loc name e.meta.adlevel e.meta.type_;
-      emit pre (assign e.meta.loc name [] e.meta.type_ e);
-      variable name e.meta.type_ e.meta.adlevel e.meta.loc
+  match e.pattern with Var _ | Lit _ -> e | _ -> copy pre e
 
 (* ---- scopes ------------------------------------------------------------ *)
 
@@ -597,7 +597,10 @@ let rec target_of pre (lbase, indices) : expr tree =
           match l.pattern with Var n | Indexed ({pattern= Var n; _}, _) -> Some n | _ -> None)
           (leaves tree) in
         List.map
-          (Index.map (fun i -> if effectful i || mentions names i then hoist pre i else i))
+          (Index.map (fun i ->
+               if mentions names i then copy pre i
+               else if effectful i then hoist pre i
+               else i))
           indices
       else indices in
     map_tree
@@ -646,7 +649,8 @@ let rewrite_assignment loc pre lvalue ut rhs =
           (List.mapi (fun k v -> (k, v)) values) in
       let value =
         if List.length targets > 1 && aliased then
-          map_tree (fun v -> hoist pre v) value
+          map_tree (fun (v : expr) ->
+              match v.pattern with Lit _ -> v | _ -> copy pre v) value
         else value in
       match (target, value) with
       | Leaf t, Leaf v -> [store loc t v]
