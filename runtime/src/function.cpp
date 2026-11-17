@@ -53,9 +53,6 @@ size_t leaf_rank(stanli::mir::UnsizedLeaf leaf) {
     case Leaf::Complex:
       throw std::runtime_error(
           "complex numbers are not supported yet in function arguments");
-    case Leaf::Tuple:
-      throw std::runtime_error(
-          "tuples are not supported yet in function arguments");
     case Leaf::Unknown:
       throw std::runtime_error("function has unknown argument type");
   }
@@ -595,6 +592,30 @@ int stanli_function_call(const stanli_function* function,
       values.push_back(std::move(value));
     }
 
+    if (selected->results.size() > 1) {
+      // A function returning a tuple: one result per leaf, depth first.
+      stanli::MirInterp<double> interpreter(
+          function->functions, "function " + function->requested_name);
+      if (function->report_execution)
+        stanli::report_execution_function(selected->name, false,
+                                          "a function returning a tuple", 0);
+      std::vector<stanli::DataMap::Entry> results =
+          interpreter.call_values(*selected, values);
+      for (size_t k = 0; k < results.size(); ++k) {
+        stanli::DataMap::Entry& result = results[k];
+        if (selected->results[k].leaf != stanli::mir::UnsizedLeaf::Int) {
+          result.is_int = false;
+          result.i.clear();
+        }
+        if (write_result(result_context, result.is_int ? 1 : 0, result.r.data(),
+                         result.r.size(), result.i.data(), result.i.size(),
+                         result.dims.data(), result.dims.size()) != 0)
+          throw std::runtime_error("function result writer failed");
+      }
+      if (trace_scope)
+        stanli::emit_diagnostic(stanli::execution_trace_report(trace));
+      return 0;
+    }
     const auto plan = function_plan(*function, *selected, values);
     if (function->report_execution)
       stanli::report_execution_function(selected->name, plan->ok, plan->refusal,

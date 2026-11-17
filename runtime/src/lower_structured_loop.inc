@@ -2717,6 +2717,8 @@ bool try_lower_region(
   };
   if (target_scale != 1.0)
     return refuse("enclosing target scaling needs a compatible region");
+  if (contains_multi_assign(s))
+    return refuse("a call returning several values");
   if (output_references) {
     try {
       if (bounded_nested_update_over_budget(s))

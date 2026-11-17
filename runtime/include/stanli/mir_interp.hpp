@@ -210,6 +210,8 @@ class MirInterp {
              const std::vector<bool>* autodiff = nullptr) {
     if (f.arg_names.size() != args.size())
       fail("function argument count mismatch: " + f.name);
+    if (f.results.size() > 1)
+      fail(f.name + " returns several values; call it with call_values");
     MirInterp sub = function_scope(propto_ctx_);
     sub.bind_argument_types(f, autodiff);
     for (size_t k = 0; k < args.size(); ++k) {
@@ -218,6 +220,23 @@ class MirInterp {
     }
     if (sub.exec_all(f.body) == Flow::Return) return std::move(sub.returned_);
     fail("function returned no value: " + f.name);
+  }
+
+  // `call` for a function with several results: one value per result.
+  std::vector<Value> call_values(const mir::FunDef& f,
+                                 const std::vector<Value>& args) {
+    if (f.arg_names.size() != args.size())
+      fail("function argument count mismatch: " + f.name);
+    MirInterp sub = function_scope(propto_ctx_);
+    sub.bind_argument_types(f, nullptr);
+    for (size_t k = 0; k < args.size(); ++k) {
+      sub.env_[f.arg_names[k]] = args[k];
+      sub.set_declared_dims(f.arg_names[k], args[k].dims);
+    }
+    if (sub.exec_all(f.body) != Flow::Return ||
+        sub.returned_values_.size() != f.results.size())
+      fail("function returned no values: " + f.name);
+    return std::move(sub.returned_values_);
   }
 
   Value eval(const mir::Expr& e) {
@@ -332,6 +351,9 @@ class MirInterp {
       }
       case mir::Stmt::Return:
         returned_ = st.has_init ? eval(st.rhs) : Value{};
+        returned_values_.clear();
+        for (const mir::Expr& value : st.fn_args)
+          returned_values_.push_back(eval(value));
         return Flow::Return;
       case mir::Stmt::Break:
         return Flow::Break;
@@ -437,30 +459,7 @@ class MirInterp {
           return;
         }
         if (st.lhs_idx.empty()) {
-          Value v = eval(st.rhs);
-          if (const Value* current = lookup(st.lhs))
-            check_assign_size(
-                st.lhs,
-                current->dims.empty()
-                    ? std::vector<int64_t>{static_cast<int64_t>(
-                          std::max(current->r.size(), current->i.size()))}
-                    : current->dims,
-                v);
-          // A declared numeric type stays fixed for its whole lifetime. The
-          // RHS's own representation can differ: MirInterp's binary ops use
-          // real registers, while an all-integer array literal is tagged int.
-          // Preserve int destinations as before, and apply Stan's implicit
-          // int-to-real promotion when assigning into a real destination.
-          const Value* existing = lookup(st.lhs);
-          if (existing && existing->is_int && !v.is_int) {
-            v.is_int = true;
-            v.i.clear();
-            for (const T& x : v.r) v.i.push_back((int)val(x));
-          } else if (existing && !existing->is_int && v.is_int) {
-            v.is_int = false;
-            v.i.clear();
-          }
-          env_[st.lhs] = std::move(v);
+          assign_whole(st.lhs, eval(st.rhs));
           return;
         }
         Value* en = find(st.lhs);
@@ -659,6 +658,8 @@ class MirInterp {
         // Skipping it would mean stanli happily sampled a model CmdStan
         // refuses to build.
         if (const auto action = message_action(mir::internal_name(st))) {
+          if (!st.print_layout.empty())
+            fail("printing an array of tuples is not supported yet", st.raw);
           std::vector<Value> values;
           std::vector<MessageShape> shapes;
           const MessageSpec spec = lower_message_arguments(
@@ -730,9 +731,47 @@ class MirInterp {
         fail("unsupported statement function " + st.fn_name, st.raw);
       case mir::Stmt::Skip:
         return;  // constraint checks are not executed here
+      case mir::Stmt::MultiAssign: {
+        if (st.rhs.fn_lib != mir::Expr::Lib::UserDefined)
+          fail(st.rhs.name + ", which returns a tuple, is not supported yet",
+               st.raw);
+        std::vector<Value> values = call_udf_values(st.rhs);
+        if (values.size() != st.fn_args.size())
+          fail(st.rhs.name + " returned the wrong number of values", st.raw);
+        for (size_t k = 0; k < values.size(); ++k)
+          assign_whole(st.fn_args[k].name, std::move(values[k]));
+        return;
+      }
       default:
         fail("unsupported statement", st.raw);
     }
+  }
+
+  // `lhs = v` for a whole variable.
+  void assign_whole(const std::string& lhs, Value v) {
+    if (const Value* current = lookup(lhs))
+      check_assign_size(
+          lhs,
+          current->dims.empty()
+              ? std::vector<int64_t>{static_cast<int64_t>(
+                    std::max(current->r.size(), current->i.size()))}
+              : current->dims,
+          v);
+    // A declared numeric type stays fixed for its whole lifetime. The
+    // RHS's own representation can differ: MirInterp's binary ops use
+    // real registers, while an all-integer array literal is tagged int.
+    // Preserve int destinations as before, and apply Stan's implicit
+    // int-to-real promotion when assigning into a real destination.
+    const Value* existing = lookup(lhs);
+    if (existing && existing->is_int && !v.is_int) {
+      v.is_int = true;
+      v.i.clear();
+      for (const T& x : v.r) v.i.push_back((int)val(x));
+    } else if (existing && !existing->is_int && v.is_int) {
+      v.is_int = false;
+      v.i.clear();
+    }
+    env_[lhs] = std::move(v);
   }
 
   FunctionArgumentShape function_argument_shape(const mir::Expr& source,
@@ -1186,6 +1225,8 @@ class MirInterp {
   MirHooks hooks_;
   std::map<std::string, Value> env_;
   Value returned_;
+  // What a function with several results returned, one value each.
+  std::vector<Value> returned_values_;
   const std::map<std::string, Value>* parent_ = nullptr;
   std::map<std::string, std::vector<int64_t>> decl_dims_;
 
@@ -1745,19 +1786,36 @@ class MirInterp {
     return sub;
   }
 
-  Value call_udf(const mir::Expr& e) {
+  // The scope a user function call runs in, with its arguments bound.
+  MirInterp udf_scope(const mir::Expr& e, const mir::FunDef*& f) {
     auto it = funs_.find(mir::function_key(e));
     if (it == funs_.end()) fail("unknown function " + e.name, e.raw);
-    const mir::FunDef& f = *it->second;
-    if (e.args.size() != f.arg_names.size()) fail(e.name + " arity mismatch");
+    f = it->second;
+    if (e.args.size() != f->arg_names.size()) fail(e.name + " arity mismatch");
     std::vector<bool> types;
     for (const mir::Expr& arg : e.args) types.push_back(autodiff(arg));
     MirInterp sub = function_scope(propto_ctx_ && mir::inherits_propto(e));
-    sub.bind_argument_types(f, &types);
+    sub.bind_argument_types(*f, &types);
     for (size_t i = 0; i < e.args.size(); ++i)
-      sub.env_[f.arg_names[i]] = eval(e.args[i]);
-    if (sub.exec_all(f.body) == Flow::Return) return std::move(sub.returned_);
+      sub.env_[f->arg_names[i]] = eval(e.args[i]);
+    return sub;
+  }
+
+  Value call_udf(const mir::Expr& e) {
+    const mir::FunDef* f = nullptr;
+    MirInterp sub = udf_scope(e, f);
+    if (sub.exec_all(f->body) == Flow::Return) return std::move(sub.returned_);
     return Value{};
+  }
+
+  // A call of a function with several results: one value per result.
+  std::vector<Value> call_udf_values(const mir::Expr& e) {
+    const mir::FunDef* f = nullptr;
+    MirInterp sub = udf_scope(e, f);
+    if (sub.exec_all(f->body) != Flow::Return ||
+        sub.returned_values_.size() != f->results.size())
+      fail(e.name + " returned no values", e.raw);
+    return std::move(sub.returned_values_);
   }
 
   Value eval_indexed(const mir::Expr& e) {

@@ -615,10 +615,16 @@ std::vector<mir::Stmt> single_exit_body(const mir::FunDef& f,
 // data-only conditions resolve). Return ends the body with the result.
 Lowering::Val Lowering::lower_call_udf(const mir::Expr& e,
                                        const std::function<void()>& before_body,
-                                       const UdfSpecialization& specialize) {
+                                       const UdfSpecialization& specialize,
+                                       std::vector<Val>* results) {
   auto it = fun_defs.find(mir::function_key(e));
   if (it == fun_defs.end()) fail("unknown function " + e.name, e.raw);
   const mir::FunDef& f = *it->second;
+  if ((f.results.size() > 1) != (results != nullptr))
+    fail(e.name + (results ? " does not return several values"
+                           : " returns several values; only a MultiAssign "
+                             "can call it"),
+         e.raw);
   CallArguments actuals(*this, e);
   actuals.require_arity(f.arg_names.size());
   std::vector<UdfBinding> binds(actuals.size());
@@ -728,6 +734,19 @@ Lowering::Val Lowering::lower_call_udf(const mir::Expr& e,
   const Flow flow = lower_stmts(*body);
   if (flow == Flow::Break || flow == Flow::Continue)
     fail(e.name + ": break or continue outside a loop");
+  if (results) {
+    if (flow != Flow::Return || return_values.size() != f.results.size())
+      fail(e.name + ": no return values on the executed path");
+    for (size_t k = 0; k < return_values.size(); ++k) {
+      Val& value = return_values[k];
+      value.autodiff =
+          f.results[k].leaf != mir::UnsizedLeaf::Int && udf_autodiff_ctx;
+      value.layout = owning_layout(value.si);
+    }
+    *results = std::move(return_values);
+    return_values.clear();
+    return {};
+  }
   if (e.unsized.leaf == mir::UnsizedLeaf::Unknown)
     return {};  // a void function called as a statement
   if (flow != Flow::Return)

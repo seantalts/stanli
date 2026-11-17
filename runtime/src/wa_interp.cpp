@@ -1,5 +1,7 @@
 #include <stanli/wa_interp.hpp>
 
+#include "mir_tuples.hpp"
+
 #include <stanli/function_registry.hpp>
 #include <stanli/higher_order_eval.hpp>
 #include <stanli/mir_interp.hpp>
@@ -439,18 +441,18 @@ bool WaInterp::write_param(MirInterp<double>& in, const mir::Stmt& s,
       }
       base = &base->args[0];
     }
-    const auto leaf = base->kind == mir::Expr::Var
-                          ? prog_->tuple_leaves.find(base->name)
-                          : prog_->tuple_leaves.end();
-    const mir::TupleLeaf* tuple =
-        leaf == prog_->tuple_leaves.end() ? nullptr : &leaf->second;
+    const mir::detail::TupleLeaf* tuple =
+        base->kind == mir::Expr::Var
+            ? mir::detail::tuple_leaf(*prog_, base->name)
+            : nullptr;
     const mir::OutputVar* owner = output_cursor_.take(
-        tuple                          ? tuple->variable
+        tuple                          ? tuple->base
         : base->kind == mir::Expr::Var ? base->name
                                        : std::string(),
-        len, [&in](const mir::OutputVar& var) {
-          return mir::output_columns(
-              var.type, [&in](const mir::Expr& dim) { return in.as_int(dim); });
+        len, [&](const mir::OutputVar& var) {
+          return mir::detail::output_columns(
+              prog_->tuples.get(), var,
+              [&in](const mir::Expr& dim) { return in.as_int(dim); });
         });
     if (owner == nullptr)
       throw CompileError("an output write matches no output variable");
@@ -466,7 +468,7 @@ bool WaInterp::write_param(MirInterp<double>& in, const mir::Stmt& s,
       n_gq_start_ = cols_.size();
       saw_gq_ = true;
     }
-    auto named = mir::output_name(
+    auto named = mir::detail::output_name(
         owner->name, tuple, std::vector<int64_t>(ixs.rbegin(), ixs.rend()));
     if (!named)
       throw CompileError("cannot name a write of a whole array of tuples");

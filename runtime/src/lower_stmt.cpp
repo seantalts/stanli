@@ -83,7 +83,8 @@ bool Lowering::has_target_pe(const mir::Stmt& s) {
 }
 static void bound_names(const mir::Stmt& s, std::set<std::string>* out) {
   if (s.kind == mir::Stmt::Decl) out->insert(s.decl_id);
-  if (s.kind == mir::Stmt::Assignment) out->insert(s.lhs);
+  mir::for_each_assigned(s,
+                         [&](const std::string& name) { out->insert(name); });
   for (const auto& child : s.body) bound_names(child, out);
 }
 static bool sized_from(const mir::Stmt& s, const std::set<std::string>& names) {
@@ -256,6 +257,12 @@ bool Lowering::scan_block(const mir::Stmt& s,
     } else if (child.kind == mir::Stmt::Assignment &&
                local_containers.count(child.lhs)) {
       mirror_value(child, child.lhs);
+    } else if (child.kind == mir::Stmt::MultiAssign) {
+      // The scan does not run the call, so its results are unknown here.
+      for (const mir::Expr& target : child.fn_args) {
+        if (local_ints.count(target.name)) set_local_int(target.name, nullptr);
+        if (local_containers.count(target.name)) td.env().erase(target.name);
+      }
     } else if (const bool runtime = runtime_while(child);
                runtime || !local_containers.empty()) {
       std::vector<std::string> writes;
@@ -408,6 +415,10 @@ bool Lowering::decided_statically(const mir::Stmt& s) {
       return false;
     case mir::Stmt::Assignment:
       if (int_env.count(s.lhs) && !try_eval_pure(s.rhs)) return false;
+      break;
+    case mir::Stmt::MultiAssign:
+      for (const mir::Expr& target : s.fn_args)
+        if (int_env.count(target.name)) return false;
       break;
     default:
       break;
@@ -1749,6 +1760,8 @@ void Lowering::lower_simple_stmt(const mir::Stmt& s) {
       // from the same place CmdStan's generated code throws it, so the
       // sampler counts it as a rejected proposal rather than a failure.
       if (const auto action = message_action(mir::internal_name(s))) {
+        if (!s.print_layout.empty())
+          fail("printing an array of tuples is not supported yet", s.raw);
         auto spec = std::make_shared<MessageSpec>();
         std::vector<int> ins;
         std::vector<MessageShape> shapes;
@@ -1798,15 +1811,16 @@ void Lowering::lower_simple_stmt(const mir::Stmt& s) {
           base = &base->args[0];
         }
         const Val v = lower_expr(s.fn_args[0]);
-        const mir::TupleLeaf* leaf = tuple_leaf(*base);
+        const mir::detail::TupleLeaf* leaf = tuple_leaf(*base);
         const mir::OutputVar* owner = output_cursor.take(
-            leaf                           ? leaf->variable
+            leaf                           ? leaf->base
             : base->kind == mir::Expr::Var ? base->name
                                            : std::string(),
             g.slots[v.slot].len, [&](const mir::OutputVar& var) {
-              if (mir::is_tuple(var.type))
-                return mir::output_columns(
-                    var.type, [&](const mir::Expr& d) { return eval_int(d); });
+              if (mir::detail::is_tuple(var.type))
+                return mir::detail::output_columns(
+                    tuples, var,
+                    [&](const mir::Expr& d) { return eval_int(d); });
               return sized_len(var.type, nullptr, nullptr, var.name);
             });
         if (owner == nullptr)
@@ -1816,7 +1830,7 @@ void Lowering::lower_simple_stmt(const mir::Stmt& s) {
         if (owner->block == mir::OutputVar::Block::GeneratedQuantities &&
             !n_gq_start)
           n_gq_start = out.views.size();
-        auto named = mir::output_name(
+        auto named = mir::detail::output_name(
             owner->name, leaf, std::vector<int64_t>(ixs.rbegin(), ixs.rend()));
         if (!named) fail("FnWriteParam of a whole array of tuples", s.raw);
         // stanc peels the array dimensions, so what is left here is a
@@ -1848,8 +1862,46 @@ void Lowering::lower_simple_stmt(const mir::Stmt& s) {
         return;
       }
       fail("this kind of statement is not supported yet", s.raw);
+    case mir::Stmt::MultiAssign:
+      lower_multi_assign(s);
+      return;
     default:
       fail("unsupported statement", s.raw);
+  }
+}
+void Lowering::lower_multi_assign(const mir::Stmt& s) {
+  if (s.rhs.fn_lib != mir::Expr::Lib::UserDefined)
+    fail(s.rhs.name + ", which returns a tuple, is not supported yet", s.raw);
+  std::vector<Val> values;
+  (void)lower_call_udf(s.rhs, {}, {}, &values);
+  if (values.size() != s.fn_args.size())
+    fail(s.rhs.name + " returned the wrong number of values", s.raw);
+  for (size_t k = 0; k < values.size(); ++k) {
+    const std::string& target = s.fn_args[k].name;
+    if (int_locals.count(target) && g.slots[values[k].slot].len == 1) {
+      // An integer local now holds a value known only at run time.
+      Val v = values[k];
+      SlotInfo expected;
+      expected.param_free = v.si.param_free;
+      require_binding(v, 1, expected, target, s.raw);
+      v.autodiff = false;
+      v.si = expected;
+      if (write_array_unregioned()) v.si.param_free = false;
+      scope[target] = v;
+      decls[target] = DeclView{1, false, expected};
+      int_env.erase(target);
+      int_locals.erase(target);
+      td_erase(target);
+      continue;
+    }
+    const Val bound = assign_value(target, std::move(values[k]), s.raw);
+    if (!bound.si.param_free) {
+      td_erase(target);
+    } else if (const DataMap::Entry* en = observation(bound)) {
+      td_assign(target, *en);
+    } else {
+      td_erase(target);
+    }
   }
 }
 Lowering::Flow Lowering::lower_stmt_impl(const mir::Stmt& s) {
@@ -2101,8 +2153,11 @@ Lowering::Flow Lowering::lower_stmt_impl(const mir::Stmt& s) {
     }
     case mir::Stmt::Return:
       // Only reachable inside an inlined UDF body; lower_call_udf collects
-      // the value.
+      // the value, or the values of a function with several results.
       if (s.has_init) return_value = lower_expr(s.rhs);
+      return_values.clear();
+      for (const mir::Expr& value : s.fn_args)
+        return_values.push_back(lower_expr(value));
       return Flow::Return;
     case mir::Stmt::Break:
       return Flow::Break;

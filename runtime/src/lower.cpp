@@ -262,9 +262,10 @@ bool Lowering::canonical_input_rebuild(const mir::Stmt& s,
 }
 void Lowering::report_missing_data(const mir::Program& p) {
   std::string names;
-  for (const auto& input : p.input_vars)
-    if (!data_entry(input.first))
-      names += (names.empty() ? "" : ", ") + input.first;
+  for (const auto& input : p.input_vars) {
+    const std::string& key = mir::detail::data_key(p, input.first);
+    if (!data_entry(key)) names += (names.empty() ? "" : ", ") + key;
+  }
   fail("missing data for " + names +
        "; the data must give every variable in the data block");
 }
@@ -300,8 +301,10 @@ void Lowering::bind_data(const mir::Program& p) {
   bool use_prebound = debug_env("STANLI_NO_DATA_PRELOAD") == nullptr;
   for (const auto& [name, type] : p.input_vars) {
     input_names.insert(name);
-    if (!data_entry(name)) omit_zero_size(name, type);
-    if (!data_entry(name)) {
+    // A tuple's leaf is read under its CmdStan key.
+    const std::string& key = mir::detail::data_key(p, name);
+    if (!data_entry(key)) omit_zero_size(key, type);
+    if (!data_entry(key)) {
       all_inputs_bound = false;
       continue;
     }
@@ -309,7 +312,7 @@ void Lowering::bind_data(const mir::Program& p) {
     // integer tokens carry an int mirror even when the declaration is
     // real. Reconstruct the typed value directly, without copying an
     // irrelevant mirror for a large real matrix.
-    const DataMap::Entry& src = *data_entry(name);
+    const DataMap::Entry& src = *data_entry(key);
     if (!use_prebound) {
       td.env()[name] = src;
       continue;
@@ -372,7 +375,7 @@ void Lowering::bind_data(const mir::Program& p) {
     for (const auto& [name, type] : p.input_vars) {
       try {
         record(name, type);
-        validate_data_dims(name, type);
+        validate_data_dims(mir::detail::data_key(p, name), type);
       } catch (const std::exception&) {
         // CmdStan computes each size, printing if it prints, before it
         // checks that input. Print the sizes prepare_data computes ahead of
@@ -469,6 +472,11 @@ CompiledModel::ParamView Lowering::parameter_view(const mir::Stmt& s, int slot,
   return view;
 }
 void Lowering::lower_read_param(const mir::Stmt& s) {
+  if (const mir::detail::TupleLeaf* leaf = tuple_leaf(s.decl_id);
+      leaf && leaf->in_array())
+    fail("an array of tuples as a parameter (" + leaf->base +
+             ") is not supported yet",
+         s.raw);
   const mir::Transform& tr = *s.read_transform;
   const std::vector<int64_t> declared_dims = sized_dims(s.decl_type);
   const ViewKind leaf = s.decl_type.base == "SArray"
@@ -929,7 +937,7 @@ void Lowering::run_passes(const std::vector<int>& roots, const PassPlan& plan) {
 CompiledModel::WriteArray Lowering::run_write_array(const mir::Program& p) {
   const auto total_time = prep.start();
   for (const auto& f : p.fun_defs) fun_defs[mir::function_key(f)] = &f;
-  tuple_leaves = &p.tuple_leaves;
+  tuples = p.tuples.get();
   in_write_array = true;
   output_cursor = mir::OutputCursor(p.output_vars);
   // The readers drop stanc3's section guards on these flags; a guard they
@@ -1007,7 +1015,7 @@ CompiledModel Lowering::run(const mir::Program& p) {
   DumpOnThrow guard{*this};
   const auto total_time = prep.start();
   for (const auto& f : p.fun_defs) fun_defs[mir::function_key(f)] = &f;
-  tuple_leaves = &p.tuple_leaves;
+  tuples = p.tuples.get();
   const auto bind_time = prep.start();
   if (!data_prepared) bind_data(p);
   prep.graph(prep_graph, "bind_data", bind_time, g, out.fills,
@@ -1278,15 +1286,16 @@ class WriteArrayLowering {
 std::optional<DataMap> tuple_data_in_array_order(const mir::Program& p,
                                                  const DataMap& data) {
   std::optional<DataMap> out;
-  if (p.tuple_leaves.empty()) return out;
+  if (!p.tuples) return out;
   for (const auto& input : p.input_vars) {
-    const auto leaf = p.tuple_leaves.find(input.first);
-    if (leaf == p.tuple_leaves.end() || !data.has(input.first)) continue;
-    const DataMap::Entry& entry = data.at(input.first);
+    const mir::detail::TupleLeaf* leaf = p.tuples->leaf(input.first);
+    if (!leaf || !data.has(leaf->key)) continue;
+    const std::string& key = leaf->key;
+    const DataMap::Entry& entry = data.at(key);
     // Each slot ends a group of dimensions; the outermost group varies
     // slowest in the reader's layout.
     std::vector<size_t> ends;
-    for (const mir::TupleLeaf::Slot& slot : leaf->second.slots)
+    for (const mir::detail::TupleSlot& slot : leaf->path)
       if (slot.before > (ends.empty() ? 0 : ends.back()))
         ends.push_back(slot.before);
     if (ends.empty() || ends.back() > entry.dims.size()) continue;
@@ -1316,11 +1325,11 @@ std::optional<DataMap> tuple_data_in_array_order(const mir::Program& p,
     if (entry.is_int) {
       std::vector<int> values((size_t)len);
       for (int64_t k = 0; k < len; ++k) values[(size_t)k] = entry.i[source[k]];
-      out->set_int_array(input.first, std::move(values), entry.dims);
+      out->set_int_array(key, std::move(values), entry.dims);
     } else {
       std::vector<double> values((size_t)len);
       for (int64_t k = 0; k < len; ++k) values[(size_t)k] = entry.r[source[k]];
-      out->set_real_array(input.first, std::move(values), entry.dims);
+      out->set_real_array(key, std::move(values), entry.dims);
     }
   }
   return out;

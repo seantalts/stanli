@@ -290,6 +290,8 @@ bool Lowering::lower_region_map(const mir::Stmt& s, long lo, long hi) {
   if (!ParameterControl(fun_defs)(s))
     return refuse("no parameter-dependent control");
   if (target_scale != 1.0) return refuse("enclosing target scaling");
+  if (contains_multi_assign(s))
+    return refuse("a call returning several values");
   std::set<std::string> locals;
   for (const auto& child : s.body) collect_loop_locals(child, &locals);
   std::string accumulator;

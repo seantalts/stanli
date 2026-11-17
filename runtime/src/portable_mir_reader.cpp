@@ -1,4 +1,5 @@
 #include "mir_reader_internal.hpp"
+#include "mir_tuples.hpp"
 
 #include <stanli/large_stack.hpp>
 
@@ -8,6 +9,7 @@
 #include <cstdint>
 #include <cstring>
 #include <limits>
+#include <map>
 #include <optional>
 #include <stdexcept>
 #include <string>
@@ -184,9 +186,6 @@ class Reader {
 
   unsigned peak_depth() const { return peak_; }
 
-  // Any tuple type, projection or tuple assignment was read.
-  bool saw_tuple = false;
-
   class Depth {
    public:
     explicit Depth(Reader& reader) : reader_(reader) {
@@ -285,18 +284,16 @@ T read_tag(Reader& reader, uint8_t tag, const std::array<T, N>& values,
   return values[tag];
 }
 
-constexpr std::array<UnsizedLeaf, 8> kLeafTags = {
+constexpr std::array<UnsizedLeaf, 7> kLeafTags = {
     UnsizedLeaf::Unknown, UnsizedLeaf::Int,    UnsizedLeaf::Real,
     UnsizedLeaf::Complex, UnsizedLeaf::Vector, UnsizedLeaf::RowVector,
-    UnsizedLeaf::Matrix,  UnsizedLeaf::Tuple};
+    UnsizedLeaf::Matrix};
 
-constexpr std::array<Expr::Kind, 17> kExprTags = {
-    Expr::Var,         Expr::LitInt,         Expr::LitReal,
-    Expr::LitStr,      Expr::FunApp,         Expr::Promotion,
-    Expr::Indexed,     Expr::TernaryIf,      Expr::EOr,
-    Expr::EAnd,        Expr::Unsupported,    Expr::IndexAll,
-    Expr::IndexSingle, Expr::IndexUpfrom,    Expr::IndexBetween,
-    Expr::IndexMulti,  Expr::TupleProjection};
+constexpr std::array<Expr::Kind, 16> kExprTags = {
+    Expr::Var,         Expr::LitInt,      Expr::LitReal,      Expr::LitStr,
+    Expr::FunApp,      Expr::Promotion,   Expr::Indexed,      Expr::TernaryIf,
+    Expr::EOr,         Expr::EAnd,        Expr::Unsupported,  Expr::IndexAll,
+    Expr::IndexSingle, Expr::IndexUpfrom, Expr::IndexBetween, Expr::IndexMulti};
 
 constexpr std::array<Expr::Lib, 3> kLibraryTags = {
     Expr::Lib::StanLib, Expr::Lib::Internal, Expr::Lib::UserDefined};
@@ -305,7 +302,7 @@ constexpr std::array<FnSuffix, 6> kSuffixTags = {
     FnSuffix::Plain, FnSuffix::Rng,    FnSuffix::Lpdf,
     FnSuffix::Lpmf,  FnSuffix::Target, FnSuffix::Jacobian};
 
-constexpr std::array<Transform::Kind, 20> kTransformTags = {
+constexpr std::array<Transform::Kind, 19> kTransformTags = {
     Transform::Identity,
     Transform::Lower,
     Transform::Upper,
@@ -324,40 +321,21 @@ constexpr std::array<Transform::Kind, 20> kTransformTags = {
     Transform::CholeskyCov,
     Transform::StochasticColumn,
     Transform::StochasticRow,
-    Transform::Unsupported,
-    Transform::Tuple};
+    Transform::Unsupported};
 
-// Tag 14 is `jacobian +=`, a TargetPE with its jacobian flag set. Tag 15
-// is an assignment through a tuple projection.
+// Tag 14 is `jacobian +=`, a TargetPE with its jacobian flag set.
 constexpr uint8_t kJacobianPETag = 14;
-constexpr uint8_t kTupleAssignmentTag = 15;
 constexpr std::array<Stmt::Kind, 16> kStmtTags = {
     Stmt::Decl,     Stmt::Assignment,  Stmt::TargetPE, Stmt::Block,
     Stmt::SList,    Stmt::For,         Stmt::IfElse,   Stmt::While,
     Stmt::NRFunApp, Stmt::Return,      Stmt::Break,    Stmt::Continue,
-    Stmt::Skip,     Stmt::Unsupported, Stmt::TargetPE, Stmt::Assignment};
+    Stmt::Skip,     Stmt::Unsupported, Stmt::TargetPE, Stmt::MultiAssign};
 
-// A view without a tuple's components, which follow it on the wire.
-UnsizedView read_leaf_view(Reader& reader) {
+UnsizedView read_view(Reader& reader) {
   UnsizedView view;
   view.depth = reader.u8();
   const uint8_t leaf = reader.u8();
   view.leaf = read_tag(reader, leaf, kLeafTags, "unknown unsized-view tag");
-  return view;
-}
-
-UnsizedType read_view(Reader& reader);
-
-std::vector<UnsizedType> read_components(Reader& reader) {
-  Reader::Depth depth(reader);
-  reader.saw_tuple = true;
-  return reader.list<UnsizedType>([&] { return read_view(reader); });
-}
-
-UnsizedType read_view(Reader& reader) {
-  UnsizedType view(read_leaf_view(reader));
-  if (view.leaf == UnsizedLeaf::Tuple)
-    view.components = read_components(reader);
   return view;
 }
 
@@ -376,7 +354,7 @@ FnSuffix read_suffix(Reader& reader) {
 FunctionType read_function_type(Reader& reader) {
   Reader::Depth depth(reader);
   FunctionType value;
-  value.args = reader.list<UnsizedType>([&] { return read_view(reader); });
+  value.args = reader.list<UnsizedView>([&] { return read_view(reader); });
   value.suffix = read_suffix(reader);
   value.propto = reader.boolean();
   return value;
@@ -387,12 +365,8 @@ std::vector<Expr> read_exprs(Reader& reader) {
 }
 
 void read_meta(Reader& reader, Expr& value) {
-  value.unsized = read_leaf_view(reader);
-  if (value.unsized.leaf == UnsizedLeaf::Tuple)
-    value.tuple.fill().components = read_components(reader);
+  value.unsized = read_view(reader);
   value.data_only = reader.boolean();
-  if (value.unsized.leaf == UnsizedLeaf::Tuple)
-    value.tuple->leaf_data_only = read_bools(reader);
   value.promoted = reader.boolean();
   value.raw = reader.string();
 }
@@ -445,11 +419,6 @@ Expr read_expr(Reader& reader) {
     case Expr::IndexMulti:
       value.args = read_exprs(reader);
       break;
-    case Expr::TupleProjection:
-      reader.saw_tuple = true;
-      value.args = read_exprs(reader);
-      value.component = static_cast<int>(reader.u32());
-      break;
     case Expr::Unsupported:
       break;
   }
@@ -464,9 +433,6 @@ Transform read_transform(Reader& reader) {
   value.kind = read_tag(reader, tag, kTransformTags, "unknown transform tag");
   value.args = read_exprs(reader);
   value.raw = reader.string();
-  if (value.kind == Transform::Tuple)
-    value.components.fill() =
-        reader.list<Transform>([&] { return read_transform(reader); });
   return value;
 }
 
@@ -477,6 +443,20 @@ std::optional<Transform> read_optional_transform(Reader& reader) {
   return read_transform(reader);
 }
 
+// A sized type of an input or output variable, which may be a tuple.
+TupleType read_interface_type(Reader& reader) {
+  Reader::Depth depth(reader);
+  TupleType value;
+  value.type.base = reader.string();
+  value.type.dims = read_exprs(reader);
+  value.type.elem_base = reader.string();
+  value.type.raw = reader.string();
+  if (is_tuple(value.type))
+    value.components =
+        reader.list<TupleType>([&] { return read_interface_type(reader); });
+  return value;
+}
+
 SizedType read_sized(Reader& reader) {
   Reader::Depth depth(reader);
   SizedType value;
@@ -484,11 +464,8 @@ SizedType read_sized(Reader& reader) {
   value.dims = read_exprs(reader);
   value.elem_base = reader.string();
   value.raw = reader.string();
-  if (is_tuple(value)) {
-    reader.saw_tuple = true;
-    value.tuple.fill().components =
-        reader.list<SizedType>([&] { return read_sized(reader); });
-  }
+  if (is_tuple(value))
+    reader.fail("a tuple type outside the input and output variables");
   return value;
 }
 
@@ -497,9 +474,31 @@ SizedType read_decl_type(Reader& reader) {
   const uint8_t tag = reader.u8();
   if (tag == 0) return read_sized(reader);
   if (tag != 1) reader.fail("unknown declaration-type tag");
-  UnsizedType view = read_view(reader);
+  const UnsizedView view = read_view(reader);
   std::string raw = reader.string();
   return unsized_declaration(view, std::move(raw));
+}
+
+std::vector<std::string> read_strings(Reader& reader) {
+  return reader.list<std::string>([&] { return reader.string(); });
+}
+
+PrintItem read_print_item(Reader& reader) {
+  Reader::Depth depth(reader);
+  PrintItem item;
+  const uint8_t kind = reader.u8();
+  if (kind > 1) reader.fail("unknown print-item tag");
+  if (kind == 1) {
+    item.kind = PrintItem::Kind::Tuple;
+    item.depth = reader.u8();
+    item.components =
+        reader.list<PrintItem>([&] { return read_print_item(reader); });
+  }
+  return item;
+}
+
+std::vector<PrintItem> read_print_layout(Reader& reader) {
+  return reader.list<PrintItem>([&] { return read_print_item(reader); });
 }
 
 std::vector<Stmt> read_stmts(Reader& reader) {
@@ -517,9 +516,6 @@ Stmt read_stmt(Reader& reader) {
       value.decl_id = reader.string();
       value.decl_type = read_decl_type(reader);
       value.decl_data_only = reader.boolean();
-      if (is_tuple(value.decl_type) ||
-          value.decl_type.unsized.leaf == UnsizedLeaf::Tuple)
-        value.tuple.fill().decl_leaf_data_only = read_bools(reader);
       value.has_init = reader.boolean();
       if (value.has_init) value.init = read_expr(reader);
       value.read_transform = read_optional_transform(reader);
@@ -529,21 +525,6 @@ Stmt read_stmt(Reader& reader) {
     case Stmt::Assignment:
       value.lhs = reader.string();
       value.lhs_idx = read_exprs(reader);
-      if (tag == kTupleAssignmentTag) {
-        reader.saw_tuple = true;
-        std::vector<Stmt::TupleStep>& steps = value.tuple.fill().lhs_steps;
-        steps = reader.list<Stmt::TupleStep>([&] {
-          Stmt::TupleStep step;
-          step.component = static_cast<int>(reader.u32());
-          step.indices = read_exprs(reader);
-          return step;
-        });
-        value.rhs = read_expr(reader);
-        value.read_transform = read_optional_transform(reader);
-        value.read_dims = read_exprs(reader);
-        if (steps.empty()) reader.fail("tuple assignment without a projection");
-        break;
-      }
       value.rhs = read_expr(reader);
       value.raw = reader.string();
       break;
@@ -580,26 +561,53 @@ Stmt read_stmt(Reader& reader) {
       // of a check's bounds.
       const uint8_t payload = reader.u8();
       const std::string_view internal = internal_name(value);
+      const bool prints = internal == "FnPrint" || internal == "FnReject" ||
+                          internal == "FnFatalError";
       if (payload != (internal == "FnCheck"        ? 1
                       : internal == "FnWriteParam" ? 2
+                      : prints && payload == 3     ? 3
                                                    : 0))
         reader.fail("statement payload does not match its function");
-      if (payload == 1) {
+      if (payload == 3) {
+        value.print_layout = read_print_layout(reader);
+        if (value.print_layout.empty()) reader.fail("empty print layout");
+      } else if (payload == 1) {
         value.check_transform = read_transform(reader);
         value.check_var_name = reader.string();
       } else if (payload == 2) {
         value.write_transform = read_optional_transform(reader);
       }
-      if (payload != 0)
+      if (payload == 1 || payload == 2)
         value.fn_args.insert(value.fn_args.begin(), read_expr(reader));
       value.raw = reader.string();
       break;
     }
-    case Stmt::Return:
-      value.has_init = reader.boolean();
-      if (value.has_init) value.rhs = read_expr(reader);
+    case Stmt::Return: {
+      // One value is the statement's `rhs`; several are its `fn_args`.
+      std::vector<Expr> values = read_exprs(reader);
+      if (values.size() == 1) {
+        value.has_init = true;
+        value.rhs = std::move(values[0]);
+      } else {
+        value.fn_args = std::move(values);
+      }
       value.raw = reader.string();
       break;
+    }
+    case Stmt::MultiAssign: {
+      const std::vector<std::string> targets = read_strings(reader);
+      value.rhs = read_expr(reader);
+      value.raw = reader.string();
+      if (targets.size() < 2)
+        reader.fail("MultiAssign of fewer than two values");
+      for (const std::string& name : targets) {
+        Expr target;
+        target.kind = Expr::Var;
+        target.name = name;
+        value.fn_args.push_back(std::move(target));
+      }
+      break;
+    }
     case Stmt::Break:
     case Stmt::Continue:
       break;
@@ -611,24 +619,17 @@ Stmt read_stmt(Reader& reader) {
   return value;
 }
 
-std::vector<std::string> read_strings(Reader& reader) {
-  return reader.list<std::string>([&] { return reader.string(); });
-}
-
 FunDef read_fun(Reader& reader) {
   Reader::Depth depth(reader);
   FunDef value;
   value.name = reader.string();
   value.arg_names = read_strings(reader);
-  value.arg_views = reader.list<UnsizedType>([&] { return read_view(reader); });
+  value.arg_views = reader.list<UnsizedView>([&] { return read_view(reader); });
   value.arg_data_only = read_bools(reader);
   const size_t arity = value.arg_names.size();
   if (value.arg_views.size() != arity || value.arg_data_only.size() != arity)
     reader.fail("function argument field lengths disagree");
-  value.arg_leaf_data_only.resize(arity);
-  for (size_t i = 0; i < arity; ++i)
-    if (value.arg_views[i].leaf == UnsizedLeaf::Tuple)
-      value.arg_leaf_data_only[i] = read_bools(reader);
+  value.results = reader.list<UnsizedView>([&] { return read_view(reader); });
   value.body = read_stmts(reader);
   return value;
 }
@@ -637,28 +638,65 @@ constexpr std::array<OutputVar::Block, 3> kBlockTags = {
     OutputVar::Block::Parameters, OutputVar::Block::TransformedParameters,
     OutputVar::Block::GeneratedQuantities};
 
-OutputVar read_output_var(Reader& reader) {
+// The tuple types of the input and output variables, which stay out of
+// the program's SizedTypes.
+struct Interface {
+  std::map<std::string, TupleType> tuple_types;
+  std::vector<std::pair<size_t, std::string>> tuple_inputs;
+};
+
+OutputVar read_output_var(Reader& reader, Interface& interface) {
   Reader::Depth depth(reader);
   OutputVar value;
   value.name = reader.string();
   const uint8_t block = reader.u8();
   value.block = read_tag(reader, block, kBlockTags, "unknown output-block tag");
-  value.type = read_sized(reader);
+  TupleType type = read_interface_type(reader);
+  value.type = type.type;
+  if (is_tuple(type.type) &&
+      !interface.tuple_types.emplace(value.name, std::move(type)).second)
+    reader.fail("two tuple variables named " + value.name);
   value.annotations = reader.list<std::string>([&] { return reader.string(); });
   return value;
 }
 
-std::pair<std::string, SizedType> read_input(Reader& reader) {
+std::pair<std::string, SizedType> read_input(Reader& reader,
+                                             Interface& interface,
+                                             size_t position) {
   Reader::Depth depth(reader);
   std::string name = reader.string();
-  SizedType type = read_sized(reader);
-  return {std::move(name), std::move(type)};
+  TupleType type = read_interface_type(reader);
+  SizedType sized = type.type;
+  if (is_tuple(type.type)) {
+    if (!interface.tuple_types.emplace(name, std::move(type)).second)
+      reader.fail("two tuple variables named " + name);
+    interface.tuple_inputs.emplace_back(position, name);
+  }
+  return {std::move(name), std::move(sized)};
+}
+
+WireTupleLeaf read_tuple_leaf(Reader& reader) {
+  Reader::Depth depth(reader);
+  WireTupleLeaf leaf;
+  leaf.variable = reader.string();
+  leaf.base = reader.string();
+  leaf.path = reader.list<TupleSlot>([&] {
+    TupleSlot slot;
+    slot.before = reader.u32();
+    slot.component = static_cast<int>(reader.u32());
+    if (slot.component < 1) reader.fail("tuple component numbered below 1");
+    return slot;
+  });
+  if (leaf.path.empty()) reader.fail("tuple leaf without a path");
+  return leaf;
 }
 
 Program read_program(Reader& reader) {
   Program result;
+  Interface interface;
+  size_t position = 0;
   result.input_vars = reader.list<std::pair<std::string, SizedType>>(
-      [&] { return read_input(reader); });
+      [&] { return read_input(reader, interface, position++); });
   result.prepare_data = read_stmts(reader);
   result.log_prob = read_stmts(reader);
   result.generate_quantities = read_stmts(reader);
@@ -668,12 +706,15 @@ Program read_program(Reader& reader) {
       result.generated_quantities_begin > result.generate_quantities.size())
     reader.fail("write_array section boundaries out of order");
   result.fun_defs = reader.list<FunDef>([&] { return read_fun(reader); });
-  result.output_vars =
-      reader.list<OutputVar>([&] { return read_output_var(reader); });
+  result.output_vars = reader.list<OutputVar>(
+      [&] { return read_output_var(reader, interface); });
   result.has_transform_inits = true;
   result.transform_inits = read_stmts(reader);
+  std::vector<WireTupleLeaf> leaves =
+      reader.list<WireTupleLeaf>([&] { return read_tuple_leaf(reader); });
   result.nesting = (reader.peak_depth() + 1) / 2;
-  result.has_tuples = reader.saw_tuple;
+  attach_tuple_interface(result, std::move(interface.tuple_types),
+                         std::move(interface.tuple_inputs), std::move(leaves));
   return result;
 }
 

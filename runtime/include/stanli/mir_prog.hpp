@@ -294,7 +294,8 @@ struct ProgramCompiler {
   }
 
   static void assigned_names(const mir::Stmt& s, std::set<std::string>* names) {
-    if (s.kind == mir::Stmt::Assignment) names->insert(s.lhs);
+    mir::for_each_assigned(
+        s, [&](const std::string& name) { names->insert(name); });
     for (const auto& child : s.body) assigned_names(child, names);
   }
 
@@ -4045,6 +4046,8 @@ struct ProgramCompiler {
     size_t loop_base = 0;
     bool has_result = false;
     Range result;
+    // A function with several results: one range each.
+    std::vector<Range> results;
     std::vector<int> jumps;
   };
   ReturnFrame* return_frame = nullptr;
@@ -4079,22 +4082,38 @@ struct ProgramCompiler {
   }
 
   void emit_function_return(Range value) {
+    emit_function_return(std::vector<Range>{value}, false);
+  }
+
+  // A return reached at run time copies its values into the frame's result
+  // registers and jumps to the function's end.
+  void emit_function_return(const std::vector<Range>& values, bool several) {
     if (!return_frame) bail("runtime return has no function scope");
     auto& frame = *return_frame;
+    std::vector<Range> single;
+    if (!several && frame.has_result) single.push_back(frame.result);
+    std::vector<Range>& slots = several ? frame.results : single;
     if (!frame.has_result) {
-      frame.result = value;
-      frame.result.reg = alloc(value.len);
+      slots = values;
+      for (Range& slot : slots) slot.reg = alloc(slot.len);
       frame.has_result = true;
-    } else if (!same_view(frame.result, value)) {
-      bail("function returns have different logical views");
+    } else if (slots.size() != values.size()) {
+      bail("function returns give different numbers of values");
+    } else {
+      for (size_t k = 0; k < values.size(); ++k)
+        if (!same_view(slots[k], values[k]))
+          bail("function returns have different logical views");
     }
-    for (int k = 0; k < value.len; ++k)
-      emit(Program::MOV, frame.result.reg + k, value.reg + k);
+    for (size_t k = 0; k < values.size(); ++k)
+      for (int i = 0; i < values[k].len; ++i)
+        emit(Program::MOV, slots[k].reg + i, values[k].reg + i);
+    if (!several) frame.result = slots[0];
     frame.jumps.push_back(emit(Program::JMP, 0));
   }
 
   Range function_body(const std::vector<mir::Stmt>& body,
-                      bool void_call = false) {
+                      bool void_call = false,
+                      std::vector<Range>* results = nullptr) {
     ReturnFrame frame;
     frame.body = &body;
     frame.parent = return_frame;
@@ -4106,6 +4125,7 @@ struct ProgramCompiler {
     } scope{return_frame, return_frame};
     return_frame = &frame;
     const Path path = compile_body(body);
+    if (results) *results = frame.results;
     if (path == Path::Returned) return frame.result;
     if (path == Path::Open && !void_call)
       bail("function can finish without returning a value");
@@ -4708,6 +4728,18 @@ struct ProgramCompiler {
           for (size_t i = return_frame->loop_base; i < loops.size(); ++i)
             runtime_exit = runtime_exit || !loops[i].breaks.empty() ||
                            !loops[i].continues.empty();
+        if (!s.fn_args.empty()) {
+          // A function with several results: one range each.
+          std::vector<Range> values;
+          for (const auto& value : s.fn_args) values.push_back(expr(value));
+          if (return_frame && (runtime_exit || return_frame->has_result)) {
+            emit_function_return(values, true);
+            return Path::Ended;
+          }
+          if (!return_frame) bail("return without a function scope");
+          return_frame->results = std::move(values);
+          return Path::Returned;
+        }
         if (return_frame && (runtime_exit || return_frame->has_result)) {
           emit_function_return(s.has_init ? expr(s.rhs) : Range{0, 0});
           return Path::Ended;
@@ -4901,6 +4933,8 @@ struct ProgramCompiler {
       case mir::Stmt::NRFunApp:
         if (mir::internal_name(s) == "FnValidateSize") return Path::Open;
         if (const auto action = message_action(mir::internal_name(s))) {
+          if (!s.print_layout.empty())
+            bail("printing an array of tuples is not supported yet");
           Program::Message message;
           std::vector<MessageShape> shapes;
           message.spec = lower_message_arguments(
@@ -4938,6 +4972,34 @@ struct ProgramCompiler {
         }
         bail("statement function " + s.fn_name +
              " requires the MIR interpreter");
+      case mir::Stmt::MultiAssign: {
+        if (s.rhs.fn_lib != mir::Expr::Lib::UserDefined)
+          bail(s.rhs.name + ", which returns a tuple, is not supported yet");
+        auto it = funs.find(mir::function_key(s.rhs));
+        if (it == funs.end()) bail("unknown function " + s.rhs.name);
+        std::vector<Range> values;
+        (void)inline_call(*it->second, inline_arguments(s.rhs.args), false,
+                          propto_ctx && mir::inherits_propto(s.rhs), &values);
+        if (values.size() != s.fn_args.size())
+          bail(s.rhs.name + " returned the wrong number of values");
+        // Each result is assigned as `target = value`, the value bound to a
+        // name no Stan variable can have for the one assignment.
+        for (size_t k = 0; k < values.size(); ++k) {
+          const std::string bound = std::string(1, '\0') + "result";
+          reals[bound] = values[k];
+          mir::Stmt assign;
+          assign.kind = mir::Stmt::Assignment;
+          assign.lhs = s.fn_args[k].name;
+          assign.rhs.kind = mir::Expr::Var;
+          assign.rhs.name = bound;
+          assign.rhs.unsized = s.fn_args[k].unsized;
+          assign.raw = s.raw;
+          const Path path = compile_stmt(assign);
+          reals.erase(bound);
+          if (path != Path::Open) bail("a MultiAssign target left the scope");
+        }
+        return Path::Open;
+      }
       case mir::Stmt::Skip:
         return Path::Open;
       default:
@@ -4946,8 +5008,11 @@ struct ProgramCompiler {
   }
 
   Range inline_call(const mir::FunDef& f, const std::vector<InlineArg>& args,
-                    bool void_call = false, bool propto = true) {
+                    bool void_call = false, bool propto = true,
+                    std::vector<Range>* results = nullptr) {
     if (args.size() != f.arg_names.size()) bail("function argument mismatch");
+    if ((f.results.size() > 1) != (results != nullptr))
+      bail("a call of " + f.name + " with the wrong number of results");
     if (++inline_depth > 32) {
       --inline_depth;
       bail("function inlining too deep");
@@ -5018,7 +5083,7 @@ struct ProgramCompiler {
     }
     Range out{0, 0};
     try {
-      out = function_body(f.body, void_call);
+      out = function_body(f.body, void_call, results);
     } catch (...) {
       inline_stack.pop_back();
       reals = std::move(saved_reals);

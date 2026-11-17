@@ -23,6 +23,9 @@
 
 namespace stanli {
 namespace mir {
+namespace detail {
+struct TupleInterface;
+}
 
 // The MIR text is not something this reader understands: malformed, or
 // using a construct outside the slice.
@@ -37,8 +40,7 @@ enum class UnsizedLeaf : uint8_t {
   Complex,
   Vector,
   RowVector,
-  Matrix,
-  Tuple
+  Matrix
 };
 
 struct UnsizedView {
@@ -48,70 +50,6 @@ struct UnsizedView {
 static_assert(sizeof(UnsizedView) == 2 &&
                   std::is_trivially_copyable_v<UnsizedView>,
               "every Expr holds an UnsizedView");
-
-// An UnsizedView with a tuple's component types. Expressions and sized types
-// keep the components in their tuple side structs instead, so that a program
-// without tuples does not pay for them in every node.
-struct UnsizedType : UnsizedView {
-  UnsizedType() = default;
-  UnsizedType(uint8_t depth, UnsizedLeaf leaf) : UnsizedView{depth, leaf} {}
-  UnsizedType(UnsizedView view, std::vector<UnsizedType> components = {})
-      : UnsizedView(view), components(std::move(components)) {}
-  std::vector<UnsizedType> components;  // Tuple only
-};
-
-inline bool same_components(const std::vector<UnsizedType>& a,
-                            const std::vector<UnsizedType>& b);
-
-inline bool same_view(const UnsizedView& a,
-                      const std::vector<UnsizedType>& a_components,
-                      const UnsizedView& b,
-                      const std::vector<UnsizedType>& b_components) {
-  return a.depth == b.depth && a.leaf == b.leaf &&
-         same_components(a_components, b_components);
-}
-
-inline bool same_components(const std::vector<UnsizedType>& a,
-                            const std::vector<UnsizedType>& b) {
-  if (a.size() != b.size()) return false;
-  for (size_t i = 0; i < a.size(); ++i)
-    if (!same_view(a[i], a[i].components, b[i], b[i].components)) return false;
-  return true;
-}
-
-// An owned value that is usually absent. Copying copies the value. When it
-// is absent, copying, moving and destroying it test one pointer. The MIR
-// nodes keep their tuple-only fields in one, so a program without tuples
-// pays almost nothing for them.
-template <class T>
-class Boxed {
- public:
-  Boxed() = default;
-  Boxed(const Boxed& other) : value_(copy(other)) {}
-  Boxed(Boxed&&) noexcept = default;
-  Boxed& operator=(const Boxed& other) {
-    if (this != &other) value_ = copy(other);
-    return *this;
-  }
-  Boxed& operator=(Boxed&&) noexcept = default;
-
-  explicit operator bool() const { return value_ != nullptr; }
-  T* operator->() { return value_.get(); }
-  const T* operator->() const { return value_.get(); }
-  T& operator*() { return *value_; }
-  const T& operator*() const { return *value_; }
-  // The value, made empty first when absent.
-  T& fill() {
-    if (!value_) value_ = std::make_unique<T>();
-    return *value_;
-  }
-
- private:
-  static std::unique_ptr<T> copy(const Boxed& other) {
-    return other.value_ ? std::make_unique<T>(*other.value_) : nullptr;
-  }
-  std::unique_ptr<T> value_;
-};
 
 // A non-array value of this type: stanc's UInt, UReal, UVector, ...
 inline bool is_unsized(const UnsizedView& view, UnsizedLeaf leaf) {
@@ -137,8 +75,6 @@ inline const char* leaf_spelling(UnsizedLeaf leaf) {
       return "URowVector";
     case UnsizedLeaf::Matrix:
       return "UMatrix";
-    case UnsizedLeaf::Tuple:
-      return "UTuple";
     case UnsizedLeaf::Unknown:
       break;
   }
@@ -158,19 +94,13 @@ enum class FnSuffix : uint8_t { Plain, Rng, Lpdf, Lpmf, Target, Jacobian };
 // The type of a variable that names a function, as a higher-order callback
 // does: its argument views and the suffix of the function it denotes.
 struct FunctionType {
-  std::vector<UnsizedType> args;
+  std::vector<UnsizedView> args;
   FnSuffix suffix = FnSuffix::Plain;
   bool propto = false;  // referenced as `_lupdf` / `_lupmf`
 };
 
-// What a tuple-typed expression adds to its UnsizedView.
-struct ExprTuple {
-  std::vector<UnsizedType> components;
-  std::vector<bool> leaf_data_only;  // whether each leaf is data, depth first
-};
-
 struct Expr {
-  enum Kind {
+  enum Kind : uint8_t {
     Var,
     LitInt,
     LitReal,
@@ -188,12 +118,8 @@ struct Expr {
     IndexSingle,
     IndexUpfrom,
     IndexBetween,
-    IndexMulti,
-    // `args[0].component`, numbered from 1.
-    TupleProjection
+    IndexMulti
   } kind = Unsupported;
-  int component = 0;  // TupleProjection
-  std::string name;   // Var name or FunApp function name
   // The small fields are kept together so that they pack into one word.
   enum class Lib : uint8_t {
     StanLib,
@@ -207,6 +133,7 @@ struct Expr {
   bool data_only = false;  // adlevel DataOnly
   bool promoted = false;   // explicit MIR Promotion to this adlevel/type
   UnsizedView unsized;
+  std::string name;  // Var name or FunApp function name
   // A user function call, or a Var naming one, that selects one overload of
   // an overloaded name: that overload's signature. Empty otherwise.
   std::string fn_overload;
@@ -215,40 +142,9 @@ struct Expr {
   double lit = 0;
   std::string lit_s;
   std::vector<Expr> args;  // FunApp args; Promotion inner; Indexed base+idx;
-                           // an index's bounds; a projection's tuple
-  Boxed<ExprTuple> tuple;  // a tuple-typed value only
+                           // an index's bounds
   std::string raw;         // Unsupported diagnostics
 };
-
-inline const std::vector<UnsizedType>& no_components() {
-  static const std::vector<UnsizedType> none;
-  return none;
-}
-
-inline const std::vector<bool>& no_levels() {
-  static const std::vector<bool> none;
-  return none;
-}
-
-inline const std::vector<UnsizedType>& tuple_components(const Expr& e) {
-  return e.tuple ? e.tuple->components : no_components();
-}
-
-inline const std::vector<bool>& leaf_data_only(const Expr& e) {
-  return e.tuple ? e.tuple->leaf_data_only : no_levels();
-}
-
-inline UnsizedType unsized_type(const Expr& e) {
-  return {e.unsized, tuple_components(e)};
-}
-
-inline void set_unsized_type(Expr& e, UnsizedType type) {
-  e.unsized = type;
-  if (!type.components.empty())
-    e.tuple.fill().components = std::move(type.components);
-  else if (e.tuple)
-    e.tuple->components.clear();
-}
 
 inline bool is_unsized(const Expr& e, UnsizedLeaf leaf) {
   return is_unsized(e.unsized, leaf);
@@ -619,18 +515,11 @@ struct Transform {
     CholeskyCov,
     StochasticColumn,
     StochasticRow,
-    Unsupported,
-    Tuple
+    Unsupported
   } kind = Identity;
   std::vector<Expr> args;
   std::string raw;
-  Boxed<std::vector<Transform>> components;  // Tuple only
 };
-
-inline const std::vector<Transform>& components(const Transform& t) {
-  static const std::vector<Transform> none;
-  return t.components ? *t.components : none;
-}
 
 inline bool is_structured_check(Transform::Kind kind) {
   switch (kind) {
@@ -665,8 +554,6 @@ inline bool is_matrix_only_check(Transform::Kind kind) {
   }
 }
 
-struct SizedTuple;
-
 struct SizedType {
   std::string base;        // SInt SReal SVector SRowVector SMatrix SArray ...
   std::vector<Expr> dims;  // outer-to-inner for SArray chains
@@ -675,36 +562,23 @@ struct SizedType {
   // stanc also uses unsized declarations for optimizer temporaries. Their
   // shape is supplied by the first whole-variable assignment.
   UnsizedView unsized;
-  Boxed<SizedTuple> tuple;  // a tuple type only
 };
-
-// What a tuple type adds to a SizedType.
-struct SizedTuple {
-  // STuple, or an SArray of STuple: the component types.
-  std::vector<SizedType> components;
-  // An unsized declaration of a tuple: the components of `unsized`.
-  std::vector<UnsizedType> unsized_components;
-};
-
-inline const std::vector<SizedType>& components(const SizedType& t) {
-  static const std::vector<SizedType> none;
-  return t.tuple ? t.tuple->components : none;
-}
-
-inline UnsizedType unsized_type(const SizedType& t) {
-  return {t.unsized, t.tuple ? t.tuple->unsized_components : no_components()};
-}
-
-inline bool is_tuple(const SizedType& t) {
-  return t.base == "STuple" || (t.base == "SArray" && t.elem_base == "STuple");
-}
 
 inline bool is_complex(const SizedType& t) {
   const std::string& leaf = t.base == "SArray" ? t.elem_base : t.base;
   return leaf.rfind("SComplex", 0) == 0;
 }
 
-struct StmtTuple;
+// How print, reject and fatal_error spell an array of tuples whose leaves
+// are separate arguments. An Argument item takes one argument and prints it
+// as itself. A Tuple item prints a `depth`-dimensional array of tuples,
+// `[(1,[2,3]),(4,[5,6])]`; its components take consecutive arguments, each
+// an array whose first `depth` dimensions are the tuple array's.
+struct PrintItem {
+  enum class Kind : uint8_t { Argument, Tuple } kind = Kind::Argument;
+  uint8_t depth = 0;                  // Tuple
+  std::vector<PrintItem> components;  // Tuple
+};
 
 struct Stmt {
   enum Kind : uint8_t {
@@ -721,7 +595,11 @@ struct Stmt {
     Break,
     Continue,
     Skip,
-    Unsupported
+    Unsupported,
+    // `(a, b) = f(x)`: each value the call returns goes to one declared
+    // variable, in order. The call is `rhs`; the targets are the Var
+    // expressions in `fn_args`.
+    MultiAssign
   } kind = Unsupported;
   // The small fields are kept together so that they pack into one word.
   bool decl_data_only = false;  // Decl
@@ -742,18 +620,20 @@ struct Stmt {
   // Assignment
   std::string lhs;
   std::vector<Expr> lhs_idx;
-  // `lhs[lhs_idx].2[j]` is the step {2, [j]}.
-  struct TupleStep {
-    int component = 0;
-    std::vector<Expr> indices;
-  };
+  // Assignment; the call of a MultiAssign; the value of a Return that
+  // has one value (`has_init` is then set).
   Expr rhs;
   // TargetPE
   Expr target;
   // NRFunApp
   std::string fn_name;
   std::string fn_overload;  // as on Expr
+  // NRFunApp arguments; a MultiAssign's targets; the values of a Return
+  // from a function with more than one result.
   std::vector<Expr> fn_args;
+  // FnPrint, FnReject and FnFatalError that print an array of tuples: how
+  // the items take `fn_args`. Empty when each argument prints as itself.
+  std::vector<PrintItem> print_layout;
   // FnCheck: the relation lives in the CompilerInternal payload rather than
   // the ordinary argument list. The first fn_arg is the value and the rest
   // are its bounds.
@@ -774,30 +654,23 @@ struct Stmt {
   // Block / SList / For body / IfElse (then at body[0], else at body[1] if
   // present, each wrapped as its own Stmt)
   std::vector<Stmt> body;
-  Boxed<StmtTuple> tuple;  // a tuple declaration or assignment only
   std::string raw;
-};
-
-// What a tuple declaration or assignment adds to a Stmt.
-struct StmtTuple {
-  std::vector<bool> decl_leaf_data_only;  // a declaration's leaves
-  std::vector<Stmt::TupleStep> lhs_steps;
 };
 
 #ifdef _LIBCPP_VERSION
 // Lowering copies MIR nodes often, so every program pays for their size.
-// Tuple-only fields belong behind the Boxed pointers.
-static_assert(sizeof(void*) != 8 || sizeof(Expr) == 200, "Expr grew");
-static_assert(sizeof(void*) != 8 || sizeof(Stmt) == 1808, "Stmt grew");
+static_assert(sizeof(void*) != 8 || sizeof(Expr) == 184, "Expr grew");
+static_assert(sizeof(void*) != 8 || sizeof(Stmt) == 1696, "Stmt grew");
 #endif
 
-inline const std::vector<bool>& decl_leaf_data_only(const Stmt& s) {
-  return s.tuple ? s.tuple->decl_leaf_data_only : no_levels();
-}
-
-inline const std::vector<Stmt::TupleStep>& lhs_steps(const Stmt& s) {
-  static const std::vector<Stmt::TupleStep> none;
-  return s.tuple ? s.tuple->lhs_steps : none;
+// Each variable the statement itself assigns, whole or in part: an
+// Assignment's lhs, or each target of a MultiAssign. Child statements are
+// the caller's to walk.
+template <class F>
+void for_each_assigned(const Stmt& s, F visit) {
+  if (s.kind == Stmt::Assignment) visit(s.lhs);
+  if (s.kind == Stmt::MultiAssign)
+    for (const Expr& target : s.fn_args) visit(target.name);
 }
 
 // A user function called as a statement, as the call expression the
@@ -866,17 +739,11 @@ bool instantiated_autodiff(const Expr& e, bool promoted_autodiff,
 template <class TypeRef, class F>
 void for_each_dim(TypeRef& type, F&& visit) {
   for (auto& e : type.dims) visit(e);
-  if (type.tuple)
-    for (auto& component : type.tuple->components)
-      for_each_dim(component, visit);
 }
 
 template <class TransformRef, class F>
 void for_each_transform_arg(TransformRef& transform, F&& visit) {
   for (auto& e : transform.args) visit(e);
-  if (transform.components)
-    for (auto& component : *transform.components)
-      for_each_transform_arg(component, visit);
 }
 
 template <class StmtRef, class F>
@@ -885,9 +752,6 @@ void for_each_expr_of(StmtRef& s, F& visit) {
     visit(*e);
   for (auto* expressions : {&s.read_dims, &s.lhs_idx, &s.fn_args})
     for (auto& e : *expressions) visit(e);
-  if (s.tuple)
-    for (auto& step : s.tuple->lhs_steps)
-      for (auto& e : step.indices) visit(e);
   for_each_dim(s.decl_type, visit);
   for (auto* transform :
        {&s.read_transform, &s.check_transform, &s.write_transform})
@@ -926,24 +790,13 @@ struct FunDef {
   // than one; empty otherwise. The reader assigns it.
   std::string overload;
   std::vector<std::string> arg_names;
-  std::vector<UnsizedType> arg_views;
+  std::vector<UnsizedView> arg_views;
   std::vector<bool> arg_data_only;
-  std::vector<std::vector<bool>> arg_leaf_data_only;  // tuple arguments
+  // What the function returns: nothing, one value, or, for a function
+  // returning a tuple, one value per leaf of the tuple, depth first. A
+  // call of a function with more than one result is a MultiAssign's call.
+  std::vector<UnsizedView> results;
   std::vector<Stmt> body;
-};
-
-// A variable the tuple pass made for one leaf of a tuple variable. CmdStan
-// names the leaf's columns by the variable, each array index, and each slot:
-// `p.3:2.1` is element 3 of `array[] tuple(real, vector[2]) p`, slot 2,
-// element 1. `before` is how many of the leaf's array indices come before
-// that slot.
-struct TupleLeaf {
-  std::string variable;
-  struct Slot {
-    size_t before = 0;
-    int slot = 0;
-  };
-  std::vector<Slot> slots;
 };
 
 // A variable write_array emits: a parameter, transformed parameter or
@@ -986,10 +839,11 @@ struct Program {
   // The parameters, transformed parameters and generated quantities in
   // the order write_array emits them, which is CmdStan's column order.
   std::vector<OutputVar> output_vars;
-  // The reader met a tuple; the tuple pass then replaced every one.
-  bool has_tuples = false;
-  // The leaf variables the tuple pass made, by name.
-  std::map<std::string, TupleLeaf> tuple_leaves;
+  // The tuple input and output variables, which the compiler split into
+  // one variable per leaf. A tuple input appears in `input_vars` as its
+  // leaves; a tuple output keeps its own entry in `output_vars`. Null for
+  // a program without them.
+  std::shared_ptr<const detail::TupleInterface> tuples;
   // Deepest nesting of statements and expressions the reader met.
   unsigned nesting = 0;
 };
@@ -1160,49 +1014,6 @@ const FunDef* find_function(const std::map<std::string, const FunDef*>& funs,
                             const Call& call) {
   const auto found = funs.find(function_key(call));
   return found == funs.end() ? nullptr : found->second;
-}
-
-// How many CSV columns an output variable of this type has.
-template <class Extent>
-int64_t output_columns(const SizedType& type, const Extent& extent) {
-  int64_t columns = 1;
-  for (const Expr& dim : type.dims) columns *= extent(dim);
-  if (components(type).empty()) return columns;
-  int64_t per_element = 0;
-  for (const SizedType& component : components(type))
-    per_element += output_columns(component, extent);
-  return columns * per_element;
-}
-
-// CmdStan's name for the values one write produces: the output variable,
-// then each array index and tuple slot of the write (`p.3:2`). `variable` is
-// the part naming one CSV variable, the name up to the last tuple slot, and
-// `index` the indices after it. Empty when the write is not of one element
-// of each array holding a tuple.
-struct OutputName {
-  std::string name;
-  std::string variable;
-  std::vector<int64_t> index;
-};
-
-inline std::optional<OutputName> output_name(
-    const std::string& owner, const TupleLeaf* leaf,
-    const std::vector<int64_t>& indices) {
-  OutputName out{owner, owner, {}};
-  size_t used = 0;
-  if (leaf)
-    for (const TupleLeaf::Slot& slot : leaf->slots) {
-      if (slot.before > indices.size()) return std::nullopt;
-      for (; used < slot.before; ++used)
-        out.name += "." + std::to_string(indices[used]);
-      out.name += ":" + std::to_string(slot.slot);
-      out.variable = out.name;
-    }
-  for (; used < indices.size(); ++used) {
-    out.name += "." + std::to_string(indices[used]);
-    out.index.push_back(indices[used]);
-  }
-  return out;
 }
 
 // Assigns each of write_array's FnWriteParam statements, in execution

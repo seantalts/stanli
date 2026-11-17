@@ -34,6 +34,7 @@
 #include <stanli/structured_check.hpp>
 #include <stanli/wa_interp.hpp>
 
+#include "mir_tuples.hpp"
 #include "reroll_profile.hpp"
 
 #include <algorithm>
@@ -550,6 +551,8 @@ struct Lowering {
   // with `return_value`.
   enum class [[nodiscard]] Flow { Next, Break, Continue, Return };
   Val return_value{-1, false, {}};
+  // A function with several results returns these instead, one each.
+  std::vector<Val> return_values;
   // A function argument starts as a MIR expression and becomes a graph value
   // only when a consumer asks for it.  Keeping the source expression here is
   // important: different function families need different representations,
@@ -897,20 +900,20 @@ struct Lowering {
   std::vector<int> jac_slots;
   std::vector<int> extra_roots;
   std::map<std::string, const mir::FunDef*> fun_defs;
-  const std::map<std::string, mir::TupleLeaf>* tuple_leaves = nullptr;
+  // The program's tuple input and output variables, or null.
+  const mir::detail::TupleInterface* tuples = nullptr;
   // The tuple leaf a variable is, or null.
-  const mir::TupleLeaf* tuple_leaf(const std::string& name) const {
-    if (!tuple_leaves) return nullptr;
-    const auto found = tuple_leaves->find(name);
-    return found == tuple_leaves->end() ? nullptr : &found->second;
+  const mir::detail::TupleLeaf* tuple_leaf(const std::string& name) const {
+    return tuples ? tuples->leaf(name) : nullptr;
   }
-  const mir::TupleLeaf* tuple_leaf(const mir::Expr& e) const {
+  const mir::detail::TupleLeaf* tuple_leaf(const mir::Expr& e) const {
     return e.kind == mir::Expr::Var ? tuple_leaf(e.name) : nullptr;
   }
   // A parameter's name as CmdStan writes it.
   std::string parameter_name(const std::string& decl_id) const {
-    const mir::TupleLeaf* leaf = tuple_leaf(decl_id);
-    return leaf ? mir::output_name(leaf->variable, leaf, {})->name : decl_id;
+    const mir::detail::TupleLeaf* leaf = tuple_leaf(decl_id);
+    return leaf ? mir::detail::output_name(leaf->base, leaf, {})->name
+                : decl_id;
   }
   // A generic UDF keeps one scalar template type per formal. Locals and its
   // return use the promoted type, but a direct formal reference keeps its own.
@@ -1660,11 +1663,18 @@ struct Lowering {
   void forget_runtime_ints(const mir::Stmt& s);
   bool decided_statically(const mir::Stmt& s);
 
-  // Every name an Assignment targets anywhere in `s`, in first-seen order.
+  static bool contains_multi_assign(const mir::Stmt& s) {
+    if (s.kind == mir::Stmt::MultiAssign) return true;
+    for (const auto& k : s.body)
+      if (contains_multi_assign(k)) return true;
+    return false;
+  }
+  // Every name an assignment targets anywhere in `s`, in first-seen order.
   void assigned_names(const mir::Stmt& s, std::vector<std::string>* out) {
-    if (s.kind == mir::Stmt::Assignment &&
-        std::find(out->begin(), out->end(), s.lhs) == out->end())
-      out->push_back(s.lhs);
+    mir::for_each_assigned(s, [&](const std::string& name) {
+      if (std::find(out->begin(), out->end(), name) == out->end())
+        out->push_back(name);
+    });
     for (const auto& k : s.body) assigned_names(k, out);
   }
   // The subset of those that resolve outside `s`. Lowering's scope keeps a
@@ -1676,10 +1686,11 @@ struct Lowering {
     const auto walk = [&](const auto& self, const mir::Stmt& t,
                           bool scoped) -> void {
       if (t.kind == mir::Stmt::Decl && scoped) local.push_back(t.decl_id);
-      if (t.kind == mir::Stmt::Assignment &&
-          std::find(local.begin(), local.end(), t.lhs) == local.end() &&
-          std::find(out->begin(), out->end(), t.lhs) == out->end())
-        out->push_back(t.lhs);
+      mir::for_each_assigned(t, [&](const std::string& name) {
+        if (std::find(local.begin(), local.end(), name) == local.end() &&
+            std::find(out->begin(), out->end(), name) == out->end())
+          out->push_back(name);
+      });
       const bool opens = t.kind != mir::Stmt::SList;
       const size_t scope = local.size();
       for (const auto& k : t.body) self(self, k, scoped || opens);
@@ -1704,10 +1715,12 @@ struct Lowering {
       // a separate proof and remain excluded here.
       const auto changes_shape = [&](const auto& self,
                                      const mir::Stmt& body) -> bool {
-        if ((body.kind == mir::Stmt::Assignment && body.lhs == name &&
-             body.lhs_idx.empty()) ||
-            (body.kind == mir::Stmt::Decl && body.decl_id == name))
-          return true;
+        bool whole = body.kind == mir::Stmt::Decl && body.decl_id == name;
+        if (body.kind == mir::Stmt::Assignment ? body.lhs_idx.empty() : true)
+          mir::for_each_assigned(body, [&](const std::string& assigned) {
+            whole = whole || assigned == name;
+          });
+        if (whole) return true;
         for (const auto& child : body.body)
           if (self(self, child)) return true;
         return false;
@@ -2081,9 +2094,14 @@ struct Lowering {
   // in the caller's scope, bound under the parameter names in a shadowed
   // scope, and the body lowers like any other statements (loops unroll,
   // data-only conditions resolve). Return ends the body with the result.
+  // A call of a function with several results leaves them in `results`
+  // and returns no value.
   Val lower_call_udf(const mir::Expr& e,
                      const std::function<void()>& before_body = {},
-                     const UdfSpecialization& specialize = {});
+                     const UdfSpecialization& specialize = {},
+                     std::vector<Val>* results = nullptr);
+  // `(a, b) = f(x)`.
+  void lower_multi_assign(const mir::Stmt& s);
 
   Val lower_multi_normal_rng(const mir::Expr& e, CallArguments& actuals);
 
