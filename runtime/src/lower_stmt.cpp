@@ -1877,8 +1877,49 @@ void Lowering::lower_simple_stmt(const mir::Stmt& s) {
       fail("unsupported statement", s.raw);
   }
 }
+std::vector<Lowering::Val> Lowering::lower_library_results(const mir::Stmt& s,
+                                                           bool folded) {
+  std::vector<Val> values;
+  if (folded) {
+    // The arguments are data: each result is the value preparation computed.
+    for (const mir::Expr& target : s.fn_args) {
+      mir::Expr read = target;
+      read.data_only = true;
+      const std::optional<Val> value = fold_const(read);
+      if (!value) fail(s.rhs.name + " did not fold at preparation", s.raw);
+      values.push_back(*value);
+    }
+    return values;
+  }
+  if (s.rhs.name == "csr_extract")
+    fail(s.rhs.name +
+             ": the number of nonzero entries depends on the values, so the "
+             "matrix must be data",
+         s.raw);
+  const BuiltinSpec* spec = shaped_builtin_spec(s.rhs.name, s.rhs.args.size(),
+                                                BuiltinShapePolicy::MatrixOp);
+  if (spec == nullptr)
+    fail(s.rhs.name + ", which returns a tuple, is not supported yet", s.raw);
+  CallArguments actuals(*this, s.rhs);
+  BuiltinMatrixMap map;
+  const Val packed = lower_matrix_op(s.rhs, actuals, *spec, &map);
+  int64_t offset = 0;
+  for (const BuiltinArgumentShape& part : map.parts) {
+    SlotInfo si = part.container == FunctionContainerKind::Matrix
+                      ? matrix_view(part.dimensions[0], part.dimensions[1])
+                      : view_of(mir::UnsizedView{0, mir::UnsizedLeaf::Vector});
+    si.param_free = packed.si.param_free;
+    values.push_back(with_layout(
+        emit_value(OP_SLICE, {packed}, part.storage_size, si,
+                   {checked_immediate(offset, s.rhs.name + " result")}),
+        owning_layout(si)));
+    offset += part.storage_size;
+  }
+  return values;
+}
 void Lowering::lower_multi_assign(const mir::Stmt& s) {
-  if (s.rhs.fn_lib != mir::Expr::Lib::UserDefined)
+  const bool library = s.rhs.fn_lib == mir::Expr::Lib::StanLib;
+  if (!library && s.rhs.fn_lib != mir::Expr::Lib::UserDefined)
     fail(s.rhs.name + ", which returns a tuple, is not supported yet", s.raw);
   // A call without effects whose arguments are known at preparation folds
   // there too, so an integer result can size a later declaration.
@@ -1893,7 +1934,10 @@ void Lowering::lower_multi_assign(const mir::Stmt& s) {
     }
   }
   std::vector<Val> values;
-  (void)lower_call_udf(s.rhs, {}, {}, &values);
+  if (library)
+    values = lower_library_results(s, folded);
+  else
+    (void)lower_call_udf(s.rhs, {}, {}, &values);
   if (values.size() != s.fn_args.size())
     fail(s.rhs.name + " returned the wrong number of values", s.raw);
   for (size_t k = 0; k < values.size(); ++k) {

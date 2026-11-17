@@ -1064,7 +1064,11 @@ void validate_expression(const Expr& e, const Bindings& bindings,
 // returns. Lowering refuses the others.
 std::optional<size_t> library_results(const std::string& name) {
   static const std::map<std::string, size_t> results = {
-      {"qr", 2}, {"qr_thin", 2}, {"eigendecompose_sym", 2}};
+      {"qr", 2},
+      {"qr_thin", 2},
+      {"eigendecompose_sym", 2},
+      {"svd", 3},
+      {"csr_extract", 3}};
   const auto found = results.find(name);
   return found == results.end() ? std::nullopt
                                 : std::optional<size_t>(found->second);

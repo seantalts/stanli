@@ -176,10 +176,7 @@ inline std::optional<OutputName> output_name(
   return out;
 }
 
-// Give each MultiAssign target the view and adlevel of its declaration,
-// then rewrite each call of qr, qr_thin and eigendecompose_sym that a
-// MultiAssign holds into the functions computing each result, evaluating
-// the argument once.
+// Give each MultiAssign target the view and adlevel of its declaration.
 void finish_multi_assigns(Program& program);
 
 }  // namespace detail

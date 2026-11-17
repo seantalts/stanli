@@ -2543,6 +2543,37 @@ struct ProgramCompiler {
                        spec, "runtime indexed read");
   }
 
+  // A registered matrix operation, `map_out` receiving its shapes.
+  Range matrix_op_call(const mir::Expr& e, const BuiltinSpec* matrix,
+                       BuiltinMatrixMap* map_out = nullptr) {
+    std::vector<Range> args;
+    args.reserve(matrix->arity);
+    for (const mir::Expr& argument : e.args) args.push_back(expr(argument));
+    BuiltinMatrixMap map;
+    try {
+      std::vector<BuiltinArgumentShape> shapes;
+      shapes.reserve(args.size());
+      for (size_t k = 0; k < args.size(); ++k)
+        shapes.push_back(builtin_argument_shape(e.args[k], args[k]));
+      map = builtin_matrix_map(*matrix, shapes);
+    } catch (const std::invalid_argument& error) {
+      bail(e.name + ": " + std::string(error.what()));
+    }
+    bool active = false;
+    for (const mir::Expr& argument : e.args)
+      if (!argument.data_only && !in_write_array) active = true;
+    Range out{0, (int)map.result.storage_size};
+    out = shaped(std::move(out), map.result);
+    std::vector<int> idata;
+    idata.reserve(map.idata.size());
+    for (const int64_t value : map.idata) idata.push_back((int)value);
+    if (map_out) *map_out = map;
+    return kernel_call(
+        matrix->opcode, args, out,
+        (uint8_t)(map.variant | (active ? map.active_variant : 0u)),
+        matrix->activity_mask, std::move(idata), {}, e.name);
+  }
+
   Range kernel_call(uint16_t opcode, const std::vector<Range>& args, Range out,
                     uint8_t variant = 0, uint8_t input_adjoint_mask = 0x3f,
                     std::vector<int> idata = {},
@@ -3428,33 +3459,8 @@ struct ProgramCompiler {
     // operand -- with the kernels' values_only() guard covering
     // values-only executions, exactly as it does for graph ops.
     if (const BuiltinSpec* matrix = shaped_builtin_spec(
-            e.name, e.args.size(), BuiltinShapePolicy::MatrixOp)) {
-      std::vector<Range> args;
-      args.reserve(matrix->arity);
-      for (const mir::Expr& argument : e.args) args.push_back(expr(argument));
-      BuiltinMatrixMap map;
-      try {
-        std::vector<BuiltinArgumentShape> shapes;
-        shapes.reserve(args.size());
-        for (size_t k = 0; k < args.size(); ++k)
-          shapes.push_back(builtin_argument_shape(e.args[k], args[k]));
-        map = builtin_matrix_map(*matrix, shapes);
-      } catch (const std::invalid_argument& error) {
-        bail(e.name + ": " + std::string(error.what()));
-      }
-      bool active = false;
-      for (const mir::Expr& argument : e.args)
-        if (!argument.data_only && !in_write_array) active = true;
-      Range out{0, (int)map.result.storage_size};
-      out = shaped(std::move(out), map.result);
-      std::vector<int> idata;
-      idata.reserve(map.idata.size());
-      for (const int64_t value : map.idata) idata.push_back((int)value);
-      return kernel_call(
-          matrix->opcode, args, out,
-          (uint8_t)(map.variant | (active ? map.active_variant : 0u)),
-          matrix->activity_mask, std::move(idata), {}, e.name);
-    }
+            e.name, e.args.size(), BuiltinShapePolicy::MatrixOp))
+      return matrix_op_call(e, matrix);
 
     // Registered reductions never take the elementwise dispatch below. sum
     // and log_sum_exp keep their native register loops further down; the
@@ -4971,13 +4977,30 @@ struct ProgramCompiler {
         bail("statement function " + s.fn_name +
              " requires the MIR interpreter");
       case mir::Stmt::MultiAssign: {
-        if (s.rhs.fn_lib != mir::Expr::Lib::UserDefined)
-          bail(s.rhs.name + ", which returns a tuple, is not supported yet");
-        auto it = funs.find(mir::function_key(s.rhs));
-        if (it == funs.end()) bail("unknown function " + s.rhs.name);
         std::vector<Range> values;
-        (void)inline_call(*it->second, inline_arguments(s.rhs.args), false,
-                          propto_ctx && mir::inherits_propto(s.rhs), &values);
+        if (s.rhs.fn_lib == mir::Expr::Lib::StanLib) {
+          const BuiltinSpec* matrix = shaped_builtin_spec(
+              s.rhs.name, s.rhs.args.size(), BuiltinShapePolicy::MatrixOp);
+          if (matrix == nullptr)
+            bail(s.rhs.name +
+                 ", which returns a tuple, is not supported in a "
+                 "runtime-control region");
+          BuiltinMatrixMap map;
+          const Range packed = matrix_op_call(s.rhs, matrix, &map);
+          int offset = 0;
+          for (const BuiltinArgumentShape& part : map.parts) {
+            values.push_back(shaped(
+                Range{packed.reg + offset, (int)part.storage_size}, part));
+            offset += (int)part.storage_size;
+          }
+        } else if (s.rhs.fn_lib == mir::Expr::Lib::UserDefined) {
+          auto it = funs.find(mir::function_key(s.rhs));
+          if (it == funs.end()) bail("unknown function " + s.rhs.name);
+          (void)inline_call(*it->second, inline_arguments(s.rhs.args), false,
+                            propto_ctx && mir::inherits_propto(s.rhs), &values);
+        } else {
+          bail(s.rhs.name + ", which returns a tuple, is not supported yet");
+        }
         if (values.size() != s.fn_args.size())
           bail(s.rhs.name + " returned the wrong number of values");
         // Each result is assigned as `target = value`, the value bound to a

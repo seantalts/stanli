@@ -1247,6 +1247,49 @@ BuiltinMatrixMap builtin_matrix_map(
       }
       return map;
     }
+    case BuiltinMatrixOp::Qr:
+    case BuiltinMatrixOp::QrThin:
+    case BuiltinMatrixOp::EigendecomposeSym:
+    case BuiltinMatrixOp::Svd: {
+      const AppendBlock block =
+          spec.matrix_op == BuiltinMatrixOp::EigendecomposeSym
+              ? AppendBlock{require_square(a), require_square(a)}
+              : require_matrix(a);
+      const int64_t m = block.rows, n = block.columns, k = std::min(m, n);
+      map.idata = {m, n};
+      map.active_variant = kMatrixActiveForward;
+      const auto vector_shape = [](int64_t size) {
+        return slice_vector_shape(FunctionArgumentKind::Real,
+                                  FunctionContainerKind::Vector, size);
+      };
+      // Stan Math returns every result empty for an empty argument.
+      const bool empty = m == 0 || n == 0;
+      const auto mat = [&](int64_t rows, int64_t columns) {
+        return empty ? matrix_shape(0, 0) : matrix_shape(rows, columns);
+      };
+      const auto vec = [&](int64_t size) {
+        return vector_shape(empty ? 0 : size);
+      };
+      switch (spec.matrix_op) {
+        case BuiltinMatrixOp::Qr:
+          map.parts = {mat(m, m), mat(m, n)};
+          break;
+        case BuiltinMatrixOp::QrThin:
+          map.parts = {mat(m, k), mat(k, n)};
+          break;
+        case BuiltinMatrixOp::EigendecomposeSym:
+          map.parts = {mat(n, n), vec(n)};
+          break;
+        default:
+          map.parts = {mat(m, k), vec(k), mat(n, k)};
+          break;
+      }
+      int64_t total = 0;
+      for (const BuiltinArgumentShape& part : map.parts)
+        total += part.storage_size;
+      map.result = vector_shape(total);
+      return map;
+    }
     case BuiltinMatrixOp::TraceQuadForm: {
       const int64_t n = require_square(a);
       const BuiltinArgumentShape& b = shapes[1];

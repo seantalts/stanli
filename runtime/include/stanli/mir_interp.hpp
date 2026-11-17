@@ -730,10 +730,13 @@ class MirInterp {
       case mir::Stmt::Skip:
         return;  // constraint checks are not executed here
       case mir::Stmt::MultiAssign: {
-        if (st.rhs.fn_lib != mir::Expr::Lib::UserDefined)
+        if (st.rhs.fn_lib != mir::Expr::Lib::UserDefined &&
+            st.rhs.fn_lib != mir::Expr::Lib::StanLib)
           fail(st.rhs.name + ", which returns a tuple, is not supported yet",
                st.raw);
-        std::vector<Value> values = call_udf_values(st.rhs);
+        std::vector<Value> values = st.rhs.fn_lib == mir::Expr::Lib::StanLib
+                                        ? library_values(st.rhs)
+                                        : call_udf_values(st.rhs);
         if (values.size() != st.fn_args.size())
           fail(st.rhs.name + " returned the wrong number of values", st.raw);
         for (size_t k = 0; k < values.size(); ++k)
@@ -1170,7 +1173,8 @@ class MirInterp {
   // double interpreter serves the prim instantiations (write_array,
   // prepare_data) and the var interpreter the reverse-mode ones, which is
   // the distinction the kernels' variant conventions encode.
-  Value matrix_op_eval(const mir::Expr& e, const BuiltinSpec& spec) {
+  Value matrix_op_eval(const mir::Expr& e, const BuiltinSpec& spec,
+                       BuiltinMatrixMap* map_out = nullptr) {
     std::vector<Value> values;
     values.reserve(e.args.size());
     for (const mir::Expr& argument : e.args) values.push_back(eval(argument));
@@ -1214,7 +1218,59 @@ class MirInterp {
         std::move(idata), std::move(inputs), map.result.storage_size);
     if (map.result.container != FunctionContainerKind::Scalar)
       o.dims = map.result.dimensions;
+    if (map_out) *map_out = std::move(map);
     return o;
+  }
+
+  // The values a library function returning a tuple gives a MultiAssign:
+  // csr_extract's three, or a decomposition's results sliced out of the one
+  // kernel call that computes them together.
+  std::vector<Value> library_values(const mir::Expr& e) {
+    std::vector<Value> out;
+    if (e.name == "csr_extract" && e.args.size() == 1) {
+      Value a = eval(e.args[0]);
+      if (a.dims.size() != 2)
+        fail("csr_extract: argument must be a matrix", e.raw);
+      const int64_t rows = a.dims[0];
+      Eigen::MatrixXd matrix(rows, a.dims[1]);
+      for (int64_t k = 0; k < (int64_t)a.r.size(); ++k)
+        matrix.data()[k] = val(a.r[(size_t)k]);
+      const auto [w, v, u] = stan::math::csr_extract(matrix);
+      // The weights are the nonzero entries row by row; read them from the
+      // argument itself so they keep its scalar type.
+      Value weights;
+      for (int64_t row = 0; row < rows; ++row)
+        for (int k = u[(size_t)row] - 1; k < u[(size_t)row + 1] - 1; ++k)
+          weights.r.push_back(a.r[(size_t)((v[(size_t)k] - 1) * rows + row)]);
+      weights.dims = {(int64_t)w.size()};
+      out.push_back(std::move(weights));
+      for (const std::vector<int>* indices : {&v, &u}) {
+        Value ints;
+        ints.is_int = true;
+        ints.i.assign(indices->begin(), indices->end());
+        for (const int x : *indices) ints.r.push_back(T((double)x));
+        ints.dims = {(int64_t)indices->size()};
+        out.push_back(std::move(ints));
+      }
+      return out;
+    }
+    const BuiltinSpec* spec = shaped_builtin_spec(e.name, e.args.size(),
+                                                  BuiltinShapePolicy::MatrixOp);
+    if (spec == nullptr)
+      fail(e.name + ", which returns a tuple, is not supported yet", e.raw);
+    BuiltinMatrixMap map;
+    const Value packed = matrix_op_eval(e, *spec, &map);
+    size_t offset = 0;
+    for (const BuiltinArgumentShape& part : map.parts) {
+      Value v;
+      v.r.assign(
+          packed.r.begin() + (std::ptrdiff_t)offset,
+          packed.r.begin() + (std::ptrdiff_t)(offset + part.storage_size));
+      v.dims = part.dimensions;
+      offset += (size_t)part.storage_size;
+      out.push_back(std::move(v));
+    }
+    return out;
   }
 
   const std::map<std::string, const mir::FunDef*>& funs_;

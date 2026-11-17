@@ -6,6 +6,8 @@
 
 #include <stan/math.hpp>
 
+#include <algorithm>
+#include <tuple>
 #include <type_traits>
 #include <vector>
 
@@ -329,6 +331,85 @@ void quantile_fwd(KernelCtx& ctx) {
 }
 void quantile_bwd(KernelCtx&) {}
 
+// A function returning a tuple of matrices and vectors writes each result
+// column-major after the one before it. Forward and backward call Stan
+// Math's tuple-returning function, so the results share one factorization
+// and its reverse pass, as they do in CmdStan.
+template <typename Tuple, typename F>
+void for_each_part(Tuple&& parts, F&& f) {
+  int64_t offset = 0;
+  std::apply(
+      [&](auto&&... part) { ((f(part, offset), offset += part.size()), ...); },
+      std::forward<Tuple>(parts));
+}
+
+template <typename Op>
+void packed_fwd(KernelCtx& ctx) {
+  const auto store = [&ctx](const auto& parts) {
+    for_each_part(parts, [&ctx](const auto& part, int64_t offset) {
+      const Eigen::MatrixXd v = stan::math::value_of(part);
+      std::copy(v.data(), v.data() + v.size(), ctx.out.data + offset);
+    });
+  };
+  if ((ctx.variant & kMatrixActiveForward) && !values_only(ctx)) {
+    stan::math::nested_rev_autodiff nested;
+    auto xs = load_inputs<var>(ctx);
+    store(Op::template call<var>(ctx, xs));
+    return;
+  }
+  auto xs = load_inputs<double>(ctx);
+  store(Op::template call<double>(ctx, xs));
+}
+
+template <typename Op>
+void packed_bwd(KernelCtx& ctx) {
+  if (ctx.in_adj[0].data == nullptr) return;
+  stan::math::nested_rev_autodiff nested;
+  auto xs = load_inputs<var>(ctx);
+  const auto parts = Op::template call<var>(ctx, xs);
+  var j = 0;
+  for_each_part(parts, [&](const auto& part, int64_t offset) {
+    const Eigen::Map<const Eigen::MatrixXd> seed(ctx.out_adj_vec.data + offset,
+                                                 part.rows(), part.cols());
+    j += stan::math::sum(stan::math::elt_multiply(part, seed));
+  });
+  stan::math::grad(j.vi_);
+  for (int64_t i = 0; i < ctx.in[0].len; ++i)
+    ctx.in_adj[0].data[i] += xs[0](i).adj();
+}
+
+template <typename Op>
+void register_packed(uint16_t opcode) {
+  register_kernel(opcode, Kernel{packed_fwd<Op>, packed_bwd<Op>, nullptr});
+}
+
+struct QrOp {
+  template <typename S>
+  static auto call(const KernelCtx& ctx, std::vector<Vec<S>>& xs) {
+    return stan::math::qr(matrix_at(xs, 0, ctx.idata[0], ctx.idata[1]));
+  }
+};
+struct QrThinOp {
+  template <typename S>
+  static auto call(const KernelCtx& ctx, std::vector<Vec<S>>& xs) {
+    return stan::math::qr_thin(matrix_at(xs, 0, ctx.idata[0], ctx.idata[1]));
+  }
+};
+struct EigendecomposeSymOp {
+  template <typename S>
+  static auto call(const KernelCtx& ctx, std::vector<Vec<S>>& xs) {
+    const Mat<S> m = matrix_at(xs, 0, ctx.idata[0], ctx.idata[1]);
+    return stan::math::eigendecompose_sym(m);
+  }
+};
+struct SvdOp {
+  template <typename S>
+  static auto call(const KernelCtx& ctx, std::vector<Vec<S>>& xs) {
+    const Mat<S> m = matrix_at(xs, 0, ctx.idata[0], ctx.idata[1]);
+    return stan::math::svd(m);
+  }
+};
+
 }  // namespace
 
 void register_library_kernels() {
@@ -356,6 +437,10 @@ void register_library_kernels() {
   register_library<QrROp>(OP_QR_R);
   register_library<QrThinQOp>(OP_QR_THIN_Q);
   register_library<QrThinROp>(OP_QR_THIN_R);
+  register_packed<QrOp>(OP_QR);
+  register_packed<QrThinOp>(OP_QR_THIN);
+  register_packed<EigendecomposeSymOp>(OP_EIGENDECOMPOSE_SYM);
+  register_packed<SvdOp>(OP_SVD);
   register_library<MatrixPowerOp>(OP_MATRIX_POWER);
   register_library<TraceQuadFormOp>(OP_TRACE_QUAD_FORM);
   register_library<TraceGenQuadFormOp>(OP_TRACE_GEN_QUAD_FORM);

@@ -1604,74 +1604,160 @@ void check_multi_results() {
                "a MultiAssign target without a declaration");
 }
 
-// qr, qr_thin and eigendecompose_sym compute each result with the function
-// for it, from one evaluation of the argument.
+// Stan Math's tuple-returning decomposition of theta * A, summed over every
+// entry of every result, and its derivative in theta: what CmdStan computes
+// for `target += sum(r1) + sum(r2) ...`.
+template <typename F>
+Density decomposition_reference(const Eigen::MatrixXd& a, double theta, F f) {
+  stan::math::nested_rev_autodiff nested;
+  stan::math::var t = theta;
+  const Eigen::Matrix<stan::math::var, -1, -1> m = t * a;
+  stan::math::var total = 0;
+  std::apply(
+      [&](const auto&... part) { ((total += stan::math::sum(part)), ...); },
+      f(m));
+  stan::math::grad(total.vi_);
+  return {total.val(), t.adj()};
+}
+
+bool close_ulp(double got, double want, double ulps) {
+  return std::isfinite(got) &&
+         std::fabs(got - want) <= ulps *
+                                      std::numeric_limits<double>::epsilon() *
+                                      std::max(std::fabs(want), 1.0);
+}
+
+// qr, qr_thin, eigendecompose_sym and svd factor their argument once and
+// slice every result out of the one evaluation, which is what Stan Math's
+// tuple-returning function computes. csr_extract runs when its matrix is
+// data; its sizes depend on the values otherwise.
 void check_decompositions() {
   using namespace build;
   DataMap data;
   data.set_real_array("A", {4, 1, 2, 1, 3, 0, 2, 0, 5}, {3, 3});
-  for (const auto& [name, parts] :
-       std::vector<std::pair<std::string, std::vector<std::string>>>{
-           {"qr", {"qr_Q", "qr_R"}},
-           {"qr_thin", {"qr_thin_Q", "qr_thin_R"}},
-           {"eigendecompose_sym", {"eigenvectors_sym", "eigenvalues_sym"}}}) {
-    const mir::UnsizedView second =
-        name == "eigendecompose_sym" ? kVector : kMatrix;
-    mir::Program direct;
-    direct.input_vars.emplace_back("A", sized("SMatrix", {3, 3}));
-    direct.prepare_data = {decl("A", sized("SMatrix", {3, 3}), true),
-                           read_data("A", kMatrix, "A")};
-    direct.log_prob = {real_parameter("theta")};
-    mir::Program split = direct;
-    // A + A is not a variable, so it is evaluated once into a local.
-    const mir::Expr argument = call(
-        "Plus__", {var("A", kMatrix, true), var("A", kMatrix, true)}, kMatrix);
-    const mir::Expr total = call("Plus__",
-                                 {call("sum", {var("p", kMatrix, true)}, kReal),
-                                  call("sum", {var("q", second, true)}, kReal)},
-                                 kReal);
-    direct.log_prob.push_back(decl("p", sized("SMatrix", {3, 3}), true));
-    direct.log_prob.push_back(decl("q",
-                                   second.leaf == mir::UnsizedLeaf::Vector
-                                       ? sized("SVector", {3})
-                                       : sized("SMatrix", {3, 3}),
-                                   true));
-    split.log_prob = direct.log_prob;
-    direct.log_prob.push_back(assign("p", call(parts[0], {argument}, kMatrix)));
-    direct.log_prob.push_back(assign("q", call(parts[1], {argument}, second)));
-    direct.log_prob.push_back(target(total));
-    split.log_prob.push_back(
-        multi_assign({var("p", kMatrix, true), var("q", second, true)},
-                     call(name, {argument}, {})));
-    split.log_prob.push_back(target(total));
-    const Density want = density(write_v2(direct), data, 0.5);
-    const Density got = density(write_v2(split), data, 0.5);
-    check(got.value == want.value && std::isfinite(got.value),
-          name + " in a MultiAssign computes each result as its own call");
+  Eigen::MatrixXd a(3, 3);
+  a << 4, 1, 2, 1, 3, 0, 2, 0, 5;
+  const mir::UnsizedView kMatrix{0, mir::UnsizedLeaf::Matrix};
+  const mir::UnsizedView kVector{0, mir::UnsizedLeaf::Vector};
+  using M = Eigen::Matrix<stan::math::var, -1, -1>;
+  const std::vector<std::pair<std::string, std::vector<mir::UnsizedView>>>
+      cases = {{"qr", {kMatrix, kMatrix}},
+               {"qr_thin", {kMatrix, kMatrix}},
+               {"eigendecompose_sym", {kMatrix, kVector}},
+               {"svd", {kMatrix, kVector, kMatrix}}};
+  for (const auto& [name, views] : cases) {
+    mir::Program program;
+    program.input_vars.emplace_back("A", sized("SMatrix", {3, 3}));
+    program.prepare_data = {decl("A", sized("SMatrix", {3, 3}), true),
+                            read_data("A", kMatrix, "A")};
+    program.log_prob = {real_parameter("theta")};
+    std::vector<mir::Expr> targets;
+    mir::Expr total;
+    for (size_t k = 0; k < views.size(); ++k) {
+      const std::string target_name = "r" + std::to_string(k);
+      program.log_prob.push_back(decl(target_name,
+                                      views[k].leaf == mir::UnsizedLeaf::Vector
+                                          ? sized("SVector", {3})
+                                          : sized("SMatrix", {3, 3}),
+                                      false));
+      targets.push_back(var(target_name, views[k], false));
+      const mir::Expr sum = call("sum", {targets.back()}, kReal);
+      total = k == 0 ? sum : call("Plus__", {total, sum}, kReal);
+    }
+    total.data_only = false;
+    mir::Expr argument = call(
+        "Times__", {var("theta", kReal), var("A", kMatrix, true)}, kMatrix);
+    argument.data_only = false;
+    mir::Expr decomposition = call(name, {argument}, {});
+    decomposition.data_only = false;
+    program.log_prob.push_back(multi_assign(targets, decomposition));
+    program.log_prob.push_back(target(total));
+    const Density want =
+        name == "qr" ? decomposition_reference(
+                           a, 0.5, [](const M& m) { return stan::math::qr(m); })
+        : name == "qr_thin"
+            ? decomposition_reference(
+                  a, 0.5, [](const M& m) { return stan::math::qr_thin(m); })
+        : name == "svd"
+            ? decomposition_reference(
+                  a, 0.5, [](const M& m) { return stan::math::svd(m); })
+            : decomposition_reference(a, 0.5, [](const M& m) {
+                return stan::math::eigendecompose_sym(m);
+              });
+    Density got{std::nan(""), std::nan("")};
+    std::string error;
+    try {
+      got = density(write_v2(program), data, 0.5);
+    } catch (const std::exception& e) {
+      error = e.what();
+    }
+    check(close_ulp(got.value, want.value, 4) &&
+              close_ulp(got.gradient, want.gradient, 4),
+          name + " shares one factorization like Stan Math's " + name + " (" +
+              error + ")");
   }
-  mir::Program svd;
-  svd.input_vars.emplace_back("A", sized("SMatrix", {3, 3}));
-  svd.prepare_data = {decl("A", sized("SMatrix", {3, 3}), true),
-                      read_data("A", kMatrix, "A")};
-  svd.log_prob = {
-      decl("u", sized("SMatrix", {3, 3}), true),
-      decl("d", sized("SVector", {3}), true),
-      decl("v", sized("SMatrix", {3, 3}), true),
-      multi_assign({var("u", kMatrix, true), var("d", kVector, true),
-                    var("v", kMatrix, true)},
-                   call("svd", {var("A", kMatrix, true)}, {})),
-      target(call("sum", {var("d", kVector, true)}, kReal))};
+
+  // csr_extract of a data matrix, folded at preparation; of a parameter, a
+  // clear refusal.
+  data.set_real_array("S", {1, 0, 0, 3, 2, 0}, {2, 3});
+  mir::Program csr;
+  csr.input_vars.emplace_back("S", sized("SMatrix", {2, 3}));
+  csr.prepare_data = {decl("S", sized("SMatrix", {2, 3}), true),
+                      read_data("S", kMatrix, "S")};
+  const mir::UnsizedView ints{1, mir::UnsizedLeaf::Int};
+  csr.log_prob = {
+      real_parameter("theta"), decl("w", sized("SVector", {3}), true),
+      decl("v", sized("SArray", {3}, "SInt"), true),
+      decl("u", sized("SArray", {3}, "SInt"), true),
+      multi_assign(
+          {var("w", kVector, true), var("v", ints, true), var("u", ints, true)},
+          call("csr_extract", {var("S", kMatrix, true)}, {}))};
+  // S = [[1, 0, 2], [0, 3, 0]]: w = [1, 2, 3] row by row, v = [1, 3, 2]
+  // and u = [1, 3, 4], so the target is 6 * theta + 6 + 8.
+  mir::Expr weighted =
+      call("Times__",
+           {call("sum", {var("w", kVector, true)}, kReal), var("theta", kReal)},
+           kReal);
+  weighted.data_only = false;
+  mir::Expr csr_total =
+      call("Plus__",
+           {weighted, call("Plus__",
+                           {call("sum", {var("v", ints, true)}, kInt),
+                            call("sum", {var("u", ints, true)}, kInt)},
+                           kInt)},
+           kReal);
+  csr_total.data_only = false;
+  csr.log_prob.push_back(target(csr_total));
+  Density folded{std::nan(""), std::nan("")};
+  std::string csr_error;
+  try {
+    folded = density(write_v2(csr), data, 2.0);
+  } catch (const std::exception& e) {
+    csr_error = e.what();
+  }
+  check(
+      folded.value == 6.0 * 2.0 + 6.0 + 8.0 && folded.gradient == 6.0,
+      "csr_extract of a data matrix folds at preparation (" + csr_error + ")");
+  mir::Program active = csr;
+  mir::Expr scaled =
+      call("Times__", {var("theta", kReal), var("S", kMatrix, true)}, kMatrix);
+  scaled.data_only = false;
+  active.log_prob[4].rhs.args = {scaled};
+  active.log_prob[4].rhs.data_only = false;
+  for (size_t k = 1; k < 4; ++k) active.log_prob[k].decl_data_only = false;
+  for (mir::Expr& t : active.log_prob[4].fn_args) t.data_only = false;
   bool refused = false;
   try {
-    (void)compile_model(write_v2(svd), data);
-  } catch (const std::exception& error) {
-    refused = std::string(error.what())
-                  .find("svd, which returns a tuple, is not supported yet") !=
-              std::string::npos;
+    (void)compile_model(write_v2(active), data);
+  } catch (const std::exception& e) {
+    refused = std::string(e.what()).find(
+                  "csr_extract: the number of nonzero entries depends on the "
+                  "values, so the matrix must be data") != std::string::npos;
   }
-  check(refused, "svd in a MultiAssign is refused at lowering");
-  mir::Program short_qr = svd;
-  short_qr.log_prob[3].rhs.name = "qr_thin";
+  check(refused, "csr_extract of a parameter matrix is refused");
+  mir::Program short_qr = csr;
+  short_qr.log_prob[4].rhs.name = "qr_thin";
+  short_qr.log_prob[4].rhs.args = {var("S", kMatrix, true)};
   expect_error(write_v2(short_qr), "qr_thin returns 2 values, not 3",
                "a library decomposition with too many targets");
 }

@@ -139,65 +139,6 @@ void attach_tuple_interface(
 
 namespace {
 
-// The functions computing each result of a decomposition, in the order the
-// tuple holds them.
-const std::vector<const char*>* decomposition_parts(const Expr& call) {
-  static const std::map<std::string, std::vector<const char*>> parts = {
-      {"qr", {"qr_Q", "qr_R"}},
-      {"qr_thin", {"qr_thin_Q", "qr_thin_R"}},
-      {"eigendecompose_sym", {"eigenvectors_sym", "eigenvalues_sym"}}};
-  if (call.kind != Expr::FunApp || call.fn_lib != Expr::Lib::StanLib ||
-      call.args.size() != 1 || !is_unsized(call.args[0], UnsizedLeaf::Matrix))
-    return nullptr;
-  const auto found = parts.find(call.name);
-  return found == parts.end() ? nullptr : &found->second;
-}
-
-Stmt split_decomposition(const Stmt& s, const std::vector<const char*>& parts) {
-  if (s.fn_args.size() != parts.size())
-    throw MirError("mir: " + s.rhs.name + " returns " +
-                   std::to_string(parts.size()) + " values, not " +
-                   std::to_string(s.fn_args.size()));
-  Stmt out;
-  out.kind = Stmt::SList;
-  Expr argument = s.rhs.args[0];
-  if (argument.kind != Expr::Var) {
-    // Evaluate the argument once, into a local beside the targets.
-    const std::string local = s.fn_args[0].name + ".argument";
-    out.kind = Stmt::Block;
-    Stmt decl;
-    decl.kind = Stmt::Decl;
-    decl.decl_id = local;
-    decl.decl_type = unsized_declaration(argument.unsized, "");
-    decl.decl_data_only = argument.data_only;
-    out.body.push_back(std::move(decl));
-    Stmt assign;
-    assign.kind = Stmt::Assignment;
-    assign.lhs = local;
-    assign.rhs = argument;
-    out.body.push_back(std::move(assign));
-    Expr var;
-    var.kind = Expr::Var;
-    var.name = local;
-    var.unsized = argument.unsized;
-    var.data_only = argument.data_only;
-    argument = std::move(var);
-  }
-  for (size_t k = 0; k < parts.size(); ++k) {
-    Stmt assign;
-    assign.kind = Stmt::Assignment;
-    assign.lhs = s.fn_args[k].name;
-    assign.rhs.kind = Expr::FunApp;
-    assign.rhs.name = parts[k];
-    assign.rhs.args = {argument};
-    assign.rhs.unsized = s.fn_args[k].unsized;
-    assign.rhs.data_only = argument.data_only;
-    assign.raw = s.raw;
-    out.body.push_back(std::move(assign));
-  }
-  return out;
-}
-
 // The declarations seen so far, by name. The compiler gives each
 // MultiAssign target a fresh name declared before it, so the last
 // declaration of the name is the target's.
@@ -215,8 +156,6 @@ void finish_multi_assigns(Stmt& s, Declared& declared) {
     target.unsized = found->second.first;
     target.data_only = found->second.second;
   }
-  if (const auto* parts = decomposition_parts(s.rhs))
-    s = split_decomposition(s, *parts);
 }
 
 }  // namespace

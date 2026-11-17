@@ -2177,6 +2177,13 @@ struct Lowering {
                                       CallArguments& actuals,
                                       const DensitySpec* selected);
 
+  // A registered matrix operation, `map_out` receiving its shapes.
+  Val lower_matrix_op(const mir::Expr& e, CallArguments& actuals,
+                      const BuiltinSpec& spec,
+                      BuiltinMatrixMap* map_out = nullptr);
+  // The values a library function returning a tuple gives a MultiAssign.
+  std::vector<Val> lower_library_results(const mir::Stmt& s, bool folded);
+
   // Elementwise math, reductions, and dot products.
   std::optional<Val> lower_eltwise_fn(const mir::Expr& e,
                                       CallArguments& actuals,

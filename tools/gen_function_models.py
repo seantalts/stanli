@@ -211,6 +211,16 @@ def render():
             "function-signatures/math/matrix/qr{,_thin} in tests/stanc3_good; "
             "CmdStan references"
         )
+    focused["svd"] = (
+        "tests/regressions/tuple_decompositions_more.stan in transformed "
+        "data, the model and generated quantities; CmdStan references"
+    )
+    focused["csr_extract"] = (
+        "tests/regressions/tuple_decompositions_more.stan on data matrices in "
+        "transformed data and generated quantities; CmdStan references. A "
+        "parameter matrix is refused (its sizes depend on the values) outside "
+        "the MIR interpreter"
+    )
     for name in ("to_vector_array", "to_row_vector_array"):
         focused[name] = "tests/fixtures/stan240_containers.stan; rectangular and zero-extent round trips"
     for name in ("to_int", "to_array_2d"):
