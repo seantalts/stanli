@@ -1029,8 +1029,8 @@ class OutputCursor {
   explicit OutputCursor(const std::vector<OutputVar>& vars) : vars_(&vars) {}
 
   // `named` is the variable the write reads, or empty when there is none.
-  // `columns(var)` evaluates a variable's column count. Returns null when the write fits
-  // no output variable.
+  // `columns(var)` evaluates a variable's column count. Returns null when the
+  // write fits no output variable.
   template <class Columns>
   const OutputVar* take(const std::string& named, int64_t width,
                         Columns columns) {
