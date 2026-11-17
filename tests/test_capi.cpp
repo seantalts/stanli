@@ -2797,6 +2797,52 @@ void test_tuple_array_parameters() {
   for (size_t i = 0; ok && i < q.size(); ++i)
     expect_near("tuple array json q[" + std::to_string(i) + "]", from_json[i],
                 want_json[i]);
+  // The log density's own columns, element by element as CmdStan's: the
+  // constrained names and variables a stanli_model reports, and one free
+  // block per declared parameter.
+  char model_err[4096] = "";
+  stanli_model* sm = stanli_model_new_with_opts(
+      c.mir.c_str(), "{\"K\": 2}", nullptr, model_err, sizeof model_err);
+  expect_true(std::string("tuple array stanli_model: ") + model_err,
+              sm != nullptr);
+  if (sm != nullptr) {
+    std::string names;
+    for (int64_t i = 0; i < stanli_n_constrained(sm); ++i)
+      names += (i ? "," : "") + std::string(stanli_constrained_name(sm, i));
+    expect_eq("tuple array constrained names", names,
+              "g.1.1:1,g.1.1:2.1,g.1.1:2.2,g.1.1:2.3,g.2.1:1,g.2.1:2.1,g.2."
+              "1:2.2,g.2.1:2.3,g.1.2:1,g.1.2:2.1,g.1.2:2.2,g.1.2:2.3,g.2.2:"
+              "1,g.2.2:2.1,g.2.2:2.2,g.2.2:2.3,n.1:1,n.1:2.1:1,n.1:2.1:2.1."
+              "1,n.1:2.1:2.2.1,n.1:2.1:2.1.2,n.1:2.1:2.2.2,n.1:2.2:1,n.1:2."
+              "2:2.1.1,n.1:2.2:2.2.1,n.1:2.2:2.1.2,n.1:2.2:2.2.2,n.2:1,n.2:"
+              "2.1:1,n.2:2.1:2.1.1,n.2:2.1:2.2.1,n.2:2.1:2.1.2,n.2:2.1:2.2."
+              "2,n.2:2.2:1,n.2:2.2:2.1.1,n.2:2.2:2.2.1,n.2:2.2:2.1.2,n.2:2."
+              "2:2.2.2");
+    const auto variables = [&](int set) {
+      std::string out;
+      for (int64_t i = 0; i < stanli_n_variables(sm, set); ++i) {
+        out += std::string(i ? "," : "") + stanli_variable_name(sm, set, i);
+        for (int64_t k = 0; k < stanli_variable_n_dims(sm, set, i); ++k)
+          out += ":" + std::to_string(stanli_variable_dim(sm, set, i, k));
+      }
+      return out;
+    };
+    const std::string constrained = variables(STANLI_CONSTRAINED_COLUMNS);
+    const std::string written = variables(STANLI_WRITE_ARRAY_COLUMNS);
+    expect_true(
+        "tuple array constrained variables are the parameters of "
+        "write_array's: " +
+            constrained + " vs " + written,
+        !constrained.empty() &&
+            written.compare(0, constrained.size() + 1, constrained + ",") == 0);
+    expect_true("tuple array parameter blocks",
+                stanli_n_param_blocks(sm) == 2 &&
+                    std::string(stanli_param_block_name(sm, 0)) == "g" &&
+                    stanli_param_block_size(sm, 0) == 12 &&
+                    std::string(stanli_param_block_name(sm, 1)) == "n" &&
+                    stanli_param_block_size(sm, 1) == 10);
+    stanli_model_free(sm);
+  }
   bs_model_destruct(m);
 }
 
