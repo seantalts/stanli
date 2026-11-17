@@ -1812,7 +1812,6 @@ void Lowering::lower_simple_stmt(const mir::Stmt& s) {
         }
         const Val v = lower_expr(s.fn_args[0]);
         const mir::detail::TupleLeaf* leaf = tuple_leaf(*base);
-        const bool named_leaf = leaf != nullptr;
         const mir::OutputVar* owner = output_cursor.take(
             leaf                           ? leaf->base
             : base->kind == mir::Expr::Var ? base->name
@@ -1826,7 +1825,10 @@ void Lowering::lower_simple_stmt(const mir::Stmt& s) {
             });
         if (owner == nullptr)
           fail("FnWriteParam matches no output variable", s.raw);
-        if (!named_leaf && mir::detail::is_tuple(owner->type)) {
+        // A write may read a leaf of another tuple variable, the optimizer
+        // having made this value a copy of it.
+        if (leaf && leaf->base != owner->name) leaf = nullptr;
+        if (!leaf && mir::detail::is_tuple(owner->type)) {
           leaf = mir::detail::leaf_at(
               tuples, *owner, output_cursor.offset(), g.slots[v.slot].len,
               [&](const mir::Expr& d) { return eval_int(d); });

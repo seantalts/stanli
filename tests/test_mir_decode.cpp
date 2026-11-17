@@ -1734,6 +1734,31 @@ void check_tuple_interface() {
   check(at.value == 3.0 + 6.0 * 2.0 && at.gradient == 6.0,
         "tuple data is read under its keys in CmdStan's element order");
 
+  // stanc3 prefixes a C++ keyword with _stan_, which the finalizer strips;
+  // the CmdStan key is the source name.
+  WireTuples mangled_wire;
+  mangled_wire.types["_stan_class"] = tuple;
+  mangled_wire.leaves = {{"_stan_class.1", "_stan_class", {{1, 1}}},
+                         {"_stan_class.2", "_stan_class", {{1, 2}}}};
+  mir::Program mangled = program;
+  mangled.input_vars[0].first = "_stan_class";
+  for (size_t k : {0u, 2u})
+    mangled.prepare_data[k].decl_id =
+        k == 0 ? "_stan_class.1" : "_stan_class.2";
+  mangled.prepare_data[1].fn_args[0].name = "_stan_class.1";
+  mangled.prepare_data[1].fn_args[2].lit_s = "class.1";
+  mangled.prepare_data[3].fn_args[0].name = "_stan_class.2";
+  mangled.prepare_data[3].fn_args[2].lit_s = "class.2";
+  mangled.log_prob[1].target.args[0].args[0].name = "_stan_class.2";
+  mangled.log_prob[2].target.args[0].args[0].name = "_stan_class.1";
+  const mir::Program unmangled =
+      decode_program(write_v2(mangled, mangled_wire));
+  const mir::detail::TupleLeaf* keyword =
+      mir::detail::tuple_leaf(unmangled, "class.2");
+  check(keyword && keyword->base == "class" && keyword->key == "class.2" &&
+            unmangled.input_vars[1].first == "class.2",
+        "a tuple named by a C++ keyword is unmangled with its leaves");
+
   WireTuples missing = wire;
   missing.leaves.pop_back();
   expect_error(write_v2(program, missing), "a leaf of d has no variable",

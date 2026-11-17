@@ -456,7 +456,10 @@ bool WaInterp::write_param(MirInterp<double>& in, const mir::Stmt& s,
         });
     if (owner == nullptr)
       throw CompileError("an output write matches no output variable");
-    const mir::detail::TupleLeaf* tuple = tuple_named;
+    // A write may read a leaf of another tuple variable, the optimizer
+    // having made this value a copy of it.
+    const mir::detail::TupleLeaf* tuple =
+        tuple_named && tuple_named->base == owner->name ? tuple_named : nullptr;
     if (!tuple && mir::detail::is_tuple(owner->type)) {
       tuple = mir::detail::leaf_at(
           prog_->tuples.get(), *owner, output_cursor_.offset(), len,

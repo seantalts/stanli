@@ -61,7 +61,7 @@ SlotKey slot_key(const std::vector<TupleSlot>& path) {
 void check_read_keys(const Stmt& s, const TupleInterface& tuples) {
   if (internal_name(s) == "FnReadData" && s.fn_args.size() >= 3 &&
       s.fn_args[0].kind == Expr::Var) {
-    const TupleLeaf* leaf = tuples.leaf(s.fn_args[0].name);
+    const TupleLeaf* leaf = tuples.leaf(unmangled(s.fn_args[0].name));
     if (leaf &&
         (s.fn_args[2].kind != Expr::LitStr || s.fn_args[2].lit_s != leaf->key))
       malformed("data leaf " + leaf->variable + " is not read under its key " +
@@ -77,6 +77,16 @@ void attach_tuple_interface(
     std::vector<std::pair<size_t, std::string>> tuple_inputs,
     std::vector<WireTupleLeaf> wire_leaves) {
   if (tuple_types.empty() && wire_leaves.empty()) return;
+  // The finalizer unmangles every name after this; so do the leaves.
+  std::map<std::string, TupleType> types;
+  for (auto& [name, type] : tuple_types)
+    types.emplace(unmangled(name), std::move(type));
+  tuple_types = std::move(types);
+  for (auto& input : tuple_inputs) input.second = unmangled(input.second);
+  for (WireTupleLeaf& leaf : wire_leaves) {
+    leaf.variable = unmangled(leaf.variable);
+    leaf.base = unmangled(leaf.base);
+  }
   auto tuples = std::make_shared<TupleInterface>();
   std::map<std::pair<std::string, SlotKey>, TupleLeaf> expected;
   std::map<std::string, std::vector<SlotKey>> order;

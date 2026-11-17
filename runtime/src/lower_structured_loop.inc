@@ -2507,8 +2507,12 @@ static bool loop_carries_value(const mir::Stmt& loop) {
   std::map<std::string, std::vector<const std::vector<mir::Expr>*>> writes;
   bool inner = false;
   std::function<void(const mir::Stmt&)> collect = [&](const mir::Stmt& s) {
-    if (s.kind == mir::Stmt::Assignment && !locals.count(s.lhs))
-      writes[s.lhs].push_back(&s.lhs_idx);
+    static const std::vector<mir::Expr> whole;
+    mir::for_each_assigned(s, [&](const std::string& name) {
+      if (!locals.count(name))
+        writes[name].push_back(s.kind == mir::Stmt::Assignment ? &s.lhs_idx
+                                                               : &whole);
+    });
     if (s.kind == mir::Stmt::For && loop_carries_value(s)) inner = true;
     for (const auto& child : s.body) collect(child);
   };

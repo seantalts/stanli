@@ -1388,6 +1388,11 @@ SizedType detail::unsized_declaration(const UnsizedView& view,
   return type;
 }
 
+std::string detail::unmangled(std::string name) {
+  unmangle(name);
+  return name;
+}
+
 UnsizedView detail::declaration_view(const SizedType& type) {
   return declared_view(type);
 }
