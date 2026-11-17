@@ -1334,6 +1334,7 @@ BuiltinMatrixMap builtin_matrix_map(
       return map;
     }
     case BuiltinMatrixOp::TraceDot:
+    case BuiltinMatrixOp::Trace:
     case BuiltinMatrixOp::Norm1:
     case BuiltinMatrixOp::Norm2:
     case BuiltinMatrixOp::Distance:
@@ -1346,6 +1347,10 @@ BuiltinMatrixMap builtin_matrix_map(
         const AppendBlock lhs = require_matrix(a);
         const AppendBlock rhs = require_matrix(shapes[1]);
         map.idata = {lhs.rows, lhs.columns, rhs.rows, rhs.columns};
+      }
+      if (spec.matrix_op == BuiltinMatrixOp::Trace) {
+        const AppendBlock m = require_matrix(a);
+        map.idata = {m.rows, m.columns};
       }
       map.active_variant = kMatrixActiveForward;
       map.result = make_function_shape(FunctionArgumentKind::Real,

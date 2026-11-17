@@ -216,6 +216,7 @@ namespace stanli {
   X(OP_MATRIX_EXP_MULTIPLY)           \
   X(OP_SCALE_MATRIX_EXP_MULTIPLY)     \
   X(OP_TRACE_DOT)                     \
+  X(OP_TRACE)                         \
   X(OP_NORM1)                         \
   X(OP_NORM2)                         \
   X(OP_DISTANCE)                      \

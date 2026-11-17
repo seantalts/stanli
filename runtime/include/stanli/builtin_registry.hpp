@@ -143,6 +143,7 @@ enum class BuiltinMatrixOp : uint8_t {
   MatrixExpMultiply,
   ScaleMatrixExpMultiply,
   TraceDot,
+  Trace,
   Norm1,
   Norm2,
   Distance,

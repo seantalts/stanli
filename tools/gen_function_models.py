@@ -198,7 +198,7 @@ def render():
                  "hypergeometric_pFq", "inc_beta", "int_step", "inv_inc_beta",
                  "log_determinant_spd", "matrix_exp_multiply", "matrix_power",
                  "norm1", "norm2", "qr_Q", "qr_R", "qr_thin_Q", "qr_thin_R",
-                 "quantile", "scale_matrix_exp_multiply", "trace_dot",
+                 "quantile", "scale_matrix_exp_multiply", "trace", "trace_dot",
                  "trace_gen_quad_form", "trace_quad_form", "yule_simon_rng"):
         focused[name] = (
             "tests/fixtures/library_functions.stan; CmdStan references in "

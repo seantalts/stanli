@@ -1,5 +1,5 @@
 {
-  "dumped_registry_name_count": 244,
+  "dumped_registry_name_count": 245,
   "excluded": {
     "arity mismatch": [
       "log10()=>real",
@@ -1463,12 +1463,13 @@
       "to_vector(complex_row_vector)=>complex_vector",
       "to_vector(complex_vector)=>complex_vector",
       "to_vector_array(complex_matrix)=>array[]complex_vector",
+      "trace(complex_matrix)=>complex",
       "transpose(complex_matrix)=>complex_matrix",
       "transpose(complex_row_vector)=>complex_vector",
       "transpose(complex_vector)=>complex_row_vector"
     ]
   },
-  "excluded_signature_count": 1452,
+  "excluded_signature_count": 1453,
   "generator": "tools/generate_builtin_signature_models.py",
   "missing_from_stanc": [
     "Divide__",
@@ -2006,7 +2007,7 @@
       "source_sha256": "aee4904eda12ad4c2cfe553a4d46b5629f4bd3c882b21357562fc51c74060df9"
     },
     {
-      "case_count": 153,
+      "case_count": 154,
       "file": "tests/fixtures/builtin_signatures_36.stan",
       "functions": [
         "to_array_1d",
@@ -2017,6 +2018,7 @@
         "to_row_vector_array",
         "to_vector",
         "to_vector_array",
+        "trace",
         "trace_dot",
         "trace_gen_quad_form",
         "trace_quad_form",
@@ -2030,13 +2032,13 @@
         "zeros_row_vector",
         "zeros_vector"
       ],
-      "source_bytes": 37994,
-      "source_sha256": "de9ab43a14955766be7a03084c2bbdad67934c9da18ab246df0fad836bf0683a"
+      "source_bytes": 38189,
+      "source_sha256": "61f255e107c36f9c6c6016eb295cc5112a38765aa6b97de9e5b2977b20462954"
     }
   ],
-  "registry_name_count": 266,
+  "registry_name_count": 267,
   "signature_dump_sha256": "e9d528c1e275a200679eee49cf7bd132c0b9be1574b50da891b2bf8d6cd49234",
   "stanc_build_id": "stanc3 v2.40.0-159-g1d9c028",
-  "tested_case_count": 12753,
-  "tested_signature_count": 7486
+  "tested_case_count": 12754,
+  "tested_signature_count": 7487
 }

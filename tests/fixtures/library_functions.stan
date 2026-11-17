@@ -20,7 +20,7 @@ transformed data {
                     + sum(qr_R(dT)) + sum(qr_thin_Q(dT)) + sum(qr_thin_R(dT))
                     + sum(matrix_power(dA, 3)) + trace_quad_form(dA, dB)
                     + trace_quad_form(dA, dv) + trace_gen_quad_form(dB, dA, dB)
-                    + trace_dot(dA, dB) + sum(matrix_exp_multiply(dA, dB))
+                    + trace_dot(dA, dB) + trace(dB) + sum(matrix_exp_multiply(dA, dB))
                     + sum(scale_matrix_exp_multiply(0.3, dA, dB)) + norm1(dw)
                     + norm2(dw) + distance(dw, dtheta) + inc_beta(2.5, 1.5, 0.4)
                     + inv_inc_beta(2.5, 1.5, 0.4)
@@ -94,13 +94,14 @@ transformed parameters {
   matrix[2, 2] scale_exp_mult = scale_matrix_exp_multiply(x, S, pm);
   matrix[3, 3] csr_dense = csr_to_dense_matrix(3, 3, to_vector(s) .* csr_w[1:3], {1, 3, 2}, {1, 2, 3, 4});
   vector[3] csr_prod = csr_matrix_times_vector(3, 3, append_row(s, x), csr_v, csr_u, lam);
-  vector[5] matrix_results;
+  vector[6] matrix_results;
   vector[19] scalar_results;
   matrix_results[1] = determinant(S);
   matrix_results[2] = log_determinant_spd(S);
   matrix_results[3] = trace_quad_form(S, pm);
   matrix_results[4] = trace_quad_form(S, p);
   matrix_results[5] = trace_gen_quad_form(pm, S, pm);
+  matrix_results[6] = trace(S * pm);
   scalar_results[1] = trace_dot(S, pm);
   scalar_results[2] = norm1(p);
   scalar_results[3] = norm2(lam + 2);
@@ -133,7 +134,7 @@ model {
             + dot_product(Sg_free, [1, 2, 3, 4, 5, 6]')
             + dot_product(Lc_free, [6, 5, 4, 3, 2, 1]')
             + dot_product(u_free, [1, 3, 2]');
-  target += dot_product(matrix_results, linspaced_vector(5, 1, 5) / 5);
+  target += dot_product(matrix_results, linspaced_vector(6, 1, 6) / 6);
   target += dot_product(scalar_results, linspaced_vector(19, 1, 19) / 19);
   target += dot_product(to_vector(gen_inv), linspaced_vector(6, 1, 6) / 6)
             + dot_product(to_vector(chol_inv), linspaced_vector(4, 1, 4) / 4)

@@ -176,6 +176,12 @@ struct TraceDotOp {
                                  matrix_at(xs, 1, ctx.idata[2], ctx.idata[3]));
   }
 };
+struct TraceOp {
+  template <typename S>
+  static S call(const KernelCtx& ctx, std::vector<Vec<S>>& xs) {
+    return stan::math::trace(matrix_at(xs, 0, ctx.idata[0], ctx.idata[1]));
+  }
+};
 struct Norm1Op {
   template <typename S>
   static S call(const KernelCtx&, std::vector<Vec<S>>& xs) {
@@ -421,6 +427,7 @@ void register_library_kernels() {
   register_library<HmmMarginalOp>(OP_HMM_MARGINAL);
   register_library<HmmHiddenStateProbOp>(OP_HMM_HIDDEN_STATE_PROB);
   register_library<TraceDotOp>(OP_TRACE_DOT);
+  register_library<TraceOp>(OP_TRACE);
   register_library<Norm1Op>(OP_NORM1);
   register_library<Norm2Op>(OP_NORM2);
   register_library<DistanceOp>(OP_DISTANCE);

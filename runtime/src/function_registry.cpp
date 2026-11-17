@@ -615,6 +615,7 @@ const std::vector<FunctionSpec>& function_specs() {
                            OP_SCALE_MATRIX_EXP_MULTIPLY, 3));
     builtin("trace_dot",
             matrix_builtin(BuiltinMatrixOp::TraceDot, OP_TRACE_DOT, 2));
+    builtin("trace", matrix_builtin(BuiltinMatrixOp::Trace, OP_TRACE, 1));
     builtin("norm1", matrix_builtin(BuiltinMatrixOp::Norm1, OP_NORM1, 1));
     builtin("norm2", matrix_builtin(BuiltinMatrixOp::Norm2, OP_NORM2, 1));
     builtin("distance",
