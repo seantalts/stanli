@@ -20,9 +20,14 @@ Portable MIR v1 was a pre-release JSON format.
 v2 (`STANLI2:`) was the layout before every stanc3 fact the runtime reads
 became a typed field.
 v3 (`STANLI3:`) lacked the per-output-variable annotation list.
-v4 (`STANLI4:`) added the annotation list but had no tuple fields.
-v5 (`STANLI5:`) adds the tuple fields below; a program without a tuple encodes
-the same payload bytes as v4.
+v4 (`STANLI4:`) added the annotation list but had no tuples.
+v5 (`STANLI5:`) adds tuples. The compiler splits every tuple variable into one
+variable per leaf before encoding, so procedure bodies hold no tuple types or
+projections, and a tuple argument to a function is one argument per leaf.
+What remains of tuples is a call that returns several values, a function
+that returns them, the shape of an array of tuples printed by `print`, and
+the tuple types of the model's inputs and outputs, each a typed field
+described below.
 None of the older versions is accepted by this runtime; a `STANLI<n>:`
 document of another version is rejected with a request to recompile the
 model. The legacy stanc3 S-expression reader remains a separate input path.
@@ -92,7 +97,6 @@ the wire contract.
 ```text
 u8 depth
 u8 leaf
-list<UnsizedView> components   (Tuple only)
 ```
 
 | `leaf` | Meaning |
@@ -104,11 +108,8 @@ list<UnsizedView> components   (Tuple only)
 | 4 | `Vector` |
 | 5 | `RowVector` |
 | 6 | `Matrix` |
-| 7 | `Tuple` |
 
-`depth` is the array nesting depth. Unknown leaf tags are errors. A `Tuple`
-view lists its component views, so `array[] tuple(real, vector)` is depth 1,
-`Tuple`, components `Real` and `Vector`.
+`depth` is the array nesting depth. Unknown leaf tags are errors.
 
 ### Function library
 
@@ -170,21 +171,21 @@ the common metadata suffix shown below.
 | 13 | `IndexUpfrom` | `list<Expr> args` (the lower bound) |
 | 14 | `IndexBetween` | `list<Expr> args` (the lower and upper bounds) |
 | 15 | `IndexMulti` | `list<Expr> args` (the integer array of indices) |
-| 16 | `TupleProjection` | `list<Expr> args` (the tuple), `u32 component` (from 1) |
 
 The common suffix is:
 
 ```text
 UnsizedView unsized
 bool data_only
-list<bool> leaf_data_only   (Tuple view only)
 bool promoted
 string raw
 ```
 
-stanc3 gives a tuple-typed value one adlevel per component.
-`leaf_data_only` lists whether each leaf of the tuple type is data, depth
-first; `data_only` is false for a tuple.
+A `FunApp` that returns several values (see `MultiAssign`) has an `Unknown`
+view and occurs only as a `MultiAssign`'s `call`. A tuple argument of any
+call, including a shared argument of `reduce_sum` or another higher-order
+function, is one argument per leaf, depth first. stanc3 rejects an array of
+tuples as `reduce_sum`'s sliced argument.
 
 For `LitInt`, the C++ compatibility field `Expr.lit` is reconstructed as the
 exact `double` conversion of the decoded `i32`; it is not redundantly encoded.
@@ -204,7 +205,6 @@ A transform is:
 u8 kind
 list<Expr> args
 string raw
-list<Transform> components   (Tuple only)
 ```
 
 | Tag | Kind |
@@ -228,10 +228,8 @@ list<Transform> components   (Tuple only)
 | 16 | `StochasticColumn` |
 | 17 | `StochasticRow` |
 | 18 | `Unsupported` |
-| 19 | `Tuple` |
 
-Argument arities are checked against the selected kind. A `Tuple` transform
-has no arguments and one transform per component.
+Argument arities are checked against the selected kind.
 
 ### `SizedType`
 
@@ -248,7 +246,9 @@ list<SizedType> components   (STuple, or SArray of STuple, only)
 innermost element for an array and is empty otherwise. Dimension counts are
 validated against the base. An `STuple` has no dimensions; an array of
 tuples has `SArray` base, `STuple` element base, its array dimensions, and
-the tuple's component types.
+the tuple's component types. `components` is empty for every other type.
+A tuple type occurs only in `input_vars` and `output_vars`; the decoder
+rejects one anywhere else.
 
 ### `DeclType`
 
@@ -278,6 +278,7 @@ match the function.
 | 0 | any other | none |
 | 1 | `FnCheck` | `Transform constraint`, `string var_name`, `Expr value` |
 | 2 | `FnWriteParam` | `optional<Transform> unconstrain`, `Expr value` |
+| 3 | `FnPrint`, `FnReject`, `FnFatalError` | `list<PrintItem> layout` |
 
 `FnCheck` verifies `value` against `constraint`, whose bounds are the
 statement's arguments. `FnWriteParam` writes `value`; in `transform_inits`
@@ -286,6 +287,26 @@ value into a free one, and in `generate_quantities` it is absent because the
 value is constrained already. The decoder puts `value` first in the
 statement's argument list.
 
+Tag 3 gives the shape of an array of tuples printed by `print`, `reject` or
+`fatal_error`, whose leaves are separate arguments. A statement printing no
+array of tuples uses tag 0. A `PrintItem` is
+
+```text
+u8 kind
+```
+
+| `kind` | Meaning | Fields after kind |
+| ---: | --- | --- |
+| 0 | one argument, printed as itself | none |
+| 1 | a tuple | `u8 depth`, `list<PrintItem> components` |
+
+The items take the statement's arguments in order and must take all of
+them. A tuple item of depth `d` prints an array of `d` dimensions of tuples
+the way Stan prints one, `[(1,[2,3]),(4,[5,6])]`; its components take
+consecutive arguments, each an array whose first `d` dimensions are the
+tuple array's. A tuple that is not in an array is spelled with string
+literal arguments instead and needs no layout.
+
 ### Statement kind
 
 Each statement starts with one tag and then only fields active for that kind.
@@ -293,7 +314,7 @@ There is no inactive-field block.
 
 | Tag | Kind | Active fields after tag |
 | ---: | --- | --- |
-| 0 | `Decl` | `string id`, `DeclType type`, `bool data_only`, `list<bool> leaf_data_only` (tuple type only), `bool has_init`, optional `Expr init`, `optional<Transform> read_transform`, `list<Expr> read_dims`, `string raw` |
+| 0 | `Decl` | `string id`, `DeclType type`, `bool data_only`, `bool has_init`, optional `Expr init`, `optional<Transform> read_transform`, `list<Expr> read_dims`, `string raw` |
 | 1 | `Assignment` | `string lhs`, `list<Expr> lhs_indices`, `Expr rhs`, `string raw` |
 | 2 | `TargetPE` | `Expr target`, `string raw` |
 | 3 | `Block` | `list<Stmt> body`, `string raw` |
@@ -302,20 +323,25 @@ There is no inactive-field block.
 | 6 | `IfElse` | `Expr condition`, `list<Stmt> body`, `string raw` |
 | 7 | `While` | `Expr condition`, `list<Stmt> body`, `string raw` |
 | 8 | `NRFunApp` | `u8 library`, `string name`, `u8 suffix`, `list<Expr> args`, `u8 payload` and its fields, `string raw` |
-| 9 | `Return` | `bool has_value`, optional `Expr value`, `string raw` |
+| 9 | `Return` | `list<Expr> values`, `string raw` |
 | 10 | `Break` | none |
 | 11 | `Continue` | none |
 | 12 | `Skip` | `string raw` |
 | 13 | `Unsupported` | `string raw` |
 | 14 | `JacobianPE` | `Expr target`, `string raw` |
-| 15 | `TupleAssignment` | `string lhs`, `list<Expr> lhs_indices`, `list<TupleStep> steps`, `Expr rhs`, `optional<Transform> read_transform`, `list<Expr> read_dims` |
+| 15 | `MultiAssign` | `list<string> targets`, `Expr call`, `string raw` |
 
-A `TupleAssignment` assigns through tuple projections: `x[i].2[j] = rhs` is
-`lhs` x, `lhs_indices` [i], and the one step (2, [j]). A `TupleStep` is
-`u32 component` (from 1) followed by `list<Expr> indices`. stanc3 reads a
-tuple parameter one component at a time, `x.2 = FnReadParam(...)`; such an
-assignment carries the read's transform and dimensions as `Decl` does. The
-decoder reads it as an `Assignment` with its steps.
+A `MultiAssign` assigns each value a call returns to a declared variable, in
+order: `(q, r) = qr(A)`. `call` is a `FunApp` of a user function whose
+definition lists as many results, or of a library function returning a
+tuple. A library function's results are its tuple's leaves, depth first.
+Each target is declared, with the type of its result, before the
+statement, and the targets are distinct. The compiler writes a
+tuple-returning call that it did not inline as one `MultiAssign` to fresh
+variables.
+
+A `Return` holds no value in a void function, one value in a function with
+one result, and one value per result otherwise.
 
 `JacobianPE` is `jacobian += target`. The decoder reads it as a `TargetPE`
 whose `jacobian` flag is set: stanli always evaluates the density with the
@@ -331,11 +357,14 @@ string name
 list<string> arg_names
 list<UnsizedView> arg_views
 list<bool> arg_data_only
-list<bool> leaf_data_only   (once per tuple argument, in order)
+list<UnsizedView> results
 list<Stmt> body
 ```
 
-The three argument lists must have identical lengths. Function names are stanc3's names,
+The three argument lists must have identical lengths. `results` is empty
+for a void function, one view for an ordinary function, and one view per
+leaf, depth first, for a function returning a tuple; a tuple argument is
+one argument per leaf. Function names are stanc3's names,
 including its `_stan_` prefix for a C++ keyword, which the finalizer removes.
 A `propto` flag is true only for an `FnLpdf`/`FnLpmf` call written
 `_lupdf`/`_lupmf`.
@@ -359,6 +388,7 @@ u32 generated_quantities_begin
 list<FunDef> fun_defs
 list<OutputVar> output_vars
 list<Stmt> transform_inits
+list<TupleLeaf> tuple_leaves
 ```
 
 stanc3 separates `generate_quantities`, its write_array body, into
@@ -412,9 +442,36 @@ parameters writes it as an empty list.
 The order of every list is semantic and preserved. Source locations and
 stanc3 fields absent from `stanli::mir` are not encoded.
 
-stanc3 reads a tuple input whole, `FnReadData(d, context__, "d")`, while
-CmdStan's JSON reader keys each leaf by its slots: `d.1`, `d.2.1`. The
-finalizer, below, maps one read to the other.
+A `TupleLeaf` is one variable the compiler made from a tuple input or
+output variable:
+
+```text
+string variable
+string base
+list<TupleSlot> path
+```
+
+A `TupleSlot` is `u32 before` followed by `u32 component` (from 1). `before`
+counts the array dimensions of `base` that come before the slot:
+`array[N] tuple(real, vector[2]) p` has leaves for `p[i].1` and `p[i].2`,
+each with one slot whose `before` is 1. A leaf of an array of tuples is an
+array over the tuple array's dimensions, then its own: the leaf for
+`p[i].2` is an `array[N] vector[2]`. Nothing reads a leaf's structure from
+its name.
+
+A data leaf is read with `FnReadData` under its CmdStan key, the base name
+followed by each slot (`d.1`, `d.2.1`); CmdStan's JSON reader stores an
+array of tuples element by element under that key, and the runtime reorders
+it into the leaf's array order.
+
+A parameter leaf is declared with its own read, whose transform and
+dimensions cover the whole leaf. The unconstrained values of a tuple
+parameter remain one block, in the order stanc3 reads them: element by
+element of the tuple array, the first index fastest, and within an element
+each component in turn. Each leaf's read gathers its values from that block,
+so the unconstrained vector, its length and its names are CmdStan's.
+`write_array` and `transform_inits` write a tuple parameter element by
+element, in the same order.
 
 ## Unsupported and opaque payloads
 
@@ -438,10 +495,12 @@ After structural decoding and before a `Program` is exposed, the runtime:
 2. checks function argument list lengths;
 3. records the overload each user-function call selects and rejects
    colliding overloads;
-4. replaces each tuple variable with one variable per leaf, an array of
-   tuples becoming a tuple of arrays, inlines each function returning a
-   tuple and passes a tuple argument as one argument per leaf, so no engine
-   sees a tuple (`runtime/src/mir_tuples.cpp`);
+4. checks that tuple types occur only in the input and output variables,
+   that the `TupleLeaf` list holds exactly one entry for each leaf of each
+   tuple input and output variable, that a data leaf's `FnReadData` uses
+   its CmdStan key, that each `MultiAssign` and `Return` has as many values
+   as the function has results, and that each print layout takes exactly
+   its statement's arguments;
 5. validates variable and function bindings; and
 6. rejects trailing payload bytes.
 
