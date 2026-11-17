@@ -209,9 +209,24 @@ void finish_multi_assigns(Stmt& s, Declared& declared) {
   }
 }
 
+bool has_multi_assign(const std::vector<Stmt>& body) {
+  for (const Stmt& s : body)
+    if (s.kind == Stmt::MultiAssign || has_multi_assign(s.body)) return true;
+  return false;
+}
+
 }  // namespace
 
 void finish_multi_assigns(Program& program) {
+  // Most programs have none; finding that out allocates nothing.
+  bool any = false;
+  for (const auto* body :
+       {&program.prepare_data, &program.log_prob, &program.generate_quantities,
+        &program.transform_inits})
+    any = any || has_multi_assign(*body);
+  for (const FunDef& f : program.fun_defs)
+    any = any || has_multi_assign(f.body);
+  if (!any) return;
   Declared data;
   for (const auto& [name, type] : program.input_vars)
     data[name] = {declaration_view(type), true};

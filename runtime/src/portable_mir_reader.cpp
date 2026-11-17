@@ -652,10 +652,13 @@ OutputVar read_output_var(Reader& reader, Interface& interface) {
   const uint8_t block = reader.u8();
   value.block = read_tag(reader, block, kBlockTags, "unknown output-block tag");
   TupleType type = read_interface_type(reader);
-  value.type = type.type;
-  if (is_tuple(type.type) &&
-      !interface.tuple_types.emplace(value.name, std::move(type)).second)
-    reader.fail("two tuple variables named " + value.name);
+  if (!is_tuple(type.type)) {
+    value.type = std::move(type.type);
+  } else {
+    value.type = type.type;
+    if (!interface.tuple_types.emplace(value.name, std::move(type)).second)
+      reader.fail("two tuple variables named " + value.name);
+  }
   value.annotations = reader.list<std::string>([&] { return reader.string(); });
   return value;
 }
@@ -666,8 +669,9 @@ std::pair<std::string, SizedType> read_input(Reader& reader,
   Reader::Depth depth(reader);
   std::string name = reader.string();
   TupleType type = read_interface_type(reader);
+  if (!is_tuple(type.type)) return {std::move(name), std::move(type.type)};
   SizedType sized = type.type;
-  if (is_tuple(type.type)) {
+  {
     if (!interface.tuple_types.emplace(name, std::move(type)).second)
       reader.fail("two tuple variables named " + name);
     interface.tuple_inputs.emplace_back(position, name);
