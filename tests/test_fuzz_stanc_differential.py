@@ -163,6 +163,24 @@ class CompileAndBucketTest(unittest.TestCase):
             kinds(d.compare_compiles(ok, self.compiled("timeout"))[0]),
             ["timeout"])
 
+    def test_compiler_failures_skip_warnings(self):
+        warning = ("warning: Assignment of variable to itself.\n"
+                   "    \u250c\u2500 m.stan:3:5\n  3 \u2502  x = x;\n\n")
+        self.assertEqual(
+            d.classify_failure(1, warning + 'Error: Identifier "y" not in '
+                               "scope.\n    at m.stan:2\n"),
+            ("frontend", 'Error: Identifier "y" not in scope.\n'
+                         "    at m.stan:2"))
+        self.assertEqual(d.classify_failure(1, "error: Ill-formed\n\nmore"),
+                         ("frontend", "error: Ill-formed\n\nmore"))
+        self.assertEqual(
+            d.classify_failure(1, warning + "stanli does not support x yet"),
+            ("unsupported", "stanli does not support x yet"))
+        self.assertEqual(
+            d.classify_failure(1, "Internal compiler error: boom"),
+            ("internal", "Internal compiler error: boom"))
+        self.assertEqual(d.classify_failure(-6, "abort"), ("crash", "abort"))
+
     def test_bucket_uses_first_kind_in_priority_order(self):
         diffs = [("output", {}), ("grad", {}), ("lp", {})]
         self.assertEqual(d.bucket("copy_propagation", diffs),

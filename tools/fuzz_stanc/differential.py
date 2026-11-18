@@ -287,17 +287,27 @@ def compile_model(ctx, source, passes, mir_path, repeat=1):
         result.update(outcome="ok", size=len(out.encode()),
                       sha=hashlib.sha256(out.encode()).hexdigest())
         return result
-    message = err.strip()
-    if code not in (0, 1):
-        outcome = "crash"
-    elif message.startswith("Internal compiler error"):
-        outcome = "internal"
-    elif message.startswith(("Syntax error", "Semantic error")):
-        outcome = "frontend"
-    else:
-        outcome = "unsupported"
+    outcome, message = classify_failure(code, err)
     result.update(outcome=outcome, message=message[:400])
     return result
+
+
+def classify_failure(code, err):
+    """(outcome, message) of a failed compile. stanc prints its warnings
+    before the error, one paragraph each, so they are dropped first."""
+    paragraphs = err.strip().split("\n\n")
+    while len(paragraphs) > 1 and \
+            paragraphs[0].lower().startswith("warning"):
+        paragraphs.pop(0)
+    message = "\n\n".join(paragraphs).strip()
+    if code not in (0, 1):
+        return "crash", message
+    if message.startswith("Internal compiler error"):
+        return "internal", message
+    if message.startswith(("Syntax error", "Semantic error", "Error:",
+                           "error:")):
+        return "frontend", message
+    return "unsupported", message
 
 
 def check_model(ctx, source, data_file, mir_path, status_path):
