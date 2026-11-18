@@ -236,6 +236,14 @@ class RuleTest(unittest.TestCase):
         p = program(gq=[g.Decl("y", g.REAL, [], rng())])
         self.assertEqual(rules(p), [])
 
+    def test_declared_sizes_match_the_type(self):
+        def decl(size):
+            return g.Decl("y", g.vec(0), [size], g.Lit(g.vec(0), 0.5))
+        self.assertEqual(rules(program(gq=[decl(g.Lit(g.INT, 3))])),
+                         ["in_range"])
+        self.assertEqual(rules(program(gq=[decl(g.Lit(g.INT, 2))])), [])
+        self.assertEqual(rules(program(gq=[decl(g.Size(0, "data"))])), [])
+
     def test_fixed_length_array_expression(self):
         arr = g.ArrE([HALF, HALF, HALF], g.arr(0, g.REAL))
         p = program(gq=[g.Decl("y", g.arr(0, g.REAL), [g.Size(0, "data")],

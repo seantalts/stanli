@@ -870,6 +870,12 @@ class _Checker:
     def body(self, body, scope, ctx, loops):
         scope = dict(scope)
         for i, s in enumerate(body):
+            if isinstance(s, Decl) and not self.p.config.get("out_of_range"):
+                for z, sym in zip(s.sizes, decl_syms(s.t)):
+                    if ival(z, self.p) != self.p.sizes[sym]:
+                        self.bad("in_range", f"{s.name} is declared with "
+                                 f"size {expr_str(z, self.p)} for extent "
+                                 f"{self.p.sizes[sym]}")
             if isinstance(s, Decl) and s.init is None:
                 nxt = body[i + 1] if i + 1 < len(body) else None
                 if not (isinstance(nxt, Assign) and nxt.op == "=" and
