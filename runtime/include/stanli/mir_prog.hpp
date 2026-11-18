@@ -4469,12 +4469,14 @@ struct ProgramCompiler {
             emit(Program::ADD, accumulator->reg, accumulator->reg, v.reg + k);
           return Path::Open;
         }
-        auto deferred = deferred_shapes.find(s.lhs);
-        if (deferred != deferred_shapes.end()) {
+        if (deferred_shapes.count(s.lhs)) {
           if (!s.lhs_idx.empty())
             bail("indexed assignment before unsized shape adoption for " +
                  s.lhs);
+          // Evaluating the value can inline a call, which replaces these
+          // maps and leaves any iterator into them dangling.
           const Range v = assignment_value(s);
+          auto deferred = deferred_shapes.find(s.lhs);
           if (!unsized_accepts(deferred->second, v))
             bail("assignment logical view mismatch for " + s.lhs);
           auto binding = reals.find(s.lhs);
@@ -4582,7 +4584,7 @@ struct ProgramCompiler {
             late_bound.emplace_back(nd.reg, v.len);
             for (int k = 0; k < v.len; ++k)
               emit(Program::MOV, nd.reg + k, v.reg + k);
-            it->second = nd;
+            reals[s.lhs] = nd;
             if (have_folded_ints) {
               known_int_arrays[s.lhs] = std::move(folded_ints);
               known_int_array_dims[s.lhs] = nd.dims;
