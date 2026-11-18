@@ -1,14 +1,4 @@
 [
- {"bucket": "function_inlining:compile_fail_o1",
-  "match": "assignment logical view mismatch for (tuple\\.)?inline_",
-  "reason": "#580: the inliner declares its temporaries with zero sizes, and stanli on main refuses to assign an empty value of another shape, such as array[0] vector[1]"},
- {"bucket": "copy_propagation:lp",
-  "match": "^(?!.*\"kind\": \"grad\")",
-  "reason": "expected: copy propagation turns a model local into data, so a ~ statement drops terms that are now constant; the gradient agrees"},
- {"bucket": "dead_code_elimination:lp",
-  "match": "^(?!.*\"kind\": \"grad\")",
-  "reason": "expected: as for copy_propagation:lp, a ~ statement drops terms whose arguments became data; the gradient agrees"},
- {"bucket": "function_inlining:error_message",
-  "match": "\"none\": \"(r\\d+)0\", \"o1\": \"\\1-0\"",
-  "reason": "a reject message prints 0 unoptimized and -0 at o1 for a product with a zero factor"}
+ {"bucket": "function_inlining:compile_fail_o1", "match": "assignment logical view mismatch for (tuple\\.)?inline_", "reason": "#580: the inliner declares its temporaries with zero sizes, and stanli on main refuses to assign an empty value of another shape, such as array[0] vector[1]"},
+ {"bucket": "function_inlining:error_message", "match": "\"none\": \"(r\\d+)0\", \"o1\": \"\\1-0\"", "reason": "a reject message prints 0 unoptimized and -0 at o1 for a product with a zero factor"}
 ]
