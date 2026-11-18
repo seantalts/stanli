@@ -5,11 +5,21 @@ let () =
   let filename = ref None in
   let messages_json = ref None in
   let model = ref None in
+  let passes = ref None in
   let usage =
-    "usage: stanli_compiler_cli [--model-only] [--fast-math] [--include-path DIR]... [--filename NAME] [--messages-json PATH] MODEL.stan" in
+    "usage: stanli_compiler_cli [--model-only] [--fast-math] [--passes SPEC] [--include-path DIR]... [--filename NAME] [--messages-json PATH] MODEL.stan" in
+  let set_passes spec =
+    match Stanli_pipeline.parse_pass_override spec with
+    | Ok selected -> passes := Some selected
+    | Error message -> raise (Arg.Bad ("--passes: " ^ message)) in
   Arg.parse
     [ ("--model-only", Arg.Set model_only, "compile only model entry points")
     ; ("--fast-math", Arg.Set fast_math, "enable partial evaluation")
+    ; ( "--passes"
+      , Arg.String set_passes
+      , "none, o1 (no structural fallback), or a comma-separated list of \
+         optimization_settings field names to run instead of the shipping \
+         passes" )
     ; ( "--include-path"
       , Arg.String (fun path -> include_paths := path :: !include_paths)
       , "directory to search for Stan includes (repeatable)" )
@@ -31,7 +41,7 @@ let () =
   let path = Option.get !model in
   let code = In_channel.with_open_bin path In_channel.input_all in
   let compilation =
-    Stanli_pipeline.compile_portable ~model_only:!model_only ~fast_math:!fast_math ~model_name:"embedded_model" code
+    Stanli_pipeline.compile_portable ~model_only:!model_only ~fast_math:!fast_math ?passes:!passes ~model_name:"embedded_model" code
       ~include_source:
         (Frontend.Include_files.FileSystemPaths
            (List.rev !include_paths @ [Filename.dirname path]))
