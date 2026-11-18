@@ -41,14 +41,14 @@ def _write_result(context, is_int, reals, real_size, ints, int_size,
         if dim_size == 0:
             if size != 1:
                 raise RuntimeError("Stan function returned an invalid scalar")
-            result["value"] = data[0]
+            result["values"].append(data[0])
         else:
             shape = tuple(dims[i] for i in range(dim_size))
             if size:
                 values = np.ctypeslib.as_array(data, shape=(size,)).copy()
             else:
                 values = np.empty(0, dtype=np.intc if is_int else np.float64)
-            result["value"] = values.reshape(shape, order="F")
+            result["values"].append(values.reshape(shape, order="F"))
         return 0
     except BaseException as exc:
         result["error"] = exc
@@ -165,7 +165,7 @@ class Function:
                 flat.size, dims, array.ndim)
             buffers.extend((flat, dims, encoded_name))
 
-        result = {"value": None, "error": None}
+        result = {"values": [], "error": None}
         context = ctypes.py_object(result)
         err = ctypes.create_string_buffer(8192)
         with _native_output():
@@ -176,7 +176,9 @@ class Function:
             raise result["error"]
         if rc:
             raise RuntimeError(err.value.decode())
-        return result["value"]
+        # A function returning a tuple gives one value per leaf.
+        values = result["values"]
+        return values[0] if len(values) == 1 else tuple(values)
 
     def __repr__(self):
         return f"<stanli.Function {self.name}>"

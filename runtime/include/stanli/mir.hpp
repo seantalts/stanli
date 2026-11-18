@@ -11,6 +11,7 @@
 #include <cstdint>
 #include <limits>
 #include <map>
+#include <memory>
 #include <optional>
 #include <set>
 #include <stdexcept>
@@ -22,6 +23,9 @@
 
 namespace stanli {
 namespace mir {
+namespace detail {
+struct TupleInterface;
+}
 
 // The MIR text is not something this reader understands: malformed, or
 // using a construct outside the slice.
@@ -43,6 +47,9 @@ struct UnsizedView {
   uint8_t depth = 0;
   UnsizedLeaf leaf = UnsizedLeaf::Unknown;
 };
+static_assert(sizeof(UnsizedView) == 2 &&
+                  std::is_trivially_copyable_v<UnsizedView>,
+              "every Expr holds an UnsizedView");
 
 // A non-array value of this type: stanc's UInt, UReal, UVector, ...
 inline bool is_unsized(const UnsizedView& view, UnsizedLeaf leaf) {
@@ -93,7 +100,7 @@ struct FunctionType {
 };
 
 struct Expr {
-  enum Kind {
+  enum Kind : uint8_t {
     Var,
     LitInt,
     LitReal,
@@ -113,12 +120,20 @@ struct Expr {
     IndexBetween,
     IndexMulti
   } kind = Unsupported;
-  std::string name;  // Var name or FunApp function name
-  enum class Lib { StanLib, Internal, UserDefined } fn_lib = Lib::StanLib;
+  // The small fields are kept together so that they pack into one word.
+  enum class Lib : uint8_t {
+    StanLib,
+    Internal,
+    UserDefined
+  } fn_lib = Lib::StanLib;
   FnSuffix fn_suffix = FnSuffix::Plain;
   // (FnDist _ Unnormalized), or the older (FnLpdf true): the call was written
   // `_lupdf`/`_lupmf`. On a callback Var, the reference was.
   bool fn_propto = false;
+  bool data_only = false;  // adlevel DataOnly
+  bool promoted = false;   // explicit MIR Promotion to this adlevel/type
+  UnsizedView unsized;
+  std::string name;  // Var name or FunApp function name
   // A user function call, or a Var naming one, that selects one overload of
   // an overloaded name: that overload's signature. Empty otherwise.
   std::string fn_overload;
@@ -128,9 +143,6 @@ struct Expr {
   std::string lit_s;
   std::vector<Expr> args;  // FunApp args; Promotion inner; Indexed base+idx;
                            // an index's bounds
-  UnsizedView unsized;
-  bool data_only = false;  // adlevel DataOnly
-  bool promoted = false;   // explicit MIR Promotion to this adlevel/type
   std::string raw;         // Unsupported diagnostics
 };
 
@@ -557,8 +569,19 @@ inline bool is_complex(const SizedType& t) {
   return leaf.rfind("SComplex", 0) == 0;
 }
 
+// How print, reject and fatal_error spell an array of tuples whose leaves
+// are separate arguments. An Argument item takes one argument and prints it
+// as itself. A Tuple item prints a `depth`-dimensional array of tuples,
+// `[(1,[2,3]),(4,[5,6])]`; its components take consecutive arguments, each
+// an array whose first `depth` dimensions are the tuple array's.
+struct PrintItem {
+  enum class Kind : uint8_t { Argument, Tuple } kind = Kind::Argument;
+  uint8_t depth = 0;                  // Tuple
+  std::vector<PrintItem> components;  // Tuple
+};
+
 struct Stmt {
-  enum Kind {
+  enum Kind : uint8_t {
     Decl,
     Assignment,
     TargetPE,
@@ -572,31 +595,45 @@ struct Stmt {
     Break,
     Continue,
     Skip,
-    Unsupported
+    Unsupported,
+    // `(a, b) = f(x)`: each value the call returns goes to one declared
+    // variable, in order. The call is `rhs`; the targets are the Var
+    // expressions in `fn_args`.
+    MultiAssign
   } kind = Unsupported;
+  // The small fields are kept together so that they pack into one word.
+  bool decl_data_only = false;  // Decl
+  bool has_init = false;        // Decl
+  // TargetPE: `jacobian += target`, a TargetPE that belongs to the change of
+  // variables. Every evaluation includes the Jacobian, so it adds to the
+  // target alike.
+  bool jacobian = false;
+  Expr::Lib fn_lib = Expr::Lib::StanLib;  // NRFunApp
+  FnSuffix fn_suffix = FnSuffix::Plain;   // NRFunApp
   // Decl
   std::string decl_id;
   SizedType decl_type;
-  bool decl_data_only = false;
-  bool has_init = false;
   Expr init;
-  std::optional<Transform> read_transform;  // set iff init is FnReadParam
-  std::vector<Expr> read_dims;              // FnReadParam dims
+  // Set iff the initializer, or an assignment's value, is FnReadParam.
+  std::optional<Transform> read_transform;
+  std::vector<Expr> read_dims;  // FnReadParam dims
   // Assignment
   std::string lhs;
   std::vector<Expr> lhs_idx;
+  // Assignment; the call of a MultiAssign; the value of a Return that
+  // has one value (`has_init` is then set).
   Expr rhs;
   // TargetPE
   Expr target;
-  // `jacobian += target`: a TargetPE that belongs to the change of variables.
-  // Every evaluation includes the Jacobian, so it adds to the target alike.
-  bool jacobian = false;
   // NRFunApp
   std::string fn_name;
-  Expr::Lib fn_lib = Expr::Lib::StanLib;
-  FnSuffix fn_suffix = FnSuffix::Plain;
   std::string fn_overload;  // as on Expr
+  // NRFunApp arguments; a MultiAssign's targets; the values of a Return
+  // from a function with more than one result.
   std::vector<Expr> fn_args;
+  // FnPrint, FnReject and FnFatalError that print an array of tuples: how
+  // the items take `fn_args`. Empty when each argument prints as itself.
+  std::vector<PrintItem> print_layout;
   // FnCheck: the relation lives in the CompilerInternal payload rather than
   // the ordinary argument list. The first fn_arg is the value and the rest
   // are its bounds.
@@ -619,6 +656,22 @@ struct Stmt {
   std::vector<Stmt> body;
   std::string raw;
 };
+
+#ifdef _LIBCPP_VERSION
+// Lowering copies MIR nodes often, so every program pays for their size.
+static_assert(sizeof(void*) != 8 || sizeof(Expr) == 184, "Expr grew");
+static_assert(sizeof(void*) != 8 || sizeof(Stmt) == 1696, "Stmt grew");
+#endif
+
+// Each variable the statement itself assigns, whole or in part: an
+// Assignment's lhs, or each target of a MultiAssign. Child statements are
+// the caller's to walk.
+template <class F>
+void for_each_assigned(const Stmt& s, F visit) {
+  if (s.kind == Stmt::Assignment) visit(s.lhs);
+  if (s.kind == Stmt::MultiAssign)
+    for (const Expr& target : s.fn_args) visit(target.name);
+}
 
 // A user function called as a statement, as the call expression the
 // function machinery takes. It has no value, so its type stays empty.
@@ -683,17 +736,26 @@ bool instantiated_autodiff(const Expr& e, bool promoted_autodiff,
 // Every expression a statement holds itself: its own slots, the declared
 // extents and the arguments of its transforms. Child statements are the
 // caller's to walk.
+template <class TypeRef, class F>
+void for_each_dim(TypeRef& type, F&& visit) {
+  for (auto& e : type.dims) visit(e);
+}
+
+template <class TransformRef, class F>
+void for_each_transform_arg(TransformRef& transform, F&& visit) {
+  for (auto& e : transform.args) visit(e);
+}
+
 template <class StmtRef, class F>
 void for_each_expr_of(StmtRef& s, F& visit) {
   for (auto* e : {&s.init, &s.rhs, &s.target, &s.lower, &s.upper, &s.cond})
     visit(*e);
-  for (auto* expressions :
-       {&s.read_dims, &s.lhs_idx, &s.fn_args, &s.decl_type.dims})
+  for (auto* expressions : {&s.read_dims, &s.lhs_idx, &s.fn_args})
     for (auto& e : *expressions) visit(e);
+  for_each_dim(s.decl_type, visit);
   for (auto* transform :
        {&s.read_transform, &s.check_transform, &s.write_transform})
-    if (*transform)
-      for (auto& e : (*transform)->args) visit(e);
+    if (*transform) for_each_transform_arg(**transform, visit);
 }
 
 template <class F>
@@ -730,6 +792,10 @@ struct FunDef {
   std::vector<std::string> arg_names;
   std::vector<UnsizedView> arg_views;
   std::vector<bool> arg_data_only;
+  // What the function returns: nothing, one value, or, for a function
+  // returning a tuple, one value per leaf of the tuple, depth first. A
+  // call of a function with more than one result is a MultiAssign's call.
+  std::vector<UnsizedView> results;
   std::vector<Stmt> body;
 };
 
@@ -773,6 +839,11 @@ struct Program {
   // The parameters, transformed parameters and generated quantities in
   // the order write_array emits them, which is CmdStan's column order.
   std::vector<OutputVar> output_vars;
+  // The tuple input and output variables, which the compiler split into
+  // one variable per leaf. A tuple input appears in `input_vars` as its
+  // leaves; a tuple output keeps its own entry in `output_vars`. Null for
+  // a program without them.
+  std::shared_ptr<const detail::TupleInterface> tuples;
   // Deepest nesting of statements and expressions the reader met.
   unsigned nesting = 0;
 };
@@ -958,15 +1029,29 @@ class OutputCursor {
   explicit OutputCursor(const std::vector<OutputVar>& vars) : vars_(&vars) {}
 
   // `named` is the variable the write reads, or empty when there is none.
-  // `columns(var)` evaluates a variable's column count; it is called only
-  // for a write that names no variable. Returns null when the write fits
-  // no output variable.
+  // `columns(var)` evaluates a variable's column count. Returns null when the
+  // write fits no output variable.
   template <class Columns>
   const OutputVar* take(const std::string& named, int64_t width,
                         Columns columns) {
+    const OutputVar* var = take_impl(named, width, columns);
+    offset_ = written_ - width;
+    return var;
+  }
+
+  // The column of its variable the last write taken began at.
+  int64_t offset() const { return offset_; }
+
+ private:
+  template <class Columns>
+  const OutputVar* take_impl(const std::string& named, int64_t width,
+                             Columns columns) {
     if (!vars_) return nullptr;
     for (size_t k = next_; !named.empty() && k < vars_->size(); ++k)
       if ((*vars_)[k].name == named) {
+        // The optimizer may have made a later variable a copy of this
+        // one, which is then already written.
+        if (k == next_ && written_ + width > columns((*vars_)[k])) break;
         if (k != next_) {
           next_ = k;
           written_ = 0;
@@ -992,6 +1077,7 @@ class OutputCursor {
   const std::vector<OutputVar>* vars_ = nullptr;
   size_t next_ = 0;
   int64_t written_ = 0;  // columns of vars_[next_] written so far
+  int64_t offset_ = 0;
 };
 
 Program read_program(const sexp::Node& root);

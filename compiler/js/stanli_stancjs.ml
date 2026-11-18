@@ -28,7 +28,8 @@ let compile_portable ~model_only ~fast_math name code includes filename :
         | Error (Stanli_pipeline.Frontend_error error) ->
             wrap_result ?printed_filename ~code ~color_output ~warnings
               (Error error)
-        | Error (Stanli_pipeline.Internal_error message) ->
+        | Error (Stanli_pipeline.Internal_error message)
+         |Error (Stanli_pipeline.Unsupported message) ->
             wrap_error ?printed_filename ~code ~color_output ~warnings message
       in
       Js.Unsafe.set returned (Js.string "o1_fallback")

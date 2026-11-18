@@ -131,7 +131,11 @@ class LoweringWork {
         for (const auto& a : s.fn_args) n = add(n, expression(a, depth));
         return n;
       case mir::Stmt::Return:
+        for (const auto& value : s.fn_args)
+          n = add(n, expression(value, depth));
         return s.has_init ? add(n, expression(s.rhs, depth)) : n;
+      case mir::Stmt::MultiAssign:
+        return add(n, expression(s.rhs, depth));
       case mir::Stmt::For: {
         const auto lo = value(s.lower);
         const auto hi = value(s.upper);

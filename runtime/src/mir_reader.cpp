@@ -4,6 +4,7 @@
 #include <stanli/mir.hpp>
 
 #include "mir_reader_internal.hpp"
+#include "mir_tuples.hpp"
 
 #include <algorithm>
 #include <limits>
@@ -235,6 +236,14 @@ FnSuffix read_suffix(const Node& n, bool* propto) {
 
 UnsizedView read_unsized(const Node& n);
 
+// Only stanli's compiler splits tuples into their leaves; stock stanc3 MIR
+// keeps them whole.
+[[noreturn]] void tuples_unsupported() {
+  throw mir::MirError(
+      "mir: tuples need stanli's compiler; the stock stanc S-expression "
+      "reader does not support them");
+}
+
 // (UFun ((arg types...) return-type suffix mem-pattern)): a variable that
 // names a function.
 std::optional<FunctionType> read_function_type(const Node& type) {
@@ -261,7 +270,10 @@ UnsizedView read_unsized(const Node& n) {
     ++out.depth;
     leaf = &(*leaf)[1];
   }
-  if (leaf->is_atom()) out.leaf = unsized_leaf(leaf->atom);
+  if (leaf->is_atom())
+    out.leaf = unsized_leaf(leaf->atom);
+  else if (leaf->head_is("UTuple"))
+    tuples_unsupported();
   return out;
 }
 
@@ -454,6 +466,8 @@ SizedType read_sized(const Node& n) {
     // Innermost element base kept for the lowering (nested SArray chains
     // propagate it up, so array[T, N] int reports SInt).
     st.elem_base = inner.base == "SArray" ? inner.elem_base : inner.base;
+  } else if (st.base == "STuple") {
+    tuples_unsupported();
   } else {
     st.raw = dump(n);
   }
@@ -785,7 +799,9 @@ void validate_transform_shape(const Transform& transform) {
 void validate_sized_type_shape(const SizedType& type) {
   size_t arity = 0;
   bool exact = true;
-  if (type.base == "SVector" || type.base == "SRowVector") {
+  if (type.base == "STuple") {
+    arity = 0;
+  } else if (type.base == "SVector" || type.base == "SRowVector") {
     arity = 1;
   } else if (type.base == "SMatrix") {
     arity = 2;
@@ -811,8 +827,39 @@ void validate_sized_type_shape(const SizedType& type) {
   for (const Expr& dim : type.dims) validate_expression_shape(dim);
 }
 
+size_t print_arguments(const PrintItem& item, bool top) {
+  if (item.kind == PrintItem::Kind::Argument) {
+    if (item.depth != 0 || !item.components.empty())
+      malformed("print layout argument item");
+    return 1;
+  }
+  if (item.components.empty() || (top && item.depth == 0))
+    malformed("print layout tuple item");
+  size_t count = 0;
+  for (const PrintItem& component : item.components)
+    count += print_arguments(component, false);
+  return count;
+}
+
 void validate_statement_shape(const Stmt& statement) {
   validate_sized_type_shape(statement.decl_type);
+  if (!statement.print_layout.empty()) {
+    size_t count = 0;
+    for (const PrintItem& item : statement.print_layout)
+      count += print_arguments(item, true);
+    if (count != statement.fn_args.size())
+      malformed("print layout does not take every argument");
+  }
+  if (statement.kind == Stmt::MultiAssign) {
+    if (statement.rhs.kind != Expr::FunApp || statement.fn_args.size() < 2)
+      malformed("MultiAssign statement");
+    for (const Expr& target : statement.fn_args)
+      if (target.kind != Expr::Var) malformed("MultiAssign target");
+  }
+  if (statement.kind == Stmt::Return &&
+      (statement.fn_args.size() == 1 ||
+       (statement.has_init && !statement.fn_args.empty())))
+    malformed("Return statement values");
   for (const Expr* expression :
        {&statement.init, &statement.rhs, &statement.target, &statement.lower,
         &statement.upper, &statement.cond})
@@ -939,7 +986,8 @@ void validate_bindings(const std::vector<Stmt>& body, Bindings& bindings,
 
 void validate_expression(const Expr& e, const Bindings& bindings,
                          const Functions& functions,
-                         bool strict_variable_metadata) {
+                         bool strict_variable_metadata,
+                         bool several_results = false) {
   if (strict_variable_metadata && e.kind == Expr::Var && !e.promoted) {
     const auto binding = bindings.find(e.name);
     if (binding != bindings.end() &&
@@ -985,6 +1033,9 @@ void validate_expression(const Expr& e, const Bindings& bindings,
     const FunDef& function = *found->second;
     if (e.args.size() != function.arg_names.size())
       throw mir::MirError("mir: user function arity mismatch for " + e.name);
+    if (function.results.size() > 1 && !several_results)
+      throw mir::MirError("mir: " + e.name +
+                          " returns several values outside a MultiAssign");
     for (size_t i = 0; i < e.args.size(); ++i) {
       if (e.args[i].unsized.depth != function.arg_views[i].depth ||
           e.args[i].unsized.leaf != function.arg_views[i].leaf)
@@ -1009,9 +1060,70 @@ void validate_expression(const Expr& e, const Bindings& bindings,
     validate_expression(arg, bindings, functions, strict_variable_metadata);
 }
 
+// The number of values a supported library function returning a tuple
+// returns. Lowering refuses the others.
+std::optional<size_t> library_results(const std::string& name) {
+  static const std::map<std::string, size_t> results = {
+      {"qr", 2},
+      {"qr_thin", 2},
+      {"eigendecompose_sym", 2},
+      {"svd", 3},
+      {"csr_extract", 3}};
+  const auto found = results.find(name);
+  return found == results.end() ? std::nullopt
+                                : std::optional<size_t>(found->second);
+}
+
+void validate_multi_assign(const Stmt& s, const Bindings& bindings,
+                           const Functions& functions,
+                           bool strict_variable_metadata) {
+  const Expr& call = s.rhs;
+  std::vector<UnsizedView> results;
+  if (call.fn_lib == Expr::Lib::UserDefined) {
+    const auto found = functions.find(function_key(call));
+    if (found == functions.end())
+      throw mir::MirError("mir: call to unknown user function " + call.name);
+    results = found->second->results;
+  } else if (call.fn_lib == Expr::Lib::StanLib) {
+    const auto count = library_results(call.name);
+    if (count && *count != s.fn_args.size())
+      throw mir::MirError("mir: " + call.name + " returns " +
+                          std::to_string(*count) + " values, not " +
+                          std::to_string(s.fn_args.size()));
+  } else {
+    throw mir::MirError("mir: MultiAssign of a compiler-internal function");
+  }
+  if (call.fn_lib == Expr::Lib::UserDefined &&
+      results.size() != s.fn_args.size())
+    throw mir::MirError("mir: " + call.name + " returns " +
+                        std::to_string(results.size()) + " values, not " +
+                        std::to_string(s.fn_args.size()));
+  std::set<std::string> targets;
+  for (size_t k = 0; k < s.fn_args.size(); ++k) {
+    const Expr& target = s.fn_args[k];
+    if (!targets.insert(target.name).second)
+      throw mir::MirError("mir: MultiAssign assigns " + target.name + " twice");
+    const auto binding = bindings.find(target.name);
+    if (binding == bindings.end())
+      throw mir::MirError("mir: MultiAssign target " + target.name +
+                          " is not declared");
+    const UnsizedView declared = binding->second.view;
+    if (k < results.size() && declared.leaf != UnsizedLeaf::Unknown &&
+        (declared.depth != results[k].depth ||
+         declared.leaf != results[k].leaf))
+      throw mir::MirError("mir: MultiAssign target type disagrees for " +
+                          target.name);
+  }
+  validate_expression(call, bindings, functions, strict_variable_metadata,
+                      true);
+}
+
 void validate_bindings(const Stmt& s, Bindings& bindings, BindingScope* scope,
                        const Functions& functions,
                        bool strict_variable_metadata) {
+  if (s.kind == Stmt::MultiAssign)
+    return validate_multi_assign(s, bindings, functions,
+                                 strict_variable_metadata);
   for_each_expr(s, [&](const Expr& e) {
     validate_expression(e, bindings, functions, strict_variable_metadata);
   });
@@ -1212,7 +1324,7 @@ void unmangle(Expr& e) {
 }
 
 void unmangle(SizedType& type) {
-  for (Expr& dim : type.dims) unmangle(dim);
+  for_each_dim(type, [](Expr& dim) { unmangle(dim); });
 }
 
 void unmangle(Stmt& s) {
@@ -1256,7 +1368,7 @@ void resolve_overloads(Program& prog) {
     overloads[name] = std::move(defs);
   }
   for (auto& [name, type] : prog.input_vars)
-    for (Expr& d : type.dims) resolve_calls(d, overloads);
+    for_each_dim(type, [&](Expr& d) { resolve_calls(d, overloads); });
   for (auto* body : {&prog.prepare_data, &prog.log_prob,
                      &prog.generate_quantities, &prog.transform_inits})
     for (Stmt& s : *body) resolve_calls(s, overloads);
@@ -1270,13 +1382,23 @@ SizedType detail::unsized_declaration(const UnsizedView& view,
                                       std::string raw) {
   SizedType type;
   type.raw = std::move(raw);
-  if (view.depth == 0 && view.leaf == UnsizedLeaf::Int)
+  if (view.depth == 0 && view.leaf == UnsizedLeaf::Int) {
     type.base = "SInt";
-  else if (view.depth == 0 && view.leaf == UnsizedLeaf::Real)
+  } else if (view.depth == 0 && view.leaf == UnsizedLeaf::Real) {
     type.base = "SReal";
-  else
+  } else {
     type.unsized = view;
+  }
   return type;
+}
+
+std::string detail::unmangled(std::string name) {
+  unmangle(name);
+  return name;
+}
+
+UnsizedView detail::declaration_view(const SizedType& type) {
+  return declared_view(type);
 }
 
 void detail::validate_portable_program(const Program& prog) {
@@ -1311,10 +1433,28 @@ void strip_eval(Program& prog) {
 
 }  // namespace
 
+namespace {
+
+// Each return gives as many values as the function has results.
+void validate_returns(const Stmt& s, const FunDef& f) {
+  if (s.kind == Stmt::Return) {
+    const size_t values = s.has_init ? 1 : s.fn_args.size();
+    if (values != f.results.size())
+      throw mir::MirError("mir: a return in " + f.name + " gives " +
+                          std::to_string(values) + " values, not " +
+                          std::to_string(f.results.size()));
+  }
+  for (const Stmt& child : s.body) validate_returns(child, f);
+}
+
+}  // namespace
+
 void detail::finalize_program(Program& prog, bool strict_variable_metadata) {
   strip_eval(prog);
   unmangle(prog);
   resolve_overloads(prog);
+  finish_multi_assigns(prog);
+  record_tuple_reads(prog);
   Functions functions;
   for (const auto& f : prog.fun_defs) {
     const auto inserted = functions.emplace(function_key(f), &f);
@@ -1341,6 +1481,7 @@ void detail::finalize_program(Program& prog, bool strict_variable_metadata) {
   validate_bindings(prog.transform_inits, init_bindings, nullptr, functions,
                     strict_variable_metadata);
   for (const auto& f : prog.fun_defs) {
+    for (const Stmt& s : f.body) validate_returns(s, f);
     Bindings args;
     for (size_t i = 0; i < f.arg_names.size(); ++i)
       args[f.arg_names[i]] = Binding{f.arg_views[i], f.arg_data_only[i]};
@@ -1420,6 +1561,25 @@ Program read_program(const sexp::Node& root) {
       }
       if (const Node* fb2 = field(fd, "fdbody"))
         read_stmt_list((*fb2)[1], f.body);
+      // (fdrt (ReturnType T)) or (fdrt Void). Hand-written MIR may leave it
+      // out; a function returning a value then says so by its returns.
+      const Node* rt = field(fd, "fdrt");
+      if (rt && rt->size() == 2 && !(*rt)[1].is_atom() &&
+          (*rt)[1].head_is("ReturnType") && (*rt)[1].size() == 2) {
+        f.results.push_back(read_unsized((*rt)[1][1]));
+      } else if (!rt) {
+        const auto returns_value = [](const auto& self, const Stmt& s) -> bool {
+          if (s.kind == Stmt::Return && s.has_init) return true;
+          for (const Stmt& child : s.body)
+            if (self(self, child)) return true;
+          return false;
+        };
+        for (const Stmt& s : f.body)
+          if (returns_value(returns_value, s)) {
+            f.results.push_back(UnsizedView{});
+            break;
+          }
+      }
       prog.fun_defs.push_back(std::move(f));
     }
   }

@@ -810,7 +810,7 @@ test_that("the stanli-compile executable reports the O1 fallback as a classed wa
   got <- o1_notice(stanli:::mir_from_binary(compiler, o1_budget_code()))
   expect_length(got$seen, 1)
   expect_match(got$seen, "skipped O1", fixed = TRUE)
-  expect_true(startsWith(got$value, "STANLI4:"))
+  expect_true(startsWith(got$value, "STANLI5:"))
 })
 
 test_that("a model's variables and columns come from the runtime", {
@@ -831,4 +831,141 @@ test_that("a model's variables and columns come from the runtime", {
   expect_identical(parameter_names(model), c("mu", "v"))
   expect_identical(parameter_names(model, scalars = TRUE),
                    c("mu", "v[1]", "v[2]"))
+})
+
+test_that("tuple columns have the names cmdstanr gives them", {
+  skip_without_runtime()
+  model <- stanli_model(code = "
+    parameters { real mu; }
+    transformed parameters {
+      tuple(real, tuple(real, vector[2])) tp = (mu, (2 * mu, [mu, 3 * mu]'));
+    }
+    model { mu ~ normal(0, 1); }
+    generated quantities {
+      tuple(real, tuple(int, real)) q = (mu, (2, mu));
+      tuple(real, vector[3]) c = (mu, [1, 2, 3]');
+      array[2] tuple(real, real) g;
+      for (i in 1:2) g[i] = (i * mu, i);
+      array[2, 2] tuple(real, matrix[2, 2]) h;
+      for (i in 1:2) for (j in 1:2) h[i, j] = (i + j, rep_matrix(mu, 2, 2));
+    }")
+  # The CmdStan 2.40.0 CSV header of this model, and the names cmdstanr 0.9.0
+  # gives its columns in draws(), summary() and as_draws_df().
+  csv <- c("lp__", "mu", "tp:1", "tp:2:1", "tp:2:2.1", "tp:2:2.2", "q:1",
+           "q:2:1", "q:2:2", "c:1", "c:2.1", "c:2.2", "c:2.3", "g.1:1",
+           "g.1:2", "g.2:1", "g.2:2", "h.1.1:1", "h.1.1:2.1.1",
+           "h.1.1:2.2.1", "h.1.1:2.1.2", "h.1.1:2.2.2", "h.2.1:1",
+           "h.2.1:2.1.1", "h.2.1:2.2.1", "h.2.1:2.1.2", "h.2.1:2.2.2",
+           "h.1.2:1", "h.1.2:2.1.1", "h.1.2:2.2.1", "h.1.2:2.1.2",
+           "h.1.2:2.2.2", "h.2.2:1", "h.2.2:2.1.1", "h.2.2:2.2.1",
+           "h.2.2:2.1.2", "h.2.2:2.2.2")
+  cmdstanr <- c("lp__", "mu", "tp:1", "tp:2:1", "tp:2:2[1]", "tp:2:2[2]",
+                "q:1", "q:2:1", "q:2:2", "c:1", "c:2[1]", "c:2[2]", "c:2[3]",
+                "g[1:1]", "g[1:2]", "g[2:1]", "g[2:2]", "h[1,1:1]",
+                "h[1,1:2,1,1]", "h[1,1:2,2,1]", "h[1,1:2,1,2]", "h[1,1:2,2,2]",
+                "h[2,1:1]", "h[2,1:2,1,1]", "h[2,1:2,2,1]", "h[2,1:2,1,2]",
+                "h[2,1:2,2,2]", "h[1,2:1]", "h[1,2:2,1,1]", "h[1,2:2,2,1]",
+                "h[1,2:2,1,2]", "h[1,2:2,2,2]", "h[2,2:1]", "h[2,2:2,1,1]",
+                "h[2,2:2,2,1]", "h[2,2:2,1,2]", "h[2,2:2,2,2]")
+  expect_identical(model$columns, cmdstanr[-1])
+  fit <- sample_model(model, chains = 1, warmup = 20, samples = 5, seed = 1,
+                      refresh = 0)
+  expect_identical(dimnames(fit$draws)[[3]], cmdstanr[-1])
+  skip_if_not_installed("posterior")
+  cfit <- as_cstanfit(fit)
+  expect_identical(posterior::variables(cfit$draws()), cmdstanr)
+  expect_identical(cfit$summary()$variable, cmdstanr)
+  expect_identical(posterior::variables(cfit$draws(variables = "g")),
+                   cmdstanr[startsWith(cmdstanr, "g[")])
+  expect_identical(posterior::variables(cfit$draws(variables = "h")),
+                   cmdstanr[startsWith(cmdstanr, "h[")])
+  expect_identical(posterior::variables(as_draws_array(fit)), cmdstanr[-1])
+  expect_identical(setdiff(names(posterior::as_draws_df(as_draws_array(fit))),
+                           c(".chain", ".iteration", ".draw")),
+                   cmdstanr[-1])
+  skip_if_not_installed("rstan")
+  sf <- as_stanfit(fit)
+  expect_identical(sf@sim$fnames_oi, c(cmdstanr[-1], "lp__"))
+  expect_identical(names(sf@sim$samples[[1]]), c(csv[-1], "lp__"))
+})
+
+test_that("tuple variables group under their base names", {
+  skip_without_runtime()
+  model <- stanli_model(code = "
+    parameters { real mu; }
+    transformed parameters {
+      tuple(real, tuple(real, vector[2])) tp = (1.5, (2.5, [3.5, 4.5]'));
+    }
+    model { mu ~ normal(0, 1); }
+    generated quantities {
+      tuple(real, tuple(int, real)) q = (5, (6, 7.5));
+      tuple(real, vector[3]) c = (8, [9, 10, 11]');
+      array[2] tuple(real, real) g;
+      for (i in 1:2) g[i] = (10 * i + 0.5, 10 * i + 0.25);
+      array[2, 2] tuple(real, matrix[2, 2]) h;
+      for (i in 1:2) for (j in 1:2)
+        h[i, j] = (10 * i + j, [[1, 2], [3, 4]] * (10 * i + j));
+      tuple(real, array[2] tuple(int, vector[2])) w =
+        (1, {(2, [3, 4]'), (5, [6, 7]')});
+      matrix[2, 2] m = [[1, 2], [3, 4]];
+    }")
+  fit <- sample_model(model, chains = 2, warmup = 20, samples = 3, seed = 1,
+                      refresh = 0)
+  expect_identical(parameter_names(model), "mu")
+  skip_if_not_installed("posterior")
+  cfit <- as_cstanfit(fit)
+  # cmdstanr 0.9.0 lists the slots of a plain tuple (tp:1, tp:2:1, tp:2:2)
+  # and gives arrays of tuples NA sizes; these are the base names and sizes.
+  metadata <- cfit$metadata()
+  expect_identical(metadata$stan_variables,
+                   c("lp__", "mu", "tp", "q", "c", "g", "h", "w", "m"))
+  expect_identical(metadata$stan_variable_sizes,
+                   list(lp__ = 1L, mu = 1L, tp = 1L, q = 1L, c = 1L, g = 2L,
+                        h = c(2L, 2L), w = 1L, m = c(2L, 2L)))
+  expect_identical(posterior::variables(cfit$draws(variables = "tp")),
+                   c("tp:1", "tp:2:1", "tp:2:2[1]", "tp:2:2[2]"))
+  expect_identical(posterior::variables(cfit$draws(variables = "w")),
+                   c("w:1", "w:2[1:1]", "w:2[1:2,1]", "w:2[1:2,2]",
+                     "w:2[2:1]", "w:2[2:2,1]", "w:2[2:2,2]"))
+  expect_identical(cfit$summary("q")$variable, c("q:1", "q:2:1", "q:2:2"))
+
+  # extract() gives a tuple as CmdStan's JSON shape, a list keyed "1", "2";
+  # an array of tuples puts its array dims after the draws, before each
+  # slot's own dims.
+  ex <- extract(fit)
+  expect_identical(names(ex),
+                   c("mu", "tp", "q", "c", "g", "h", "w", "m", "lp__"))
+  expect_identical(names(ex$tp), c("1", "2"))
+  expect_equal(ex$tp[["2"]][["2"]][1, ], c(3.5, 4.5))
+  expect_identical(dim(ex$tp[["2"]][["2"]]), c(6L, 2L))
+  expect_equal(as.vector(ex$q[["2"]][["1"]]), rep(6, 6))
+  expect_equal(ex$g[["1"]][2, ], c(10.5, 20.5))
+  expect_equal(ex$g[["2"]][2, ], c(10.25, 20.25))
+  expect_identical(dim(ex$h[["1"]]), c(6L, 2L, 2L))
+  expect_equal(ex$h[["1"]][1, , ], rbind(c(11, 12), c(21, 22)))
+  expect_identical(dim(ex$h[["2"]]), c(6L, 2L, 2L, 2L, 2L))
+  expect_equal(ex$h[["2"]][1, 2, 1, , ], rbind(c(21, 42), c(63, 84)))
+  expect_equal(ex$h[["2"]][1, 1, 2, , ], rbind(c(12, 24), c(36, 48)))
+  expect_equal(ex$w[["2"]][["1"]][1, ], c(2, 5))
+  expect_equal(ex$w[["2"]][["2"]][1, 2, ], c(6, 7))
+  expect_identical(names(extract(fit, pars = c("g", "m"))), c("g", "m"))
+})
+
+test_that("tuple parameters take nested starting values", {
+  skip_without_runtime()
+  model <- stanli_model(code = "
+    parameters { real a; tuple(real, array[2] real<lower=0>) tp; }
+    model { a ~ normal(0, 1); tp.1 ~ normal(0, 1); tp.2 ~ exponential(1); }")
+  expect_identical(parameter_names(model), c("a", "tp"))
+  tp <- list("1" = 0.5, "2" = c(1, 2))
+  expect_equal(unconstrain(model, list(a = 1, tp = tp)),
+               c(1, 0.5, 0, log(2)))
+  expect_equal(unconstrain(model, list(a = 1, tp = tp, extra = 3),
+                           ignore_unknown = TRUE),
+               c(1, 0.5, 0, log(2)))
+  expect_equal(unconstrain(model, list(tp = tp), partial = TRUE, seed = 1)[-1],
+               c(0.5, 0, log(2)))
+  drawn <- local({ set.seed(1); stats::runif(4, -2, 2) })
+  expect_equal(unconstrain(model, list(a = 1), partial = TRUE, seed = 1),
+               c(1, drawn[-1]))
 })

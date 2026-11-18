@@ -262,21 +262,90 @@ runtime_variables <- function(ptr, parameters) {
   stats::setNames(v$dims, v$name)
 }
 
-# Column names in Stan's order, `theta[1,2]` for an element.
+# Column names in Stan's order, `theta[1,2]` for an element. Tuple columns
+# follow cmdstanr's repair of the CmdStan CSV name: `g.1:2.3` is `g[1:2,3]`.
 variable_columns <- function(variables) {
-  unlist(lapply(names(variables), function(name) {
+  csv <- unlist(lapply(names(variables), function(name) {
     dims <- variables[[name]]
     if (!length(dims)) return(name)
     if (prod(dims) == 0) return(character(0))
     index <- as.matrix(expand.grid(lapply(dims, seq_len)))
-    paste0(name, "[", apply(index, 1L, paste, collapse = ","), "]")
+    paste0(name, ".", apply(index, 1L, paste, collapse = "."))
   }), use.names = FALSE)
+  indexed <- grepl(".", csv, fixed = TRUE)
+  csv[indexed] <- paste0(gsub(".", ",", sub(".", "[", csv[indexed], fixed = TRUE),
+                              fixed = TRUE), "]")
+  csv
 }
 
 # The variable each column belongs to.
 column_variables <- function(variables) {
   rep(names(variables), vapply(variables, function(d) as.integer(prod(d)),
                                integer(1)))
+}
+
+# The runtime gives each slot of a tuple as a variable (`tp:2`, `g.1:1`);
+# the variable a user names is the base before the first `.` or `:`.
+variable_base <- function(names) sub("[.:].*$", "", names)
+
+# The steps from a tuple's base to one slot: "2" for a slot, "[1,2]" for an
+# array index. `g.1:2.3` is "[1]", "2", "[3]".
+tuple_steps <- function(name) {
+  parts <- strsplit(name, ":", fixed = TRUE)[[1L]]
+  index <- function(i) if (length(i)) paste0("[", paste(i, collapse = ","), "]")
+  head <- strsplit(parts[1L], ".", fixed = TRUE)[[1L]]
+  steps <- index(head[-1L])
+  for (part in parts[-1L]) {
+    p <- strsplit(part, ".", fixed = TRUE)[[1L]]
+    steps <- c(steps, p[1L], index(p[-1L]))
+  }
+  steps
+}
+
+# The declared variables with each tuple under its base name: an array of
+# tuples has its array dims, a plain tuple none.
+variable_groups <- function(variables) {
+  bases <- variable_base(names(variables))
+  groups <- lapply(unique(bases), function(base) {
+    slots <- names(variables)[bases == base]
+    if (identical(slots, base)) return(variables[[base]])
+    first <- vapply(slots, function(s) tuple_steps(s)[1L], "")
+    if (!startsWith(first[1L], "[")) return(integer(0))
+    index <- do.call(rbind, lapply(strsplit(gsub("\\[|\\]", "", first), ","),
+                                   as.integer))
+    as.integer(apply(index, 2L, max))
+  })
+  stats::setNames(groups, unique(bases))
+}
+
+# A tuple's slots as nested lists keyed "1", "2", ..., CmdStan's JSON shape.
+# An array of tuples puts its dims after the leading dim of each slot's
+# values, before the slot's own dims.
+nest_tuple_slots <- function(slots) {
+  steps <- lapply(names(slots), tuple_steps)
+  build <- function(entries) {
+    if (length(entries) == 1L && !length(steps[[entries]])) return(slots[[entries]])
+    keys <- vapply(entries, function(i) steps[[i]][1L], "")
+    for (i in entries) steps[[i]] <<- steps[[i]][-1L]
+    groups <- lapply(unique(keys), function(k) build(entries[keys == k]))
+    if (!startsWith(keys[1L], "["))
+      return(stats::setNames(groups, unique(keys))[order(as.integer(unique(keys)))])
+    index <- do.call(rbind, lapply(strsplit(gsub("\\[|\\]", "", unique(keys)), ","),
+                                   as.integer))
+    stack_tuple_elements(groups, as.integer(apply(index, 2L, max)))
+  }
+  build(seq_along(slots))
+}
+
+stack_tuple_elements <- function(elements, dims) {
+  if (is.list(elements[[1L]]))
+    return(lapply(stats::setNames(nm = names(elements[[1L]])), function(slot)
+      stack_tuple_elements(lapply(elements, `[[`, slot), dims)))
+  shape <- dim(elements[[1L]])
+  leaf <- shape[-1L]
+  stacked <- array(unlist(elements, use.names = FALSE),
+                   dim = c(shape[1L], leaf, dims))
+  aperm(stacked, c(1L, length(leaf) + 1L + seq_along(dims), 1L + seq_along(leaf)))
 }
 
 # The variables of a model or of a fit's model. A model saved before models
@@ -343,7 +412,7 @@ parameter_names <- function(model, scalars = FALSE) {
   if (!is.logical(scalars) || length(scalars) != 1L || is.na(scalars))
     stop("scalars must be TRUE or FALSE", call. = FALSE)
   variables <- runtime_variables(model$ptr, parameters = TRUE)
-  if (scalars) variable_columns(variables) else names(variables)
+  if (scalars) variable_columns(variables) else unique(variable_base(names(variables)))
 }
 
 #' Starting values on the constrained scale, as the free vector
@@ -427,7 +496,7 @@ complete_partial_inits <- function(model, values, init_radius, seed) {
   variables <- runtime_variables(model$ptr, parameters = TRUE)
   columns <- variable_columns(variables)
   values <- lapply(values, function(value) if (is.array(value)) as.vector(value) else value)
-  if (all(names(variables) %in% names(values))) return(values)
+  if (all(variable_base(names(variables)) %in% names(values))) return(values)
   if (!identical(columns, utils::head(model$columns, length(columns))))
     stop("this model's outputs do not begin with its parameters; partial ",
          "starting values are unavailable", call. = FALSE)
@@ -443,6 +512,11 @@ complete_partial_inits <- function(model, values, init_radius, seed) {
                        length(columns))
   declared <- column_variables(variables)
   filled <- split(drawn, factor(declared, levels = names(variables)))
+  bases <- variable_base(names(filled))
+  filled <- lapply(stats::setNames(nm = unique(bases)), function(base) {
+    slots <- filled[bases == base]
+    if (identical(names(slots), base)) slots[[1L]] else nest_tuple_slots(slots)
+  })
   filled[intersect(names(values), names(filled))] <-
     values[intersect(names(values), names(filled))]
   # names that are not parameters are passed on for the usual error or, for

@@ -97,7 +97,8 @@ log_posterior.stanli_fit <- function(object, inc_warmup = FALSE, ...) {
 select_draw_variables <- function(columns, pars) {
   if (is.null(pars)) return(seq_along(columns))
   indices <- lapply(pars, function(par) {
-    selected <- which(columns == par | startsWith(columns, paste0(par, "[")))
+    selected <- which(columns == par | startsWith(columns, paste0(par, "[")) |
+                      startsWith(columns, paste0(par, ":")))
     if (!length(selected)) stop("unknown variable: ", par, call. = FALSE)
     selected
   })

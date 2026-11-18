@@ -75,7 +75,8 @@ let () =
       prerr_endline (Stanli_pipeline.diagnostic_message diagnostic))
     compilation.diagnostics;
   match compilation.result with
-  | Error (Stanli_pipeline.Internal_error message) ->
+  | Error (Stanli_pipeline.Internal_error message)
+   |Error (Stanli_pipeline.Unsupported message) ->
       prerr_endline message;
       exit 1
   | Error (Stanli_pipeline.Frontend_error error) ->

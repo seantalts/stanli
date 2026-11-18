@@ -102,43 +102,6 @@ stanli::DataMap load_data(const char* data) {
 std::map<std::string, stanli::DataMap::Entry> inits_from_flat(
     const stanli::CompiledModel& cm, const double* theta);
 
-// The names of one declared parameter's UNCONSTRAINED values.
-//
-// These are not the constrained CSV names: lowering records the exact free
-// logical shape, including outer array extents, so a simplex leaf contributes
-// K-1 indices and a structured matrix leaf contributes its flat raw width.
-void append_unc_names(const stanli::CompiledModel::UncParam& p,
-                      std::vector<std::string>& out) {
-  int64_t prod = 1;
-  bool sane = true;
-  for (int64_t d : p.dims) {
-    if (d < 0) sane = false;
-    prod *= d;
-  }
-  if (sane && prod == p.len && !p.dims.empty()) {
-    // Last-index-major, the way Stan serializes everything: the FIRST
-    // index varies fastest, so matrix[2,3] m is m.1.1, m.2.1, m.1.2, ...
-    std::vector<int64_t> idx(p.dims.size(), 0);
-    for (int64_t k = 0; k < p.len; ++k) {
-      std::string s = p.name;
-      for (size_t d = 0; d < idx.size(); ++d)
-        s += "." + std::to_string(idx[d] + 1);
-      out.push_back(std::move(s));
-      for (size_t d = 0; d < idx.size(); ++d) {
-        if (++idx[d] < p.dims[d]) break;
-        idx[d] = 0;
-      }
-    }
-    return;
-  }
-  if (p.dims.empty() && p.len == 1) {
-    out.push_back(p.name);
-    return;
-  }
-  for (int64_t i = 0; i < p.len; ++i)
-    out.push_back(p.name + "." + std::to_string(i + 1));
-}
-
 std::string join_csv(const std::vector<std::string>& names) {
   std::string s;
   for (const auto& n : names) {
@@ -523,7 +486,7 @@ bs_model* model_from_data(
         for (int64_t i = 1; i <= m->whiten->n; ++i)
           flat.push_back("z." + std::to_string(i));
       } else {
-        for (const auto& p : m->cm.unc_params) append_unc_names(p, flat);
+        for (const auto& p : m->cm.unc_params) p.append_names(flat);
       }
       m->unc_names = join_csv(flat);
     }
@@ -705,15 +668,23 @@ int bs_param_constrain(const bs_model* m, bool include_tp, bool include_gq,
 
 namespace {
 
+// The constrained columns as starting values, keyed as CmdStan's JSON names
+// them. The columns of an array of tuples come element by element, which is
+// how CmdStan's reader stores each leaf under its key.
 std::map<std::string, stanli::DataMap::Entry> inits_from_flat(
     const stanli::CompiledModel& cm, const double* theta) {
+  std::map<std::string, std::pair<std::string, std::vector<int64_t>>> keys;
+  for (const auto& leaf : cm.param_leaves)
+    if (leaf.column < 0) keys[leaf.own.key()] = {leaf.init_key, leaf.own.dims};
   std::map<std::string, stanli::DataMap::Entry> out;
   int64_t at = 0;
   for (const auto& view : cm.views) {
-    stanli::DataMap::Entry e;
-    e.dims = view.dims;
-    e.r.assign(theta + at, theta + at + view.len);
-    out.emplace(view.name, std::move(e));
+    const auto found = keys.find(view.key());
+    const std::string& key =
+        found == keys.end() ? view.key() : found->second.first;
+    stanli::DataMap::Entry& e = out[key];
+    e.dims = found == keys.end() ? view.dims : found->second.second;
+    e.r.insert(e.r.end(), theta + at, theta + at + view.len);
     at += view.len;
   }
   return out;

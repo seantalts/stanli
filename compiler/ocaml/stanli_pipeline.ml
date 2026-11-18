@@ -1,6 +1,7 @@
 type error =
   | Frontend_error of Frontend.Errors.t
   | Internal_error of string
+  | Unsupported of string
 
 type diagnostic =
   | O1_budget_exceeded of
@@ -180,6 +181,13 @@ let compile_mir_at_level
     | Ok (Ok mir) -> Ok mir in
   {result; warnings= !warnings; diagnostics= []}
 
+(* Split tuples, reporting a construct the split cannot handle as a compile
+   error rather than an internal one. *)
+let split mir =
+  match Stanli_tuples.scalarize mir with
+  | split -> Ok split
+  | exception Portable_mir.Not_supported message -> Error (Unsupported message)
+
 let compile_mir_with_passes_uncached ?include_source ?(prune_unused_sections = true)
     ?(model_only = false) ~passes ~model_name code =
   let compiled =
@@ -213,13 +221,18 @@ let compile_mir_with_passes_uncached ?include_source ?(prune_unused_sections = t
           let stats = max_procedure_stats inlined in
           match passes.max_o1_statement_depth_cost with
           | Some budget when stats.cost > budget ->
-              ( Ok mir
+              ( split mir
               , [O1_budget_exceeded
                    { cost= stats.cost
                    ; budget
                    ; statements= stats.statements
                    ; max_control_depth= stats.max_control_depth }] )
           | _ ->
+              (* Tuples are split before pruning, so pruned and unpruned
+                 compiles name their temporaries alike. *)
+              match split inlined with
+              | Error error -> (Error error, [])
+              | Ok inlined ->
               let candidate =
                 if prune_unused_sections then
                   if model_only then prune_portable_procedures inlined
@@ -253,10 +266,13 @@ let compile_portable ?include_source ?model_only ?fast_math ~model_name code =
     | Error error -> Error error
     | Ok mir -> (
       match
-        Common.ICE.with_exn_message (fun () -> Portable_mir.encode mir)
+        Common.ICE.with_exn_message (fun () ->
+            try Ok (Portable_mir.encode mir)
+            with Portable_mir.Not_supported message -> Error message)
       with
       | Error internal -> Error (Internal_error internal)
-      | Ok encoded -> Ok encoded ) in
+      | Ok (Error message) -> Error (Unsupported message)
+      | Ok (Ok encoded) -> Ok encoded ) in
   { result
   ; warnings= compiled.warnings
   ; diagnostics= compiled.diagnostics }

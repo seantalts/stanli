@@ -13,6 +13,7 @@
 #include <stdexcept>
 #include <string>
 #include <utility>
+#include <vector>
 
 struct stanli_function;
 
@@ -35,6 +36,11 @@ void stanli_function_set_execution_report(stanli_function* function,
 // Results are borrowed only for the duration of this callback. Keeping the
 // copy on the caller side avoids transferring STL-owned storage across the
 // shared-library boundary, where the two sides may use different C++ runtimes.
+//
+// Tuples are passed as their leaves. A tuple argument is one argument per
+// leaf, named by the leaf's formal: `x.1`, `x.2.1`, ... for a formal `x`.
+// A function returning a tuple calls the writer once per leaf of the result,
+// depth first; any other function calls it once.
 typedef int (*stanli_function_result_writer)(
     void* context, int is_int, const double* reals, size_t real_size,
     const int* ints, size_t int_size, const int64_t* dims, size_t dim_size);
@@ -100,12 +106,21 @@ class Function {
   }
 
   DataMap::Entry operator()(const DataMap& arguments) const {
+    std::vector<DataMap::Entry> values = results(arguments);
+    if (values.size() != 1)
+      throw std::runtime_error(
+          "Stan function returns a tuple; call results() for its leaves");
+    return std::move(values[0]);
+  }
+
+  // Every value the function returns: one, or one per leaf of a tuple.
+  std::vector<DataMap::Entry> results(const DataMap& arguments) const {
     char err[8192] = {};
-    DataMap::Entry result;
+    std::vector<DataMap::Entry> values;
     struct ResultContext {
-      DataMap::Entry* result;
+      std::vector<DataMap::Entry>* values;
       std::exception_ptr error;
-    } context{&result, nullptr};
+    } context{&values, nullptr};
 
     const auto write_result = [](void* opaque, int is_int, const double* reals,
                                  size_t real_size, const int* ints,
@@ -113,13 +128,12 @@ class Function {
                                  size_t dim_size) -> int {
       auto& context = *static_cast<ResultContext*>(opaque);
       try {
-        context.result->is_int = is_int != 0;
-        context.result->r.clear();
-        context.result->i.clear();
-        context.result->dims.clear();
-        if (real_size != 0) context.result->r.assign(reals, reals + real_size);
-        if (int_size != 0) context.result->i.assign(ints, ints + int_size);
-        if (dim_size != 0) context.result->dims.assign(dims, dims + dim_size);
+        DataMap::Entry result;
+        result.is_int = is_int != 0;
+        if (real_size != 0) result.r.assign(reals, reals + real_size);
+        if (int_size != 0) result.i.assign(ints, ints + int_size);
+        if (dim_size != 0) result.dims.assign(dims, dims + dim_size);
+        context.values->push_back(std::move(result));
         return 0;
       } catch (...) {
         context.error = std::current_exception();
@@ -133,7 +147,7 @@ class Function {
       throw std::runtime_error(err[0] ? err
                                       : "Stan function evaluation failed");
     }
-    return result;
+    return values;
   }
 
  private:

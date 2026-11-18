@@ -84,6 +84,21 @@ def test_function_source_file_and_cached_mir():
             raise AssertionError("native function handles must not be duplicated")
 
 
+def test_function_tuple_leaves():
+    # A tuple argument is one argument per leaf; a tuple result comes back
+    # as a Python tuple of its leaves.
+    f = stanli.Function("scaled", stan_code="""
+functions {
+  tuple(real, vector) scaled(real x, tuple(real, int) p) {
+    return (x * p.1, rep_vector(x, p.2));
+  }
+}
+""")
+    first, second = f({"x": 1.5, "p.1": 4.0, "p.2": 3})
+    assert first == 6.0
+    np.testing.assert_array_equal(second, [1.5, 1.5, 1.5])
+
+
 def test_function_scalar_types_overloads_and_nonfinite():
     mir = stanli.stan_to_mir(FUNCTION_SOURCE)
     integer = stanli.Function("int_identity", mir=mir)
@@ -268,7 +283,7 @@ def test_function_errors_and_recovery():
 
 
 def _portable_payload(mir):
-    assert mir.startswith("STANLI4:"), mir[:80]
+    assert mir.startswith("STANLI5:"), mir[:80]
     return base64.b64decode(mir[8:], validate=True)
 
 
@@ -1065,6 +1080,134 @@ generated quantities {
 """
 
 
+def test_tuple_variables_and_inits():
+    # Inits take CmdStan's tuple JSON, or Python tuples as CmdStanPy writes
+    # them.
+    m = stanli.Model(stan_code="""
+        parameters { tuple(real, array[2] real<lower=0>) tp; }
+        model { tp.1 ~ normal(0, 1); tp.2 ~ exponential(1); }
+        generated quantities { array[2] tuple(real, int) g;
+          for (i in 1:2) g[i] = (tp.1 * i, i); }
+        """)
+    fit = m.sample(chains=1, seed=1, warmup=50, samples=20, refresh=0)
+    assert fit.variables == {"tp": (), "g": (2,)}
+    assert fit.names == ["tp.1", "tp.2[1]", "tp.2[2]", "g[1].1", "g[1].2",
+                         "g[2].1", "g[2].2"]
+    assert np.array_equal(fit["g[2].1"], 2 * fit["tp.1"])
+    assert np.array_equal(fit["g.2:1"], fit["g[2].1"])
+    assert m.constrained_names == ["tp.1", "tp.2[1]", "tp.2[2]"]
+    free = m.unconstrain({"tp": {"1": 0.5, "2": [1.0, 2.0]}})
+    assert np.allclose(free, [0.5, 0.0, np.log(2.0)]), free
+    assert np.array_equal(m.unconstrain({"tp": (0.5, np.array([1.0, 2.0]))}),
+                          free)
+    draw = fit.stan_variable("tp")[3]
+    assert np.array_equal(
+        m.unconstrain({"tp": draw}),
+        m.unconstrain({"tp": {"1": float(draw[0]), "2": draw[1].tolist()}}))
+
+
+def _same_value(got, want):
+    if isinstance(want, tuple):
+        return (isinstance(got, tuple) and len(got) == len(want)
+                and all(_same_value(a, b) for a, b in zip(got, want)))
+    if isinstance(want, np.ndarray):
+        return (isinstance(got, np.ndarray) and got.dtype == want.dtype
+                and got.shape == want.shape
+                and all(_same_value(a, b) for a, b in zip(got.flat, want.flat)))
+    return type(got) is type(want) and got == want
+
+
+def _objects(shape, values):
+    out = np.empty(len(values), dtype=object)
+    for i, v in enumerate(values):
+        out[i] = v
+    return out.reshape(shape)
+
+
+def test_tuples_match_cmdstanpy():
+    m = stanli.Model(stan_code="""
+        parameters { real mu; }
+        transformed parameters {
+          tuple(real, tuple(real, vector[2])) tp = (1.5, (2.5, [3.5, 4.5]'));
+        }
+        model { mu ~ normal(0, 1); }
+        generated quantities {
+          tuple(real, tuple(int, real)) q = (5, (6, 7.5));
+          tuple(real, vector[3]) c = (8, [9, 10, 11]');
+          array[2] tuple(real, real) g;
+          for (i in 1:2) g[i] = (10 * i + 0.5, 10 * i + 0.25);
+          array[2, 2] tuple(real, matrix[2, 2]) h;
+          for (i in 1:2) for (j in 1:2)
+            h[i, j] = (10 * i + j, [[1, 2], [3, 4]] * (10 * i + j));
+          tuple(real, array[2] tuple(int, vector[2])) w =
+            (1, {(2, [3, 4]'), (5, [6, 7]')});
+          matrix[2, 2] m = [[1, 2], [3, 4]];
+        }
+        """)
+    # CmdStanPy 1.3.2 under CmdStan 2.40.0: column_names, then each
+    # stan_variable's draw, and the dimensions of each variable.
+    columns = [
+        "mu", "tp.1", "tp.2.1", "tp.2.2[1]", "tp.2.2[2]", "q.1", "q.2.1",
+        "q.2.2", "c.1", "c.2[1]", "c.2[2]", "c.2[3]", "g[1].1", "g[1].2",
+        "g[2].1", "g[2].2", "h[1,1].1", "h[1,1].2[1,1]", "h[1,1].2[2,1]",
+        "h[1,1].2[1,2]", "h[1,1].2[2,2]", "h[2,1].1", "h[2,1].2[1,1]",
+        "h[2,1].2[2,1]", "h[2,1].2[1,2]", "h[2,1].2[2,2]", "h[1,2].1",
+        "h[1,2].2[1,1]", "h[1,2].2[2,1]", "h[1,2].2[1,2]", "h[1,2].2[2,2]",
+        "h[2,2].1", "h[2,2].2[1,1]", "h[2,2].2[2,1]", "h[2,2].2[1,2]",
+        "h[2,2].2[2,2]", "w.1", "w.2[1].1", "w.2[1].2[1]", "w.2[1].2[2]",
+        "w.2[2].1", "w.2[2].2[1]", "w.2[2].2[2]", "m[1,1]", "m[2,1]",
+        "m[1,2]", "m[2,2]"]
+    f, a = np.float64, np.array
+    hm = a([[1.0, 2.0], [3.0, 4.0]])
+    draw = {
+        "tp": (f(1.5), (f(2.5), a([3.5, 4.5]))),
+        "q": (f(5.0), (f(6.0), f(7.5))),
+        "c": (f(8.0), a([9.0, 10.0, 11.0])),
+        "g": _objects((2,), [(f(10.5), f(10.25)), (f(20.5), f(20.25))]),
+        "h": _objects((2, 2), [(f(11.0), hm * 11), (f(12.0), hm * 12),
+                               (f(21.0), hm * 21), (f(22.0), hm * 22)]),
+        "w": (f(1.0), _objects((2,), [(f(2.0), a([3.0, 4.0])),
+                                      (f(5.0), a([6.0, 7.0]))])),
+        "m": hm,
+    }
+    dims = {"mu": (), "tp": (), "q": (), "c": (), "g": (2,), "h": (2, 2),
+            "w": (), "m": (2, 2)}
+    fit = m.sample(chains=2, seed=1, warmup=20, samples=3, refresh=0)
+    assert fit.names == columns, fit.names
+    assert fit.variables == dims
+    assert list(fit.stan_variables()) == list(dims)
+    for name, want in draw.items():
+        got = fit.stan_variable(name)
+        assert got.shape == (6,) + dims[name], (name, got.shape)
+        assert got.dtype == (np.float64 if name == "m" else object), name
+        for k in range(6):
+            assert _same_value(got[k], want), (name, k, got[k])
+        assert fit.draws(name).shape == (2, 3) + dims[name]
+        assert _same_value(fit.draws(name)[1, 2], want)
+        assert _same_value(fit[name][4], want)
+    for slot in ["tp.1", "h[2,1].2"]:
+        try:
+            fit.stan_variable(slot)
+            raise AssertionError(f"{slot} is not a variable")
+        except ValueError:
+            pass
+    assert fit.summary().names == columns
+    assert fit.summary(["h"]).names == columns[16:36]
+    assert fit.summary(["g[2].1"]).names == ["g[2].1"]
+    assert np.array_equal(fit["h.2.1:2.1.2"], fit["h[2,1].2[1,2]"])
+    mode = m.optimize(seed=1)
+    assert list(mode) == columns
+    for name in ["tp", "g", "h", "w"]:
+        assert _same_value(mode[name], draw[name]), (name, mode[name])
+    # CmdStanPy's write_stan_json of the same values.
+    assert stanli._data_to_json(
+        {"tp": (0.5, (1.0, np.array([2.0, 3.0]))), "g": [(1.0, 2), (3.0, 4)],
+         "t3": (1, [2, 3]), "x": [1, 2]}) == (
+        '{"tp": {"1": 0.5, "2": {"1": 1.0, "2": [2.0, 3.0]}}, '
+        '"g": [{"1": 1.0, "2": 2}, {"1": 3.0, "2": 4}], '
+        '"t3": {"1": 1, "2": [2, 3]}, "x": [1, 2]}')
+
+
 def test_variables_are_shaped():
     m = stanli.Model(stan_code=SHAPES_SOURCE)
     fit = m.sample(chains=2, seed=1, warmup=100, samples=50, refresh=0)
@@ -1423,7 +1566,7 @@ def _fake_compiler_run(calls, warnings=(), o1_fallback=None,
         pathlib.Path(path).write_text(json.dumps(
             {"warnings": list(warnings), "o1_fallback": o1_fallback}),
             encoding="utf-8")
-        return subprocess.CompletedProcess(argv, 0, "STANLI4:ZmFrZQ==",
+        return subprocess.CompletedProcess(argv, 0, "STANLI5:ZmFrZQ==",
                                            stderr)
     return run
 
@@ -1449,7 +1592,7 @@ def test_subprocess_compiler_contract():
             with warnings.catch_warnings(record=True) as caught:
                 warnings.simplefilter("always")
                 got = stanli._stanc_mir(source)
-        assert got == "STANLI4:ZmFrZQ=="
+        assert got == "STANLI5:ZmFrZQ=="
         assert [(w.category, str(w.message)) for w in caught] == [
             (RuntimeWarning, "a successful frontend warning"),
             (stanli.O1FallbackWarning, "stanli compiler: skipped O1")]

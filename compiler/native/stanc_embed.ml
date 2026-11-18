@@ -31,7 +31,9 @@ let compile_tmir ~model_only ~fast_math ~filename ~include_paths (code : string)
   let o1_fallback = Stanli_pipeline.o1_fallback compilation in
   let outcome =
     match compilation.result with
-    | Error (Stanli_pipeline.Internal_error message) -> Error message
+    | Error (Stanli_pipeline.Internal_error message)
+     |Error (Stanli_pipeline.Unsupported message) ->
+        Error message
     | Error (Stanli_pipeline.Frontend_error error) ->
         Error (Fmt.str "%a" (Frontend.Errors.pp ?printed_filename ~code) error)
     | Ok encoded -> Ok encoded in

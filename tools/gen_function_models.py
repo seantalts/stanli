@@ -198,12 +198,29 @@ def render():
                  "hypergeometric_pFq", "inc_beta", "int_step", "inv_inc_beta",
                  "log_determinant_spd", "matrix_exp_multiply", "matrix_power",
                  "norm1", "norm2", "qr_Q", "qr_R", "qr_thin_Q", "qr_thin_R",
-                 "quantile", "scale_matrix_exp_multiply", "trace_dot",
+                 "quantile", "scale_matrix_exp_multiply", "trace", "trace_dot",
                  "trace_gen_quad_form", "trace_quad_form", "yule_simon_rng"):
         focused[name] = (
             "tests/fixtures/library_functions.stan; CmdStan references in "
             "sized_functions_references.json.gz"
         )
+    for name in ("eigendecompose_sym", "qr", "qr_thin"):
+        focused[name] = (
+            "tests/regressions/tuple_decompositions.stan in transformed data, "
+            "model and generated quantities; tuples/qr_unpack and "
+            "function-signatures/math/matrix/qr{,_thin} in tests/stanc3_good; "
+            "CmdStan references"
+        )
+    focused["svd"] = (
+        "tests/regressions/tuple_decompositions_more.stan in transformed "
+        "data, the model and generated quantities; CmdStan references"
+    )
+    focused["csr_extract"] = (
+        "tests/regressions/tuple_decompositions_more.stan on data matrices in "
+        "transformed data and generated quantities; CmdStan references. A "
+        "parameter matrix is refused (its sizes depend on the values) outside "
+        "the MIR interpreter"
+    )
     for name in ("to_vector_array", "to_row_vector_array"):
         focused[name] = "tests/fixtures/stan240_containers.stan; rectangular and zero-extent round trips"
     for name in ("to_int", "to_array_2d"):

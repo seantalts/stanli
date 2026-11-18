@@ -18,6 +18,13 @@ void finalize_program(Program& program, bool strict_variable_metadata = false);
 // first whole-variable assignment supplies the shape.
 SizedType unsized_declaration(const UnsizedView& view, std::string raw);
 
+// A name without stanc3's `_stan_` prefix for a C++ keyword, as the
+// finalizer spells it.
+std::string unmangled(std::string name);
+
+// The view a sized or unsized declaration gives its variable.
+UnsizedView declaration_view(const SizedType& type);
+
 // Compact portable MIR is a closed-world format, so reject inconsistent
 // kind-specific shapes and redundant type metadata before finalization. The
 // legacy reader deliberately remains permissive because its unsupported-form

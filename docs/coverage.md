@@ -79,8 +79,15 @@ The name metric in the table above does not show these gaps:
   exponentiated-quadratic, Matern 3/2, Matern 5/2 and exponential kernels work.
 - Complex arguments and results are refused by policy. The graph holds real
   and integer values only.
-- Tuple-valued results are refused by policy. The graph cannot yet represent
-  or destructure tuples.
+- Tuples work in data, parameters, locals, generated quantities and user
+  functions; stanli replaces each with one variable per component before
+  running the model. Three library functions return tuples stanli computes:
+  `qr`, `qr_thin` and `eigendecompose_sym` of a real matrix. The others
+  (`svd`, `csr_extract`, the complex decompositions and
+  `generate_laplace_options`) are refused, as are an array of tuples
+  declared as a parameter and `print` or `reject` of an array of tuples.
+  The conformance sweep still classifies tuple-valued results as expected
+  unsupported, since its generator does not build them.
 
 stanli records whether each GLM argument was a scalar or an array. Scalar
 outcomes and trial counts then use Stan Math's broadcast overload. This
