@@ -1044,7 +1044,8 @@ void Lowering::run_passes(const std::vector<int>& roots, const PassPlan& plan) {
     // rather than N; before reroll, so the lanes it sees have data
     // operands.
     const auto constfold_time = prep.start();
-    const ConstFoldStats constfolded = const_fold(g, out.fills, update_roots);
+    const ConstFoldStats constfolded =
+        const_fold(g, out.fills, update_roots, known_outputs);
     trace("constfold", constfold_time, update_roots,
           PrepTrace::Extra::ConstFold, constfolded.ops_removed,
           constfolded.slots_folded);

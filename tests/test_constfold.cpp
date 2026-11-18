@@ -156,6 +156,29 @@ static void test_keeps_categorical_op() {
   expect("categorical op still runs", run_grad(std::move(g), fills)[0] == 0);
 }
 
+// A recorded value replaces the op it was recorded for, and only that op.
+static void test_known_outputs() {
+  for (bool same : {true, false}) {
+    Graph g;
+    Fills fills;
+    const int a = g.add_slot(1, false), b = g.add_slot(1, false);
+    fills.emplace_back(a, std::vector<double>{2.0});
+    fills.emplace_back(b, std::vector<double>{3.0});
+    const int ab = g.add_slot(1, false);
+    g.add_op(OP_ADD, {a, b}, ab);
+    KnownOutput known{g.ops.back(), {7.0}};
+    if (!same) known.op.in[1] = a;
+    const ConstFoldStats st = const_fold(g, fills, {ab}, {known});
+    expect("known output folded", st.ops_removed == 1);
+    double value = 0;
+    for (const auto& f : fills)
+      if (f.first == ab) value = f.second.at(0);
+    expect(
+        same ? "matching op takes the recorded value" : "different op is run",
+        value == (same ? 7.0 : 5.0));
+  }
+}
+
 int main() {
   {  // kernels register through the first Executor
     Graph g;
@@ -169,6 +192,7 @@ int main() {
   test_refuses_midchain_reader();
   test_keeps_categorical_op();
   test_env_disable();
+  test_known_outputs();
   if (failures == 0) std::printf("test_constfold OK\n");
   return failures == 0 ? 0 : 1;
 }

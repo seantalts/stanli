@@ -16,9 +16,16 @@ struct ConstFoldStats {
   int slots_folded = 0;  // const outputs some surviving op still reads
 };
 
+// An op whose output lowering already computed, and that output's value in
+// graph order.
+struct KnownOutput {
+  Op op;
+  std::vector<double> value;
+};
+
 // Evaluate every constant op once and delete it, appending a fill for each
-// folded slot a surviving op (or a root) still reads. `folded` receives those
-// slot ids so the caller can mark them data-like for the passes that follow.
+// folded slot a surviving op (or a root) still reads. A constant op that
+// matches one in `known` is not run again: its recorded value is used.
 //
 // Why lowering time rather than a skip flag in the executor: the point is not
 // only to stop re-evaluating them, it is to get them out of the graph, so the
@@ -33,7 +40,7 @@ struct ConstFoldStats {
 // STANLI_NO_CONSTFOLD=1 disables the pass.
 ConstFoldStats const_fold(
     Graph& g, std::vector<std::pair<int, std::vector<double>>>& fills,
-    const std::vector<int>& roots, std::vector<int>* folded = nullptr);
+    const std::vector<int>& roots, const std::vector<KnownOutput>& known = {});
 
 }  // namespace stanli
 
