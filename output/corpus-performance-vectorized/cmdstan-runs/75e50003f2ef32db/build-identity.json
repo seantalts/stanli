@@ -1,0 +1,43 @@
+{
+  "runtime_base": "1e0a66ffbcbed2a66b1aefcb8ea5524356634e5f",
+  "files": {
+    "build-rel/CMakeCache.txt": "be456da295fc5b0a3eb56b392bc2a441ce57ad22566a5bce70cd1054bbe441ad",
+    "build-rel/bench_grad": "8d1b4c8d01213e198818bbb130655e5daa3e4b8537aaeb792d9f81ea5fcc4e4a",
+    "build-rel/stanli_check": "10460a02a395ac86778aa6097cb0db7c1dd055104c24d93e3e787e2b2b7d6351",
+    "build-rel/stanli_run": "147cccda3b28c135fd224f5b625c4e2a86e4ef1f6b17fb4f11f6fda7d2718f8b",
+    "build-rel/libstanli.dylib": "9c159935efa238a38b57f88a628163dad2baf7fe52fe2f5c325195ddd14c68fa",
+    "deps/stanc3/stanc": "c63bc07ab50b6c7e72ad453319298d1fbbfa165809fab5896f2850f552009a04",
+    "deps/stanc3/stanc-pinned": "d549f0ddbccff17f6b882a54109339f2a0f718b3d1fc09fce118ccdf452adc2d",
+    "deps/stanc3/embed/691e6e07da34e9f9/stanc_embed.o": "e0019a91528f50b3777bfb73073a6ac34d410834f1f29f49c8bf73946ca72e51",
+    "deps/stanc3/embed/691e6e07da34e9f9/stanc_embed.o.stamp": "091d5d7dffbd33064e3a2f099b21243dc036455ac48f5497a5ff7a2df7b6896d",
+    "deps/stanc3/embed/691e6e07da34e9f9/stanli-vectorize-probe": "6e7739b75c9d5fec46728e60fdb38ea1ab332ceaa42c4acbb00e00c9ba47ae92",
+    "deps/stanc3/embed/691e6e07da34e9f9/stanli-vectorize-probe.stamp": "091d5d7dffbd33064e3a2f099b21243dc036455ac48f5497a5ff7a2df7b6896d"
+  },
+  "configuration": [
+    "CMAKE_BUILD_TYPE:STRING=Release",
+    "CMAKE_CXX_FLAGS:STRING=",
+    "CMAKE_CXX_FLAGS_DEBUG:STRING=-g",
+    "CMAKE_CXX_FLAGS_MINSIZEREL:STRING=-Os -DNDEBUG",
+    "CMAKE_CXX_FLAGS_RELEASE:STRING=-O3 -DNDEBUG",
+    "CMAKE_CXX_FLAGS_RELWITHDEBINFO:STRING=-O2 -g -DNDEBUG",
+    "CMAKE_OSX_ARCHITECTURES:STRING=",
+    "CMAKE_OSX_DEPLOYMENT_TARGET:STRING=11.0",
+    "CMAKE_OSX_SYSROOT:STRING=",
+    "STANLI_BASH:FILEPATH=/bin/bash",
+    "STANLI_DEBUG_SWITCHES:BOOL=OFF",
+    "STANLI_EMBED_STANC:BOOL=ON",
+    "STANLI_LIT_JOBS:STRING=24",
+    "STANLI_PORTABLE_COMPILER:FILEPATH=",
+    "STANLI_SANITIZE:STRING=",
+    "STANLI_SHARED_TEST_RUNTIME:BOOL=ON",
+    "STANLI_STANC_EXECUTABLE:FILEPATH=/Users/xitrium/claud/stanrt/.worktrees/bench-refresh-028/deps/stanc3/stanc",
+    "STANLI_STAN_DENSITY_ORACLE:BOOL=OFF",
+    "STANLI_THREADS:BOOL=ON",
+    "STANLI_WASM_SIDE:BOOL=OFF"
+  ],
+  "host": [
+    "Apple M3 Ultra",
+    "103079215104"
+  ],
+  "numerical_replay": "references recorded against CmdStan 2.40.0 (d3d5df6a2256), math 5252d51d47c1, on Darwin arm64\n68 models retain per-model recording provenance overrides\nsame-platform ULP limits: 124 models on Darwin arm64; all models retain their scaled-error and structural checks\n\n373/373 models within 1e-09 of the CmdStan references at all 3 evaluation points (1071155 values compared); worst epinow2_estimate_infections at 4.25e-11 (299015 ulp)\n"
+}
