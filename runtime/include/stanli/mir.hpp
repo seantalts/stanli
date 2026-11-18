@@ -1029,7 +1029,12 @@ const FunDef* find_function(const std::map<std::string, const FunDef*>& funs,
 class OutputCursor {
  public:
   OutputCursor() = default;
-  explicit OutputCursor(const std::vector<OutputVar>& vars) : vars_(&vars) {}
+  // `whole_leaf_tuples` names the tuple variables that hold no array of
+  // tuples. Each of their leaves gets one write if it is written whole, or
+  // writes of one column each.
+  explicit OutputCursor(const std::vector<OutputVar>& vars,
+                        std::set<std::string> whole_leaf_tuples = {})
+      : vars_(&vars), whole_leaf_tuples_(std::move(whole_leaf_tuples)) {}
 
   // `named` is the variable the write reads, or empty when there is none,
   // and `named_part` the part of it the write reads, if known. `parts(var)`
@@ -1064,7 +1069,10 @@ class OutputCursor {
         if (written_ > 0 && written_ < all) return nullptr;
         continue;
       }
-      if (written_ < all || (width == 0 && written_ == 0) ||
+      // A write of no columns stays with such a tuple only in an empty
+      // leaf not yet taken. Another variable can take any number of them.
+      const bool whole_leaves = whole_leaf_tuples_.count((*vars_)[next_].name);
+      if (written_ < all || (width == 0 && written_ == 0 && !whole_leaves) ||
           (width == 0 && find_part(p, width) < p.size())) {
         place(p, width, std::nullopt);
         return &(*vars_)[next_];
@@ -1137,6 +1145,7 @@ class OutputCursor {
   }
 
   const std::vector<OutputVar>* vars_ = nullptr;
+  std::set<std::string> whole_leaf_tuples_;
   size_t next_ = 0;
   int64_t written_ = 0;  // columns of vars_[next_] written so far
   size_t part_ = 0;      // the first part of vars_[next_] not all written

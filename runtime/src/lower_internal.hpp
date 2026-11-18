@@ -865,7 +865,7 @@ struct Lowering {
                      [&in](const mir::Expr& arg) { return in.eval(arg); },
                      result);
                },
-               [this](const mir::Stmt& st) {
+               [this](MirInterp<double>&, const mir::Stmt& st) {
                  return data_extent_scope && st.kind == mir::Stmt::NRFunApp &&
                         message_action(st.fn_name) == MessageAction::Print;
                }}};

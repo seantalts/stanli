@@ -158,7 +158,7 @@ std::vector<double> InitInterp::eval(
     const auto it = shaped.find(name);
     return it == shaped.end() ? nullptr : &it->second;
   };
-  h.stmt = [&](const mir::Stmt& s) {
+  h.stmt = [&](MirInterp<double>&, const mir::Stmt& s) {
     if (mir::internal_name(s) != "FnWriteParam" || !s.write_transform)
       return false;
     // A write names a whole parameter, or one element of a tuple leaf when

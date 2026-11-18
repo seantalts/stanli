@@ -401,7 +401,7 @@ std::optional<DataMap::Entry> region_bounded_data_value(const mir::Expr& e) {
     *value = found->second;
     return true;
   };
-  hooks.stmt = [&](const mir::Stmt&) {
+  hooks.stmt = [&](MirInterp<double>&, const mir::Stmt&) {
     if (++steps > 4096)
       throw CompileError("structured data probe budget exceeded");
     return false;

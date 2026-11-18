@@ -657,6 +657,8 @@ void Lowering::lower_island(const mir::Stmt* s, const mir::Expr* e,
   }
   // The names the statement assigns that it does not declare itself.
   std::vector<std::string> pre;
+  // The integers among them that leave the region folded, not as live-outs.
+  std::set<std::string> folded_out;
   if (s) outer_assigned_names(*s, &pre);
   try {
     if (s) {
@@ -717,8 +719,10 @@ void Lowering::lower_island(const mir::Stmt* s, const mir::Expr* e,
         auto folded = c.ints.find(name);
         auto held = int_env.find(name);
         if (folded != c.ints.end() && folded->second.size() == 1 &&
-            held != int_env.end())
+            held != int_env.end()) {
           held->second = folded->second[0];
+          folded_out.insert(name);
+        }
       }
     } else {
       *expr_out = c.expr(*e);
@@ -737,10 +741,17 @@ void Lowering::lower_island(const mir::Stmt* s, const mir::Expr* e,
   // unless the region's entire purpose was a conditional effect: that has
   // no data output by design, its value being the output or exception.
   // A statement that assigns nothing outside itself has nothing to lose.
-  // It still runs, because its checks can reject.
+  // Neither does one whose outer writes all leave as folded integers or
+  // were never compiled, as in a loop that runs no times. It still runs,
+  // because its checks can reject.
   reg->has_effect = island_has_effect(*prog);
+  const bool loses_assignment =
+      std::any_of(pre.begin(), pre.end(), [&](const std::string& name) {
+        return (c.reals.count(name) || c.ints.count(name)) &&
+               !folded_out.count(name);
+      });
   if (prog->out_regs.empty() && !(e && expr_out->len == 0) &&
-      (s == nullptr || (reg->out_names.empty() && !pre.empty())) &&
+      (s == nullptr || (reg->out_names.empty() && loses_assignment)) &&
       !reg->has_effect)
     fail("runtime-control region produces nothing", s ? s->raw : e->raw);
   finalize_island_program(*prog, !in_write_array, false, true);
@@ -1644,6 +1655,8 @@ void Lowering::lower_simple_stmt(const mir::Stmt& s) {
       return;
     }
     case mir::Stmt::TargetPE: {
+      // CmdStan's write_array runs with jacobian__ = false.
+      if (in_write_array && s.jacobian) return;
       // Stan defines `target += e` for a container `e` as adding `sum(e)`
       // -- CmdStan's `lp_accum__.add(e)` reduces the whole container. A
       // target term is consumed as a scalar, so the reduction has to

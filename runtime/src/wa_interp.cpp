@@ -351,24 +351,38 @@ std::vector<double> WaInterp::eval(
     cols_.clear();
     n_tp_start_ = n_gq_start_ = 0;
     saw_tp_ = saw_gq_ = false;
-    output_cursor_ = mir::OutputCursor(prog_->output_vars);
+    output_cursor_ =
+        mir::OutputCursor(prog_->output_vars,
+                          mir::detail::whole_leaf_tuples(prog_->tuples.get()));
   }
   std::vector<double> row;
-  MirInterp<double>* cur = nullptr;
+  // CmdStan's write_array gives `target +=` an accumulator of its own that
+  // starts at zero, which target() reads, and skips `jacobian +=`.
+  stan::math::accumulator<double> target;
   MirHooks h;
-  h.stmt = [this, &cur, &params, &row](const mir::Stmt& s) {
+  h.stmt = [this, &params, &row, &target](MirInterp<double>& in,
+                                          const mir::Stmt& s) {
     if (s.kind == mir::Stmt::Decl && s.read_transform)
-      return read_param(*cur, s, params);
-    if (mir::internal_name(s) == "FnWriteParam")
-      return write_param(*cur, s, row);
+      return read_param(in, s, params);
+    if (mir::internal_name(s) == "FnWriteParam") return write_param(in, s, row);
+    if (s.kind == mir::Stmt::TargetPE) {
+      if (!s.jacobian) {
+        const DataMap::Entry v = in.eval(s.target);
+        if (v.r.size() >= v.i.size())
+          target.add(Eigen::Map<const Eigen::VectorXd>(v.r.data(),
+                                                       (Eigen::Index)v.r.size())
+                         .sum());
+        else
+          for (int k : v.i) target.add(k);
+      }
+      return true;
+    }
     return false;
   };
-  h.fun = [this, &rng](MirInterp<double>& in, const mir::Expr& e,
-                       DataMap::Entry* out) {
-    // The interpreter refuses `target +=`, so the target CmdStan's
-    // write_array accumulates from lp__ = 0 is still 0 here.
+  h.fun = [this, &rng, &target](MirInterp<double>& in, const mir::Expr& e,
+                                DataMap::Entry* out) {
     if (mir::stateful_intrinsic_kind(e)) {
-      out->r = {0.0};
+      out->r = {target.sum()};
       return true;
     }
     return interpreted_rng_call(in, e, out, rng) ||
@@ -378,7 +392,6 @@ std::vector<double> WaInterp::eval(
   };
   MirInterp<double> in(funs_, "write_array", std::move(h));
   in.set_native_extrema(true);
-  cur = &in;
   in.set_parent_env(shared_env_.get());
   in.env() = base_env_;
   in.run(prog_->generate_quantities);
