@@ -606,6 +606,16 @@ struct ProgramCompiler {
     return true;
   }
 
+  // As external_int_array: the caller's values are from before this
+  // region, so an expression that reads one of the region's own runtime
+  // values is not the caller's to answer.
+  bool external_real(const mir::Expr& e, double* value) {
+    if (!extern_real) return false;
+    mir::Expr literal = e;
+    literalize_external_ints(&literal);
+    return !refers_to_local_runtime(literal) && extern_real(literal, value);
+  }
+
   // The view of a named value, without building it: a shape query in an
   // integer position (a declared extent, a loop bound, an index) may not
   // emit, because try_cint swallows a Bail and a half-built branch would
@@ -893,10 +903,9 @@ struct ProgramCompiler {
   }
 
   std::optional<double> constant_real(const mir::Expr& e) {
-    if (e.data_only && extern_real &&
-        mir::is_unsized(e, mir::UnsizedLeaf::Real)) {
+    if (e.data_only && mir::is_unsized(e, mir::UnsizedLeaf::Real)) {
       double value = 0.0;
-      if (extern_real(e, &value)) return value;
+      if (external_real(e, &value)) return value;
     }
     switch (e.kind) {
       case mir::Expr::LitInt:
@@ -1702,9 +1711,9 @@ struct ProgramCompiler {
     // remainder AutoDiffable even after all its actuals became data literals.
     if (e.kind == mir::Expr::FunApp &&
         e.fn_lib == mir::Expr::Lib::UserDefined &&
-        mir::is_unsized(e, mir::UnsizedLeaf::Real) && extern_real) {
+        mir::is_unsized(e, mir::UnsizedLeaf::Real)) {
       double value = 0.0;
-      if (extern_real(e, &value)) return {konst(value), 1};
+      if (external_real(e, &value)) return {konst(value), 1};
     }
     switch (e.kind) {
       case mir::Expr::LitInt:
