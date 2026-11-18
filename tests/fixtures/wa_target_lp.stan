@@ -12,8 +12,8 @@ parameters {
 
 transformed parameters {
   jacobian += x;
-  real t = bump_lp([0.25, 0.125]');
-  real u = bump_lp([0, 0]');
+  real t = bump_lp([0.25, 0.125]' + 0 * x);
+  real u = bump_lp([0, 0]' + 0 * x);
 }
 
 model {
