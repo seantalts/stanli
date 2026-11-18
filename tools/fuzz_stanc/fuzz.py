@@ -84,6 +84,29 @@ def perf_kinds(r):
     return out
 
 
+def error_line(text):
+    """The error in a stanc message, without the warnings before it, with
+    quoted names replaced by '_'."""
+    lines = text.splitlines()
+    for i, line in enumerate(lines):
+        low = line.lower()
+        if not (low.startswith(("error", "semantic error", "syntax error"))):
+            continue
+        head, _, tail = line.partition(":")
+        if tail.strip() and "error" in head.lower() and " in " not in head:
+            msg = tail.strip()
+        else:
+            msg = next((x.strip() for x in lines[i + 1:] if x.strip() and
+                        not re.match(r"^\s*([-|]|\d+ *[|:])", x)), line)
+        return re.sub(r"'[^']*'|\"[^\"]*\"", "'_'", msg)
+    return lines[0] if lines else ""
+
+
+def generic(message):
+    """A stanli message with generated names replaced by V."""
+    return re.sub(r"\b[A-Za-z_]+\d+\w*", "V", message)
+
+
 def known_entry(bucket, diffs, known):
     text = json.dumps(diffs)
     for k in known:
@@ -164,8 +187,18 @@ def examine(record, source, data_file, work, ctx):
     none = d.evaluate(ctx, source, data_file, work, "none", "none")
     record["none"] = {k: none[0][k] for k in ("outcome", "seconds", "size")}
     if none[0]["outcome"] != "ok":
-        record["outcome"] = "reject"
-        record["reject"] = none[0]["message"][:400]
+        run = d.run_process([ctx["compiler"], "--model-only", "--passes",
+                             "none", "--filename", source.name, source],
+                            ctx["timeout"])
+        err = run[2] if run else "timeout"
+        if none[0]["outcome"] == "unsupported":
+            # stanli's compiler, not stanc, refuses the program.
+            record["outcome"] = "not_comparable"
+            record["not_comparable"] = "compiler_unsupported_none"
+            record["refusal"] = (err.strip().splitlines() or [""])[-1][:300]
+        else:
+            record["outcome"] = "reject"
+            record["reject"] = error_line(err)
         return record
     o1 = d.evaluate(ctx, source, data_file, work, "o1", "o1", reuse=none)
     if o1 is none:
@@ -179,6 +212,8 @@ def examine(record, source, data_file, work, ctx):
     if reason:
         record["outcome"] = "not_comparable"
         record["not_comparable"] = reason
+        if none[1] is not None and none[1][0] == "refused":
+            record["refusal"] = none[1][1][:300]
         return record
     if o1[1] is not None and none[1] is not None:
         record["points_with_values"] = d.values_compared(none[1], o1[1])
@@ -243,10 +278,8 @@ def summarize(results, meta, out):
     p(f"generator rejects: {len(rejects)}")
     msgs = {}
     for r in rejects:
-        lines = [x for x in r.get("reject", "").splitlines() if x.strip()]
-        key = next((x for x in lines if x.startswith(("Error", "error"))),
-                   lines[0] if lines else "")
-        msgs[key[:120]] = msgs.get(key[:120], 0) + 1
+        key = r.get("reject", "")[:120]
+        msgs[key] = msgs.get(key, 0) + 1
     for m, k in sorted(msgs.items(), key=lambda kv: -kv[1])[:10]:
         p(f"  {k:6d}  {m}")
     compiled = [r for r in results if "mir_identical" in r]
@@ -261,6 +294,14 @@ def summarize(results, meta, out):
     if nc:
         p("not comparable: " + ", ".join(f"{k} {v}" for k, v in
                                          sorted(nc.items())))
+        refusals = {}
+        for r in results:
+            if r.get("refusal"):
+                key = generic(r["refusal"])[:120]
+                refusals[key] = refusals.get(key, 0) + 1
+        p("stanli refusals")
+        for m, k in sorted(refusals.items(), key=lambda kv: -kv[1])[:15]:
+            p(f"  {k:6d}  {m}")
     new, known = {}, {}
     for r in results:
         for b in r.get("buckets", []):

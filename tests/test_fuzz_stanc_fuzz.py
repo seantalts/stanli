@@ -115,16 +115,28 @@ class SummaryTest(unittest.TestCase):
                    diffs=[{"kind": "write_array"}]),
             record(seed=5, outcome="differ", buckets=["o1:mir_growth"],
                    known={"o1:mir_growth": "why"}),
+            record(seed=6, outcome="not_comparable",
+                   not_comparable="stanli_refuses_none",
+                   refusal="runtime-control region: x7 is not known"),
         ]
         out = io.StringIO()
         fuzz.summarize(results, {"seconds": 2.0, "compiler": "c"}, out)
         text = out.getvalue()
-        self.assertIn("5 programs in 2.0 s (2.5 per second)", text)
+        self.assertIn("6 programs in 2.0 s (3.0 per second)", text)
         self.assertIn("generator rejects: 1", text)
-        self.assertIn("different MIR at none and o1: 3 of 4", text)
+        self.assertIn("different MIR at none and o1: 4 of 5", text)
+        self.assertRegex(text, r"stanli refusals\n\s+1\s+runtime-control "
+                         r"region: V is not known")
         self.assertIn("dead_code_elimination:write_array", text)
         self.assertRegex(text, r"known buckets\n\s+o1:mir_growth\s+1")
-        self.assertRegex(text, r"t_real\s+5")
+        self.assertRegex(text, r"t_real\s+6")
+
+    def test_reject_message_skips_warnings(self):
+        text = ("Warning: Assignment of variable to itself.\n  1 | x = x;\n"
+                "Semantic error in 'm.stan', line 3:\n   -------\n"
+                "Identifier 'q' not in scope.\n")
+        self.assertEqual(fuzz.error_line(text),
+                         "Identifier '_' not in scope.")
 
 
 if __name__ == "__main__":
