@@ -2,6 +2,51 @@
 
 ## Unreleased
 
+## 0.28.1
+
+`reduce_sum` now runs in parallel on many more models, and a long brms sum is
+much faster per gradient.
+
+### Performance
+
+- A brms model with more than 10 varying-effect terms per observation was
+  about 17x slower per gradient than one with 10. With 11 terms a gradient
+  now takes 0.47 ms instead of 7.85 ms (#571).
+- `reduce_sum` now runs in parallel when the partial sum fills local arrays
+  element by element. Of 29 brms `threading()` models that used to run on one
+  thread, 28 now run in parallel, and so does the occRS occupancy model (#571, #577).
+- `ordered_logistic` loops in cumulative brms models now run as one density,
+  so with 8 categories a gradient is about 2x faster.
+- Models with many generated quantities compile faster: a model with 3200
+  small loops compiles in 4.3 s instead of 11 s (#583). Data preparation for
+  the beta_neg_binomial cdf models is 1.4x faster (#582).
+
+### Fixes
+
+- A function that returns an empty array of matrices, for example
+  `array[0] matrix[R, S]`, no longer fails with "assignment logical view
+  mismatch" (reported on #568). Assigning an array of the wrong size to an
+  empty array now raises CmdStan's size error instead of being accepted.
+- When `threads_per_chain` has no effect, the note now says why each
+  `reduce_sum` call runs on one thread, instead of saying the model has no
+  `reduce_sum` call (#577).
+- write_array no longer fails with "unknown variable ..._1dim__" when a
+  model-block local and a generated quantity share a name.
+- A vectorized `student_t_lccdf` in transformed data now returns the sum over
+  its elements, not just the first.
+- In R, `launch_shinystan()` and `shinystan::as.shinystan()` accept a
+  `stanli_fit` directly (#585).
+
+### Docs
+
+- The corpus benchmark tables are republished at 0.28.0, with 16 more models
+  from CRAN packages.
+
+### Internal
+
+- PR builds keep their compiler cache, and PRs that change only the R
+  package test against main's runtime instead of rebuilding it.
+
 ## 0.28.0
 
 Models that use Stan tuples now compile and run.
