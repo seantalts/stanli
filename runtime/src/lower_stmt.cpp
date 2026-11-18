@@ -1823,25 +1823,21 @@ void Lowering::lower_simple_stmt(const mir::Stmt& s) {
             leaf                           ? leaf->base
             : base->kind == mir::Expr::Var ? base->name
                                            : std::string(),
-            g.slots[v.slot].len, [&](const mir::OutputVar& var) {
+            mir::detail::leaf_index(tuples, leaf), g.slots[v.slot].len,
+            [&](const mir::OutputVar& var) {
               if (mir::detail::is_tuple(var.type))
-                return mir::detail::output_columns(
+                return mir::detail::output_parts(
                     tuples, var,
                     [&](const mir::Expr& d) { return eval_int(d); });
-              return sized_len(var.type, nullptr, nullptr, var.name);
+              return std::vector<int64_t>{
+                  sized_len(var.type, nullptr, nullptr, var.name)};
             });
         if (owner == nullptr)
           fail("FnWriteParam matches no output variable", s.raw);
-        // A write may read a leaf of another tuple variable, the optimizer
-        // having made this value a copy of it.
-        if (leaf && leaf->base != owner->name) leaf = nullptr;
-        if (!leaf && mir::detail::is_tuple(owner->type)) {
-          leaf = mir::detail::leaf_at(
-              tuples, *owner, output_cursor.offset(), g.slots[v.slot].len,
-              [&](const mir::Expr& d) { return eval_int(d); });
-          if (!leaf)
-            fail("cannot name a write of part of tuple " + owner->name, s.raw);
-        }
+        leaf = mir::detail::output_leaf(tuples, *owner, leaf,
+                                        output_cursor.part());
+        if (!leaf && mir::detail::is_tuple(owner->type))
+          fail("cannot name a write of part of tuple " + owner->name, s.raw);
         if (owner->block != mir::OutputVar::Block::Parameters && !n_tp_start)
           n_tp_start = out.views.size();
         if (owner->block == mir::OutputVar::Block::GeneratedQuantities &&

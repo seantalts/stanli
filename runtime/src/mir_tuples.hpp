@@ -114,47 +114,64 @@ void attach_tuple_interface(
 std::vector<size_t> reader_order(const TupleLeaf& leaf,
                                  const std::vector<int64_t>& dims);
 
-// How many CSV columns an output variable has.
+// The CSV column count of each leaf of tuple output `var`, in order.
 template <class Extent>
-int64_t output_columns(const TupleInterface* tuples, const OutputVar& var,
-                       const Extent& extent) {
-  if (tuples && is_tuple(var.type)) {
-    const auto found = tuples->leaves_of.find(var.name);
-    if (found == tuples->leaves_of.end()) return 0;
-    int64_t columns = 0;
-    for (const std::string& name : found->second) {
-      int64_t leaf = 1;
-      for (const Expr& dim : tuples->leaves.at(name).type.dims)
-        leaf *= extent(dim);
-      columns += leaf;
-    }
-    return columns;
+std::vector<int64_t> output_parts(const TupleInterface* tuples,
+                                  const OutputVar& var, const Extent& extent) {
+  std::vector<int64_t> parts;
+  if (!tuples) return parts;
+  const auto found = tuples->leaves_of.find(var.name);
+  if (found == tuples->leaves_of.end()) return parts;
+  for (const std::string& name : found->second) {
+    int64_t columns = 1;
+    for (const Expr& dim : tuples->leaves.at(name).type.dims)
+      columns *= extent(dim);
+    parts.push_back(columns);
   }
-  int64_t columns = 1;
-  for (const Expr& dim : var.type.dims) columns *= extent(dim);
-  return columns;
+  return parts;
 }
 
-// The leaf of tuple output `var` that a write of `width` columns starting at
-// column `offset` writes whole, for a write that reads no leaf variable (the
-// optimizer may turn one into a literal). Null when an array of tuples
-// holds the leaves, or the write is not one whole leaf.
-template <class Extent>
-const TupleLeaf* leaf_at(const TupleInterface* tuples, const OutputVar& var,
-                         int64_t offset, int64_t width, const Extent& extent) {
-  if (!tuples) return nullptr;
+// Which leaf of its tuple variable `leaf` is, in the order of
+// output_parts. Empty for a null leaf.
+inline std::optional<size_t> leaf_index(const TupleInterface* tuples,
+                                        const TupleLeaf* leaf) {
+  if (!tuples || !leaf) return std::nullopt;
+  const auto found = tuples->leaves_of.find(leaf->base);
+  if (found == tuples->leaves_of.end()) return std::nullopt;
+  for (size_t k = 0; k < found->second.size(); ++k)
+    if (found->second[k] == leaf->variable) return k;
+  return std::nullopt;
+}
+
+// The leaf of tuple output `var` that a write the cursor placed in `part`
+// is of. Null when there is no such part, or when an array of tuples holds
+// the leaves: its writes go element by element, so they do not take the
+// leaves in order.
+inline const TupleLeaf* leaf_of_part(const TupleInterface* tuples,
+                                     const OutputVar& var,
+                                     std::optional<size_t> part) {
+  if (!tuples || !part) return nullptr;
   const auto found = tuples->leaves_of.find(var.name);
-  if (found == tuples->leaves_of.end()) return nullptr;
-  int64_t start = 0;
-  for (const std::string& name : found->second) {
-    const TupleLeaf& leaf = tuples->leaves.at(name);
-    if (leaf.in_array()) return nullptr;
-    int64_t columns = 1;
-    for (const Expr& dim : leaf.type.dims) columns *= extent(dim);
-    if (start == offset) return columns == width ? &leaf : nullptr;
-    start += columns;
-  }
-  return nullptr;
+  if (found == tuples->leaves_of.end() || *part >= found->second.size())
+    return nullptr;
+  for (const std::string& name : found->second)
+    if (tuples->leaves.at(name).in_array()) return nullptr;
+  return &tuples->leaves.at(found->second[*part]);
+}
+
+// The leaf of output `owner` a write is of, given the leaf variable the
+// write reads (null when it reads none) and the part the cursor placed it
+// in. The optimizer may have turned the write into a literal or into a read
+// of another leaf, so the position decides where it can; inside an array of
+// tuples only the leaf read can. Null when `owner` is not a tuple or the
+// leaf cannot be told.
+inline const TupleLeaf* output_leaf(const TupleInterface* tuples,
+                                    const OutputVar& owner,
+                                    const TupleLeaf* read,
+                                    std::optional<size_t> part) {
+  if (!is_tuple(owner.type)) return nullptr;
+  if (const TupleLeaf* at = leaf_of_part(tuples, owner, part)) return at;
+  return read && read->base == owner.name ? read : nullptr;
 }
 
 // CmdStan's name for the values one write produces: the output variable,

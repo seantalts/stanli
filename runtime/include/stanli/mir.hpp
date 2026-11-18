@@ -1017,67 +1017,130 @@ const FunDef* find_function(const std::map<std::string, const FunDef*>& funs,
 }
 
 // Assigns each of write_array's FnWriteParam statements, in execution
-// order, to the output variable whose values it writes. stanc3 emits the
-// variables in output_vars order. A write that reads a later output
-// variable by name belongs to it. A write the optimizer turned into a
-// literal no longer names its variable; it belongs to the first variable
-// whose columns are not all written yet, which needs the column counts of
-// the variables from the current one on.
+// order, to the output variable whose values it writes, and to the part of
+// that variable it falls in. A tuple variable's parts are its leaves, in
+// order; any other variable is one part. stanc3 emits the variables in
+// output_vars order. A write that reads a later output variable by name
+// belongs to it once the current variable has all its columns. A write the
+// optimizer turned into a literal, or into a read of another variable, no
+// longer names its variable; it belongs to the first variable whose parts are
+// not all written yet. An empty part counts as written once a write of no
+// columns has taken it, so writes of empty leaves stay with their tuple.
 class OutputCursor {
  public:
   OutputCursor() = default;
   explicit OutputCursor(const std::vector<OutputVar>& vars) : vars_(&vars) {}
 
-  // `named` is the variable the write reads, or empty when there is none.
-  // `columns(var)` evaluates a variable's column count. Returns null when the
-  // write fits no output variable.
-  template <class Columns>
-  const OutputVar* take(const std::string& named, int64_t width,
-                        Columns columns) {
-    const OutputVar* var = take_impl(named, width, columns);
-    offset_ = written_ - width;
-    return var;
-  }
-
-  // The column of its variable the last write taken began at.
-  int64_t offset() const { return offset_; }
-
- private:
-  template <class Columns>
-  const OutputVar* take_impl(const std::string& named, int64_t width,
-                             Columns columns) {
+  // `named` is the variable the write reads, or empty when there is none,
+  // and `named_part` the part of it the write reads, if known. `parts(var)`
+  // evaluates the column count of each of a variable's parts. Returns null
+  // when the write fits no output variable.
+  template <class Parts>
+  const OutputVar* take(const std::string& named,
+                        std::optional<size_t> named_part, int64_t width,
+                        Parts parts) {
+    part_taken_.reset();
     if (!vars_) return nullptr;
     for (size_t k = next_; !named.empty() && k < vars_->size(); ++k)
       if ((*vars_)[k].name == named) {
+        const std::vector<int64_t> p = parts((*vars_)[k]);
         // The optimizer may have made a later variable a copy of this
-        // one, which is then already written.
-        if (k == next_ && written_ + width > columns((*vars_)[k])) break;
+        // one, which is then already written, or this variable a copy of a
+        // later one, while columns of this one are still to come.
+        if (k == next_ && written_ + width > total(p)) break;
+        if (k != next_ && !all_written(k, parts)) break;
         if (k != next_) {
           next_ = k;
           written_ = 0;
+          part_ = 0;
         }
-        written_ += width;
+        place(p, width, named_part);
         return &(*vars_)[next_];
       }
-    for (; next_ < vars_->size(); ++next_, written_ = 0) {
-      const int64_t total = columns((*vars_)[next_]);
-      if (written_ + width > total) {
-        if (written_ > 0 && written_ < total) return nullptr;
+    for (; next_ < vars_->size(); ++next_, written_ = 0, part_ = 0) {
+      const std::vector<int64_t> p = parts((*vars_)[next_]);
+      const int64_t all = total(p);
+      if (written_ + width > all) {
+        if (written_ > 0 && written_ < all) return nullptr;
         continue;
       }
-      if (written_ < total || (width == 0 && written_ == 0)) {
-        written_ += width;
+      if (written_ < all || (width == 0 && written_ == 0) ||
+          (width == 0 && find_part(p, width) < p.size())) {
+        place(p, width, std::nullopt);
         return &(*vars_)[next_];
       }
     }
     return nullptr;
   }
 
+  // The part of its variable the last write taken lies within, or empty
+  // when it covers more than one part.
+  std::optional<size_t> part() const { return part_taken_; }
+
  private:
+  // Whether the variables before vars_[k] have no columns left to write.
+  template <class Parts>
+  bool all_written(size_t k, Parts& parts) const {
+    if (written_ < total(parts((*vars_)[next_]))) return false;
+    for (size_t j = next_ + 1; j < k; ++j)
+      if (total(parts((*vars_)[j])) > 0) return false;
+    return true;
+  }
+
+  static int64_t total(const std::vector<int64_t>& parts) {
+    int64_t sum = 0;
+    for (int64_t n : parts) sum += n;
+    return sum;
+  }
+
+  // Whether a write of `width` columns at column written_ can start in
+  // part k, which begins at column `start`: k holds that column, or for a
+  // write of no columns k is an empty part there.
+  bool starts_in(const std::vector<int64_t>& parts, size_t k, int64_t start,
+                 int64_t width) const {
+    return width == 0 ? parts[k] == 0 && start == written_
+                      : start <= written_ && written_ < start + parts[k];
+  }
+
+  // The first part from part_ on that such a write starts in, or
+  // parts.size() when there is none.
+  size_t find_part(const std::vector<int64_t>& parts, int64_t width) const {
+    int64_t start = 0;
+    for (size_t k = 0; k < part_ && k < parts.size(); ++k) start += parts[k];
+    for (size_t k = part_; k < parts.size(); start += parts[k++]) {
+      if (starts_in(parts, k, start, width)) return k;
+      if (start > written_) break;
+    }
+    return parts.size();
+  }
+
+  // Place the write in the part it reads when it can start there: a leaf
+  // that got no write, such as an empty array of vectors, leaves an empty
+  // part at the same column.
+  void place(const std::vector<int64_t>& parts, int64_t width,
+             std::optional<size_t> named_part) {
+    size_t k = find_part(parts, width);
+    if (named_part && *named_part < parts.size()) {
+      int64_t start = 0;
+      for (size_t j = 0; j < *named_part; ++j) start += parts[j];
+      if (starts_in(parts, *named_part, start, width)) k = *named_part;
+    }
+    if (k == parts.size()) {
+      written_ += width;
+      return;
+    }
+    int64_t end = 0;
+    for (size_t j = 0; j <= k; ++j) end += parts[j];
+    if (written_ + width <= end) part_taken_ = k;
+    written_ += width;
+    part_ = written_ >= end ? k + 1 : k;
+  }
+
   const std::vector<OutputVar>* vars_ = nullptr;
   size_t next_ = 0;
   int64_t written_ = 0;  // columns of vars_[next_] written so far
-  int64_t offset_ = 0;
+  size_t part_ = 0;      // the first part of vars_[next_] not all written
+  std::optional<size_t> part_taken_;
 };
 
 Program read_program(const sexp::Node& root);
