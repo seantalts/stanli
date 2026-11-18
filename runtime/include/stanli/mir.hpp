@@ -1064,7 +1064,12 @@ class OutputCursor {
         if (written_ > 0 && written_ < all) return nullptr;
         continue;
       }
-      if (written_ < all || (width == 0 && written_ == 0) ||
+      // A tuple's leaves that are written whole get one write each, and
+      // its other leaves get writes of one column, so a write of no
+      // columns stays with a tuple only in an empty leaf not yet taken.
+      // An array can take any number of them.
+      const bool tuple = (*vars_)[next_].type.base == "STuple";
+      if (written_ < all || (width == 0 && written_ == 0 && !tuple) ||
           (width == 0 && find_part(p, width) < p.size())) {
         place(p, width, std::nullopt);
         return &(*vars_)[next_];
