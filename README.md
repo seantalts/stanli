@@ -80,7 +80,7 @@ example in their language.
   and <!--gen:corpus_at_par-->349<!--/gen--> models are at least as fast.
   The [full benchmark](docs/benchmarks.md) also lists the runs that failed or
   were capped.
-- Model coverage. We compare <!--gen:corpus_reference_models-->374<!--/gen-->
+- Model coverage. We compare <!--gen:corpus_reference_models-->375<!--/gen-->
   models with CmdStan's recorded answers at three points each. In the
   posteriordb subset, <!--gen:corpus_verified-->118/120<!--/gen--> models
   match CmdStan's log density and full gradient.
@@ -94,7 +94,7 @@ example in their language.
   with recorded CmdStan answers
   ([tests/stanc3_good/README.md](tests/stanc3_good/README.md)). We also
   verify the programs that once failed to lower, in the same way as the
-  corpus. Of these, <!--gen:lang_verified-->12/12<!--/gen--> pass
+  corpus. Of these, <!--gen:lang_verified-->13/13<!--/gen--> pass
   ([tests/regressions/README.md](tests/regressions/README.md)).
 - Distribution coverage. We verify each of these against CmdStan: 71 of 72
   densities, all 105 cdf/lcdf/lccdf functions, truncation, censoring,

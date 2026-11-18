@@ -19,6 +19,7 @@ through the same CmdStan oracle as posteriordb: references in
 | `tuple_effect_once` | written for this directory | a user function taking a tuple, called on an overloaded function that returns a tuple, prints and draws, so it is not inlined; the inlined body reads both slots of the argument, and the call must still run once |
 | `tuple_loops` | written for this directory | arrays of tuples read and written element by element in loops, as data, a model-block local and generated quantities with RNG draws; a projection of a tuple of two draws; tuple parameters with a bound and a simplex; a bounded tuple transformed parameter from a user function that returns from a branch on a parameter and from inside a loop; an int promoted to real in a tuple |
 | `tuple_reduce_sum` | written for this directory | `reduce_sum` and `reduce_sum_static` whose shared arguments are a tuple and an array of tuples from data, and a partial sum calling an overloaded user function that returns a tuple; stanc3 refuses an array of tuples as the sliced argument |
+| `tuple_return_slices` | written for this directory | a user function returning a four-tuple whose matrix has no columns and whose array of matrices is empty for one call and not for the other, bound to tuple transformed parameters and read through `.4` of the call. Its body writes `out[:, :, 1]`, `out[1, :, 1]`, `out[k, pick] +=` and `out[k, pick, 2] +=` |
 
 `reject_udf_data_size` is valid at the committed data. With an empty `Nc` the
 function rejects, and both CmdStan and stanli stop at data load with the
