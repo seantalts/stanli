@@ -1,0 +1,53 @@
+# Delete superseded cache entries before GitHub's 10 GB limit evicts by age.
+#
+# Hash-keyed caches leave their previous entry behind on main after every
+# change to the hashed files. Once the repository passes the limit, eviction
+# removes the least recently used entries, which has included the main Clang
+# ccache that every pull request restores. tools/prune_caches.py keeps the
+# newest entry of each key family on main and removes entries of closed pull
+# requests.
+name: prune caches
+
+on:
+  workflow_run:
+    workflows:
+      - wheels
+      - seed PR Clang ccache
+      - Windows dev setup
+      - R
+      - Stan conformance nightly
+    types: [completed]
+    branches: [main]
+  schedule:
+    - cron: '20 */6 * * *'
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: only print what would be deleted
+        type: boolean
+        default: false
+
+permissions:
+  actions: write
+  contents: read
+  # Reads the state of the pull request that owns a cache entry.
+  pull-requests: read
+
+concurrency:
+  group: prune-caches
+  cancel-in-progress: false
+
+jobs:
+  prune:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Delete superseded entries
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DRY_RUN: ${{ inputs.dry_run }}
+        run: |
+          args=(--repo "$GITHUB_REPOSITORY")
+          if [ "$DRY_RUN" = true ]; then args+=(--dry-run); fi
+          python3 tools/prune_caches.py "${args[@]}"

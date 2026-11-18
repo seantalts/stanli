@@ -50,7 +50,7 @@ jobs:
     # must not publish a cache that looks like the trusted main seed.
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-24.04
-    timeout-minutes: 45
+    timeout-minutes: 100
     container:
       image: ghcr.io/seantalts/stanli-manylinux:2_28-x86_64
       credentials:
@@ -73,8 +73,11 @@ jobs:
           echo "id=$fingerprint" >> "$GITHUB_OUTPUT"
 
       # Use restore/save separately: only a complete successful build may
-      # publish the canonical main cache. A prefix hit still reuses unchanged
-      # objects after a source edit, then saves the new content-addressed key.
+      # publish the exact key. A prefix hit still reuses unchanged objects
+      # after a source edit, then saves the new content-addressed key. A
+      # build that fails or times out saves what it compiled under a
+      # -partial key, which PR builds also restore by prefix, so a cold
+      # start still leaves the next seed and PRs warmer.
       - name: Restore the PR compiler cache
         id: compiler-cache
         uses: actions/cache/restore@v4
@@ -218,6 +221,10 @@ jobs:
           key: ${{ steps.stanc-build-cache.outputs.cache-primary-key }}
 
       - name: Compile the PR target graph
+        id: build
+        # Fail the step rather than hit the job limit, so the partial cache
+        # below still saves.
+        timeout-minutes: 80
         shell: bash
         run: |
           export CC=clang CXX=clang++
@@ -232,7 +239,7 @@ jobs:
             -DCMAKE_C_COMPILER_LAUNCHER=ccache \
             -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
             -DSTANLI_EMBED_STANC=ON
-          cmake --build build-rel -j2
+          cmake --build build-rel -j3
           # The PR job's differential step rebuilds everything with Stan
           # Math's own density kernels and the developer switches kept; seed
           # those objects too.
@@ -244,7 +251,7 @@ jobs:
             -DCMAKE_C_COMPILER_LAUNCHER=ccache \
             -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
             -DSTANLI_EMBED_STANC=ON
-          cmake --build build-oracle -j2
+          cmake --build build-oracle -j3
           ccache -s
 
       - name: Save the completed PR compiler cache
@@ -253,3 +260,14 @@ jobs:
         with:
           path: .ccache
           key: ${{ steps.compiler-cache.outputs.cache-primary-key }}
+
+      # ccache entries are content-addressed, so objects from an unfinished
+      # build are still correct to reuse.
+      - name: Save the partial PR compiler cache
+        if: >-
+          failure() && steps.build.outcome == 'failure' &&
+          steps.compiler-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: .ccache
+          key: ${{ steps.compiler-cache.outputs.cache-primary-key }}-partial-${{ github.run_id }}
