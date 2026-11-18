@@ -1,0 +1,2 @@
+model	params	stanli_compile_s	stanli_prep_s	cmdstan_stanc_s	cmdstan_build_s	stanli_ns_grad	cmdstan_ns_grad	stanli_ns_grad_mad	cmdstan_ns_grad_mad	paired_speedup	paired_speedup_mad	paired_rounds	points_kept	points_dropped	point_source	gradient_count	stanli_estimated_s	cmdstan_estimated_s	run_id	note
+rbioacc_odetk	3	0.01863770800000175	0.0014748335	0.032277208	5.3645432500000005	270841.4880442779	220477.67159946688	1907.4108997700096	1811.8976674948499	0.8275893410280004	0.010836631663555307	6	10	0	reference_run	20389	5.5422996412347825	9.892139704241531	75e50003f2ef32db	""

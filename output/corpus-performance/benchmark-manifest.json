@@ -1,25 +1,25 @@
 {
   "identity": {
     "config": {
-      "bench": "/Users/xitrium/claud/stanrt/.worktrees/bench-publish/build-rel/bench_grad",
+      "bench": "/Users/xitrium/claud/stanrt/.worktrees/bench-refresh-028/build-rel/bench_grad",
       "build_timeout": 900.0,
-      "cmdstan": "/Users/xitrium/claud/stanrt/.worktrees/bench-publish/deps/cmdstan",
+      "cmdstan": "/Users/xitrium/claud/stanrt/deps/cmdstan",
       "corpus": "all",
       "filter": "",
       "gradient_timeout": 60.0,
       "measure_ms": 40,
-      "pdb": "/Users/xitrium/claud/stanrt/.worktrees/bench-publish/deps/posteriordb",
+      "pdb": "/Users/xitrium/claud/stanrt/deps/posteriordb",
       "points": 10,
       "rounds": 6,
-      "stanc": "/Users/xitrium/claud/stanrt/.worktrees/bench-publish/deps/stanc3/stanc-pinned",
+      "stanc": "/Users/xitrium/claud/stanrt/.worktrees/bench-refresh-028/deps/stanc3/stanc-pinned",
       "stancflags": "",
-      "vectorize_probe": "/Users/xitrium/claud/stanrt/.worktrees/bench-publish/deps/stanc3/embed/0a5006d31d4889b8/stanli-vectorize-probe",
+      "vectorize_probe": "/Users/xitrium/claud/stanrt/.worktrees/bench-refresh-028/deps/stanc3/embed/691e6e07da34e9f9/stanli-vectorize-probe",
       "warmup_ms": 20
     },
     "executables": {
-      "bench": "605b7b1c8e95f57276eb1e0c83ce3d4c754a0e3391c51cb87a2a62bc3624be5e",
+      "bench": "8d1b4c8d01213e198818bbb130655e5daa3e4b8537aaeb792d9f81ea5fcc4e4a",
       "stanc": "d549f0ddbccff17f6b882a54109339f2a0f718b3d1fc09fce118ccdf452adc2d",
-      "vectorize_probe": "969f5fd3747185be6cb79afca25e6c8417fa41cbb5f7811353a23449c713ad8c"
+      "vectorize_probe": "6e7739b75c9d5fec46728e60fdb38ea1ab332ceaa42c4acbb00e00c9ba47ae92"
     },
     "inputs": {
       "2pl_latent_reg_irt": {
@@ -327,6 +327,15 @@
         "points_sha256": "e6803b5488b5cc912ffe04d8dd74bfb393be2a5b74e2ca9a833f6fd52c9e51ab",
         "reference_sha256": "618127a8ccce8f89f4cb45171dd6d109c93d8b39e14e36eb941d5ffa12a4f8a2",
         "stan": "aa713e50a5154ab9efda30f2b5fe320d6a77510434ff73cef6708cbf72d1fae8"
+      },
+      "beeguts_guts_sd": {
+        "collection": "beeguts",
+        "data": "f517f301749b6439b48ee7350aff75062ce596fc1f9b2e5a4016388042f54933",
+        "gradient_count": 18876,
+        "point_source": "reference_run",
+        "points_sha256": "d1e4a310f669b76d585dcebb9dafe6e9888e17dfbc21481bd72a67c0d1948154",
+        "reference_sha256": "fef172dcb120452f5a8681ebca339a3d5b7f3fad8d6bda2a66082d3c1c2c09fb",
+        "stan": "873a376ace0aed82cb1dc6a64425a3f779554ea262b89bb6506bb6362c838a39"
       },
       "blr": {
         "collection": "posteriordb",
@@ -1206,6 +1215,24 @@
         "reference_sha256": "7b15a401550e3245f46837b1cf3f3593cf5d672e96b1ca85cc11595676b8fcd4",
         "stan": "cabef66313b5b1568716951892387134a46d92865a84710445970cc69bda163a"
       },
+      "ecoensemble_hierarchical_withdrivers": {
+        "collection": "ecoensemble",
+        "data": "6a935c2f6bdb7b64e83488fd100d71e2bcb57f829c9ebbe3b3c3fa7297ce7cf6",
+        "gradient_count": 162994,
+        "point_source": "reference_run",
+        "points_sha256": "d1e0d4869633fff694aef8e4b092c045c51fd329bd4312036791bab6580fa086",
+        "reference_sha256": "2a14ee323092a0eaf4d9edacc2a0631a22cd3dcdd26c862dd2610d2c9ca6be3d",
+        "stan": "a5e83a3989c04909d255cbb71f4a06297dfebe3523702d99a9e7139a08e33c58"
+      },
+      "ecoensemble_hierarchical_withdrivers_conj": {
+        "collection": "ecoensemble",
+        "data": "39e5dd35332852ef2b0ea4eea1171f04541cc6f7ae2206ed1ab0639a141aa0e9",
+        "gradient_count": 192434,
+        "point_source": "reference_run",
+        "points_sha256": "c77d02f12c1201b6bbc682fb8675815cc90764ebc9065278b8e0763ce0a3e173",
+        "reference_sha256": "ff4c2a4625333e3239aff25213f0468111f70ed985158bac188e3c936de04233",
+        "stan": "a5e83a3989c04909d255cbb71f4a06297dfebe3523702d99a9e7139a08e33c58"
+      },
       "eight_schools_centered": {
         "collection": "posteriordb",
         "data": "f06889e8cae3755c00a4a44f002d5fc3acf3263ff9ae8ffe5655b1907bcadd80",
@@ -1232,6 +1259,24 @@
         "points_sha256": "95f22ada2603b6f2fbadbe931d09e27b09e4b63cc5eecb06f9076b568e4e05fb",
         "reference_sha256": "40fcff0bd059fc8c43b79f8247b1112d14f5ec8e9ceaf4d13f15155f00793380",
         "stan": "cc0cac4d2d729adf98d1b12d06db2fa53327e3fc3bc700a1e7f28b3690ef858d"
+      },
+      "epinow2_estimate_infections": {
+        "collection": "epinow2",
+        "data": "9e6687aa0516ce251962de83ffd520fee89185e9ff4b4703365115ba1d28df81",
+        "gradient_count": 87808,
+        "point_source": "reference_run",
+        "points_sha256": "d1f841f96fe780a6015cff7619d89d1a972f795799631032a6c6189fc5a0e4b2",
+        "reference_sha256": "5f9dace5730058ed04748206d273e05e341ad67171c350d76ebe2dfb4a81fbef",
+        "stan": "93a82f10e8665955560945e3fe011811c9c78ca3a418432d2b54b30c3069d909"
+      },
+      "epinow2_estimate_secondary": {
+        "collection": "epinow2",
+        "data": "61f7c06215feccdb025f7e6bc08eaf71e8904c95f699abd0be3293aa5c3f0c78",
+        "gradient_count": 42629,
+        "point_source": "reference_run",
+        "points_sha256": "b813a7d3dd655d5f5671244395c82eb332c9f0ae3477f9dbdfd339688409edb6",
+        "reference_sha256": "c1f00f460e971efc1c7c111b61b0fa1905152718f461e16315b0b304644a6e89",
+        "stan": "57ecf8c23635b06215995f8ce60b63d4a90696abceac3cea06d419fc7e75954d"
       },
       "extra_hurdle_poisson": {
         "collection": "rethinking",
@@ -1286,6 +1331,24 @@
         "points_sha256": "5a4ca203a3d36c66abb4a515af555acd80f4db78677d276c4230d3c9e68fdb0a",
         "reference_sha256": "eb51e1a8c5fde118c730f3ede8524f906320ef6792a5f8f3560476bdbeb4f66c",
         "stan": "4ffc84d7cd04d241e6f20a0e088833f577a6a69b0533e971fcc752f8adf12bf1"
+      },
+      "hdbayes_lm_npp": {
+        "collection": "hdbayes",
+        "data": "dcc7e34cd6f80f08916b876d26b54d5cf8cc9e28c6064cc1d1279395c408f3f7",
+        "gradient_count": 88692,
+        "point_source": "reference_run",
+        "points_sha256": "f0cd1a0bf6a5c9b57564469cde0679eef727c92d0c1cf4507ac40bd500631f7c",
+        "reference_sha256": "12f75e0f9a7b271e6ca5e91296a9c6060d88b58b69d65ccca690d2be720ffd60",
+        "stan": "6ff96d0d018a21ac1a11258b5feac0698949f13ad698458f6eac9522cded49d5"
+      },
+      "hdbayes_pwe_npp": {
+        "collection": "hdbayes",
+        "data": "85f813edb5c1ba55e52cc8176622c6a0d49ff52c2f586c76d695cb907f3357e6",
+        "gradient_count": 28121,
+        "point_source": "reference_run",
+        "points_sha256": "42f7bc5120e58a999f769a8f5bc39bb1dddf480d6cb544e40dd18088e51647b4",
+        "reference_sha256": "86cb41ef537b0f73c2691b3c38034c67ccf5cdeff64c4130f56fc8e6209de344",
+        "stan": "3f5b39b482a83eab7076fb4cc3b7f0b278a2b987fa3c895998d6c8f370d0c5a3"
       },
       "hier_2pl": {
         "collection": "posteriordb",
@@ -1745,6 +1808,24 @@
         "reference_sha256": "0d530c6603c5b2cd312394f650235328e7a834a678a6534d74509e6dcb4fd6b0",
         "stan": "5233a18e3656e4239b9a5e1c4bddc31803d3ce69c2dbb46a80b50c67e5efa036"
       },
+      "mlumr_survival_mspline_relaxed": {
+        "collection": "mlumr",
+        "data": "5a5eefbdebad298afe2dfb5d797d28ff506093844014e8ccf94349ff2adb92d7",
+        "gradient_count": 63346,
+        "point_source": "reference_run",
+        "points_sha256": "d8b725af3a77afef612b42f4f822b789c291945f94c4503641febca580009248",
+        "reference_sha256": "2e3b40521ebffd2fc9fea530f5ba0fffe23d8e69fd83f2d85369cd8244f1f3d2",
+        "stan": "d57a839054932060140929572de66c74e2258c6e6433cf889fe7a92a0ee3f828"
+      },
+      "mlumr_survival_relaxed": {
+        "collection": "mlumr",
+        "data": "c0561491e025c49a91996ab3e92eaef7a2315df6a1c1ddb895f23ba30a7286f2",
+        "gradient_count": 96894,
+        "point_source": "reference_run",
+        "points_sha256": "d2383fe962fa4e9b611eea1217886ea39ea97d853efee99ee5ff5a02246be932",
+        "reference_sha256": "b7a29b9bfa12437442e3dff6dded72591f60315ff6d5ade979239321cc0f878f",
+        "stan": "fcaeda0f0a6204321954e77de5adeb564c23d530de6ec48fe0eb578845e93cf1"
+      },
       "multi_occupancy": {
         "collection": "posteriordb",
         "data": "455d722d60b508fc799ed5e2ab666831b55d905ad219272173491fd8cc132eff",
@@ -1753,6 +1834,24 @@
         "points_sha256": "4b5c011c0ff96990259a1a9fa2b87fdb51cf34d61e12392c2bbece111da05000",
         "reference_sha256": "7ba3e6b50a0d754386f5e9052b1e93b7f14926e6a0b3a8d40cf553c8defb2012",
         "stan": "2da8b97338d43107b8c9d97500ca3b9f526891ad6ace2eb11715c06c2c45b052"
+      },
+      "multinma_ndmm_mspline": {
+        "collection": "multinma",
+        "data": "99ff8c09448e30bb21a0abb4872411375d9262f37305d76bfcb51942f7fbd014",
+        "gradient_count": 35396,
+        "point_source": "reference_run",
+        "points_sha256": "5b41994b0ceff2a832db62b584188d41c1bc1effbdcbb60ee95d0550903db46d",
+        "reference_sha256": "116747e3b9d3c5e21f8fa1fa3e993635d4c42272e3a559ccf7b226dc842d4fde",
+        "stan": "dc3c57d7bbf06e5ff8a817fa8b815fa67647857fc3aa3a97b9c007fc50ac6200"
+      },
+      "multinma_smoking_re": {
+        "collection": "multinma",
+        "data": "c8ca8bf51070adf1f5d3ba7519303a62754840069f2add3ce96677943dbc6c00",
+        "gradient_count": 119560,
+        "point_source": "reference_run",
+        "points_sha256": "f985c6f063aa016a759bcfff1e7ab78238ae599d08362150488e30941a0177ea",
+        "reference_sha256": "28c7270c01f64849af0fc55bd0ebf137a770c300813595175f74847f004aebee",
+        "stan": "64308aff31bf80e3341f4b6e88f96ea4178b194d9cd75b54f48979929d1d4efe"
       },
       "nes": {
         "collection": "posteriordb",
@@ -1986,6 +2085,51 @@
         "points_sha256": "d41934b888109e34393acbad97fda009875b841467a794c3d6d69e1796763bac",
         "reference_sha256": "2da8e7e314ef8943e40dc145d02a18d33439fcb5a3b53c4493bdaf64686b5ac7",
         "stan": "c01395015d523c02784e538927b7c2b9cf36114d93729bd25a81d566e05eca19"
+      },
+      "rbioacc_odetk": {
+        "collection": "rbioacc",
+        "data": "9337465a2148432a8722217cf5b6867c9f044cc1dc439567be5f7519bd247d62",
+        "gradient_count": 20389,
+        "point_source": "reference_run",
+        "points_sha256": "acbaa86e334c1d74d96b83f07d5ad4f4c7d7bd9af9ea8efbbfb5bdbcbc6233a4",
+        "reference_sha256": "a9752cc309d94c4c23f4e5dea968b5c5d207a68d65e9f032487dca38b1171328",
+        "stan": "8f006274b3c25c90650ad8c754d393e2dcd56d8c78501a7a38ce815b015217f3"
+      },
+      "rstanarm_glm_gaussian": {
+        "collection": "rstanarm",
+        "data": "6f25b58571a6cd2019c67e86da6279307ff5c1c4368a2c0990ca6ecaa24909fc",
+        "gradient_count": 14920,
+        "point_source": "reference_run",
+        "points_sha256": "b03f792f9358715d8d5f897d0cab6966234c08490ddf3478b0c9a10ec389d624",
+        "reference_sha256": "2c89b2d7a42a09f97b7f02211d53a4511a3ca2b361bfe2ae3031097bcd499805",
+        "stan": "96cde79cb7ce8997b6523dd91af96890e3d8887f0a18870f0a95721506d90795"
+      },
+      "rstanarm_glmer_bernoulli": {
+        "collection": "rstanarm",
+        "data": "cac9ff4af8bbd5121ea0e624656f602209fa18652af0c8c0246a88deef57a422",
+        "gradient_count": 57278,
+        "point_source": "reference_run",
+        "points_sha256": "3bf3032d91f97f8fccfc9a10d09250119804d4b9c2bc46edc8b42cb375dc19f0",
+        "reference_sha256": "04d392b9212f253759d2cec91379d630091c7eff4781365de71f7e97ade0629c",
+        "stan": "b54806b63d808efc911be7dfb0fba39e3baaed64963a6053717bc59f5a734c7d"
+      },
+      "rstanarm_glmer_nb_count": {
+        "collection": "rstanarm",
+        "data": "f7e74f553e4bc8f0dd43122d2d70f00b82656c0e0d39a404722f886f988a4b41",
+        "gradient_count": 220662,
+        "point_source": "reference_run",
+        "points_sha256": "34c0d5ef12312b559dcf0526c96ad01ed82e153164576b4637dfbf460984ecad",
+        "reference_sha256": "4785ffee3ff389f76e28ac61f13e5429b7dd6e2893ec5c1d3c296e1e1e748999",
+        "stan": "2561388b1565cf85b40040e2211025d3c5c4546e928d196819d8c3885140ac6e"
+      },
+      "rstanarm_polr": {
+        "collection": "rstanarm",
+        "data": "59210bee4967d92fa415bc40a0516029be3c6c0f22ab2468947a00af5105b24a",
+        "gradient_count": 15180,
+        "point_source": "reference_run",
+        "points_sha256": "31f8e8dcdb4cd377bbb20dfea60886d5504ca1bd8cee9c538871c6b893a76a70",
+        "reference_sha256": "c90f1645ce40be91522e2f21d052a6af3637ab638c6bde9ff35b16da661af499",
+        "stan": "af4ccfeeba54b1d1e3c75b1fc3db3da2f78318166a24ab9c86510ff0027e123c"
       },
       "s2_ar_cov": {
         "collection": "brms",
@@ -3141,12 +3285,12 @@
       }
     },
     "machine": {
-      "host": "SeansMacStudio",
+      "host": "Seans-Mac-Studio.local",
       "logical_cpus": 32,
       "platform": "macOS-26.6.2-arm64-arm-64bit",
       "processor": "arm"
     },
-    "points_file_sha256": "154a367c8b0874f72b4cffada4f1cae2c3bd77c6bdcd39b62380449e4943bdc5",
+    "points_file_sha256": "dff8488b2a13a2609e61457ee899ee7b9b604503b92a0c555a7288a23db512ac",
     "protocol": "stanli-corpus-v6",
     "reference_settings": {
       "chains": 1,
@@ -3160,16 +3304,16 @@
       "warmup": 1000
     },
     "sources": {
-      "harnesses/corpus_bench.py": "86cbc8dae465037d9584bd2c5d4b29dbf67f9fe23f1e85e5dfcaf417e911239d",
+      "harnesses/corpus_bench.py": "a1d525d81fe3c687d6af78ea2b7a7fc4cee08627a3bccbb476bf9a02937c741d",
       "tools/bench_cmdstan_grad.cpp": "eb4ef7c0bb27aac34a189f605af5ed0ea0869928293ce5f0aa1793a3a782536f",
-      "tools/bench_grad.cpp": "1368601f50136174f6fde03b9242d159f3d37c67c31db6c66cacebcaa4aeb775",
+      "tools/bench_grad.cpp": "ef60ac8fd89886397c6c6a7b072db20b52f849ce1a3d1cee12c2bd6d9af30b95",
       "tools/benchmark_timer.hpp": "08c7b09589d126d78b91b8f81e53b8f772f58dbcdc906bad9ca70397d13181d4",
       "tools/cmdstan_ref.py": "059099bf6f1786f8e5ed7c2c64ad0dfd25aafaa75b18056b6427690bb9b2968d",
-      "tools/corpus_inventory.py": "a8f81d82d60eb98ef71d9e68c3ca88bb14eccfb1f3d1f5d23163e46fb9972baa",
-      "tools/verify_refs.py": "6b680c42706f463d735c4d3a50aa683ce1c9d6d86b1c8884fc0fc5f2832dfa75"
+      "tools/corpus_inventory.py": "61c775e1b05b367e4b37c8aed7af583da8b8c80b4de3035ea718a87c215205b7",
+      "tools/verify_refs.py": "c4127018c6e51e53aa3b916263ceff9e40624a217661f0e0ca6cd505d8a17d2b"
     },
     "stanli_source": {
-      "head": "b4247512ca87f95da9fc9d088fba956f91c34e09",
+      "head": "1e0a66ffbcbed2a66b1aefcb8ea5524356634e5f",
       "tracked_diff_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
     },
     "threads": {
@@ -3225,6 +3369,6 @@
       }
     }
   },
-  "run_id": "5167a7b02ed6d888",
-  "started_utc": "2026-11-13T13:28:51Z"
+  "run_id": "ca6d63336d009651",
+  "started_utc": "2026-11-18T05:44:29Z"
 }

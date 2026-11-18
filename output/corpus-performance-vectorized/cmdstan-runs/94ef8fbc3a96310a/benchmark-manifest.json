@@ -1,0 +1,131 @@
+{
+  "identity": {
+    "config": {
+      "bench": "/Users/xitrium/claud/stanrt/.worktrees/bench-refresh-028/build-rel/bench_grad",
+      "build_timeout": 900.0,
+      "cmdstan": "/Users/xitrium/claud/stanrt/deps/cmdstan",
+      "corpus": "all",
+      "filter": "epinow2_estimate_",
+      "gradient_timeout": 60.0,
+      "measure_ms": 40,
+      "pdb": "/Users/xitrium/claud/stanrt/deps/posteriordb",
+      "points": 10,
+      "rounds": 6,
+      "stanc": "/Users/xitrium/.codex/worktrees/e688d4b7-0100-4415-af6a-57ad52961ceb/stanrt/build/corpus-current/stanc-o1vec-src/_build/default/src/stanc/stanc.exe",
+      "stancflags": "--O1",
+      "vectorize_probe": "/Users/xitrium/claud/stanrt/.worktrees/bench-refresh-028/deps/stanc3/embed/691e6e07da34e9f9/stanli-vectorize-probe",
+      "warmup_ms": 20
+    },
+    "executables": {
+      "bench": "8d1b4c8d01213e198818bbb130655e5daa3e4b8537aaeb792d9f81ea5fcc4e4a",
+      "stanc": "359c905c882a4263811b17636817ce349f0b8c743a07769e5348e389dc81173c",
+      "vectorize_probe": "6e7739b75c9d5fec46728e60fdb38ea1ab332ceaa42c4acbb00e00c9ba47ae92"
+    },
+    "inputs": {
+      "epinow2_estimate_infections": {
+        "collection": "epinow2",
+        "data": "9e6687aa0516ce251962de83ffd520fee89185e9ff4b4703365115ba1d28df81",
+        "gradient_count": 87808,
+        "point_source": "reference_run",
+        "points_sha256": "d1f841f96fe780a6015cff7619d89d1a972f795799631032a6c6189fc5a0e4b2",
+        "reference_sha256": "5f9dace5730058ed04748206d273e05e341ad67171c350d76ebe2dfb4a81fbef",
+        "stan": "93a82f10e8665955560945e3fe011811c9c78ca3a418432d2b54b30c3069d909"
+      },
+      "epinow2_estimate_secondary": {
+        "collection": "epinow2",
+        "data": "61f7c06215feccdb025f7e6bc08eaf71e8904c95f699abd0be3293aa5c3f0c78",
+        "gradient_count": 42629,
+        "point_source": "reference_run",
+        "points_sha256": "b813a7d3dd655d5f5671244395c82eb332c9f0ae3477f9dbdfd339688409edb6",
+        "reference_sha256": "c1f00f460e971efc1c7c111b61b0fa1905152718f461e16315b0b304644a6e89",
+        "stan": "57ecf8c23635b06215995f8ce60b63d4a90696abceac3cea06d419fc7e75954d"
+      }
+    },
+    "machine": {
+      "host": "Seans-Mac-Studio.local",
+      "logical_cpus": 32,
+      "platform": "macOS-26.6.2-arm64-arm-64bit",
+      "processor": "arm"
+    },
+    "points_file_sha256": "dff8488b2a13a2609e61457ee899ee7b9b604503b92a0c555a7288a23db512ac",
+    "protocol": "stanli-corpus-v6",
+    "reference_settings": {
+      "chains": 1,
+      "delta": 0.8,
+      "draws": 1000,
+      "max_depth": 10,
+      "points": 10,
+      "save_warmup": true,
+      "seed": 1,
+      "timeout_s": 1800,
+      "warmup": 1000
+    },
+    "sources": {
+      "harnesses/corpus_bench.py": "a1d525d81fe3c687d6af78ea2b7a7fc4cee08627a3bccbb476bf9a02937c741d",
+      "tools/bench_cmdstan_grad.cpp": "eb4ef7c0bb27aac34a189f605af5ed0ea0869928293ce5f0aa1793a3a782536f",
+      "tools/bench_grad.cpp": "ef60ac8fd89886397c6c6a7b072db20b52f849ce1a3d1cee12c2bd6d9af30b95",
+      "tools/benchmark_timer.hpp": "08c7b09589d126d78b91b8f81e53b8f772f58dbcdc906bad9ca70397d13181d4",
+      "tools/cmdstan_ref.py": "059099bf6f1786f8e5ed7c2c64ad0dfd25aafaa75b18056b6427690bb9b2968d",
+      "tools/corpus_inventory.py": "61c775e1b05b367e4b37c8aed7af583da8b8c80b4de3035ea718a87c215205b7",
+      "tools/verify_refs.py": "c4127018c6e51e53aa3b916263ceff9e40624a217661f0e0ca6cd505d8a17d2b"
+    },
+    "stanli_source": {
+      "head": "1e0a66ffbcbed2a66b1aefcb8ea5524356634e5f",
+      "tracked_diff_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "threads": {
+      "MKL_NUM_THREADS": "1",
+      "OMP_NUM_THREADS": "1",
+      "OPENBLAS_NUM_THREADS": "1",
+      "STAN_NUM_THREADS": "1",
+      "VECLIB_MAXIMUM_THREADS": "1"
+    },
+    "toolchains": {
+      "build_environment": {
+        "CC": null,
+        "CFLAGS": null,
+        "CPPFLAGS": null,
+        "CXX": null,
+        "CXXFLAGS": null,
+        "LDFLAGS": null,
+        "MAKEFLAGS": null
+      },
+      "clang_sha256": "b8763cf250e607a778bb4603cecb5b90338814d0a3dfcba0d57b1de242f610e9",
+      "cmdstan": {
+        "head": "d3d5df6a22565edbe13edbd4eb40762cc8c5a4d6",
+        "tracked_diff_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "libraries": {
+        "stan/lib/stan_math/lib/sundials_6.1.1/lib/libsundials_cvodes.a": "3c7398013f7c7c2d271be1107495b4af3fa6c91ce4b276987e7da589c1b3a9ab",
+        "stan/lib/stan_math/lib/sundials_6.1.1/lib/libsundials_idas.a": "c4fa89a1f841cba924769baf133fa60cd0fac4a94c1c3bfd247664600de62ca7",
+        "stan/lib/stan_math/lib/sundials_6.1.1/lib/libsundials_kinsol.a": "9c277256b65e09dc5b77e26ccf9c967cbd612c7f86f9334e334ed1678c19a2b7",
+        "stan/lib/stan_math/lib/sundials_6.1.1/lib/libsundials_nvecserial.a": "d1ea28ff4d38bb0e14febc427c257e67141451399ceb3a4f70ad348cfb2e60f3",
+        "stan/lib/stan_math/lib/tbb/libtbb.dylib": "3e1261fbe451cdfd7eddb0c93507065128c8ab02d4fcbbbfb20385a61f6f5289",
+        "stan/lib/stan_math/lib/tbb/libtbbmalloc.dylib": "9a6247602224ac8e233f06e381e38be4797a8120c9944828eeba971e75c5879f",
+        "stan/lib/stan_math/lib/tbb/libtbbmalloc_proxy.dylib": "0aba46a96c6c38bb32f8a7aa43dfd8d0b9aa1bc8537a1160d22b566dc8304e21"
+      },
+      "math": {
+        "head": "5252d51d47c1d5e78005fc043ad996fad6dd8da8",
+        "tracked_diff_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "stan": {
+        "head": "a6806ef8477a7b5f65b27449ec33528c162bc024",
+        "tracked_diff_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "stanli_fmt": {
+        "head": "40626af88bd7df9a5fb80be7b25ac85b122d6c21",
+        "tracked_diff_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "stanli_math": {
+        "head": "5252d51d47c1d5e78005fc043ad996fad6dd8da8",
+        "tracked_diff_sha256": "a46ab8328d3da9cfaa9b5787dc73261f9f96d46bf6a935d1af1e1aed6a8040eb"
+      },
+      "stanli_stan": {
+        "head": "a6806ef8477a7b5f65b27449ec33528c162bc024",
+        "tracked_diff_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      }
+    }
+  },
+  "run_id": "94ef8fbc3a96310a",
+  "started_utc": "2026-11-18T06:26:08Z"
+}

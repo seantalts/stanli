@@ -1,0 +1,13 @@
+diff --git a/src/analysis_and_optimization/Optimize.ml b/src/analysis_and_optimization/Optimize.ml
+index f60845bdd..7cc15b456 100644
+--- a/src/analysis_and_optimization/Optimize.ml
++++ b/src/analysis_and_optimization/Optimize.ml
+@@ -1538,7 +1538,7 @@ let level_optimizations (lvl : optimization_level) : optimization_settings =
+       { function_inlining= true
+       ; static_loop_unrolling= false
+       ; one_step_loop_unrolling= false
+-      ; vectorize_loops= false
++      ; vectorize_loops= true
+       ; list_collapsing= true
+       ; block_fixing= true
+       ; constant_propagation= true

@@ -2,6 +2,31 @@
 
 ## Unreleased
 
+## 0.28.0
+
+Models that use Stan tuples now compile and run.
+
+### Features
+
+- Tuples work in every block: as data, parameters, transformed parameters,
+  generated quantities and locals, as arrays of tuples, and as the return
+  type of user functions. `qr`, `qr_thin`, `eigendecompose_sym`, `svd` and
+  `csr_extract`, which return tuples, work too (#567).
+- Tuple output columns use cmdstanr's names in R and CmdStanPy's in Python.
+  In Python, `stan_variable()` returns tuples, and in R,
+  `metadata()$stan_variables` lists each tuple once under its own name.
+- Tuples that hold complex numbers, and the Laplace functions that take
+  tuples, still stop with an error.
+
+### Fixes
+
+- An `_rng` call whose result is never used is no longer removed, so the
+  draws after it match CmdStan's.
+
+### Docs
+
+- The user docs are rewritten in plainer language (#572).
+
 ## 0.27.0
 
 You can now continue sampling from an existing fit, see divergence counts

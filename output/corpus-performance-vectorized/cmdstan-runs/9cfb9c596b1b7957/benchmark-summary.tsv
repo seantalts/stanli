@@ -1,0 +1,3 @@
+model	params	stanli_compile_s	stanli_prep_s	cmdstan_stanc_s	cmdstan_build_s	stanli_ns_grad	cmdstan_ns_grad	stanli_ns_grad_mad	cmdstan_ns_grad_mad	paired_speedup	paired_speedup_mad	paired_rounds	points_kept	points_dropped	point_source	gradient_count	stanli_estimated_s	cmdstan_estimated_s	run_id	note
+hdbayes_lm_npp	6	0.009456708000001868	0.0007318755000000001	0.020859583000000015	6.324431292	2492.8387021334656	2210.6444754516638	6.176900302689091	10.885860374088452	0.889001224482506	0.007728467057570909	6	10	0	reference_run	88692	0.23128343366962323	6.541357354816759	9cfb9c596b1b7957	""
+hdbayes_pwe_npp		0.020778833000001384		0.038909792	3.8533939580000016										reference_run	28121			9cfb9c596b1b7957	hdbayes_pwe_npp/gradient/0/cmdstan: failed (event 27)
