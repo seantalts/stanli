@@ -45,7 +45,9 @@ struct Pos {
   std::vector<PosIn> ins;
   int64_t width = 1;            // elements per lane through this position
   LaneLayout read;              // OP_INDEX/row elision or slice of the base
-  bool row_store = false;       // SET_SLICE of row `lane`, lanes cover it
+  bool row_store = false;       // SET_SLICE of row `lane`, consecutive rows
+  bool repack = false;          // row_store into the other packing order:
+                                //   the value goes through OP_TRANSPOSE
   int store_src = -1;           // the store's base at lane 0
   bool hoist = false;           // all inputs + idata invariant: emit once
   bool term_density = false;    // density, every lane's out a target term
@@ -166,9 +168,13 @@ inline bool profitable(const Graph& g, const CandidatePlan& plan,
       ops_out += 2;
       lane_elems += 2 * ap.width;
     } else if (ap.store_vec >= 0) {
-      const bool whole =
-          ap.row_store || (ap.store_stride == 1 && ap.store_start == 0 &&
-                           Luse == g.slots[(size_t)ap.store_vec].len);
+      if (ap.repack) {
+        ++ops_out;
+        added += 2 * Luse * ap.width;
+        lane_elems += 2 * ap.width;
+      }
+      const bool whole = ap.store_stride == 1 && ap.store_start == 0 &&
+                         Luse * ap.width == g.slots[(size_t)ap.store_vec].len;
       if (!whole || ap.store_written_after) {
         ++ops_out;
         lane_elems += 2 * ap.width;
@@ -309,11 +315,27 @@ inline void SelectedPlan::emit(Graph& g, Fills& fills, TermRetirement& retired,
         result.push_back(rv);
         W = rv.out;
       }
+      if (ap.repack) {
+        // Column-major L x w and row-major L x w are each other's
+        // transpose.
+        Op tr;
+        tr.opcode = OP_TRANSPOSE;
+        tr.n_in = 1;
+        tr.in[0] = W;
+        tr.out = g.add_slot(Luse * ap.width, false);
+        std::vector<int> tidata =
+            layout_cols ? std::vector<int>{(int)Luse, (int)ap.width}
+                        : std::vector<int>{(int)ap.width, (int)Luse};
+        g.idata_pool.push_back(std::move(tidata));
+        tr.idata = g.idata_pool.back().data();
+        tr.n_idata = 2;
+        result.push_back(tr);
+        W = tr.out;
+      }
       const int vec = ap.store_vec;
       int replacement = W;
-      const bool whole =
-          ap.row_store || (ap.store_stride == 1 && ap.store_start == 0 &&
-                           Luse == g.slots[vec].len);
+      const bool whole = ap.store_stride == 1 && ap.store_start == 0 &&
+                         Luse * ap.width == g.slots[vec].len;
       if (ap.store_written_after || !whole) {
         // A window (or a comb) rather than the whole vector: the
         // untouched elements still have to come from somewhere, so this
@@ -400,6 +422,40 @@ inline void SelectedPlan::emit(Graph& g, Fills& fills, TermRetirement& retired,
       result.push_back(rep);
       return rep.out;
     };
+    if (t.opcode == OP_CONCAT2) {
+      // Column-major packing, so each operand packs at its own width: a
+      // shared operand repeats each element Luse times, a lane-local one
+      // is already packed.
+      for (int j = 0; j < 2; ++j) {
+        const PosIn& in = ap.ins[j];
+        const int64_t w = g.slots[t.in[j]].len;
+        if (in.kind == InKind::kConstLanes) {
+          op.in[j] = packed_const(in, w);
+          continue;
+        }
+        const int v = in.kind == InKind::kLaneLocal
+                          ? pos_out[(size_t)in.producer_pos]
+                          : resolve(t.in[j]);
+        if (!in.tile_wide) {
+          op.in[j] = v;
+          continue;
+        }
+        Op rep;
+        rep.opcode = OP_REP_MAT;
+        rep.n_in = 1;
+        rep.in[0] = v;
+        rep.out = g.add_slot(Luse * w, false);
+        g.idata_pool.push_back({(int)Luse, (int)w, 2});
+        rep.idata = g.idata_pool.back().data();
+        rep.n_idata = 3;
+        result.push_back(rep);
+        op.in[j] = rep.out;
+      }
+      op.out = g.add_slot(Luse * ap.width, false);
+      pos_out[(size_t)p] = op.out;
+      result.push_back(op);
+      continue;
+    }
     bool all_scalar = true;
     for (int j = 0; j < t.n_in; ++j) {
       switch (ap.ins[j].kind) {

@@ -115,9 +115,9 @@
     "model": "region_map_hurdle_data",
     "quantity": "grad[*]",
     "pair": "default/passes_off",
-    "bound_ulp": 4,
-    "cause": "the 64 per-iteration gradient contributions of a loop whose UDF branches on data are accumulated in a different grouping with and without STANLI_NO_REROLL. The region map refuses the loop (the branch is data-only), so this is the rerolled graph's own regrouping, surfaced by this fixture. Measured at three swept points: up to 4 ULP, and STANLI_NO_REROLL with STANLI_NO_PARTITION gives the same bits as passes_off.",
-    "since": "2026-10-03"
+    "bound_ulp": 8,
+    "cause": "the 64 per-iteration gradient contributions of a loop whose UDF branches on data are accumulated in a different grouping with and without STANLI_NO_REROLL. The region map refuses the loop (the branch is data-only), so this is the rerolled graph's own regrouping, surfaced by this fixture. Measured at three swept points: up to 4 ULP, and STANLI_NO_REROLL with STANLI_NO_PARTITION gives the same bits as passes_off. Since CSE merges the y == 0 rows' identical log(hu) terms into one term times their count (#587), the hu entry differs by up to 8 ULP. Against an 80-digit mpmath reference at points 0-4, default is at most 2.9 ULP off on every entry and passes_off up to 11.1 ULP on the hu entry, so the gap is passes_off's error.",
+    "since": "2026-11-18"
   },
   {
     "model": "region_map_multi",
@@ -294,5 +294,101 @@
     "bound_ulp": 1,
     "cause": "STANLI_NO_NATIVE_ADJ refuses the region map, so it gives the same bits as default/no_region_map. See default/no_region_map.",
     "since": "2026-11-12"
+  },
+  {
+    "model": "fast_math_cse",
+    "quantity": "grad[*]",
+    "pair": "default/no_cse",
+    "bound_ulp": 2,
+    "cause": "CSE merges this model's repeated active target terms, which only the target reads, into one term multiplied by its count (#587). Without CSE the copies are added one at a time, so the sum and the gradient round differently.",
+    "since": "2026-11-18"
+  },
+  {
+    "model": "fast_math_cse",
+    "quantity": "grad[*]",
+    "pair": "default/passes_off",
+    "bound_ulp": 2,
+    "cause": "CSE merges this model's repeated active target terms, which only the target reads, into one term multiplied by its count (#587). Without CSE the copies are added one at a time, so the sum and the gradient round differently.",
+    "since": "2026-11-18"
+  },
+  {
+    "model": "fast_math_cse",
+    "quantity": "lp",
+    "pair": "default/no_cse",
+    "bound_ulp": 2,
+    "cause": "CSE merges this model's repeated active target terms, which only the target reads, into one term multiplied by its count (#587). Without CSE the copies are added one at a time, so the sum and the gradient round differently.",
+    "since": "2026-11-18"
+  },
+  {
+    "model": "fast_math_cse",
+    "quantity": "lp",
+    "pair": "default/passes_off",
+    "bound_ulp": 2,
+    "cause": "CSE merges this model's repeated active target terms, which only the target reads, into one term multiplied by its count (#587). Without CSE the copies are added one at a time, so the sum and the gradient round differently.",
+    "since": "2026-11-18"
+  },
+  {
+    "model": "matrix_multi_multi",
+    "quantity": "lp",
+    "pair": "default/no_cse",
+    "bound_ulp": 1,
+    "cause": "two of the four target sums select the same cells, so CSE merges them into one term times 2 (#587) and the four terms sum in a different order than without CSE.",
+    "since": "2026-11-18"
+  },
+  {
+    "model": "matrix_multi_multi",
+    "quantity": "lp",
+    "pair": "default/passes_off",
+    "bound_ulp": 1,
+    "cause": "two of the four target sums select the same cells, so CSE merges them into one term times 2 (#587) and the four terms sum in a different order than without CSE.",
+    "since": "2026-11-18"
+  },
+  {
+    "model": "region_map_hurdle_data",
+    "quantity": "grad[*]",
+    "pair": "default/no_cse",
+    "bound_ulp": 4,
+    "cause": "every y == 0 row adds the same log(hu), and CSE now merges those terms into one term times their count (#587). Without CSE they are added one at a time, so the lp and the hu gradient round differently.",
+    "since": "2026-11-18"
+  },
+  {
+    "model": "region_map_hurdle_data",
+    "quantity": "lp",
+    "pair": "default/no_cse",
+    "bound_ulp": 1,
+    "cause": "every y == 0 row adds the same log(hu), and CSE now merges those terms into one term times their count (#587). Without CSE they are added one at a time, so the lp and the hu gradient round differently.",
+    "since": "2026-11-18"
+  },
+  {
+    "model": "viewalias",
+    "quantity": "grad[*]",
+    "pair": "default/no_cse",
+    "bound_ulp": 4,
+    "cause": "CSE merges this model's repeated active target terms into one term multiplied by its count (#587), so the terms sum in a different grouping than without CSE.",
+    "since": "2026-11-18"
+  },
+  {
+    "model": "viewalias",
+    "quantity": "grad[*]",
+    "pair": "default/passes_off",
+    "bound_ulp": 4,
+    "cause": "CSE merges this model's repeated active target terms into one term multiplied by its count (#587), so the terms sum in a different grouping than without CSE.",
+    "since": "2026-11-18"
+  },
+  {
+    "model": "viewalias",
+    "quantity": "lp",
+    "pair": "default/no_cse",
+    "bound_ulp": 2,
+    "cause": "CSE merges this model's repeated active target terms into one term multiplied by its count (#587), so the terms sum in a different grouping than without CSE.",
+    "since": "2026-11-18"
+  },
+  {
+    "model": "viewalias",
+    "quantity": "lp",
+    "pair": "default/passes_off",
+    "bound_ulp": 2,
+    "cause": "CSE merges this model's repeated active target terms into one term multiplied by its count (#587), so the terms sum in a different grouping than without CSE.",
+    "since": "2026-11-18"
   }
 ]

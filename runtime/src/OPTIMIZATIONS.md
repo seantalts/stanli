@@ -234,6 +234,14 @@ as the row tiles via `OP_REP_MAT` instead of blocking the region; and a row
 density whose result feeds another op (a mixture over rows) folds back with
 one `OP_SUM_ROWS` per lane, repacking first when the region's convention is
 column-major, since `OP_SUM_ROWS` needs each lane's elements contiguous.
+A lane that builds its row with `OP_CONCAT2` (`mu[n] = [a[n], b[n]]'`, the
+brms categorical and multivariate shape) commits the region to column-major,
+where the lanes' concatenations are one `OP_CONCAT2` of the packed operands;
+a shared operand such as brms's leading zero tiles to every lane. A row store
+whose container uses the other convention takes one `OP_TRANSPOSE`, and
+row-major row stores may fill any run of consecutive rows through one
+`OP_SET_SLICE` window. Store forwarding often leaves the last row out of
+the run, because that lane reads its values directly (#574).
 Partition's `indexed_read` and its own wide-operand check share the same
 affine classifier and the same tiling, so a lane found by structure there
 or by period here is priced and packed the same way.
@@ -592,6 +600,30 @@ the island carver a smaller residue. `Mt_model` falls from 1,062 ops to
 70 (16.1x per gradient), `Mh_model` gains 1.39x, and `gpcm_latent_reg_irt`
 enters the partition pass with 34,634 ops rather than 61,612. Forward
 results are bitwise unchanged.
+
+An active duplicate normally shares only its value and keeps its own
+pullback, so the reverse sweep accumulates in source order. A duplicate
+that only the target reads is different: its seed is exactly 1, so k
+copies merge into one op and the target gets one term multiplied by k.
+That rounds once where adding the copies rounded k - 1 times. A brms
+`hurdle_poisson` model with 5,308 zeros among 12,000 rows adds
+`bernoulli_lpmf(1 | hu)` once per zero; its log density was 588 to 1,267
+ULP from an 80-digit reference (CmdStan: 102 to 567) and is now 3 to 56,
+and a gradient runs 1.24x faster. The same model passes each zero's
+`mu[n]` to a branch that never reads it, so the pass also drops a static
+`INDEX`, `SLICE` or `GATHER` whose value nothing reads, and a copy that
+shares another op's value once nothing reads it (merging terms leaves the
+copies that computed their arguments unread). It drops no other unused
+op, since an unused density can still reject.
+
+The gradient does not always improve. A term's pullback now adds one
+scaled contribution where it added k small ones, at the position of the
+first copy. When the contributions of the opposite sign are still added
+one at a time, the running sum can grow larger before it cancels. On
+`s2_hurdle_cumulative` (14 identical terms) one gradient entry went from
+3.4 to 9.6 ULP against an 80-digit reference at one point. Moving the
+scaled term to the middle or last copy helps there and hurts
+`hurdle_poisson` more, so it stays at the first.
 
 ## Native scalar probability categorical (`message.cpp`)
 

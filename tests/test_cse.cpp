@@ -85,20 +85,97 @@ static void test_merges_identical_ops() {
                      run_grad(std::move(g), fills), want);
 }
 
-// Target terms are the whole win on the M*_model family: the duplicated ops
-// there have no op consumer at all.
-static void test_rewrites_target_terms() {
+// Identical active ops that only feed the target (the M*_model capture
+// terms, the zeros of a hurdle model) become one term scaled by their count:
+// one rounding instead of k - 1 additions, and one pullback seeded with k.
+static void test_counts_repeated_target_terms() {
+  Graph g;
+  Fills fills;
+  const int p = g.add_slot(1, true);
+  constexpr int k = 1000;
+  std::vector<int> terms;
+  for (int i = 0; i < k; ++i) {
+    const int t = g.add_slot(1, false);
+    g.add_op(OP_EXPV, {p}, t);
+    terms.push_back(t);
+  }
+  const CseStats st = cse(g, fills, terms, {});
+  expect("repeated terms merged", st.ops_removed == k - 1);
+  expect("one EXP remains", count_opcode(g, OP_EXPV) == 1);
+  expect("one scaled term", terms.size() == 1);
+  testutil::reduce_into_result(g, terms);
+  const std::vector<double> got = run_grad(std::move(g), fills);
+  const double e = std::exp(fill_at(0));
+  expect("value is k * exp(p)", got[0] == k * e);
+  expect("gradient is k * exp(p)", got.size() == 2 && got[1] == k * e);
+}
+
+// A term that an op also reads keeps its own pullback: its seed is not
+// just the target's.
+static void test_term_with_reader_keeps_pullback() {
   Graph g;
   Fills fills;
   const int p = g.add_slot(1, true);
   const int t1 = g.add_slot(1, false), t2 = g.add_slot(1, false);
   g.add_op(OP_EXPV, {p}, t1);
   g.add_op(OP_EXPV, {p}, t2);
+  const int r = g.add_slot(1, false);
+  g.add_op(OP_MUL, {t1, p}, r);
+  std::vector<int> terms{t1, t2, r};
+  const CseStats st = cse(g, fills, terms, {});
+  expect("read term only shares its primal",
+         st.primals_shared == 1 && st.ops_removed == 0);
+  expect("terms keep separate adjoints", terms.size() == 3 && terms[0] == t1 &&
+                                             terms[1] == t2 && terms[2] == r);
+}
+
+// Merging two terms leaves the copy that computed the second one's input
+// unread. It runs no forward of its own, so it goes too.
+static void test_drops_unread_copies() {
+  Graph g;
+  Fills fills;
+  const int p = g.add_slot(1, true);
+  const int e1 = g.add_slot(1, false), e2 = g.add_slot(1, false);
+  const int t1 = g.add_slot(1, false), t2 = g.add_slot(1, false);
+  g.add_op(OP_EXPV, {p}, e1);
+  g.add_op(OP_MUL, {e1, p}, t1);
+  g.add_op(OP_EXPV, {p}, e2);
+  g.add_op(OP_MUL, {e2, p}, t2);
   std::vector<int> terms{t1, t2};
   const CseStats st = cse(g, fills, terms, {});
-  expect("duplicate term primal shared", st.primals_shared == 1);
-  expect("terms keep separate adjoints",
-         terms.size() == 2 && terms[0] == t1 && terms[1] == t2);
+  expect("unread copy dropped", st.unread_dropped == 1);
+  expect("one EXP remains", count_opcode(g, OP_EXPV) == 1);
+  testutil::reduce_into_result(g, terms);
+  const std::vector<double> got = run_grad(std::move(g), fills);
+  const double x = fill_at(0), e = std::exp(x);
+  expect("value is 2 * exp(p) * p", got[0] == 2 * (e * x));
+  expect("gradient is 2 * (exp(p) * p + exp(p))",
+         got.size() == 2 && std::abs(got[1] - 2 * (e * x + e)) <= 1e-15 * e);
+}
+
+// A static read whose value nothing uses is dropped, with the reads that
+// only fed it. Ops that can fail at run time stay even when unused.
+static void test_drops_unread_static_reads() {
+  Graph g;
+  Fills fills;
+  const int v = g.add_slot(4, true);
+  const int row = g.add_slot(2, false), cell = g.add_slot(1, false);
+  g.add_op(OP_SLICE, {v}, row, {1});
+  g.add_op(OP_INDEX, {row}, cell, {0});
+  const int used = g.add_slot(1, false);
+  g.add_op(OP_INDEX, {v}, used, {3});
+  const int s = g.add_slot(1, false), unused_lp = g.add_slot(1, false);
+  fills.emplace_back(s, std::vector<double>{-1.0});
+  g.add_op(OP_NORMAL_LPDF, {used, used, s}, unused_lp);
+  const int r = g.add_slot(1, false);
+  g.add_op(OP_EXPV, {used}, r);
+  g.result_slot = r;
+  std::vector<int> terms;
+  const CseStats st = cse(g, fills, terms, {});
+  expect("two unread reads dropped", st.unread_dropped == 2);
+  expect("used read kept",
+         count_opcode(g, OP_INDEX) == 1 && count_opcode(g, OP_SLICE) == 0);
+  expect("unused density kept", count_opcode(g, OP_NORMAL_LPDF) == 1);
 }
 
 // Effects are graph semantics: two prints print twice.
@@ -490,9 +567,11 @@ static void test_fast_merge_target_terms() {
   const std::vector<double> want = run_grad(std::move(ref), fills);
 
   const CseStats st = cse(g, fills, terms, {}, true);
-  expect("duplicate term removed", st.ops_removed == 1 && g.ops.size() == 1);
-  expect("both terms name the survivor",
-         terms.size() == 2 && terms[0] == t1 && terms[1] == t1);
+  expect("duplicate term removed",
+         st.ops_removed == 1 && count_opcode(g, OP_EXPV) == 1);
+  expect("one term scales the survivor",
+         terms.size() == 1 && g.ops.back().opcode == OP_MUL &&
+             g.ops.back().in[0] == t1 && g.ops.back().out == terms[0]);
   testutil::reduce_into_result(g, terms);
   expect_same_values("fast term gradient", run_grad(std::move(g), fills), want);
 }
@@ -581,7 +660,10 @@ int main() {
     (void)warm.n_params();
   }
   test_merges_identical_ops();
-  test_rewrites_target_terms();
+  test_counts_repeated_target_terms();
+  test_term_with_reader_keeps_pullback();
+  test_drops_unread_copies();
+  test_drops_unread_static_reads();
   test_keeps_effectful_ops();
   test_never_merges_solver_ops();
   test_idata_distinguishes();
