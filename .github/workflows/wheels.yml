@@ -121,10 +121,9 @@ jobs:
                 # Other jobs in that run, such as the Pages deploy, may fail.
                 passed=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$id/jobs?per_page=100" \
                   --jq '[.jobs[] | select(.conclusion == "success") | .name] | join("|")') || continue
-                case "|$passed|" in
-                  *"|build (manylinux_2_28_x86_64)|"*"|portable browser compiler|"*|*"|portable browser compiler|"*"|build (manylinux_2_28_x86_64)|"*) ;;
-                  *) continue ;;
-                esac
+                for job in "build (manylinux_2_28_x86_64)" "portable browser compiler"; do
+                  case "|$passed|" in *"|$job|"*) ;; *) continue 2 ;; esac
+                done
                 git fetch --no-tags --depth=1 origin "$sha" || continue
                 tree_diff=$(git diff --no-renames --name-only "$sha" HEAD) || continue
                 same=true
