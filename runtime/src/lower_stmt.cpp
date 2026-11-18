@@ -475,22 +475,34 @@ void Lowering::configure_island_compiler(ProgramCompiler& c,
   for (const std::string& name : names)
     if (const auto found = int_env.find(name); found != int_env.end())
       c.ints[name] = {found->second};
+  // The interpreter holds the values from before the region, so it must not
+  // answer an expression that reads a name the region declares or writes.
+  auto written = std::make_shared<std::set<std::string>>();
+  if (s) bound_names(*s, written.get());
+  const auto reads_written = [written](const mir::Expr& x) {
+    std::set<std::string> read;
+    mir::collect_names(x, &read);
+    return std::any_of(read.begin(), read.end(), [&](const std::string& n) {
+      return written->count(n) != 0;
+    });
+  };
   // Data the region reads as a compile-time integer, answered by the
   // same interpreter that answers a size expression. The region has
   // already resolved the indices, so what arrives is a literal read of a
-  // data-only value -- nothing here depends on the region's own scope.
-  c.extern_int = [&](const mir::Expr& x, long* out) {
-    if (!x.data_only) return false;
+  // data-only value.
+  c.extern_int = [this, reads_written](const mir::Expr& x, long* out) {
+    if (!x.data_only || reads_written(x)) return false;
     auto evaluated = try_eval_pure(x);
     if (!evaluated || !evaluated->is_int || evaluated->i.size() != 1)
       return false;
     *out = evaluated->i[0];
     return true;
   };
-  c.extern_ints = [&](const mir::Expr& x, std::vector<long>* values,
-                      std::vector<int64_t>* dims) {
+  c.extern_ints = [this, reads_written](const mir::Expr& x,
+                                        std::vector<long>* values,
+                                        std::vector<int64_t>* dims) {
     if (!x.data_only || x.unsized.depth == 0 ||
-        x.unsized.leaf != mir::UnsizedLeaf::Int)
+        x.unsized.leaf != mir::UnsizedLeaf::Int || reads_written(x))
       return false;
     auto evaluated = try_eval_pure(x);
     if (!evaluated || !evaluated->is_int ||
@@ -500,8 +512,9 @@ void Lowering::configure_island_compiler(ProgramCompiler& c,
     *dims = evaluated->dims;
     return true;
   };
-  c.extern_real = [&](const mir::Expr& x, double* value) {
-    if (!mir::is_unsized(x, mir::UnsizedLeaf::Real)) return false;
+  c.extern_real = [this, reads_written](const mir::Expr& x, double* value) {
+    if (!mir::is_unsized(x, mir::UnsizedLeaf::Real) || reads_written(x))
+      return false;
     auto evaluated = try_eval_pure(x);
     if (!evaluated || evaluated->is_int || evaluated->r.size() != 1)
       return false;
