@@ -4300,6 +4300,25 @@ int main() {
           "to_array_2d write_array interp");
   }
 
+  // A density of an empty integer outcome is 0, as in Stan Math, also when
+  // the interpreter evaluates it.
+  {
+    const std::string mir = slurp("tests/fixtures/empty_int_outcome.tmir.sexp");
+    DataMap d =
+        DataMap::from_json(slurp("tests/fixtures/empty_int_outcome.json"));
+    const std::vector<double> q{0.75};
+    const std::vector<double> want_row{0.75, 0, 0};
+    for (bool interp : {false, true}) {
+      const std::string what = std::string("empty int outcome write_array ") +
+                               (interp ? "interp" : "graph");
+      try {
+        check(write_array_row(mir, d, q, interp) == want_row, what);
+      } catch (const std::exception& error) {
+        check(false, what + ": " + error.what());
+      }
+    }
+  }
+
   // to_int truncates toward zero (-2.7 -> -2, -0.5 -> 0, 2.9 -> 2), where
   // rounding would give -3, -1 (or 0), and 3. r = [[1.9, -2.9], [3.5, -0.5]]
   // truncates to [[1, -2], [3, 0]]; the model's coefficient on q is
