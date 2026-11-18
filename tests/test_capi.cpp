@@ -1806,6 +1806,38 @@ void test_reduce_sum_threads() {
   }
   stanli_model_free(serial);
   stanli_model_free(parallel);
+
+  // A reduction that stays serial has a reason, and the note gives it.
+  auto* single = stanli_model_new_with_opts(
+      mir.c_str(), "{\"N\":1,\"y\":[0.5]}", &model_opts, err, sizeof err);
+  expect_true("single-element reduction builds", single != nullptr);
+  if (single == nullptr) return;
+  expect_true("single-element reduction stays serial",
+              stanli_reduce_sum_count(single) == 0 &&
+                  stanli_n_reduce_sum_fallbacks(single) == 1);
+  stanli_sample_opts opts;
+  stanli_sample_opts_init(&opts);
+  opts.chains = 1;
+  opts.warmup = 10;
+  opts.samples = 10;
+  std::vector<double> draws(10);
+  MessageCapture note;
+  int rc = 1;
+  collect_message(note, [&] {
+    rc = stanli_sample_multi_metric(single, &opts, nullptr, 100, draws.data(),
+                                    nullptr, nullptr, nullptr, nullptr, nullptr,
+                                    nullptr, nullptr, nullptr, err, sizeof err);
+  });
+  expect_true("single-element reduction samples", rc == 0);
+  expect_true("threads note names why the reduction is serial",
+              count_containing(
+                  note,
+                  "Note: threads_per_chain = 4 has no effect on this "
+                  "model, because its reduce_sum calls run on one "
+                  "thread (partial: slice has at most one element).") == 1);
+  expect_true("threads note does not deny the reduce_sum call",
+              count_containing(note, "has no reduce_sum call") == 0);
+  stanli_model_free(single);
 }
 
 // A continued run is the same run: 1000 + 1000 transitions reproduce 2000 in
