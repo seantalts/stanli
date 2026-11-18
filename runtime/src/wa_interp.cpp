@@ -351,7 +351,9 @@ std::vector<double> WaInterp::eval(
     cols_.clear();
     n_tp_start_ = n_gq_start_ = 0;
     saw_tp_ = saw_gq_ = false;
-    output_cursor_ = mir::OutputCursor(prog_->output_vars);
+    output_cursor_ =
+        mir::OutputCursor(prog_->output_vars,
+                          mir::detail::whole_leaf_tuples(prog_->tuples.get()));
   }
   std::vector<double> row;
   // CmdStan's write_array gives `target +=` an accumulator of its own that

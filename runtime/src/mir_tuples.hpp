@@ -10,9 +10,11 @@
 
 #include <stanli/mir.hpp>
 
+#include <algorithm>
 #include <cstdint>
 #include <map>
 #include <optional>
+#include <set>
 #include <string>
 #include <utility>
 #include <vector>
@@ -129,6 +131,20 @@ std::vector<int64_t> output_parts(const TupleInterface* tuples,
     parts.push_back(columns);
   }
   return parts;
+}
+
+// The tuple variables with no array of tuples among their leaves, for
+// OutputCursor.
+inline std::set<std::string> whole_leaf_tuples(const TupleInterface* tuples) {
+  std::set<std::string> names;
+  if (!tuples) return names;
+  for (const auto& [name, leaves] : tuples->leaves_of)
+    if (std::none_of(leaves.begin(), leaves.end(),
+                     [&](const std::string& leaf) {
+                       return tuples->leaves.at(leaf).in_array();
+                     }))
+      names.insert(name);
+  return names;
 }
 
 // Which leaf of its tuple variable `leaf` is, in the order of

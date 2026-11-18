@@ -1799,22 +1799,19 @@ void check_output_cursor_leaves() {
   check(reads.part() == std::optional<size_t>(1),
         "a write of an empty leaf is placed in the leaf it reads");
 
-  // A tuple gets one write per leaf that is written whole, so once its
-  // leaves are all taken, a write of no columns that reads no output
-  // belongs to the next variable. t is tuple(array[0] vector[0],
-  // tuple(matrix[0, 0], row_vector[0])): its first leaf is written element
-  // by element and gets no write. An array of empty vectors, x, still takes
-  // each such write.
+  // A tuple with no array of tuples inside gets one write per leaf that is
+  // written whole, so once its leaves are all taken, a write of no columns
+  // that reads no output belongs to the next variable. t is
+  // tuple(array[0] vector[0], tuple(matrix[0, 0], row_vector[0])): its first
+  // leaf is written element by element and gets no write. An array of empty
+  // vectors, x, still takes each such write.
   std::vector<mir::OutputVar> empties(3);
   empties[0].name = "t";
-  empties[0].type.base = "STuple";
   empties[1].name = "u";
-  empties[1].type.base = "STuple";
   empties[2].name = "x";
-  empties[2].type.base = "SArray";
   const std::map<std::string, std::vector<int64_t>> empty_parts = {
       {"t", {0, 0, 0}}, {"u", {0, 0}}, {"x", {0}}};
-  mir::OutputCursor after(empties);
+  mir::OutputCursor after(empties, {"t", "u"});
   got.clear();
   const std::vector<std::pair<std::string, std::optional<size_t>>> writes = {
       {"t", 1},           {"t", 2},           {"", std::nullopt},
