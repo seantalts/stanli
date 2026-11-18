@@ -175,8 +175,13 @@ bool ops_match(const Graph& g, const Op& a, const Op& b,
   // indices are a shape it can pack.
   if (a.opcode == OP_GATHER)
     return a.in[0] == b.in[0] && a.n_idata == b.n_idata;
-  if (has_op_trait(a.opcode, op_trait::kRerollIdataDensity))
-    return a.n_idata == b.n_idata;
+  if (has_op_trait(a.opcode, op_trait::kRerollIdataDensity)) {
+    if (a.n_idata != b.n_idata) return false;
+    for (int64_t k = a.n_idata - outcome_idata_header(a.opcode); k < a.n_idata;
+         ++k)
+      if (a.idata[k] != b.idata[k]) return false;
+    return true;
+  }
   if (a.n_idata != b.n_idata) return false;
   for (int64_t k = 0; k < a.n_idata; ++k)
     if (a.idata[k] != b.idata[k]) return false;
@@ -220,9 +225,11 @@ uint64_t op_signature(const Graph& g, const Op& a) {
     h = mix_u64(h, (uint64_t)a.n_idata);
   } else if (!idx_family) {
     h = mix_u64(h, (uint64_t)a.n_idata);
-    if (!has_op_trait(a.opcode, op_trait::kRerollIdataDensity))
-      for (int64_t k = 0; k < a.n_idata; ++k)
-        h = mix_u64(h, (uint64_t)(uint32_t)a.idata[k]);
+    const int64_t first = has_op_trait(a.opcode, op_trait::kRerollIdataDensity)
+                              ? a.n_idata - outcome_idata_header(a.opcode)
+                              : 0;
+    for (int64_t k = first; k < a.n_idata; ++k)
+      h = mix_u64(h, (uint64_t)(uint32_t)a.idata[k]);
   }
   return h;
 }
@@ -1009,6 +1016,8 @@ RerollStats reroll(Graph& g,
 
           const bool idata_density =
               has_op_trait(t.opcode, op_trait::kRerollIdataDensity);
+          const int64_t header = outcome_idata_header(t.opcode);
+          const int64_t outcomes = t.n_idata - header;
           bool row_idata_varies = false;
           if (is_row_read(t))
             for (int64_t l = 1; l < Luse && !row_idata_varies; ++l)
@@ -1320,13 +1329,18 @@ RerollStats reroll(Graph& g,
             const bool all_terms = br_term == Luse;
             const bool no_terms = br_nonterm == Luse;
             const bool row_outcomes = idata_density && ap.width > 1 &&
-                                      t.n_idata == ap.width &&
+                                      outcomes == ap.width && !header &&
                                       !two_int_groups(t.opcode);
             if (br_internal < Luse || (!all_terms && !no_terms)) {
               ok = false;
               prefix = std::min(
                   prefix, std::min(br_internal, std::max(br_term, br_nonterm)));
-            } else if (idata_density && t.n_idata != 1 && !row_outcomes) {
+            } else if (header && (!all_terms || all_inputs_invariant)) {
+              // The kernel has no elementwise form, and pairs an outcome
+              // array with a location vector, never a broadcast scalar.
+              ok = false;
+              prefix = 0;
+            } else if (idata_density && outcomes != 1 && !row_outcomes) {
               // More than one immediate: either already a vector op, or one
               // of the binomials, whose two integer groups only partition.cpp
               // concatenates. One lane still stands for all of them when the
@@ -1418,10 +1432,12 @@ RerollStats reroll(Graph& g,
           // the two fusing density dispositions need it; the hoist arm
           // above excludes idata-outcome densities.
           if ((ap.term_density || ap.elt_density) && idata_density) {
-            ap.outcome_idata.reserve((size_t)(Luse * t.n_idata));
+            ap.outcome_idata.reserve((size_t)(Luse * outcomes + header));
             for (int64_t l = 0; l < Luse; ++l)
-              for (int64_t k = 0; k < t.n_idata; ++k)
+              for (int64_t k = 0; k < outcomes; ++k)
                 ap.outcome_idata.push_back(op_at(p, l).idata[k]);
+            ap.outcome_idata.insert(ap.outcome_idata.end(), t.idata + outcomes,
+                                    t.idata + t.n_idata);
           }
           lane0_producer[t.out] = p;
         }

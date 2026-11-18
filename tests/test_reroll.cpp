@@ -2787,6 +2787,13 @@ static std::string rmw_terms_json(int N, int k) {
 static std::string rmw_terms16_json(int N) { return rmw_terms_json(N, 16); }
 static std::string rmw_terms25_json(int N) { return rmw_terms_json(N, 25); }
 
+static std::string ordered_logistic_json(int N) {
+  return "{\"N\":" + std::to_string(N) + ",\"K\":4,\"y\":" +
+         json_int_array(N, [](int i) { return (i * 5 + i / 3) % 4 + 1; }) +
+         ",\"x\":" + json_array(N, [](int i) { return std::sin(0.7 * i); }) +
+         "}";
+}
+
 static void test_read_modify_write_models() {
   struct Case {
     const char* sexp;
@@ -2804,6 +2811,8 @@ static void test_read_modify_write_models() {
        true},
       {"tests/fixtures/rmw_terms25.tmir.sexp", rmw_terms25_json, "rmw_terms25",
        true},
+      {"tests/fixtures/reroll_ordered_logistic.tmir.sexp",
+       ordered_logistic_json, "ordered_logistic", true},
   };
   for (const Case& c : cases) {
     const std::string tag = c.name;
