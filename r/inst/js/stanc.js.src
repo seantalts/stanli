@@ -1,6 +1,6 @@
 format=stanli-portable-stancjs-v3
 stanc3_src_repo=https://github.com/seantalts/stanc3.git
-stanc3_src_sha=1d9c0280418c3f6672ffc96c3d3ca1b3a3b6dea8
+stanc3_src_sha=c97020a04ee6392316471a27145d996ae0736d57
 opam_switch=stanc3-552
 ocaml_version=5.5.2
 ocaml_target=aarch64-apple-darwin25.6.0
@@ -9,4 +9,4 @@ js_of_ocaml_version=6.4.1
 producer_inputs_sha256=39ed16cb68cc2012cd18ea751be0d4cfa896f7fecdd867038bff2f67b8ca9180
 dune_profile=release
 dune_subst=1
-artifact_sha256=8a5f605f7e4713cc9b1b91ed7778d3cfaf4eb0cca22efb85733697da282e0805
+artifact_sha256=cdc60c1d270ea571095d46277b6cc0b02738bdcc848fef2d770d2c9b1ad9c11c

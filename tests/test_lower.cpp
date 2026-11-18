@@ -1796,6 +1796,26 @@ static void test_udf_void_statements() {
   }
 }
 
+// The model block's v_1dim__ is a local; the generated quantities' v_1dim__
+// is transformed data. Lowering log_prob must leave the latter for the
+// interpreted write_array.
+static void test_write_array_shadowed_size() {
+  using namespace stanli;
+  const std::string mir = slurp("tests/fixtures/wa_shadowed_size.tmir.sexp");
+  const DataMap data = DataMap::from_json(R"({"N":3,"r":1})");
+  const std::vector<double> q{0.25};
+  const std::vector<double> want{0.25, 0.5, 0.5, 0.5};
+  for (bool interp : {false, true}) {
+    const std::string what = std::string("shadowed size write_array ") +
+                             (interp ? "interpreted" : "compiled");
+    try {
+      check(write_array_row(mir, data, q, interp) == want, what);
+    } catch (const std::exception& e) {
+      check(false, what + " threw: " + e.what());
+    }
+  }
+}
+
 // stanc's inliner declares a vector-returning function's result zero-length
 // and assigns it in each arm. The structured loop sizes it from those
 // assignments instead of refusing the loop.
@@ -2173,6 +2193,8 @@ static void test_udf_param_branch() {
 
 int main() {
   using namespace stanli;
+
+  test_write_array_shadowed_size();
 
   // Section A1's five reductions must lower in the autodiff model graph, not
   // merely in the generated-quantities graph. A zero product and tied maximum

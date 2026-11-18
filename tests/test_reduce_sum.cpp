@@ -21,9 +21,11 @@
 #include "expect.hpp"
 
 #include <stanli/compile.hpp>
+#include <stanli/detail/input_ranges.hpp>
 #include <stanli/message_sink.hpp>
 #include <stanli/optable.hpp>
 #include <stanli/reduce_sum.hpp>
+#include <stanli/detail/input_ranges.hpp>
 #include <stanli/nuts.hpp>
 #include <stanli/graph_print.hpp>
 #include <thread>
@@ -642,6 +644,76 @@ void native_region_map() {
   }
 }
 
+// A callback that fills a local array element by element lowers to in-place
+// stores on slots the child produced, which children can run concurrently.
+void native_local_store() {
+  using namespace stanli;
+  if (!thread_safe_build()) return;
+  const auto mir = slurp("tests/fixtures/reduce_sum_local_store.tmir.sexp");
+  const auto data =
+      DataMap::from_json_file("tests/fixtures/reduce_sum_local_store.json");
+  CompileOptions options;
+  options.reduce_sum_min_chunk_ns = 0;
+  options.reduce_sum_threads = 4;
+  auto cm = compile_model(mir, data, 1, options);
+  std::string reasons;
+  for (const auto& reason : cm.reduce_sum_fallbacks) reasons += " " + reason;
+  expect_true("local-store callback retains one reduction:" + reasons,
+              count_opcode(cm.graph, OP_REDUCE_SUM) == 1 &&
+                  cm.reduce_sum_fallbacks.empty());
+  size_t stores = 0;
+  for (const auto& op : cm.graph.ops)
+    if (op.opcode == OP_REDUCE_SUM)
+      for (const auto& child :
+           static_cast<const ReduceSumSpec*>(op.udata)->children)
+        stores += count_opcode(child.graph, OP_SET_INDEX_INPLACE);
+  expect_true("children store in place", stores > 0);
+
+  auto serial = compile_model(mir, data);
+  Executor reference(std::move(serial.graph));
+  serial.bind(reference);
+  Executor plain(std::move(cm.graph));
+  cm.bind(plain);
+  Executor first(plain), second(plain);
+  ReduceExecutionContext first_team(4), second_team(4);
+  first.set_reduce_context(&first_team);
+  second.set_reduce_context(&second_team);
+  const auto evaluate_at = [](Executor& ex, int point) {
+    Run run;
+    run.grad.assign((size_t)ex.n_params(), 0.0);
+    for (int64_t i = 0; i < ex.n_params(); ++i)
+      ex.params_data()[i] = 0.5 * std::sin(double(i + 7 * point));
+    run.lp = ex.gradient(run.grad.data());
+    return run;
+  };
+  std::vector<Run> expected;
+  for (int point = 0; point < 3; ++point) {
+    const Run want = evaluate_at(reference, point);
+    const Run got = evaluate_at(first, point);
+    expect_true("local-store lp matches the whole slice",
+                std::abs(got.lp - want.lp) < 1e-10 * (1 + std::abs(want.lp)));
+    for (size_t i = 0; i < got.grad.size(); ++i)
+      expect_true("local-store gradient matches the whole slice",
+                  std::abs(got.grad[i] - want.grad[i]) <
+                      1e-10 * (1 + std::abs(want.grad[i])));
+    expected.push_back(got);
+  }
+  std::atomic<bool> chains_agree{true};
+  const auto chain = [&](Executor& executor) {
+    for (int repeat = 0; repeat < 50; ++repeat)
+      for (int point = 0; point < 3; ++point) {
+        const Run got = evaluate_at(executor, point);
+        if (got.lp != expected[point].lp || got.grad != expected[point].grad)
+          chains_agree = false;
+      }
+  };
+  std::thread chain_a(chain, std::ref(first)), chain_b(chain, std::ref(second));
+  chain_a.join();
+  chain_b.join();
+  expect_true("repeated and concurrent local-store evaluations agree bitwise",
+              chains_agree);
+}
+
 void serial_notice() {
   using namespace stanli;
   if (!thread_safe_build()) return;
@@ -765,6 +837,125 @@ void region_map_domain_error() {
   expect_true("recovered gradient is finite", std::isfinite(got[0]));
 }
 
+std::string inplace_data(int n, int direct) {
+  std::ostringstream json;
+  json << "{\"N\":" << n << ",\"N_1\":5,\"direct\":" << direct;
+  const auto vec = [&](const char* name, double shift) {
+    json << ",\"" << name << "\":[";
+    for (int i = 0; i < n; ++i)
+      json << (i ? "," : "") << std::cos(shift + 1.1 * i);
+    json << "]";
+  };
+  vec("Y", 0.2);
+  vec("Z_1_1", 0.0);
+  vec("Z_1_2", 0.3);
+  json << ",\"J_1\":[";
+  for (int i = 0; i < n; ++i) json << (i ? "," : "") << (i * 7) % 5 + 1;
+  json << "]}";
+  return json.str();
+}
+
+bool has_inplace_store(const stanli::Graph& g) {
+  using namespace stanli;
+  return count_opcode(g, OP_SET_INDEX_INPLACE) +
+             count_opcode(g, OP_SET_SLICE_INPLACE) +
+             count_opcode(g, OP_SET_SLICE_STRIDED_INPLACE) >
+         0;
+}
+
+// A partial sum that writes its own local vectors in place threads, and
+// matches both the serial call and the program without reduce_sum.
+void native_inplace_stores() {
+  using namespace stanli;
+  if (!thread_safe_build()) return;
+  const auto mir = slurp("tests/fixtures/reduce_sum_inplace.tmir.sexp");
+  const auto data = DataMap::from_json(inplace_data(257, 0));
+  CompileOptions options;
+  options.reduce_sum_threads = 4;
+  options.reduce_sum_min_chunk_ns = 0;
+  auto cm = compile_model(mir, data, 1, options);
+  std::string reasons;
+  for (const auto& reason : cm.reduce_sum_fallbacks) reasons += " " + reason;
+  expect_true("in-place partial sum threads:" + reasons,
+              count_opcode(cm.graph, OP_REDUCE_SUM) == 1);
+  for (const auto& op : cm.graph.ops)
+    if (op.opcode == OP_REDUCE_SUM)
+      for (const auto& child :
+           static_cast<const ReduceSumSpec*>(op.udata)->children)
+        expect_true("child stores in place", has_inplace_store(child.graph));
+  auto serial = compile_model(mir, data);
+  auto direct =
+      compile_model(mir, DataMap::from_json(inplace_data(257, 1)), 1, options);
+  Executor threaded(std::move(cm.graph)), one(std::move(serial.graph)),
+      plain(std::move(direct.graph));
+  cm.bind(threaded);
+  serial.bind(one);
+  direct.bind(plain);
+  ReduceExecutionContext team(4);
+  threaded.set_reduce_context(&team);
+  const int64_t n = threaded.n_params();
+  std::vector<double> got(n), want(n), base(n);
+  for (int point = 0; point < 3; ++point) {
+    for (int64_t i = 0; i < n; ++i)
+      threaded.params_data()[i] = one.params_data()[i] =
+          plain.params_data()[i] = eval_point(i + point) + 0.03 * point;
+    const double lp = threaded.gradient(got.data());
+    const double lp1 = one.gradient(want.data());
+    const double lp0 = plain.gradient(base.data());
+    expect_true("in-place lp matches serial",
+                std::abs(lp - lp1) < 1e-10 * (1 + std::abs(lp1)));
+    expect_true("in-place lp matches direct",
+                std::abs(lp - lp0) < 1e-10 * (1 + std::abs(lp0)));
+    for (int64_t i = 0; i < n; ++i) {
+      expect_true("in-place gradient matches serial " + std::to_string(i),
+                  std::abs(got[i] - want[i]) < 1e-10 * (1 + std::abs(want[i])));
+      expect_true("in-place gradient matches direct " + std::to_string(i),
+                  std::abs(got[i] - base[i]) < 1e-10 * (1 + std::abs(base[i])));
+    }
+  }
+}
+
+// An in-place store is private to one call only when an earlier op of the
+// same child graph wrote its target. A parameter, a fill or an import is
+// storage the call shares, and must still be refused.
+void inplace_store_imports() {
+  using namespace stanli;
+  enum class Target { kParam, kFill, kImport, kLocal };
+  for (Target target :
+       {Target::kParam, Target::kFill, Target::kImport, Target::kLocal}) {
+    Graph g;
+    detail::Fills fills;
+    const int p = g.add_slot(3, true);
+    const int v = g.add_slot(1, false);
+    fills.push_back({v, {2.0}});
+    int base = p;
+    if (target == Target::kFill) {
+      base = g.add_slot(3, false);
+      fills.push_back({base, {0.0, 0.0, 0.0}});
+    } else if (target == Target::kImport) {
+      base = g.add_slot(3, false);
+    } else if (target == Target::kLocal) {
+      base = g.add_slot(3, false);
+      g.add_op(OP_SET_INDEX, {p, v}, base, {0});
+    }
+    g.add_op(OP_SET_INDEX_INPLACE, {base, v}, base, {1});
+    const int sum = g.add_slot(1, false);
+    g.add_op(OP_SUM_VEC, {base}, sum);
+    g.result_slot = sum;
+    std::vector<detail::Import> imports;
+    std::string reason;
+    const bool ok =
+        detail::compact_imports(g, fills, imports, nullptr, &reason);
+    if (target == Target::kLocal) {
+      expect_true("local in-place target accepted: " + reason, ok);
+    } else {
+      expect_true("shared in-place target refused", !ok);
+      expect_true("refusal names the shared store: " + reason,
+                  reason.find("in-place store") != std::string::npos);
+    }
+  }
+}
+
 }  // namespace
 
 int main() {
@@ -775,6 +966,9 @@ int main() {
   native_corners();
   native_parallel();
   native_region_map();
+  native_local_store();
+  native_inplace_stores();
+  inplace_store_imports();
   serial_notice();
   work_cutoff();
   region_map_domain_error();

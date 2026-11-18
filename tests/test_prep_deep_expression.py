@@ -116,14 +116,18 @@ def prepare(text, parallel_wa="auto"):
         return run, time.perf_counter() - start
 
 
+# CTest runs this class alone, since it checks a time bound.
 @unittest.skipIf(sys.platform == "win32", "needs setrlimit for the stack")
-class DeepExpressionPrep(unittest.TestCase):
+class DeepExpressionPrepTime(unittest.TestCase):
     def test_prep_is_linear_in_depth(self):
         run, elapsed = prepare(model(DEPTH))
         self.assertEqual(run.returncode, 0, run.stderr[-400:])
         self.assertLess(elapsed, BOUND_SECONDS,
                         f"prep of a {DEPTH}-deep expression took {elapsed:.2f} s")
 
+
+@unittest.skipIf(sys.platform == "win32", "needs setrlimit for the stack")
+class DeepExpressionPrep(unittest.TestCase):
     def test_deep_sum_prepares_at_default_stack(self):
         run, _ = prepare(live_model("sum", DEPTH))
         self.assertEqual(run.returncode, 0, run.stderr[-400:])

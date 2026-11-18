@@ -273,6 +273,14 @@ candidate-free million-op LDA shape from 1.16 s to about 3.4 ms. The exact
 candidate-index, packed-row, and use-list work counters live in `RerollStats`
 and have deterministic scaling tests.
 
+The periods tried at a position come from the graph. The first candidate op
+in the window must recur one period later, so the candidates are the distances
+to its next ops with the same signature: every one up to 32 ops away, then the
+next eight. Earlier
+versions tried every period up to 32 ops, which left a brms partial sum with 11
+or more varying-effect terms (35 ops per iteration) entirely scalar: 7.9 ms per
+gradient where 10 terms took 0.46 ms (issue 571).
+
 A classified region still prices itself before committing, in the same
 currencies `partition.cpp` uses (`pass_util.hpp`'s `kLaneOpCost`,
 `kLaneDensityElem`, `kLanePartitionMargin`): elision and hoisting free, a

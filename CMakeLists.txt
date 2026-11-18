@@ -898,12 +898,17 @@ target_precompile_headers(stanli_test_pch PRIVATE ${STANLI_TEST_PCH})
 endif()
 
 # Single-threaded tests stub the one TBB symbol stan-math's rev core needs.
+# OPTIMIZED is for a test whose own code dominates its run time: it builds at
+# -O2 without the shared PCH, which costs a little compile time.
 function(stanli_add_test NAME)
+  cmake_parse_arguments(PARSE_ARGV 1 _test "OPTIMIZED" "" "")
   add_executable(${NAME} tests/${NAME}.cpp
     $<TARGET_OBJECTS:stanli_tbb_stub>)
   add_dependencies(${NAME} stanli_mir_fixtures)
   target_link_libraries(${NAME} PRIVATE ${STANLI_TEST_RUNTIME_TARGET})
-  if(STANLI_FAST_TEST_TUS)
+  if(STANLI_FAST_TEST_TUS AND _test_OPTIMIZED)
+    target_compile_options(${NAME} PRIVATE -O2)
+  elseif(STANLI_FAST_TEST_TUS)
     stanli_configure_test_tu(${NAME})
   endif()
   if(MINGW AND CMAKE_BUILD_TYPE MATCHES "^(Debug|RelWithDebInfo)$")
@@ -1053,9 +1058,13 @@ set_tests_properties(test_prep_only PROPERTIES
 if(NOT STANLI_SANITIZE)
   add_test(NAME test_prep_deep_expression
            COMMAND ${Python3_EXECUTABLE} tests/test_prep_deep_expression.py
-                   $<TARGET_FILE:bench_grad>
+                   $<TARGET_FILE:bench_grad> DeepExpressionPrep
            WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
-  set_tests_properties(test_prep_deep_expression PROPERTIES RUN_SERIAL TRUE)
+  add_test(NAME test_prep_deep_expression_time
+           COMMAND ${Python3_EXECUTABLE} tests/test_prep_deep_expression.py
+                   $<TARGET_FILE:bench_grad> DeepExpressionPrepTime
+           WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
+  set_tests_properties(test_prep_deep_expression_time PROPERTIES RUN_SERIAL TRUE)
 endif()
 add_test(NAME test_prep_profile
          COMMAND bench_grad tests/fixtures/ar1.tmir.sexp
@@ -1378,12 +1387,12 @@ set(STANLI_TESTS
   test_reduce_sum
   test_structured_arrays test_pathfinder test_algorithms test_unconstrain
   test_init_interp test_constrain_structured test_csr_times_vector)
-if(STANLI_STAN_DENSITY_ORACLE)
-  list(APPEND STANLI_TESTS test_density_fused)
-endif()
 foreach(STANLI_TEST IN LISTS STANLI_TESTS)
   stanli_add_test(${STANLI_TEST})
 endforeach()
+if(STANLI_STAN_DENSITY_ORACLE)
+  stanli_add_test(test_density_fused OPTIMIZED)
+endif()
 # The parts of these two that check the environment switches themselves.
 foreach(_stanli_split test_wa_parallel test_pass_dump)
   add_test(NAME ${_stanli_split}_switches COMMAND ${_stanli_split} --switches
@@ -1501,11 +1510,28 @@ if(Python3_Interpreter_FOUND)
            COMMAND ${Python3_EXECUTABLE} tests/test_data_loop_memo.py
                    $<TARGET_FILE:stanli_check>
            WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
-  add_test(NAME test_prep_scaling
-           COMMAND ${Python3_EXECUTABLE} tests/test_prep_scaling.py
-                   $<TARGET_FILE:bench_grad> ${STANLI_STANC_EXECUTABLE}
+  # Only the preparation timings need to run alone; compiling the models
+  # with stanc is most of the work and can share the machine.
+  add_test(NAME test_prep_scaling_models
+           COMMAND ${Python3_EXECUTABLE} tests/test_prep_scaling.py compile
+                   ${STANLI_STANC_EXECUTABLE}
+                   ${CMAKE_CURRENT_BINARY_DIR}/prep_scaling
            WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
-  set_tests_properties(test_prep_scaling PROPERTIES RUN_SERIAL TRUE)
+  set_tests_properties(test_prep_scaling_models PROPERTIES
+    FIXTURES_SETUP prep_scaling_models PROCESSORS 4)
+  add_test(NAME test_prep_scaling
+           COMMAND ${Python3_EXECUTABLE} tests/test_prep_scaling.py time
+                   $<TARGET_FILE:bench_grad>
+                   ${CMAKE_CURRENT_BINARY_DIR}/prep_scaling
+           WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
+  set_tests_properties(test_prep_scaling PROPERTIES
+    RUN_SERIAL TRUE FIXTURES_REQUIRED prep_scaling_models)
+  add_test(NAME test_prep_data_calls
+           COMMAND ${Python3_EXECUTABLE} tests/test_prep_data_calls.py
+                   ${STANLI_STANC_EXECUTABLE} $<TARGET_FILE:bench_grad>
+                   ${CMAKE_CURRENT_BINARY_DIR}/prep_data_calls
+           WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
+  set_tests_properties(test_prep_data_calls PROPERTIES RUN_SERIAL TRUE)
   add_test(NAME test_prep_loop_body
            COMMAND ${Python3_EXECUTABLE} tests/test_prep_loop_body.py
                    $<TARGET_FILE:bench_grad> ${STANLI_STANC_EXECUTABLE}

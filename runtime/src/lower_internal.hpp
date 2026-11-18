@@ -896,6 +896,7 @@ struct Lowering {
   // Interpreter-native semantic values. Graph fills use a different physical
   // order for arrays, so compile-time observation must never reuse them.
   std::map<ObservationKey, DataMap::Entry> observations;
+  std::vector<KnownOutput> known_outputs;
   std::vector<int> target_terms;
   std::vector<int> jac_slots;
   std::vector<int> extra_roots;
@@ -946,6 +947,16 @@ struct Lowering {
   // log_prob lowering adds model-block locals to both; a write_array local
   // of the same name must not start from the model block's last value.
   std::set<std::string> prepared_names;
+  // The prepared values of names that a log_prob local reuses, such as a
+  // size `v_1dim__` that stanc emits both for a model-block local `v` and
+  // for a generated quantity `v`. Lowering log_prob overwrites or drops
+  // them; restore_shadowed_prepared puts them back for write_array.
+  struct ShadowedPrepared {
+    std::optional<DataMap::Entry> value;
+    std::optional<DeclView> decl;
+  };
+  std::map<std::string, ShadowedPrepared> shadowed_prepared;
+  void restore_shadowed_prepared();
   bool data_prepared = false;
   std::function<void()> after_data_prepared;
   // Lowering generate_quantities rather than log_prob: parameters are columns
@@ -1042,6 +1053,11 @@ struct Lowering {
       en.dims = {len};
     else
       en.dims.clear();
+    if (!g.ops.empty() && g.ops.back().out == v.slot)
+      known_outputs.push_back(
+          {g.ops.back(), graph_order(en, is_matrix(v.si),
+                                     is_array(v.si) && array_shape(v.si).leaf ==
+                                                           ViewKind::Matrix)});
     observations[{v.slot, v.si}] = std::move(en);
   }
   const DataMap::Entry* observation(const Val& v) const {
@@ -1480,6 +1496,8 @@ struct Lowering {
   // declared shape is bound instead.
   Val checked_binding(const Val& v, int64_t len, const SlotInfo& expected,
                       const std::string& name, const std::string& raw);
+  bool takes_value_shape(const Val& v, const SlotInfo& expected,
+                         const std::string& name);
   std::optional<std::string> assign_size_error(const Val& v, int64_t len,
                                                const SlotInfo& expected,
                                                const std::string& name);

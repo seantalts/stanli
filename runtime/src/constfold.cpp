@@ -11,11 +11,13 @@
 // So: find the ops no parameter reaches, run them once, and replace them with
 // their results.
 //
-// Running them means running them. There is one definition of what an op
-// computes -- its kernel -- and this pass uses it, through a real Executor
-// over a sub-graph holding just the constant ops and the slots they touch. A
-// compile-time re-implementation would be a second definition, and the two
-// would drift.
+// Lowering has already evaluated many of these values with the MIR
+// interpreter, the same evaluator that computes transformed data, and bound
+// them for later data-only reads. An op whose value lowering recorded takes
+// that value, so a variable has one value in the interpreter and the graph,
+// and an expensive call is not evaluated a second time. The rest run through
+// a real Executor over a sub-graph holding just those ops and the slots they
+// touch.
 //
 // The one subtlety is order. Folding replaces a slot with its FINAL value, so
 // a surviving op that reads a slot some later constant op overwrites would
@@ -27,6 +29,7 @@
 #include <stanli/island.hpp>
 #include <stanli/optable.hpp>
 
+#include <algorithm>
 #include <cstdlib>
 #include <unordered_map>
 #include <unordered_set>
@@ -136,11 +139,49 @@ std::vector<char> mark_constant_ops(const Graph& g) {
   }
 }
 
+bool same_op(const Op& a, const Op& b) {
+  return a.opcode == b.opcode && a.variant == b.variant && a.out == b.out &&
+         a.out2 == b.out2 && a.n_in == b.n_in &&
+         std::equal(a.in, a.in + a.n_in, b.in) && a.idata == b.idata &&
+         a.n_idata == b.n_idata && a.udata == b.udata &&
+         a.dyn_capacity == b.dyn_capacity &&
+         a.dyn_extent_in == b.dyn_extent_in && a.dyn_lengths == b.dyn_lengths &&
+         a.primal_source == b.primal_source;
+}
+
+// The recorded value of each op in `known` that still writes its slot alone,
+// as it did when lowering evaluated it. Parallel to `g.ops`.
+std::vector<const std::vector<double>*> known_values(
+    const Graph& g,
+    const std::vector<std::pair<int, std::vector<double>>>& fills,
+    const std::vector<KnownOutput>& known) {
+  std::vector<const std::vector<double>*> values(g.ops.size(), nullptr);
+  if (known.empty()) return values;
+  std::unordered_map<int, const KnownOutput*> by_out;
+  for (const KnownOutput& k : known) by_out[k.op.out] = &k;
+  std::vector<int> writers(g.slots.size(), 0);
+  for (const Op& op : g.ops) {
+    if (op.out >= 0) ++writers[(size_t)op.out];
+    if (op.out2 >= 0) ++writers[(size_t)op.out2];
+  }
+  for (const auto& f : fills) ++writers[(size_t)f.first];
+  for (size_t i = 0; i < g.ops.size(); ++i) {
+    const Op& op = g.ops[i];
+    if (op.out < 0 || op.out2 >= 0 || writers[(size_t)op.out] != 1) continue;
+    const auto it = by_out.find(op.out);
+    if (it == by_out.end() || !same_op(it->second->op, op) ||
+        (int64_t)it->second->value.size() != g.slots[(size_t)op.out].len)
+      continue;
+    values[i] = &it->second->value;
+  }
+  return values;
+}
+
 }  // namespace
 
 ConstFoldStats const_fold(
     Graph& g, std::vector<std::pair<int, std::vector<double>>>& fills,
-    const std::vector<int>& roots, std::vector<int>* folded) {
+    const std::vector<int>& roots, const std::vector<KnownOutput>& known) {
   ConstFoldStats st;
   if (const char* e = debug_env("STANLI_NO_CONSTFOLD"))
     if (e[0] == '1') return st;
@@ -161,8 +202,10 @@ ConstFoldStats const_fold(
     remap.emplace(s, ns);
     return ns;
   };
+  const std::vector<const std::vector<double>*> known_value =
+      known_values(g, fills, known);
   for (size_t i = 0; i < g.ops.size(); ++i) {
-    if (!is_const[i]) continue;
+    if (!is_const[i] || known_value[i]) continue;
     const Op& op = g.ops[i];
     Op sop = op;  // idata / udata point into g's pools, which outlive this
     for (int k = 0; k < op.n_in; ++k)
@@ -171,7 +214,7 @@ ConstFoldStats const_fold(
     if (op.out2 >= 0) sop.out2 = map_slot(op.out2);
     sub.ops.push_back(sop);
   }
-  sub.result_slot = 0;
+  sub.result_slot = sub.slots.empty() ? -1 : 0;
 
   // Const outputs anything still needs: a surviving op's input, or a root.
   // The rest was scaffolding and is simply gone.
@@ -193,6 +236,13 @@ ConstFoldStats const_fold(
       double* p = ex.value_ptr(it->second);
       for (size_t j = 0; j < f.second.size(); ++j) p[j] = f.second[j];
     }
+    for (size_t i = 0; i < g.ops.size(); ++i) {
+      if (!is_const[i] || !known_value[i]) continue;
+      auto it = remap.find(g.ops[i].out);
+      if (it == remap.end()) continue;
+      std::copy(known_value[i]->begin(), known_value[i]->end(),
+                ex.value_ptr(it->second));
+    }
     ex.run_forward_only();
     std::unordered_set<int> emitted;
     for (size_t i = 0; i < g.ops.size(); ++i) {
@@ -201,10 +251,13 @@ ConstFoldStats const_fold(
       for (int out : {op.out, op.out2}) {
         if (out < 0 || !needed.count(out) || !emitted.insert(out).second)
           continue;
+        if (known_value[i]) {
+          new_fills.emplace_back(out, *known_value[i]);
+          continue;
+        }
         const int64_t len = g.slots[(size_t)out].len;
         const double* p = std::as_const(ex).value_ptr(remap.at(out));
         new_fills.emplace_back(out, std::vector<double>(p, p + len));
-        if (folded) folded->push_back(out);
       }
     }
     st.slots_folded = (int)emitted.size();

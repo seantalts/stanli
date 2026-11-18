@@ -216,6 +216,20 @@ test_that("shinystan imports a stanfit without compiling a model", {
   expect_s4_class(shinystan::as.shinystan(as_stanfit(fit)), "shinystan")
 })
 
+test_that("shinystan accepts a stanli_fit directly", {
+  skip_without_runtime()
+  skip_if_not_installed("rstan")
+  skip_if_not_installed("shinystan")
+  fit <- sample_model(es_model(), chains = 2, warmup = 200, samples = 200,
+                      refresh = 0)
+  sso <- shinystan::as.shinystan(fit)
+  expect_s4_class(sso, "shinystan")
+  expect_identical(dim(sso@posterior_sample)[1:2], c(200L, 2L))
+  expect_identical(getS3method("launch_shinystan", "stanli_fit",
+                               envir = asNamespace("shinystan")),
+                   stanli:::launch_shinystan.stanli_fit)
+})
+
 test_that("a fit started at a later chain id keeps those ids in the stanfit", {
   skip_without_runtime()
   skip_if_not_installed("rstan")

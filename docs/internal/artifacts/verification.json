@@ -874,6 +874,13 @@
   "point": 0,
   "status": "VERIFIED"
  },
+ "empty_return_shape": {
+  "max_rel": 0.0,
+  "max_ulp": 0,
+  "n_values": 4,
+  "point": 0,
+  "status": "VERIFIED"
+ },
  "epinow2_estimate_infections": {
   "max_rel": 4.246687965329096e-11,
   "max_ulp": 299015,

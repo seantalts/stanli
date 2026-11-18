@@ -10,6 +10,7 @@
 \alias{loo_compare.stanli_fit}
 \alias{tidy_draws.stanli_fit}
 \alias{bridge_sampler.stanli_fit}
+\alias{launch_shinystan.stanli_fit}
 \title{R workflow integrations}
 \usage{
 nuts_params.stanli_fit(object, pars = NULL, inc_warmup = FALSE, ...)
@@ -37,6 +38,8 @@ bridge_sampler.stanli_fit(
   verbose = FALSE,
   ...
 )
+
+launch_shinystan.stanli_fit(object, ...)
 }
 \arguments{
 \item{object, x, model}{A `stanli_fit`.}
@@ -67,15 +70,18 @@ from the likelihood with `loo::relative_eff()` using the chain axis.}
   returns a `bridge` object.
 }
 \description{
-Optional methods for bayesplot, loo, tidybayes, and bridgesampling. Install
-the relevant package to use its generic; no plotting package is needed to
-load stanli.
+Optional methods for bayesplot, loo, tidybayes, bridgesampling, and
+shinystan. Install the relevant package to use its generic; no plotting
+package is needed to load stanli.
 Saved warmup is excluded by default.
 }
 \details{
 R-hat and effective sample size use [summary.stanli_fit()].
   The ESS ratio is bulk ESS divided by the number of retained post-warmup
   draws. Bayesplot's CmdStanMCMC method instead uses basic ESS.
+
+  `launch_shinystan` and `shinystan::as.shinystan()` convert the fit with
+  [as_stanfit()] first, so they need rstan as well as shinystan.
 
   `bridge_sampler` estimates the log marginal likelihood from the
   unconstrained post-warmup draws. Write the model with `target +=`

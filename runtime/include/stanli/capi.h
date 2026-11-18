@@ -476,7 +476,8 @@ void stanli_metric_opts_init(stanli_metric_opts* o);
  * A positive `refresh` also lets the run send its own notices to the message
  * sink (the one print() uses), each line prefixed "Chain [id]": a proposal
  * rejected because the model threw, the adaptation-window warnings, and a
- * note when threads_per_chain exceeds 1 on a model with no reduce_sum call.
+ * note when threads_per_chain exceeds 1 on a model that runs no reduce_sum
+ * call in parallel, with the reasons from stanli_reduce_sum_fallback.
  *
  * `poll` is asked on the calling thread about every 100 ms. A stopped run
  * returns 0 with `*interrupted` set to 1 and only the rows stored before the
