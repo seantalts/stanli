@@ -1477,6 +1477,30 @@ static void test_udf_lp_bound() {
   }
 }
 
+// A structured candidate refused inside a branch of an inlined function.
+// Lowering catches the refusal, so the branch node the candidate was
+// filling must not stay the current one after it is gone.
+static void test_structured_refused_branch() {
+  using namespace stanli;
+  const DataMap data = DataMap::from_json(
+      slurp("tests/fixtures/structured_refused_branch.json"));
+  CompiledModel cm;
+  try {
+    cm = compile_model(
+        slurp("tests/fixtures/structured_refused_branch.tmir.sexp"), data);
+  } catch (const std::exception& error) {
+    check(false,
+          std::string("structured refused branch compile: ") + error.what());
+    return;
+  }
+  Executor ex(cm.graph);
+  cm.bind(ex);
+  ex.params_data()[0] = 0.1;
+  double grad = 1;
+  expect_ulp("structured refused branch lp", ex.gradient(&grad), 0.0, 0);
+  expect_ulp("structured refused branch grad", grad, 0.0, 0);
+}
+
 // `if (a > 1) return;` at the end of a void function inlined into a
 // parameter-dependent branch. The branch's skip lands where the next
 // statement, `target += p`, begins.
@@ -9258,6 +9282,7 @@ int main() {
   test_udf_lp_condition();
   test_udf_lp_bound();
   test_udf_void_return_in_branch();
+  test_structured_refused_branch();
   test_udf_branch_kernels();
   test_udf_data_call_o1();
   test_udf_void_names();
