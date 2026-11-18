@@ -887,6 +887,8 @@ void Lowering::lower_runtime_ifelse(const mir::Stmt& s) {
     // select kernels that deliberately omit adjoints for that input.
     si.param_free = false;
     scope[name] = Val{out_slots[k], scalar_autodiff(), si};
+    // Its value is now known only at run time, as with an integer above.
+    td_erase(name);
   }
   if (reg.has_target) push_target_term(out_slots.back());
 }
