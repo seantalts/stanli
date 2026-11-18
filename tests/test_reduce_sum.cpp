@@ -556,13 +556,13 @@ void native_region_map() {
       for (const auto& child : spec.children) {
         expect_true("child runs a region map",
                     count_opcode(child.graph, OP_REGION_MAP) == 1);
-        expect_true("child views the slice and both data vectors",
-                    child.shared.size() == 3);
+        // The body never reads its slice of seq, so only y and x remain.
+        expect_true("child views both data vectors", child.shared.size() == 2);
         for (const auto& fill : child.fills)
           expect_true("child keeps no copy of the data",
                       fill.second.size() < 64);
       }
-      expect_true("one block per data argument", spec.blocks.size() == 3);
+      expect_true("one block per data vector", spec.blocks.size() == 2);
       expect_true("data arguments are not op inputs", op.n_in == 2);
     }
 
