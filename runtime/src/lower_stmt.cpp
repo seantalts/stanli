@@ -1644,6 +1644,8 @@ void Lowering::lower_simple_stmt(const mir::Stmt& s) {
       return;
     }
     case mir::Stmt::TargetPE: {
+      // CmdStan's write_array runs with jacobian__ = false.
+      if (in_write_array && s.jacobian) return;
       // Stan defines `target += e` for a container `e` as adding `sum(e)`
       // -- CmdStan's `lp_accum__.add(e)` reduces the whole container. A
       // target term is consumed as a scalar, so the reduction has to

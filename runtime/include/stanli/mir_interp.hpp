@@ -94,9 +94,10 @@ struct MirHooks {
   // live in that body's scope, not in whichever instance installed the hook.
   std::function<bool(MirInterp<double>&, const mir::Expr&, DataMap::Entry*)>
       fun;
-  // First shot at any statement (FnReadParam and FnWriteParam in the
-  // interpreted write_array). Return true when handled.
-  std::function<bool(const mir::Stmt&)> stmt;
+  // First shot at any statement (FnReadParam, FnWriteParam and `target +=`
+  // in the interpreted write_array). Return true when handled. As with
+  // `fun`, the interpreter running the statement is passed in.
+  std::function<bool(MirInterp<double>&, const mir::Stmt&)> stmt;
 };
 
 template <typename T>
@@ -308,7 +309,7 @@ class MirInterp {
 
   Flow exec(const mir::Stmt& st) {
     if constexpr (std::is_same_v<T, double>) {
-      if (hooks_.stmt && hooks_.stmt(st)) return Flow::Next;
+      if (hooks_.stmt && hooks_.stmt(*this, st)) return Flow::Next;
     }
     switch (st.kind) {
       case mir::Stmt::For: {
@@ -743,6 +744,8 @@ class MirInterp {
           assign_whole(st.fn_args[k].name, std::move(values[k]));
         return;
       }
+      case mir::Stmt::TargetPE:
+        fail("target += is not available in " + where_, st.raw);
       default:
         fail("unsupported statement", st.raw);
     }
