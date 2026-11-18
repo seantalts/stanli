@@ -78,7 +78,9 @@ documents it at the call site, as in
 ## The checks
 
 "PR" means a pull request that changes source. A PR that touches only
-documentation runs only the static checks. A PR builds and tests on Linux
+documentation runs only the static checks. A PR that touches only the R
+package runs the static checks and the R package tests, against the Linux
+runtime from a recent `main` run whose other files match. A PR builds and tests on Linux
 x86-64 (Clang) and Windows x64. "Post-merge" means pushes to `main`, nightly
 runs, release tags and manual dispatch. Post-merge runs add macOS arm64 and
 x86-64, Linux aarch64 and a GCC build on Linux x86-64. To run them on a

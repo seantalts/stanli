@@ -29,12 +29,15 @@ def expression(value, context):
     value = re.sub(r"\b(?:github|needs|matrix|steps)\.[\w.-]+",
                    lambda match: repr(context[match[0]]), value)
     value = value.replace("&&", " and ").replace("||", " or ")
+    value = re.sub(r"!(?!=)", " not ", value).strip()
 
     def visit(node):
         if isinstance(node, ast.Constant):
             return node.value
         if isinstance(node, ast.Name) and node.id in ("true", "false"):
             return node.id == "true"
+        if isinstance(node, ast.UnaryOp) and isinstance(node.op, ast.Not):
+            return not visit(node.operand)
         if isinstance(node, ast.BoolOp):
             values = (visit(item) for item in node.values)
             return all(values) if isinstance(node.op, ast.And) else any(values)
@@ -47,6 +50,8 @@ def expression(value, context):
         if isinstance(node, ast.Call) and isinstance(node.func, ast.Name):
             if node.func.id == "always" and not node.args and not node.keywords:
                 return True
+            if node.func.id == "cancelled" and not node.args and not node.keywords:
+                return False
             if node.func.id == "startsWith" and len(node.args) == 2:
                 return visit(node.args[0]).startswith(visit(node.args[1]))
         raise AssertionError("Unsupported CI guard: " + ast.dump(node))
@@ -59,6 +64,7 @@ def enabled(item, event, heavy="true", ref="refs/heads/main"):
         "github.event_name": event,
         "github.ref": ref,
         "needs.changes.outputs.heavy": heavy,
+        "needs.changes.outputs.artifact_run": "",
         "matrix.runtime": "linux-x86_64",
         "matrix.plat": "manylinux_2_28_x86_64",
         "steps.bs-models.outputs.cache-hit": "true",
@@ -146,6 +152,45 @@ class CiPolicyTest(unittest.TestCase):
         self.assertEqual(workflow("rethinking.yml")["on"]["push"]["branches"], ["main"])
         self.assertNotIn("pull_request", workflow("dev-setup-windows.yml")["on"])
 
+    def scope(self, paths, main_diff=(), gh_fails=False,
+              jobs="build (manylinux_2_28_x86_64)|portable browser compiler",
+              artifacts="runtime-linux-x86_64 r-oracle-cli-linux-x86_64 browser-compilers"):
+        """Run the classifier with git and gh replaced by fixtures.
+
+        The fixture main run 101 at main-sha differs from the PR by main_diff.
+        """
+        script = self.jobs["changes"]["steps"][1]["run"]
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "git").write_text(
+                '#!/usr/bin/env bash\ncase "$1" in\n'
+                'fetch) ;;\n'
+                'diff) if [ "$4" = fixture-base ]; then printf "%s" "$TEST_CHANGED_PATHS";'
+                ' else printf "%s" "$TEST_MAIN_DIFF"; fi ;;\n'
+                '*) exit 90 ;;\nesac\n')
+            # gh prints what its --jq filter would select.
+            (root / "gh").write_text(
+                '#!/usr/bin/env bash\n[ -z "$TEST_GH_FAILS" ] || exit 1\ncase "$2" in\n'
+                '*/workflows/wheels.yml/runs*) echo "101 main-sha" ;;\n'
+                '*/runs/101/jobs*) echo "$TEST_JOBS" ;;\n'
+                '*/runs/101/artifacts*) echo "$TEST_ARTIFACTS" ;;\n'
+                '*) exit 91 ;;\nesac\n')
+            for tool in ("git", "gh"):
+                (root / tool).chmod(0o755)
+            output = root / "output"
+            env = dict(os.environ, PATH=tmp + os.pathsep + os.environ["PATH"],
+                       GITHUB_EVENT_NAME="pull_request", BASE_SHA="fixture-base",
+                       GITHUB_REPOSITORY="owner/repo",
+                       RUNNER_TEMP=tmp, GITHUB_OUTPUT=str(output),
+                       TEST_CHANGED_PATHS="".join(path + "\n" for path in paths),
+                       TEST_MAIN_DIFF="".join(path + "\n" for path in main_diff),
+                       TEST_GH_FAILS="1" if gh_fails else "",
+                       TEST_JOBS=jobs, TEST_ARTIFACTS=artifacts)
+            result = subprocess.run([self.bash, "-e", "-o", "pipefail", "-c", script],
+                                    env=env, cwd=tmp, capture_output=True, text=True)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            return dict(line.split("=", 1) for line in output.read_text().split())
+
     def test_changed_files_select_the_correct_validation_path(self):
         cases = [
             ([], "false"),
@@ -154,39 +199,57 @@ class CiPolicyTest(unittest.TestCase):
             (["docs/internal/archive/plans/plan.md", "web/index.html"], "false"),
             (["runtime/src/executor.cpp"], "true"),
             (["compiler/ocaml/portable_mir.ml"], "true"),
-            (["r/R/fit.R"], "true"),
+            (["r/inst/js/stanc.js"], "true"),
+            (["r/R/fit.R", "tests/fixtures/example.stan"], "true"),
             (["tests/fixtures/example.stan"], "true"),
             (["docs/internal/artifacts/corpus-refs.json.gz"], "true"),
             ([".github/workflows/wheels.yml"], "true"),
             (["README.md", "unknown/new-file"], "true"),
         ]
-        script = self.jobs["changes"]["steps"][1]["run"]
         for paths, expected in cases:
-            with self.subTest(paths=paths), tempfile.TemporaryDirectory() as tmp:
-                root = Path(tmp)
-                (root / "git").write_text(
-                    '#!/usr/bin/env bash\ncase "$1" in\n'
-                    'fetch) ;;\ndiff) printf "%s" "$TEST_CHANGED_PATHS" ;;\n'
-                    '*) exit 90 ;;\nesac\n')
-                (root / "git").chmod(0o755)
-                output = root / "output"
-                env = dict(os.environ, PATH=tmp + os.pathsep + os.environ["PATH"],
-                           GITHUB_EVENT_NAME="pull_request", BASE_SHA="fixture-base",
-                           RUNNER_TEMP=tmp, GITHUB_OUTPUT=str(output),
-                           TEST_CHANGED_PATHS="".join(path + "\n" for path in paths))
-                result = subprocess.run([self.bash, "-e", "-o", "pipefail", "-c", script],
-                                        env=env, cwd=tmp, capture_output=True, text=True)
-                self.assertEqual(result.returncode, 0, result.stderr)
-                self.assertEqual(output.read_text().strip(), "heavy=" + expected)
+            with self.subTest(paths=paths):
+                self.assertEqual(self.scope(paths, main_diff=paths),
+                                 {"heavy": expected, "artifact_run": ""})
 
-    def gate(self, heavy, results):
+    def test_r_only_changes_reuse_a_matching_main_run(self):
+        reuse = {"heavy": "false", "artifact_run": "101"}
+        full = {"heavy": "true", "artifact_run": ""}
+        for paths in (["r/R/fit.R"], ["r/R/fit.R", "README.md", "r/tests/t.R"]):
+            with self.subTest(paths=paths):
+                self.assertEqual(self.scope(paths, main_diff=paths + ["docs/x.md"]),
+                                 reuse)
+        for name, kwargs in {
+            "main differs outside r/": {"main_diff": ["r/R/fit.R", "runtime/src/a.cpp"]},
+            "main differs in the bundled compiler": {"main_diff": ["r/inst/js/stanc.js"]},
+            "lookup fails": {"gh_fails": True},
+            "main build failed": {"jobs": "portable browser compiler"},
+            "main compiler failed": {"jobs": "build (manylinux_2_28_x86_64)"},
+            "artifact expired": {"artifacts": "runtime-linux-x86_64 browser-compilers"},
+        }.items():
+            with self.subTest(name):
+                kwargs.setdefault("main_diff", ["r/R/fit.R"])
+                self.assertEqual(self.scope(["r/R/fit.R"], **kwargs), full)
+
+    def test_r_tests_run_on_main_artifacts_or_a_fresh_build(self):
+        guard = self.jobs["r-tests"]["if"]
+        for artifact_run, build, expected in (
+                ("101", "skipped", True), ("", "skipped", False),
+                ("", "success", True), ("", "failure", False)):
+            with self.subTest(artifact_run=artifact_run, build=build):
+                self.assertEqual(expression(guard, {
+                    "needs.changes.outputs.artifact_run": artifact_run,
+                    "needs.build.result": build,
+                    "needs.browser-compiler.result": build}), expected)
+
+    def gate(self, heavy, results, artifact_run=""):
         job = self.jobs["pr-gate"]
         # Every dependency belongs to this required status, including Windows,
         # R, and producer parity; a failed prerequisite still schedules it.
         self.assertEqual(set(job["needs"]), set(results))
         self.assertIn("always()", job["if"])
         step = job["steps"][0]
-        context = {"needs.changes.outputs.heavy": heavy}
+        context = {"needs.changes.outputs.heavy": heavy,
+                   "needs.changes.outputs.artifact_run": artifact_run}
         context.update({"needs." + key + ".result": value
                         for key, value in results.items()})
         env = dict(os.environ)
@@ -212,6 +275,21 @@ class CiPolicyTest(unittest.TestCase):
                         self.assertNotEqual(self.gate(heavy, dict(expected, **{job: result})), 0)
             for invalid_scope in ("", "unknown"):
                 self.assertNotEqual(self.gate(invalid_scope, expected), 0)
+
+    def test_required_gate_for_r_only_needs_the_r_tests(self):
+        expected = {"changes": "success", "static_checks": "success",
+                    "build": "skipped", "windows": "skipped",
+                    "browser-compiler": "skipped", "r-tests": "success",
+                    "stanc-windows": "skipped", "windows-compiler": "skipped"}
+        self.assertEqual(self.gate("false", expected, "101"), 0)
+        self.assertNotEqual(self.gate("true", expected, "101"), 0)
+        for job in expected:
+            for result in ("success", "failure", "cancelled", "skipped", ""):
+                if result == expected[job]:
+                    continue
+                with self.subTest(job=job, result=result):
+                    self.assertNotEqual(
+                        self.gate("false", dict(expected, **{job: result}), "101"), 0)
 
 
 class NetworkRetryTest(unittest.TestCase):
