@@ -1,0 +1,21 @@
+{
+  "source_sha": "d58446e631b02cacc5355e373defc6092a684554",
+  "binary_sha256": "359c905c882a4263811b17636817ce349f0b8c743a07769e5348e389dc81173c",
+  "patch_sha256": "3e547cd5f2705ad97f2d1ff292371df9867261f0300228e5edff85f6fc4d3a87",
+  "optimization": "O1 plus vectorize_loops",
+  "build_commands": [
+    "cwd=/Users/xitrium/.codex/worktrees/e688d4b7-0100-4415-af6a-57ad52961ceb/stanrt git clone --shared --no-checkout /Users/xitrium/.codex/worktrees/e688d4b7-0100-4415-af6a-57ad52961ceb/stanrt/deps/stanc3-src /Users/xitrium/.codex/worktrees/e688d4b7-0100-4415-af6a-57ad52961ceb/stanrt/build/corpus-current/stanc-o1vec-src",
+    "cwd=/Users/xitrium/.codex/worktrees/e688d4b7-0100-4415-af6a-57ad52961ceb/stanrt/build/corpus-current/stanc-o1vec-src git remote set-url origin https://github.com/stan-dev/stanc3.git",
+    "cwd=/Users/xitrium/.codex/worktrees/e688d4b7-0100-4415-af6a-57ad52961ceb/stanrt/build/corpus-current/stanc-o1vec-src git fetch origin",
+    "cwd=/Users/xitrium/.codex/worktrees/e688d4b7-0100-4415-af6a-57ad52961ceb/stanrt/build/corpus-current/stanc-o1vec-src git remote set-head origin --auto",
+    "cwd=/Users/xitrium/.codex/worktrees/e688d4b7-0100-4415-af6a-57ad52961ceb/stanrt/build/corpus-current/stanc-o1vec-src git checkout --detach d58446e631b02cacc5355e373defc6092a684554",
+    "cwd=/Users/xitrium/.codex/worktrees/e688d4b7-0100-4415-af6a-57ad52961ceb/stanrt/build/corpus-current/stanc-o1vec-src git rev-list --left-right --count d58446e631b02cacc5355e373defc6092a684554...origin/HEAD",
+    "cwd=/Users/xitrium/.codex/worktrees/e688d4b7-0100-4415-af6a-57ad52961ceb/stanrt/build/corpus-current/stanc-o1vec-src opam exec --switch=stanc3-55 -- dune subst",
+    "cwd=/Users/xitrium/.codex/worktrees/e688d4b7-0100-4415-af6a-57ad52961ceb/stanrt/build/corpus-current/stanc-o1vec-src git diff -- src/analysis_and_optimization/Optimize.ml",
+    "cwd=/Users/xitrium/.codex/worktrees/e688d4b7-0100-4415-af6a-57ad52961ceb/stanrt/build/corpus-current/stanc-o1vec-src opam exec --switch=stanc3-55 -- dune build -j 4 --profile release src/stanc/stanc.exe",
+    "cwd=/Users/xitrium/.codex/worktrees/e688d4b7-0100-4415-af6a-57ad52961ceb/stanrt /Users/xitrium/.codex/worktrees/e688d4b7-0100-4415-af6a-57ad52961ceb/stanrt/deps/stanc3/stanc /Users/xitrium/.codex/worktrees/e688d4b7-0100-4415-af6a-57ad52961ceb/stanrt/build/corpus-current/vectorization-sentinel.stan --O1 --debug-optimized-mir --o=/Users/xitrium/.codex/worktrees/e688d4b7-0100-4415-af6a-57ad52961ceb/stanrt/build/corpus-current/stock-sentinel.hpp",
+    "cwd=/Users/xitrium/.codex/worktrees/e688d4b7-0100-4415-af6a-57ad52961ceb/stanrt /Users/xitrium/.codex/worktrees/e688d4b7-0100-4415-af6a-57ad52961ceb/stanrt/build/corpus-current/stanc-o1vec-src/_build/default/src/stanc/stanc.exe /Users/xitrium/.codex/worktrees/e688d4b7-0100-4415-af6a-57ad52961ceb/stanrt/build/corpus-current/vectorization-sentinel.stan --O1 --debug-optimized-mir --o=/Users/xitrium/.codex/worktrees/e688d4b7-0100-4415-af6a-57ad52961ceb/stanrt/build/corpus-current/vectorized-sentinel.hpp"
+  ],
+  "ocaml": "5.5.0",
+  "dune": "3.24.2"
+}
