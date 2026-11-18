@@ -216,6 +216,15 @@ def compare_runs(a, b):
     return diffs, None
 
 
+def values_compared(a, b):
+    """How many points returned values on both sides."""
+    if a[0] != "points" or b[0] != "points":
+        return 0
+    return sum(1 for k in POINTS
+               if not refused(a[1]["points"][k]["status"])
+               and not refused(b[1]["points"][k]["status"]))
+
+
 def compare_compiles(a, b):
     """(differences, not_comparable_reason) from two compile results, or
     (None, None) when both compiled."""
@@ -380,8 +389,9 @@ def one_model(name, source, data_obj, ctx):
         if reason:
             record["not_comparable"] = reason
             return record
-        engines_match = none[2] == o1[2]
-        record["engines_match"] = engines_match
+        record["engines_match"] = none[2] == o1[2]
+        record["mir_identical"] = none[0]["sha"] == o1[0]["sha"]
+        record["points_with_values"] = values_compared(none[1], o1[1])
         if not diffs:
             record["agree"] = True
             return record
@@ -424,7 +434,8 @@ def brms_inputs():
 def retime(ctx, results, count, repeat=5):
     """Time the compiles with the largest o1/none ratios again, one at a
     time, keeping each side's fastest of `repeat` runs. The parallel sweep
-    shares the machine with 23 other jobs and is too noisy to rank."""
+    shares the machine with the other jobs and is too noisy to rank.
+    A negative count times every model."""
     rows = []
     for r in results:
         a = (r.get("none") or {}).get("compile", {}).get("seconds")
@@ -432,8 +443,10 @@ def retime(ctx, results, count, repeat=5):
         if a and b:
             rows.append((b / a, r))
     rows.sort(key=lambda row: -row[0])
+    if count >= 0:
+        rows = rows[:count]
     with tempfile.TemporaryDirectory(dir=ctx["work"]) as work:
-        for _, r in rows[:count]:
+        for _, r in rows:
             source = pathlib.Path(r["source"])
             r["serial_seconds"] = {
                 passes: compile_model(ctx, source, passes,
@@ -459,6 +472,12 @@ def summarize(results, out):
     p(f"{len(results)} models: {agree} agree, "
       f"{sum(map(len, buckets.values()))} differ, "
       f"{sum(nc.values())} not comparable")
+    agreeing = [r for r in results if r.get("agree")]
+    p(f"of those that agree: {sum(r['mir_identical'] for r in agreeing)} "
+      f"had identical MIR, "
+      f"{sum(r['points_with_values'] == 0 for r in agreeing)} compared only "
+      f"errors, {sum(not r['engines_match'] for r in agreeing)} ran on "
+      f"different engines")
     p()
     p("bucket (first guilty pass:kind)          models  engines differ")
     for b, rs in sorted(buckets.items(), key=lambda kv: -len(kv[1])):
@@ -489,12 +508,14 @@ def summarize(results, out):
              for r in results if r.get("serial_seconds")]
     if timed:
         p()
-        p("serial re-timing, fastest of 5 (largest parallel ratios first)")
-        for ratio, r in sorted(timed, key=lambda t: -t[0]):
+        p(f"largest o1/none compile time ratios, timed serially, fastest of "
+          f"5, over {len(timed)} models")
+        for ratio, r in sorted(timed, key=lambda t: -t[0])[:10]:
             t = r["serial_seconds"]
             p(f"  {ratio:7.2f}  none {t['none']:.3f} s, o1 {t['o1']:.3f} s  "
               f"{r['model']}")
-    for key, unit in (("seconds", "s"), ("size", "bytes")):
+    for key, unit in (("seconds", "s (parallel, noisy)"),
+                      ("size", "bytes")):
         p()
         p(f"largest o1/none compile {key} ratios")
         for ratio, a, b, model in ratios(key):
@@ -517,7 +538,8 @@ def main(argv=None):
                     default=pathlib.Path("fuzz_stanc_results.json"))
     ap.add_argument("--match", help="only models whose name contains this")
     ap.add_argument("--retime", type=int, default=10, metavar="N",
-                    help="re-time the N largest compile-time ratios serially")
+                    help="re-time the N largest compile-time ratios "
+                    "serially; -1 re-times every model")
     args = ap.parse_args(argv)
     if len(args.pairs) % 2:
         ap.error("expected MODEL DATA pairs")
