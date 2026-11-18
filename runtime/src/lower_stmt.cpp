@@ -461,14 +461,21 @@ bool Lowering::peel_terminal_return(mir::Stmt* s, mir::Expr* value) {
   return false;
 }
 // Whether `e` reads the value of one of `names`. A shape query of a variable
-// reads only its declared extent, which a write cannot change.
+// declared with a nonzero size reads only that size, which a write cannot
+// change. Assignment resizes a zero-size declaration, such as the temporaries
+// that stanc's inliner declares.
 static bool reads_value_of(const mir::Expr& e,
-                           const std::set<std::string>& names) {
+                           const std::set<std::string>& names,
+                           const std::map<std::string, DeclView>& decls) {
   if (e.kind == mir::Expr::Var) return names.count(e.name) != 0;
-  if (Lowering::is_shape_query(e) && e.args[0].kind == mir::Expr::Var)
-    return false;
+  if (Lowering::is_shape_query(e) && e.args[0].kind == mir::Expr::Var) {
+    const auto declared = decls.find(e.args[0].name);
+    if (declared != decls.end() && declared->second.len > 0 &&
+        !declared->second.deferred_shape)
+      return false;
+  }
   return std::any_of(e.args.begin(), e.args.end(), [&](const mir::Expr& a) {
-    return reads_value_of(a, names);
+    return reads_value_of(a, names, decls);
   });
 }
 void Lowering::configure_island_compiler(ProgramCompiler& c,
@@ -493,7 +500,7 @@ void Lowering::configure_island_compiler(ProgramCompiler& c,
   if (s) bound_names(*s, written.get());
   const auto region_eval =
       [this, &c, written](const mir::Expr& x) -> std::optional<DataMap::Entry> {
-    if (reads_value_of(x, *written)) return std::nullopt;
+    if (reads_value_of(x, *written, decls)) return std::nullopt;
     td.set_propto(c.propto_ctx);
     const ScopeExit restore{[&] { td.set_propto(propto_ctx); }};
     return try_eval_pure(x);
