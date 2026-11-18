@@ -782,12 +782,9 @@ def ival(e, p):
         vals = [ival(a, p) for a in e.args]
         if None not in vals:
             return min(vals) if e.name == "min" else max(vals)
-        if e.name == "min":
-            known = [v for v in vals if v is not None]
-            return ("at_most", min(known)) if known else None
     if isinstance(e, Op) and e.op in ("+", "-") and e.t == INT:
         a, b = ival(e.a, p), ival(e.b, p)
-        if isinstance(a, int) and isinstance(b, int):
+        if a is not None and b is not None:
             return a + b if e.op == "+" else a - b
     return None
 
@@ -795,9 +792,17 @@ def ival(e, p):
 def upper(e, p):
     """An upper bound of an int expression, or None."""
     v = ival(e, p)
-    if isinstance(v, tuple):
-        return v[1]
-    return v
+    if v is not None:
+        return v
+    if isinstance(e, Call) and e.name in ("min", "max") and e.t == INT:
+        ups = [upper(a, p) for a in e.args]
+        if e.name == "min":
+            known = [u for u in ups if u is not None]
+            return min(known) if known else None
+        return None if None in ups else max(ups)
+    if isinstance(e, Clamp):
+        return upper(e.hi, p)
+    return None
 
 
 def dim_value(t, pos, p):
@@ -1045,7 +1050,7 @@ FEATURES = (
     "c_slice_arg", "c_multi_index_arg", "c_nested_call", "c_call_in_size",
     "c_call_loop_bound", "c_call_in_cond", "c_unused_result",
     "c_call_in_td", "c_rng_in_arg", "c_print_in_arg", "c_reject_in_arg",
-    "c_call_in_earlier_fn",
+    "c_call_in_earlier_fn", "c_effect_in_tuple_arg", "c_param_read_twice",
 )
 
 
@@ -1084,6 +1089,13 @@ def program_features(p):
                 out.add("t_tuple_return")
     if any(len(v) > 1 for v in names.values()):
         out.add("fn_overload")
+    for f in p.functions:
+        for n, _ in f.params:
+            top = sum(1 for st in f.body for e in stmt_exprs(st)
+                      for x in walk_expr(e) if x == Var(n, x.t)
+                      if isinstance(x, Var))
+            if top >= 2:
+                out.add("c_param_read_twice")
     for d in p.datavars:
         type_features(d.t, out)
     for q in p.params:
@@ -1216,6 +1228,10 @@ def _features_expr(e, out, where, callers, p, nested):
                 kinds.add("param")
         if where == "gq":
             kinds.add("data")
+        for (_, pt), a in zip(e.fn.params, e.args):
+            if has_tuple(pt) and not isinstance(a, (Var, Lit)) and \
+                    any(call_effects(x) for x in walk_expr(a)):
+                out.add("c_effect_in_tuple_arg")
         for a in e.args:
             if isinstance(a, Lit):
                 out.add("c_literal_arg")
@@ -1266,7 +1282,8 @@ DEFAULT_WEIGHTS = {
     "var": 3.0, "literal": 1.0, "call": 2.0, "effect_call": 1.0,
     "slice": 0.6, "multi_index": 0.5, "call_in_size": 0.5,
     "call_loop_bound": 0.4, "call_in_cond": 0.5, "ternary": 0.3,
-    "logic": 0.3, "tuple_arg": 1.0,
+    "logic": 0.3, "tuple_arg": 1.0, "effect_in_tuple": 1.0,
+    "param_reuse": 1.0,
 }
 
 DEFAULT_CONFIG = {
@@ -1402,7 +1419,8 @@ class Gen:
         return self.p.sizes[s]
 
     # -- types
-    def gen_type(self, allow_tuple=True, allow_int=True, depth=0):
+    def gen_type(self, allow_tuple=True, allow_int=True, depth=0,
+                 force=None):
         w = self.w
         opts = [(w("real"), "real"), (w("vector"), "vector"),
                 (w("row_vector"), "row_vector"), (w("matrix"), "matrix"),
@@ -1412,7 +1430,7 @@ class Gen:
             opts += [(w("int"), "int"), (w("array_int"), "array_int")]
         if allow_tuple and depth == 0:
             opts.append((w("tuple"), "tuple"))
-        k = self.pick(opts) or "real"
+        k = force or self.pick(opts) or "real"
         if k == "real":
             return REAL
         if k == "int":
@@ -1672,8 +1690,32 @@ class Gen:
                 return Call(r.choice(REAL_UNARY), [self.expr(t, ctx, d)], t)
             return None
         if k == "tuple":
-            return Tup([self.expr(i, ctx, d) for i in t.items], t)
+            items = [None] * len(t.items)
+            if ctx.budget[0] > 0 and self.chance("effect_in_tuple", 0.5):
+                j = r.randrange(len(t.items))
+                items[j] = self.effectful(t.items[j], ctx, d)
+            return Tup([e if e is not None else self.expr(it, ctx, d)
+                        for e, it in zip(items, t.items)], t)
         return None
+
+    def effectful(self, t, ctx, d):
+        """A call of type t with an effect, or None."""
+        opts = []
+        if ctx.rng and t in (REAL, INT):
+            opts.append("rng")
+        fs = [f for f in self.callable(ctx) if f.ret == t and f.effects()]
+        if fs:
+            opts.append("user")
+        if not opts or ctx.budget[0] <= 0:
+            return None
+        if self.r.choice(opts) == "user":
+            return self.call_of(self.r.choice(fs), ctx, d)
+        ctx.budget[0] -= 1
+        if t == REAL:
+            return Call("normal_rng", [self.expr(REAL, ctx, d),
+                                       self.scale(ctx, d)], REAL)
+        return Call("poisson_log_rng", [Call(
+            "tanh", [self.expr(REAL, ctx, d)], REAL)], INT)
 
     def same_kind(self, t, s2):
         """t with its first dimension replaced by s2."""
@@ -1830,6 +1872,8 @@ class Gen:
                 out.append(self.rec_depth(ctx))
             elif f.kind == "lpmf" and i == 0:
                 out.append(self.outcome(t, ctx))
+            elif t.kind == "tuple" and self.chance("tuple_arg", 0.4):
+                out.append(self.compound(t, ctx, max(d, 1)))
             else:
                 out.append(self.expr(t, ctx, max(d, 0)))
         return out
@@ -2126,8 +2170,13 @@ class Gen:
                 [INT, arr(self.sym(), INT)])))
         for _ in range(r.randint(1, 3) if kind != "lpdf" else
                        r.randint(0, 2)):
-            t = self.gen_type(allow_tuple=self.chance("tuple_arg", 0.4))
+            t = self.gen_type(allow_tuple=False)
             params.append((self.name("a"), t))
+        if self.w("tuple") > 0 and self.chance("tuple_arg", 0.3):
+            j = r.randrange(len(params))
+            if not (j == 0 and kind in ("lpdf", "lpmf")):
+                params[j] = (params[j][0], self.gen_type(allow_tuple=True,
+                                                         depth=0, force="tuple"))
         if kind in ("lpdf", "lpmf"):
             ret = REAL
         elif kind == "void" or (kind == "lp" and r.random() < 0.4):
@@ -2147,7 +2196,22 @@ class Gen:
             body.append(Return(ret))
         elif f.ret is not None:
             body.append(Return(self.expr(f.ret, ctx.fresh())))
+        if f.params and self.chance("param_reuse", 0.5):
+            params = Ctx(f, None, [VarInfo(n, t) for n, t in f.params])
+            body.insert(0, self.reuse_guard(f, params))
         f.body = body
+
+    def reuse_guard(self, f, c):
+        """if (r(a) + r(a) > 1000) return ...; for a parameter a. It reads a
+        twice before anything else and is never true."""
+        tuples = [(n, t) for n, t in f.params if has_tuple(t)]
+        n, t = self.r.choice(tuples if tuples and self.r.random() < 0.7
+                             else f.params)
+        reads = Op("+", self.reduce_to_real(Var(n, t)),
+                   self.reduce_to_real(Var(n, t)), REAL)
+        ret = None if f.ret is None else self.expr(f.ret, c)
+        return If(Op(">", reads, Lit(REAL, 1000.0), INT), [Return(ret)],
+                  None)
 
     def density_return(self, f, c):
         y_name, yt = f.params[0]
@@ -2179,9 +2243,10 @@ class Gen:
                   pinned=True)
         mid = self.stmts(ctx, r.randint(0, 2), 1)
         f.body = [base] + mid
+        # The self-call has f's effects, so nothing else in this statement
+        # may have any.
         c = ctx.fresh()
-        if f.effects():
-            c.budget[0] = 0
+        c.budget[0] = 0
         down = Op("-", Var(n, INT), Lit(INT, 1), INT)
         call = Call(f.name, [down, self.expr(REAL, c, 1)], REAL, fn=f)
         tail = r.choice(["+", "*"])
@@ -2277,7 +2342,6 @@ class Gen:
         for e in all_exprs(self.p):
             if isinstance(e, Call) and e.fn is not None:
                 called.add(id(e.fn))
-        scope_all = self.block_scope("gq")
         for f in self.p.functions:
             if id(f) in called:
                 continue
@@ -2288,31 +2352,31 @@ class Gen:
                 block = "td"
             else:
                 block = "model"
-            ctx = Ctx(None, block, self.block_scope(block))
-            del scope_all
-            scope_all = None
             body = getattr(self.p, block)
+            at = self.r.randint(0, len(body))
+            ctx = Ctx(None, block, self.block_scope(block, at))
             if f.kind in ("lpdf", "lpmf"):
                 if self.r.random() < 0.5:
                     args = self.args(f, ctx, 2)
-                    body.append(Tilde(args[0], f.name[:-5], args[1:], fn=f))
+                    st = Tilde(args[0], f.name[:-5], args[1:], fn=f)
                 else:
-                    body.append(Target(self.call_of(f, ctx, 2)))
+                    st = Target(self.call_of(f, ctx, 2))
             elif f.ret is None:
                 call = self.call_of(f, ctx, 2)
                 call.t = None
-                body.append(CallStmt(call))
+                st = CallStmt(call)
             else:
                 call = self.call_of(f, ctx, 2)
                 if block == "model" and r_true(self.r, 0.5):
-                    body.append(Target(self.reduce_to_real(call)))
+                    st = Target(self.reduce_to_real(call))
                 else:
                     pre = "td" if block == "td" else (
                         "m" if block == "model" else "gq")
                     sc = ctx.data_only()
-                    body.append(Decl(self.name(pre), f.ret,
-                                     [self.size(s, sc, 0)
-                                      for s in decl_syms(f.ret)], call))
+                    st = Decl(self.name(pre), f.ret,
+                              [self.size(s, sc, 0)
+                               for s in decl_syms(f.ret)], call)
+            body.insert(at, st)
 
     def reduce_to_real(self, e):
         t = e.t
@@ -2336,11 +2400,13 @@ class Gen:
                 "*", Call("size", [e], INT), Lit(REAL, 0.5), REAL)
         return Lit(REAL, 0.5)
 
-    def block_scope(self, block):
+    def block_scope(self, block, upto=None):
+        """The variables visible in block before its statement `upto`."""
         p = self.p
         scope = [VarInfo(d.name, d.t, data=True) for d in p.datavars]
         scope += [VarInfo(s.name, s.t, mutable=block == "td", data=True)
-                  for s in p.td if isinstance(s, Decl)]
+                  for s in (p.td[:upto] if block == "td" else p.td)
+                  if isinstance(s, Decl)]
         if block == "td":
             return scope
         scope += [VarInfo(q.name, q.t, param=True) for q in p.params]
@@ -2348,7 +2414,8 @@ class Gen:
                   for s in p.tp if isinstance(s, Decl)]
         if block in ("model", "gq"):
             scope += [VarInfo(s.name, s.t, mutable=True)
-                      for s in getattr(p, block) if isinstance(s, Decl)]
+                      for s in getattr(p, block)[:upto]
+                      if isinstance(s, Decl)]
         return scope
 
 

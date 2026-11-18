@@ -94,6 +94,18 @@ class GeneratedProgramsTest(unittest.TestCase):
             seen.update(p.features())
         self.assertEqual(sorted(set(g.FEATURES) - seen), [])
 
+    def test_tuple_arguments_with_effects_are_common(self):
+        n = sum("c_effect_in_tuple_arg" in p.features()
+                for p in self.programs)
+        self.assertGreater(n, len(self.programs) // 30)
+
+    def test_call_sites_are_spread_through_blocks(self):
+        last = sum(1 for p in self.programs
+                   if p.gq and isinstance(p.gq[-1], g.Decl) and
+                   isinstance(p.gq[-1].init, g.Call) and
+                   p.gq[-1].init.fn is not None)
+        self.assertLess(last, len(self.programs) // 4)
+
     def test_one_to_four_functions(self):
         names = [len({f.name for f in p.functions}) for p in self.programs]
         self.assertEqual(min(names), 1)
