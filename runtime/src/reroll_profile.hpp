@@ -9,7 +9,6 @@ namespace stanli {
 namespace detail {
 
 constexpr int64_t kMinLanes = 4;
-constexpr int kMaxPeriod = 32;
 
 struct SignatureCheckResult {
   int64_t pairs_checked = 0;

@@ -46,6 +46,9 @@ inline bool compact_imports(stanli::Graph& graph, Fills& fills,
     }
     lo[s] = graph.slots[s].len;
   }
+  std::vector<char> filled(count, false);
+  for (const auto& fill : fills)
+    if (valid(fill.first)) filled[fill.first] = true;
   for (const auto& op : graph.ops) {
     const auto* k = find_kernel(op.opcode);
     const bool transparent_payload =
@@ -54,13 +57,21 @@ inline bool compact_imports(stanli::Graph& graph, Fills& fills,
         (op.udata && !transparent_payload) || op.dyn_extent_in != -1 ||
         op.dyn_lengths || op.dyn_capacity || op.opcode == OP_DYNAMIC_SLICE ||
         op.opcode == OP_INDEX_DYNAMIC || op.opcode == OP_SET_INDEX_DYNAMIC ||
-        op.opcode == OP_SET_INDEX_INPLACE ||
-        op.opcode == OP_SET_SLICE_INPLACE ||
-        op.opcode == OP_SET_SLICE_STRIDED_INPLACE || !valid(op.out) ||
-        op.n_in < 0 || op.n_in > 6 || (op.out2 != -1 && !valid(op.out2)))
+        !valid(op.out) || op.n_in < 0 || op.n_in > 6 ||
+        (op.out2 != -1 && !valid(op.out2)))
       return reject(
           std::string("opaque/stateful kernel or dynamic import geometry: ") +
           opcode_name(op.opcode));
+    // Each call's executor owns a slot an earlier op of this graph wrote;
+    // parameters, fills and imports are bound from storage outside it.
+    if ((op.opcode == OP_SET_INDEX_INPLACE ||
+         op.opcode == OP_SET_SLICE_INPLACE ||
+         op.opcode == OP_SET_SLICE_STRIDED_INPLACE) &&
+        (op.n_in < 1 || op.out != op.in[0] || !written[op.out] ||
+         graph.slots[op.out].is_param || filled[op.out]))
+      return reject(std::string("in-place store into storage the call does "
+                                "not own: ") +
+                    opcode_name(op.opcode));
     written[op.out] = true;
     if (op.out2 >= 0) written[op.out2] = true;
     for (int i = 0; i < op.n_in; ++i)
