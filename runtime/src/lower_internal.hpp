@@ -896,6 +896,7 @@ struct Lowering {
   // Interpreter-native semantic values. Graph fills use a different physical
   // order for arrays, so compile-time observation must never reuse them.
   std::map<ObservationKey, DataMap::Entry> observations;
+  std::vector<KnownOutput> known_outputs;
   std::vector<int> target_terms;
   std::vector<int> jac_slots;
   std::vector<int> extra_roots;
@@ -1052,6 +1053,11 @@ struct Lowering {
       en.dims = {len};
     else
       en.dims.clear();
+    if (!g.ops.empty() && g.ops.back().out == v.slot)
+      known_outputs.push_back(
+          {g.ops.back(), graph_order(en, is_matrix(v.si),
+                                     is_array(v.si) && array_shape(v.si).leaf ==
+                                                           ViewKind::Matrix)});
     observations[{v.slot, v.si}] = std::move(en);
   }
   const DataMap::Entry* observation(const Val& v) const {

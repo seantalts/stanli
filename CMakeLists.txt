@@ -1526,6 +1526,12 @@ if(Python3_Interpreter_FOUND)
            WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
   set_tests_properties(test_prep_scaling PROPERTIES
     RUN_SERIAL TRUE FIXTURES_REQUIRED prep_scaling_models)
+  add_test(NAME test_prep_data_calls
+           COMMAND ${Python3_EXECUTABLE} tests/test_prep_data_calls.py
+                   ${STANLI_STANC_EXECUTABLE} $<TARGET_FILE:bench_grad>
+                   ${CMAKE_CURRENT_BINARY_DIR}/prep_data_calls
+           WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
+  set_tests_properties(test_prep_data_calls PROPERTIES RUN_SERIAL TRUE)
   add_test(NAME test_prep_loop_body
            COMMAND ${Python3_EXECUTABLE} tests/test_prep_loop_body.py
                    $<TARGET_FILE:bench_grad> ${STANLI_STANC_EXECUTABLE}

@@ -3287,12 +3287,6 @@ class MirInterp {
       r.r = {T((double)v)};
       return r;
     }
-    if (e.name == "student_t_lccdf" && e.args.size() == 4) {
-      r.r = {stan::math::student_t_lccdf(
-          eval(e.args[0]).r.at(0), eval(e.args[1]).r.at(0),
-          eval(e.args[2]).r.at(0), eval(e.args[3]).r.at(0))};
-      return r;
-    }
     // Scalar unaries from the shared list, so transformed data and
     // generated quantities accept exactly what the log-density path does.
     // Evaluate the table's value formula on doubles on every route. An ODE
