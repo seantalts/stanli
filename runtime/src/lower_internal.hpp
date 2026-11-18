@@ -1481,11 +1481,15 @@ struct Lowering {
     fail("result type does not match logical rows/cols");
   }
   void validate_view(const SlotInfo& si, int64_t len, const std::string& what);
+  // The same check for the value `kind` + `name`, a message built only if
+  // it fails.
+  void validate_view(const SlotInfo& si, int64_t len, const char* kind,
+                     const std::string& name);
 
   void require_binding(const Val& v, int64_t len, const SlotInfo& expected,
                        const std::string& name, const std::string& raw = "") {
-    validate_view(v.si, g.slots[v.slot].len, "binding " + name);
-    validate_view(expected, len, "declaration " + name);
+    validate_view(v.si, g.slots[v.slot].len, "binding ", name);
+    validate_view(expected, len, "declaration ", name);
     if (g.slots[v.slot].len != len)
       fail("assignment width mismatch for " + name, raw);
     if (!same_view(v.si, g.slots[v.slot].len, expected, len))
@@ -1680,6 +1684,48 @@ struct Lowering {
   // their value, so a later `if (flag) break` is not read as constant.
   void forget_runtime_ints(const mir::Stmt& s);
   bool decided_statically(const mir::Stmt& s);
+
+  // The control scans change int_env through these two calls only. While an
+  // IntEnvScope is open, each change is logged with the value it replaced,
+  // and the scope puts those entries back when it closes. Copying the whole
+  // map instead cost one allocation per entry for every loop iteration that
+  // was scanned.
+  using IntEnvLog = std::vector<std::pair<std::string, std::optional<long>>>;
+  IntEnvLog* int_env_log = nullptr;
+  void scan_set_int(const std::string& name, long value) {
+    if (int_env_log) {
+      const auto found = int_env.find(name);
+      int_env_log->emplace_back(name, found == int_env.end()
+                                          ? std::nullopt
+                                          : std::optional<long>(found->second));
+    }
+    int_env[name] = value;
+  }
+  void scan_erase_int(const std::string& name) {
+    const auto found = int_env.find(name);
+    if (found == int_env.end()) return;
+    if (int_env_log) int_env_log->emplace_back(name, found->second);
+    int_env.erase(found);
+  }
+  struct IntEnvScope {
+    Lowering& lowering;
+    IntEnvLog* outer;
+    IntEnvLog log;
+    explicit IntEnvScope(Lowering& l) : lowering(l), outer(l.int_env_log) {
+      lowering.int_env_log = &log;
+    }
+    IntEnvScope(const IntEnvScope&) = delete;
+    IntEnvScope& operator=(const IntEnvScope&) = delete;
+    ~IntEnvScope() {
+      for (auto it = log.rbegin(); it != log.rend(); ++it) {
+        if (it->second)
+          lowering.int_env[it->first] = *it->second;
+        else
+          lowering.int_env.erase(it->first);
+      }
+      lowering.int_env_log = outer;
+    }
+  };
 
   static bool contains_multi_assign(const mir::Stmt& s) {
     if (s.kind == mir::Stmt::MultiAssign) return true;

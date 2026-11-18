@@ -144,7 +144,7 @@ std::optional<Lowering::Flow> Lowering::unroll_while(const mir::Stmt& s) {
 // static UDF.
 bool Lowering::scan_block(const mir::Stmt& s,
                           const std::function<bool(const mir::Stmt&)>& stop) {
-  const auto saved = int_env;
+  const IntEnvScope saved{*this};
   std::set<std::string> local_ints;
   // The container locals passed so far, with what decls held for each name
   // before, so `int n = rows(x)` on a local declared earlier in the block
@@ -163,7 +163,6 @@ bool Lowering::scan_block(const mir::Stmt& s,
   std::vector<LocalValue> local_values;
   std::set<std::string> local_containers;
   const ScopeExit restore{[&] {
-    int_env = saved;
     for (auto it = local_views.rbegin(); it != local_views.rend(); ++it) {
       if (it->second)
         decls[it->first] = *it->second;
@@ -185,10 +184,10 @@ bool Lowering::scan_block(const mir::Stmt& s,
   // say) stays unknown; lowering evaluates it in order.
   const auto set_local_int = [&](const std::string& name,
                                  const mir::Expr* rhs) {
-    int_env.erase(name);
+    scan_erase_int(name);
     if (!rhs) return;
     try {
-      int_env[name] = eval_int(*rhs);
+      scan_set_int(name, eval_int(*rhs));
     } catch (const CompileError&) {
     }
   };
@@ -275,7 +274,7 @@ bool Lowering::scan_block(const mir::Stmt& s,
       std::vector<std::string> writes;
       assigned_names(child, &writes);
       for (const auto& name : writes) {
-        if (runtime) int_env.erase(name);
+        if (runtime) scan_erase_int(name);
         if (local_containers.count(name)) td.env().erase(name);
       }
     }
@@ -332,7 +331,7 @@ bool Lowering::needs_runtime_control(const mir::Stmt& s) {
     // will use. This keeps static conditions such as `if (t < N)` out of
     // a region without overlooking an arm that exists only at a later t.
     for (int64_t v = lo; v <= hi && !found; ++v) {
-      int_env[s.loopvar] = static_cast<long>(v);
+      scan_set_int(s.loopvar, static_cast<long>(v));
       for (const auto& k : s.body)
         if (needs_runtime_control(k)) {
           found = true;
@@ -340,9 +339,9 @@ bool Lowering::needs_runtime_control(const mir::Stmt& s) {
         }
     }
     if (had_old)
-      int_env[s.loopvar] = old_value;
+      scan_set_int(s.loopvar, old_value);
     else
-      int_env.erase(s.loopvar);
+      scan_erase_int(s.loopvar);
     return found;
   }
   for (const auto& k : s.body)
@@ -433,14 +432,19 @@ bool Lowering::decided_statically(const mir::Stmt& s) {
   return std::all_of(s.body.begin(), s.body.end(),
                      [&](const mir::Stmt& k) { return decided_statically(k); });
 }
+// Every name an assignment in `s` targets, nested statements included.
+template <class F>
+static void visit_assigned(const mir::Stmt& s, const F& visit) {
+  mir::for_each_assigned(s, visit);
+  for (const auto& k : s.body) visit_assigned(k, visit);
+}
 void Lowering::forget_runtime_ints(const mir::Stmt& s) {
-  std::vector<std::string> writes;
-  assigned_names(s, &writes);
-  if (std::none_of(writes.begin(), writes.end(),
-                   [&](const std::string& n) { return int_env.count(n); }))
-    return;
-  if (decided_statically(s)) return;
-  for (const auto& name : writes) int_env.erase(name);
+  bool writes_int = false;
+  visit_assigned(s, [&](const std::string& n) {
+    writes_int = writes_int || int_env.count(n);
+  });
+  if (!writes_int || decided_statically(s)) return;
+  visit_assigned(s, [&](const std::string& n) { scan_erase_int(n); });
 }
 // Remove a return at the lexical end of a statement arm, preserving every
 // statement that precedes it.  This is the structured form used by UDFs
@@ -1169,8 +1173,8 @@ Lowering::Val Lowering::checked_binding(const Val& v, int64_t len,
                                         const SlotInfo& expected,
                                         const std::string& name,
                                         const std::string& raw) {
-  validate_view(v.si, g.slots[v.slot].len, "binding " + name);
-  validate_view(expected, len, "declaration " + name);
+  validate_view(v.si, g.slots[v.slot].len, "binding ", name);
+  validate_view(expected, len, "declaration ", name);
   if (g.slots[v.slot].len == len &&
       same_view(v.si, g.slots[v.slot].len, expected, len))
     return v;
@@ -1194,8 +1198,8 @@ Lowering::Val Lowering::checked_binding(const Val& v, int64_t len,
 // value as it is.
 bool Lowering::takes_value_shape(const Val& v, const SlotInfo& expected,
                                  const std::string& name) {
-  validate_view(v.si, g.slots[v.slot].len, "binding " + name);
-  validate_view(expected, 0, "declaration " + name);
+  validate_view(v.si, g.slots[v.slot].len, "binding ", name);
+  validate_view(expected, 0, "declaration ", name);
   return !assign_size_error(v, 0, expected, name);
 }
 // stan::model::assign's size check, which throws at every evaluation that
@@ -2129,21 +2133,11 @@ Lowering::Flow Lowering::lower_stmt_impl(const mir::Stmt& s) {
       // The bounds come first so a zero-trip loop never evaluates its body.
       // Only a break or continue can answer yes, so a body without one is
       // not scanned.
-      const auto old = int_env.find(s.loopvar);
-      const bool had_old = old != int_env.end();
-      const long old_value = had_old ? old->second : 0;
       bool has_runtime_loop_control = false;
       if (std::any_of(s.body.begin(), s.body.end(), has_loop_control)) {
-        const auto saved_ints = int_env;
-        const ScopeExit leave{[&] {
-          int_env = saved_ints;
-          if (had_old)
-            int_env[s.loopvar] = old_value;
-          else
-            int_env.erase(s.loopvar);
-        }};
+        const IntEnvScope saved{*this};
         for (int64_t v = lo; v <= hi && !has_runtime_loop_control; ++v) {
-          int_env[s.loopvar] = static_cast<long>(v);
+          scan_set_int(s.loopvar, static_cast<long>(v));
           for (const auto& child : s.body) {
             if (runtime_loop_control(child)) {
               has_runtime_loop_control = true;

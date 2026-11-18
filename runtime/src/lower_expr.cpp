@@ -661,6 +661,21 @@ void Lowering::validate_view(const SlotInfo& si, int64_t len,
     return;
   }
 }
+void Lowering::validate_view(const SlotInfo& si, int64_t len, const char* kind,
+                             const std::string& name) {
+  // Scalars and matrices are checked here without building the message;
+  // anything else, and any view that fails, takes the full check.
+  if (is_array(si) == (si.shape != 0)) {
+    if (si.kind == ViewKind::Flat && len == 1) return;
+    if (is_matrix(si) && si.rows >= 0 && si.cols >= 0 &&
+        (si.cols == 0 ||
+         si.rows <= std::numeric_limits<int64_t>::max() / si.cols) &&
+        si.rows * si.cols == len)
+      return;
+    if (si.kind != ViewKind::Flat && !is_matrix(si) && !is_array(si)) return;
+  }
+  validate_view(si, len, kind + name);
+}
 // Lazily materialize an env value as a data slot when log_prob uses it.
 int Lowering::env_slot(const std::string& name) {
   DataMap::Entry* en = td.find(name);
@@ -679,7 +694,7 @@ int Lowering::env_slot(const std::string& name) {
   // DataMap is first-index-fast. Graph arrays are outer-major, with only
   // an innermost matrix kept column-major, so normalize at materialization.
   std::vector<double> vals = graph_order(*en, is_matrix(si), nested_matrix);
-  validate_view(si, (int64_t)vals.size(), "data value " + name);
+  validate_view(si, (int64_t)vals.size(), "data value ", name);
   const int s = add_slot((int64_t)vals.size(), false);
   out.fills.emplace_back(s, std::move(vals));
   Val v{s, false, si, owning_layout(si)};
