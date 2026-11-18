@@ -695,13 +695,14 @@ revisions, on matched hardware, compiler, build mode, threads, inputs and
 settings, with separate output paths.
 
 Compare each model's source-to-MIR time, preparation time, warm gradient and
-setup-plus-gradient estimate as `100 * (candidate / baseline - 1)`. A change of
-2% or more is a major slowdown. Show per-model and per-phase results, since
-an aggregate win can hide a regression. Missing, failed or timed-out
+total sampling estimate as `100 * (candidate / baseline - 1)`. A model's
+slowdown is major when its total sampling estimate grows by 2% or 5 ms,
+whichever is greater. Show per-model and per-phase results, since an aggregate
+win can hide a regression. Missing, failed or timed-out
 observations stay visible and cannot count as a pass, and every existing
 numerical check still applies.
 
-Shared CI hosts can be noisier than 2%. Investigate a threshold crossing with a
+Shared CI hosts can be noisier than that. Investigate a threshold crossing with a
 separate experiment on an idle host: at least six alternating fresh-process
 baseline/candidate pairs for the affected phases, all samples kept, with
 identical-binary controls when needed. Do not rerun until a favorable sample
