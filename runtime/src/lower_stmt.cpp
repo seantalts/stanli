@@ -49,34 +49,41 @@ static bool bounded_while_guard(const mir::Expr& e) {
   return true;
 }
 
-bool Lowering::expr_has_jacobian(const mir::Expr& e) {
+// Stan permits target and Jacobian increments in a user function precisely
+// when its name has the `_lp` or `_jacobian` suffix. Conservatively carry a
+// target through such a call; an unused zero is cheaper than dropping a
+// nested increment.
+static bool user_call_adds_to_target(mir::Expr::Lib lib, mir::FnSuffix suffix) {
+  return lib == mir::Expr::Lib::UserDefined &&
+         (suffix == mir::FnSuffix::Target || suffix == mir::FnSuffix::Jacobian);
+}
+bool Lowering::expr_adds_to_target(const mir::Expr& e) {
   if (e.kind == mir::Expr::FunApp) {
     CallableTransformSpec transform;
     if (callable_transform(e.name, &transform) &&
         transform.direction == TransformDirection::Jacobian)
       return true;
-    // Stan permits Jacobian adjustments in a UDF precisely when its name
-    // has this suffix. Conservatively carry a target through such a call;
-    // an unused zero is cheaper than dropping a nested adjustment.
-    if (e.fn_lib == mir::Expr::Lib::UserDefined &&
-        e.fn_suffix == mir::FnSuffix::Jacobian)
-      return true;
+    if (user_call_adds_to_target(e.fn_lib, e.fn_suffix)) return true;
   }
   for (const auto& a : e.args)
-    if (expr_has_jacobian(a)) return true;
+    if (expr_adds_to_target(a)) return true;
   return false;
 }
-// Does `s` increment the target, explicitly or through a Jacobian call?
+// Does `s` increment the target, explicitly or through a call?
 bool Lowering::has_target_pe(const mir::Stmt& s) {
   if (s.kind == mir::Stmt::TargetPE) return true;
-  if ((s.has_init && expr_has_jacobian(s.init)) || expr_has_jacobian(s.rhs) ||
-      expr_has_jacobian(s.target) || expr_has_jacobian(s.lower) ||
-      expr_has_jacobian(s.upper) || expr_has_jacobian(s.cond))
+  if (s.kind == mir::Stmt::NRFunApp &&
+      user_call_adds_to_target(s.fn_lib, s.fn_suffix))
+    return true;
+  if ((s.has_init && expr_adds_to_target(s.init)) ||
+      expr_adds_to_target(s.rhs) || expr_adds_to_target(s.target) ||
+      expr_adds_to_target(s.lower) || expr_adds_to_target(s.upper) ||
+      expr_adds_to_target(s.cond))
     return true;
   for (const auto& e : s.fn_args)
-    if (expr_has_jacobian(e)) return true;
+    if (expr_adds_to_target(e)) return true;
   for (const auto& e : s.lhs_idx)
-    if (expr_has_jacobian(e)) return true;
+    if (expr_adds_to_target(e)) return true;
   for (const auto& k : s.body)
     if (has_target_pe(k)) return true;
   return false;

@@ -1638,9 +1638,9 @@ struct Lowering {
     // so an emitter must not treat the region as having nothing to produce.
     bool has_effect = false;
   };
-  static bool expr_has_jacobian(const mir::Expr& e);
+  static bool expr_adds_to_target(const mir::Expr& e);
 
-  // Does `s` increment the target, explicitly or through a Jacobian call?
+  // Does `s` increment the target, explicitly or through a call?
   static bool has_target_pe(const mir::Stmt& s);
 
   bool scan_block(const mir::Stmt& s,

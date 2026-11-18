@@ -1417,6 +1417,66 @@ static void test_udf_lp_branch_propto() {
   }
 }
 
+// An `_lp` call adds to the target wherever it sits: in a branch condition,
+// or as a statement in a branch whose only other effect is an assignment.
+// Inside a parameter-dependent region neither is a `target +=` statement of
+// the region itself.
+static void test_udf_lp_condition() {
+  using namespace stanli;
+  const DataMap data =
+      DataMap::from_json(slurp("tests/fixtures/udf_lp_condition.json"));
+  CompiledModel cm;
+  try {
+    cm =
+        compile_model(slurp("tests/fixtures/udf_lp_condition.tmir.sexp"), data);
+  } catch (const std::exception& error) {
+    check(false, std::string("udf lp condition compile: ") + error.what());
+    return;
+  }
+  for (double q : {0.1, 0.5, 1.5}) {
+    stan::math::var p = q;
+    stan::math::var lp = -0.5 * stan::math::square(p);
+    const double x1 = q < 0.2 ? 1 : 0;
+    const double x2 = q < 1 ? 2 : x1;
+    lp += x1;
+    if (q < 1) lp += p;
+    lp += x2;
+    lp.grad();
+    Executor ex(cm.graph);
+    cm.bind(ex);
+    ex.params_data()[0] = q;
+    double grad = 0;
+    const std::string at = " at " + std::to_string(q);
+    expect_ulp("udf lp condition lp" + at, ex.gradient(&grad), lp.val(), 2);
+    expect_ulp("udf lp condition grad" + at, grad, p.adj(), 2);
+    stan::math::recover_memory();
+  }
+}
+
+// An `_lp` call as the whole condition of an empty branch, and as a loop
+// bound: the region has nothing to produce except the target increments.
+static void test_udf_lp_bound() {
+  using namespace stanli;
+  const DataMap data =
+      DataMap::from_json(slurp("tests/fixtures/udf_lp_bound.json"));
+  CompiledModel cm;
+  try {
+    cm = compile_model(slurp("tests/fixtures/udf_lp_bound.tmir.sexp"), data);
+  } catch (const std::exception& error) {
+    check(false, std::string("udf lp bound compile: ") + error.what());
+    return;
+  }
+  for (double q : {0.1, -1.5}) {
+    Executor ex(cm.graph);
+    cm.bind(ex);
+    ex.params_data()[0] = q;
+    double grad = 0;
+    const std::string at = " at " + std::to_string(q);
+    expect_ulp("udf lp bound lp" + at, ex.gradient(&grad), 2 * q, 0);
+    expect_ulp("udf lp bound grad" + at, grad, 2.0, 0);
+  }
+}
+
 // `if (a > 1) return;` at the end of a void function inlined into a
 // parameter-dependent branch. The branch's skip lands where the next
 // statement, `target += p`, begins.
@@ -9176,6 +9236,8 @@ int main() {
   test_udf_lp_propto();
   test_udf_lp_inlined_propto();
   test_udf_lp_branch_propto();
+  test_udf_lp_condition();
+  test_udf_lp_bound();
   test_udf_void_return_in_branch();
   test_udf_branch_kernels();
   test_udf_data_call_o1();
