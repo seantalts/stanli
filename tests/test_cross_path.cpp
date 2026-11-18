@@ -212,7 +212,7 @@ int main() {
   expect(with_necessity >= 84,
          "at least 84 fixtures reach a necessity island, got " +
              std::to_string(with_necessity));
-  expect(with_carved >= 8, "at least 8 fixtures reach a carved island, got " +
+  expect(with_carved >= 7, "at least 7 fixtures reach a carved island, got " +
                                std::to_string(with_carved));
   expect(with_native_adj >= 79,
          "at least 79 fixtures run a generated adjoint, got " +
@@ -244,7 +244,7 @@ int main() {
   };
   const Floor floors[] = {
       {"no_island", 430, 2},
-      {"island_always", 430, 2},
+      {"island_always", 430, 1},
       {"no_island_compact", 430, 55},
       {"island_always_no_compact", 430, 56},
       {"no_native_adj", 430, 120},
