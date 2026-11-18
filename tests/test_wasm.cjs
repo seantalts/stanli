@@ -56,7 +56,7 @@ createStanli().then((M) => {
       portableCompile = portable;
       compiled = portable("embedded_model", code);
       if (!compiled.errors &&
-          !String(compiled.result).startsWith("STANLI4:"))
+          !String(compiled.result).startsWith("STANLI5:"))
         fail("portable stancjs returned legacy or malformed MIR");
     } else {
       fail("browser compiler did not export stanli_compile()");

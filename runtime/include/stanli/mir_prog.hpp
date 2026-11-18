@@ -294,7 +294,8 @@ struct ProgramCompiler {
   }
 
   static void assigned_names(const mir::Stmt& s, std::set<std::string>* names) {
-    if (s.kind == mir::Stmt::Assignment) names->insert(s.lhs);
+    mir::for_each_assigned(
+        s, [&](const std::string& name) { names->insert(name); });
     for (const auto& child : s.body) assigned_names(child, names);
   }
 
@@ -2542,6 +2543,37 @@ struct ProgramCompiler {
                        spec, "runtime indexed read");
   }
 
+  // A registered matrix operation, `map_out` receiving its shapes.
+  Range matrix_op_call(const mir::Expr& e, const BuiltinSpec* matrix,
+                       BuiltinMatrixMap* map_out = nullptr) {
+    std::vector<Range> args;
+    args.reserve(matrix->arity);
+    for (const mir::Expr& argument : e.args) args.push_back(expr(argument));
+    BuiltinMatrixMap map;
+    try {
+      std::vector<BuiltinArgumentShape> shapes;
+      shapes.reserve(args.size());
+      for (size_t k = 0; k < args.size(); ++k)
+        shapes.push_back(builtin_argument_shape(e.args[k], args[k]));
+      map = builtin_matrix_map(*matrix, shapes);
+    } catch (const std::invalid_argument& error) {
+      bail(e.name + ": " + std::string(error.what()));
+    }
+    bool active = false;
+    for (const mir::Expr& argument : e.args)
+      if (!argument.data_only && !in_write_array) active = true;
+    Range out{0, (int)map.result.storage_size};
+    out = shaped(std::move(out), map.result);
+    std::vector<int> idata;
+    idata.reserve(map.idata.size());
+    for (const int64_t value : map.idata) idata.push_back((int)value);
+    if (map_out) *map_out = map;
+    return kernel_call(
+        matrix->opcode, args, out,
+        (uint8_t)(map.variant | (active ? map.active_variant : 0u)),
+        matrix->activity_mask, std::move(idata), {}, e.name);
+  }
+
   Range kernel_call(uint16_t opcode, const std::vector<Range>& args, Range out,
                     uint8_t variant = 0, uint8_t input_adjoint_mask = 0x3f,
                     std::vector<int> idata = {},
@@ -3427,33 +3459,8 @@ struct ProgramCompiler {
     // operand -- with the kernels' values_only() guard covering
     // values-only executions, exactly as it does for graph ops.
     if (const BuiltinSpec* matrix = shaped_builtin_spec(
-            e.name, e.args.size(), BuiltinShapePolicy::MatrixOp)) {
-      std::vector<Range> args;
-      args.reserve(matrix->arity);
-      for (const mir::Expr& argument : e.args) args.push_back(expr(argument));
-      BuiltinMatrixMap map;
-      try {
-        std::vector<BuiltinArgumentShape> shapes;
-        shapes.reserve(args.size());
-        for (size_t k = 0; k < args.size(); ++k)
-          shapes.push_back(builtin_argument_shape(e.args[k], args[k]));
-        map = builtin_matrix_map(*matrix, shapes);
-      } catch (const std::invalid_argument& error) {
-        bail(e.name + ": " + std::string(error.what()));
-      }
-      bool active = false;
-      for (const mir::Expr& argument : e.args)
-        if (!argument.data_only && !in_write_array) active = true;
-      Range out{0, (int)map.result.storage_size};
-      out = shaped(std::move(out), map.result);
-      std::vector<int> idata;
-      idata.reserve(map.idata.size());
-      for (const int64_t value : map.idata) idata.push_back((int)value);
-      return kernel_call(
-          matrix->opcode, args, out,
-          (uint8_t)(map.variant | (active ? map.active_variant : 0u)),
-          matrix->activity_mask, std::move(idata), {}, e.name);
-    }
+            e.name, e.args.size(), BuiltinShapePolicy::MatrixOp))
+      return matrix_op_call(e, matrix);
 
     // Registered reductions never take the elementwise dispatch below. sum
     // and log_sum_exp keep their native register loops further down; the
@@ -4045,6 +4052,8 @@ struct ProgramCompiler {
     size_t loop_base = 0;
     bool has_result = false;
     Range result;
+    // A function with several results: one range each.
+    std::vector<Range> results;
     std::vector<int> jumps;
   };
   ReturnFrame* return_frame = nullptr;
@@ -4079,22 +4088,38 @@ struct ProgramCompiler {
   }
 
   void emit_function_return(Range value) {
+    emit_function_return(std::vector<Range>{value}, false);
+  }
+
+  // A return reached at run time copies its values into the frame's result
+  // registers and jumps to the function's end.
+  void emit_function_return(const std::vector<Range>& values, bool several) {
     if (!return_frame) bail("runtime return has no function scope");
     auto& frame = *return_frame;
+    std::vector<Range> single;
+    if (!several && frame.has_result) single.push_back(frame.result);
+    std::vector<Range>& slots = several ? frame.results : single;
     if (!frame.has_result) {
-      frame.result = value;
-      frame.result.reg = alloc(value.len);
+      slots = values;
+      for (Range& slot : slots) slot.reg = alloc(slot.len);
       frame.has_result = true;
-    } else if (!same_view(frame.result, value)) {
-      bail("function returns have different logical views");
+    } else if (slots.size() != values.size()) {
+      bail("function returns give different numbers of values");
+    } else {
+      for (size_t k = 0; k < values.size(); ++k)
+        if (!same_view(slots[k], values[k]))
+          bail("function returns have different logical views");
     }
-    for (int k = 0; k < value.len; ++k)
-      emit(Program::MOV, frame.result.reg + k, value.reg + k);
+    for (size_t k = 0; k < values.size(); ++k)
+      for (int i = 0; i < values[k].len; ++i)
+        emit(Program::MOV, slots[k].reg + i, values[k].reg + i);
+    if (!several) frame.result = slots[0];
     frame.jumps.push_back(emit(Program::JMP, 0));
   }
 
   Range function_body(const std::vector<mir::Stmt>& body,
-                      bool void_call = false) {
+                      bool void_call = false,
+                      std::vector<Range>* results = nullptr) {
     ReturnFrame frame;
     frame.body = &body;
     frame.parent = return_frame;
@@ -4106,6 +4131,7 @@ struct ProgramCompiler {
     } scope{return_frame, return_frame};
     return_frame = &frame;
     const Path path = compile_body(body);
+    if (results) *results = frame.results;
     if (path == Path::Returned) return frame.result;
     if (path == Path::Open && !void_call)
       bail("function can finish without returning a value");
@@ -4203,6 +4229,79 @@ struct ProgramCompiler {
     for (const auto& child : body)
       if (const Path path = compile_stmt(child); path != Path::Open)
         return path;
+    return Path::Open;
+  }
+
+  // A MultiAssign result being assigned to its target: the assignment
+  // compile_multi_assign builds for it, and the registers it assigns.
+  const mir::Stmt* given_stmt = nullptr;
+  Range given_value;
+  bool given(const mir::Stmt& s) const { return &s == given_stmt; }
+  Range assignment_value(const mir::Stmt& s) {
+    return given(s) ? given_value : expr(s.rhs);
+  }
+
+  // The statements a call returning several values needs, kept out of
+  // compile_stmt: a register-program refusal unwinds through every
+  // compile_stmt frame, and each statement compiled inline there makes every
+  // such unwind slower.
+  [[gnu::noinline]] Path compile_multi_return(const mir::Stmt& s,
+                                              bool runtime_exit) {
+    std::vector<Range> values;
+    for (const auto& value : s.fn_args) values.push_back(expr(value));
+    if (return_frame && (runtime_exit || return_frame->has_result)) {
+      emit_function_return(values, true);
+      return Path::Ended;
+    }
+    if (!return_frame) bail("return without a function scope");
+    return_frame->results = std::move(values);
+    return Path::Returned;
+  }
+
+  [[gnu::noinline]] Path compile_multi_assign(const mir::Stmt& s) {
+    std::vector<Range> values;
+    if (s.rhs.fn_lib == mir::Expr::Lib::StanLib) {
+      const BuiltinSpec* matrix = shaped_builtin_spec(
+          s.rhs.name, s.rhs.args.size(), BuiltinShapePolicy::MatrixOp);
+      if (matrix == nullptr)
+        bail(s.rhs.name +
+             ", which returns a tuple, is not supported in a "
+             "runtime-control region");
+      BuiltinMatrixMap map;
+      const Range packed = matrix_op_call(s.rhs, matrix, &map);
+      int offset = 0;
+      for (const BuiltinArgumentShape& part : map.parts) {
+        values.push_back(
+            shaped(Range{packed.reg + offset, (int)part.storage_size}, part));
+        offset += (int)part.storage_size;
+      }
+    } else if (s.rhs.fn_lib == mir::Expr::Lib::UserDefined) {
+      auto it = funs.find(mir::function_key(s.rhs));
+      if (it == funs.end()) bail("unknown function " + s.rhs.name);
+      (void)inline_call(*it->second, inline_arguments(s.rhs.args), false,
+                        propto_ctx && mir::inherits_propto(s.rhs), &values);
+    } else {
+      bail(s.rhs.name + ", which returns a tuple, is not supported yet");
+    }
+    if (values.size() != s.fn_args.size())
+      bail(s.rhs.name + " returned the wrong number of values");
+    // Each result is assigned as `target = value`: the assignment path takes
+    // the result's registers in place of evaluating a right side.
+    struct Given {
+      const mir::Stmt*& stmt;
+      ~Given() { stmt = nullptr; }
+    } given_scope{given_stmt};
+    for (size_t k = 0; k < values.size(); ++k) {
+      mir::Stmt assign;
+      assign.kind = mir::Stmt::Assignment;
+      assign.lhs = s.fn_args[k].name;
+      assign.raw = s.raw;
+      given_stmt = &assign;
+      given_value = values[k];
+      const Path path = compile_stmt(assign);
+      given_stmt = nullptr;
+      if (path != Path::Open) bail("a MultiAssign target left the scope");
+    }
     return Path::Open;
   }
 
@@ -4353,7 +4452,7 @@ struct ProgramCompiler {
       }
       case mir::Stmt::Assignment: {
         if (accumulator && s.lhs == accumulator->name) {
-          if (!s.lhs_idx.empty() || s.rhs.name != "Plus__" ||
+          if (given(s) || !s.lhs_idx.empty() || s.rhs.name != "Plus__" ||
               s.rhs.args.size() != 2 || s.rhs.args[0].name != s.lhs)
             bail("accumulator " + s.lhs + " is not only added to");
           const Range v = expr(s.rhs.args[1]);
@@ -4366,7 +4465,7 @@ struct ProgramCompiler {
           if (!s.lhs_idx.empty())
             bail("indexed assignment before unsized shape adoption for " +
                  s.lhs);
-          const Range v = expr(s.rhs);
+          const Range v = assignment_value(s);
           if (!unsized_accepts(deferred->second, v))
             bail("assignment logical view mismatch for " + s.lhs);
           auto binding = reals.find(s.lhs);
@@ -4385,8 +4484,8 @@ struct ProgramCompiler {
 
           if (int_array_names.count(s.lhs)) {
             std::vector<long> values;
-            if (fold_is_certain(s.lhs) && try_cints(s.rhs, &values) &&
-                values.size() == (size_t)v.len) {
+            if (fold_is_certain(s.lhs) && !given(s) &&
+                try_cints(s.rhs, &values) && values.size() == (size_t)v.len) {
               known_int_arrays[s.lhs] = std::move(values);
               known_int_array_dims[s.lhs] = adopted.dims;
             } else {
@@ -4405,7 +4504,8 @@ struct ProgramCompiler {
           // Reify any nonconstant scalar assignment; expr still decides
           // whether its integer operations have a supported implementation.
           const bool certain = fold_is_certain(s.lhs);
-          const bool constant = certain && try_cint(s.rhs, &ignored);
+          const bool constant =
+              certain && !given(s) && try_cint(s.rhs, &ignored);
           if (!certain || !constant) {
             if (certain && !constant && !structured_while_seen &&
                 !in_write_array)
@@ -4446,14 +4546,14 @@ struct ProgramCompiler {
         }
         if (it == reals.end()) bail("assignment to undeclared " + s.lhs);
         const Range dst = it->second;
-        const Range v = expr(s.rhs);
+        const Range v = assignment_value(s);
         // Once written here, the imported value can no longer be answered
         // from the enclosing graph's preparation-time observation.
         extern_bound.erase(s.lhs);
         if (s.lhs_idx.empty()) {
           std::vector<long> folded_ints;
           const bool have_folded_ints = int_array_names.count(s.lhs) &&
-                                        fold_is_certain(s.lhs) &&
+                                        fold_is_certain(s.lhs) && !given(s) &&
                                         try_cints(s.rhs, &folded_ints) &&
                                         folded_ints.size() == (size_t)v.len;
           if (dst.len == 0 && v.len != 0) {
@@ -4512,8 +4612,8 @@ struct ProgramCompiler {
             emit(Program::MOV, dst.reg + k, v.reg + k);
           if (int_array_names.count(s.lhs)) {
             std::vector<long> values;
-            if (fold_is_certain(s.lhs) && try_cints(s.rhs, &values) &&
-                values.size() == (size_t)v.len) {
+            if (fold_is_certain(s.lhs) && !given(s) &&
+                try_cints(s.rhs, &values) && values.size() == (size_t)v.len) {
               known_int_arrays[s.lhs] = std::move(values);
               known_int_array_dims[s.lhs] = dst.dims;
             } else {
@@ -4619,12 +4719,12 @@ struct ProgramCompiler {
             bool folded = false;
             if (offsets.size() == 1) {
               long value = 0;
-              if (try_cint(s.rhs, &value)) {
+              if (!given(s) && try_cint(s.rhs, &value)) {
                 values = {value};
                 folded = true;
               }
             } else {
-              folded = try_cints(s.rhs, &values);
+              folded = !given(s) && try_cints(s.rhs, &values);
             }
             if (fold_is_certain(s.lhs) && folded &&
                 values.size() == offsets.size() &&
@@ -4689,7 +4789,7 @@ struct ProgramCompiler {
         if (int_array_names.count(s.lhs)) {
           long value = 0;
           auto known = known_int_arrays.find(s.lhs);
-          if (fold_is_certain(s.lhs) && try_cint(s.rhs, &value) &&
+          if (fold_is_certain(s.lhs) && !given(s) && try_cint(s.rhs, &value) &&
               known != known_int_arrays.end() && flat >= 0 &&
               (size_t)flat < known->second.size())
             known->second[(size_t)flat] = value;
@@ -4708,6 +4808,7 @@ struct ProgramCompiler {
           for (size_t i = return_frame->loop_base; i < loops.size(); ++i)
             runtime_exit = runtime_exit || !loops[i].breaks.empty() ||
                            !loops[i].continues.empty();
+        if (!s.fn_args.empty()) return compile_multi_return(s, runtime_exit);
         if (return_frame && (runtime_exit || return_frame->has_result)) {
           emit_function_return(s.has_init ? expr(s.rhs) : Range{0, 0});
           return Path::Ended;
@@ -4904,7 +5005,7 @@ struct ProgramCompiler {
           Program::Message message;
           std::vector<MessageShape> shapes;
           message.spec = lower_message_arguments(
-              s.fn_args, [&](const mir::Expr& argument) {
+              s.fn_args, s.print_layout, [&](const mir::Expr& argument) {
                 const Range value = expr(argument);
                 message.value_reg.push_back(value.reg);
                 message.value_len.push_back(value.len);
@@ -4938,6 +5039,8 @@ struct ProgramCompiler {
         }
         bail("statement function " + s.fn_name +
              " requires the MIR interpreter");
+      case mir::Stmt::MultiAssign:
+        return compile_multi_assign(s);
       case mir::Stmt::Skip:
         return Path::Open;
       default:
@@ -4946,8 +5049,11 @@ struct ProgramCompiler {
   }
 
   Range inline_call(const mir::FunDef& f, const std::vector<InlineArg>& args,
-                    bool void_call = false, bool propto = true) {
+                    bool void_call = false, bool propto = true,
+                    std::vector<Range>* results = nullptr) {
     if (args.size() != f.arg_names.size()) bail("function argument mismatch");
+    if ((f.results.size() > 1) != (results != nullptr))
+      bail("a call of " + f.name + " with the wrong number of results");
     if (++inline_depth > 32) {
       --inline_depth;
       bail("function inlining too deep");
@@ -5018,7 +5124,7 @@ struct ProgramCompiler {
     }
     Range out{0, 0};
     try {
-      out = function_body(f.body, void_call);
+      out = function_body(f.body, void_call, results);
     } catch (...) {
       inline_stack.pop_back();
       reals = std::move(saved_reals);

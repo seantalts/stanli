@@ -72,6 +72,10 @@ struct CompiledModel {
     // view is a whole variable.
     std::string variable;
     std::vector<int64_t> index;
+    // The variable holding the values, when it is not `name`: a tuple
+    // parameter's leaf `tp.1` is named `tp:1`.
+    std::string binding;
+    const std::string& key() const { return binding.empty() ? name : binding; }
     // Empty means identity. Nonidentity permutations are prepared once while
     // compiling the concrete model, so serialization performs one indexed
     // copy per value with no per-draw division or allocation.
@@ -148,14 +152,15 @@ struct CompiledModel {
   std::map<std::string, DataMap::Entry> constrained_env(
       const Executor& ex) const {
     std::map<std::string, DataMap::Entry> env;
-    for (const auto& view : views) {
+    for (const ParamLeaf& leaf : param_leaves) {
+      const ParamView& view = leaf_view(leaf);
       DataMap::Entry value;
       value.dims = view.dims;
       value.r.resize((size_t)view.len);
       const double* stored = ex.value_ptr(view.slot);
       for (int64_t i = 0; i < view.len; ++i)
         value.r[(size_t)i] = stored[view.storage_index(i)];
-      env.emplace(view.name, std::move(value));
+      env.emplace(view.key(), std::move(value));
     }
     return env;
   }
@@ -173,8 +178,84 @@ struct CompiledModel {
     // Outer array dimensions are always preserved.
     std::vector<int64_t> dims;
     mir::Transform::Kind transform = mir::Transform::Identity;
+    // A tuple parameter's leaves, depth first; `dims` is then empty. Its
+    // free values are those of each element of the tuple array in turn,
+    // the first index fastest, and within an element each component's,
+    // nested tuple arrays the same way: the order stanc3 reads them.
+    struct Leaf {
+      // Per tuple level: the array dimensions of `dims` before the level,
+      // and the component it selects, from 1.
+      std::vector<std::pair<size_t, int>> path;
+      // The enclosing tuple arrays' dimensions, then one element's free
+      // dimensions, as `dims` above.
+      std::vector<int64_t> dims;
+      int64_t len = 0;
+      mir::Transform::Kind transform = mir::Transform::Identity;
+      // The number of elements of the enclosing tuple arrays.
+      int64_t elements() const {
+        int64_t n = 1;
+        const size_t outer = path.empty() ? 0 : path.back().first;
+        for (size_t d = 0; d < outer && d < dims.size(); ++d) n *= dims[d];
+        return n;
+      }
+    };
+    std::vector<Leaf> leaves;
+
+    // Calls f(leaf, index) for each element of each leaf in the order the
+    // free values hold them; `index` is the element's 0-based index in the
+    // enclosing tuple arrays.
+    template <typename F>
+    void for_each_element(F&& f) const {
+      walk(0, leaves.size(), 0, {}, f);
+    }
+    // The free values' names, as stanc3's unconstrained_param_names.
+    void append_names(std::vector<std::string>& out) const;
+
+   private:
+    template <typename F>
+    void walk(size_t lo, size_t hi, size_t level, std::vector<int64_t> outer,
+              F& f) const {
+      const size_t before = leaves[lo].path[level].first;
+      const size_t from = outer.size();
+      int64_t count = 1;
+      for (size_t d = from; d < before; ++d) count *= leaves[lo].dims[d];
+      outer.resize(before, 0);
+      for (int64_t e = 0; e < count; ++e) {
+        int64_t rest = e;
+        for (size_t d = from; d < before; ++d) {
+          outer[d] = rest % leaves[lo].dims[d];
+          rest /= leaves[lo].dims[d];
+        }
+        for (size_t k = lo; k < hi;) {
+          const int component = leaves[k].path[level].second;
+          size_t end = k + 1;
+          while (end < hi && leaves[end].path[level].second == component) ++end;
+          if (end == k + 1 && leaves[k].path.size() == level + 1)
+            f(k, outer);
+          else
+            walk(k, end, level + 1, outer, f);
+          k = end;
+        }
+      }
+    }
   };
   std::vector<UncParam> unc_params;
+  // Each declared parameter whole, or each leaf of a tuple parameter whole:
+  // the constrained variable the MIR interpreter reads by its view's key, its
+  // free values, and the CmdStan key a starting value is given under. A
+  // plain parameter's view is its entry in `views`, `column`; a tuple leaf,
+  // whose columns `views` gives element by element, owns its view.
+  struct ParamLeaf {
+    int column = -1;
+    ParamView own;
+    int64_t free_len = 0;
+    mir::Transform::Kind transform = mir::Transform::Identity;
+    std::string init_key;
+  };
+  std::vector<ParamLeaf> param_leaves;
+  const ParamView& leaf_view(const ParamLeaf& leaf) const {
+    return leaf.column >= 0 ? views[(size_t)leaf.column] : leaf.own;
+  }
   // Slot fills for data + constants, applied after Executor construction.
   std::vector<std::pair<int, std::vector<double>>> fills;
 

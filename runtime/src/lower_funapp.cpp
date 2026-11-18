@@ -615,10 +615,16 @@ std::vector<mir::Stmt> single_exit_body(const mir::FunDef& f,
 // data-only conditions resolve). Return ends the body with the result.
 Lowering::Val Lowering::lower_call_udf(const mir::Expr& e,
                                        const std::function<void()>& before_body,
-                                       const UdfSpecialization& specialize) {
+                                       const UdfSpecialization& specialize,
+                                       std::vector<Val>* results) {
   auto it = fun_defs.find(mir::function_key(e));
   if (it == fun_defs.end()) fail("unknown function " + e.name, e.raw);
   const mir::FunDef& f = *it->second;
+  if ((f.results.size() > 1) != (results != nullptr))
+    fail(e.name + (results ? " does not return several values"
+                           : " returns several values; only a MultiAssign "
+                             "can call it"),
+         e.raw);
   CallArguments actuals(*this, e);
   actuals.require_arity(f.arg_names.size());
   std::vector<UdfBinding> binds(actuals.size());
@@ -728,6 +734,19 @@ Lowering::Val Lowering::lower_call_udf(const mir::Expr& e,
   const Flow flow = lower_stmts(*body);
   if (flow == Flow::Break || flow == Flow::Continue)
     fail(e.name + ": break or continue outside a loop");
+  if (results) {
+    if (flow != Flow::Return || return_values.size() != f.results.size())
+      fail(e.name + ": no return values on the executed path");
+    for (size_t k = 0; k < return_values.size(); ++k) {
+      Val& value = return_values[k];
+      value.autodiff =
+          f.results[k].leaf != mir::UnsizedLeaf::Int && udf_autodiff_ctx;
+      value.layout = owning_layout(value.si);
+    }
+    *results = std::move(return_values);
+    return_values.clear();
+    return {};
+  }
   if (e.unsized.leaf == mir::UnsizedLeaf::Unknown)
     return {};  // a void function called as a statement
   if (flow != Flow::Return)
@@ -1270,6 +1289,78 @@ Lowering::Val Lowering::lower_funapp(const mir::Expr& e) {
       shaped_builtin_spec(e.name, e.args.size(), BuiltinShapePolicy::Ordering))
     return lower_program_expression(e);
   fail("unsupported function " + e.name);
+}
+Lowering::Val Lowering::lower_matrix_op(const mir::Expr& e,
+                                        CallArguments& actuals,
+                                        const BuiltinSpec& spec,
+                                        BuiltinMatrixMap* map_out) {
+  const BuiltinSpec* matrix = &spec;
+  actuals.require_arity(matrix->arity);
+  Val a = actuals.at(0).value();
+  // A runtime square extent keeps matrix_exp's dynamic kernel: the
+  // resolver reasons over static shapes only.
+  if (matrix->matrix_op == BuiltinMatrixOp::MatrixExp && has_runtime_shape(a)) {
+    if (a.runtime_dims.size() != 2 || a.runtime_dims[0] < 0 ||
+        a.runtime_dims[0] != a.runtime_dims[1])
+      fail("matrix_exp: needs one runtime square extent", e.raw);
+    Val extent{a.runtime_dims[0], false,
+               view_of(mir::UnsizedView{0, mir::UnsizedLeaf::Int}),
+               ExpressionLayout::scalar()};
+    extent.si.param_free = true;
+    Val result = emit_value(OP_MATRIX_EXP_DYNAMIC, {a, extent},
+                            g.slots[a.slot].len, a.si);
+    result.runtime_dims = a.runtime_dims;
+    return with_layout(result, owning_layout(a.si));
+  }
+  std::vector<Val> args{a};
+  for (size_t k = 1; k < matrix->arity; ++k)
+    args.push_back(actuals.at(k).value());
+  BuiltinMatrixMap map;
+  try {
+    std::vector<BuiltinArgumentShape> shapes;
+    shapes.reserve(args.size());
+    for (size_t k = 0; k < args.size(); ++k)
+      shapes.push_back(builtin_argument_shape(e.args[k], args[k]));
+    map = builtin_matrix_map(*matrix, shapes);
+  } catch (const std::invalid_argument& error) {
+    fail(e.name + ": " + error.what(), e.raw);
+  }
+  SlotInfo si;
+  switch (map.result.container) {
+    case FunctionContainerKind::Matrix:
+      si = matrix_view(map.result.dimensions[0], map.result.dimensions[1]);
+      break;
+    case FunctionContainerKind::Vector:
+      si = view_of(mir::UnsizedView{0, mir::UnsizedLeaf::Vector});
+      break;
+    case FunctionContainerKind::Array:
+      si = array_view(map.result.dimensions, ViewKind::Flat, true);
+      break;
+    default:
+      break;
+  }
+  si.param_free = std::all_of(args.begin(), args.end(),
+                              [](const Val& v) { return v.si.param_free; });
+  std::vector<int> idata;
+  idata.reserve(map.idata.size());
+  for (const int64_t value : map.idata)
+    idata.push_back(checked_immediate(value, e.name + " extent"));
+  Val v = matrix->arity == 4
+              ? emit_value(matrix->opcode, {args[0], args[1], args[2], args[3]},
+                           map.result.storage_size, si, idata)
+          : matrix->arity == 3
+              ? emit_value(matrix->opcode, {args[0], args[1], args[2]},
+                           map.result.storage_size, si, idata)
+          : matrix->arity == 2 ? emit_value(matrix->opcode, {args[0], args[1]},
+                                            map.result.storage_size, si, idata)
+                               : emit_value(matrix->opcode, {args[0]},
+                                            map.result.storage_size, si, idata);
+  g.ops.back().variant =
+      (uint8_t)(map.variant | (v.autodiff ? map.active_variant : 0u));
+  if (map_out) *map_out = map;
+  return with_layout(v, map.result.container == FunctionContainerKind::Scalar
+                            ? ExpressionLayout::scalar()
+                            : owning_layout(si));
 }
 // Density calls: the registry-planned kernels.
 std::optional<Lowering::Val> Lowering::lower_density_fn(
@@ -1906,75 +1997,8 @@ std::optional<Lowering::Val> Lowering::lower_eltwise_fn(
   // shape half of the variant; the autodiff half comes from the emitted
   // value, the same bit the named branches always stamped.
   if (const BuiltinSpec* matrix = shaped_builtin_spec(
-          e.name, e.args.size(), BuiltinShapePolicy::MatrixOp)) {
-    actuals.require_arity(matrix->arity);
-    Val a = actuals.at(0).value();
-    // A runtime square extent keeps matrix_exp's dynamic kernel: the
-    // resolver reasons over static shapes only.
-    if (matrix->matrix_op == BuiltinMatrixOp::MatrixExp &&
-        has_runtime_shape(a)) {
-      if (a.runtime_dims.size() != 2 || a.runtime_dims[0] < 0 ||
-          a.runtime_dims[0] != a.runtime_dims[1])
-        fail("matrix_exp: needs one runtime square extent", e.raw);
-      Val extent{a.runtime_dims[0], false,
-                 view_of(mir::UnsizedView{0, mir::UnsizedLeaf::Int}),
-                 ExpressionLayout::scalar()};
-      extent.si.param_free = true;
-      Val result = emit_value(OP_MATRIX_EXP_DYNAMIC, {a, extent},
-                              g.slots[a.slot].len, a.si);
-      result.runtime_dims = a.runtime_dims;
-      return with_layout(result, owning_layout(a.si));
-    }
-    std::vector<Val> args{a};
-    for (size_t k = 1; k < matrix->arity; ++k)
-      args.push_back(actuals.at(k).value());
-    BuiltinMatrixMap map;
-    try {
-      std::vector<BuiltinArgumentShape> shapes;
-      shapes.reserve(args.size());
-      for (size_t k = 0; k < args.size(); ++k)
-        shapes.push_back(builtin_argument_shape(e.args[k], args[k]));
-      map = builtin_matrix_map(*matrix, shapes);
-    } catch (const std::invalid_argument& error) {
-      fail(e.name + ": " + error.what(), e.raw);
-    }
-    SlotInfo si;
-    switch (map.result.container) {
-      case FunctionContainerKind::Matrix:
-        si = matrix_view(map.result.dimensions[0], map.result.dimensions[1]);
-        break;
-      case FunctionContainerKind::Vector:
-        si = view_of(mir::UnsizedView{0, mir::UnsizedLeaf::Vector});
-        break;
-      case FunctionContainerKind::Array:
-        si = array_view(map.result.dimensions, ViewKind::Flat, true);
-        break;
-      default:
-        break;
-    }
-    si.param_free = std::all_of(args.begin(), args.end(),
-                                [](const Val& v) { return v.si.param_free; });
-    std::vector<int> idata;
-    idata.reserve(map.idata.size());
-    for (const int64_t value : map.idata)
-      idata.push_back(checked_immediate(value, e.name + " extent"));
-    Val v =
-        matrix->arity == 4
-            ? emit_value(matrix->opcode, {args[0], args[1], args[2], args[3]},
-                         map.result.storage_size, si, idata)
-        : matrix->arity == 3
-            ? emit_value(matrix->opcode, {args[0], args[1], args[2]},
-                         map.result.storage_size, si, idata)
-        : matrix->arity == 2 ? emit_value(matrix->opcode, {args[0], args[1]},
-                                          map.result.storage_size, si, idata)
-                             : emit_value(matrix->opcode, {args[0]},
-                                          map.result.storage_size, si, idata);
-    g.ops.back().variant =
-        (uint8_t)(map.variant | (v.autodiff ? map.active_variant : 0u));
-    return with_layout(v, map.result.container == FunctionContainerKind::Scalar
-                              ? ExpressionLayout::scalar()
-                              : owning_layout(si));
-  }
+          e.name, e.args.size(), BuiltinShapePolicy::MatrixOp))
+    return lower_matrix_op(e, actuals, *matrix);
 
   // Registered reductions: one container argument, one scalar result,
   // through the registry-declared kernel. Resolution by name and arity

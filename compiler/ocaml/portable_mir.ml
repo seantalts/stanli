@@ -25,15 +25,26 @@ type wire_expr =
 type wire_transform = {t_kind: string; t_args: wire_expr list; t_raw: string}
 
 type wire_sized =
-  {s_base: string; s_dims: wire_expr list; s_elem_base: string; s_raw: string}
+  { s_base: string
+  ; s_dims: wire_expr list
+  ; s_elem_base: string
+  ; s_raw: string
+  ; s_components: wire_sized list }
 
-(* The payload of the two statement internals that carry one: FnCheck's
-   constraint, checked variable name and value, and FnWriteParam's optional
-   transform to invert and the value it writes. *)
+(* How print, reject and fatal_error print their arguments: one argument as
+   itself, or an array of tuples of the given depth whose leaves are the
+   following arguments. *)
+type print_item = Print_arg | Print_tuple of int * print_item list
+
+(* The payload of the statement internals that carry one: FnCheck's
+   constraint, checked variable name and value, FnWriteParam's optional
+   transform to invert and the value it writes, and the print layout of a
+   statement printing an array of tuples. *)
 type wire_payload =
   | No_payload
   | Check_payload of wire_transform * string * wire_expr
   | Write_payload of wire_transform option * wire_expr
+  | Print_payload of print_item list
 
 and wire_stmt =
   { st_kind: string
@@ -48,6 +59,8 @@ and wire_stmt =
   ; st_lhs: string
   ; st_lhs_idx: wire_expr list
   ; st_rhs: wire_expr
+  ; st_values: wire_expr list
+  ; st_targets: string list
   ; st_target: wire_expr
   ; st_fn_lib: string
   ; st_fn_name: string
@@ -66,7 +79,11 @@ type wire_fun =
   ; f_arg_names: string list
   ; f_arg_views: unsized_view list
   ; f_arg_data_only: bool list
+  ; f_results: unsized_view list
   ; f_body: wire_stmt list }
+
+type tuple_leaf =
+  {tl_variable: string; tl_base: string; tl_path: (int * int) list}
 
 let unsupported_view = {depth= 0; leaf= "Unknown"}
 
@@ -86,7 +103,8 @@ let default_expr () =
   ; e_promoted= false
   ; e_raw= "" }
 
-let default_sized () = {s_base= ""; s_dims= []; s_elem_base= ""; s_raw= ""}
+let default_sized () =
+  {s_base= ""; s_dims= []; s_elem_base= ""; s_raw= ""; s_components= []}
 
 let default_stmt () =
   { st_kind= "Unsupported"
@@ -101,6 +119,8 @@ let default_stmt () =
   ; st_lhs= ""
   ; st_lhs_idx= []
   ; st_rhs= default_expr ()
+  ; st_values= []
+  ; st_targets= []
   ; st_target= default_expr ()
   ; st_fn_lib= "StanLib"
   ; st_fn_name= ""
@@ -137,19 +157,30 @@ let raw_expr_pattern pattern =
 let raw_internal internal =
   sexp_string (Internal_fun.sexp_of_t Expr.Typed.sexp_of_t internal)
 
-let raw_transform transform =
-  sexp_string (Transformation.sexp_of_t Expr.Typed.sexp_of_t transform)
-
 let raw_sized sized =
   sexp_string (SizedType.sexp_of_t Expr.Typed.sexp_of_t sized)
 
-let raw_stmt_pattern pattern =
-  sexp_string
-    (Stmt.Pattern.sexp_of_t Expr.Typed.sexp_of_t Stmt.Located.sexp_of_t pattern)
+let raw_stmt stmt = sexp_string (Stmt.Located.sexp_of_t stmt)
+
+let raw_transform transform =
+  sexp_string (Transformation.sexp_of_t Expr.Typed.sexp_of_t transform)
 
 let is_data_only = function UnsizedType.DataOnly -> true | _ -> false
 
-let unsized_view_and_raw typ =
+exception Not_supported of string
+
+let has_tuple = UnsizedType.contains_tuple
+
+(* A tuple leaf's variable: the tuple variable's name followed by each
+   component index from the outermost tuple level, as CmdStan names it:
+   tuple_leaf_name "x" [2; 1] is "x.2.1". *)
+let tuple_leaf_name base components =
+  String.concat ~sep:""
+    (base :: List.map components ~f:(fun c -> "." ^ Int.to_string c))
+
+(* A tuple type is written as Unknown: after the compiler splits tuples, a
+   procedure holds none, and the expression's raw spells the stanc3 type. *)
+let unsized_view typ =
   let rec unwind depth = function
     | UnsizedType.UArray inner ->
         if depth = 255 then
@@ -165,12 +196,22 @@ let unsized_view_and_raw typ =
     | UVector -> "Vector"
     | URowVector -> "RowVector"
     | UMatrix -> "Matrix"
-    | UComplexVector | UComplexRowVector | UComplexMatrix | UTuple _ | UFun _
+    | UTuple _ | UComplexVector | UComplexRowVector | UComplexMatrix | UFun _
      |UMathLibraryFunction ->
         "Unknown"
     | UArray _ -> assert false in
-  let view = {depth; leaf} in
-  if String.equal leaf "Unknown" then (view, raw_unsized typ) else (view, "")
+  {depth; leaf}
+
+let unsized_view_and_raw typ =
+  let view = unsized_view typ in
+  if String.equal view.leaf "Unknown" then (view, raw_unsized typ)
+  else (view, "")
+
+(* The views of a function's results: one per leaf of a tuple, depth first,
+   or the one view of any other type. *)
+let rec result_views = function
+  | UnsizedType.UTuple types -> List.concat_map types ~f:result_views
+  | typ -> [unsized_view typ]
 
 let canonical_int32 spelling =
   try Int32.of_string spelling |> Int32.to_string
@@ -233,10 +274,7 @@ let suffix_tag : Fun_kind.suffix -> int = function
 let function_type_of = function
   | UnsizedType.UFun (args, _, suffix, _) ->
       Some
-        { ft_args=
-            List.map args ~f:(fun (_, typ) ->
-                let view, _ = unsized_view_and_raw typ in
-                view)
+        { ft_args= List.map args ~f:(fun (_, typ) -> unsized_view typ)
         ; ft_suffix= suffix_tag suffix
         ; ft_propto= propto suffix }
   | UInt | UReal | UComplex | UVector | URowVector | UMatrix | UComplexVector
@@ -244,64 +282,89 @@ let function_type_of = function
    |UMathLibraryFunction ->
       None
 
-let rec expr_of_t (expr : Expr.Typed.t) =
-  let open Expr.Pattern in
-  let base =
-    match expr.pattern with
-    | Var name ->
-        (* A density passed as `foo_lupdf` names the definition foo_lpdf and
-           asks for its unnormalized form, as stanc3's C++ generation reads
-           it. *)
-        let fn_type = function_type_of expr.meta.type_ in
-        let unnormalized =
-          Option.value_map fn_type ~default:false ~f:(fun t -> t.ft_propto)
-        in
-        { (default_expr ()) with
-          e_kind= "Var"
-        ; e_name= (if unnormalized then Utils.normalized_name name else name)
-        ; e_fn_type= fn_type }
-    | Lit (Int, spelling) ->
-        let canonical = canonical_int32 spelling in
-        { (default_expr ()) with
-          e_kind= "LitInt"
-        ; e_lit_i= canonical
-        ; e_lit= Int32.to_float (Int32.of_string canonical) }
-    | Lit (Real, spelling) ->
-        { (default_expr ()) with
-          e_kind= "LitReal"
-        ; e_lit= float_of_literal spelling }
-    | Lit ((Imaginary | Str), spelling) ->
-        {(default_expr ()) with e_kind= "LitStr"; e_lit_s= spelling}
-    | FunApp (kind, args) -> fun_app_of_t kind args
-    | Promotion (inner, _, _) -> {(expr_of_t inner) with e_promoted= true}
-    | TernaryIf (cond, if_true, if_false) ->
-        { (default_expr ()) with
-          e_kind= "TernaryIf"
-        ; e_args= List.map ~f:expr_of_t [cond; if_true; if_false] }
-    | EOr (lhs, rhs) ->
-        { (default_expr ()) with
-          e_kind= "EOr"
-        ; e_args= List.map ~f:expr_of_t [lhs; rhs] }
-    | EAnd (lhs, rhs) ->
-        { (default_expr ()) with
-          e_kind= "EAnd"
-        ; e_args= List.map ~f:expr_of_t [lhs; rhs] }
-    | Indexed (base, indices) ->
-        { (default_expr ()) with
-          e_kind= "Indexed"
-        ; e_args= expr_of_t base :: List.map ~f:index_of_t indices }
-    | TupleProjection _ ->
-        { (default_expr ()) with
-          e_kind= "Unsupported"
-        ; e_raw= raw_expr_pattern expr.pattern } in
+(* The leaf variables of each tuple temporary declared so far in scope: a call
+   returning a tuple that the compiler did not inline is assigned to such a
+   temporary and read only through its components. *)
+type env = string list String.Map.t
+
+let with_meta (expr : Expr.Typed.t) base =
   let view, type_raw = unsized_view_and_raw expr.meta.type_ in
   { base with
     e_unsized= view
   ; e_data_only= is_data_only expr.meta.adlevel
   ; e_raw= (if String.is_empty type_raw then base.e_raw else type_raw) }
 
-and fun_app_of_t kind args =
-  let args = List.map ~f:expr_of_t args in
+let unsupported_expr (expr : Expr.Typed.t) =
+  { (default_expr ()) with
+    e_unsized= unsized_view expr.meta.type_
+  ; e_data_only= is_data_only expr.meta.adlevel
+  ; e_raw= raw_expr_pattern expr.pattern }
+
+let rec expr_of_t (env : env) (expr : Expr.Typed.t) =
+  let open Expr.Pattern in
+  match expr.pattern with
+  | TupleProjection ({pattern= Var name; _}, component) -> (
+      match String.Map.find_opt name env with
+      | Some leaves when component >= 1 && component <= List.length leaves ->
+          with_meta expr
+            { (default_expr ()) with
+              e_kind= "Var"
+            ; e_name= List.nth leaves (component - 1) }
+      | _ -> unsupported_expr expr)
+  | TupleProjection _ -> unsupported_expr expr
+  | _ when has_tuple expr.meta.type_ -> unsupported_expr expr
+  | Var name ->
+      (* A density passed as `foo_lupdf` names the definition foo_lpdf and
+         asks for its unnormalized form, as stanc3's C++ generation reads
+         it. *)
+      let fn_type = function_type_of expr.meta.type_ in
+      let unnormalized =
+        Option.value_map fn_type ~default:false ~f:(fun t -> t.ft_propto) in
+      with_meta expr
+        { (default_expr ()) with
+          e_kind= "Var"
+        ; e_name= (if unnormalized then Utils.normalized_name name else name)
+        ; e_fn_type= fn_type }
+  | Lit (Int, spelling) ->
+      let canonical = canonical_int32 spelling in
+      with_meta expr
+        { (default_expr ()) with
+          e_kind= "LitInt"
+        ; e_lit_i= canonical
+        ; e_lit= Int32.to_float (Int32.of_string canonical) }
+  | Lit (Real, spelling) ->
+      with_meta expr
+        { (default_expr ()) with
+          e_kind= "LitReal"
+        ; e_lit= float_of_literal spelling }
+  | Lit ((Imaginary | Str), spelling) ->
+      with_meta expr {(default_expr ()) with e_kind= "LitStr"; e_lit_s= spelling}
+  | FunApp (kind, args) -> with_meta expr (fun_app_of_t env kind args)
+  | Promotion (inner, _, _) ->
+      with_meta expr {(expr_of_t env inner) with e_promoted= true}
+  | TernaryIf (cond, if_true, if_false) ->
+      with_meta expr
+        { (default_expr ()) with
+          e_kind= "TernaryIf"
+        ; e_args= List.map ~f:(expr_of_t env) [cond; if_true; if_false] }
+  | EOr (lhs, rhs) ->
+      with_meta expr
+        { (default_expr ()) with
+          e_kind= "EOr"
+        ; e_args= List.map ~f:(expr_of_t env) [lhs; rhs] }
+  | EAnd (lhs, rhs) ->
+      with_meta expr
+        { (default_expr ()) with
+          e_kind= "EAnd"
+        ; e_args= List.map ~f:(expr_of_t env) [lhs; rhs] }
+  | Indexed (base, indices) ->
+      with_meta expr
+        { (default_expr ()) with
+          e_kind= "Indexed"
+        ; e_args= expr_of_t env base :: List.map ~f:(index_of_t env) indices }
+
+and fun_app_of_t env kind args =
+  let args = List.map ~f:(expr_of_t env) args in
   match kind with
   | Fun_kind.StanLib (name, suffix) ->
       { (default_expr ()) with
@@ -335,21 +398,41 @@ and fun_app_of_t kind args =
       ; e_fn_propto= propto suffix
       ; e_args= args }
 
-and index_of_t = function
+and index_of_t env = function
   | Index.All -> {(default_expr ()) with e_kind= "IndexAll"}
   | Single expr ->
-      {(default_expr ()) with e_kind= "IndexSingle"; e_args= [expr_of_t expr]}
+      { (default_expr ()) with
+        e_kind= "IndexSingle"
+      ; e_args= [expr_of_t env expr] }
   | Between (lower, upper) ->
       { (default_expr ()) with
         e_kind= "IndexBetween"
-      ; e_args= List.map ~f:expr_of_t [lower; upper] }
+      ; e_args= List.map ~f:(expr_of_t env) [lower; upper] }
   | MultiIndex expr ->
-      {(default_expr ()) with e_kind= "IndexMulti"; e_args= [expr_of_t expr]}
+      { (default_expr ()) with
+        e_kind= "IndexMulti"
+      ; e_args= [expr_of_t env expr] }
   | Upfrom expr ->
-      {(default_expr ()) with e_kind= "IndexUpfrom"; e_args= [expr_of_t expr]}
+      { (default_expr ()) with
+        e_kind= "IndexUpfrom"
+      ; e_args= [expr_of_t env expr] }
 
-let rec sized_of_t sized =
+(* A call returning several values, the right side of a MultiAssign. It keeps
+   its tuple type's Unknown view rather than becoming unsupported. *)
+let multi_call_of_t env (expr : Expr.Typed.t) =
+  match expr.pattern with
+  | FunApp (((StanLib _ | UserDefined _) as kind), args)
+    when has_tuple expr.meta.type_ ->
+      Some (with_meta expr (fun_app_of_t env kind args))
+  | _ -> None
+
+let rec sized_of_t env sized =
+  let expr_of_t = expr_of_t env in
   match sized with
+  | SizedType.STuple components ->
+      { (default_sized ()) with
+        s_base= "STuple"
+      ; s_components= List.map ~f:(sized_of_t env) components }
   | SizedType.SInt -> {(default_sized ()) with s_base= "SInt"}
   | SReal -> {(default_sized ()) with s_base= "SReal"}
   | SComplex -> {(default_sized ()) with s_base= "SComplex"}
@@ -362,27 +445,29 @@ let rec sized_of_t sized =
         s_base= "SMatrix"
       ; s_dims= List.map ~f:expr_of_t [rows; cols] }
   | SArray (inner, dim) ->
-      let inner = sized_of_t inner in
+      let inner = sized_of_t env inner in
       { (default_sized ()) with
         s_base= "SArray"
       ; s_dims= expr_of_t dim :: inner.s_dims
       ; s_elem_base=
           (if String.equal inner.s_base "SArray" then inner.s_elem_base
-           else inner.s_base) }
-  | (SComplexVector _ | SComplexRowVector _ | SComplexMatrix _ | STuple _) as
-    unsupported ->
+           else inner.s_base)
+      ; s_components= inner.s_components }
+  | (SComplexVector _ | SComplexRowVector _ | SComplexMatrix _) as unsupported
+    ->
       let sexp = raw_sized unsupported in
       let base =
         match unsupported with
         | SComplexVector _ -> "SComplexVector"
         | SComplexRowVector _ -> "SComplexRowVector"
         | SComplexMatrix _ -> "SComplexMatrix"
-        | STuple _ -> "STuple"
         | _ -> assert false in
       {(default_sized ()) with s_base= base; s_raw= sexp}
 
-let transform_of_t transform =
-  let supported_atom kind = {t_kind= kind; t_args= []; t_raw= kind} in
+let transform_of_t env transform =
+  let expr_of_t = expr_of_t env in
+  let make kind args = {t_kind= kind; t_args= args; t_raw= ""} in
+  let supported_atom kind = {(make kind []) with t_raw= kind} in
   match transform with
   | Transformation.Identity -> supported_atom "Identity"
   | Simplex -> supported_atom "Simplex"
@@ -394,22 +479,18 @@ let transform_of_t transform =
   | Correlation -> supported_atom "Correlation"
   | Covariance -> supported_atom "Covariance"
   | CholeskyCov -> supported_atom "CholeskyCov"
-  | Lower arg -> {t_kind= "Lower"; t_args= [expr_of_t arg]; t_raw= ""}
-  | Upper arg -> {t_kind= "Upper"; t_args= [expr_of_t arg]; t_raw= ""}
+  | Lower arg -> make "Lower" [expr_of_t arg]
+  | Upper arg -> make "Upper" [expr_of_t arg]
   | LowerUpper (lower, upper) ->
-      { t_kind= "LowerUpper"
-      ; t_args= List.map ~f:expr_of_t [lower; upper]
-      ; t_raw= "" }
-  | Offset arg -> {t_kind= "Offset"; t_args= [expr_of_t arg]; t_raw= ""}
-  | Multiplier arg -> {t_kind= "Multiplier"; t_args= [expr_of_t arg]; t_raw= ""}
+      make "LowerUpper" (List.map ~f:expr_of_t [lower; upper])
+  | Offset arg -> make "Offset" [expr_of_t arg]
+  | Multiplier arg -> make "Multiplier" [expr_of_t arg]
   | OffsetMultiplier (offset, multiplier) ->
-      { t_kind= "OffsetMultiplier"
-      ; t_args= List.map ~f:expr_of_t [offset; multiplier]
-      ; t_raw= "" }
+      make "OffsetMultiplier" (List.map ~f:expr_of_t [offset; multiplier])
   | StochasticColumn -> supported_atom "StochasticColumn"
   | StochasticRow -> supported_atom "StochasticRow"
-  | TupleTransformation _ as unsupported ->
-      {t_kind= "Unsupported"; t_args= []; t_raw= raw_transform unsupported}
+  | TupleTransformation _ ->
+      {(make "Unsupported" []) with t_raw= raw_transform transform}
 
 (* stanc3 declares optimizer temporaries, such as an inlined function's result,
    without sizes; the first whole assignment gives them a shape. *)
@@ -419,16 +500,165 @@ let decl_unsized_of_type = function
       let view, raw = unsized_view_and_raw unsized in
       Some (view, raw)
 
-let read_param_fields (expr : Expr.Typed.t) =
+let read_param_fields env (expr : Expr.Typed.t) =
   match expr.pattern with
   | Expr.Pattern.FunApp
       (Fun_kind.CompilerInternal (Internal_fun.FnReadParam fields), _) ->
-      (Some (transform_of_t fields.constrain), List.map ~f:expr_of_t fields.dims)
+      ( Some (transform_of_t env fields.constrain)
+      , List.map ~f:(expr_of_t env) fields.dims )
   | _ -> (None, [])
 
-let rec stmt_of_t (stmt : Stmt.Located.t) =
+let unsupported_stmt stmt = {(default_stmt ()) with st_raw= raw_stmt stmt}
+
+(* The component types of a tuple whose components hold no tuple, the only
+   tuple a temporary for a call's results may have. *)
+let flat_tuple_components = function
+  | Type.Sized (SizedType.STuple components)
+    when not (List.exists components ~f:SizedType.contains_tuple) ->
+      Some (List.map components ~f:(fun c -> Type.Sized c))
+  | Unsized (UnsizedType.UTuple components)
+    when not (List.exists components ~f:has_tuple) ->
+      Some (List.map components ~f:(fun c -> Type.Unsized c))
+  | _ -> None
+
+(* The leaves of a returned tuple value written with tuple syntax, depth first;
+   None when some leaf is still a tuple. *)
+let rec return_leaves (expr : Expr.Typed.t) =
+  match (expr.pattern, expr.meta.type_) with
+  | FunApp (CompilerInternal FnMakeTuple, components), UTuple _ ->
+      Option.map ~f:List.concat
+        (Option.all (List.map components ~f:return_leaves))
+  | _ when has_tuple expr.meta.type_ -> None
+  | _ -> Some [expr]
+
+let string_literal text =
+  { (Expr.Helpers.str text) with
+    meta= {Expr.Typed.Meta.empty with type_= UReal; adlevel= DataOnly} }
+
+let rec strip_arrays depth = function
+  | UnsizedType.UArray inner -> strip_arrays (depth + 1) inner
+  | typ -> (depth, typ)
+
+(* The arguments and layout items for one printed value. A tuple outside any
+   array is spelled with string literals, as stan_print writes it; an array of
+   tuples becomes one tuple item over its leaves. A tuple of another shape is
+   unsupported. *)
+let rec print_value env (expr : Expr.Typed.t) =
+  match (expr.pattern, strip_arrays 0 expr.meta.type_) with
+  | _ when not (has_tuple expr.meta.type_) -> ([expr_of_t env expr], [Print_arg])
+  | FunApp (CompilerInternal FnMakeTuple, components), (0, UTuple types)
+    when List.length components = List.length types ->
+      let literal text =
+        ([expr_of_t env (string_literal text)], [Print_arg]) in
+      let parts =
+        List.concat
+          (List.mapi components ~f:(fun i component ->
+               (if i = 0 then [] else [literal ","])
+               @ [print_value env component])) in
+      let parts = (literal "(" :: parts) @ [literal ")"] in
+      (List.concat_map parts ~f:fst, List.concat_map parts ~f:snd)
+  | _ -> (
+    match tuple_layout env expr.meta.type_ expr with
+    | Some (args, item) -> (args, [item])
+    | None -> ([unsupported_expr expr], [Print_arg]))
+
+(* The layout of an array of tuples of type [typ] whose leaves [expr] lists
+   with tuple syntax, nested tuples nesting. *)
+and tuple_layout env typ (expr : Expr.Typed.t) =
+  match (strip_arrays 0 typ, expr.pattern) with
+  | (depth, UTuple types), FunApp (CompilerInternal FnMakeTuple, components)
+    when List.length components = List.length types ->
+      let parts =
+        List.map2 types components ~f:(fun component_type component ->
+            if has_tuple component_type then
+              tuple_layout env component_type component
+            else Some ([expr_of_t env component], Print_arg)) in
+      Option.map (Option.all parts) ~f:(fun parts ->
+          ( List.concat_map parts ~f:fst
+          , Print_tuple (depth, List.map parts ~f:snd) ))
+  | _ -> None
+
+let is_tuple_item = function
+  | Print_arg -> false
+  | Print_tuple _ -> true
+
+(* Fresh names for the leaves of tuple temporaries, chosen against every
+   identifier of the program so far. The identifiers are collected the first
+   time a tuple temporary needs a name, so a program without one never walks
+   them. *)
+type names = {mutable taken: String.Set.t Lazy.t}
+
+let fresh_name names base component =
+  let first = tuple_leaf_name base [component] in
+  let rec pick n =
+    let candidate =
+      if n = 0 then first else first ^ "_" ^ Int.to_string n in
+    let taken = Lazy.force names.taken in
+    if String.Set.mem candidate taken then pick (n + 1)
+    else (
+      names.taken <- Lazy.from_val (String.Set.add candidate taken);
+      candidate) in
+  pick 0
+
+let rec stmts_of_t names env stmts =
+  let env, rev =
+    List.fold_left stmts ~init:(env, []) ~f:(fun (env, acc) stmt ->
+        let env, wire = stmt_of_t names env stmt in
+        (env, List.rev_append wire acc)) in
+  (env, List.rev rev)
+
+and scoped names env stmts = snd (stmts_of_t names env stmts)
+
+(* A body that takes one statement: a declaration of a tuple temporary becomes
+   several, kept together in an SList. *)
+and single names env stmt =
+  match snd (stmt_of_t names env stmt) with
+  | [one] -> one
+  | many -> {(default_stmt ()) with st_kind= "SList"; st_body= many}
+
+and stmt_of_t names (env : env) (stmt : Stmt.Located.t) : env * wire_stmt list
+    =
   let open Stmt.Pattern in
+  let expr_of_t = expr_of_t env in
+  let one wire = (env, [wire]) in
   match stmt.pattern with
+  | Decl {decl_adtype; decl_id; decl_type; initialize; _}
+    when has_tuple (Type.to_unsized decl_type) -> (
+      let env = String.Map.remove decl_id env in
+      let call =
+        match initialize with
+        | Assign expr -> Option.map (multi_call_of_t env expr) ~f:Option.some
+        | Uninit | Default -> Some None in
+      match (flat_tuple_components decl_type, call) with
+      | Some components, Some call ->
+          let levels =
+            match decl_adtype with
+            | UnsizedType.TupleAD levels
+              when List.length levels = List.length components ->
+                levels
+            | level -> List.map components ~f:(fun _ -> level) in
+          let leaves =
+            List.mapi components ~f:(fun i _ -> fresh_name names decl_id (i + 1))
+          in
+          let decls =
+            List.map3 leaves components levels ~f:(fun leaf component level ->
+                { (default_stmt ()) with
+                  st_kind= "Decl"
+                ; st_decl_id= leaf
+                ; st_decl_type=
+                    (match component with
+                    | Type.Sized sized -> sized_of_t env sized
+                    | Unsized _ -> default_sized ())
+                ; st_decl_unsized= decl_unsized_of_type component
+                ; st_decl_data_only= is_data_only level }) in
+          let assign =
+            Option.value_map call ~default:[] ~f:(fun call ->
+                [ { (default_stmt ()) with
+                    st_kind= "MultiAssign"
+                  ; st_targets= leaves
+                  ; st_rhs= call } ]) in
+          (String.Map.add ~key:decl_id ~data:leaves env, decls @ assign)
+      | _ -> (env, [unsupported_stmt stmt]))
   | Decl {decl_adtype; decl_id; decl_type; initialize; _} ->
       let initialized, init =
         match initialize with
@@ -436,82 +666,115 @@ let rec stmt_of_t (stmt : Stmt.Located.t) =
         | Uninit | Default -> (false, default_expr ()) in
       let read_transform, read_dims =
         match initialize with
-        | Assign expr -> read_param_fields expr
+        | Assign expr -> read_param_fields env expr
         | Uninit | Default -> (None, []) in
-      { (default_stmt ()) with
-        st_kind= "Decl"
-      ; st_decl_id= decl_id
-      ; st_decl_type=
-          (match decl_type with
-          | Type.Sized sized -> sized_of_t sized
-          | Unsized _ -> default_sized ())
-      ; st_decl_unsized= decl_unsized_of_type decl_type
-      ; st_decl_data_only= is_data_only decl_adtype
-      ; st_has_init= initialized
-      ; st_init= init
-      ; st_read_transform= read_transform
-      ; st_read_dims= read_dims }
+      ( String.Map.remove decl_id env
+      , [ { (default_stmt ()) with
+            st_kind= "Decl"
+          ; st_decl_id= decl_id
+          ; st_decl_type=
+              (match decl_type with
+              | Type.Sized sized -> sized_of_t env sized
+              | Unsized _ -> default_sized ())
+          ; st_decl_unsized= decl_unsized_of_type decl_type
+          ; st_decl_data_only= is_data_only decl_adtype
+          ; st_has_init= initialized
+          ; st_init= init
+          ; st_read_transform= read_transform
+          ; st_read_dims= read_dims } ] )
+  | Assignment ((LVariable lhs, []), _, rhs) when String.Map.mem lhs env -> (
+    match multi_call_of_t env rhs with
+    | Some call ->
+        one
+          { (default_stmt ()) with
+            st_kind= "MultiAssign"
+          ; st_targets= String.Map.find lhs env
+          ; st_rhs= call }
+    | None -> one (unsupported_stmt stmt))
+  | Assignment ((LVariable _, _), lhs_type, rhs)
+    when has_tuple lhs_type || has_tuple rhs.meta.type_ ->
+      one (unsupported_stmt stmt)
   | Assignment ((LVariable lhs, indices), _, rhs) ->
-      { (default_stmt ()) with
-        st_kind= "Assignment"
-      ; st_lhs= lhs
-      ; st_lhs_idx= List.map ~f:index_of_t indices
-      ; st_rhs= expr_of_t rhs }
-  | Assignment ((LTupleProjection _, _), _, _) ->
-      { (default_stmt ()) with
-        st_kind= "Unsupported"
-      ; st_raw= raw_stmt_pattern stmt.pattern }
+      one
+        { (default_stmt ()) with
+          st_kind= "Assignment"
+        ; st_lhs= lhs
+        ; st_lhs_idx= List.map ~f:(index_of_t env) indices
+        ; st_rhs= expr_of_t rhs }
+  | Assignment ((LTupleProjection _, _), _, _) -> one (unsupported_stmt stmt)
   | TargetPE expr ->
-      {(default_stmt ()) with st_kind= "TargetPE"; st_target= expr_of_t expr}
+      one {(default_stmt ()) with st_kind= "TargetPE"; st_target= expr_of_t expr}
   | Block body ->
-      { (default_stmt ()) with
-        st_kind= "Block"
-      ; st_body= List.map ~f:stmt_of_t body }
+      one
+        { (default_stmt ()) with
+          st_kind= "Block"
+        ; st_body= scoped names env body }
   | SList body ->
-      { (default_stmt ()) with
-        st_kind= "SList"
-      ; st_body= List.map ~f:stmt_of_t body }
+      (* An SList is not a scope: its declarations stay visible after it. *)
+      let env, body = stmts_of_t names env body in
+      (env, [{(default_stmt ()) with st_kind= "SList"; st_body= body}])
   | For {loopvar; lower; upper; body} ->
-      { (default_stmt ()) with
-        st_kind= "For"
-      ; st_loopvar= loopvar
-      ; st_lower= expr_of_t lower
-      ; st_upper= expr_of_t upper
-      ; st_body= [stmt_of_t body] }
+      one
+        { (default_stmt ()) with
+          st_kind= "For"
+        ; st_loopvar= loopvar
+        ; st_lower= expr_of_t lower
+        ; st_upper= expr_of_t upper
+        ; st_body= [single names (String.Map.remove loopvar env) body] }
   | IfElse (cond, if_true, if_false) ->
-      { (default_stmt ()) with
-        st_kind= "IfElse"
-      ; st_cond= expr_of_t cond
-      ; st_body=
-          stmt_of_t if_true
-          :: Option.value_map if_false ~default:[] ~f:(fun s -> [stmt_of_t s])
-      }
+      one
+        { (default_stmt ()) with
+          st_kind= "IfElse"
+        ; st_cond= expr_of_t cond
+        ; st_body=
+            single names env if_true
+            :: Option.value_map if_false ~default:[] ~f:(fun s ->
+                   [single names env s]) }
   | While (cond, body) ->
-      { (default_stmt ()) with
-        st_kind= "While"
-      ; st_cond= expr_of_t cond
-      ; st_body= [stmt_of_t body] }
-  | Return expr ->
-      { (default_stmt ()) with
-        st_kind= "Return"
-      ; st_has_init= Option.is_some expr
-      ; st_rhs= Option.value_map expr ~default:(default_expr ()) ~f:expr_of_t }
-  | Break -> {(default_stmt ()) with st_kind= "Break"}
-  | Continue -> {(default_stmt ()) with st_kind= "Continue"}
-  | Skip -> {(default_stmt ()) with st_kind= "Skip"}
-  | NRFunApp (kind, args) -> nr_fun_app_of_t kind args
+      one
+        { (default_stmt ()) with
+          st_kind= "While"
+        ; st_cond= expr_of_t cond
+        ; st_body= [single names env body] }
+  | Return None -> one {(default_stmt ()) with st_kind= "Return"}
+  | Return (Some expr) -> (
+    match return_leaves expr with
+    | Some values ->
+        one
+          { (default_stmt ()) with
+            st_kind= "Return"
+          ; st_values= List.map ~f:expr_of_t values }
+    | None -> one (unsupported_stmt stmt))
+  | Break -> one {(default_stmt ()) with st_kind= "Break"}
+  | Continue -> one {(default_stmt ()) with st_kind= "Continue"}
+  | Skip -> one {(default_stmt ()) with st_kind= "Skip"}
+  | NRFunApp (kind, args) -> one (nr_fun_app_of_t env kind args)
   | Profile (_, body) ->
       (* The profile name is only for stanc's own timing output, which stanli
          does not produce; unwrap to the plain block it wraps. *)
-      { (default_stmt ()) with
-        st_kind= "Block"
-      ; st_body= List.map ~f:stmt_of_t body }
+      one
+        { (default_stmt ()) with
+          st_kind= "Block"
+        ; st_body= scoped names env body }
   | JacobianPE expr ->
-      {(default_stmt ()) with st_kind= "JacobianPE"; st_target= expr_of_t expr}
+      one
+        {(default_stmt ()) with st_kind= "JacobianPE"; st_target= expr_of_t expr}
 
-and nr_fun_app_of_t kind args =
-  let ordinary_args = List.map ~f:expr_of_t args in
+and nr_fun_app_of_t env kind args =
+  let ordinary_args () = List.map ~f:(expr_of_t env) args in
   match kind with
+  | Fun_kind.CompilerInternal ((FnPrint | FnReject | FnFatalError) as internal)
+    ->
+      let parts = List.map args ~f:(print_value env) in
+      let layout = List.concat_map parts ~f:snd in
+      { (default_stmt ()) with
+        st_kind= "NRFunApp"
+      ; st_fn_lib= "Internal"
+      ; st_fn_name= internal_name internal
+      ; st_fn_args= List.concat_map parts ~f:fst
+      ; st_payload=
+          (if List.exists layout ~f:is_tuple_item then Print_payload layout
+           else No_payload) }
   | Fun_kind.CompilerInternal internal ->
       let name = internal_name internal in
       (* transform_inits' FnWriteParam names the transform to INVERT, turning an
@@ -520,10 +783,11 @@ and nr_fun_app_of_t kind args =
       let payload =
         match internal with
         | Internal_fun.FnCheck {trans; var_name; var} ->
-            Check_payload (transform_of_t trans, var_name, expr_of_t var)
+            Check_payload (transform_of_t env trans, var_name, expr_of_t env var)
         | FnWriteParam {var; unconstrain_opt} ->
             Write_payload
-              (Option.map ~f:transform_of_t unconstrain_opt, expr_of_t var)
+              ( Option.map ~f:(transform_of_t env) unconstrain_opt
+              , expr_of_t env var )
         | FnLength | FnMakeArray | FnMakeTuple | FnMakeRowVec | FnNegInf
          |FnReadData | FnReadDeserializer | FnReadParam _ | FnValidateSize
          |FnValidateSizePositive | FnValidateSizeUnitVector | FnPrint
@@ -534,42 +798,129 @@ and nr_fun_app_of_t kind args =
         st_kind= "NRFunApp"
       ; st_fn_lib= "Internal"
       ; st_fn_name= name
-      ; st_fn_args= ordinary_args
+      ; st_fn_args= ordinary_args ()
       ; st_payload= payload }
   | StanLib (name, suffix) ->
       { (default_stmt ()) with
         st_kind= "NRFunApp"
       ; st_fn_name= name
       ; st_fn_suffix= suffix_tag suffix
-      ; st_fn_args= ordinary_args }
+      ; st_fn_args= ordinary_args () }
   | Operator op ->
       { (default_stmt ()) with
         st_kind= "NRFunApp"
       ; st_fn_name= operator_name op
-      ; st_fn_args= ordinary_args }
+      ; st_fn_args= ordinary_args () }
   | UserDefined (name, suffix) ->
       { (default_stmt ()) with
         st_kind= "NRFunApp"
       ; st_fn_lib= "UserDefined"
       ; st_fn_name= name
       ; st_fn_suffix= suffix_tag suffix
-      ; st_fn_args= ordinary_args }
+      ; st_fn_args= ordinary_args () }
 
-let fun_of_t (definition : Stmt.Located.t Program.fun_def) =
-  let arg_names, arg_views, arg_data_only =
-    List.fold_right definition.fdargs ~init:([], [], [])
-      ~f:(fun (adlevel, name, typ) (names, views, levels) ->
-        let view, _ = unsized_view_and_raw typ in
-        (name :: names, view :: views, is_data_only adlevel :: levels)) in
+let fun_of_t names (definition : Stmt.Located.t Program.fun_def) =
   { f_name= definition.fdname
-  ; f_arg_names= arg_names
-  ; f_arg_views= arg_views
-  ; f_arg_data_only= arg_data_only
+  ; f_arg_names= List.map definition.fdargs ~f:(fun (_, name, _) -> name)
+  ; f_arg_views= List.map definition.fdargs ~f:(fun (_, _, typ) -> unsized_view typ)
+  ; f_arg_data_only=
+      List.map definition.fdargs ~f:(fun (adlevel, _, _) -> is_data_only adlevel)
+  ; f_results=
+      (match definition.fdrt with
+      | Void -> []
+      | ReturnType typ -> result_views typ)
   ; f_body=
-      Option.value_map definition.fdbody ~default:[] ~f:(fun s -> [stmt_of_t s])
-  }
+      Option.value_map definition.fdbody ~default:[] ~f:(fun s ->
+          [single names String.Map.empty s]) }
 
-(* Portable MIR v2 is a canonical ASCII envelope around a small fixed-layout
+(* Once the compiler passes a tuple argument as one argument per leaf, two
+   definitions stanc3 told apart, f(tuple(real, real)) and f(real, real), can
+   take the same arguments. Distinct stanc3 signatures otherwise stay
+   distinct, so equal argument types among definitions with bodies can only
+   come from that split. *)
+let check_split_overloads (functions : Stmt.Located.t Program.fun_def list) =
+  let defined =
+    List.filter_map functions ~f:(fun (fn : Stmt.Located.t Program.fun_def) ->
+        Option.map fn.fdbody ~f:(fun _ ->
+            (fn.fdname, List.map fn.fdargs ~f:(fun (_, _, typ) -> typ)))) in
+  let rec scan = function
+    | [] -> ()
+    | (name, types) :: rest ->
+        if
+          List.exists rest ~f:(fun (other, other_types) ->
+              String.equal name other
+              && List.equal ~eq:UnsizedType.equal types other_types)
+        then
+          raise
+            (Not_supported
+               ("user function " ^ name
+           ^ " has overloads that are the same once their tuple arguments \
+              are split into components; rename one of them"))
+        else scan rest in
+  scan defined
+
+(* The leaves of each tuple input and output variable, depth first. Each slot
+   records the array dimensions of the tuple variable before it and the
+   component it selects. *)
+let tuple_leaves_of (name, sized) =
+  let rec leaves before path sized =
+    let rec unwind depth = function
+      | SizedType.SArray (inner, _) -> unwind (depth + 1) inner
+      | elem -> (depth, elem) in
+    match unwind 0 sized with
+    | depth, SizedType.STuple components ->
+        let before = before + depth in
+        List.concat
+          (List.mapi components ~f:(fun i component ->
+               leaves before ((before, i + 1) :: path) component))
+    | _ -> [List.rev path] in
+  if SizedType.contains_tuple sized then
+    List.map (leaves 0 [] sized) ~f:(fun path ->
+        { tl_variable= tuple_leaf_name name (List.map path ~f:snd)
+        ; tl_base= name
+        ; tl_path= path })
+  else []
+
+(* Every identifier the program names, so a fresh leaf name avoids them. *)
+let program_identifiers (program : Program.Typed.t) =
+  let rec expr set (e : Expr.Typed.t) =
+    let set =
+      match e.pattern with Var name -> String.Set.add name set | _ -> set in
+    Expr.Pattern.fold expr set e.pattern in
+  let rec lvalue set (base, _) =
+    match base with
+    | Stmt.Pattern.LVariable name -> String.Set.add name set
+    | LTupleProjection (inner, _) -> lvalue set inner in
+  let rec stmt set (s : Stmt.Located.t) =
+    let set =
+      match s.pattern with
+      | Decl {decl_id; _} -> String.Set.add decl_id set
+      | For {loopvar; _} -> String.Set.add loopvar set
+      | Assignment (lhs, _, _) -> lvalue set lhs
+      | _ -> set in
+    Stmt.Pattern.fold expr stmt set s.pattern in
+  let stmts set = List.fold_left ~init:set ~f:stmt in
+  let set = String.Set.empty in
+  let set =
+    List.fold_left program.input_vars ~init:set ~f:(fun set (name, _, _) ->
+        String.Set.add name set) in
+  let set =
+    List.fold_left program.output_vars ~init:set ~f:(fun set (name, _, _) ->
+        String.Set.add name set) in
+  let set =
+    List.fold_left program.functions_block ~init:set
+      ~f:(fun set (fn : Stmt.Located.t Program.fun_def) ->
+        let set = String.Set.add fn.fdname set in
+        let set =
+          List.fold_left fn.fdargs ~init:set ~f:(fun set (_, name, _) ->
+              String.Set.add name set) in
+        Option.value_map fn.fdbody ~default:set ~f:(stmt set)) in
+  List.fold_left ~init:set ~f:stmts
+    [ program.prepare_data; program.log_prob; program.reverse_mode_log_prob
+    ; program.generate_quantities; program.transform_inits
+    ; program.unconstrain_array ]
+
+(* Portable MIR is a canonical ASCII envelope around a small fixed-layout
    binary payload. The envelope keeps the existing native, subprocess, V8,
    worker, and C-string transports byte-safe; the payload keeps decoding
    allocation-light. Multibyte scalars are little-endian, strings and lists
@@ -768,11 +1119,25 @@ let add_v2_transform buffer transform =
   add_v2_list add_v2_expr buffer transform.t_args;
   add_v2_string buffer transform.t_raw
 
-let add_v2_sized buffer sized =
+let is_tuple_sized sized =
+  String.equal sized.s_base "STuple"
+  || String.equal sized.s_base "SArray"
+     && String.equal sized.s_elem_base "STuple"
+
+let rec add_v2_sized buffer sized =
   add_v2_string buffer sized.s_base;
   add_v2_list add_v2_expr buffer sized.s_dims;
   add_v2_string buffer sized.s_elem_base;
-  add_v2_string buffer sized.s_raw
+  add_v2_string buffer sized.s_raw;
+  if is_tuple_sized sized then
+    add_v2_list add_v2_sized buffer sized.s_components
+
+let rec add_print_item buffer = function
+  | Print_arg -> add_u8 buffer 0
+  | Print_tuple (depth, components) ->
+      add_u8 buffer 1;
+      add_u8 buffer depth;
+      add_v2_list add_print_item buffer components
 
 let rec add_v2_stmt buffer stmt =
   match stmt.st_kind with
@@ -844,12 +1209,14 @@ let rec add_v2_stmt buffer stmt =
       | Write_payload (transform, var) ->
           add_u8 buffer 2;
           add_v2_optional add_v2_transform buffer transform;
-          add_v2_expr buffer var);
+          add_v2_expr buffer var
+      | Print_payload layout ->
+          add_u8 buffer 3;
+          add_v2_list add_print_item buffer layout);
       add_v2_string buffer stmt.st_raw
   | "Return" ->
       add_u8 buffer 9;
-      add_v2_bool buffer stmt.st_has_init;
-      if stmt.st_has_init then add_v2_expr buffer stmt.st_rhs;
+      add_v2_list add_v2_expr buffer stmt.st_values;
       add_v2_string buffer stmt.st_raw
   | "Break" -> add_u8 buffer 10
   | "Continue" -> add_u8 buffer 11
@@ -863,6 +1230,11 @@ let rec add_v2_stmt buffer stmt =
       add_u8 buffer 14;
       add_v2_expr buffer stmt.st_target;
       add_v2_string buffer stmt.st_raw
+  | "MultiAssign" ->
+      add_u8 buffer 15;
+      add_v2_list add_v2_string buffer stmt.st_targets;
+      add_v2_expr buffer stmt.st_rhs;
+      add_v2_string buffer stmt.st_raw
   | kind -> invalid_arg ("portable MIR: unknown statement kind " ^ kind)
 
 let add_v2_fun buffer fn =
@@ -870,6 +1242,7 @@ let add_v2_fun buffer fn =
   add_v2_list add_v2_string buffer fn.f_arg_names;
   add_v2_list add_v2_view buffer fn.f_arg_views;
   add_v2_list add_v2_bool buffer fn.f_arg_data_only;
+  add_v2_list add_v2_view buffer fn.f_results;
   add_v2_list add_v2_stmt buffer fn.f_body
 
 let add_v2_input buffer (name, sized) =
@@ -886,6 +1259,15 @@ let add_v2_output buffer (name, block, sized, annotations) =
   add_u8 buffer (block_tag block);
   add_v2_sized buffer sized;
   add_v2_list add_v2_string buffer annotations
+
+let add_tuple_leaf buffer {tl_variable; tl_base; tl_path} =
+  add_v2_string buffer tl_variable;
+  add_v2_string buffer tl_base;
+  add_v2_list
+    (fun buffer (before, component) ->
+      add_u32 buffer before;
+      add_u32 buffer component)
+    buffer tl_path
 
 let base64_alphabet =
   "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
@@ -958,27 +1340,44 @@ let write_array_sections stmts =
   (List.rev kept, Option.value tp_begin ~default:gq_begin, gq_begin)
 
 let encode (program : Program.Typed.t) =
+  check_split_overloads program.functions_block;
+  let names = {taken= lazy (program_identifiers program)} in
+  let procedure stmts = scoped names String.Map.empty stmts in
   let inputs =
-    List.map program.input_vars ~f:(fun (name, _, sized) ->
-        (name, sized_of_t sized)) in
+    List.map program.input_vars ~f:(fun (name, _, sized) -> (name, sized)) in
+  let outputs =
+    List.map program.output_vars
+      ~f:(fun (name, _, Program.{out_block; out_constrained_st; out_annotations; _})
+         ->
+        ( name
+        , out_block
+        , out_constrained_st
+        , List.map out_annotations ~f:(fun (a : Annotation.t) -> a.name) )) in
   let buffer = Buffer.create 32768 in
-  add_v2_list add_v2_input buffer inputs;
-  add_v2_list add_v2_stmt buffer (List.map ~f:stmt_of_t program.prepare_data);
-  add_v2_list add_v2_stmt buffer (List.map ~f:stmt_of_t program.log_prob);
+  add_v2_list add_v2_input buffer
+    (List.map inputs ~f:(fun (name, sized) -> (name, sized_of_t String.Map.empty sized)));
+  add_v2_list add_v2_stmt buffer (procedure program.prepare_data);
+  add_v2_list add_v2_stmt buffer (procedure program.log_prob);
   let write_array, tp_begin, gq_begin =
     write_array_sections program.generate_quantities in
-  add_v2_list add_v2_stmt buffer (List.map ~f:stmt_of_t write_array);
-  add_u32 buffer tp_begin;
-  add_u32 buffer gq_begin;
-  add_v2_list add_v2_fun buffer (List.map ~f:fun_of_t program.functions_block);
+  (* A declaration can become several statements, so each section is encoded
+     on its own, the declarations of one staying visible in the next. *)
+  let before_tp, rest = List.split_n write_array tp_begin in
+  let tp, gq = List.split_n rest (gq_begin - tp_begin) in
+  let env, before_tp = stmts_of_t names String.Map.empty before_tp in
+  let env, tp = stmts_of_t names env tp in
+  let _, gq = stmts_of_t names env gq in
+  add_v2_list add_v2_stmt buffer (before_tp @ tp @ gq);
+  add_u32 buffer (List.length before_tp);
+  add_u32 buffer (List.length before_tp + List.length tp);
+  add_v2_list add_v2_fun buffer
+    (List.map ~f:(fun_of_t names) program.functions_block);
   add_v2_list add_v2_output buffer
-    (List.map program.output_vars
-       ~f:(fun
-           (name, _, Program.{out_block; out_constrained_st; out_annotations; _})
-         ->
-         ( name,
-           out_block,
-           sized_of_t out_constrained_st,
-           List.map out_annotations ~f:(fun (a : Annotation.t) -> a.name) )));
-  add_v2_list add_v2_stmt buffer (List.map ~f:stmt_of_t program.transform_inits);
-  "STANLI4:" ^ encode_base64 (Buffer.contents buffer)
+    (List.map outputs ~f:(fun (name, block, sized, annotations) ->
+         (name, block, sized_of_t String.Map.empty sized, annotations)));
+  add_v2_list add_v2_stmt buffer (procedure program.transform_inits);
+  add_v2_list add_tuple_leaf buffer
+    (List.concat_map ~f:tuple_leaves_of
+       (inputs
+       @ List.map outputs ~f:(fun (name, _, sized, _) -> (name, sized))));
+  "STANLI5:" ^ encode_base64 (Buffer.contents buffer)

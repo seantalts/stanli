@@ -75,7 +75,7 @@ rfit_array <- function(object, inc_warmup = FALSE) {
 }
 
 rfit_variables <- function(variables, columns, pars, include = TRUE) {
-  of <- column_variables(variables)[match(columns, variable_columns(variables))]
+  of <- variable_base(column_variables(variables)[match(columns, variable_columns(variables))])
   if (is.null(pars)) return(unique(of))
   if (!is.character(pars) || anyNA(pars) || anyDuplicated(pars))
     stop("pars must contain unique parameter names", call. = FALSE)
@@ -109,7 +109,15 @@ extract <- function(object, pars = NULL, permuted = TRUE, inc_warmup = FALSE,
   chain_rows <- unlist(lapply(seq_len(dim(arr)[2L]), function(chain)
     object$rfit_permutation[[chain]] + (chain - 1L) * n), use.names = FALSE)
   flat <- matrix(arr, nrow = n * dim(arr)[2L])
+  bases <- variable_base(names(variables))
   out <- lapply(pars, function(par) {
+    if (!par %in% names(variables) && par %in% bases) {
+      slots <- names(variables)[bases == par]
+      return(nest_tuple_slots(lapply(stats::setNames(nm = slots), function(slot) {
+        index <- match(variable_columns(variables[slot]), columns)
+        array(flat[chain_rows, index], dim = c(length(chain_rows), variables[[slot]]))
+      })))
+    }
     index <- select_draw_variables(columns, par)
     shape <- if (par %in% names(layout$dimensions)) layout$dimensions[[par]] else integer(0)
     value <- array(flat[chain_rows, index, drop = FALSE], dim = c(length(chain_rows), shape))

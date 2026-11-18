@@ -65,7 +65,8 @@ let () =
     !messages_json;
   match compilation.result with
   | Ok encoded -> print_string encoded
-  | Error (Stanli_pipeline.Internal_error message) ->
+  | Error (Stanli_pipeline.Internal_error message)
+   |Error (Stanli_pipeline.Unsupported message) ->
       prerr_endline message;
       exit 1
   | Error (Stanli_pipeline.Frontend_error error) ->

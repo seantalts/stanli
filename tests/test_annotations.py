@@ -105,7 +105,7 @@ def test_sexp_and_portable_paths_agree():
         print("  no stanc binary under deps/stanc3; sexp path skipped")
         return
     portable = quiet(stanli.stan_to_mir, TWO_LATENT)
-    assert portable.startswith("STANLI4:")
+    assert portable.startswith("STANLI5:")
     from_sexp = quiet(stanli.Model, mir=sexp, data=SMALL)
     from_portable = quiet(stanli.Model, mir=portable, data=SMALL)
     assert (from_sexp.parameter_annotations()

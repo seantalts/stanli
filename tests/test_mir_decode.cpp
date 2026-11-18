@@ -2,12 +2,16 @@
 // objects in this file are test-only deep-comparison values; the wire encoder
 // below mirrors the production OCaml layout for malformed-input coverage.
 #include <stanli/compile.hpp>
+#include <stanli/mir_interp.hpp>
+#include <stanli/graph.hpp>
 #include <stanli/mir_decode.hpp>
 #include <stanli/wa_interp.hpp>
 
+#include "../runtime/src/mir_tuples.hpp"
 #include "../runtime/third_party/nlohmann_json.hpp"
 
 #include <algorithm>
+#include <cmath>
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
@@ -15,6 +19,7 @@
 #include <functional>
 #include <initializer_list>
 #include <limits>
+#include <map>
 #include <optional>
 #include <sstream>
 #include <string>
@@ -84,7 +89,7 @@ std::string encode_base64(std::string_view bytes) {
 }
 
 std::string v2_wire(std::string_view payload) {
-  return "STANLI4:" + encode_base64(payload);
+  return "STANLI5:" + encode_base64(payload);
 }
 
 void append_bool(std::string& bytes, bool value) {
@@ -101,6 +106,11 @@ void append_list(std::string& bytes, const std::vector<T>& values,
 void append_view(std::string& bytes, const mir::UnsizedView& value) {
   append_u8(bytes, value.depth);
   append_u8(bytes, static_cast<uint8_t>(value.leaf));
+}
+
+void append_bools(std::string& bytes, const std::vector<bool>& values) {
+  append_u32(bytes, static_cast<uint32_t>(values.size()));
+  for (bool value : values) append_bool(bytes, value);
 }
 
 void append_expr(std::string& bytes, const mir::Expr& value);
@@ -188,6 +198,22 @@ void append_sized(std::string& bytes, const mir::SizedType& value) {
   append_string(bytes, value.raw);
 }
 
+// The type of an input or output variable, with a tuple's components.
+void append_interface_type(std::string& bytes,
+                           const mir::detail::TupleType& value) {
+  append_sized(bytes, value.type);
+  if (mir::detail::is_tuple(value.type))
+    append_list(bytes, value.components, append_interface_type);
+}
+
+void append_print_item(std::string& bytes, const mir::PrintItem& item) {
+  append_u8(bytes, item.kind == mir::PrintItem::Kind::Tuple ? 1 : 0);
+  if (item.kind == mir::PrintItem::Kind::Tuple) {
+    append_u8(bytes, item.depth);
+    append_list(bytes, item.components, append_print_item);
+  }
+}
+
 void append_stmt_list(std::string& bytes,
                       const std::vector<mir::Stmt>& values) {
   append_list(bytes, values, [](std::string& out, const mir::Stmt& statement) {
@@ -196,7 +222,9 @@ void append_stmt_list(std::string& bytes,
 }
 
 void append_stmt(std::string& bytes, const mir::Stmt& value) {
-  append_u8(bytes, value.jacobian ? 14 : static_cast<uint8_t>(value.kind));
+  append_u8(bytes, value.kind == mir::Stmt::MultiAssign ? 15
+                   : value.jacobian ? 14
+                                    : static_cast<uint8_t>(value.kind));
   switch (value.kind) {
     case mir::Stmt::Decl:
       append_string(bytes, value.decl_id);
@@ -269,13 +297,23 @@ void append_stmt(std::string& bytes, const mir::Stmt& value) {
             bytes, value.fn_args.empty() ? mir::Expr{} : value.fn_args.front());
       } else {
         append_expr_list(bytes, value.fn_args);
-        append_u8(bytes, 0);
+        append_u8(bytes, value.print_layout.empty() ? 0 : 3);
+        if (!value.print_layout.empty())
+          append_list(bytes, value.print_layout, append_print_item);
       }
       append_string(bytes, value.raw);
       break;
     case mir::Stmt::Return:
-      append_bool(bytes, value.has_init);
-      if (value.has_init) append_expr(bytes, value.rhs);
+      append_expr_list(bytes, value.has_init ? std::vector<mir::Expr>{value.rhs}
+                                             : value.fn_args);
+      append_string(bytes, value.raw);
+      break;
+    case mir::Stmt::MultiAssign:
+      append_list(bytes, value.fn_args,
+                  [](std::string& out, const mir::Expr& target) {
+                    append_string(out, target.name);
+                  });
+      append_expr(bytes, value.rhs);
       append_string(bytes, value.raw);
       break;
     case mir::Stmt::Break:
@@ -298,21 +336,33 @@ void append_strings(std::string& bytes,
 void append_fun(std::string& bytes, const mir::FunDef& value) {
   append_string(bytes, value.name);
   append_strings(bytes, value.arg_names);
-  append_list(bytes, value.arg_views,
-              [](std::string& out, const mir::UnsizedView& view) {
-                append_view(out, view);
-              });
-  append_u32(bytes, static_cast<uint32_t>(value.arg_data_only.size()));
-  for (bool data_only : value.arg_data_only) append_bool(bytes, data_only);
+  append_list(bytes, value.arg_views, append_view);
+  append_bools(bytes, value.arg_data_only);
+  append_list(bytes, value.results, append_view);
   append_stmt_list(bytes, value.body);
 }
 
-std::string write_v2(const mir::Program& value) {
+// What a program's tuple input and output variables add on the wire: their
+// full types, by name, and the leaf variables the compiler made for them.
+struct WireTuples {
+  std::map<std::string, mir::detail::TupleType> types;
+  std::vector<mir::detail::WireTupleLeaf> leaves;
+};
+
+std::string write_v2(const mir::Program& value, const WireTuples& tuples = {}) {
+  const auto append_type = [&](std::string& out, const std::string& name,
+                               const mir::SizedType& type) {
+    const auto found = tuples.types.find(name);
+    if (found != tuples.types.end())
+      append_interface_type(out, found->second);
+    else
+      append_sized(out, type);
+  };
   std::string payload;
   append_u32(payload, static_cast<uint32_t>(value.input_vars.size()));
   for (const auto& input : value.input_vars) {
     append_string(payload, input.first);
-    append_sized(payload, input.second);
+    append_type(payload, input.first, input.second);
   }
   append_stmt_list(payload, value.prepare_data);
   append_stmt_list(payload, value.log_prob);
@@ -325,22 +375,33 @@ std::string write_v2(const mir::Program& value) {
                 append_fun(out, definition);
               });
   append_list(payload, value.output_vars,
-              [](std::string& out, const mir::OutputVar& var) {
+              [&](std::string& out, const mir::OutputVar& var) {
                 append_string(out, var.name);
                 append_u8(out, static_cast<uint8_t>(var.block));
-                append_sized(out, var.type);
+                append_type(out, var.name, var.type);
                 append_list(out, var.annotations,
                             [](std::string& list, const std::string& name) {
                               append_string(list, name);
                             });
               });
   append_stmt_list(payload, value.transform_inits);
+  append_list(payload, tuples.leaves,
+              [](std::string& out, const mir::detail::WireTupleLeaf& leaf) {
+                append_string(out, leaf.variable);
+                append_string(out, leaf.base);
+                append_list(
+                    out, leaf.path,
+                    [](std::string& slots, const mir::detail::TupleSlot& slot) {
+                      append_u32(slots, static_cast<uint32_t>(slot.before));
+                      append_u32(slots, static_cast<uint32_t>(slot.component));
+                    });
+              });
   return v2_wire(payload);
 }
 
 std::string empty_v2_payload() {
   std::string payload;
-  for (int i = 0; i < 9; ++i) append_u32(payload, 0);
+  for (int i = 0; i < 10; ++i) append_u32(payload, 0);
   return payload;
 }
 
@@ -365,6 +426,7 @@ std::string real_target_v2_payload(uint64_t bits, uint8_t data_only = 1,
   append_u32(payload, 0);      // fun_defs
   append_u32(payload, 0);      // output_vars
   append_u32(payload, 0);      // transform_inits
+  append_u32(payload, 0);      // tuple_leaves
   return payload;
 }
 
@@ -612,6 +674,8 @@ const char* write_stmt_kind(mir::Stmt::Kind value) {
       return "Skip";
     case mir::Stmt::Unsupported:
       return "Unsupported";
+    case mir::Stmt::MultiAssign:
+      return "MultiAssign";
   }
   return "Unsupported";
 }
@@ -658,6 +722,7 @@ json write_fun_def(const mir::FunDef& value) {
           {"arg_names", write_strings(value.arg_names)},
           {"arg_views", write_array(value.arg_views, write_unsized)},
           {"arg_data_only", write_bools(value.arg_data_only)},
+          {"results", write_array(value.results, write_unsized)},
           {"body", write_array(value.body, write_stmt)}};
 }
 
@@ -1239,6 +1304,598 @@ void check_overload_finalization() {
         "portable decoder applies legacy overload finalization once");
 }
 
+namespace build {
+
+const mir::UnsizedView kInt{0, mir::UnsizedLeaf::Int};
+const mir::UnsizedView kReal{0, mir::UnsizedLeaf::Real};
+const mir::UnsizedView kVector{0, mir::UnsizedLeaf::Vector};
+const mir::UnsizedView kMatrix{0, mir::UnsizedLeaf::Matrix};
+
+mir::Expr integer(long value) {
+  mir::Expr e;
+  e.kind = mir::Expr::LitInt;
+  e.lit_i = value;
+  e.lit = static_cast<double>(value);
+  e.unsized = kInt;
+  e.data_only = true;
+  return e;
+}
+
+mir::Expr real(double value) { return literal(value); }
+
+mir::Expr var(const std::string& name, mir::UnsizedView view,
+              bool data_only = false) {
+  mir::Expr e;
+  e.kind = mir::Expr::Var;
+  e.name = name;
+  e.unsized = view;
+  e.data_only = data_only;
+  return e;
+}
+
+mir::Expr call(const std::string& name, std::vector<mir::Expr> args,
+               mir::UnsizedView view,
+               mir::Expr::Lib lib = mir::Expr::Lib::StanLib) {
+  mir::Expr e;
+  e.kind = mir::Expr::FunApp;
+  e.name = name;
+  e.fn_lib = lib;
+  e.unsized = view;
+  e.data_only = true;
+  for (const mir::Expr& arg : args) e.data_only = e.data_only && arg.data_only;
+  e.args = std::move(args);
+  return e;
+}
+
+mir::Expr index(mir::Expr base, long i, mir::UnsizedView view) {
+  mir::Expr single;
+  single.kind = mir::Expr::IndexSingle;
+  single.args.push_back(integer(i));
+  mir::Expr e;
+  e.kind = mir::Expr::Indexed;
+  e.unsized = view;
+  e.data_only = base.data_only;
+  e.args = {std::move(base), std::move(single)};
+  return e;
+}
+
+mir::SizedType sized(const std::string& base, std::vector<long> dims = {},
+                     const std::string& elem_base = "") {
+  mir::SizedType type;
+  type.base = base;
+  type.elem_base = elem_base;
+  for (long d : dims) type.dims.push_back(integer(d));
+  return type;
+}
+
+mir::Stmt decl(const std::string& name, mir::SizedType type,
+               bool data_only = false) {
+  mir::Stmt s;
+  s.kind = mir::Stmt::Decl;
+  s.decl_id = name;
+  s.decl_type = std::move(type);
+  s.decl_data_only = data_only;
+  return s;
+}
+
+mir::Stmt assign(const std::string& lhs, mir::Expr rhs) {
+  mir::Stmt s;
+  s.kind = mir::Stmt::Assignment;
+  s.lhs = lhs;
+  s.rhs = std::move(rhs);
+  return s;
+}
+
+mir::Stmt target(mir::Expr e) {
+  mir::Stmt s;
+  s.kind = mir::Stmt::TargetPE;
+  s.target = std::move(e);
+  return s;
+}
+
+mir::Stmt block(std::vector<mir::Stmt> body) {
+  mir::Stmt s;
+  s.kind = mir::Stmt::Block;
+  s.body = std::move(body);
+  return s;
+}
+
+mir::Stmt multi_assign(std::vector<mir::Expr> targets, mir::Expr call) {
+  mir::Stmt s;
+  s.kind = mir::Stmt::MultiAssign;
+  s.fn_args = std::move(targets);
+  s.rhs = std::move(call);
+  return s;
+}
+
+mir::Stmt read_data(const std::string& name, mir::UnsizedView view,
+                    const std::string& key) {
+  mir::Stmt s;
+  s.kind = mir::Stmt::NRFunApp;
+  s.fn_lib = mir::Expr::Lib::Internal;
+  s.fn_name = "FnReadData";
+  mir::Expr text;
+  text.kind = mir::Expr::LitStr;
+  text.lit_s = key;
+  text.data_only = true;
+  s.fn_args = {var(name, view, true), var("context__", {}, true), text};
+  return s;
+}
+
+// A real parameter read whole, unconstrained.
+mir::Stmt real_parameter(const std::string& name) {
+  mir::Stmt s = decl(name, sized("SReal"));
+  s.has_init = true;
+  s.init = call("FnReadParam", {}, kReal, mir::Expr::Lib::Internal);
+  s.init.data_only = false;
+  s.read_transform = mir::Transform{};
+  return s;
+}
+
+}  // namespace build
+
+struct Density {
+  double value;
+  double gradient;
+};
+
+Density density(const std::string& wire, const DataMap& data, double theta) {
+  CompiledModel model = compile_model(wire, data);
+  Executor executor(std::move(model.graph));
+  model.bind(executor);
+  if (executor.n_params() > 0) executor.params_data()[0] = theta;
+  double gradient = 0;
+  const double value = executor.gradient(&gradient);
+  return {value, gradient};
+}
+
+// f(x) = (x * x, [x, x]'): a function returning a tuple of two leaves.
+mir::FunDef two_results() {
+  using namespace build;
+  mir::FunDef f;
+  f.name = "f";
+  f.arg_names = {"x"};
+  f.arg_views = {kReal};
+  f.arg_data_only = {false};
+  f.results = {kReal, kVector};
+  mir::Stmt ret;
+  ret.kind = mir::Stmt::Return;
+  ret.fn_args = {call("Times__", {var("x", kReal), var("x", kReal)}, kReal),
+                 call("rep_vector", {var("x", kReal), integer(2)}, kVector)};
+  f.body = {ret};
+  return f;
+}
+
+mir::Expr call_f(mir::Expr argument) {
+  mir::Expr e =
+      build::call("f", {std::move(argument)}, {}, mir::Expr::Lib::UserDefined);
+  e.data_only = false;
+  return e;
+}
+
+// `(a, b) = f(x)`, `target += a + sum(b)`.
+std::vector<mir::Stmt> use_f(mir::Expr x) {
+  using namespace build;
+  return {
+      multi_assign({var("a", kReal), var("b", kVector)}, call_f(x)),
+      target(call("Plus__",
+                  {var("a", kReal), call("sum", {var("b", kVector)}, kReal)},
+                  kReal))};
+}
+
+void check_multi_results() {
+  using namespace build;
+  mir::Program program;
+  program.fun_defs = {two_results()};
+  program.log_prob = {real_parameter("theta"), decl("a", sized("SReal")),
+                      decl("b", sized("SVector", {2}))};
+  for (mir::Stmt& s : use_f(var("theta", kReal))) program.log_prob.push_back(s);
+  const std::string wire = write_v2(program);
+  const mir::Program decoded = decode_program(wire);
+  check(decoded.fun_defs.at(0).results.size() == 2 &&
+            decoded.fun_defs[0].body.at(0).fn_args.size() == 2 &&
+            !decoded.fun_defs[0].body[0].has_init &&
+            decoded.log_prob.at(3).kind == mir::Stmt::MultiAssign &&
+            decoded.log_prob[3].fn_args.size() == 2 &&
+            decoded.log_prob[3].fn_args[1].name == "b" &&
+            decoded.log_prob[3].rhs.name == "f",
+        "MultiAssign and a return of several values decode");
+  // theta^2 + 2 theta at 3, and its derivative 2 theta + 2.
+  const Density at_three = density(wire, DataMap{}, 3.0);
+  check(at_three.value == 15.0 && at_three.gradient == 8.0,
+        "graph lowering assigns each result of f");
+
+  // In a loop, three times.
+  mir::Program looped = program;
+  looped.log_prob.resize(3);
+  mir::Stmt loop;
+  loop.kind = mir::Stmt::For;
+  loop.loopvar = "i";
+  loop.lower = integer(1);
+  loop.upper = integer(3);
+  loop.body = {block(use_f(var("theta", kReal)))};
+  looped.log_prob.push_back(loop);
+  const Density thrice = density(write_v2(looped), DataMap{}, 3.0);
+  check(thrice.value == 45.0 && thrice.gradient == 24.0,
+        "a MultiAssign in a loop assigns on every trip");
+
+  // In a while loop whose condition reads the parameter:
+  // k = theta; while (k < 10) { (a, b) = f(k); k = a; target += sum(b); }
+  // At theta = 3 the body runs for k = 3 and k = 9, adding 2k each time:
+  // 6 + 18, with derivative 2 + 4 theta.
+  mir::Program dynamic = program;
+  dynamic.log_prob.resize(3);
+  mir::Stmt k = decl("k", sized("SReal"));
+  dynamic.log_prob.push_back(k);
+  dynamic.log_prob.push_back(assign("k", var("theta", kReal)));
+  mir::Stmt w;
+  w.kind = mir::Stmt::While;
+  w.cond = call("Less__", {var("k", kReal), real(10)}, kInt);
+  w.cond.data_only = false;
+  w.body = {block({multi_assign({var("a", kReal), var("b", kVector)},
+                                call_f(var("k", kReal))),
+                   assign("k", var("a", kReal)),
+                   target(call("sum", {var("b", kVector)}, kReal))})};
+  dynamic.log_prob.push_back(w);
+  const Density looping = density(write_v2(dynamic), DataMap{}, 3.0);
+  check(looping.value == 24.0 && looping.gradient == 14.0,
+        "a MultiAssign in a parameter-dependent while loop");
+
+  // Transformed data runs in the MIR interpreter: f(2) = (4, [2, 2]').
+  mir::Program data = program;
+  data.prepare_data = {decl("a", sized("SReal"), true),
+                       decl("b", sized("SVector", {2}), true)};
+  data.prepare_data.push_back(multi_assign(
+      {var("a", kReal, true), var("b", kVector, true)}, call_f(real(2))));
+  data.prepare_data.back().rhs.data_only = true;
+  data.log_prob = {
+      real_parameter("theta"),
+      target(call("Plus__",
+                  {var("a", kReal, true),
+                   call("Times__",
+                        {call("sum", {var("b", kVector, true)}, kReal),
+                         var("theta", kReal)},
+                        kReal)},
+                  kReal))};
+  data.log_prob.back().target.data_only = false;
+  data.log_prob.back().target.args[1].data_only = false;
+  const Density prepared = density(write_v2(data), DataMap{}, 3.0);
+  check(prepared.value == 16.0 && prepared.gradient == 4.0,
+        "the MIR interpreter assigns each result in transformed data");
+
+  // The interpreter's entry point for a function returning a tuple.
+  std::map<std::string, const mir::FunDef*> functions;
+  for (const mir::FunDef& f : decoded.fun_defs)
+    functions[mir::function_key(f)] = &f;
+  MirInterp<double> interpreter(functions, "test");
+  DataMap::Entry x;
+  x.r = {3.0};
+  const std::vector<DataMap::Entry> results =
+      interpreter.call_values(decoded.fun_defs[0], {x});
+  check(results.size() == 2 && results[0].r == std::vector<double>{9.0} &&
+            results[1].r == std::vector<double>{3.0, 3.0},
+        "the interpreter returns each result of a function returning a "
+        "tuple");
+
+  // Validation.
+  mir::Program short_targets = program;
+  short_targets.log_prob[3].fn_args.pop_back();
+  expect_error(write_v2(short_targets), "MultiAssign",
+               "a MultiAssign of one value");
+  mir::Program three = program;
+  three.log_prob.push_back(decl("c", sized("SReal")));
+  three.log_prob[3].fn_args.push_back(var("c", kReal));
+  std::swap(three.log_prob[3], three.log_prob.back());
+  std::swap(three.log_prob[3], three.log_prob[4]);
+  expect_error(write_v2(three), "f returns 2 values, not 3",
+               "a MultiAssign with more targets than results");
+  mir::Program in_expression = program;
+  in_expression.log_prob.resize(3);
+  in_expression.log_prob.push_back(target(call_f(var("theta", kReal))));
+  expect_error(write_v2(in_expression), "returns several values outside",
+               "a call of a tuple function outside a MultiAssign");
+  mir::Program bad_return = program;
+  bad_return.fun_defs[0].body[0].fn_args.push_back(real(1));
+  expect_error(write_v2(bad_return), "gives 3 values, not 2",
+               "a return with the wrong number of values");
+  mir::Program undeclared = program;
+  undeclared.log_prob.erase(undeclared.log_prob.begin() + 2);
+  expect_error(write_v2(undeclared), "target b is not declared",
+               "a MultiAssign target without a declaration");
+}
+
+// Stan Math's tuple-returning decomposition of theta * A, summed over every
+// entry of every result, and its derivative in theta: what CmdStan computes
+// for `target += sum(r1) + sum(r2) ...`.
+template <typename F>
+Density decomposition_reference(const Eigen::MatrixXd& a, double theta, F f) {
+  stan::math::nested_rev_autodiff nested;
+  stan::math::var t = theta;
+  const Eigen::Matrix<stan::math::var, -1, -1> m = t * a;
+  stan::math::var total = 0;
+  std::apply(
+      [&](const auto&... part) { ((total += stan::math::sum(part)), ...); },
+      f(m));
+  stan::math::grad(total.vi_);
+  return {total.val(), t.adj()};
+}
+
+bool close_ulp(double got, double want, double ulps) {
+  return std::isfinite(got) &&
+         std::fabs(got - want) <= ulps *
+                                      std::numeric_limits<double>::epsilon() *
+                                      std::max(std::fabs(want), 1.0);
+}
+
+// qr, qr_thin, eigendecompose_sym and svd factor their argument once and
+// slice every result out of the one evaluation, which is what Stan Math's
+// tuple-returning function computes. csr_extract runs when its matrix is
+// data; its sizes depend on the values otherwise.
+void check_decompositions() {
+  using namespace build;
+  DataMap data;
+  data.set_real_array("A", {4, 1, 2, 1, 3, 0, 2, 0, 5}, {3, 3});
+  Eigen::MatrixXd a(3, 3);
+  a << 4, 1, 2, 1, 3, 0, 2, 0, 5;
+  const mir::UnsizedView kMatrix{0, mir::UnsizedLeaf::Matrix};
+  const mir::UnsizedView kVector{0, mir::UnsizedLeaf::Vector};
+  using M = Eigen::Matrix<stan::math::var, -1, -1>;
+  const std::vector<std::pair<std::string, std::vector<mir::UnsizedView>>>
+      cases = {{"qr", {kMatrix, kMatrix}},
+               {"qr_thin", {kMatrix, kMatrix}},
+               {"eigendecompose_sym", {kMatrix, kVector}},
+               {"svd", {kMatrix, kVector, kMatrix}}};
+  for (const auto& [name, views] : cases) {
+    mir::Program program;
+    program.input_vars.emplace_back("A", sized("SMatrix", {3, 3}));
+    program.prepare_data = {decl("A", sized("SMatrix", {3, 3}), true),
+                            read_data("A", kMatrix, "A")};
+    program.log_prob = {real_parameter("theta")};
+    std::vector<mir::Expr> targets;
+    mir::Expr total;
+    for (size_t k = 0; k < views.size(); ++k) {
+      const std::string target_name = "r" + std::to_string(k);
+      program.log_prob.push_back(decl(target_name,
+                                      views[k].leaf == mir::UnsizedLeaf::Vector
+                                          ? sized("SVector", {3})
+                                          : sized("SMatrix", {3, 3}),
+                                      false));
+      targets.push_back(var(target_name, views[k], false));
+      const mir::Expr sum = call("sum", {targets.back()}, kReal);
+      total = k == 0 ? sum : call("Plus__", {total, sum}, kReal);
+    }
+    total.data_only = false;
+    mir::Expr argument = call(
+        "Times__", {var("theta", kReal), var("A", kMatrix, true)}, kMatrix);
+    argument.data_only = false;
+    mir::Expr decomposition = call(name, {argument}, {});
+    decomposition.data_only = false;
+    program.log_prob.push_back(multi_assign(targets, decomposition));
+    program.log_prob.push_back(target(total));
+    const Density want =
+        name == "qr" ? decomposition_reference(
+                           a, 0.5, [](const M& m) { return stan::math::qr(m); })
+        : name == "qr_thin"
+            ? decomposition_reference(
+                  a, 0.5, [](const M& m) { return stan::math::qr_thin(m); })
+        : name == "svd"
+            ? decomposition_reference(
+                  a, 0.5, [](const M& m) { return stan::math::svd(m); })
+            : decomposition_reference(a, 0.5, [](const M& m) {
+                return stan::math::eigendecompose_sym(m);
+              });
+    Density got{std::nan(""), std::nan("")};
+    std::string error;
+    try {
+      got = density(write_v2(program), data, 0.5);
+    } catch (const std::exception& e) {
+      error = e.what();
+    }
+    check(close_ulp(got.value, want.value, 4) &&
+              close_ulp(got.gradient, want.gradient, 4),
+          name + " shares one factorization like Stan Math's " + name + " (" +
+              error + ")");
+  }
+
+  // csr_extract of a data matrix, folded at preparation; of a parameter, a
+  // clear refusal.
+  data.set_real_array("S", {1, 0, 0, 3, 2, 0}, {2, 3});
+  mir::Program csr;
+  csr.input_vars.emplace_back("S", sized("SMatrix", {2, 3}));
+  csr.prepare_data = {decl("S", sized("SMatrix", {2, 3}), true),
+                      read_data("S", kMatrix, "S")};
+  const mir::UnsizedView ints{1, mir::UnsizedLeaf::Int};
+  csr.log_prob = {
+      real_parameter("theta"), decl("w", sized("SVector", {3}), true),
+      decl("v", sized("SArray", {3}, "SInt"), true),
+      decl("u", sized("SArray", {3}, "SInt"), true),
+      multi_assign(
+          {var("w", kVector, true), var("v", ints, true), var("u", ints, true)},
+          call("csr_extract", {var("S", kMatrix, true)}, {}))};
+  // S = [[1, 0, 2], [0, 3, 0]]: w = [1, 2, 3] row by row, v = [1, 3, 2]
+  // and u = [1, 3, 4], so the target is 6 * theta + 6 + 8.
+  mir::Expr weighted =
+      call("Times__",
+           {call("sum", {var("w", kVector, true)}, kReal), var("theta", kReal)},
+           kReal);
+  weighted.data_only = false;
+  mir::Expr csr_total =
+      call("Plus__",
+           {weighted, call("Plus__",
+                           {call("sum", {var("v", ints, true)}, kInt),
+                            call("sum", {var("u", ints, true)}, kInt)},
+                           kInt)},
+           kReal);
+  csr_total.data_only = false;
+  csr.log_prob.push_back(target(csr_total));
+  Density folded{std::nan(""), std::nan("")};
+  std::string csr_error;
+  try {
+    folded = density(write_v2(csr), data, 2.0);
+  } catch (const std::exception& e) {
+    csr_error = e.what();
+  }
+  check(
+      folded.value == 6.0 * 2.0 + 6.0 + 8.0 && folded.gradient == 6.0,
+      "csr_extract of a data matrix folds at preparation (" + csr_error + ")");
+  mir::Program active = csr;
+  mir::Expr scaled =
+      call("Times__", {var("theta", kReal), var("S", kMatrix, true)}, kMatrix);
+  scaled.data_only = false;
+  active.log_prob[4].rhs.args = {scaled};
+  active.log_prob[4].rhs.data_only = false;
+  for (size_t k = 1; k < 4; ++k) active.log_prob[k].decl_data_only = false;
+  for (mir::Expr& t : active.log_prob[4].fn_args) t.data_only = false;
+  bool refused = false;
+  try {
+    (void)compile_model(write_v2(active), data);
+  } catch (const std::exception& e) {
+    refused = std::string(e.what()).find(
+                  "csr_extract: the number of nonzero entries depends on the "
+                  "values, so the matrix must be data") != std::string::npos;
+  }
+  check(refused, "csr_extract of a parameter matrix is refused");
+  mir::Program short_qr = csr;
+  short_qr.log_prob[4].rhs.name = "qr_thin";
+  short_qr.log_prob[4].rhs.args = {var("S", kMatrix, true)};
+  expect_error(write_v2(short_qr), "qr_thin returns 2 values, not 3",
+               "a library decomposition with too many targets");
+}
+
+// `array[3] tuple(int, vector[2]) d` arrives as two leaf variables with the
+// tuple's type beside them; nothing reads their names. CmdStan's JSON reader
+// stores each leaf element by element under its key.
+void check_tuple_interface() {
+  using namespace build;
+  mir::detail::TupleType tuple;
+  tuple.type = sized("SArray", {3}, "STuple");
+  tuple.components = {{sized("SInt"), {}}, {sized("SVector", {2}), {}}};
+  WireTuples wire;
+  wire.types["d"] = tuple;
+  wire.leaves = {{"d_a", "d", {{1, 1}}}, {"d_b", "d", {{1, 2}}}};
+  const mir::UnsizedView ints{1, mir::UnsizedLeaf::Int};
+  const mir::UnsizedView vectors{1, mir::UnsizedLeaf::Vector};
+  mir::Program program;
+  program.input_vars.emplace_back("d", tuple.type);
+  program.prepare_data = {decl("d_a", sized("SArray", {3}, "SInt"), true),
+                          read_data("d_a", ints, "d.1"),
+                          decl("d_b", sized("SArray", {3, 2}, "SVector"), true),
+                          read_data("d_b", vectors, "d.2")};
+  program.log_prob = {
+      real_parameter("theta"),
+      target(
+          call("sum", {index(var("d_b", vectors, true), 1, kVector)}, kReal)),
+      target(call(
+          "Times__",
+          {call("sum", {var("d_a", ints, true)}, kInt), var("theta", kReal)},
+          kReal))};
+  program.log_prob.back().target.data_only = false;
+  const std::string text = write_v2(program, wire);
+  const mir::Program decoded = decode_program(text);
+  check(decoded.input_vars.size() == 2 &&
+            decoded.input_vars[0].first == "d_a" &&
+            decoded.input_vars[0].second.base == "SArray" &&
+            decoded.input_vars[0].second.elem_base == "SInt" &&
+            decoded.input_vars[1].first == "d_b" &&
+            decoded.input_vars[1].second.dims.size() == 2,
+        "a tuple input becomes its leaf variables");
+  const mir::detail::TupleLeaf* leaf = mir::detail::tuple_leaf(decoded, "d_b");
+  check(leaf && leaf->base == "d" && leaf->key == "d.2" &&
+            leaf->path.size() == 1 && leaf->path[0].before == 1 &&
+            leaf->path[0].component == 2 && leaf->type.dims.size() == 2,
+        "the leaf records its tuple variable, slot and CmdStan key");
+  const auto name =
+      mir::detail::output_name("d", leaf, std::vector<int64_t>{3, 1});
+  check(name && name->name == "d.3:2.1" && name->variable == "d.3:2" &&
+            name->index == std::vector<int64_t>{1},
+        "CmdStan names a tuple slot with ':' and indices with '.'");
+  check(!mir::detail::output_name("d", leaf, {}),
+        "a whole array of tuples has no single column name");
+
+  DataMap data;
+  data.set_int_array("d.1", {1, 2, 3}, {3});
+  // d[1].2 = [1, 2], d[2].2 = [3, 4], d[3].2 = [5, 6], element by element.
+  data.set_real_array("d.2", {1, 2, 3, 4, 5, 6}, {3, 2});
+  const Density at = density(text, data, 2.0);
+  check(at.value == 3.0 + 6.0 * 2.0 && at.gradient == 6.0,
+        "tuple data is read under its keys in CmdStan's element order");
+
+  // stanc3 prefixes a C++ keyword with _stan_, which the finalizer strips;
+  // the CmdStan key is the source name.
+  WireTuples mangled_wire;
+  mangled_wire.types["_stan_class"] = tuple;
+  mangled_wire.leaves = {{"_stan_class.1", "_stan_class", {{1, 1}}},
+                         {"_stan_class.2", "_stan_class", {{1, 2}}}};
+  mir::Program mangled = program;
+  mangled.input_vars[0].first = "_stan_class";
+  for (size_t k : {0u, 2u})
+    mangled.prepare_data[k].decl_id =
+        k == 0 ? "_stan_class.1" : "_stan_class.2";
+  mangled.prepare_data[1].fn_args[0].name = "_stan_class.1";
+  mangled.prepare_data[1].fn_args[2].lit_s = "class.1";
+  mangled.prepare_data[3].fn_args[0].name = "_stan_class.2";
+  mangled.prepare_data[3].fn_args[2].lit_s = "class.2";
+  mangled.log_prob[1].target.args[0].args[0].name = "_stan_class.2";
+  mangled.log_prob[2].target.args[0].args[0].name = "_stan_class.1";
+  const mir::Program unmangled =
+      decode_program(write_v2(mangled, mangled_wire));
+  const mir::detail::TupleLeaf* keyword =
+      mir::detail::tuple_leaf(unmangled, "class.2");
+  check(keyword && keyword->base == "class" && keyword->key == "class.2" &&
+            unmangled.input_vars[1].first == "class.2",
+        "a tuple named by a C++ keyword is unmangled with its leaves");
+
+  WireTuples missing = wire;
+  missing.leaves.pop_back();
+  expect_error(write_v2(program, missing), "a leaf of d has no variable",
+               "a tuple leaf without a variable");
+  WireTuples stray = wire;
+  stray.leaves.push_back({"d_c", "d", {{1, 3}}});
+  expect_error(write_v2(program, stray), "no leaf of a tuple variable",
+               "a leaf the tuple type does not have");
+  mir::Program wrong_key = program;
+  wrong_key.prepare_data[3].fn_args[2].lit_s = "d_b";
+  expect_error(write_v2(wrong_key, wire), "not read under its key d.2",
+               "a data leaf read under another key");
+  mir::Program local = program;
+  local.log_prob.push_back(decl("g", sized("STuple")));
+  expect_error(write_v2(local, wire), "a tuple type outside",
+               "a tuple type in a declaration");
+
+  // An array of tuples prints as stan_print spells it.
+  mir::Program printed = program;
+  mir::Stmt print;
+  print.kind = mir::Stmt::NRFunApp;
+  print.fn_lib = mir::Expr::Lib::Internal;
+  print.fn_name = "FnReject";
+  mir::Expr label;
+  label.kind = mir::Expr::LitStr;
+  label.lit_s = "d=";
+  print.fn_args = {label, var("d_a", ints, true), var("d_b", vectors, true)};
+  mir::PrintItem item;
+  item.kind = mir::PrintItem::Kind::Tuple;
+  item.depth = 1;
+  item.components.resize(2);
+  print.print_layout = {mir::PrintItem{}, item};
+  printed.log_prob.push_back(print);
+  const mir::Program decoded_print = decode_program(write_v2(printed, wire));
+  check(
+      decoded_print.log_prob.back().print_layout.size() == 2 &&
+          decoded_print.log_prob.back().print_layout[1].components.size() == 2,
+      "a print layout decodes");
+  std::string message;
+  try {
+    (void)density(write_v2(printed, wire), data, 2.0);
+  } catch (const std::exception& error) {
+    message = error.what();
+  }
+  check(message.find("d=[(1,[1,2]),(2,[3,4]),(3,[5,6])]") != std::string::npos,
+        "an array of tuples is printed as stan_print spells it: " + message);
+  printed.log_prob.back().print_layout[1].components.pop_back();
+  expect_error(write_v2(printed, wire), "print layout does not take every",
+               "a print layout that leaves an argument");
+}
+
 void check_exact_float_bits() {
   mir::Program program;
   mir::Stmt target;
@@ -1515,15 +2172,17 @@ void check_structural_rejections() {
 }
 
 void check_v2_rejections() {
-  expect_error("STANLI5:", "is from a different stanli compiler",
+  expect_error("STANLI6:", "is from a different stanli compiler",
                "unknown portable version");
+  expect_error("STANLI4:AAAAAA==", "is from a different stanli compiler",
+               "retired portable v4 envelope");
   expect_error("STANLI3:AAAAAA==", "is from a different stanli compiler",
                "retired portable v3 envelope");
   expect_error("STANLI2:AAAAAA==", "is from a different stanli compiler",
                "retired portable v2 envelope");
   expect_error("{\"stanli_ir\":1}", "unrecognized input format",
                "retired portable v1 envelope");
-  expect_error(" STANLI4:", "unrecognized input format",
+  expect_error(" STANLI5:", "unrecognized input format",
                "v2 leading whitespace");
   expect_error("[]", "unrecognized input format", "unknown input format");
   expect_error(" \n\t", "empty input", "empty input");
@@ -1599,14 +2258,14 @@ void check_v2_rejections() {
   check_real_bits(UINT64_C(0x7ff8000000000042),
                   "v2 preserves binary64 NaN payload bits");
 
-  expect_error("STANLI4:AAA", "multiple of 4", "v2 incomplete base64 quartet");
-  expect_error("STANLI4:!!!!", "invalid base64 character",
+  expect_error("STANLI5:AAA", "multiple of 4", "v2 incomplete base64 quartet");
+  expect_error("STANLI5:!!!!", "invalid base64 character",
                "v2 invalid base64 character");
-  expect_error("STANLI4:AA==AAAA", "padding before final quartet",
+  expect_error("STANLI5:AA==AAAA", "padding before final quartet",
                "v2 early base64 padding");
-  expect_error("STANLI4:AB==", "non-canonical base64 tail",
+  expect_error("STANLI5:AB==", "non-canonical base64 tail",
                "v2 non-canonical one-byte tail");
-  expect_error("STANLI4:AAB=", "non-canonical base64 tail",
+  expect_error("STANLI5:AAB=", "non-canonical base64 tail",
                "v2 non-canonical two-byte tail");
 
   std::string truncated = empty_v2_payload();
@@ -1616,7 +2275,7 @@ void check_v2_rejections() {
   append_u8(trailing, 0);
   expect_error(v2_wire(trailing), "trailing bytes", "v2 trailing payload");
   std::string no_transform_inits = empty_v2_payload();
-  no_transform_inits.resize(no_transform_inits.size() - 4);
+  no_transform_inits.resize(no_transform_inits.size() - 8);
   expect_error(v2_wire(no_transform_inits), "truncated input",
                "missing transform_inits section");
 
@@ -1809,6 +2468,9 @@ int main(int argc, char** argv) {
                              argc == 3 ? argv[2] : nullptr);
   check_full_span_assignment_lowering();
   check_overload_finalization();
+  check_multi_results();
+  check_decompositions();
+  check_tuple_interface();
   check_exact_float_bits();
   check_nullary_math_constants();
   check_output_annotations();

@@ -1,5 +1,7 @@
 #include <stanli/wa_interp.hpp>
 
+#include "mir_tuples.hpp"
+
 #include <stanli/function_registry.hpp>
 #include <stanli/higher_order_eval.hpp>
 #include <stanli/mir_interp.hpp>
@@ -439,15 +441,33 @@ bool WaInterp::write_param(MirInterp<double>& in, const mir::Stmt& s,
       }
       base = &base->args[0];
     }
+    const mir::detail::TupleLeaf* tuple_named =
+        base->kind == mir::Expr::Var
+            ? mir::detail::tuple_leaf(*prog_, base->name)
+            : nullptr;
     const mir::OutputVar* owner = output_cursor_.take(
-        base->kind == mir::Expr::Var ? base->name : std::string(), len,
-        [&in](const mir::OutputVar& var) {
-          int64_t columns = 1;
-          for (const mir::Expr& dim : var.type.dims) columns *= in.as_int(dim);
-          return columns;
+        tuple_named                    ? tuple_named->base
+        : base->kind == mir::Expr::Var ? base->name
+                                       : std::string(),
+        len, [&](const mir::OutputVar& var) {
+          return mir::detail::output_columns(
+              prog_->tuples.get(), var,
+              [&in](const mir::Expr& dim) { return in.as_int(dim); });
         });
     if (owner == nullptr)
       throw CompileError("an output write matches no output variable");
+    // A write may read a leaf of another tuple variable, the optimizer
+    // having made this value a copy of it.
+    const mir::detail::TupleLeaf* tuple =
+        tuple_named && tuple_named->base == owner->name ? tuple_named : nullptr;
+    if (!tuple && mir::detail::is_tuple(owner->type)) {
+      tuple = mir::detail::leaf_at(
+          prog_->tuples.get(), *owner, output_cursor_.offset(), len,
+          [&in](const mir::Expr& dim) { return in.as_int(dim); });
+      if (!tuple)
+        throw CompileError("cannot name a write of part of tuple " +
+                           owner->name);
+    }
     if (mir::is_complex(owner->type))
       throw CompileError("complex numbers are not supported yet (in output " +
                          owner->name + ")");
@@ -460,13 +480,14 @@ bool WaInterp::write_param(MirInterp<double>& in, const mir::Stmt& s,
       n_gq_start_ = cols_.size();
       saw_gq_ = true;
     }
-    std::string name = owner->name;
-    for (auto it = ixs.rbegin(); it != ixs.rend(); ++it)
-      name += "." + std::to_string(*it);
+    auto named = mir::detail::output_name(
+        owner->name, tuple, std::vector<int64_t>(ixs.rbegin(), ixs.rend()));
+    if (!named)
+      throw CompileError("cannot name a write of a whole array of tuples");
     using Naming = CompiledModel::ParamView::Naming;
-    CompiledModel::ParamView pv{name, (int)row.size(), len};
-    pv.variable = owner->name;
-    pv.index.assign(ixs.rbegin(), ixs.rend());
+    CompiledModel::ParamView pv{std::move(named->name), (int)row.size(), len};
+    pv.variable = std::move(named->variable);
+    pv.index = std::move(named->index);
     if (mir::language_scalar(v) ||
         mir::is_unsized(v, mir::UnsizedLeaf::Complex)) {
       pv.naming = Naming::Scalar;

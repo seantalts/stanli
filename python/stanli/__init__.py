@@ -440,13 +440,16 @@ def _dptr(a):
 
 
 def _bracket(name):
-    """CmdStan's dot form to CmdStanPy's bracket form: theta.1.2 -> theta[1,2]."""
+    """CmdStan's CSV name in CmdStanPy's form: theta.1.2 -> theta[1,2],
+    g.1:2.3 -> g[1].2[3]."""
     if "[" in name:
         return name
-    parts = name.split(".")
-    if len(parts) < 2 or not all(p.isdigit() for p in parts[1:]):
-        return name
-    return parts[0] + "[" + ",".join(parts[1:]) + "]"
+    parts = name.split(":")
+    for i, part in enumerate(parts):
+        head, *index = part.split(".")
+        if index:
+            parts[i] = head + "[" + ",".join(index) + "]"
+    return ".".join(parts)
 
 
 def _scalar_variables(names):
@@ -454,10 +457,11 @@ def _scalar_variables(names):
     return {n: ((), np.array(i, dtype=np.int64)) for i, n in enumerate(names)}
 
 
-def _variable_columns(variables):
+def _variable_columns(shapes):
     """Column names in Stan's order, ``theta[1,2]`` for an element."""
     out = []
-    for name, (dims, idx) in variables.items():
+    for name, dims in shapes:
+        name = _bracket(name)
         if not dims:
             out.append(name)
             continue
@@ -467,18 +471,109 @@ def _variable_columns(variables):
     return out
 
 
+class _TupleArray:
+    """An array of tuples: its dims and its elements, first index fastest."""
+
+    def __init__(self, dims, elements):
+        self.dims = dims
+        self.elements = elements
+
+
+def _tuple_path(name):
+    """A CmdStan tuple column name as its base and its steps: an int for a
+    slot, a tuple of ints for an array index. h.1.2:2 -> h, [(1, 2), 2]."""
+    head, *rest = name.split(":")
+    base, *index = head.split(".")
+    path = [tuple(int(i) for i in index)] if index else []
+    for part in rest:
+        slot, *index = part.split(".")
+        path.append(int(slot))
+        if index:
+            path.append(tuple(int(i) for i in index))
+    return base, path
+
+
+def _tuple_node(entries):
+    """A tuple (a Python tuple of nodes) or a _TupleArray from nested
+    {step: entry}; a leaf is its array of column indices."""
+    if not isinstance(entries, dict):
+        return entries
+    keys = list(entries)
+    if isinstance(keys[0], int):
+        return tuple(_tuple_node(entries[k]) for k in sorted(keys))
+    dims = tuple(max(k[d] for k in keys) for d in range(len(keys[0])))
+    order = sorted(keys, key=lambda k: tuple(reversed(k)))
+    return _TupleArray(dims, [_tuple_node(entries[k]) for k in order])
+
+
+def _tuple_values(node, draws):
+    """CmdStanPy's stan_variable values for a tuple node: an object array
+    of (rows, *dims) from draws of (rows, columns)."""
+    if isinstance(node, np.ndarray):
+        return draws[:, node]
+    rows = draws.shape[0]
+    if isinstance(node, _TupleArray):
+        out = np.empty((rows,) + node.dims, dtype=object)
+        for pos, element in zip(np.ndindex(*reversed(node.dims)),
+                                node.elements):
+            out[(slice(None),) + tuple(reversed(pos))] = \
+                _tuple_values(element, draws)
+        return out
+    parts = [_tuple_values(slot, draws) for slot in node]
+    out = np.empty(rows, dtype=object)
+    for k in range(rows):
+        out[k] = tuple(part[k] for part in parts)
+    return out
+
+
+def _tuple_leaves(name, node):
+    """[(column-style name, column indices)] for each leaf of a tuple."""
+    if isinstance(node, np.ndarray):
+        return [(name, node)]
+    if isinstance(node, _TupleArray):
+        return [leaf for pos, element in zip(np.ndindex(*reversed(node.dims)),
+                                             node.elements)
+                for leaf in _tuple_leaves(
+                    name + "[" + ",".join(str(i + 1) for i in reversed(pos))
+                    + "]", element)]
+    return [leaf for i, slot in enumerate(node, 1)
+            for leaf in _tuple_leaves(f"{name}.{i}", slot)]
+
+
+def _variable_indices(idx):
+    """The columns of a variable, in column order."""
+    if isinstance(idx, np.ndarray):
+        return [int(c) for c in np.atleast_1d(idx).flatten("F")]
+    return [int(c) for _, leaf in _tuple_leaves("", idx)
+            for c in np.atleast_1d(leaf).flatten("F")]
+
+
 def _variables_from_shapes(shapes):
     """{variable: (dims, index_array)} from the runtime's (name, dims) list.
 
-    Variables cover consecutive columns in order, first index fastest.
+    Variables cover consecutive columns in order, first index fastest. A
+    tuple is one variable under its base name, with the dims of its array
+    (none for a plain tuple) and its slots as a tree of index arrays.
     """
-    out, start = {}, 0
+    out, tuples, start = {}, {}, 0
     for name, dims in shapes:
         size = int(np.prod(dims, dtype=np.int64)) if dims else 1
         cols = np.arange(start, start + size, dtype=np.int64)
-        out[name] = (dims, cols.reshape(dims, order="F") if dims
-                     else np.array(start, dtype=np.int64))
+        idx = (cols.reshape(dims, order="F") if dims
+               else np.array(start, dtype=np.int64))
         start += size
+        if ":" not in name:
+            out[name] = (dims, idx)
+            continue
+        base, path = _tuple_path(name)
+        out.setdefault(base, None)
+        node = tuples.setdefault(base, {})
+        for step in path[:-1]:
+            node = node.setdefault(step, {})
+        node[path[-1]] = idx
+    for base, entries in tuples.items():
+        node = _tuple_node(entries)
+        out[base] = (node.dims if isinstance(node, _TupleArray) else (), node)
     return out
 
 
@@ -486,6 +581,8 @@ def _resolve(name, variables, columns):
     """(dims, index_array) for a variable, flat bracket, or dot name."""
     if name in variables:
         return variables[name]
+    if name in columns:
+        return (), np.array(columns[name], dtype=np.int64)
     bracketed = _bracket(name)
     if bracketed in variables:
         return variables[bracketed]
@@ -895,7 +992,21 @@ def _data_to_json(data) -> str:
             return value.tolist()
         raise TypeError(f"cannot serialise {type(value).__name__} as Stan data")
 
-    return json.dumps(data, default=encode)
+    return json.dumps(_stan_json_value(data), default=encode)
+
+
+def _stan_json_value(value):
+    """Tuples as CmdStan's JSON objects keyed "1", "2", ..., as CmdStanPy
+    writes them, including inside lists and object arrays."""
+    if isinstance(value, tuple):
+        return {str(i): _stan_json_value(v) for i, v in enumerate(value, 1)}
+    if isinstance(value, Mapping):
+        return {k: _stan_json_value(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_stan_json_value(v) for v in value]
+    if isinstance(value, np.ndarray) and value.dtype == object:
+        return _stan_json_value(value.tolist())
+    return value
 
 
 def exact_lp() -> bool:
@@ -1087,7 +1198,11 @@ class Fit:
         """
         if name is None:
             return self._draws
-        _, idx = _resolve(name, self._variables, self._columns)
+        dims, idx = _resolve(name, self._variables, self._columns)
+        if not isinstance(idx, np.ndarray):
+            flat = self._draws.reshape(-1, self._draws.shape[2])
+            return _tuple_values(idx, flat).reshape(
+                self._draws.shape[:2] + dims)
         return self._draws[:, :, idx]
 
     def __getitem__(self, name):
@@ -1102,7 +1217,22 @@ class Fit:
             col = SAMPLER_COLUMNS.index(name)
             return self.sampler_stats[:, :, col].reshape(-1)
         dims, idx = _resolve(name, self._variables, self._columns)
+        if not isinstance(idx, np.ndarray):
+            return _tuple_values(
+                idx, self._draws.reshape(-1, self._draws.shape[2]))
         return self._draws[:, :, idx].reshape(-1, *dims)
+
+    def stan_variable(self, name):
+        """One declared variable's draws, chains concatenated, as
+        CmdStanPy's ``stan_variable`` returns them: a tuple variable is an
+        object array of Python tuples."""
+        if name not in self._variables:
+            raise ValueError(f"{name!r} is not a variable of this fit")
+        return self[name]
+
+    def stan_variables(self):
+        """{name: stan_variable(name)} for every declared variable."""
+        return {name: self[name] for name in self._variables}
 
     # The dict protocol the pre-chains API returned, so `fit["mu"]` and
     # `for k, v in fit.items()` keep working unchanged.
@@ -1178,7 +1308,7 @@ class Fit:
             cols = []
             for p in params:
                 _, idx = _resolve(p, self._variables, self._columns)
-                cols.extend(int(c) for c in np.atleast_1d(idx).flatten("F"))
+                cols.extend(_variable_indices(idx))
         sub = np.ascontiguousarray(self._draws[:, :, cols], dtype=np.float64)
         n_chains, n_draws, n_cols = sub.shape
         out = np.empty((n_cols, _N_SUMMARY_STATS))
@@ -1214,7 +1344,13 @@ class Fit:
         arviz is not a dependency; this raises ImportError without it.
         """
         import arviz as az
-        posterior = {var: self.draws(var) for var in self.variables}
+        posterior = {}
+        for var, (dims, idx) in self._variables.items():
+            if isinstance(idx, np.ndarray):
+                posterior[var] = self._draws[:, :, idx]
+            else:
+                for name, leaf in _tuple_leaves(var, idx):
+                    posterior[name] = self._draws[:, :, leaf]
         stats = {n.rstrip("_"): self.sampler_stats[:, :, i]
                  for i, n in enumerate(SAMPLER_COLUMNS)}
         return az.from_dict(posterior=posterior, sample_stats=stats)
@@ -1253,6 +1389,9 @@ class OptimizeResult(dict):
             dims, idx = _resolve(key, self._variables, self._columns)
         except ValueError:
             raise KeyError(key) from None
+        if not isinstance(idx, np.ndarray):
+            values = np.array([dict.__getitem__(self, n) for n in self._names])
+            return _tuple_values(idx, values[None, :])[0]
         if dims == ():
             return self[self._names[int(idx)]]
         cols = idx.flatten("F")
@@ -1497,7 +1636,7 @@ class Model:
         self._threads_per_chain = threads_per_chain
         self.n_unconstrained = _lib.stanli_n_unconstrained(m)
         self.constrained_names = _variable_columns(
-            self._column_variables(False))
+            self._column_shapes(False))
 
     def _construct(self, seed, threads_per_chain):
         mir, stan_code, data_json = self._source
@@ -1793,11 +1932,15 @@ class Model:
         quantities section; the constrained parameters otherwise.
         """
         if _lib.stanli_wa_n_columns(self._handle) > 0:
-            return _variable_columns(self._column_variables(True)), True
+            return _variable_columns(self._column_shapes(True)), True
         return list(self.constrained_names), False
 
     def _column_variables(self, write_array):
         """The declared variables behind _column_names, from the runtime."""
+        return _variables_from_shapes(self._column_shapes(write_array))
+
+    def _column_shapes(self, write_array):
+        """The runtime's (CmdStan name, dims) behind _column_names."""
         m = self._m
         which = _WRITE_ARRAY_COLUMNS if write_array else _CONSTRAINED_COLUMNS
         shapes = []
@@ -1806,7 +1949,7 @@ class Model:
                          range(_lib.stanli_variable_n_dims(m, which, i)))
             shapes.append((_lib.stanli_variable_name(m, which, i).decode(),
                            dims))
-        return _variables_from_shapes(shapes)
+        return shapes
 
     def parameter_annotations(self):
         """The declaration annotations on each parameter.

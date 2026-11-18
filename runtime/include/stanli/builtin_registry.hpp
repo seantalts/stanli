@@ -143,6 +143,7 @@ enum class BuiltinMatrixOp : uint8_t {
   MatrixExpMultiply,
   ScaleMatrixExpMultiply,
   TraceDot,
+  Trace,
   Norm1,
   Norm2,
   Distance,
@@ -155,6 +156,12 @@ enum class BuiltinMatrixOp : uint8_t {
   HmmMarginal,
   HmmHiddenStateProb,
   Quantile,
+  // Functions returning a tuple of matrices and vectors, each result packed
+  // column-major after the one before it (BuiltinMatrixMap::parts).
+  Qr,
+  QrThin,
+  EigendecomposeSym,
+  Svd,
 };
 
 enum class BuiltinSlice : uint8_t {
@@ -426,6 +433,9 @@ struct BuiltinMatrixMap {
   uint8_t variant = 0;
   uint8_t active_variant = 0;
   BuiltinArgumentShape result;
+  // For a function returning a tuple, the shape of each result, in order;
+  // `result` is then a vector holding them one after another.
+  std::vector<BuiltinArgumentShape> parts;
 };
 BuiltinMatrixMap builtin_matrix_map(
     const BuiltinSpec& spec, const std::vector<BuiltinArgumentShape>& shapes);

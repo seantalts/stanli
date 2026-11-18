@@ -1247,6 +1247,49 @@ BuiltinMatrixMap builtin_matrix_map(
       }
       return map;
     }
+    case BuiltinMatrixOp::Qr:
+    case BuiltinMatrixOp::QrThin:
+    case BuiltinMatrixOp::EigendecomposeSym:
+    case BuiltinMatrixOp::Svd: {
+      const AppendBlock block =
+          spec.matrix_op == BuiltinMatrixOp::EigendecomposeSym
+              ? AppendBlock{require_square(a), require_square(a)}
+              : require_matrix(a);
+      const int64_t m = block.rows, n = block.columns, k = std::min(m, n);
+      map.idata = {m, n};
+      map.active_variant = kMatrixActiveForward;
+      const auto vector_shape = [](int64_t size) {
+        return slice_vector_shape(FunctionArgumentKind::Real,
+                                  FunctionContainerKind::Vector, size);
+      };
+      // Stan Math returns every result empty for an empty argument.
+      const bool empty = m == 0 || n == 0;
+      const auto mat = [&](int64_t rows, int64_t columns) {
+        return empty ? matrix_shape(0, 0) : matrix_shape(rows, columns);
+      };
+      const auto vec = [&](int64_t size) {
+        return vector_shape(empty ? 0 : size);
+      };
+      switch (spec.matrix_op) {
+        case BuiltinMatrixOp::Qr:
+          map.parts = {mat(m, m), mat(m, n)};
+          break;
+        case BuiltinMatrixOp::QrThin:
+          map.parts = {mat(m, k), mat(k, n)};
+          break;
+        case BuiltinMatrixOp::EigendecomposeSym:
+          map.parts = {mat(n, n), vec(n)};
+          break;
+        default:
+          map.parts = {mat(m, k), vec(k), mat(n, k)};
+          break;
+      }
+      int64_t total = 0;
+      for (const BuiltinArgumentShape& part : map.parts)
+        total += part.storage_size;
+      map.result = vector_shape(total);
+      return map;
+    }
     case BuiltinMatrixOp::TraceQuadForm: {
       const int64_t n = require_square(a);
       const BuiltinArgumentShape& b = shapes[1];
@@ -1291,6 +1334,7 @@ BuiltinMatrixMap builtin_matrix_map(
       return map;
     }
     case BuiltinMatrixOp::TraceDot:
+    case BuiltinMatrixOp::Trace:
     case BuiltinMatrixOp::Norm1:
     case BuiltinMatrixOp::Norm2:
     case BuiltinMatrixOp::Distance:
@@ -1303,6 +1347,10 @@ BuiltinMatrixMap builtin_matrix_map(
         const AppendBlock lhs = require_matrix(a);
         const AppendBlock rhs = require_matrix(shapes[1]);
         map.idata = {lhs.rows, lhs.columns, rhs.rows, rhs.columns};
+      }
+      if (spec.matrix_op == BuiltinMatrixOp::Trace) {
+        const AppendBlock m = require_matrix(a);
+        map.idata = {m.rows, m.columns};
       }
       map.active_variant = kMatrixActiveForward;
       map.result = make_function_shape(FunctionArgumentKind::Real,

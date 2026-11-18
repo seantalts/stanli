@@ -2551,6 +2551,305 @@ Compilation compile(const std::string& code, const char* filename) {
   return out;
 }
 
+// Tuple names as CmdStan's generated constrained_param_names and
+// unconstrained_param_names spell them: ':' before a slot, '.' before an
+// index, a simplex's free values one fewer.
+void test_tuple_names() {
+  if (!stanli_has_embedded_stanc()) return;
+  const Compilation c = compile(
+      "parameters { tuple(real, array[2] real<lower=0>) tp;"
+      "  tuple(simplex[3], real) ts; }\n"
+      "transformed parameters { tuple(real<lower=0>, real) tt ="
+      "  (tp.2[1], ts.2); }\n"
+      "model { tp.1 ~ normal(0, 1); tp.2 ~ exponential(1);"
+      "  ts.2 ~ normal(ts.1[1], 1); }\n"
+      "generated quantities { array[2] tuple(real, int) g;"
+      "  for (i in 1:2) g[i] = (tp.1 * i, i); }\n",
+      "tuples.stan");
+  expect_true("tuple model compiles: " + c.error, c.ok);
+  if (!c.ok) return;
+  char message[256] = "";
+  char* payload = stanli_bridgestan_data(nullptr, c.mir.c_str(), "tuples",
+                                         message, sizeof message);
+  expect_true(std::string("tuple payload: ") + message, payload != nullptr);
+  if (payload == nullptr) return;
+  char* err = nullptr;
+  bs_model* m = bs_model_construct(payload, 1, &err);
+  stanli_string_free(payload);
+  expect_true(std::string("tuple model constructs: ") + (err ? err : ""),
+              m != nullptr);
+  bs_free_error_msg(err);
+  err = nullptr;
+  if (m == nullptr) return;
+  expect_eq("tuple bs_param_unc_names", bs_param_unc_names(m),
+            "tp:1,tp:2.1,tp:2.2,ts:1.1,ts:1.2,ts:2");
+  expect_eq("tuple bs_param_names(F,F)", bs_param_names(m, false, false),
+            "tp:1,tp:2.1,tp:2.2,ts:1.1,ts:1.2,ts:1.3,ts:2");
+  expect_eq("tuple bs_param_names(T,F)", bs_param_names(m, true, false),
+            "tp:1,tp:2.1,tp:2.2,ts:1.1,ts:1.2,ts:1.3,ts:2,tt:1,tt:2");
+  expect_eq("tuple bs_param_names(F,T)", bs_param_names(m, false, true),
+            "tp:1,tp:2.1,tp:2.2,ts:1.1,ts:1.2,ts:1.3,ts:2,g.1:1,g.1:2,"
+            "g.2:1,g.2:2");
+  expect_eq("tuple bs_param_names(T,T)", bs_param_names(m, true, true),
+            "tp:1,tp:2.1,tp:2.2,ts:1.1,ts:1.2,ts:1.3,ts:2,tt:1,tt:2,g.1:1,"
+            "g.1:2,g.2:1,g.2:2");
+  // A constrained draw goes back through unconstrain, which reads each
+  // tuple leaf by its name.
+  const double q[6] = {0.3, -0.2, 0.4, 0.1, -0.5, 0.7};
+  double theta[7], back[6];
+  const bool ok =
+      bs_param_constrain(m, false, false, q, theta, nullptr, &err) == 0 &&
+      bs_param_unconstrain(m, theta, back, &err) == 0;
+  expect_true(std::string("tuple constrain round trip: ") + (err ? err : ""),
+              ok);
+  bs_free_error_msg(err);
+  for (int i = 0; ok && i < 6; ++i)
+    expect_near("tuple unconstrain q[" + std::to_string(i) + "]", back[i],
+                q[i]);
+  bs_model_destruct(m);
+}
+
+// An array of tuples as parameters, nested and constrained. The names, the
+// constrained draw at q and the log density come from reference BridgeStan
+// 2.9.0 on the same model; the unconstrained values are one block per
+// declared parameter, element by element as stanc3 reads them.
+void test_tuple_array_parameters() {
+  if (!stanli_has_embedded_stanc()) return;
+  const Compilation c = compile(
+      "data { int K; }\n"
+      "parameters {\n"
+      "  array[2, 2] tuple(real<lower=0>, simplex[3]) g;\n"
+      "  array[2] tuple(real, array[K] tuple(real, cholesky_factor_corr[2])) "
+      "n;\n"
+      "}\n"
+      "model {\n"
+      "  for (i in 1:2) {\n"
+      "    for (j in 1:2) {\n"
+      "      g[i, j].1 ~ exponential(1);\n"
+      "      g[i, j].2 ~ dirichlet([1, 2, 3]');\n"
+      "    }\n"
+      "    n[i].1 ~ normal(0, 1);\n"
+      "    for (k in 1:K) n[i].2[k].1 ~ normal(n[i].1, 1);\n"
+      "  }\n"
+      "}\n"
+      "generated quantities { real s = g[2, 1].1 + n[2].2[K].2[2, 1]; }\n",
+      "tuple_array_parameters.stan");
+  expect_true("tuple array model compiles: " + c.error, c.ok);
+  if (!c.ok) return;
+  char message[256] = "";
+  char* payload = stanli_bridgestan_data("{\"K\": 2}", c.mir.c_str(), "small",
+                                         message, sizeof message);
+  expect_true(std::string("tuple array payload: ") + message,
+              payload != nullptr);
+  if (payload == nullptr) return;
+  char* err = nullptr;
+  bs_model* m = bs_model_construct(payload, 1, &err);
+  stanli_string_free(payload);
+  expect_true(std::string("tuple array model constructs: ") + (err ? err : ""),
+              m != nullptr);
+  bs_free_error_msg(err);
+  err = nullptr;
+  if (m == nullptr) return;
+  expect_eq("tuple array bs_param_unc_names", bs_param_unc_names(m),
+            "g.1.1:1,g.1.1:2.1,g.1.1:2.2,g.2.1:1,g.2.1:2.1,g.2.1:2.2,g.1."
+            "2:1,g.1.2:2.1,g.1.2:2.2,g.2.2:1,g.2.2:2.1,g.2.2:2.2,n.1:1,n."
+            "1:2.1:1,n.1:2.1:2.1,n.1:2.2:1,n.1:2.2:2.1,n.2:1,n.2:2.1:1,n."
+            "2:2.1:2.1,n.2:2.2:1,n.2:2.2:2.1");
+  expect_eq("tuple array bs_param_names(T,T)", bs_param_names(m, true, true),
+            "g.1.1:1,g.1.1:2.1,g.1.1:2.2,g.1.1:2.3,g.2.1:1,g.2.1:2.1,g.2."
+            "1:2.2,g.2.1:2.3,g.1.2:1,g.1.2:2.1,g.1.2:2.2,g.1.2:2.3,g.2.2:"
+            "1,g.2.2:2.1,g.2.2:2.2,g.2.2:2.3,n.1:1,n.1:2.1:1,n.1:2.1:2.1."
+            "1,n.1:2.1:2.2.1,n.1:2.1:2.1.2,n.1:2.1:2.2.2,n.1:2.2:1,n.1:2."
+            "2:2.1.1,n.1:2.2:2.2.1,n.1:2.2:2.1.2,n.1:2.2:2.2.2,n.2:1,n.2:"
+            "2.1:1,n.2:2.1:2.1.1,n.2:2.1:2.2.1,n.2:2.1:2.1.2,n.2:2.1:2.2."
+            "2,n.2:2.2:1,n.2:2.2:2.1.1,n.2:2.2:2.2.1,n.2:2.2:2.1.2,n.2:2."
+            "2:2.2.2,s");
+  const std::vector<double> q = {
+      -0.30000000000000004, -0.2, -0.1, 0.0, 0.1, 0.2, 0.30000000000000004,
+      -0.30000000000000004, -0.2, -0.1, 0.0, 0.1, 0.2, 0.30000000000000004,
+      -0.30000000000000004, -0.2, -0.1, 0.0, 0.1, 0.2, 0.30000000000000004,
+      -0.30000000000000004};
+  const std::vector<double> want_theta = {0.7408182206817179,
+                                          0.2755664322331399,
+                                          0.36564811822927296,
+                                          0.3587854495375871,
+                                          1.0,
+                                          0.3849957794836783,
+                                          0.3342238625477446,
+                                          0.2807803579685771,
+                                          1.3498588075760032,
+                                          0.24343208139547043,
+                                          0.3720774553179327,
+                                          0.3844904632865969,
+                                          0.9048374180359595,
+                                          0.34665307605488577,
+                                          0.34665307605488577,
+                                          0.3066938478902284,
+                                          0.2,
+                                          0.30000000000000004,
+                                          1.0,
+                                          -0.29131261245159096,
+                                          0.0,
+                                          0.9566279119002483,
+                                          -0.2,
+                                          1.0,
+                                          -0.09966799462495582,
+                                          0.0,
+                                          0.9950207489532265,
+                                          0.0,
+                                          0.1,
+                                          1.0,
+                                          0.197375320224904,
+                                          0.0,
+                                          0.9803279976447253,
+                                          0.30000000000000004,
+                                          1.0,
+                                          -0.29131261245159096,
+                                          0.0,
+                                          0.9566279119002483};
+  expect_true("tuple array unconstrained size",
+              bs_param_unc_num(m) == (int)q.size());
+  expect_true("tuple array constrained size",
+              bs_param_num(m, false, false) == (int)want_theta.size());
+  std::vector<double> theta((size_t)bs_param_num(m, false, false)),
+      back(q.size());
+  bool ok = bs_param_constrain(m, false, false, q.data(), theta.data(), nullptr,
+                               &err) == 0;
+  expect_true(std::string("tuple array constrain: ") + (err ? err : ""), ok);
+  bs_free_error_msg(err);
+  err = nullptr;
+  for (size_t i = 0; ok && i < theta.size(); ++i)
+    expect_near("tuple array theta[" + std::to_string(i) + "]", theta[i],
+                want_theta[i]);
+  double lp = 0;
+  std::vector<double> grad(q.size());
+  ok = bs_log_density_gradient(m, true, true, q.data(), &lp, grad.data(),
+                               &err) == 0;
+  expect_true(std::string("tuple array gradient: ") + (err ? err : ""), ok);
+  bs_free_error_msg(err);
+  err = nullptr;
+  expect_near("tuple array log density", lp, -28.59525869328727);
+  ok = bs_param_unconstrain(m, theta.data(), back.data(), &err) == 0;
+  expect_true(std::string("tuple array unconstrain: ") + (err ? err : ""), ok);
+  bs_free_error_msg(err);
+  err = nullptr;
+  for (size_t i = 0; ok && i < q.size(); ++i)
+    expect_near("tuple array round trip q[" + std::to_string(i) + "]", back[i],
+                q[i]);
+  // The same draw as JSON, an array of tuples an array of objects keyed by
+  // slot. CmdStan's JSON reader stores a multidimensional array of tuples
+  // nesting order first while stanc3 reads it first index fastest, so
+  // CmdStan takes g[1, 2] from where this document puts g[2, 1]; reference
+  // BridgeStan 2.9.0 gives these free values for it, and so must stanli.
+  const std::vector<double> want_json = {-0.3,
+                                         -0.20000000000000007,
+                                         -0.10000000000000007,
+                                         0.30000000000000004,
+                                         -0.3000000000000001,
+                                         -0.20000000000000007,
+                                         0.0,
+                                         0.10000000000000012,
+                                         0.20000000000000015,
+                                         -0.10000000000000006,
+                                         0.0,
+                                         0.0999999999999999,
+                                         0.2,
+                                         0.30000000000000004,
+                                         -0.30000000000000004,
+                                         -0.2,
+                                         -0.09999999999999999,
+                                         0.0,
+                                         0.1,
+                                         0.2,
+                                         0.30000000000000004,
+                                         -0.30000000000000004};
+  std::string json = "{\"g\": [";
+  for (int i = 0; i < 2; ++i) {
+    json += i ? ", [" : "[";
+    for (int j = 0; j < 2; ++j) {
+      // g[i, j] is element (i + 2 j) of the first-index-fastest order.
+      const size_t e = (size_t)(4 * (i + 2 * j));
+      char buf[200];
+      std::snprintf(
+          buf, sizeof buf, "%s{\"1\": %.17g, \"2\": [%.17g, %.17g, %.17g]}",
+          j ? ", " : "", theta[e], theta[e + 1], theta[e + 2], theta[e + 3]);
+      json += buf;
+    }
+    json += "]";
+  }
+  json += "], \"n\": [";
+  for (int i = 0; i < 2; ++i) {
+    const size_t e = 16 + (size_t)i * 11;
+    char buf[600];
+    std::snprintf(
+        buf, sizeof buf,
+        "%s{\"1\": %.17g, \"2\": [{\"1\": %.17g, \"2\": [[%.17g, %.17g], "
+        "[%.17g, %.17g]]}, {\"1\": %.17g, \"2\": [[%.17g, %.17g], [%.17g, "
+        "%.17g]]}]}",
+        i ? ", " : "", theta[e], theta[e + 1], theta[e + 2], theta[e + 4],
+        theta[e + 3], theta[e + 5], theta[e + 6], theta[e + 7], theta[e + 9],
+        theta[e + 8], theta[e + 10]);
+    json += buf;
+  }
+  json += "]}";
+  std::vector<double> from_json(q.size());
+  ok = bs_param_unconstrain_json(m, json.c_str(), from_json.data(), &err) == 0;
+  expect_true(std::string("tuple array unconstrain json: ") + (err ? err : ""),
+              ok);
+  bs_free_error_msg(err);
+  err = nullptr;
+  for (size_t i = 0; ok && i < q.size(); ++i)
+    expect_near("tuple array json q[" + std::to_string(i) + "]", from_json[i],
+                want_json[i]);
+  // The log density's own columns, element by element as CmdStan's: the
+  // constrained names and variables a stanli_model reports, and one free
+  // block per declared parameter.
+  char model_err[4096] = "";
+  stanli_model* sm = stanli_model_new_with_opts(
+      c.mir.c_str(), "{\"K\": 2}", nullptr, model_err, sizeof model_err);
+  expect_true(std::string("tuple array stanli_model: ") + model_err,
+              sm != nullptr);
+  if (sm != nullptr) {
+    std::string names;
+    for (int64_t i = 0; i < stanli_n_constrained(sm); ++i)
+      names += (i ? "," : "") + std::string(stanli_constrained_name(sm, i));
+    expect_eq("tuple array constrained names", names,
+              "g.1.1:1,g.1.1:2.1,g.1.1:2.2,g.1.1:2.3,g.2.1:1,g.2.1:2.1,g.2."
+              "1:2.2,g.2.1:2.3,g.1.2:1,g.1.2:2.1,g.1.2:2.2,g.1.2:2.3,g.2.2:"
+              "1,g.2.2:2.1,g.2.2:2.2,g.2.2:2.3,n.1:1,n.1:2.1:1,n.1:2.1:2.1."
+              "1,n.1:2.1:2.2.1,n.1:2.1:2.1.2,n.1:2.1:2.2.2,n.1:2.2:1,n.1:2."
+              "2:2.1.1,n.1:2.2:2.2.1,n.1:2.2:2.1.2,n.1:2.2:2.2.2,n.2:1,n.2:"
+              "2.1:1,n.2:2.1:2.1.1,n.2:2.1:2.2.1,n.2:2.1:2.1.2,n.2:2.1:2.2."
+              "2,n.2:2.2:1,n.2:2.2:2.1.1,n.2:2.2:2.2.1,n.2:2.2:2.1.2,n.2:2."
+              "2:2.2.2");
+    const auto variables = [&](int set) {
+      std::string out;
+      for (int64_t i = 0; i < stanli_n_variables(sm, set); ++i) {
+        out += std::string(i ? "," : "") + stanli_variable_name(sm, set, i);
+        for (int64_t k = 0; k < stanli_variable_n_dims(sm, set, i); ++k)
+          out += ":" + std::to_string(stanli_variable_dim(sm, set, i, k));
+      }
+      return out;
+    };
+    const std::string constrained = variables(STANLI_CONSTRAINED_COLUMNS);
+    const std::string written = variables(STANLI_WRITE_ARRAY_COLUMNS);
+    expect_true(
+        "tuple array constrained variables are the parameters of "
+        "write_array's: " +
+            constrained + " vs " + written,
+        !constrained.empty() &&
+            written.compare(0, constrained.size() + 1, constrained + ",") == 0);
+    expect_true("tuple array parameter blocks",
+                stanli_n_param_blocks(sm) == 2 &&
+                    std::string(stanli_param_block_name(sm, 0)) == "g" &&
+                    stanli_param_block_size(sm, 0) == 12 &&
+                    std::string(stanli_param_block_name(sm, 1)) == "n" &&
+                    stanli_param_block_size(sm, 1) == 10);
+    stanli_model_free(sm);
+  }
+  bs_model_destruct(m);
+}
+
 void test_named_source_and_warnings() {
   Compilation empty = compile("", "dir/empty.stan");
   if (!stanli_has_embedded_stanc()) {
@@ -2796,6 +3095,8 @@ int main() {
   test_sample_setup_error();
   test_bridgestan_data();
   test_named_source_and_warnings();
+  test_tuple_names();
+  test_tuple_array_parameters();
   test_declaration_annotations();
   test_fast_math_options();
   test_source_include_paths();

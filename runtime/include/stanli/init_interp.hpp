@@ -27,7 +27,10 @@ namespace stanli {
 
 // One declared parameter, as the section will ask for it.
 struct InitParam {
+  // The variable the section reads, and the key its starting value is
+  // given under: CmdStan's JSON key, `p.2` for a tuple leaf.
   std::string name;
+  std::string key;
   // Constrained dimensions in declaration order, empty for a scalar.
   std::vector<int64_t> dims;
   // Constrained value count, and the free count it unconstrains to.

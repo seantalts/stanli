@@ -116,7 +116,7 @@ if (compilerPath) {
       unicode_ok <- eval_js('(() => {
         const mir = Module.FS.readFile("/tmp/portable-bundled.mir",
                                        {encoding: "utf8"});
-        if (!mir.startsWith("STANLI4:"))
+        if (!mir.startsWith("STANLI5:"))
           return "FAIL missing portable envelope";
         const payload = Uint8Array.from(atob(mir.slice(8)),
                                         c => c.charCodeAt(0));
@@ -129,7 +129,7 @@ if (compilerPath) {
         }
         return "FAIL UTF-8 changed";
       })()')
-      good <- if (!startsWith(mir, "STANLI4:")) {
+      good <- if (!startsWith(mir, "STANLI5:")) {
         "FAIL missing portable envelope"
       } else {
         unicode_ok
@@ -160,7 +160,7 @@ if (compilerPath) {
           return("FAIL missing include lost its filename")
         "ok"
       }
-      portable_includes <- check_includes("STANLI4:")
+      portable_includes <- check_includes("STANLI5:")
 
       instrumented <- eval_js('(() => {
         const portable = globalThis.stanli_compile;
@@ -183,7 +183,7 @@ if (compilerPath) {
       warning_mir <- mir_from_webr(eval_js, warning_source, "webr_warning")
       warning_calls <- eval_js(
         'JSON.stringify(globalThis.__stanli_helper_calls)')
-      warning_ok <- if (!startsWith(warning_mir, "STANLI4:")) {
+      warning_ok <- if (!startsWith(warning_mir, "STANLI5:")) {
         "FAIL warning source produced no portable MIR"
       } else if (!grepl('"warnings":[1-9]', warning_calls)) {
         "FAIL portable warning was not observed"
@@ -203,7 +203,7 @@ if (compilerPath) {
           o1 <<- c(o1, conditionMessage(w))
           invokeRestart("muffleWarning")
         })
-      o1_ok <- if (!startsWith(budget_mir, "STANLI4:")) {
+      o1_ok <- if (!startsWith(budget_mir, "STANLI5:")) {
         "FAIL budget source produced no portable MIR"
       } else if (length(o1) != 1L || !grepl("skipped O1", o1, fixed = TRUE)) {
         "FAIL O1 fallback was not a stanli_o1_fallback condition"

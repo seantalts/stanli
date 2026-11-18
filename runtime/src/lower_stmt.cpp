@@ -83,7 +83,8 @@ bool Lowering::has_target_pe(const mir::Stmt& s) {
 }
 static void bound_names(const mir::Stmt& s, std::set<std::string>* out) {
   if (s.kind == mir::Stmt::Decl) out->insert(s.decl_id);
-  if (s.kind == mir::Stmt::Assignment) out->insert(s.lhs);
+  mir::for_each_assigned(s,
+                         [&](const std::string& name) { out->insert(name); });
   for (const auto& child : s.body) bound_names(child, out);
 }
 static bool sized_from(const mir::Stmt& s, const std::set<std::string>& names) {
@@ -256,6 +257,12 @@ bool Lowering::scan_block(const mir::Stmt& s,
     } else if (child.kind == mir::Stmt::Assignment &&
                local_containers.count(child.lhs)) {
       mirror_value(child, child.lhs);
+    } else if (child.kind == mir::Stmt::MultiAssign) {
+      // The scan does not run the call, so its results are unknown here.
+      for (const mir::Expr& target : child.fn_args) {
+        if (local_ints.count(target.name)) set_local_int(target.name, nullptr);
+        if (local_containers.count(target.name)) td.env().erase(target.name);
+      }
     } else if (const bool runtime = runtime_while(child);
                runtime || !local_containers.empty()) {
       std::vector<std::string> writes;
@@ -408,6 +415,10 @@ bool Lowering::decided_statically(const mir::Stmt& s) {
       return false;
     case mir::Stmt::Assignment:
       if (int_env.count(s.lhs) && !try_eval_pure(s.rhs)) return false;
+      break;
+    case mir::Stmt::MultiAssign:
+      for (const mir::Expr& target : s.fn_args)
+        if (int_env.count(target.name)) return false;
       break;
     default:
       break;
@@ -1752,8 +1763,8 @@ void Lowering::lower_simple_stmt(const mir::Stmt& s) {
         auto spec = std::make_shared<MessageSpec>();
         std::vector<int> ins;
         std::vector<MessageShape> shapes;
-        *spec =
-            lower_message_arguments(s.fn_args, [&](const mir::Expr& argument) {
+        *spec = lower_message_arguments(
+            s.fn_args, s.print_layout, [&](const mir::Expr& argument) {
               // Op::in holds six. Keep that backend capacity check here;
               // parsing and semantic dispatch remain shared.
               if (ins.size() >= 6)
@@ -1798,29 +1809,48 @@ void Lowering::lower_simple_stmt(const mir::Stmt& s) {
           base = &base->args[0];
         }
         const Val v = lower_expr(s.fn_args[0]);
+        const mir::detail::TupleLeaf* leaf = tuple_leaf(*base);
         const mir::OutputVar* owner = output_cursor.take(
-            base->kind == mir::Expr::Var ? base->name : std::string(),
+            leaf                           ? leaf->base
+            : base->kind == mir::Expr::Var ? base->name
+                                           : std::string(),
             g.slots[v.slot].len, [&](const mir::OutputVar& var) {
+              if (mir::detail::is_tuple(var.type))
+                return mir::detail::output_columns(
+                    tuples, var,
+                    [&](const mir::Expr& d) { return eval_int(d); });
               return sized_len(var.type, nullptr, nullptr, var.name);
             });
         if (owner == nullptr)
           fail("FnWriteParam matches no output variable", s.raw);
+        // A write may read a leaf of another tuple variable, the optimizer
+        // having made this value a copy of it.
+        if (leaf && leaf->base != owner->name) leaf = nullptr;
+        if (!leaf && mir::detail::is_tuple(owner->type)) {
+          leaf = mir::detail::leaf_at(
+              tuples, *owner, output_cursor.offset(), g.slots[v.slot].len,
+              [&](const mir::Expr& d) { return eval_int(d); });
+          if (!leaf)
+            fail("cannot name a write of part of tuple " + owner->name, s.raw);
+        }
         if (owner->block != mir::OutputVar::Block::Parameters && !n_tp_start)
           n_tp_start = out.views.size();
         if (owner->block == mir::OutputVar::Block::GeneratedQuantities &&
             !n_gq_start)
           n_gq_start = out.views.size();
-        std::string name = owner->name;
-        for (auto it = ixs.rbegin(); it != ixs.rend(); ++it)
-          name += "." + std::to_string(*it);
+        auto named = mir::detail::output_name(
+            owner->name, leaf, std::vector<int64_t>(ixs.rbegin(), ixs.rend()));
+        if (!named) fail("FnWriteParam of a whole array of tuples", s.raw);
         // stanc peels the array dimensions, so what is left here is a
         // scalar, a vector/row_vector, or a matrix -- and its type decides
         // how CmdStan indexes the columns.
         using Naming = CompiledModel::ParamView::Naming;
         const mir::Expr& t = s.fn_args[0];
-        CompiledModel::ParamView pv{name, v.slot, g.slots[v.slot].len};
-        pv.variable = owner->name;
-        pv.index.assign(ixs.rbegin(), ixs.rend());
+        CompiledModel::ParamView pv{std::move(named->name), v.slot,
+                                    g.slots[v.slot].len};
+        pv.variable = std::move(named->variable);
+        pv.index = std::move(named->index);
+        const std::string& name = pv.name;
         if (mir::language_scalar(t) ||
             mir::is_unsized(t, mir::UnsizedLeaf::Complex)) {
           pv.naming = Naming::Scalar;
@@ -1840,8 +1870,113 @@ void Lowering::lower_simple_stmt(const mir::Stmt& s) {
         return;
       }
       fail("this kind of statement is not supported yet", s.raw);
+    case mir::Stmt::MultiAssign:
+      lower_multi_assign(s);
+      return;
     default:
       fail("unsupported statement", s.raw);
+  }
+}
+std::vector<Lowering::Val> Lowering::lower_library_results(const mir::Stmt& s,
+                                                           bool folded) {
+  std::vector<Val> values;
+  if (folded) {
+    // The arguments are data: each result is the value preparation computed.
+    for (const mir::Expr& target : s.fn_args) {
+      mir::Expr read = target;
+      read.data_only = true;
+      const std::optional<Val> value = fold_const(read);
+      if (!value) fail(s.rhs.name + " did not fold at preparation", s.raw);
+      values.push_back(*value);
+    }
+    return values;
+  }
+  if (s.rhs.name == "csr_extract")
+    fail(s.rhs.name +
+             ": the number of nonzero entries depends on the values, so the "
+             "matrix must be data",
+         s.raw);
+  const BuiltinSpec* spec = shaped_builtin_spec(s.rhs.name, s.rhs.args.size(),
+                                                BuiltinShapePolicy::MatrixOp);
+  if (spec == nullptr)
+    fail(s.rhs.name + ", which returns a tuple, is not supported yet", s.raw);
+  CallArguments actuals(*this, s.rhs);
+  BuiltinMatrixMap map;
+  const Val packed = lower_matrix_op(s.rhs, actuals, *spec, &map);
+  int64_t offset = 0;
+  for (const BuiltinArgumentShape& part : map.parts) {
+    SlotInfo si = part.container == FunctionContainerKind::Matrix
+                      ? matrix_view(part.dimensions[0], part.dimensions[1])
+                      : view_of(mir::UnsizedView{0, mir::UnsizedLeaf::Vector});
+    si.param_free = packed.si.param_free;
+    values.push_back(with_layout(
+        emit_value(OP_SLICE, {packed}, part.storage_size, si,
+                   {checked_immediate(offset, s.rhs.name + " result")}),
+        owning_layout(si)));
+    offset += part.storage_size;
+  }
+  return values;
+}
+void Lowering::lower_multi_assign(const mir::Stmt& s) {
+  const bool library = s.rhs.fn_lib == mir::Expr::Lib::StanLib;
+  if (!library && s.rhs.fn_lib != mir::Expr::Lib::UserDefined)
+    fail(s.rhs.name + ", which returns a tuple, is not supported yet", s.raw);
+  // A call without effects whose arguments are known at preparation folds
+  // there too, so an integer result can size a later declaration.
+  bool folded = false;
+  if (!expr_effectful(s.rhs) &&
+      std::all_of(s.rhs.args.begin(), s.rhs.args.end(),
+                  [](const mir::Expr& arg) { return arg.data_only; })) {
+    try {
+      (void)td.exec(s);
+      folded = true;
+    } catch (const std::exception&) {
+    }
+  }
+  std::vector<Val> values;
+  if (library)
+    values = lower_library_results(s, folded);
+  else
+    (void)lower_call_udf(s.rhs, {}, {}, &values);
+  if (values.size() != s.fn_args.size())
+    fail(s.rhs.name + " returned the wrong number of values", s.raw);
+  for (size_t k = 0; k < values.size(); ++k) {
+    const std::string& target = s.fn_args[k].name;
+    const auto known = folded ? td.env().find(target) : td.env().end();
+    if (int_locals.count(target) && known != td.env().end() &&
+        known->second.is_int && known->second.i.size() == 1 &&
+        known->second.dims.empty()) {
+      int_env[target] = known->second.i[0];
+      continue;
+    }
+    if (int_locals.count(target) && g.slots[values[k].slot].len == 1) {
+      // An integer local now holds a value known only at run time.
+      Val v = values[k];
+      SlotInfo expected;
+      expected.param_free = v.si.param_free;
+      require_binding(v, 1, expected, target, s.raw);
+      v.autodiff = false;
+      v.si = expected;
+      if (write_array_unregioned()) v.si.param_free = false;
+      scope[target] = v;
+      decls[target] = DeclView{1, false, expected};
+      int_env.erase(target);
+      int_locals.erase(target);
+      td_erase(target);
+      continue;
+    }
+    const Val bound = assign_value(target, std::move(values[k]), s.raw);
+    if (!bound.si.param_free) {
+      td_erase(target);
+    } else if (const DataMap::Entry* en = observation(bound)) {
+      td_assign(target, *en);
+    } else if (known != td.env().end()) {
+      DataMap::Entry value = known->second;
+      td_assign(target, value);
+      observe(bound, std::move(value));
+    } else {
+      td_erase(target);
+    }
   }
 }
 Lowering::Flow Lowering::lower_stmt_impl(const mir::Stmt& s) {
@@ -2093,8 +2228,11 @@ Lowering::Flow Lowering::lower_stmt_impl(const mir::Stmt& s) {
     }
     case mir::Stmt::Return:
       // Only reachable inside an inlined UDF body; lower_call_udf collects
-      // the value.
+      // the value, or the values of a function with several results.
       if (s.has_init) return_value = lower_expr(s.rhs);
+      return_values.clear();
+      for (const mir::Expr& value : s.fn_args)
+        return_values.push_back(lower_expr(value));
       return Flow::Return;
     case mir::Stmt::Break:
       return Flow::Break;

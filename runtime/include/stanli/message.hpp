@@ -6,6 +6,7 @@
 #ifndef STANLI_MESSAGE_HPP
 #define STANLI_MESSAGE_HPP
 
+#include <algorithm>
 #include <cstddef>
 #include <cstdint>
 #include <optional>
@@ -56,14 +57,33 @@ struct MessageShape {
   bool integer = false;
 };
 
+// A printed array of tuples whose leaves are separate values: `depth` array
+// dimensions of tuples, each printed `(a,b)` from its components in turn. A
+// component with no components of its own is the next value, an array whose
+// first dimensions are those of every enclosing array of tuples; otherwise
+// it is a tuple whose `depth` counts only its own array dimensions.
+struct MessageTuple {
+  int depth = 0;
+  std::vector<MessageTuple> components;
+
+  std::size_t values() const {
+    if (components.empty()) return 1;
+    std::size_t n = 0;
+    for (const MessageTuple& c : components) n += c.values();
+    return n;
+  }
+};
+
 // Literal chunks surrounding runtime values.  There is exactly one more
-// chunk than value: chunk k precedes value k, and the final chunk trails it.
-// Backends that know their value shapes when the message is built keep them
-// in `shapes`, one per value.
+// chunk than item: chunk k precedes item k, and the final chunk trails it.
+// Without `items` each value is one item; otherwise item k prints the
+// values `items[k]` takes, in order. Backends that know their value shapes
+// when the message is built keep them in `shapes`, one per value.
 struct MessageSpec {
   std::vector<std::string> chunks;
   MessageError error = MessageError::Domain;
   std::vector<MessageShape> shapes;
+  std::vector<MessageTuple> items;
 };
 
 inline int64_t message_offset(const MessageShape& shape,
@@ -88,13 +108,25 @@ inline int64_t message_offset(const MessageShape& shape,
 template <typename Shape, typename Value>
 std::string render_message(const MessageSpec& spec, std::size_t value_count,
                            Shape shape, Value value) {
-  if (spec.chunks.size() != value_count + 1)
+  std::size_t item_count = value_count, taken = 0;
+  if (!spec.items.empty()) {
+    item_count = spec.items.size();
+    for (const MessageTuple& item : spec.items) taken += item.values();
+    if (taken != value_count)
+      throw std::logic_error("malformed message template");
+  }
+  if (spec.chunks.size() != item_count + 1)
     throw std::logic_error("malformed message template");
   std::ostringstream out;
-  for (std::size_t k = 0; k < value_count; ++k) {
-    out << spec.chunks[k];
+  // Value k from dimension `from` on, the dimensions before it fixed by
+  // `prefix`, the indices of the arrays of tuples enclosing it.
+  const auto print_value = [&](std::size_t k,
+                               const std::vector<int64_t>& prefix) {
     const MessageShape& s = shape(k);
+    if (prefix.size() > s.dims.size())
+      throw std::logic_error("malformed message template");
     std::vector<int64_t> index(s.dims.size(), 0);
+    std::copy(prefix.begin(), prefix.end(), index.begin());
     const auto scalar = [&] {
       const double x = value(k, message_offset(s, index));
       if (s.integer)
@@ -112,7 +144,53 @@ std::string render_message(const MessageSpec& spec, std::size_t value_count,
       }
       out << ']';
     };
-    level(level, 0);
+    level(level, prefix.size());
+  };
+  // A tuple taking the values from `first` on: its array dimensions are
+  // those of its first value after `prefix`.
+  const auto print_tuple = [&](const auto& self, const MessageTuple& tuple,
+                               std::size_t first,
+                               std::vector<int64_t> prefix) -> void {
+    const MessageShape& s = shape(first);
+    const std::size_t outer = prefix.size();
+    if (outer + static_cast<std::size_t>(tuple.depth) > s.dims.size())
+      throw std::logic_error("malformed message template");
+    prefix.resize(outer + static_cast<std::size_t>(tuple.depth), 0);
+    const auto level = [&](const auto& level_self, std::size_t d) -> void {
+      if (d == prefix.size()) {
+        out << '(';
+        std::size_t k = first;
+        for (std::size_t c = 0; c < tuple.components.size(); ++c) {
+          if (c) out << ',';
+          const MessageTuple& component = tuple.components[c];
+          if (component.components.empty())
+            print_value(k, prefix);
+          else
+            self(self, component, k, prefix);
+          k += component.values();
+        }
+        out << ')';
+        return;
+      }
+      out << '[';
+      for (int64_t i = 0; i < s.dims[d]; ++i) {
+        if (i) out << ',';
+        prefix[d] = i;
+        level_self(level_self, d + 1);
+      }
+      out << ']';
+    };
+    level(level, outer);
+  };
+  std::size_t next = 0;
+  for (std::size_t k = 0; k < item_count; ++k) {
+    out << spec.chunks[k];
+    if (spec.items.empty() || spec.items[k].components.empty()) {
+      print_value(next++, {});
+    } else {
+      print_tuple(print_tuple, spec.items[k], next, {});
+      next += spec.items[k].values();
+    }
   }
   out << spec.chunks.back();
   return out.str();

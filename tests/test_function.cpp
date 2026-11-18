@@ -151,6 +151,28 @@ int main() {
       return finish("test_function");
     }
 
+    // A tuple argument is one argument per leaf, named by its formal's
+    // leaves, and a tuple result is one result per leaf.
+    Function tupled(
+        "functions {\n"
+        "  tuple(real, vector) scaled(real x, tuple(real, int) p) {\n"
+        "    return (x * p.1, rep_vector(x, p.2));\n"
+        "  }\n"
+        "}\n",
+        "scaled");
+    DataMap tuple_args;
+    tuple_args.set_real("x", 1.5);
+    tuple_args.set_real("p.1", 4.0);
+    tuple_args.set_int("p.2", 3);
+    const std::vector<DataMap::Entry> leaves = tupled.results(tuple_args);
+    check(leaves.size() == 2 && leaves[0].r == std::vector<double>{6.0} &&
+              leaves[0].dims.empty() &&
+              leaves[1].r == std::vector<double>({1.5, 1.5, 1.5}) &&
+              leaves[1].dims == std::vector<int64_t>{3},
+          "a tuple function returns each leaf");
+    throws_with([&] { tupled(tuple_args); }, "returns a tuple",
+                "a tuple function refuses a single-result call");
+
     Function affine(source, "affine");
     DataMap args;
     args.set_real_array("x", {1.0, 2.0, 4.0});

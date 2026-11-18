@@ -588,6 +588,13 @@ const std::vector<FunctionSpec>& function_specs() {
             matrix_builtin(BuiltinMatrixOp::GeneralizedInverse,
                            OP_GENERALIZED_INVERSE, 1));
     builtin("qr_Q", matrix_builtin(BuiltinMatrixOp::QrQ, OP_QR_Q, 1));
+    // Tuple results, packed one after another; only a MultiAssign calls them.
+    builtin("qr", matrix_builtin(BuiltinMatrixOp::Qr, OP_QR, 1));
+    builtin("qr_thin", matrix_builtin(BuiltinMatrixOp::QrThin, OP_QR_THIN, 1));
+    builtin("eigendecompose_sym",
+            matrix_builtin(BuiltinMatrixOp::EigendecomposeSym,
+                           OP_EIGENDECOMPOSE_SYM, 1));
+    builtin("svd", matrix_builtin(BuiltinMatrixOp::Svd, OP_SVD, 1));
     builtin("qr_R", matrix_builtin(BuiltinMatrixOp::QrR, OP_QR_R, 1));
     builtin("qr_thin_Q",
             matrix_builtin(BuiltinMatrixOp::QrThinQ, OP_QR_THIN_Q, 1));
@@ -608,6 +615,7 @@ const std::vector<FunctionSpec>& function_specs() {
                            OP_SCALE_MATRIX_EXP_MULTIPLY, 3));
     builtin("trace_dot",
             matrix_builtin(BuiltinMatrixOp::TraceDot, OP_TRACE_DOT, 2));
+    builtin("trace", matrix_builtin(BuiltinMatrixOp::Trace, OP_TRACE, 1));
     builtin("norm1", matrix_builtin(BuiltinMatrixOp::Norm1, OP_NORM1, 1));
     builtin("norm2", matrix_builtin(BuiltinMatrixOp::Norm2, OP_NORM2, 1));
     builtin("distance",
