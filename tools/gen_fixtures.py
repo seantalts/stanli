@@ -53,6 +53,7 @@ O0_FIXTURES = {
     "udf_lp_condition",
     "udf_local_shape",
     "udf_lp_propto",
+    "udf_lpdf_folded_normalized",
     "udf_truncate_forms",
     "udf_truncate_shapes",
     "udf_void_early_return",
