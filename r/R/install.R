@@ -144,11 +144,46 @@ stanli_install <- function(version = stanli_runtime_release, quiet = FALSE,
   if (!quiet) message("stanli runtime installed to ", dest)
   if (identical(dest, stanli_runtime_path())) {
     load_runtime()
+    note <- commit_mismatch_note()
+    if (!quiet && !is.null(note)) message(note)
   } else if (!quiet) {
     message("this package loads the ", stanli_runtime_release,
             " runtime; set STANLI_RUNTIME to use the one just installed")
   }
   invisible(dest)
+}
+
+# remotes and pak record the commit that install_github() installed.
+installed_commit <- function() {
+  sha <- utils::packageDescription("stanli", fields = "RemoteSha")
+  if (is.character(sha) && grepl("^[0-9a-f]{40}$", sha)) sha else NA_character_
+}
+
+runtime_commit <- function(build_id = tryCatch(stanli_build_id(),
+                                               error = function(e) "")) {
+  m <- regmatches(build_id, regexec("^abi[0-9]+-([0-9a-f]{12})-", build_id))[[1]]
+  if (length(m) == 2) m[2] else NA_character_
+}
+
+# The runtime compiles the model as well as running it. A package installed
+# from a commit after a release still gets that release's runtime, which
+# lacks anything merged since.
+commit_mismatch_note <- function(package = installed_commit(),
+                                 runtime = runtime_commit()) {
+  if (is.na(package) || is.na(runtime) || startsWith(package, runtime))
+    return(NULL)
+  paste0("This R package was installed from commit ", substr(package, 1, 12),
+         ", but the runtime, which compiles and runs the model, was built ",
+         "from commit ", runtime, ". Changes merged after that runtime are ",
+         "not in it. To get a package and runtime from the same release, run ",
+         "remotes::install_github(\"seantalts/stanli@*release\", ",
+         "subdir = \"r\") and then stanli_install(overwrite = TRUE).")
+}
+
+with_commit_note <- function(expr, note = commit_mismatch_note()) {
+  if (is.null(note)) return(expr)
+  tryCatch(expr, error = function(e)
+    stop(conditionMessage(e), "\n", note, call. = FALSE))
 }
 
 native_state <- new.env(parent = emptyenv())
