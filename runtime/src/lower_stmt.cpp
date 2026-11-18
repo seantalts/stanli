@@ -879,10 +879,15 @@ void Lowering::lower_runtime_ifelse(const mir::Stmt& s) {
     if (!shaped_outside) {
       // The outside declaration was zero-size, which Stan's assignment
       // resizes; the region's registers carry the real shape.
-      si = SlotInfo{};
-      si.rows = reg.out_views[k].rows;
-      si.cols = reg.out_views[k].cols;
-      si.kind = reg.out_views[k].kind;
+      const Range& out_view = reg.out_views[k];
+      if (out_view.kind == ViewKind::Array) {
+        si = array_view(out_view.dims, out_view.leaf);
+      } else {
+        si = SlotInfo{};
+        si.rows = out_view.rows;
+        si.cols = out_view.cols;
+        si.kind = out_view.kind;
+      }
       auto dl = decls.find(name);
       if (dl != decls.end()) {
         dl->second.len = reg.out_views[k].len;
