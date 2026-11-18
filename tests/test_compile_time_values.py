@@ -22,6 +22,8 @@ DIRECTORY = Path(__file__).resolve().parent / "compile_time_values"
 CMDSTAN = {
     "normalized_udf_lupdf": ((0.5476172947105451, 0.04), ("none", "o1")),
     "propto_var_local_branch": ((0.99919999999999998, 0.04), ("none",)),
+    "while_recursive_udf": ((0.047069457298039678, -1.1567364324509919),
+                            ("none", "o1")),
 }
 
 
