@@ -3,15 +3,20 @@
 
 Each seed's program from gen.py is compiled with --passes none and o1 and
 compared in stanli by differential.py. A difference is bisected to the
-first pass that causes it. Three performance checks add their own buckets:
+first pass that causes it. Four performance checks add their own buckets:
 
   slow_compile   the o1 compile takes more than 1 s and more than 10 times
                  the none compile (timed again serially before reporting)
+  inline_growth  the MIR after function_inlining alone is more than 50
+                 times the size of the unoptimized MIR
   mir_growth     the o1 MIR is more than 8 times the size of the MIR after
                  function_inlining alone
-  more_ad_work   one gradient at o1 executes more than 1.5 times, and at
-                 least 10 more, op output elements than unoptimized,
-                 counted by stanli's STANLI_PROFILE=1 report
+  slow_gradient  a warm gradient at o1 takes more than 1.5 times, and at
+                 least 100 ns more than, the unoptimized one, timed serially
+                 with bench_grad. Only programs whose STANLI_PROFILE=1 report
+                 at o1 shows 1.5 times the op output elements, or more calls
+                 of compiled regions, are timed. A region's own work is not
+                 in the element count.
 
     tools/fuzz_stanc/fuzz.py --seeds 0:1000 --jobs 24 --out DIR
 """
@@ -38,9 +43,13 @@ import gen  # noqa: E402
 
 KEEP_PER_BUCKET = 5
 SLOW_SECONDS, SLOW_RATIO = 1.0, 10.0
+INLINE_GROWTH_RATIO = 50.0  # above the 99.9th percentile of 20,000 programs
 GROWTH_RATIO = 8.0
 WORK_RATIO = 1.5
 WORK_FLOOR = 10  # elements; a few ops of difference is not a finding
+GRADIENT_RATIO = 1.5
+GRADIENT_FLOOR_NS = 100.0
+REGION_OPS = ("OP_ISLAND", "OP_LOOP", "OP_REGION_MAP")
 
 
 def parse_seeds(spec):
@@ -58,14 +67,27 @@ def parse_seeds(spec):
 
 
 def profile_work(text):
-    """Executed ops and their output elements in a STANLI_PROFILE report."""
-    calls = elems = 0
+    """Executed ops, their output elements, and calls of compiled regions in
+    a STANLI_PROFILE report."""
+    calls = elems = regions = 0
     for line in text.splitlines():
         if line.startswith("OP_"):
             cols = line.split()
             calls += int(cols[1])
             elems += int(cols[-1])
-    return {"calls": calls, "elems": elems}
+            if cols[0] in REGION_OPS:
+                regions += int(cols[1])
+    return {"calls": calls, "elems": elems, "regions": regions}
+
+
+def more_work(w):
+    """Whether the profile at o1 suggests more work than unoptimized."""
+    if not w:
+        return False
+    a, b = w["none"], w["o1"]
+    more_elems = a["elems"] > 0 and b["elems"] > WORK_RATIO * a["elems"] \
+        and b["elems"] - a["elems"] >= WORK_FLOOR
+    return more_elems or b.get("regions", 0) > a.get("regions", 0)
 
 
 def perf_kinds(r):
@@ -75,14 +97,17 @@ def perf_kinds(r):
     if t["none"] and t["o1"] and t["o1"] > SLOW_SECONDS and \
             t["o1"] > SLOW_RATIO * t["none"]:
         out.append("slow_compile")
+    if r.get("inlined_size") and r["none"].get("size") and \
+            r["inlined_size"] > INLINE_GROWTH_RATIO * r["none"]["size"]:
+        out.append("inline_growth")
     if r.get("inlined_size") and r["o1"].get("size") and \
             r["o1"]["size"] > GROWTH_RATIO * r["inlined_size"]:
         out.append("mir_growth")
-    w = r.get("work")
-    if w and w["none"]["elems"] > 0 and \
-            w["o1"]["elems"] > WORK_RATIO * w["none"]["elems"] and \
-            w["o1"]["elems"] - w["none"]["elems"] >= WORK_FLOOR:
-        out.append("more_ad_work")
+    g = r.get("gradient_ns")
+    if g and g["none"] and g["o1"] and \
+            g["o1"] > GRADIENT_RATIO * g["none"] and \
+            g["o1"] - g["none"] >= GRADIENT_FLOOR_NS:
+        out.append("slow_gradient")
     return out
 
 
@@ -163,7 +188,8 @@ def keep_failure(ctx, bucket, seed, work, record):
     (dest / "diffs.json").write_text(json.dumps(
         {k: record.get(k) for k in ("seed", "buckets", "guilty", "diffs",
                                     "bisect", "none", "o1", "inlined_size",
-                                    "work")}, indent=1) + "\n")
+                                    "work", "gradient_ns")}, indent=1)
+        + "\n")
 
 
 def one_program(seed, cfg, ctx):
@@ -238,27 +264,62 @@ def examine(record, source, data_file, work, ctx):
     return record
 
 
+def gradient_ns(ctx, mir, data_file):
+    """The fastest of five warm-gradient times from bench_grad, or None when
+    the gradient fails."""
+    best = None
+    for _ in range(5):
+        try:
+            r = subprocess.run([str(ctx["bench"]), str(mir), str(data_file),
+                                "2000"], capture_output=True, text=True,
+                               timeout=ctx["timeout"])
+        except subprocess.TimeoutExpired:
+            return None
+        lines = [x for x in r.stdout.splitlines() if x[:1].isdigit()]
+        if r.returncode or not lines:
+            return None
+        ns = float(lines[-1].split()[0])
+        best = ns if best is None else min(best, ns)
+    return best
+
+
 def retime(ctx, cfg, results):
-    """Time the slow_compile candidates again, one at a time."""
+    """Time the slow_compile and slow_gradient candidates again, one at a
+    time."""
     for r in results:
-        if r.get("outcome") not in ("agree", "differ"):
-            continue
-        t = (r["none"]["seconds"], r["o1"]["seconds"])
-        if not (t[0] and t[1] and t[1] > SLOW_SECONDS and
-                t[1] > SLOW_RATIO * t[0]):
-            continue
-        with tempfile.TemporaryDirectory(dir=ctx["work"]) as w:
-            src = pathlib.Path(w) / "model.stan"
-            src.write_text(gen.generate(r["seed"], cfg).source())
-            r["serial_seconds"] = {
-                passes: d.compile_model(ctx, src, passes,
-                                        pathlib.Path(w) / "x.mir",
-                                        repeat=3)["seconds"]
+        if r.get("outcome") in ("agree", "differ"):
+            p = gen.generate(r["seed"], cfg)
+            retime_one(ctx, r, p.source(), p.data())
+
+
+def retime_one(ctx, r, source, data):
+    t = (r["none"]["seconds"], r["o1"]["seconds"])
+    slow = bool(t[0] and t[1] and t[1] > SLOW_SECONDS and
+                t[1] > SLOW_RATIO * t[0])
+    work = more_work(r.get("work"))
+    if not (slow or work):
+        return
+    with tempfile.TemporaryDirectory(dir=ctx["work"]) as w:
+        w = pathlib.Path(w)
+        (w / "model.stan").write_text(source)
+        (w / "data.json").write_text(json.dumps(data))
+        runs = {passes: d.compile_model(ctx, w / "model.stan", passes,
+                                        w / f"{passes}.mir",
+                                        repeat=3 if slow else 1)
                 for passes in ("none", "o1")}
-        perf = [f"o1:{k}" for k in perf_kinds(r)]
+        if slow:
+            r["serial_seconds"] = {k: v["seconds"] for k, v in runs.items()}
+        if work:
+            r["gradient_ns"] = {
+                k: gradient_ns(ctx, w / f"{k}.mir", w / "data.json")
+                if v["outcome"] == "ok" else None for k, v in runs.items()}
+        before = set(r["buckets"])
         r["buckets"] = [b for b in r["buckets"] if not b.startswith("o1:")] \
-            + perf
+            + [f"o1:{k}" for k in perf_kinds(r)]
         r["outcome"] = "differ" if r["buckets"] else "agree"
+        for b in r["buckets"]:
+            if b not in before:
+                keep_failure(ctx, b, r["seed"], w, r)
 
 
 def summarize(results, meta, out):
@@ -331,10 +392,12 @@ def main(argv=None):
                     default=REPO / "deps" / "stanc3" / "stanli-compile")
     ap.add_argument("--check", type=pathlib.Path,
                     default=REPO / "build-rel" / "stanli_check")
+    ap.add_argument("--bench", type=pathlib.Path,
+                    default=REPO / "build-rel" / "bench_grad")
     ap.add_argument("--known", type=pathlib.Path, default=HERE / "known.json")
     ap.add_argument("--timeout", type=float, default=d.TIMEOUT)
     args = ap.parse_args(argv)
-    for tool in (args.compiler, args.check):
+    for tool in (args.compiler, args.check, args.bench):
         if not tool.exists():
             ap.error(f"{tool} does not exist")
     cfg = gen.load_config(args.config)
@@ -342,7 +405,7 @@ def main(argv=None):
     args.out.mkdir(parents=True, exist_ok=True)
     work = pathlib.Path(tempfile.mkdtemp(prefix="fuzz_gen_"))
     ctx = {"compiler": args.compiler.resolve(), "check": args.check.resolve(),
-           "timeout": args.timeout, "work": work, "out": args.out,
+           "bench": args.bench.resolve(), "timeout": args.timeout, "work": work, "out": args.out,
            "known": json.loads(args.known.read_text()),
            "lock": threading.Lock(), "kept": {}}
     started = time.monotonic()

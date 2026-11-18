@@ -470,7 +470,8 @@ def make_ctx(args):
     import fuzz
     work = pathlib.Path(tempfile.mkdtemp(prefix="fuzz_reduce_"))
     return {"compiler": args.compiler.resolve(),
-            "check": args.check.resolve(), "timeout": args.timeout,
+            "check": args.check.resolve(), "bench": args.bench.resolve(),
+            "timeout": args.timeout,
             "work": work, "out": None, "known": [],
             "lock": threading.Lock(), "kept": {}}, fuzz
 
@@ -482,8 +483,11 @@ def examine(p, ctx, fuzz):
         source.write_text(p.source())
         data_file = work / "data.json"
         data_file.write_text(json.dumps(p.data()))
-        return fuzz.examine({"seed": p.seed, "features": [], "buckets": []},
-                            source, data_file, work, ctx)
+        r = fuzz.examine({"seed": p.seed, "features": [], "buckets": []},
+                         source, data_file, work, ctx)
+        if r.get("outcome") in ("agree", "differ"):
+            fuzz.retime_one(ctx, r, p.source(), p.data())
+        return r
     finally:
         shutil.rmtree(work, ignore_errors=True)
 
@@ -500,6 +504,8 @@ def main(argv=None):
                     default=fuzz.REPO / "deps" / "stanc3" / "stanli-compile")
     ap.add_argument("--check", type=pathlib.Path,
                     default=fuzz.REPO / "build-rel" / "stanli_check")
+    ap.add_argument("--bench", type=pathlib.Path,
+                    default=fuzz.REPO / "build-rel" / "bench_grad")
     ap.add_argument("--timeout", type=float, default=d.TIMEOUT)
     ap.add_argument("--jobs", type=int, default=24)
     args = ap.parse_args(argv)
@@ -533,7 +539,7 @@ def main(argv=None):
         print("", file=f)
         for x in final.get("diffs", []):
             print(json.dumps(x), file=f)
-        for k in ("none", "o1", "inlined_size", "work"):
+        for k in ("none", "o1", "inlined_size", "work", "gradient_ns"):
             if final.get(k) is not None:
                 print(f"{k}: {json.dumps(final[k])}", file=f)
     sys.stdout.write(small.source())

@@ -18,6 +18,7 @@ PROFILE = """\
 opcode                      calls       fwd ns       bwd ns      %        elems
 OP_TANHV                        5          833          459  42.5%            5
 OP_NORMAL_LPDF                  2          833           83  30.1%            6
+OP_ISLAND                       2         1250          416  20.0%            2
                                           3043 ns total
 """
 
@@ -42,25 +43,26 @@ class SeedsTest(unittest.TestCase):
 
 class ProfileTest(unittest.TestCase):
     def test_totals(self):
-        self.assertEqual(fuzz.profile_work(PROFILE), {"calls": 7, "elems": 11})
+        self.assertEqual(fuzz.profile_work(PROFILE),
+                         {"calls": 9, "elems": 13, "regions": 2})
         self.assertEqual(fuzz.profile_work("OK 1 2\n"),
-                         {"calls": 0, "elems": 0})
+                         {"calls": 0, "elems": 0, "regions": 0})
 
 
 class PerfTest(unittest.TestCase):
     def test_slow_compile_needs_both_conditions(self):
         r = record(o1={"seconds": 1.5, "size": 1}, none={"seconds": 0.1,
-                                                         "size": 1})
+                                                         "size": 1000})
         self.assertEqual(fuzz.perf_kinds(r), ["slow_compile"])
         r["none"]["seconds"] = 0.2
         self.assertEqual(fuzz.perf_kinds(r), [])
         r = record(o1={"seconds": 0.5, "size": 1}, none={"seconds": 0.01,
-                                                         "size": 1})
+                                                         "size": 1000})
         self.assertEqual(fuzz.perf_kinds(r), [])
 
     def test_serial_times_override_parallel_ones(self):
         r = record(o1={"seconds": 1.5, "size": 1}, none={"seconds": 0.1,
-                                                         "size": 1},
+                                                         "size": 1000},
                    serial_seconds={"none": 0.1, "o1": 0.3})
         self.assertEqual(fuzz.perf_kinds(r), [])
 
@@ -70,18 +72,38 @@ class PerfTest(unittest.TestCase):
         r["inlined_size"] = 1200
         self.assertEqual(fuzz.perf_kinds(r), [])
 
-    def test_more_ad_work(self):
-        r = record(work={"none": {"calls": 20, "elems": 20},
-                         "o1": {"calls": 24, "elems": 31}})
-        self.assertEqual(fuzz.perf_kinds(r), ["more_ad_work"])
-        r["work"]["o1"]["elems"] = 30
+    def test_inline_growth(self):
+        r = record(inlined_size=50001)
+        self.assertEqual(fuzz.perf_kinds(r), ["inline_growth"])
+        r["inlined_size"] = 50000
         self.assertEqual(fuzz.perf_kinds(r), [])
-        r["work"] = {"none": {"calls": 1, "elems": 1},
-                     "o1": {"calls": 3, "elems": 9}}
-        self.assertEqual(fuzz.perf_kinds(r), [], "too few extra elements")
-        r["work"] = {"none": {"calls": 0, "elems": 0},
-                     "o1": {"calls": 3, "elems": 3}}
+
+    def test_more_work_screen(self):
+        def work(none, o1):
+            return {"none": dict(zip(("calls", "elems", "regions"), none)),
+                    "o1": dict(zip(("calls", "elems", "regions"), o1))}
+        self.assertTrue(fuzz.more_work(work((20, 20, 0), (24, 31, 0))))
+        self.assertFalse(fuzz.more_work(work((20, 20, 0), (24, 30, 0))))
+        self.assertFalse(fuzz.more_work(work((1, 1, 0), (3, 9, 0))),
+                         "too few extra elements")
+        self.assertTrue(fuzz.more_work(work((1, 1, 0), (3, 2, 2))),
+                        "work inside a region does not show as elements")
+        self.assertFalse(fuzz.more_work(work((1, 1, 2), (3, 2, 2))))
+        self.assertFalse(fuzz.more_work(None))
+
+    def test_slow_gradient_needs_ratio_and_floor(self):
+        r = record(gradient_ns={"none": 200.0, "o1": 301.0})
+        self.assertEqual(fuzz.perf_kinds(r), ["slow_gradient"])
+        r["gradient_ns"]["o1"] = 300.0
         self.assertEqual(fuzz.perf_kinds(r), [])
+        r["gradient_ns"] = {"none": 15.0, "o1": 100.0}
+        self.assertEqual(fuzz.perf_kinds(r), [], "under 100 ns more")
+        r["gradient_ns"] = {"none": None, "o1": 1000.0}
+        self.assertEqual(fuzz.perf_kinds(r), [])
+        r = record(work={"none": {"calls": 1, "elems": 1, "regions": 0},
+                         "o1": {"calls": 30, "elems": 90, "regions": 0}})
+        self.assertEqual(fuzz.perf_kinds(r), [],
+                         "the profile alone is not a finding")
 
 
 class KnownTest(unittest.TestCase):
