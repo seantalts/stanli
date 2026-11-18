@@ -1597,6 +1597,44 @@ static void test_udf_void_early_return() {
   }
 }
 
+// A conditional expression whose condition prints and can reject. The
+// value is |p| and the print happens once per gradient.
+static void test_effect_ternary() {
+  using namespace stanli;
+  CompiledModel cm;
+  try {
+    cm = compile_model(
+        slurp("tests/fixtures/paramcond_effect_ternary.tmir.sexp"), DataMap());
+  } catch (const std::exception& error) {
+    check(false, std::string("effect ternary compile: ") + error.what());
+    return;
+  }
+  Executor ex(cm.graph);
+  cm.bind(ex);
+  for (const double p : {0.5, -0.5}) {
+    ex.params_data()[0] = p;
+    double grad = 0.0;
+    stanli_test::StdoutCapture output;
+    const double lp = ex.gradient(&grad);
+    const std::string text = output.finish();
+    expect_eq("effect ternary lp", lp, 0.5);
+    expect_eq("effect ternary grad", grad, p > 0 ? 1.0 : -1.0);
+    check(text == (p > 0 ? "f 0.5\n" : "f -0.5\n"),
+          "effect ternary prints once, got '" + text + "'");
+  }
+  ex.params_data()[0] = -2.0;
+  std::string got;
+  try {
+    double grad = 0.0;
+    stanli_test::StdoutCapture output;
+    (void)ex.gradient(&grad);
+  } catch (const std::domain_error& e) {
+    got = e.what();
+  }
+  check(got.find("x is -2") != std::string::npos,
+        "effect ternary rejects, got '" + got + "'");
+}
+
 static void test_udf_void_statements() {
   using namespace stanli;
   const std::string mir = slurp("tests/fixtures/udf_void_statements.tmir.sexp");
@@ -9113,6 +9151,7 @@ int main() {
   test_udf_void_names();
   test_region_local_only();
   test_udf_void_early_return();
+  test_effect_ternary();
   test_udf_void_statements();
   test_structured_vector_return();
   test_structured_dead_after_break();

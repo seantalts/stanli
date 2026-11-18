@@ -1301,8 +1301,9 @@ Lowering::Val Lowering::lower_expr_impl(const mir::Expr& e) {
     case mir::Expr::FunApp:
       return lower_funapp(e);
     case mir::Expr::TernaryIf: {
-      if (expr_effectful(e.args[0]))
-        fail("effectful expression cannot be a compile-time condition", e.raw);
+      // Evaluating an effectful condition while compiling would print or
+      // draw at the wrong time, so the region decides it when it runs.
+      if (expr_effectful(e.args[0])) return lower_runtime_ternary(e);
       // Shape specialization and ordinary data evaluation can decide a
       // condition even when the complete expression's MIR adlevel is not
       // DataOnly (for example `rows(x) == 0 || theta > 0`).  Only the
