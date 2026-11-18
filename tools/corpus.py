@@ -132,28 +132,31 @@ def main():
 
     imported = [m for m in ok if m not in ver and m in refs]
     md = ["# Corpus status", "",
-          f"Evaluating: {len(ok)}/{len(results)}",
-          f"CmdStan reference coverage: {sum(m in refs for m in results)}/{len(results)} models, "
-          f"{sum(len(refs.get(m, {}).get('points', {})) for m in results)} evaluation points.", "",
-          "The shared corpus includes posteriordb, generated brms and "
+          f"Models that evaluate: {len(ok)}/{len(results)}",
+          f"Models with CmdStan reference values: {sum(m in refs for m in results)}/{len(results)}, "
+          f"at {sum(len(refs.get(m, {}).get('points', {})) for m in results)} evaluation points in total.", "",
+          "The corpus includes models from posteriordb, generated brms and "
           "cogmod models, ctsem's state-space template, models from CRAN "
-          "packages, imported teaching "
-          "models, and language fixtures. "
-          "Collection labels retain their source provenance; all references "
-          "use the same replay in `tools/verify_refs.py`.", "",
-          f"Recording-time primary-point comparison metrics retained for {len(verified)} "
-          "verified models are shown below. Imported references retain their original "
-          "answers and per-model recording provenance, without inventing historical "
-          "comparison metrics. Reference coverage is separate from a current-build "
-          "numerical replay result.", "",
-          "A model counts as passing only when tools/verify_sample.py "
-          "matches CmdStan's log_prob and full gradient at the shared "
-          "deterministic point. Accuracy below is the worst deviation "
-          "over lp and every gradient component: relative, and in ULPs "
-          "(0 = bitwise identical to CmdStan). Bitwise counts are "
-          "reported for information; the replay uses a 1e-9 scaled-error "
-          "gate with documented ill-conditioned exceptions. Models that evaluate but are not verified are listed "
-          "separately and are not counted.",
+          "packages, imported teaching models, and language fixtures. The "
+          "source collection column says where each model came from. "
+          "`tools/verify_refs.py` checks all reference values the same way.", "",
+          f"For {len(verified)} verified models, the table below shows how far "
+          "stanli was from CmdStan at the primary evaluation point. These "
+          "numbers were measured when the reference was recorded. Imported "
+          "references keep their original CmdStan answers and a record of "
+          "how each one was made. No deviation was recorded for them, so "
+          "their rows say \"not recorded\". Having a reference "
+          "for a model does not mean that the current build matches it. The "
+          "numerical replay checks the current build.", "",
+          "A model passes only when tools/verify_sample.py finds that "
+          "stanli's log_prob and full gradient match CmdStan's at a shared, "
+          "fixed evaluation point. The accuracy columns show the worst "
+          "deviation over lp and every gradient component, as a relative "
+          "difference and in ULPs. 0 ULP means bitwise identical to CmdStan. "
+          "The bitwise results are for information only. The replay requires "
+          "a scaled error of at most 1e-9, with documented exceptions for "
+          "ill-conditioned models. Models that evaluate but are not verified "
+          "are listed in a separate section and do not count as passing.",
           "",
           "| model | source collection | values compared | max rel diff | max ULP |",
           "| --- | --- | ---: | ---: | ---: |"]
@@ -186,14 +189,15 @@ def main():
                 wa_refs[m] = len(pt["wa"]["values"])
     if wa_refs:
         md += ["", "## write_array references", "",
-               "The oracle also records CmdStan's write_array at the same "
-               "point: every CSV column (constrained parameters, transformed "
-               "parameters, generated quantities). Both direct-write-array "
-               "drivers use Stan's RNG with the same seed and chain 0, so "
-               "generated-quantity draws are compared too. "
-               "tools/verify_refs.py replays the rows in CI "
-               "with column names matched exactly and values sharing the "
-               "model's gate.", "",
+               "The reference recorder also saves CmdStan's write_array "
+               "output at the same point. This covers every CSV column: "
+               "constrained parameters, transformed parameters and generated "
+               "quantities. Both drivers call write_array directly and use "
+               "Stan's RNG with the same seed and chain 0, so the "
+               "generated-quantity draws can be compared too. In CI, "
+               "tools/verify_refs.py replays these rows. Column names must "
+               "match exactly, and values must pass the same tolerance as the "
+               "model's log density and gradient.", "",
                "| model | write_array values compared |",
                "| --- | ---: |"]
         for m in sorted(wa_refs):
@@ -203,10 +207,10 @@ def main():
     if rejected:
         md += ["", "## Rejected by both engines", "",
                "CmdStan and stanli both reject every shared evaluation "
-               "point for these models: the model is invalid there (an ODE "
-               "solution dipping below a declared lower bound, for "
-               "instance), so there is nothing to compare. Agreement, not "
-               "a gap, but not counted as verified either.", ""]
+               "point for these models. The model is invalid at those "
+               "points, for example when an ODE solution dips below a "
+               "declared lower bound. There is nothing to compare. The two "
+               "engines agree, but these models do not count as verified.", ""]
         md += [f"- `{m}`" for m in sorted(rejected)]
     unver = [m for m in ok if m not in verified and m not in rejected and m not in imported]
     if unver:
