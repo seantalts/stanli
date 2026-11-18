@@ -26,11 +26,14 @@
 // Active outputs instead retain their slot identity and reverse callback.
 // Only their primal and read-only forward scratch are shared: summing seeds
 // before a nonlinear pullback would change floating-point accumulation.
-// The exception is an active op whose value only the target reads. Every
-// copy's seed is exactly 1, so k copies merge into one term multiplied by k:
-// one rounding where adding them took k - 1, and one pullback seeded with k.
-// The zeros of a brms hurdle model each add bernoulli_lpmf(1 | hu), 5,308
-// identical terms in one 12,000-row model.
+// The exception is an active op whose seed is a whole number: one that only
+// the target reads, which seeds each term with 1, or that reaches the target
+// only through scalar additions, which pass a seed on unchanged. Adding whole
+// seeds is exact, so k such copies merge into one op with one pullback, and
+// a term listed k times becomes that term multiplied by k: one rounding
+// where adding the copies took k - 1. The zeros of a brms hurdle model each
+// add bernoulli_lpmf(1 | hu), 5,308 identical terms in one 12,000-row model,
+// and each of its other rows adds bernoulli_lpmf(0 | hu) to its own term.
 //
 // The same model passes each zero's element of mu to a function branch that
 // never reads it, and each merged copy leaves the copies that computed its
@@ -75,6 +78,37 @@ bool droppable_if_unread(const Op& op) {
     default:
       return false;
   }
+}
+
+// Whether each slot's adjoint is a whole number: the slot is written once,
+// and every read of it is a target term or an operand of a scalar ADD or
+// ADD_N whose own adjoint is whole. Readers follow their writer, so one
+// newest-first sweep settles each slot before its writer is reached.
+std::vector<char> whole_seeds(const Graph& g,
+                              const std::vector<int>& target_terms,
+                              const std::unordered_set<int>& keep,
+                              const std::vector<int>& writes) {
+  std::vector<char> read(g.slots.size(), 0), other(g.slots.size(), 0);
+  for (int t : target_terms) read[(size_t)t] = 1;
+  std::vector<char> whole(g.slots.size(), 0);
+  for (size_t i = g.ops.size(); i-- > 0;) {
+    const Op& op = g.ops[i];
+    if (op.out >= 0) {
+      const size_t o = (size_t)op.out;
+      whole[o] = read[o] && !other[o] && writes[o] == 1 && !keep.count(op.out);
+    }
+    const bool passes =
+        (op.opcode == OP_ADD_N || (op.opcode == OP_ADD && op.variant == 0)) &&
+        op.out >= 0 && op.out2 < 0 && op.udata == nullptr &&
+        g.slots[(size_t)op.out].len == 1 && whole[(size_t)op.out];
+    for (int j = 0; j < op.n_in; ++j) {
+      if (op.in[j] < 0) continue;
+      read[(size_t)op.in[j]] = 1;
+      if (!passes) other[(size_t)op.in[j]] = 1;
+    }
+    if (op.primal_source >= 0) other[(size_t)op.primal_source] = 1;
+  }
+  return whole;
 }
 
 // Replaces each run of k copies of one term with a single term times k, at
@@ -148,27 +182,26 @@ CseStats cse(Graph& g, std::vector<std::pair<int, std::vector<double>>>& fills,
   if (debug_env("STANLI_NO_CSE")) return st;
 
   const size_t n_slots = g.slots.size();
-  std::vector<int> writes(n_slots, 0), reads(n_slots, 0);
+  std::vector<int> writes(n_slots, 0);
   for (const Op& op : g.ops) {
     if (op.out >= 0) ++writes[(size_t)op.out];
     if (op.out2 >= 0) ++writes[(size_t)op.out2];
-    for (int j = 0; j < op.n_in; ++j)
-      if (op.in[j] >= 0) ++reads[(size_t)op.in[j]];
   }
-  std::vector<char> is_term(n_slots, 0);
-  for (int t : target_terms) is_term[(size_t)t] = 1;
 
   std::unordered_set<int> keep(extra_roots.begin(), extra_roots.end());
   if (g.result_slot >= 0) keep.insert(g.result_slot);
   // A fill writes its slot at bind time from a buffer sized by the slot
   // length, so a filled slot must keep that length even once dead.
   for (const auto& f : fills) keep.insert(f.first);
+  const std::vector<char> whole =
+      merge_active ? std::vector<char>()
+                   : whole_seeds(g, target_terms, keep, writes);
 
   std::vector<int64_t> version(n_slots, 0);
   std::vector<char> active(n_slots, 0);
   for (size_t s = 0; s < n_slots; ++s) active[s] = g.slots[s].is_param;
   std::unordered_map<Key, size_t, KeyHash> table;
-  std::unordered_map<Key, int, KeyHash> term_table;  // key -> surviving term
+  std::unordered_map<Key, int, KeyHash> whole_table;  // key -> surviving term
   std::unordered_map<int, int> rename;  // removed output -> surviving output
   std::unordered_map<int, int> primal;  // same value, independent adjoint
   const auto resolve = [&](int s) {
@@ -212,11 +245,10 @@ CseStats cse(Graph& g, std::vector<std::pair<int, std::vector<double>>>& fills,
       }
       key.w.push_back(op.n_idata);
       for (int64_t k = 0; k < op.n_idata; ++k) key.w.push_back(op.idata[k]);
-      // An active value only the target reads merges into an earlier one
-      // that only the target reads.
-      if (any_active && !merge_active && is_term[(size_t)op.out] &&
-          reads[(size_t)op.out] == 0) {
-        auto term = term_table.emplace(key, op.out);
+      // An active value with a whole-number seed merges into an earlier one
+      // with a whole-number seed.
+      if (any_active && !merge_active && whole[(size_t)op.out]) {
+        auto term = whole_table.emplace(key, op.out);
         if (!term.second) {
           rename.emplace(op.out, term.first->second);
           g.slots[(size_t)op.out].len = 0;

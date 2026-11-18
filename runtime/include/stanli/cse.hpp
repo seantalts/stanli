@@ -2,7 +2,7 @@
 // the same computation many times. Inactive duplicates become references to
 // the first. Active duplicates share only the forward value and scratch;
 // each keeps its own adjoint and its original place in the reverse sweep,
-// unless only the target reads them (see cse()).
+// unless their seeds are whole numbers (see cse()).
 #ifndef STANLI_CSE_HPP
 #define STANLI_CSE_HPP
 
@@ -19,9 +19,11 @@ struct CseStats {
   int unread_dropped = 0;
 };
 
-// In place. Inactive target terms are renamed. An active term keeps its
-// source identity, so combining seeds cannot reassociate a VJP, unless no op
-// reads it: then its copies merge, since each one's seed is exactly 1. A
+// In place. Inactive target terms are renamed. An active value keeps its
+// source identity, so combining seeds cannot reassociate a VJP, unless its
+// seed is a whole number: it is read only as a target term or through
+// scalar additions into one. Then its copies merge, since adding whole
+// seeds is exact. A
 // term listed k times afterwards becomes one term times k, which adds a
 // constant to `fills`. Static reads (OP_INDEX, OP_SLICE, ...) and
 // primal-sharing copies whose value nothing reads are dropped.

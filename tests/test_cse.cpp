@@ -110,6 +110,35 @@ static void test_counts_repeated_target_terms() {
   expect("gradient is k * exp(p)", got.size() == 2 && got[1] == k * e);
 }
 
+// The same holds for copies whose value reaches the target only through
+// additions, as in `target += f(y[n]) + bernoulli_lpmf(0 | hu)`: an addition
+// passes its seed on unchanged, so each copy's seed is still exactly 1. The
+// copies share one pullback seeded with k while every addition keeps its
+// own value.
+static void test_counts_terms_reached_through_additions() {
+  Graph g;
+  Fills fills;
+  const int p = g.add_slot(1, true);
+  constexpr int k = 1000;
+  std::vector<int> terms;
+  for (int i = 0; i < k; ++i) {
+    const int e = g.add_slot(1, false), c = g.add_slot(1, false);
+    const int t = g.add_slot(1, false);
+    fills.emplace_back(c, std::vector<double>{0.25 * i});
+    g.add_op(OP_EXPV, {p}, e);
+    g.add_op(OP_ADD, {c, e}, t);
+    terms.push_back(t);
+  }
+  const CseStats st = cse(g, fills, terms, {});
+  expect("added copies merged", st.ops_removed == k - 1);
+  expect("one EXP remains", count_opcode(g, OP_EXPV) == 1);
+  expect("every addition remains", count_opcode(g, OP_ADD) == k);
+  testutil::reduce_into_result(g, terms);
+  const std::vector<double> got = run_grad(std::move(g), fills);
+  expect("gradient is k * exp(p)",
+         got.size() == 2 && got[1] == k * std::exp(fill_at(0)));
+}
+
 // A term that an op also reads keeps its own pullback: its seed is not
 // just the target's.
 static void test_term_with_reader_keeps_pullback() {
@@ -661,6 +690,7 @@ int main() {
   }
   test_merges_identical_ops();
   test_counts_repeated_target_terms();
+  test_counts_terms_reached_through_additions();
   test_term_with_reader_keeps_pullback();
   test_drops_unread_copies();
   test_drops_unread_static_reads();

@@ -603,27 +603,27 @@ results are bitwise unchanged.
 
 An active duplicate normally shares only its value and keeps its own
 pullback, so the reverse sweep accumulates in source order. A duplicate
-that only the target reads is different: its seed is exactly 1, so k
-copies merge into one op and the target gets one term multiplied by k.
+whose seed is a whole number is different. The target seeds each term
+with 1 and a scalar addition passes its seed on unchanged, so a copy that
+reaches the target only as a term or through additions has a whole-number
+seed, and adding such seeds is exact. Its k copies merge into one op with
+one pullback, and a term listed k times becomes one term multiplied by k.
 That rounds once where adding the copies rounded k - 1 times. A brms
 `hurdle_poisson` model with 5,308 zeros among 12,000 rows adds
 `bernoulli_lpmf(1 | hu)` once per zero; its log density was 588 to 1,267
 ULP from an 80-digit reference (CmdStan: 102 to 567) and is now 3 to 56,
-and a gradient runs 1.24x faster. The same model passes each zero's
-`mu[n]` to a branch that never reads it, so the pass also drops a static
-`INDEX`, `SLICE` or `GATHER` whose value nothing reads, and a copy that
-shares another op's value once nothing reads it (merging terms leaves the
-copies that computed their arguments unread). It drops no other unused
-op, since an unused density can still reject.
+and a gradient runs 1.24x faster. Merging through additions matters for
+the gradient: in `s2_hurdle_cumulative` each nonzero row adds
+`bernoulli_lpmf(0 | hu)` to its own term, and merging only the zeros'
+terms left those 26 pullbacks accumulating against one large one (9.6 ULP
+on one entry, against 3.4 before). With both sides merged it is 0.4 ULP.
 
-The gradient does not always improve. A term's pullback now adds one
-scaled contribution where it added k small ones, at the position of the
-first copy. When the contributions of the opposite sign are still added
-one at a time, the running sum can grow larger before it cancels. On
-`s2_hurdle_cumulative` (14 identical terms) one gradient entry went from
-3.4 to 9.6 ULP against an 80-digit reference at one point. Moving the
-scaled term to the middle or last copy helps there and hurts
-`hurdle_poisson` more, so it stays at the first.
+The `hurdle_poisson` model passes each zero's `mu[n]` to a branch that
+never reads it, so the pass also drops a static `INDEX`, `SLICE` or
+`GATHER` whose value nothing reads, and a copy that shares another op's
+value once nothing reads it (merging terms leaves the copies that
+computed their arguments unread). It drops no other unused op, since an
+unused density can still reject.
 
 ## Native scalar probability categorical (`message.cpp`)
 
