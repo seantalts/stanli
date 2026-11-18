@@ -53,6 +53,8 @@ O0_FIXTURES = {
     "udf_lp_condition",
     "udf_local_shape",
     "udf_lp_propto",
+    "udf_truncate_forms",
+    "udf_truncate_shapes",
     "udf_void_early_return",
     "udf_void_names",
     "udf_void_return_in_branch",

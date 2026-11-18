@@ -1332,6 +1332,88 @@ static void test_udf_lp_propto() {
   stan::math::recover_memory();
 }
 
+// The pinned stanc before 4b8c5f4c0 typed the cdf calls that it writes for
+// `T[1, ]` with the type of the int bound, so a user cdf that stanc did not
+// inline looked like an int and its real result was truncated.
+// udf_truncate_forms expects stanli's O1
+// answers and, for form 0, CmdStan's recorded answers for stanc3's
+// user-distro-truncate.stan. udf_truncate_shapes expects the same density
+// written with Stan Math.
+static void test_udf_truncate() {
+  using namespace stanli;
+  const double u[] = {-0.04, -0.02, 0.0, 0.02, 0.04, -0.04, -0.02};
+  const double inf = std::numeric_limits<double>::infinity();
+  const double expected_forms[][3] = {
+      {inf, -23.810511851378845, 23.840042659841107},
+      {-8.8608317549462381, -5.9376299625247633, 5.9600106649602766},
+      {-7.1808317549462375, -5.9376299625247633, 5.9600106649602766},
+      {inf, -5.9376299625247633, 5.9600106649602766}};
+  for (int form = 0; form < 4; ++form) {
+    const std::string name = "udf truncate form " + std::to_string(form);
+    CompiledModel cm;
+    try {
+      cm = compile_model(
+          slurp("tests/fixtures/udf_truncate_forms.tmir.sexp"),
+          DataMap::from_json("{\"form\": " + std::to_string(form) + "}"));
+    } catch (const std::exception& error) {
+      check(false, name + " compile: " + error.what());
+      continue;
+    }
+    Executor ex(cm.graph);
+    cm.bind(ex);
+    std::copy_n(u, 2, ex.params_data());
+    double grad[2] = {};
+    expect_ulp(name + " lp", ex.gradient(grad), expected_forms[form][0], 10);
+    expect_ulp(name + " grad y", grad[0], expected_forms[form][1], 10);
+    expect_ulp(name + " grad mu", grad[1], expected_forms[form][2], 10);
+  }
+
+  const DataMap data =
+      DataMap::from_json(slurp("tests/fixtures/udf_truncate_shapes.json"));
+  CompiledModel cm;
+  try {
+    cm = compile_model(slurp("tests/fixtures/udf_truncate_shapes.tmir.sexp"),
+                       data);
+  } catch (const std::exception& error) {
+    check(false, std::string("udf truncate shapes compile: ") + error.what());
+    return;
+  }
+  using stan::math::log_diff_exp;
+  using stan::math::square;
+  using stan::math::var;
+  std::vector<var> x(u, u + 7);
+  var lp = 0;
+  const var y = stan::math::lub_constrain(x[0], 1, 5, lp);
+  const var mu = x[1];
+  const var z[] = {stan::math::lub_constrain(x[2], 1, 5, lp),
+                   stan::math::lub_constrain(x[3], 1, 5, lp)};
+  const var nu[] = {x[4], x[5]};
+  const var lam = stan::math::lb_constrain(x[6], 0, lp);
+  const auto lcdf = [](double y, const var& mu) { return -1.7 / y - 0.1 * mu; };
+  const auto between = [&](const var& mu) {
+    return log_diff_exp(lcdf(5, mu), lcdf(1, mu));
+  };
+  lp += -square(y - mu) + 0.02 + 0.1 * mu;     // T[1, ]
+  lp += -square(y - mu) + 1.7 / 5 + 0.1 * mu;  // T[, 5]
+  lp += -square(y - mu) - between(mu);         // T[1, 5]
+  lp += -square(y - mu) + 0.02 + 0.1 * mu;     // T[L, ]
+  lp += -square(z[0] - mu) - square(z[1] - mu) - 2 * between(mu);
+  lp +=
+      -square(y - nu[0]) - square(y - nu[1]) - between(nu[0]) - between(nu[1]);
+  lp += 3 * stan::math::log(lam) - lam -
+        log_diff_exp(-1.5 / 9 - 0.1 * lam, -1.5 - 0.1 * lam);
+  lp.grad();
+  Executor ex(cm.graph);
+  cm.bind(ex);
+  std::copy_n(u, 7, ex.params_data());
+  double grad[7] = {};
+  expect_ulp("udf truncate shapes lp", ex.gradient(grad), lp.val(), 10);
+  for (int i = 0; i < 7; ++i)
+    expect_ulp("udf truncate shapes grad " + std::to_string(i), grad[i],
+               x[i].adj(), 10);
+  stan::math::recover_memory();
+}
+
 // stanc's O1 inliner substitutes the data actual for each formal, but an
 // indexed formal such as `s[i]` keeps the AutoDiffable adlevel it had in the
 // function body. CmdStan's types come from the actuals, so the data scales
@@ -5881,8 +5963,7 @@ int main() {
     }
   }
 
-  // Parameter-dependent truncation must retain its real normalizer even
-  // when stanc's synthesized MIR expressions carry UInt metadata. These
+  // Parameter-dependent truncation must retain its real normalizer. These
   // CmdStan values/gradients are from the independent conformance oracle:
   // https://github.com/seantalts/stanli/actions/runs/36575332712
   // Exercise generated reverse and var replay, including support rejection.
@@ -5964,6 +6045,40 @@ int main() {
       check(std::abs(lp - acc.val()) <= tol,
             "truncvec: lp matches the var path");
     }
+  }
+
+  // A truncated parameter vector with int bounds. The pinned stanc before
+  // 4b8c5f4c0 typed the normalizer times the length as an int, and stanli
+  // multiplied it as one.
+  {
+    CompiledModel tm =
+        compile_model(slurp("tests/fixtures/trunc_param_vector.tmir.sexp"),
+                      DataMap::from_json("{}"));
+    Executor tex(std::move(tm.graph));
+    tm.bind(tex);
+    const double u[] = {-0.04, -0.02, 0.0, 0.02, 0.04, -0.04};
+    using stan::math::var;
+    std::vector<var> x(u, u + 6);
+    var acc = 0;
+    Eigen::Matrix<var, Eigen::Dynamic, 1> z(2), w(2);
+    z << stan::math::lub_constrain(x[0], 1, 5, acc),
+        stan::math::lub_constrain(x[1], 1, 5, acc);
+    w << stan::math::lb_constrain(x[3], 0, acc),
+        stan::math::lb_constrain(x[4], 0, acc);
+    const var mu = x[2], nu = x[5];
+    acc += stan::math::normal_lpdf<true>(z, mu, 1) -
+           2 * stan::math::log_diff_exp(stan::math::normal_lcdf(5, mu, 1),
+                                        stan::math::normal_lcdf(1, mu, 1));
+    acc += stan::math::normal_lpdf<true>(w, nu, 1) -
+           2 * stan::math::normal_lccdf(0, nu, 1);
+    acc.grad();
+    std::copy_n(u, 6, tex.params_data());
+    double grad[6] = {};
+    expect_ulp("trunc_param_vector lp", tex.gradient(grad), acc.val(), 10);
+    for (int i = 0; i < 6; ++i)
+      expect_ulp("trunc_param_vector grad " + std::to_string(i), grad[i],
+                 x[i].adj(), 10);
+    stan::math::recover_memory();
   }
 
   // A scalar int outcome against vectorized real arguments. See
@@ -9299,6 +9414,7 @@ int main() {
   test_region_constant_shadow();
   test_udf_guard_returns();
   test_udf_lp_propto();
+  test_udf_truncate();
   test_udf_lp_inlined_propto();
   test_udf_lp_branch_propto();
   test_udf_lp_condition();
