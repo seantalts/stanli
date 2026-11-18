@@ -116,7 +116,11 @@ Linux and Windows x86_64 native builds, CTest, one complete recorded CmdStan
 corpus replay for the shipped configuration, installed Python/R interface
 checks, native/JavaScript compiler parity, and inexpensive static checks.
 Keep the required status present for documentation-only changes and fail it
-if a required source-change check fails or is unexpectedly skipped.
+if a required source-change check fails or is unexpectedly skipped. A PR that
+changes only the R package (`r/`, except the bundled compiler in `r/inst/js`)
+runs the R tests against the runtime and compilers from a main run with the
+same files outside `r/`, and skips the native builds. Without such a run, it
+gets the full build.
 
 Except for the compiler-pipeline benchmark requirement above, broad
 optimization-on/off sweeps, timing comparisons, extra platform and
