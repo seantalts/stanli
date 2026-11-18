@@ -1721,6 +1721,11 @@ if(Python3_Interpreter_FOUND)
   add_test(NAME test_fuzz_stanc_differential
            COMMAND ${Python3_EXECUTABLE} tests/test_fuzz_stanc_differential.py
            WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
+  foreach(_fuzz_test gen fuzz reduce)
+    add_test(NAME test_fuzz_stanc_${_fuzz_test}
+             COMMAND ${Python3_EXECUTABLE} tests/test_fuzz_stanc_${_fuzz_test}.py
+             WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
+  endforeach()
   # The corpus replay's per-point verdicts, over a stub stanli_check. The
   # oracle itself needs posteriordb and a real binary and so runs in CI
   # rather than here; what runs here is the classification it depends on,
