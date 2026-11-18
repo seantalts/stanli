@@ -687,17 +687,17 @@ Lowering::Val Lowering::lower_call_udf(const mir::Expr& e,
   decls.clear();
   int_locals.clear();
   td.env().clear();
-  const bool propto_saved = propto_ctx;
+  const bool propto_saved = td.propto_context();
   const bool autodiff_saved = udf_autodiff_ctx;
   const bool known_static_saved = write_array_known_static;
   write_array_known_static = false;
-  propto_ctx = propto_ctx && mir::inherits_propto(e);
+  td.set_propto_context(propto_saved && mir::inherits_propto(e));
   udf_autodiff_ctx = false;
   for (size_t i = 0; i < binds.size(); ++i)
     if (!binds[i].is_int && f.arg_views[i].leaf != mir::UnsizedLeaf::Int)
       udf_autodiff_ctx = udf_autodiff_ctx || binds[i].v.autodiff;
   const ScopeExit restore{[&] {
-    propto_ctx = propto_saved;
+    td.set_propto_context(propto_saved);
     udf_autodiff_ctx = autodiff_saved;
     write_array_known_static = known_static_saved;
     scope = std::move(sc_saved);

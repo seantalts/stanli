@@ -1752,6 +1752,15 @@ if(Python3_Interpreter_FOUND)
              COMMAND ${Python3_EXECUTABLE} tests/test_fuzz_stanc_${_fuzz_test}.py
              WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
   endforeach()
+  # It picks the passes, so it needs the compiler executable.
+  set(_stanli_compile
+      "${CMAKE_CURRENT_SOURCE_DIR}/deps/stanc3/stanli-compile${CMAKE_EXECUTABLE_SUFFIX}")
+  if(EXISTS "${_stanli_compile}")
+    add_test(NAME test_compile_time_values
+             COMMAND ${Python3_EXECUTABLE} tests/test_compile_time_values.py
+                     $<TARGET_FILE:stanli_check> ${_stanli_compile}
+             WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
+  endif()
   # The corpus replay's per-point verdicts, over a stub stanli_check. The
   # oracle itself needs posteriordb and a real binary and so runs in CI
   # rather than here; what runs here is the classification it depends on,

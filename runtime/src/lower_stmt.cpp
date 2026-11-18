@@ -467,7 +467,7 @@ void Lowering::configure_island_compiler(ProgramCompiler& c,
                                          const mir::Stmt* s) {
   IslandProg* const prog = &prog_ref;
   IslandRegion* const reg = &region;
-  c.propto_ctx = propto_ctx;
+  c.propto_ctx = td.propto_context();
   if (udf_depth > 0) {
     c.call_types =
         ProgramCompiler::CallTypes{udf_formal_autodiff, udf_autodiff_ctx};

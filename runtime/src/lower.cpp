@@ -37,6 +37,7 @@ Lowering::Lowering(const DataMap& d, PrepTrace& p, PassDumper& dump_to,
       prep_graph(graph_name),
       td_rng(std::move(stream)) {
   td.set_native_extrema(true);
+  td.refuse_propto_densities();
 }
 template <typename Map>
 static void copy_named(Map& to, const Map& from,
@@ -78,7 +79,7 @@ Lowering::Lowering(Lowering& parent, RegionTrialTag,
   else
     for (const std::string& name : *names)
       if (parent.int_locals.count(name)) int_locals.insert(name);
-  propto_ctx = parent.propto_ctx;
+  td.set_propto_context(parent.td.propto_context());
   udf_depth = parent.udf_depth;
   udf_autodiff_ctx = parent.udf_autodiff_ctx;
   udf_formal_autodiff = parent.udf_formal_autodiff;
