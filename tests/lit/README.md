@@ -26,6 +26,13 @@ also how a silently accepted invalid model is recorded: `XFAIL` plus `OK`.
 XFAIL cases also carry the CTest label `broken`, so the known-gap inventory is
 directly runnable with `ctest --test-dir build -L broken`.
 
+A case can also give the write_array column names it expects at the check
+point, comma separated, which makes `stanli_check` print them:
+
+```stan
+// STANLI-LIT-WANAMES: g:1,g:2.1,g:2.2
+```
+
 ## Checking a lowering pass
 
 A case can additionally assert the shape of one pass dump. `STANLI-LIT-DUMP`

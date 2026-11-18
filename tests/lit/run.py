@@ -17,6 +17,10 @@ A case can also assert the shape of one lowering-pass dump:
     // STANLI-LIT-CHECK: s{{[0-9]+}}[195] = FMA
     // STANLI-LIT-CHECK-NEXT: s{{[0-9]+}}[1] = INDEX
     // STANLI-LIT-CHECK-NOT: SUM_VEC
+
+or the write_array column names at the check point, comma separated:
+
+    // STANLI-LIT-WANAMES: g:1,g:2.1,g:2.2
 """
 
 from __future__ import annotations
@@ -34,6 +38,7 @@ EXPECT_PREFIX = "// STANLI-LIT-EXPECT: "
 DATA_PREFIX = "// STANLI-LIT-DATA: "
 TIMEOUT_PREFIX = "// STANLI-LIT-TIMEOUT: "
 DUMP_PREFIX = "// STANLI-LIT-DUMP: "
+WANAMES_PREFIX = "// STANLI-LIT-WANAMES:"
 CHECK_PREFIXES = {
     "// STANLI-LIT-CHECK: ": "CHECK",
     "// STANLI-LIT-CHECK-NEXT: ": "CHECK-NEXT",
@@ -47,6 +52,13 @@ def directive(lines: list[str], prefix: str) -> str | None:
     if len(values) > 1:
         raise ValueError(f"duplicate {prefix.strip()} directive")
     return values[0] if values else None
+
+
+def wa_names(stdout: str) -> str:
+    for line in stdout.splitlines():
+        if line == "WANAMES" or line.startswith("WANAMES "):
+            return line[len("WANAMES"):].strip()
+    return "no write_array row"
 
 
 def checks(lines: list[str]) -> list[tuple[str, str]]:
@@ -138,6 +150,7 @@ def main() -> int:
         timeout_text = directive(lines, TIMEOUT_PREFIX) or "30"
         dump_stage = directive(lines, DUMP_PREFIX)
         check_directives = checks(lines)
+        want_names = directive(lines, WANAMES_PREFIX)
         if check_directives and not dump_stage:
             raise ValueError("CHECK directives need a STANLI-LIT-DUMP stage")
         if status not in {"PASS", "XFAIL"}:
@@ -167,6 +180,8 @@ def main() -> int:
         command = [str(args.stanli_check), str(source), str(data_path)]
         if dump_stage:
             command.append(f"--dump-passes={dump_stage}")
+        if want_names is not None:
+            command.append("--wa-values")
         try:
             completed = subprocess.run(
                 command,
@@ -204,6 +219,11 @@ def main() -> int:
             print(f"FAIL {args.case}: unmatched {failed}")
             print("\n".join(region))
             return 1
+
+    if want_names is not None and wa_names(completed.stdout) != want_names:
+        print(f"FAIL {args.case}: write_array names "
+              f"{wa_names(completed.stdout)!r}, expected {want_names!r}")
+        return 1
 
     if matches(expect, result, completed.returncode):
         print(f"{status} {args.case}: {result}")
