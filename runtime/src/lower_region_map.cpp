@@ -271,15 +271,20 @@ bool only_accumulates(const mir::Stmt& s, const std::string& name,
 
 }  // namespace
 
-bool Lowering::lower_region_map(const mir::Stmt& s, long lo, long hi) {
+RegionMapSwitches read_region_map_switches() {
   const char* mode = debug_env("STANLI_REGION_MAP");
-  if (mode && std::string_view(mode) == "0") return false;
+  RegionMapSwitches switches;
+  switches.off = mode && std::string_view(mode) == "0";
+  switches.diagnostics = debug_env("STANLI_REGION_MAP_DIAGNOSTICS") != nullptr;
+  return switches;
+}
+bool Lowering::lower_region_map(const mir::Stmt& s, long lo, long hi) {
+  if (region_map_switches.off) return false;
   if (in_write_array || region_current) return false;
   if (structured_policy == StructuredMode::Prefer ||
       structured_policy == StructuredMode::Force)
     return false;
-  const bool diagnostics =
-      debug_env("STANLI_REGION_MAP_DIAGNOSTICS") != nullptr;
+  const bool diagnostics = region_map_switches.diagnostics;
   const auto refuse = [&](const std::string& why) {
     if (diagnostics)
       emit_diagnostic("stanli_region_map refused (" + s.loopvar + "): " + why);

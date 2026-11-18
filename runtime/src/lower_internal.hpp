@@ -364,6 +364,13 @@ enum class StructuredMode { Off, Auto, Prefer, Force };
 
 StructuredMode read_structured_mode();
 
+// STANLI_REGION_MAP=0 and STANLI_REGION_MAP_DIAGNOSTICS.
+struct RegionMapSwitches {
+  bool off = false;
+  bool diagnostics = false;
+};
+RegionMapSwitches read_region_map_switches();
+
 struct RealRange {
   double lo = 0;
   double hi = 0;
@@ -974,6 +981,9 @@ struct Lowering {
   // cheap outer-loop hazard gate fires, so ordinary expressions and loops pay
   // no repeated environment lookup or recursive scan.
   StructuredMode structured_policy = read_structured_mode();
+  // Also read once: lowering tries a region map for every loop it unrolls,
+  // and each environment lookup scans the whole environment.
+  RegionMapSwitches region_map_switches = read_region_map_switches();
   // How many columns precede the first transformed parameter and the first
   // generated quantity. Unset until such a column is emitted (a section can
   // be empty), which run_write_array then reads as "at the end".
