@@ -1527,6 +1527,38 @@ static void test_udf_void_names() {
   }
 }
 
+// A parameter-dependent branch that writes only its own locals compiles, and
+// its checks still run when the branch is taken: the scale is s - theta.
+static void test_region_local_only() {
+  using namespace stanli;
+  CompiledModel cm;
+  try {
+    cm = compile_model(slurp("tests/fixtures/paramcond_local_only.tmir.sexp"),
+                       DataMap::from_json(R"({"s": 1.0})"));
+  } catch (const std::exception& error) {
+    check(false, std::string("local-only region compile: ") + error.what());
+    return;
+  }
+  Executor ex(cm.graph);
+  cm.bind(ex);
+  for (const double theta : {0.5, -0.5}) {
+    ex.params_data()[0] = theta;
+    double grad = 0.0;
+    expect_eq("local-only region lp", ex.gradient(&grad), -0.5 * theta * theta);
+    expect_eq("local-only region grad", grad, -theta);
+  }
+  ex.params_data()[0] = 2.0;
+  std::string got;
+  try {
+    double grad = 0.0;
+    (void)ex.gradient(&grad);
+  } catch (const std::domain_error& e) {
+    got = e.what();
+  }
+  check(got.find("Scale parameter is -1") != std::string::npos,
+        "local-only region rejects a negative scale, got '" + got + "'");
+}
+
 static void test_udf_void_statements() {
   using namespace stanli;
   const std::string mir = slurp("tests/fixtures/udf_void_statements.tmir.sexp");
@@ -9041,6 +9073,7 @@ int main() {
   test_udf_branch_kernels();
   test_udf_data_call_o1();
   test_udf_void_names();
+  test_region_local_only();
   test_udf_void_statements();
   test_structured_vector_return();
   test_structured_dead_after_break();

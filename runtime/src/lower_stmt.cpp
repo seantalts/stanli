@@ -648,6 +648,9 @@ void Lowering::lower_island(const mir::Stmt* s, const mir::Expr* e,
     c.emit_const(target_reg, &zero, 1);
     c.target_reg = target_reg;
   }
+  // The names the statement assigns that it does not declare itself.
+  std::vector<std::string> pre;
+  if (s) outer_assigned_names(*s, &pre);
   try {
     if (s) {
       // A local declared before the region but never assigned has no
@@ -655,8 +658,6 @@ void Lowering::lower_island(const mir::Stmt* s, const mir::Expr* e,
       // no outside value to read: the region declares it itself. Stan
       // initializes a local to NaN, and an arm that does not assign it
       // has to leave it that way.
-      std::vector<std::string> pre;
-      outer_assigned_names(*s, &pre);
       for (const std::string& name : pre) {
         if (scope.count(name) || decls.count(name)) outer_names.insert(name);
         if (int_locals.count(name)) outer_int_names.insert(name);
@@ -728,9 +729,12 @@ void Lowering::lower_island(const mir::Stmt* s, const mir::Expr* e,
   // mistake this catches -- a region that lost what it was to produce --
   // unless the region's entire purpose was a conditional effect: that has
   // no data output by design, its value being the output or exception.
+  // A statement that assigns nothing outside itself has nothing to lose.
+  // It still runs, because its checks can reject.
   reg->has_effect = island_has_effect(*prog);
   if (prog->out_regs.empty() && !(e && expr_out->len == 0) &&
-      (s == nullptr || reg->out_names.empty()) && !reg->has_effect)
+      (s == nullptr || (reg->out_names.empty() && !pre.empty())) &&
+      !reg->has_effect)
     fail("runtime-control region produces nothing", s ? s->raw : e->raw);
   finalize_island_program(*prog, !in_write_array, false, true);
   *prog_out = std::move(prog);
@@ -831,7 +835,8 @@ void Lowering::lower_runtime_ifelse(const mir::Stmt& s) {
   // keep the empty shape they already have outside. A `target +=` would
   // have put its own register here, so this cannot drop one -- and a
   // print()/reject() have no live-out by design, so it cannot either.
-  if (prog->out_regs.empty() && !reg.has_effect) return;
+  if (prog->out_regs.empty() && !reg.out_names.empty() && !reg.has_effect)
+    return;
   std::vector<int> out_slots;
   emit_island(prog, reg, out_lens, &out_slots);
   // Later statements read the island's results, not the old values.

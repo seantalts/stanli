@@ -3267,6 +3267,23 @@ static void expect_reduction_interp(const std::string& text,
   }
 }
 
+// A runtime statement that writes nothing outside itself compiles to an
+// island after the graph's runtime sum, rather than folding the sum.
+static void expect_reduction_island(const std::string& text, const char* what) {
+  using namespace stanli;
+  const CompiledModel cm = compile_model(text, reduction_data());
+  int sums = 0, islands = 0;
+  if (cm.write_array)
+    for (const Op& op : cm.write_array->graph.ops) {
+      sums += op.opcode == OP_SUM_VEC;
+      islands += op.opcode == OP_ISLAND;
+    }
+  if (!cm.write_array || cm.write_array->interp || sums != 1 || islands != 1) {
+    ++failures;
+    std::printf("FAIL %s: sums %d, islands %d\n", what, sums, islands);
+  }
+}
+
 static std::vector<double> eval_reduction_interp(
     const std::string& text, std::vector<std::string>* names) {
   using namespace stanli;
@@ -3971,8 +3988,7 @@ void test_runtime_int_sum_is_not_compile_time() {
       "    (meta <opaque>))\n   ";
   std::string loop = base;
   loop.insert(insertion, runtime_loop);
-  expect_reduction_interp(loop, "runtime-control region produces nothing",
-                          "unused runtime loop has no live output", true);
+  expect_reduction_island(loop, "unused runtime loop runs as an island");
 
   const std::string runtime_condition =
       "((pattern\n"
@@ -3985,8 +4001,7 @@ void test_runtime_int_sum_is_not_compile_time() {
       "    (meta <opaque>))\n   ";
   std::string condition = base;
   condition.insert(insertion, runtime_condition);
-  expect_reduction_interp(condition, "runtime-control region produces nothing",
-                          "runtime sum cannot provide a condition", true);
+  expect_reduction_island(condition, "runtime sum decides a runtime branch");
 }
 
 void test_runtime_int_sum_redeclaration_shadowing() {

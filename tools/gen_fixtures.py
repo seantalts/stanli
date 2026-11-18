@@ -30,6 +30,7 @@ O0_FIXTURES = {
     "gq_udf_loop_return_o0",
     "gq_function_exits",
     "paramcond_intarray",
+    "paramcond_local_only",
     "region_map_cf_nested",
     "region_map_cf_variant_o0",
     "reduce_sum_arguments",
