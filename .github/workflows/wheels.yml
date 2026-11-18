@@ -120,6 +120,8 @@ jobs:
         run: python3 tests/test_windows_exports.py
       - name: Check the x86-64 baseline ISA guard
         run: python3 tests/test_isa_baseline.py
+      - name: Check which cache entries the pruner deletes
+        run: python3 tests/test_prune_caches.py
       - name: Check each signature replay writes its own seed
         run: python3 tests/test_signature_seed.py
       - name: Check portable build parallelism
@@ -201,7 +203,7 @@ jobs:
       matrix:
         include: >-
           ${{ fromJSON(github.event_name == 'pull_request'
-              && '[{"os":"ubuntu-24.04","plat":"manylinux_2_28_x86_64","container":"ghcr.io/seantalts/stanli-manylinux:2_28-x86_64","opam_arch":"x86_64-linux","build_jobs":2,"runtime":"linux-x86_64"}]'
+              && '[{"os":"ubuntu-24.04","plat":"manylinux_2_28_x86_64","container":"ghcr.io/seantalts/stanli-manylinux:2_28-x86_64","opam_arch":"x86_64-linux","build_jobs":3,"runtime":"linux-x86_64"}]'
               || '[{"os":"macos-26","plat":"macosx_11_0_arm64","macos_target":"11.0","opam_arch":"arm64-macos","build_jobs":4,"runtime":"darwin-arm64"},{"os":"macos-15-intel","plat":"macosx_10_15_x86_64","macos_target":"10.15","opam_arch":"x86_64-macos","build_jobs":4,"runtime":"darwin-x86_64"},{"os":"ubuntu-24.04","plat":"manylinux_2_28_x86_64","container":"ghcr.io/seantalts/stanli-manylinux:2_28-x86_64","opam_arch":"x86_64-linux","build_jobs":2,"runtime":"linux-x86_64"},{"os":"ubuntu-24.04-arm","plat":"manylinux_2_28_aarch64","container":"ghcr.io/seantalts/stanli-manylinux:2_28-aarch64","opam_arch":"arm64-linux","build_jobs":2,"runtime":"linux-arm64"}]') }}
     steps:
       - uses: actions/checkout@v4
@@ -478,7 +480,9 @@ jobs:
           # Bounded, not bare -j. The containers ran at -j1 because one
           # densities.cpp compile peaked at 7.57 GB, so two at once
           # OOM-killed a 16 GB runner (exit 137). Sharded, the largest
-          # shard is 3.89 GB and -j3 worst-cases at 9.0 GB. Printing what
+          # shard is 3.89 GB and -j3 worst-cases at 9.0 GB. In a PR Clang
+          # build on 2026-11-17 the largest compile peaked at 4392 MB on a
+          # 16 GB runner, so PRs build at -j3; GCC keeps -j2. Printing what
           # the runner actually has, so the next person tuning this reads
           # it off a log instead of guessing.
           cores=$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo '?')
