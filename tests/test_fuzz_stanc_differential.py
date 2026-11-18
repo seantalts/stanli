@@ -171,6 +171,33 @@ class CompileAndBucketTest(unittest.TestCase):
                                          ("one_side_threw", {})]),
                          "one_side_threw")
 
+    def test_bisect_steps_always_collapse_lists(self):
+        steps = d.bisect_steps()
+        self.assertEqual(steps[0], ("list_collapsing", "list_collapsing"))
+        self.assertEqual(steps[1], ("function_inlining",
+                                    "function_inlining,list_collapsing"))
+        for added, spec in steps:
+            self.assertIn("list_collapsing", spec.split(","))
+            self.assertIn(added, spec.split(","))
+        self.assertEqual(steps[-1][1], ",".join(d.PRODUCTION_PASSES))
+        self.assertEqual([a for a, _ in steps[1:]],
+                         [p for p in d.PRODUCTION_PASSES
+                          if p != "list_collapsing"])
+
+    def test_guilty_step_must_show_the_o1_kind(self):
+        steps = [{"added": "list_collapsing", "primary": None},
+                 {"added": "function_inlining",
+                  "primary": "compile_fail_o1"},
+                 {"added": "constant_propagation", "primary": None},
+                 {"added": "dead_code_elimination",
+                  "primary": "write_array"}]
+        self.assertEqual(d.guilty_step(steps, "write_array"),
+                         "dead_code_elimination")
+        self.assertEqual(d.guilty_step(steps, "compile_fail_o1"),
+                         "function_inlining")
+        self.assertEqual(d.guilty_step(steps, "lp"), "function_inlining?")
+        self.assertEqual(d.guilty_step(steps[:1], "lp"), "unreproduced")
+
     def test_production_passes_follow_the_suite(self):
         self.assertEqual(d.PRODUCTION_PASSES[0], "function_inlining")
         self.assertEqual(d.PRODUCTION_PASSES[-1], "block_fixing")

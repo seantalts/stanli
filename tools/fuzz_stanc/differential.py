@@ -6,7 +6,8 @@ Each model is compiled twice by stanli-compile, with --passes none and
 log density, gradient, write_array rows, printed output and error messages
 must agree. When they do not, the production passes are added one at a time
 in the order stanc3's optimization_suite runs them, and the first pass that
-moves the answer away from the unoptimized one is reported.
+moves the answer away from the unoptimized one is reported. Every step also
+runs list_collapsing (see bisect_steps).
 
     tools/fuzz_stanc/differential.py --corpus stanc3_good --out results.json
     tools/fuzz_stanc/differential.py model.stan data.json [MODEL DATA]...
@@ -335,23 +336,56 @@ def differences(base, other):
     return compare_runs(base[1], other[1])
 
 
+def bisect_steps():
+    """(added pass, pass list) for each bisect step.
+
+    function_inlining leaves nested statement lists that list_collapsing
+    flattens, and stanli does not write transformed parameters whose
+    declarations sit in such a list. O1 always flattens them, so every step
+    runs list_collapsing too, and the first step tries it alone."""
+    steps = [("list_collapsing", "list_collapsing")]
+    for i, added in enumerate(PRODUCTION_PASSES):
+        if added == "list_collapsing":
+            continue
+        chosen = PRODUCTION_PASSES[:i + 1] + ("list_collapsing",)
+        steps.append((added, ",".join(p for p in PRODUCTION_PASSES
+                                      if p in chosen)))
+    return steps
+
+
+def guilty_step(steps, target):
+    """The pass added at the first step whose primary difference kind is
+    o1's. An intermediate pass list can make MIR that stanli refuses or
+    reads differently although o1 does not, so a step that differs in
+    another way is passed over. Without a match, the first step that
+    differs at all, marked with "?"."""
+    for s in steps:
+        if s["primary"] == target:
+            return s["added"]
+    for s in steps:
+        if s["primary"] is not None:
+            return s["added"] + "?"
+    return "unreproduced"
+
+
 def bisect(ctx, source, data_file, work, none, o1):
     """(guilty pass, steps) for a model whose o1 answer differs."""
-    steps, previous, guilty = [], none, None
-    for i, added in enumerate(PRODUCTION_PASSES):
-        spec = ",".join(PRODUCTION_PASSES[:i + 1])
+    target = primary_kind(differences(none, o1)[0])
+    steps, previous = [], none
+    for i, (added, spec) in enumerate(bisect_steps()):
         result = evaluate(ctx, source, data_file, work, spec, f"step{i}",
                           reuse=previous)
         diffs, reason = differences(none, result)
         steps.append({"added": added, "size": result[0]["size"],
                       "kinds": sorted({k for k, _ in diffs}),
+                      "primary": primary_kind(diffs) if diffs else None,
                       "not_comparable": reason})
         previous = result
-        if diffs:
-            guilty = added
+        if diffs and steps[-1]["primary"] == target:
             break
-    if guilty is None:
-        return "unreproduced", steps
+    guilty = guilty_step(steps, target)
+    if guilty == "unreproduced":
+        return guilty, steps
     # Guard: the full cumulative list must reproduce the o1 MIR.
     full = compile_model(ctx, source, ",".join(PRODUCTION_PASSES),
                          work / "full.mir")
