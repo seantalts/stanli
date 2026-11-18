@@ -116,6 +116,8 @@ class MirInterp {
   // CmdStan's generated code does, instead of a scalar fold. For the
   // interpreters whose values are the model's own results.
   void set_native_extrema(bool on) { native_extrema_ = on; }
+  // Whether `_lupdf` and `~` drop constants here, as the caller decides.
+  void set_propto(bool on) { propto_ctx_ = on; }
 
   // A host may bind a typed value directly and skip stanc's generated input
   // declaration/rebuild statements. Keep the declaration-owned geometry
