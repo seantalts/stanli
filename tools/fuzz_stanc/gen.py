@@ -2186,8 +2186,7 @@ class Gen:
         if self.w("tuple") > 0 and self.chance("tuple_arg", 0.3):
             j = r.randrange(len(params))
             if not (j == 0 and kind in ("lpdf", "lpmf")):
-                params[j] = (params[j][0], self.gen_type(allow_tuple=True,
-                                                         depth=0, force="tuple"))
+                params[j] = (params[j][0], self.gen_type(force="tuple"))
         if kind in ("lpdf", "lpmf"):
             ret = REAL
         elif kind == "void" or (kind == "lp" and r.random() < 0.4):
@@ -2281,7 +2280,8 @@ class Gen:
     def program(self):
         r, w = self.r, self.w
         lo, hi = self.cfg["sizes"]
-        self.p.sizes = [r.choice(SIZE_VALUES) for _ in range(r.randint(lo, hi))]
+        self.p.sizes = [r.choice(SIZE_VALUES)
+                        for _ in range(r.randint(lo, hi))]
         if 0 not in self.p.sizes and r.random() < 0.3:
             self.p.sizes[r.randrange(len(self.p.sizes))] = 0
         self.p.datavars = [DataVar(f"N{s}", INT, "size", sym=s)
