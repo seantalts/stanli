@@ -1567,6 +1567,36 @@ static void test_region_local_only() {
         "local-only region rejects a negative scale, got '" + got + "'");
 }
 
+static void test_udf_void_early_return() {
+  using namespace stanli;
+  CompiledModel cm;
+  try {
+    cm = compile_model(slurp("tests/fixtures/udf_void_early_return.tmir.sexp"),
+                       DataMap());
+  } catch (const std::exception& error) {
+    check(false, std::string("void early return compile: ") + error.what());
+    return;
+  }
+  Executor ex(cm.graph);
+  cm.bind(ex);
+  for (const auto& [p, want] : std::vector<std::pair<double, std::string>>{
+           {2.0, ""}, {-0.5, ""}, {0.5, "x is -1.5"}, {-2.0, "x is -2"}}) {
+    ex.params_data()[0] = p;
+    double grad = 0.0;
+    std::string got;
+    try {
+      const double lp = ex.gradient(&grad);
+      expect_eq("void early return lp", lp, p);
+      expect_eq("void early return grad", grad, 1.0);
+    } catch (const std::domain_error& e) {
+      got = e.what();
+    }
+    check(want.empty() ? got.empty() : got.find(want) != std::string::npos,
+          "void early return at " + std::to_string(p) + ": want '" + want +
+              "', got '" + got + "'");
+  }
+}
+
 static void test_udf_void_statements() {
   using namespace stanli;
   const std::string mir = slurp("tests/fixtures/udf_void_statements.tmir.sexp");
@@ -9082,6 +9112,7 @@ int main() {
   test_udf_data_call_o1();
   test_udf_void_names();
   test_region_local_only();
+  test_udf_void_early_return();
   test_udf_void_statements();
   test_structured_vector_return();
   test_structured_dead_after_break();

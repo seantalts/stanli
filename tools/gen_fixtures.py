@@ -49,6 +49,7 @@ O0_FIXTURES = {
     "udf_lp_branch_propto",
     "udf_local_shape",
     "udf_lp_propto",
+    "udf_void_early_return",
     "udf_void_names",
     "udf_void_statements",
     "whileloop",

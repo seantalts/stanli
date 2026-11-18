@@ -1538,7 +1538,8 @@ struct ProgramCompiler {
 
   static bool same_view(const Range& a, const Range& b) {
     if (a.kind != b.kind) return false;
-    if (a.kind == ViewKind::Flat) return a.len == 1 && b.len == 1;
+    // A zero-width flat range is no value, as a void return gives.
+    if (a.kind == ViewKind::Flat) return a.len == b.len && a.len <= 1;
     if (a.kind == ViewKind::Vector || a.kind == ViewKind::RowVector)
       return a.len == b.len;
     if (a.kind == ViewKind::Array)
