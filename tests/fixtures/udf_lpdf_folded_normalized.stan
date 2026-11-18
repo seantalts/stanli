@@ -5,8 +5,11 @@ functions {
     }
     return normal_lupdf(y | 0.5, 0.5);
   }
-  real fixed_lpdf(real y) {
+  real inner_lpdf(real y) {
     return normal_lupdf(0.25 | 0.5, 0.5);
+  }
+  real outer_lpdf(real y) {
+    return inner_lupdf(0.25 | );
   }
 }
 parameters {
@@ -16,7 +19,7 @@ transformed parameters {
   real t = shifted_lpdf(0.25 | );
   real u = 0;
   if (p < 100) {
-    u = fixed_lpdf(p | );
+    u = outer_lpdf(p | );
   }
 }
 model {

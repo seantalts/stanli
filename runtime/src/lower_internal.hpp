@@ -2057,6 +2057,14 @@ struct Lowering {
     if (!specialize_static_shapes(&specialized)) return std::nullopt;
     return try_eval_interpreter(specialized);
   }
+  // try_eval_pure for code whose propto__ is `propto`, such as a body that
+  // the region compiler inlines.
+  std::optional<DataMap::Entry> try_eval_pure(const mir::Expr& e, bool propto) {
+    const bool outer = propto_ctx;
+    set_propto_ctx(propto);
+    const ScopeExit restore{[&] { set_propto_ctx(outer); }};
+    return try_eval_pure(e);
+  }
   DataMap::Entry eval_pure(const mir::Expr& e, const std::string& use) {
     if (expr_effectful(e))
       fail("effectful expression cannot be used for " + use, e.raw);

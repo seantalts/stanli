@@ -1336,8 +1336,8 @@ static void test_udf_lp_propto() {
 // Lowering folds a call with data arguments in the MIR interpreter, which
 // has to use the call's normalization as the graph does. The branch in
 // shifted_lpdf makes lowering record the folded value for constant folding
-// to reuse. fixed_lpdf runs in a region on a parameter, whose compiler asks
-// the lowering for the value of its data-only density.
+// to reuse. outer_lpdf runs in a region on a parameter, whose compiler asks
+// the lowering for the value of the data-only call inside it.
 static void test_udf_lpdf_folded_normalized() {
   using namespace stanli;
   const std::string mir =

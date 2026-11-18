@@ -481,7 +481,7 @@ void Lowering::configure_island_compiler(ProgramCompiler& c,
   // data-only value -- nothing here depends on the region's own scope.
   c.extern_int = [&](const mir::Expr& x, long* out) {
     if (!x.data_only) return false;
-    auto evaluated = try_eval_pure(x);
+    auto evaluated = try_eval_pure(x, c.propto_ctx);
     if (!evaluated || !evaluated->is_int || evaluated->i.size() != 1)
       return false;
     *out = evaluated->i[0];
@@ -492,7 +492,7 @@ void Lowering::configure_island_compiler(ProgramCompiler& c,
     if (!x.data_only || x.unsized.depth == 0 ||
         x.unsized.leaf != mir::UnsizedLeaf::Int)
       return false;
-    auto evaluated = try_eval_pure(x);
+    auto evaluated = try_eval_pure(x, c.propto_ctx);
     if (!evaluated || !evaluated->is_int ||
         evaluated->i.size() != evaluated->r.size())
       return false;
@@ -502,7 +502,7 @@ void Lowering::configure_island_compiler(ProgramCompiler& c,
   };
   c.extern_real = [&](const mir::Expr& x, double* value) {
     if (!mir::is_unsized(x, mir::UnsizedLeaf::Real)) return false;
-    auto evaluated = try_eval_pure(x);
+    auto evaluated = try_eval_pure(x, c.propto_ctx);
     if (!evaluated || evaluated->is_int || evaluated->r.size() != 1)
       return false;
     *value = evaluated->r[0];
