@@ -109,6 +109,20 @@ class CompareRunsTest(unittest.TestCase):
             [k for k in kinds(d.compare_runs(ran(threw), ran(nan))[0])
              if k != "one_side_threw"], ["error_message"])
 
+    def test_no_row_when_log_density_threw(self):
+        # stanli_check runs write_array only after log_prob succeeds. An
+        # interpreted section reports no columns before its first row, which
+        # must not read as an empty row at a point where log_prob threw.
+        threw = same(BODY)
+        threw[0] = ["EVAL_FAIL bad scale 1.5"]
+        interpreted = check_status.CheckStatus(
+            {"record": "compile", "ok": True, "interpreter_fallbacks": ["gq"],
+             "write_array": {"section": "interpreted", "columns": 0,
+                             "truncated": "gq"}})
+        self.assertEqual(
+            d.compare_runs(ran(threw), ran(threw, status=interpreted)),
+            ([], None))
+
     def test_prints(self):
         printed = {k: ["mu=1"] + BODY for k in d.POINTS}
         other = {k: ["mu=1"] + BODY for k in d.POINTS}
