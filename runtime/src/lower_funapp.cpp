@@ -48,6 +48,7 @@ Lowering::BuiltinDispatch Lowering::resolve_builtin(const mir::Expr& e) {
           {"cols", BuiltinFamily::ShapeQuery},
           {"size", BuiltinFamily::ShapeQuery},
           {"num_elements", BuiltinFamily::ShapeQuery},
+          {"FnLength", BuiltinFamily::ShapeQuery},
 
       };
   const auto builtin = kBuiltins.find(e.name);
@@ -1171,7 +1172,7 @@ Lowering::Val Lowering::lower_funapp(const mir::Expr& e) {
     acc.layout = owning_layout(acc.si);
     return acc;
   }
-  if (e.fn_lib != mir::Expr::Lib::StanLib) {
+  if (e.fn_lib != mir::Expr::Lib::StanLib && e.name != "FnLength") {
     if (auto v = fold_const(e)) return *v;
     fail("unsupported function kind for " + e.name, e.raw);
   }
