@@ -4867,6 +4867,10 @@ struct ProgramCompiler {
           reals[s.loopvar] = Range{index, 1};
           const int one = konst(1);
           const int condition = alloc(1);
+          // The bound runs again on every trip, so a local of a function it
+          // calls has to be reset there like a local of the body.
+          structured_while_seen = true;
+          ++structured_while_depth;
           const int head = (int)p.code.size();
           const Range upper = expr(s.upper);
           if (!is_scalar(upper)) bail("for upper bound is not scalar");
@@ -4875,8 +4879,6 @@ struct ProgramCompiler {
           const int body_head = (int)p.code.size();
           loops.push_back({});
           loops.back().structured = true;
-          structured_while_seen = true;
-          ++structured_while_depth;
           ++runtime_for_depth;
           // Other paths may still continue or break; patch them below.
           (void)compile_body(s.body);
@@ -4957,13 +4959,14 @@ struct ProgramCompiler {
         for (const auto& child : s.body) assigned_names(child, &written);
         for (const std::string& name : written) reify_loop_write(name);
 
+        // The condition runs again on every trip, like the body.
+        structured_while_seen = true;
+        ++structured_while_depth;
         const int head = (int)p.code.size();
         std::vector<int> exits;
         cond_jump(s.cond, false, &exits);
         loops.push_back({});
         loops.back().structured = true;
-        structured_while_seen = true;
-        ++structured_while_depth;
         const bool body_returned = compile_body(s.body) == Path::Ended;
         --structured_while_depth;
         for (int jump : loops.back().continues) p.code[(size_t)jump].dst = head;
