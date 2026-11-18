@@ -1067,7 +1067,8 @@ jobs:
           working-directory: r
           extra-packages: >-
             any::testthat, any::posterior, any::V8, any::jsonlite,
-            any::bayesplot, any::loo, any::bridgesampling, any::tidybayes, any::callr, any::rstan, any::shinystan, any::cmdstanr, any::nutpieR
+            any::bayesplot, any::loo, any::bridgesampling, any::tidybayes, any::callr, any::rstan, any::shinystan, any::cmdstanr
+            ${{ github.event_name != 'pull_request' && 'any::nutpieR' || '' }}
           dependencies: '"hard"'
 
       # Through R CMD check rather than testthat directly, so the tests run
@@ -1076,12 +1077,14 @@ jobs:
       - name: Build and check
         working-directory: r
         # A check whose tests all skipped is green and worthless, which is
-        # the exact failure this job exists to prevent. The runtime and
-        # nutpieR are installed above, so their skips become failures.
+        # the exact failure this job exists to prevent. The runtime is
+        # installed above, so its skips become failures.
         env:
           _R_CHECK_FORCE_SUGGESTS_: 'false'
           STANLI_REQUIRE_RUNTIME: '1'
-          STANLI_REQUIRE_NUTPIER: '1'
+          # nutpieR builds from source, about 3 minutes, so PRs skip its
+          # tests. Runs after merge install it and require them.
+          STANLI_REQUIRE_NUTPIER: ${{ github.event_name != 'pull_request' && '1' || '' }}
         run: |
           R CMD build .
           R CMD check --no-manual --ignore-vignettes stanli_*.tar.gz

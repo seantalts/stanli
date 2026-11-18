@@ -39,8 +39,12 @@ def expression(value, context):
         if isinstance(node, ast.UnaryOp) and isinstance(node.op, ast.Not):
             return not visit(node.operand)
         if isinstance(node, ast.BoolOp):
-            values = (visit(item) for item in node.values)
-            return all(values) if isinstance(node.op, ast.And) else any(values)
+            # Like GitHub, && and || return an operand, not a boolean.
+            for item in node.values[:-1]:
+                value = visit(item)
+                if bool(value) != isinstance(node.op, ast.And):
+                    return value
+            return visit(node.values[-1])
         if isinstance(node, ast.Compare) and len(node.ops) == 1:
             left, right = visit(node.left), visit(node.comparators[0])
             if isinstance(node.ops[0], ast.Eq):
@@ -105,6 +109,21 @@ class CiPolicyTest(unittest.TestCase):
                 with self.subTest(item=item.get("name", item.get("uses")), event=event):
                     self.assertEqual(enabled(item, event), event != "pull_request")
             self.assertTrue(enabled(item, "push", ref="refs/tags/v1.0.0"))
+
+    def test_nutpie_is_installed_and_required_only_after_merge(self):
+        install = next(step for step in self.jobs["r-tests"]["steps"]
+                       if "setup-r-dependencies" in step.get("uses", ""))
+        packages = install["with"]["extra-packages"]
+        required = self.step("r-tests", "Build and check")["env"]["STANLI_REQUIRE_NUTPIER"]
+        for event in ("pull_request", "push", "schedule", "workflow_dispatch"):
+            with self.subTest(event=event):
+                after_merge = event != "pull_request"
+                listed = re.sub(r"\$\{\{(.*?)\}\}",
+                                lambda m: expression(m[1], {"github.event_name": event}),
+                                packages)
+                self.assertEqual("any::nutpieR" in listed.split(), after_merge)
+                self.assertEqual(expression(required, {"github.event_name": event}),
+                                 "1" if after_merge else "")
 
     def test_windows_wheel_and_prerequisites_follow_source_scope(self):
         for name in ("stanc-windows", "windows-compiler", "windows"):
