@@ -120,6 +120,8 @@ jobs:
         run: python3 tests/test_windows_exports.py
       - name: Check the x86-64 baseline ISA guard
         run: python3 tests/test_isa_baseline.py
+      - name: Check which cache entries the pruner deletes
+        run: python3 tests/test_prune_caches.py
       - name: Check each signature replay writes its own seed
         run: python3 tests/test_signature_seed.py
       - name: Check portable build parallelism
