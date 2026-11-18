@@ -118,6 +118,9 @@ class MirInterp {
   void set_native_extrema(bool on) { native_extrema_ = on; }
   // Whether `_lupdf` and `~` drop constants here, as the caller decides.
   void set_propto(bool on) { propto_ctx_ = on; }
+  // Where `target +=` adds in write_array, which accumulates from 0 like
+  // CmdStan's. Without one the statement is refused.
+  void set_target_sink(T* sum) { target_sink_ = sum; }
 
   // A host may bind a typed value directly and skip stanc's generated input
   // declaration/rebuild statements. Keep the declaration-owned geometry
@@ -745,6 +748,12 @@ class MirInterp {
           assign_whole(st.fn_args[k].name, std::move(values[k]));
         return;
       }
+      case mir::Stmt::TargetPE:
+        if (!target_sink_) fail("unsupported statement", st.raw);
+        // write_array runs without the Jacobian.
+        if (st.jacobian) return;
+        for (const T& term : eval(st.target).r) *target_sink_ += term;
+        return;
       default:
         fail("unsupported statement", st.raw);
     }
@@ -1278,6 +1287,7 @@ class MirInterp {
   const std::map<std::string, const mir::FunDef*>& funs_;
   std::string where_;
   bool native_extrema_ = false;
+  T* target_sink_ = nullptr;
   MirHooks hooks_;
   std::map<std::string, Value> env_;
   Value returned_;
@@ -1837,6 +1847,7 @@ class MirInterp {
     if (udf_depth_ > 64) fail("UDF recursion too deep");
     MirInterp sub(funs_, where_, hooks_);
     sub.native_extrema_ = native_extrema_;
+    sub.target_sink_ = target_sink_;
     sub.udf_depth_ = udf_depth_ + 1;
     sub.propto_ctx_ = propto;
     return sub;

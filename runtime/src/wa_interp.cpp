@@ -363,12 +363,12 @@ std::vector<double> WaInterp::eval(
       return write_param(*cur, s, row);
     return false;
   };
-  h.fun = [this, &rng](MirInterp<double>& in, const mir::Expr& e,
-                       DataMap::Entry* out) {
-    // The interpreter refuses `target +=`, so the target CmdStan's
-    // write_array accumulates from lp__ = 0 is still 0 here.
+  // CmdStan's write_array accumulates the target from lp__ = 0.
+  double target = 0.0;
+  h.fun = [this, &rng, &target](MirInterp<double>& in, const mir::Expr& e,
+                                DataMap::Entry* out) {
     if (mir::stateful_intrinsic_kind(e)) {
-      out->r = {0.0};
+      out->r = {target};
       return true;
     }
     return interpreted_rng_call(in, e, out, rng) ||
@@ -378,6 +378,7 @@ std::vector<double> WaInterp::eval(
   };
   MirInterp<double> in(funs_, "write_array", std::move(h));
   in.set_native_extrema(true);
+  in.set_target_sink(&target);
   cur = &in;
   in.set_parent_env(shared_env_.get());
   in.env() = base_env_;
