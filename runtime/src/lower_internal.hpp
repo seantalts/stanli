@@ -946,6 +946,16 @@ struct Lowering {
   // log_prob lowering adds model-block locals to both; a write_array local
   // of the same name must not start from the model block's last value.
   std::set<std::string> prepared_names;
+  // The prepared values of names that a log_prob local reuses, such as a
+  // size `v_1dim__` that stanc emits both for a model-block local `v` and
+  // for a generated quantity `v`. Lowering log_prob overwrites or drops
+  // them; restore_shadowed_prepared puts them back for write_array.
+  struct ShadowedPrepared {
+    std::optional<DataMap::Entry> value;
+    std::optional<DeclView> decl;
+  };
+  std::map<std::string, ShadowedPrepared> shadowed_prepared;
+  void restore_shadowed_prepared();
   bool data_prepared = false;
   std::function<void()> after_data_prepared;
   // Lowering generate_quantities rather than log_prob: parameters are columns
@@ -1480,6 +1490,8 @@ struct Lowering {
   // declared shape is bound instead.
   Val checked_binding(const Val& v, int64_t len, const SlotInfo& expected,
                       const std::string& name, const std::string& raw);
+  bool takes_value_shape(const Val& v, const SlotInfo& expected,
+                         const std::string& name);
   std::optional<std::string> assign_size_error(const Val& v, int64_t len,
                                                const SlotInfo& expected,
                                                const std::string& name);

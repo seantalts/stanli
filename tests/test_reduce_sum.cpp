@@ -21,6 +21,7 @@
 #include "expect.hpp"
 
 #include <stanli/compile.hpp>
+#include <stanli/detail/input_ranges.hpp>
 #include <stanli/message_sink.hpp>
 #include <stanli/optable.hpp>
 #include <stanli/reduce_sum.hpp>
@@ -643,6 +644,76 @@ void native_region_map() {
   }
 }
 
+// A callback that fills a local array element by element lowers to in-place
+// stores on slots the child produced, which children can run concurrently.
+void native_local_store() {
+  using namespace stanli;
+  if (!thread_safe_build()) return;
+  const auto mir = slurp("tests/fixtures/reduce_sum_local_store.tmir.sexp");
+  const auto data =
+      DataMap::from_json_file("tests/fixtures/reduce_sum_local_store.json");
+  CompileOptions options;
+  options.reduce_sum_min_chunk_ns = 0;
+  options.reduce_sum_threads = 4;
+  auto cm = compile_model(mir, data, 1, options);
+  std::string reasons;
+  for (const auto& reason : cm.reduce_sum_fallbacks) reasons += " " + reason;
+  expect_true("local-store callback retains one reduction:" + reasons,
+              count_opcode(cm.graph, OP_REDUCE_SUM) == 1 &&
+                  cm.reduce_sum_fallbacks.empty());
+  size_t stores = 0;
+  for (const auto& op : cm.graph.ops)
+    if (op.opcode == OP_REDUCE_SUM)
+      for (const auto& child :
+           static_cast<const ReduceSumSpec*>(op.udata)->children)
+        stores += count_opcode(child.graph, OP_SET_INDEX_INPLACE);
+  expect_true("children store in place", stores > 0);
+
+  auto serial = compile_model(mir, data);
+  Executor reference(std::move(serial.graph));
+  serial.bind(reference);
+  Executor plain(std::move(cm.graph));
+  cm.bind(plain);
+  Executor first(plain), second(plain);
+  ReduceExecutionContext first_team(4), second_team(4);
+  first.set_reduce_context(&first_team);
+  second.set_reduce_context(&second_team);
+  const auto evaluate_at = [](Executor& ex, int point) {
+    Run run;
+    run.grad.assign((size_t)ex.n_params(), 0.0);
+    for (int64_t i = 0; i < ex.n_params(); ++i)
+      ex.params_data()[i] = 0.5 * std::sin(double(i + 7 * point));
+    run.lp = ex.gradient(run.grad.data());
+    return run;
+  };
+  std::vector<Run> expected;
+  for (int point = 0; point < 3; ++point) {
+    const Run want = evaluate_at(reference, point);
+    const Run got = evaluate_at(first, point);
+    expect_true("local-store lp matches the whole slice",
+                std::abs(got.lp - want.lp) < 1e-10 * (1 + std::abs(want.lp)));
+    for (size_t i = 0; i < got.grad.size(); ++i)
+      expect_true("local-store gradient matches the whole slice",
+                  std::abs(got.grad[i] - want.grad[i]) <
+                      1e-10 * (1 + std::abs(want.grad[i])));
+    expected.push_back(got);
+  }
+  std::atomic<bool> chains_agree{true};
+  const auto chain = [&](Executor& executor) {
+    for (int repeat = 0; repeat < 50; ++repeat)
+      for (int point = 0; point < 3; ++point) {
+        const Run got = evaluate_at(executor, point);
+        if (got.lp != expected[point].lp || got.grad != expected[point].grad)
+          chains_agree = false;
+      }
+  };
+  std::thread chain_a(chain, std::ref(first)), chain_b(chain, std::ref(second));
+  chain_a.join();
+  chain_b.join();
+  expect_true("repeated and concurrent local-store evaluations agree bitwise",
+              chains_agree);
+}
+
 void serial_notice() {
   using namespace stanli;
   if (!thread_safe_build()) return;
@@ -895,6 +966,7 @@ int main() {
   native_corners();
   native_parallel();
   native_region_map();
+  native_local_store();
   native_inplace_stores();
   inplace_store_imports();
   serial_notice();

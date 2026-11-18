@@ -1345,11 +1345,20 @@ int stanli_sample_multi_metric(stanli_model* m, const stanli_sample_opts* opts,
 #endif
       }
     } flush_stdout;
-    if (refresh > 0 && m->threads_per_chain > 1 && m->reduce_sum_count == 0)
-      stanli::emit_message(
+    if (refresh > 0 && m->threads_per_chain > 1 && m->reduce_sum_count == 0) {
+      std::string note =
           "Note: threads_per_chain = " + std::to_string(m->threads_per_chain) +
-          " has no effect on this model, which has no reduce_sum call to run "
-          "in parallel.");
+          " has no effect on this model";
+      if (m->reduce_sum_fallbacks.empty()) {
+        note += ", which has no reduce_sum call to run in parallel.";
+      } else {
+        note += ", because its reduce_sum calls run on one thread (";
+        for (size_t i = 0; i < m->reduce_sum_fallbacks.size(); ++i)
+          note += (i ? "; " : "") + m->reduce_sum_fallbacks[i];
+        note += ").";
+      }
+      stanli::emit_message(note);
+    }
     switch (mo.metric) {
       case STANLI_METRIC_UNIT:
         cfg.metric = stanli::Metric::Unit;

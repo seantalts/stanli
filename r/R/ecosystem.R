@@ -5,7 +5,8 @@ register_ecosystem_methods <- function() {
     bayesplot = c("nuts_params", "log_posterior", "rhat", "neff_ratio"),
     loo = c("loo", "loo_compare"),
     tidybayes = "tidy_draws",
-    bridgesampling = "bridge_sampler"
+    bridgesampling = "bridge_sampler",
+    shinystan = "launch_shinystan"
   )
   for (package in names(methods)) {
     local({
@@ -22,6 +23,29 @@ register_ecosystem_methods <- function() {
       setHook(packageEvent(pkg, "onLoad"), register)
     })
   }
+  if ("shinystan" %in% loadedNamespaces()) register_shinystan_method()
+  setHook(packageEvent("shinystan", "onLoad"), function(...) register_shinystan_method())
+}
+
+# as.shinystan() is an S4 generic, so its method needs an S4 view of the
+# S3 class. Like the stanfit classes, it lives in a package-owned registry.
+.shinystan_registry <- new.env(parent = emptyenv())
+
+register_shinystan_method <- function() {
+  registry <- .shinystan_registry
+  if (exists(".__C__stanli_fit", envir = registry, inherits = FALSE))
+    return(invisible(NULL))
+  parent.env(registry) <- asNamespace("stanli")
+  registry$.packageName <- "stanli"
+  methods::setOldClass("stanli_fit", where = registry)
+  methods::setMethod(methods::getGeneric("as.shinystan", where = asNamespace("shinystan")),
+                     signature = "stanli_fit", definition = as_shinystan_stanli_fit,
+                     where = registry)
+  invisible(NULL)
+}
+
+as_shinystan_stanli_fit <- function(X, ...) {
+  shinystan::as.shinystan(as_stanfit(X), ...)
 }
 
 post_warmup_rows <- function(fit, inc_warmup = FALSE) {
@@ -49,9 +73,9 @@ sampler_long <- function(object, pars, inc_warmup = FALSE, parameter = TRUE) {
 
 #' R workflow integrations
 #'
-#' Optional methods for bayesplot, loo, tidybayes, and bridgesampling. Install
-#' the relevant package to use its generic; no plotting package is needed to
-#' load stanli.
+#' Optional methods for bayesplot, loo, tidybayes, bridgesampling, and
+#' shinystan. Install the relevant package to use its generic; no plotting
+#' package is needed to load stanli.
 #' Saved warmup is excluded by default.
 #'
 #' @param object,x,model A `stanli_fit`.
@@ -71,6 +95,9 @@ sampler_long <- function(object, pars, inc_warmup = FALSE, parameter = TRUE) {
 #' @details R-hat and effective sample size use [summary.stanli_fit()].
 #'   The ESS ratio is bulk ESS divided by the number of retained post-warmup
 #'   draws. Bayesplot's CmdStanMCMC method instead uses basic ESS.
+#'
+#'   `launch_shinystan` and `shinystan::as.shinystan()` convert the fit with
+#'   [as_stanfit()] first, so they need rstan as well as shinystan.
 #'
 #'   `bridge_sampler` estimates the log marginal likelihood from the
 #'   unconstrained post-warmup draws. Write the model with `target +=`
@@ -220,4 +247,9 @@ bridge_sampler.stanli_fit <- function(samples, repetitions = 1, method = "normal
     ub = stats::setNames(rep(Inf, n_par), p),
     repetitions = repetitions, method = method, cores = cores,
     use_neff = use_neff, maxiter = maxiter, silent = silent, verbose = verbose)
+}
+
+#' @rdname stanli-ecosystem
+launch_shinystan.stanli_fit <- function(object, ...) {
+  shinystan::launch_shinystan(as_stanfit(object), ...)
 }

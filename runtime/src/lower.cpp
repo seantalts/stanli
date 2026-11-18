@@ -440,8 +440,32 @@ void Lowering::bind_data(const mir::Program& p) {
     if (e.is_int && e.i.size() == 1 && e.dims.empty()) int_env[name] = e.i[0];
   }
   int_env_data = int_env;
+  const auto shadowed = [&](const auto& self, const mir::Stmt& st) -> void {
+    if (st.kind == mir::Stmt::Decl && prepared_names.count(st.decl_id) &&
+        !shadowed_prepared.count(st.decl_id)) {
+      ShadowedPrepared& saved = shadowed_prepared[st.decl_id];
+      if (const auto it = td.env().find(st.decl_id); it != td.env().end())
+        saved.value = it->second;
+      if (const auto it = decls.find(st.decl_id); it != decls.end())
+        saved.decl = it->second;
+    }
+    for (const auto& child : st.body) self(self, child);
+  };
+  for (const auto& st : p.log_prob) shadowed(shadowed, st);
   data_prepared = true;
   if (after_data_prepared) after_data_prepared();
+}
+void Lowering::restore_shadowed_prepared() {
+  for (auto& [name, saved] : shadowed_prepared) {
+    if (saved.value)
+      td.env()[name] = *saved.value;
+    else
+      td.env().erase(name);
+    if (saved.decl)
+      decls[name] = *saved.decl;
+    else
+      decls.erase(name);
+  }
 }
 // ---- statements -----------------------------------------------------------
 CompiledModel::ParamView Lowering::parameter_view(const mir::Stmt& s, int slot,
@@ -1545,6 +1569,7 @@ CompiledModel compile_model(const std::string& mir_text, const DataMap& data,
   }
   auto specialized = try_bounded_specialization(lo, *prog);
   CompiledModel cm = specialized ? std::move(*specialized) : lo.run(*prog);
+  lo.restore_shadowed_prepared();
   for (const mir::OutputVar& out : prog->output_vars)
     if (!out.annotations.empty())
       cm.annotations.emplace_back(out.name, out.annotations);
