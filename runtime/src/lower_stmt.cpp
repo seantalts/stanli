@@ -1166,6 +1166,15 @@ Lowering::Val Lowering::checked_binding(const Val& v, int64_t len,
       std::vector<double>(len, std::numeric_limits<double>::quiet_NaN()));
   return placeholder;
 }
+// stan::model::assign checks no size of a destination with no elements
+// beyond its nonzero outer extents, and the destination then holds the
+// value as it is.
+bool Lowering::takes_value_shape(const Val& v, const SlotInfo& expected,
+                                 const std::string& name) {
+  validate_view(v.si, g.slots[v.slot].len, "binding " + name);
+  validate_view(expected, 0, "declaration " + name);
+  return !assign_size_error(v, 0, expected, name);
+}
 // stan::model::assign's size check, which throws at every evaluation that
 // reaches the assignment.
 std::optional<std::string> Lowering::assign_size_error(
@@ -1210,12 +1219,17 @@ Lowering::Val Lowering::assign_value(const std::string& lhs, Val rhs,
                                      const std::string& raw) {
   auto old = scope.find(lhs);
   if (old != scope.end()) {
-    rhs = checked_binding(rhs, g.slots[old->second.slot].len, old->second.si,
-                          lhs, raw);
-    const bool param_free = rhs.si.param_free;
-    rhs.autodiff = old->second.autodiff;
-    rhs.si = old->second.si;
-    rhs.si.param_free = param_free;
+    const int64_t len = g.slots[old->second.slot].len;
+    if (len == 0 && g.slots[rhs.slot].len == 0 &&
+        takes_value_shape(rhs, old->second.si, lhs)) {
+      rhs.autodiff = old->second.autodiff;
+    } else {
+      rhs = checked_binding(rhs, len, old->second.si, lhs, raw);
+      const bool param_free = rhs.si.param_free;
+      rhs.autodiff = old->second.autodiff;
+      rhs.si = old->second.si;
+      rhs.si.param_free = param_free;
+    }
   } else {
     auto dl = decls.find(lhs);
     if (dl != decls.end()) {
@@ -1224,14 +1238,9 @@ Lowering::Val Lowering::assign_value(const std::string& lhs, Val rhs,
         dl->second.si = rhs.si;
         dl->second.deferred_shape = false;
       } else if (dl->second.len == 0 &&
-                 (g.slots[rhs.slot].len != 0 ||
-                  (is_matrix(dl->second.si) && is_matrix(rhs.si) &&
-                   (dl->second.si.rows != rhs.si.rows ||
-                    dl->second.si.cols != rhs.si.cols)))) {
-        // stan::model::assign treats a zero-size destination as a
-        // wildcard that takes the right-hand side's size. Slots do not
-        // resize, so the first whole-variable assignment defines the
-        // shape instead.
+                 takes_value_shape(rhs, dl->second.si, lhs)) {
+        // Slots do not resize, so the first whole-variable assignment
+        // defines the shape instead.
         dl->second.len = g.slots[rhs.slot].len;
         dl->second.si = rhs.si;
       } else {
@@ -1339,11 +1348,15 @@ void Lowering::lower_simple_stmt(const mir::Stmt& s) {
             s.decl_type.base == "SArray" && s.decl_type.elem_base == "SInt";
         if (s.has_init) {
           Val v = lower_expr(s.init);
-          v = checked_binding(v, sh.len, view_of(s.decl_type), s.decl_id,
-                              s.raw);
-          SlotInfo expected = view_of(s.decl_type, v.si.param_free);
+          if (sh.len == 0 && takes_value_shape(v, sh.si, s.decl_id)) {
+            sh.len = g.slots[v.slot].len;
+            sh.si = v.si;
+          } else {
+            v = checked_binding(v, sh.len, view_of(s.decl_type), s.decl_id,
+                                s.raw);
+            v.si = view_of(s.decl_type, v.si.param_free);
+          }
           v.autodiff = sh.autodiff;
-          v.si = expected;
           v.layout = owning_layout(v.si);
           scope[s.decl_id] = v;
         }

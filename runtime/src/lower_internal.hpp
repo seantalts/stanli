@@ -1480,6 +1480,8 @@ struct Lowering {
   // declared shape is bound instead.
   Val checked_binding(const Val& v, int64_t len, const SlotInfo& expected,
                       const std::string& name, const std::string& raw);
+  bool takes_value_shape(const Val& v, const SlotInfo& expected,
+                         const std::string& name);
   std::optional<std::string> assign_size_error(const Val& v, int64_t len,
                                                const SlotInfo& expected,
                                                const std::string& name);

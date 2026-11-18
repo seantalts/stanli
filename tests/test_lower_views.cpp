@@ -231,6 +231,11 @@ const std::vector<ValueCase>& value_cases() {
       {"explicit array[2] vector[0] construction",
        "viewa_explicit_zero_vectors",
        {{{0.25}, 200.25, {1}}}},
+      // stan::model::assign lets a destination with no elements take the
+      // value's shape, as --O1's array[0] matrix[0, 0] return temporaries do.
+      {"empty destination takes the value's shape",
+       "viewa_empty_assign_shape",
+       {{{0.25}, 3343.5, {2}}}},
   };
   return cases;
 }
@@ -503,6 +508,25 @@ void test_data_size_effect_prints_before_dimension_error() {
         "data size prints before the dimension error, got '" + printed + "'");
 }
 
+void test_empty_destination_checks_outer_size() {
+  stanli::CompiledModel model = stanli::compile_model(
+      fixture("viewa_empty_assign_mismatch"), stanli::DataMap{});
+  stanli::Executor ex(std::move(model.graph));
+  model.bind(ex);
+  ex.params_data()[0] = 0.25;
+  double grad[1] = {};
+  std::string thrown;
+  try {
+    (void)ex.gradient(grad);
+  } catch (const std::invalid_argument& e) {
+    thrown = e.what();
+  }
+  check(thrown ==
+            "assign array size: assigning variable two (2) and right hand "
+            "side (3) must match in size",
+        "array[2] destination rejects three elements, got '" + thrown + "'");
+}
+
 std::string lower_dump(const std::string& stem, const std::string& dir) {
   std::filesystem::remove_all(dir);
   auto data = stanli::DataMap::from_json_file(
@@ -539,6 +563,8 @@ int main() {
            test_data_size_effect_runs_once_per_site);
   run_case("data size effect prints before a dimension error",
            test_data_size_effect_prints_before_dimension_error);
+  run_case("empty destination checks its outer size",
+           test_empty_destination_checks_outer_size);
   run_case("while fallback leaves no trace",
            test_while_fallback_leaves_no_trace);
   if (failures == 0) std::printf("test_lower_views OK\n");
