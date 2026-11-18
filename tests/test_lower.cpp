@@ -667,6 +667,18 @@ static void test_fixture_constants() {
        "paramcond_empty",
        make_data([](DataMap& d) { d.set_int("n", 2); }),
        {{{0.5}, 0.5, {1.0}}, {{-0.5}, -0.5, {1.0}}}},
+      // A region that assigns nothing outside itself except an integer it
+      // folds has nothing to carry out.
+      {"region folded flag",
+       "region_folded_flag",
+       DataMap(),
+       {{{0.5}, 0.5, {1.0}}}},
+      // Nor does one whose only outer write sits in a loop that runs no
+      // times. v keeps its value 1.5 on both arms.
+      {"region zero-trip write",
+       "region_zero_trip_write",
+       DataMap(),
+       {{{0.5}, 0.75, {1.5}}, {{-0.5}, -0.75, {1.5}}}},
       // rep_vector inside a region: a run the compiler fills, at an extent it
       // knows. The repeated parameter is the part worth checking -- the
       // gradient is the broadcast's, every element adding into the one cell
