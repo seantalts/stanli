@@ -4129,6 +4129,7 @@ struct ProgramCompiler {
       ~Scope() { current = saved; }
     } scope{return_frame, return_frame};
     return_frame = &frame;
+    const size_t start = p.code.size();
     const Path path = compile_body(body);
     if (results) *results = frame.results;
     if (path == Path::Returned) return frame.result;
@@ -4137,10 +4138,19 @@ struct ProgramCompiler {
     if (!frame.has_result && !void_call) bail("function returned no value");
     // Fall through at the final return instead of dispatching a no-op jump.
     // Path::Ended propagates only through all-return paths; handlers with a
-    // fallthrough edge to code.size() consume it before reaching here.
+    // fallthrough edge to code.size() consume it before reaching here. A
+    // branch already patched to land just after the jump, as the one for
+    // `if (c) return;` is, moves back with it. Only the body's own code can
+    // branch there.
     if (!frame.jumps.empty() && frame.jumps.back() == (int)p.code.size() - 1) {
+      const int after = (int)p.code.size();
       p.code.pop_back();
       frame.jumps.pop_back();
+      for (size_t i = start; i < p.code.size(); ++i) {
+        Program::Instr& I = p.code[i];
+        if ((I.code == Program::JZ || I.code == Program::JMP) && I.dst == after)
+          I.dst = after - 1;
+      }
     }
     for (int jump : frame.jumps) p.code[(size_t)jump].dst = (int)p.code.size();
     return frame.result;

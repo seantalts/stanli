@@ -1417,6 +1417,36 @@ static void test_udf_lp_branch_propto() {
   }
 }
 
+// `if (a > 1) return;` at the end of a void function inlined into a
+// parameter-dependent branch. The branch's skip lands where the next
+// statement, `target += p`, begins.
+static void test_udf_void_return_in_branch() {
+  using namespace stanli;
+  const DataMap data = DataMap::from_json(
+      slurp("tests/fixtures/udf_void_return_in_branch.json"));
+  CompiledModel cm;
+  try {
+    cm = compile_model(
+        slurp("tests/fixtures/udf_void_return_in_branch.tmir.sexp"), data);
+  } catch (const std::exception& error) {
+    check(false,
+          std::string("udf void return in branch compile: ") + error.what());
+    return;
+  }
+  for (double q : {0.1, 1.5, -0.5}) {
+    Executor ex(cm.graph);
+    cm.bind(ex);
+    ex.params_data()[0] = q;
+    double grad = 0;
+    const std::string at = " at " + std::to_string(q);
+    const bool taken = q >= -0.3;
+    expect_ulp("udf void return in branch lp" + at, ex.gradient(&grad),
+               taken ? q : 0.0, 0);
+    expect_ulp("udf void return in branch grad" + at, grad, taken ? 1.0 : 0.0,
+               0);
+  }
+}
+
 // Kernels whose constant terms depend on the caller's propto and the
 // actual argument types, inside a parameter-dependent branch. reduce_sum with
 // an `_lpdf` partial is normalized and with `_lupdf` drops the data scale's
@@ -9146,6 +9176,7 @@ int main() {
   test_udf_lp_propto();
   test_udf_lp_inlined_propto();
   test_udf_lp_branch_propto();
+  test_udf_void_return_in_branch();
   test_udf_branch_kernels();
   test_udf_data_call_o1();
   test_udf_void_names();
