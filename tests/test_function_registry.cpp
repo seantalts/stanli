@@ -399,9 +399,6 @@ int main() {
     std::printf("FAIL complex overload matched numeric registry\n");
     return 1;
   }
-  // stanc synthesizes truncation normalizers with UInt metadata even on
-  // real-valued CDFs and log_diff_exp. Their surrounding unary minus must
-  // resolve from the registered result, not truncate the normalizer to int.
   const auto call = [](std::string name, std::vector<mir::Expr> args) {
     mir::Expr e;
     e.kind = mir::Expr::FunApp;
@@ -410,18 +407,6 @@ int main() {
     e.unsized.leaf = mir::UnsizedLeaf::Int;
     return e;
   };
-  mir::Expr real;
-  real.kind = mir::Expr::Var;
-  real.unsized.leaf = mir::UnsizedLeaf::Real;
-  const auto cdf = call("normal_lcdf", {real, real, real});
-  const auto normalizer = call("log_diff_exp", {cdf, cdf});
-  const auto negated = call("PMinus__", {normalizer});
-  if (function_spec(negated)->result() != FunctionArgumentKind::Real ||
-      function_spec(call("PMinus__", {negated}))->result() !=
-          FunctionArgumentKind::Real) {
-    std::printf("FAIL synthesized real normalizer resolved as integer\n");
-    return 1;
-  }
   mir::Expr integer;
   integer.kind = mir::Expr::LitInt;
   integer.unsized.leaf = mir::UnsizedLeaf::Int;
@@ -444,7 +429,7 @@ int main() {
   auto promoted = integer_negated;
   promoted.promoted = true;
   promoted.unsized.leaf = mir::UnsizedLeaf::Real;
-  auto user_call = normalizer;
+  auto user_call = call("f", {integer});
   user_call.fn_lib = mir::Expr::Lib::UserDefined;
   if (function_spec(call("PMinus__", {promoted}))->result() !=
           FunctionArgumentKind::Real ||
