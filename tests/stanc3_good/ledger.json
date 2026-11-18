@@ -101,16 +101,6 @@
   "cause": "The model multiplies and adds containers whose sizes come from data and never match. stanli sees the sizes when it binds the data and refuses the model with Stan Math's message; CmdStan throws the same kind of error at every evaluation.",
   "status": "one_side_threw"
  },
- "compiler-optimizations/mem_patterns/indexing2.stan": {
-  "cause": "The size check on assigning a 5-element slice to vector[6] tp_soa_single_idx_in_upfrom_idx is present in plain stanc's C++ and absent from stanc --O1's, whose MIR stanli lowers.",
-  "points": {
-   "0": "one_side_threw",
-   "1": "one_side_threw",
-   "2": "one_side_threw",
-   "3": "one_side_threw",
-   "4": "one_side_threw"
-  }
- },
  "compiler-optimizations/partial-eval.stan": {
   "cause": "complex numbers are not supported yet (in variable z)",
   "status": "unsupported"
@@ -180,14 +170,8 @@
   "status": "unsupported"
  },
  "function-signatures/math/matrix/csr_extract_v.stan": {
-  "cause": "Plain stanc sizes the local before assigning it, so CmdStan's assign checks the size and throws; stanc --O1, whose MIR stanli lowers, leaves the local empty and Stan's assign skips the check for an empty left side.",
-  "points": {
-   "0": "one_side_threw",
-   "1": "one_side_threw",
-   "2": "one_side_threw",
-   "3": "one_side_threw",
-   "4": "one_side_threw"
-  }
+  "cause": "unsupported function csr_extract_v",
+  "status": "unsupported"
  },
  "function-signatures/math/matrix/csr_extract_w.stan": {
   "cause": "unsupported function csr_extract_w",
@@ -247,6 +231,10 @@
  },
  "function-signatures/math/matrix/get_real.stan": {
   "cause": "mir: malformed sized declaration type",
+  "status": "unsupported"
+ },
+ "function-signatures/math/matrix/gp_regression.stan": {
+  "cause": "unsupported function gp_dot_prod_cov",
   "status": "unsupported"
  },
  "function-signatures/math/matrix/inv_fft.stan": {
@@ -357,16 +345,6 @@
   "cause": "complex numbers are not supported yet (in variable d_cmatrix) | in: (SComplexMatrix ((pattern (Var d_int)) (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly)))) ((pattern (Var d_int)) (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly)))))",
   "status": "unsupported"
  },
- "integrate_1d_good.stan": {
-  "cause": "stanc --O1, whose MIR stanli lowers, drops the unused model-block integrate_1d calls as dead code, so the one with lower limit 0.2 > upper limit 0 never runs; plain stanc keeps it and CmdStan throws 'integrate_1d: lower limit is 0.2, but must be less than or equal to 0'. stanli makes the same check when the call runs.",
-  "points": {
-   "0": "one_side_threw",
-   "1": "one_side_threw",
-   "2": "one_side_threw",
-   "3": "one_side_threw",
-   "4": "one_side_threw"
-  }
- },
  "laplace_deriv_check.stan": {
   "cause": "stanli write_array unsupported: unsupported call taking the function ll_function | in: (UFun (((AutoDiffable UVector) (AutoDiffable UReal) (AutoDiffable UVector) (AutoDiffable (UArray UInt))) (ReturnType UReal) FnPlain AoS))",
   "points": {
@@ -398,20 +376,6 @@
  "promotion/return_position.stan": {
   "cause": "complex numbers are not supported yet (in variable c) | in: (SComplexVector ((pattern (Lit Int 2)) (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly)))))",
   "status": "unsupported"
- },
- "runtime_errors/size_mismatch_fun.stan": {
-  "cause": "A function local matrix[2,3] is assigned a 2x4 value. Plain stanc's C++ checks the size and CmdStan throws 'matrix assign columns'; stanc --O1, whose MIR stanli lowers, leaves the local empty, so stanli's assignment takes any size.",
-  "status": "one_side_threw"
- },
- "runtime_errors/size_mismatch_lp_local.stan": {
-  "cause": "Plain stanc sizes the local before assigning it, so CmdStan's assign checks the size and throws; stanc --O1, whose MIR stanli lowers, leaves the local empty and Stan's assign skips the check for an empty left side.",
-  "points": {
-   "0": "one_side_threw",
-   "1": "one_side_threw",
-   "2": "one_side_threw",
-   "3": "one_side_threw",
-   "4": "one_side_threw"
-  }
  },
  "tuples/arrays-tuples-nested.stan": {
   "cause": "complex numbers are not supported yet (in variable very_deep.2.2.1)",
