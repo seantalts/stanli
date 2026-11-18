@@ -576,6 +576,20 @@ static void test_fixture_constants() {
        "early_return",
        make_data([](DataMap& d) { d.set_int("first", 1); }),
        {{{0.4}, 2.0 * 0.4, {2.0}}}},
+      // A parameter-dependent conditional expression with array arms. Below
+      // 0.25: 3 + p + 6. Above: (p + 3) + 1 + 2p.
+      {"parameter-condition array ternary",
+       "paramcond_array_ternary",
+       DataMap(),
+       {{{-0.5}, 8.5, {1.0}}, {{0.5}, 5.5, {3.0}}},
+       1,
+       true},
+      // An integer min or max in an index, with a shape query of a parameter
+      // as one argument. p[2] + 2 * p[3].
+      {"integer extrema index",
+       "int_extrema_index",
+       make_data([](DataMap& d) { d.set_int("N", 3); }),
+       {{{0.5, 0.25, 1.5}, 3.25, {0.0, 1.0, 2.0}}}},
       // rows() in a necessity island reads the logical matrix geometry rather
       // than being rejected as an unknown register-machine function.
       {"parameter-condition rows",
@@ -1318,6 +1332,88 @@ static void test_udf_lp_propto() {
   stan::math::recover_memory();
 }
 
+// The pinned stanc before 4b8c5f4c0 typed the cdf calls that it writes for
+// `T[1, ]` with the type of the int bound, so a user cdf that stanc did not
+// inline looked like an int and its real result was truncated.
+// udf_truncate_forms expects stanli's O1
+// answers and, for form 0, CmdStan's recorded answers for stanc3's
+// user-distro-truncate.stan. udf_truncate_shapes expects the same density
+// written with Stan Math.
+static void test_udf_truncate() {
+  using namespace stanli;
+  const double u[] = {-0.04, -0.02, 0.0, 0.02, 0.04, -0.04, -0.02};
+  const double inf = std::numeric_limits<double>::infinity();
+  const double expected_forms[][3] = {
+      {inf, -23.810511851378845, 23.840042659841107},
+      {-8.8608317549462381, -5.9376299625247633, 5.9600106649602766},
+      {-7.1808317549462375, -5.9376299625247633, 5.9600106649602766},
+      {inf, -5.9376299625247633, 5.9600106649602766}};
+  for (int form = 0; form < 4; ++form) {
+    const std::string name = "udf truncate form " + std::to_string(form);
+    CompiledModel cm;
+    try {
+      cm = compile_model(
+          slurp("tests/fixtures/udf_truncate_forms.tmir.sexp"),
+          DataMap::from_json("{\"form\": " + std::to_string(form) + "}"));
+    } catch (const std::exception& error) {
+      check(false, name + " compile: " + error.what());
+      continue;
+    }
+    Executor ex(cm.graph);
+    cm.bind(ex);
+    std::copy_n(u, 2, ex.params_data());
+    double grad[2] = {};
+    expect_ulp(name + " lp", ex.gradient(grad), expected_forms[form][0], 10);
+    expect_ulp(name + " grad y", grad[0], expected_forms[form][1], 10);
+    expect_ulp(name + " grad mu", grad[1], expected_forms[form][2], 10);
+  }
+
+  const DataMap data =
+      DataMap::from_json(slurp("tests/fixtures/udf_truncate_shapes.json"));
+  CompiledModel cm;
+  try {
+    cm = compile_model(slurp("tests/fixtures/udf_truncate_shapes.tmir.sexp"),
+                       data);
+  } catch (const std::exception& error) {
+    check(false, std::string("udf truncate shapes compile: ") + error.what());
+    return;
+  }
+  using stan::math::log_diff_exp;
+  using stan::math::square;
+  using stan::math::var;
+  std::vector<var> x(u, u + 7);
+  var lp = 0;
+  const var y = stan::math::lub_constrain(x[0], 1, 5, lp);
+  const var mu = x[1];
+  const var z[] = {stan::math::lub_constrain(x[2], 1, 5, lp),
+                   stan::math::lub_constrain(x[3], 1, 5, lp)};
+  const var nu[] = {x[4], x[5]};
+  const var lam = stan::math::lb_constrain(x[6], 0, lp);
+  const auto lcdf = [](double y, const var& mu) { return -1.7 / y - 0.1 * mu; };
+  const auto between = [&](const var& mu) {
+    return log_diff_exp(lcdf(5, mu), lcdf(1, mu));
+  };
+  lp += -square(y - mu) + 0.02 + 0.1 * mu;     // T[1, ]
+  lp += -square(y - mu) + 1.7 / 5 + 0.1 * mu;  // T[, 5]
+  lp += -square(y - mu) - between(mu);         // T[1, 5]
+  lp += -square(y - mu) + 0.02 + 0.1 * mu;     // T[L, ]
+  lp += -square(z[0] - mu) - square(z[1] - mu) - 2 * between(mu);
+  lp +=
+      -square(y - nu[0]) - square(y - nu[1]) - between(nu[0]) - between(nu[1]);
+  lp += 3 * stan::math::log(lam) - lam -
+        log_diff_exp(-1.5 / 9 - 0.1 * lam, -1.5 - 0.1 * lam);
+  lp.grad();
+  Executor ex(cm.graph);
+  cm.bind(ex);
+  std::copy_n(u, 7, ex.params_data());
+  double grad[7] = {};
+  expect_ulp("udf truncate shapes lp", ex.gradient(grad), lp.val(), 10);
+  for (int i = 0; i < 7; ++i)
+    expect_ulp("udf truncate shapes grad " + std::to_string(i), grad[i],
+               x[i].adj(), 10);
+  stan::math::recover_memory();
+}
+
 // stanc's O1 inliner substitutes the data actual for each formal, but an
 // indexed formal such as `s[i]` keeps the AutoDiffable adlevel it had in the
 // function body. CmdStan's types come from the actuals, so the data scales
@@ -1400,6 +1496,120 @@ static void test_udf_lp_branch_propto() {
     expect_ulp("udf lp branch lp" + at, ex.gradient(&grad), lp.val(), 10);
     expect_ulp("udf lp branch grad" + at, grad, tau.adj(), 10);
     stan::math::recover_memory();
+  }
+}
+
+// An `_lp` call adds to the target wherever it sits: in a branch condition,
+// or as a statement in a branch whose only other effect is an assignment.
+// Inside a parameter-dependent region neither is a `target +=` statement of
+// the region itself.
+static void test_udf_lp_condition() {
+  using namespace stanli;
+  const DataMap data =
+      DataMap::from_json(slurp("tests/fixtures/udf_lp_condition.json"));
+  CompiledModel cm;
+  try {
+    cm =
+        compile_model(slurp("tests/fixtures/udf_lp_condition.tmir.sexp"), data);
+  } catch (const std::exception& error) {
+    check(false, std::string("udf lp condition compile: ") + error.what());
+    return;
+  }
+  for (double q : {0.1, 0.5, 1.5}) {
+    stan::math::var p = q;
+    stan::math::var lp = -0.5 * stan::math::square(p);
+    const double x1 = q < 0.2 ? 1 : 0;
+    const double x2 = q < 1 ? 2 : x1;
+    lp += x1;
+    if (q < 1) lp += p;
+    lp += x2;
+    lp.grad();
+    Executor ex(cm.graph);
+    cm.bind(ex);
+    ex.params_data()[0] = q;
+    double grad = 0;
+    const std::string at = " at " + std::to_string(q);
+    expect_ulp("udf lp condition lp" + at, ex.gradient(&grad), lp.val(), 2);
+    expect_ulp("udf lp condition grad" + at, grad, p.adj(), 2);
+    stan::math::recover_memory();
+  }
+}
+
+// An `_lp` call as the whole condition of an empty branch, and as a loop
+// bound: the region has nothing to produce except the target increments.
+static void test_udf_lp_bound() {
+  using namespace stanli;
+  const DataMap data =
+      DataMap::from_json(slurp("tests/fixtures/udf_lp_bound.json"));
+  CompiledModel cm;
+  try {
+    cm = compile_model(slurp("tests/fixtures/udf_lp_bound.tmir.sexp"), data);
+  } catch (const std::exception& error) {
+    check(false, std::string("udf lp bound compile: ") + error.what());
+    return;
+  }
+  for (double q : {0.1, -1.5}) {
+    Executor ex(cm.graph);
+    cm.bind(ex);
+    ex.params_data()[0] = q;
+    double grad = 0;
+    const std::string at = " at " + std::to_string(q);
+    expect_ulp("udf lp bound lp" + at, ex.gradient(&grad), 2 * q, 0);
+    expect_ulp("udf lp bound grad" + at, grad, 2.0, 0);
+  }
+}
+
+// A structured candidate refused inside a branch of an inlined function.
+// Lowering catches the refusal, so the branch node the candidate was
+// filling must not stay the current one after it is gone.
+static void test_structured_refused_branch() {
+  using namespace stanli;
+  const DataMap data = DataMap::from_json(
+      slurp("tests/fixtures/structured_refused_branch.json"));
+  CompiledModel cm;
+  try {
+    cm = compile_model(
+        slurp("tests/fixtures/structured_refused_branch.tmir.sexp"), data);
+  } catch (const std::exception& error) {
+    check(false,
+          std::string("structured refused branch compile: ") + error.what());
+    return;
+  }
+  Executor ex(cm.graph);
+  cm.bind(ex);
+  ex.params_data()[0] = 0.1;
+  double grad = 1;
+  expect_ulp("structured refused branch lp", ex.gradient(&grad), 0.0, 0);
+  expect_ulp("structured refused branch grad", grad, 0.0, 0);
+}
+
+// `if (a > 1) return;` at the end of a void function inlined into a
+// parameter-dependent branch. The branch's skip lands where the next
+// statement, `target += p`, begins.
+static void test_udf_void_return_in_branch() {
+  using namespace stanli;
+  const DataMap data = DataMap::from_json(
+      slurp("tests/fixtures/udf_void_return_in_branch.json"));
+  CompiledModel cm;
+  try {
+    cm = compile_model(
+        slurp("tests/fixtures/udf_void_return_in_branch.tmir.sexp"), data);
+  } catch (const std::exception& error) {
+    check(false,
+          std::string("udf void return in branch compile: ") + error.what());
+    return;
+  }
+  for (double q : {0.1, 1.5, -0.5}) {
+    Executor ex(cm.graph);
+    cm.bind(ex);
+    ex.params_data()[0] = q;
+    double grad = 0;
+    const std::string at = " at " + std::to_string(q);
+    const bool taken = q >= -0.3;
+    expect_ulp("udf void return in branch lp" + at, ex.gradient(&grad),
+               taken ? q : 0.0, 0);
+    expect_ulp("udf void return in branch grad" + at, grad, taken ? 1.0 : 0.0,
+               0);
   }
 }
 
@@ -1519,6 +1729,106 @@ static void test_udf_void_names() {
     check(got.find(want) != std::string::npos,
           "udf void names reject: want '" + want + "', got '" + got + "'");
   }
+}
+
+// A parameter-dependent branch that writes only its own locals compiles, and
+// its checks still run when the branch is taken: the scale is s - theta.
+static void test_region_local_only() {
+  using namespace stanli;
+  CompiledModel cm;
+  try {
+    cm = compile_model(slurp("tests/fixtures/paramcond_local_only.tmir.sexp"),
+                       DataMap::from_json(R"({"s": 1.0})"));
+  } catch (const std::exception& error) {
+    check(false, std::string("local-only region compile: ") + error.what());
+    return;
+  }
+  Executor ex(cm.graph);
+  cm.bind(ex);
+  for (const double theta : {0.5, -0.5}) {
+    ex.params_data()[0] = theta;
+    double grad = 0.0;
+    expect_eq("local-only region lp", ex.gradient(&grad), -0.5 * theta * theta);
+    expect_eq("local-only region grad", grad, -theta);
+  }
+  ex.params_data()[0] = 2.0;
+  std::string got;
+  try {
+    double grad = 0.0;
+    (void)ex.gradient(&grad);
+  } catch (const std::domain_error& e) {
+    got = e.what();
+  }
+  check(got.find("Scale parameter is -1") != std::string::npos,
+        "local-only region rejects a negative scale, got '" + got + "'");
+}
+
+static void test_udf_void_early_return() {
+  using namespace stanli;
+  CompiledModel cm;
+  try {
+    cm = compile_model(slurp("tests/fixtures/udf_void_early_return.tmir.sexp"),
+                       DataMap());
+  } catch (const std::exception& error) {
+    check(false, std::string("void early return compile: ") + error.what());
+    return;
+  }
+  Executor ex(cm.graph);
+  cm.bind(ex);
+  for (const auto& [p, want] : std::vector<std::pair<double, std::string>>{
+           {2.0, ""}, {-0.5, ""}, {0.5, "x is -1.5"}, {-2.0, "x is -2"}}) {
+    ex.params_data()[0] = p;
+    double grad = 0.0;
+    std::string got;
+    try {
+      const double lp = ex.gradient(&grad);
+      expect_eq("void early return lp", lp, p);
+      expect_eq("void early return grad", grad, 1.0);
+    } catch (const std::domain_error& e) {
+      got = e.what();
+    }
+    check(want.empty() ? got.empty() : got.find(want) != std::string::npos,
+          "void early return at " + std::to_string(p) + ": want '" + want +
+              "', got '" + got + "'");
+  }
+}
+
+// A conditional expression whose condition prints and can reject. The
+// value is |p| and the print happens once per gradient.
+static void test_effect_ternary() {
+  using namespace stanli;
+  CompiledModel cm;
+  try {
+    cm = compile_model(
+        slurp("tests/fixtures/paramcond_effect_ternary.tmir.sexp"), DataMap());
+  } catch (const std::exception& error) {
+    check(false, std::string("effect ternary compile: ") + error.what());
+    return;
+  }
+  Executor ex(cm.graph);
+  cm.bind(ex);
+  for (const double p : {0.5, -0.5}) {
+    ex.params_data()[0] = p;
+    double grad = 0.0;
+    stanli_test::StdoutCapture output;
+    const double lp = ex.gradient(&grad);
+    const std::string text = output.finish();
+    expect_eq("effect ternary lp", lp, 0.5);
+    expect_eq("effect ternary grad", grad, p > 0 ? 1.0 : -1.0);
+    check(text == (p > 0 ? "f 0.5\n" : "f -0.5\n"),
+          "effect ternary prints once, got '" + text + "'");
+  }
+  ex.params_data()[0] = -2.0;
+  std::string got;
+  try {
+    double grad = 0.0;
+    stanli_test::StdoutCapture output;
+    (void)ex.gradient(&grad);
+  } catch (const std::domain_error& e) {
+    got = e.what();
+  }
+  check(got.find("x is -2") != std::string::npos,
+        "effect ternary rejects, got '" + got + "'");
 }
 
 static void test_udf_void_statements() {
@@ -4118,6 +4428,25 @@ int main() {
           "to_array_2d write_array interp");
   }
 
+  // A density of an empty integer outcome is 0, as in Stan Math, also when
+  // the interpreter evaluates it.
+  {
+    const std::string mir = slurp("tests/fixtures/empty_int_outcome.tmir.sexp");
+    DataMap d =
+        DataMap::from_json(slurp("tests/fixtures/empty_int_outcome.json"));
+    const std::vector<double> q{0.75};
+    const std::vector<double> want_row{0.75, 0, 0};
+    for (bool interp : {false, true}) {
+      const std::string what = std::string("empty int outcome write_array ") +
+                               (interp ? "interp" : "graph");
+      try {
+        check(write_array_row(mir, d, q, interp) == want_row, what);
+      } catch (const std::exception& error) {
+        check(false, what + ": " + error.what());
+      }
+    }
+  }
+
   // to_int truncates toward zero (-2.7 -> -2, -0.5 -> 0, 2.9 -> 2), where
   // rounding would give -3, -1 (or 0), and 3. r = [[1.9, -2.9], [3.5, -0.5]]
   // truncates to [[1, -2], [3, 0]]; the model's coefficient on q is
@@ -5634,8 +5963,7 @@ int main() {
     }
   }
 
-  // Parameter-dependent truncation must retain its real normalizer even
-  // when stanc's synthesized MIR expressions carry UInt metadata. These
+  // Parameter-dependent truncation must retain its real normalizer. These
   // CmdStan values/gradients are from the independent conformance oracle:
   // https://github.com/seantalts/stanli/actions/runs/36575332712
   // Exercise generated reverse and var replay, including support rejection.
@@ -5717,6 +6045,40 @@ int main() {
       check(std::abs(lp - acc.val()) <= tol,
             "truncvec: lp matches the var path");
     }
+  }
+
+  // A truncated parameter vector with int bounds. The pinned stanc before
+  // 4b8c5f4c0 typed the normalizer times the length as an int, and stanli
+  // multiplied it as one.
+  {
+    CompiledModel tm =
+        compile_model(slurp("tests/fixtures/trunc_param_vector.tmir.sexp"),
+                      DataMap::from_json("{}"));
+    Executor tex(std::move(tm.graph));
+    tm.bind(tex);
+    const double u[] = {-0.04, -0.02, 0.0, 0.02, 0.04, -0.04};
+    using stan::math::var;
+    std::vector<var> x(u, u + 6);
+    var acc = 0;
+    Eigen::Matrix<var, Eigen::Dynamic, 1> z(2), w(2);
+    z << stan::math::lub_constrain(x[0], 1, 5, acc),
+        stan::math::lub_constrain(x[1], 1, 5, acc);
+    w << stan::math::lb_constrain(x[3], 0, acc),
+        stan::math::lb_constrain(x[4], 0, acc);
+    const var mu = x[2], nu = x[5];
+    acc += stan::math::normal_lpdf<true>(z, mu, 1) -
+           2 * stan::math::log_diff_exp(stan::math::normal_lcdf(5, mu, 1),
+                                        stan::math::normal_lcdf(1, mu, 1));
+    acc += stan::math::normal_lpdf<true>(w, nu, 1) -
+           2 * stan::math::normal_lccdf(0, nu, 1);
+    acc.grad();
+    std::copy_n(u, 6, tex.params_data());
+    double grad[6] = {};
+    expect_ulp("trunc_param_vector lp", tex.gradient(grad), acc.val(), 10);
+    for (int i = 0; i < 6; ++i)
+      expect_ulp("trunc_param_vector grad " + std::to_string(i), grad[i],
+                 x[i].adj(), 10);
+    stan::math::recover_memory();
   }
 
   // A scalar int outcome against vectorized real arguments. See
@@ -9052,11 +9414,19 @@ int main() {
   test_region_constant_shadow();
   test_udf_guard_returns();
   test_udf_lp_propto();
+  test_udf_truncate();
   test_udf_lp_inlined_propto();
   test_udf_lp_branch_propto();
+  test_udf_lp_condition();
+  test_udf_lp_bound();
+  test_udf_void_return_in_branch();
+  test_structured_refused_branch();
   test_udf_branch_kernels();
   test_udf_data_call_o1();
   test_udf_void_names();
+  test_region_local_only();
+  test_udf_void_early_return();
+  test_effect_ternary();
   test_udf_void_statements();
   test_structured_vector_return();
   test_structured_dead_after_break();

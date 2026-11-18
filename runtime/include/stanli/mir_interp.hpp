@@ -833,7 +833,7 @@ class MirInterp {
     values.reserve(e.args.size());
     for (const mir::Expr& arg : e.args) values.push_back(eval(arg));
     const auto ints = [&](size_t k) {
-      if (!values[k].is_int || values[k].i.empty())
+      if (!values[k].is_int || (values[k].i.empty() && !values[k].r.empty()))
         fail(e.name + ": integer argument is not integer-valued", e.raw);
       return values[k].i;
     };

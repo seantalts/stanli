@@ -188,21 +188,24 @@ let split mir =
   | split -> Ok split
   | exception Portable_mir.Not_supported message -> Error (Unsupported message)
 
-let compile_mir_with_passes_uncached ?include_source ?(prune_unused_sections = true)
-    ?(model_only = false) ~passes ~model_name code =
+let production_settings passes =
+  { (Analysis_and_optimization.Optimize.level_optimizations O1) with
+    vectorize_loops= passes.vectorize_loops
+  ; preserve_stability= true
+  ; partial_evaluation= passes.partial_evaluation }
+
+(* [settings = None] returns the transformed O0 MIR. *)
+let compile_with_settings ?include_source ?(prune_unused_sections = true)
+    ?(model_only = false) ~settings ~budget ~model_name code =
   let compiled =
     compile_mir_at_level ?include_source
       ~optimization_level:Analysis_and_optimization.Optimize.O0 ~model_name code
   in
   let result, diagnostics =
-    match compiled.result with
-    | Error error -> (Error error, [])
-    | Ok mir -> (
-      let settings =
-        { (Analysis_and_optimization.Optimize.level_optimizations O1) with
-          vectorize_loops= passes.vectorize_loops
-        ; preserve_stability= true
-        ; partial_evaluation= passes.partial_evaluation } in
+    match (compiled.result, settings) with
+    | Error error, _ -> (Error error, [])
+    | Ok mir, None -> (split mir, [])
+    | Ok mir, Some settings -> (
       let optimize candidate settings =
         Common.ICE.with_exn_message (fun () ->
             Analysis_and_optimization.Optimize.optimization_suite ~settings
@@ -212,14 +215,16 @@ let compile_mir_with_passes_uncached ?include_source ?(prune_unused_sections = t
          generated-quantities locals. Preserve the original structural-budget
          decision as well. The remaining dataflow passes need only the
          procedures the portable encoder actually consumes. *)
-      match
-        Common.ICE.with_exn_message (fun () ->
-            Analysis_and_optimization.Optimize.function_inlining mir)
-      with
+      let inline mir =
+        if settings.Analysis_and_optimization.Optimize.function_inlining then
+          Common.ICE.with_exn_message (fun () ->
+              Analysis_and_optimization.Optimize.function_inlining mir)
+        else Ok mir in
+      match inline mir with
       | Error internal -> (Error (Internal_error internal), [])
       | Ok inlined ->
           let stats = max_procedure_stats inlined in
-          match passes.max_o1_statement_depth_cost with
+          match budget with
           | Some budget when stats.cost > budget ->
               ( split mir
               , [O1_budget_exceeded
@@ -244,6 +249,12 @@ let compile_mir_with_passes_uncached ?include_source ?(prune_unused_sections = t
               | Ok optimized -> (Ok optimized, [])) ) in
   {result; warnings= compiled.warnings; diagnostics}
 
+let compile_mir_with_passes_uncached ?include_source ?prune_unused_sections
+    ?model_only ~passes ~model_name code =
+  compile_with_settings ?include_source ?prune_unused_sections ?model_only
+    ~settings:(Some (production_settings passes))
+    ~budget:passes.max_o1_statement_depth_cost ~model_name code
+
 let compile_mir_with_passes ?include_source ?(cache_signatures = true)
     ?prune_unused_sections ?model_only
     ~passes ~model_name code =
@@ -254,13 +265,83 @@ let compile_mir_with_passes ?include_source ?(cache_signatures = true)
     Frontend.SignatureMismatch.with_stanlib_cache compile
   else compile ()
 
-let compile_mir ?include_source ?model_only ?fast_math ~model_name code =
-  compile_mir_with_passes ?include_source ?model_only
-    ~passes:(selected_default_passes ?fast_math ()) ~model_name code
+type pass_override =
+  | No_passes
+  | O1_without_fallback
+  | Only of Analysis_and_optimization.Optimize.optimization_settings
 
-let compile_portable ?include_source ?model_only ?fast_math ~model_name code =
+let pass_setters :
+    (string
+    * (   Analysis_and_optimization.Optimize.optimization_settings
+       -> Analysis_and_optimization.Optimize.optimization_settings))
+    list =
+  [ ("function_inlining", fun s -> {s with function_inlining= true})
+  ; ("constant_propagation", fun s -> {s with constant_propagation= true})
+  ; ("copy_propagation", fun s -> {s with copy_propagation= true})
+  ; ("dead_code_elimination", fun s -> {s with dead_code_elimination= true})
+  ; ("vectorize_loops", fun s -> {s with vectorize_loops= true})
+  ; ("one_step_loop_unrolling", fun s -> {s with one_step_loop_unrolling= true})
+  ; ("expression_propagation", fun s -> {s with expression_propagation= true})
+  ; ("partial_evaluation", fun s -> {s with partial_evaluation= true})
+  ; ("lazy_code_motion", fun s -> {s with lazy_code_motion= true})
+  ; ("static_loop_unrolling", fun s -> {s with static_loop_unrolling= true})
+  ; ("list_collapsing", fun s -> {s with list_collapsing= true})
+  ; ("optimize_ad_levels", fun s -> {s with optimize_ad_levels= true})
+  ; ("optimize_soa", fun s -> {s with optimize_soa= true})
+  ; ( "allow_uninitialized_decls"
+    , fun s -> {s with allow_uninitialized_decls= true} )
+  ; ("block_fixing", fun s -> {s with block_fixing= true})
+  ; ("preserve_stability", fun s -> {s with preserve_stability= true}) ]
+
+let pass_names = List.map fst pass_setters
+
+let parse_pass_override = function
+  | "none" -> Ok No_passes
+  | "o1" -> Ok O1_without_fallback
+  | spec ->
+      let start =
+        { Analysis_and_optimization.Optimize.no_optimizations with
+          preserve_stability= true } in
+      List.fold_left
+        (fun settings name ->
+          Result.bind settings (fun settings ->
+              match List.assoc_opt name pass_setters with
+              | Some set -> Ok (set settings)
+              | None ->
+                  Error
+                    (Fmt.str
+                       "unknown pass '%s'; expected none, o1, or a \
+                        comma-separated list of: %s"
+                       name
+                       (String.concat ", " pass_names))))
+        (Ok start)
+        (String.split_on_char ',' spec)
+      |> Result.map (fun settings -> Only settings)
+
+let compile_mir ?include_source ?model_only ?fast_math ?passes ~model_name code
+    =
+  let production = selected_default_passes ?fast_math () in
+  let without_budget settings =
+    Frontend.SignatureMismatch.with_stanlib_cache (fun () ->
+        compile_with_settings ?include_source ?model_only ~settings ~budget:None
+          ~model_name code) in
+  match passes with
+  | None ->
+      compile_mir_with_passes ?include_source ?model_only ~passes:production
+        ~model_name code
+  | Some O1_without_fallback ->
+      compile_mir_with_passes ?include_source ?model_only
+        ~passes:{production with max_o1_statement_depth_cost= None}
+        ~model_name code
+  | Some No_passes -> without_budget None
+  | Some (Only settings) ->
+      without_budget (Some {settings with preserve_stability= true})
+
+let compile_portable ?include_source ?model_only ?fast_math ?passes ~model_name
+    code =
   let compiled =
-    compile_mir ?include_source ?model_only ?fast_math ~model_name code in
+    compile_mir ?include_source ?model_only ?fast_math ?passes ~model_name code
+  in
   let result =
     match compiled.result with
     | Error error -> Error error

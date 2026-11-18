@@ -1762,6 +1762,44 @@ void check_decompositions() {
                "a library decomposition with too many targets");
 }
 
+// The optimizer can turn every write of a tuple output into a literal, so
+// the cursor places writes by the columns of each leaf. A write of no
+// columns takes the next empty leaf of the current variable, before or
+// after its other leaves, and only then moves to the next variable.
+void check_output_cursor_leaves() {
+  std::vector<mir::OutputVar> vars(3);
+  vars[0].name = "a";  // tuple(array[0] real, real, vector[0])
+  vars[1].name = "b";  // tuple(matrix[0, 0], int)
+  vars[2].name = "c";  // real
+  const std::map<std::string, std::vector<int64_t>> parts = {
+      {"a", {0, 1, 0}}, {"b", {0, 1}}, {"c", {1}}};
+  mir::OutputCursor cursor(vars);
+  std::string got;
+  for (const int64_t width : {0, 1, 0, 0, 1, 1}) {
+    const mir::OutputVar* var =
+        cursor.take("", std::nullopt, width,
+                    [&](const mir::OutputVar& v) { return parts.at(v.name); });
+    got += var ? var->name : std::string("none");
+    got += cursor.part() ? std::to_string(*cursor.part()) : std::string("-");
+    got += " ";
+  }
+  check(got == "a0 a1 a2 b0 b1 c0 ",
+        "literal writes take the leaves of tuple outputs in order: " + got);
+
+  // tuple(array[2] vector[0], vector[0], real): the first leaf is written
+  // element by element, so it gets no write, and a write that reads the
+  // second leaf belongs to it.
+  std::vector<mir::OutputVar> one(1);
+  one[0].name = "g";
+  mir::OutputCursor reads(one);
+  const auto g_parts = [](const mir::OutputVar&) {
+    return std::vector<int64_t>{0, 0, 1};
+  };
+  (void)reads.take("g", size_t{1}, 0, g_parts);
+  check(reads.part() == std::optional<size_t>(1),
+        "a write of an empty leaf is placed in the leaf it reads");
+}
+
 // `array[3] tuple(int, vector[2]) d` arrives as two leaf variables with the
 // tuple's type beside them; nothing reads their names. CmdStan's JSON reader
 // stores each leaf element by element under its key.
@@ -2471,6 +2509,7 @@ int main(int argc, char** argv) {
   check_multi_results();
   check_decompositions();
   check_tuple_interface();
+  check_output_cursor_leaves();
   check_exact_float_bits();
   check_nullary_math_constants();
   check_output_annotations();

@@ -63,7 +63,10 @@ std::vector<char> mark_constant_ops(const Graph& g) {
       // refuse to run here anyway (no evaluation state), but the refusal is
       // an exception that abandons this whole pass; excluding the region
       // leaves the rest of the constant sub-graph foldable.
-      bool c = op.n_in > 0 && !is_effectful_op(op.opcode);
+      // A region over literals alone, such as an inlined loop with constant
+      // bounds, has no inputs and is constant all the same.
+      bool c = (op.n_in > 0 || op.opcode == OP_ISLAND) &&
+               !is_effectful_op(op.opcode);
       if (c && op.opcode == OP_ISLAND && op.udata != nullptr &&
           island_has_effect(*static_cast<const IslandProg*>(op.udata)))
         c = false;

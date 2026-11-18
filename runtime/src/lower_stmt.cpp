@@ -49,34 +49,41 @@ static bool bounded_while_guard(const mir::Expr& e) {
   return true;
 }
 
-bool Lowering::expr_has_jacobian(const mir::Expr& e) {
+// Stan permits target and Jacobian increments in a user function precisely
+// when its name has the `_lp` or `_jacobian` suffix. Conservatively carry a
+// target through such a call; an unused zero is cheaper than dropping a
+// nested increment.
+static bool user_call_adds_to_target(mir::Expr::Lib lib, mir::FnSuffix suffix) {
+  return lib == mir::Expr::Lib::UserDefined &&
+         (suffix == mir::FnSuffix::Target || suffix == mir::FnSuffix::Jacobian);
+}
+bool Lowering::expr_adds_to_target(const mir::Expr& e) {
   if (e.kind == mir::Expr::FunApp) {
     CallableTransformSpec transform;
     if (callable_transform(e.name, &transform) &&
         transform.direction == TransformDirection::Jacobian)
       return true;
-    // Stan permits Jacobian adjustments in a UDF precisely when its name
-    // has this suffix. Conservatively carry a target through such a call;
-    // an unused zero is cheaper than dropping a nested adjustment.
-    if (e.fn_lib == mir::Expr::Lib::UserDefined &&
-        e.fn_suffix == mir::FnSuffix::Jacobian)
-      return true;
+    if (user_call_adds_to_target(e.fn_lib, e.fn_suffix)) return true;
   }
   for (const auto& a : e.args)
-    if (expr_has_jacobian(a)) return true;
+    if (expr_adds_to_target(a)) return true;
   return false;
 }
-// Does `s` increment the target, explicitly or through a Jacobian call?
+// Does `s` increment the target, explicitly or through a call?
 bool Lowering::has_target_pe(const mir::Stmt& s) {
   if (s.kind == mir::Stmt::TargetPE) return true;
-  if ((s.has_init && expr_has_jacobian(s.init)) || expr_has_jacobian(s.rhs) ||
-      expr_has_jacobian(s.target) || expr_has_jacobian(s.lower) ||
-      expr_has_jacobian(s.upper) || expr_has_jacobian(s.cond))
+  if (s.kind == mir::Stmt::NRFunApp &&
+      user_call_adds_to_target(s.fn_lib, s.fn_suffix))
+    return true;
+  if ((s.has_init && expr_adds_to_target(s.init)) ||
+      expr_adds_to_target(s.rhs) || expr_adds_to_target(s.target) ||
+      expr_adds_to_target(s.lower) || expr_adds_to_target(s.upper) ||
+      expr_adds_to_target(s.cond))
     return true;
   for (const auto& e : s.fn_args)
-    if (expr_has_jacobian(e)) return true;
+    if (expr_adds_to_target(e)) return true;
   for (const auto& e : s.lhs_idx)
-    if (expr_has_jacobian(e)) return true;
+    if (expr_adds_to_target(e)) return true;
   for (const auto& k : s.body)
     if (has_target_pe(k)) return true;
   return false;
@@ -648,6 +655,9 @@ void Lowering::lower_island(const mir::Stmt* s, const mir::Expr* e,
     c.emit_const(target_reg, &zero, 1);
     c.target_reg = target_reg;
   }
+  // The names the statement assigns that it does not declare itself.
+  std::vector<std::string> pre;
+  if (s) outer_assigned_names(*s, &pre);
   try {
     if (s) {
       // A local declared before the region but never assigned has no
@@ -655,8 +665,6 @@ void Lowering::lower_island(const mir::Stmt* s, const mir::Expr* e,
       // no outside value to read: the region declares it itself. Stan
       // initializes a local to NaN, and an arm that does not assign it
       // has to leave it that way.
-      std::vector<std::string> pre;
-      outer_assigned_names(*s, &pre);
       for (const std::string& name : pre) {
         if (scope.count(name) || decls.count(name)) outer_names.insert(name);
         if (int_locals.count(name)) outer_int_names.insert(name);
@@ -728,9 +736,12 @@ void Lowering::lower_island(const mir::Stmt* s, const mir::Expr* e,
   // mistake this catches -- a region that lost what it was to produce --
   // unless the region's entire purpose was a conditional effect: that has
   // no data output by design, its value being the output or exception.
+  // A statement that assigns nothing outside itself has nothing to lose.
+  // It still runs, because its checks can reject.
   reg->has_effect = island_has_effect(*prog);
   if (prog->out_regs.empty() && !(e && expr_out->len == 0) &&
-      (s == nullptr || reg->out_names.empty()) && !reg->has_effect)
+      (s == nullptr || (reg->out_names.empty() && !pre.empty())) &&
+      !reg->has_effect)
     fail("runtime-control region produces nothing", s ? s->raw : e->raw);
   finalize_island_program(*prog, !in_write_array, false, true);
   *prog_out = std::move(prog);
@@ -831,7 +842,8 @@ void Lowering::lower_runtime_ifelse(const mir::Stmt& s) {
   // keep the empty shape they already have outside. A `target +=` would
   // have put its own register here, so this cannot drop one -- and a
   // print()/reject() have no live-out by design, so it cannot either.
-  if (prog->out_regs.empty() && !reg.has_effect) return;
+  if (prog->out_regs.empty() && !reg.out_names.empty() && !reg.has_effect)
+    return;
   std::vector<int> out_slots;
   emit_island(prog, reg, out_lens, &out_slots);
   // Later statements read the island's results, not the old values.
@@ -867,10 +879,15 @@ void Lowering::lower_runtime_ifelse(const mir::Stmt& s) {
     if (!shaped_outside) {
       // The outside declaration was zero-size, which Stan's assignment
       // resizes; the region's registers carry the real shape.
-      si = SlotInfo{};
-      si.rows = reg.out_views[k].rows;
-      si.cols = reg.out_views[k].cols;
-      si.kind = reg.out_views[k].kind;
+      const Range& out_view = reg.out_views[k];
+      if (out_view.kind == ViewKind::Array) {
+        si = array_view(out_view.dims, out_view.leaf);
+      } else {
+        si = SlotInfo{};
+        si.rows = out_view.rows;
+        si.cols = out_view.cols;
+        si.kind = out_view.kind;
+      }
       auto dl = decls.find(name);
       if (dl != decls.end()) {
         dl->second.len = reg.out_views[k].len;
@@ -882,6 +899,8 @@ void Lowering::lower_runtime_ifelse(const mir::Stmt& s) {
     // select kernels that deliberately omit adjoints for that input.
     si.param_free = false;
     scope[name] = Val{out_slots[k], scalar_autodiff(), si};
+    // Its value is now known only at run time, as with an integer above.
+    td_erase(name);
   }
   if (reg.has_target) push_target_term(out_slots.back());
 }
@@ -895,9 +914,13 @@ Lowering::Val Lowering::lower_runtime_ternary(const mir::Expr& e) {
   std::vector<int> out_slots;
   emit_island(prog, reg, {value.len}, &out_slots);
   SlotInfo si;
-  si.rows = value.rows;
-  si.cols = value.cols;
-  si.kind = value.kind;
+  if (value.kind == ViewKind::Array) {
+    si = array_view(value.dims, value.leaf, false);
+  } else {
+    si.rows = value.rows;
+    si.cols = value.cols;
+    si.kind = value.kind;
+  }
   return {out_slots[0], scalar_autodiff(), si};
 }
 // Use the runtime-control compiler as a graph producer for higher-order
@@ -1827,25 +1850,21 @@ void Lowering::lower_simple_stmt(const mir::Stmt& s) {
             leaf                           ? leaf->base
             : base->kind == mir::Expr::Var ? base->name
                                            : std::string(),
-            g.slots[v.slot].len, [&](const mir::OutputVar& var) {
+            mir::detail::leaf_index(tuples, leaf), g.slots[v.slot].len,
+            [&](const mir::OutputVar& var) {
               if (mir::detail::is_tuple(var.type))
-                return mir::detail::output_columns(
+                return mir::detail::output_parts(
                     tuples, var,
                     [&](const mir::Expr& d) { return eval_int(d); });
-              return sized_len(var.type, nullptr, nullptr, var.name);
+              return std::vector<int64_t>{
+                  sized_len(var.type, nullptr, nullptr, var.name)};
             });
         if (owner == nullptr)
           fail("FnWriteParam matches no output variable", s.raw);
-        // A write may read a leaf of another tuple variable, the optimizer
-        // having made this value a copy of it.
-        if (leaf && leaf->base != owner->name) leaf = nullptr;
-        if (!leaf && mir::detail::is_tuple(owner->type)) {
-          leaf = mir::detail::leaf_at(
-              tuples, *owner, output_cursor.offset(), g.slots[v.slot].len,
-              [&](const mir::Expr& d) { return eval_int(d); });
-          if (!leaf)
-            fail("cannot name a write of part of tuple " + owner->name, s.raw);
-        }
+        leaf = mir::detail::output_leaf(tuples, *owner, leaf,
+                                        output_cursor.part());
+        if (!leaf && mir::detail::is_tuple(owner->type))
+          fail("cannot name a write of part of tuple " + owner->name, s.raw);
         if (owner->block != mir::OutputVar::Block::Parameters && !n_tp_start)
           n_tp_start = out.views.size();
         if (owner->block == mir::OutputVar::Block::GeneratedQuantities &&

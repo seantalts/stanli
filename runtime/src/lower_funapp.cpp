@@ -48,6 +48,7 @@ Lowering::BuiltinDispatch Lowering::resolve_builtin(const mir::Expr& e) {
           {"cols", BuiltinFamily::ShapeQuery},
           {"size", BuiltinFamily::ShapeQuery},
           {"num_elements", BuiltinFamily::ShapeQuery},
+          {"FnLength", BuiltinFamily::ShapeQuery},
 
       };
   const auto builtin = kBuiltins.find(e.name);
@@ -593,18 +594,26 @@ std::vector<mir::Stmt> single_exit_body(const mir::FunDef& f,
   ret.kind = mir::Stmt::Return;
   ret.has_init = true;
   ret.rhs = std::move(value);
-  if (!looped) return {std::move(decl), std::move(pass), std::move(ret)};
-  mir::Stmt flag;
-  flag.kind = mir::Stmt::Decl;
-  flag.decl_id = exited;
-  flag.decl_type.base = "SInt";
-  mir::Stmt clear;
-  clear.kind = mir::Stmt::Assignment;
-  clear.lhs = exited;
-  clear.rhs = one;
-  clear.rhs.lit_i = 0;
-  return {std::move(decl), std::move(flag), std::move(clear), std::move(pass),
-          std::move(ret)};
+  // A void function has no result to declare or return.
+  const bool has_result = !f.results.empty();
+  std::vector<mir::Stmt> out;
+  if (has_result) out.push_back(std::move(decl));
+  if (looped) {
+    mir::Stmt flag;
+    flag.kind = mir::Stmt::Decl;
+    flag.decl_id = exited;
+    flag.decl_type.base = "SInt";
+    mir::Stmt clear;
+    clear.kind = mir::Stmt::Assignment;
+    clear.lhs = exited;
+    clear.rhs = one;
+    clear.rhs.lit_i = 0;
+    out.push_back(std::move(flag));
+    out.push_back(std::move(clear));
+  }
+  out.push_back(std::move(pass));
+  if (has_result) out.push_back(std::move(ret));
+  return out;
 }
 
 }  // namespace
@@ -722,7 +731,8 @@ Lowering::Val Lowering::lower_call_udf(const mir::Expr& e,
     }
   }
   const std::vector<mir::Stmt>* body = &f.body;
-  if (mir::language_scalar(e) &&
+  const bool void_call = f.results.empty();
+  if ((mir::language_scalar(e) || void_call) &&
       (non_tail_return(f.body, true) ||
        std::any_of(f.body.begin(), f.body.end(), return_in_branch))) {
     auto rewritten =
@@ -1171,7 +1181,7 @@ Lowering::Val Lowering::lower_funapp(const mir::Expr& e) {
     acc.layout = owning_layout(acc.si);
     return acc;
   }
-  if (e.fn_lib != mir::Expr::Lib::StanLib) {
+  if (e.fn_lib != mir::Expr::Lib::StanLib && e.name != "FnLength") {
     if (auto v = fold_const(e)) return *v;
     fail("unsupported function kind for " + e.name, e.raw);
   }

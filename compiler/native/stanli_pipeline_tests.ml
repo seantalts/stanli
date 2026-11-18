@@ -1184,7 +1184,91 @@ let tuple_phase_a_tests () =
     (String.starts_with ~prefix:"user function f has overloads" message)
     ("unexpected overload message: " ^ message)
 
+let has_user_call name (mir : Program.Typed.t) =
+  let rec expr (e : Expr.Typed.t) =
+    (match e.pattern with
+     | Expr.Pattern.FunApp (Fun_kind.UserDefined (called, _), _) ->
+         String.equal called name
+     | _ -> false)
+    || Expr.Pattern.fold (fun found e -> found || expr e) false e.pattern in
+  let rec stmt (s : Stmt.Located.t) =
+    Stmt.Pattern.fold (fun found e -> found || expr e)
+      (fun found s -> found || stmt s) false s.pattern in
+  List.exists stmt mir.log_prob
+
+let parse_passes spec =
+  match Stanli_pipeline.parse_pass_override spec with
+  | Ok passes -> passes
+  | Error message -> failwith ("--passes " ^ spec ^ ": " ^ message)
+
+let pass_override_tests () =
+  let code =
+    {|
+    functions { real sq(real x) { return x * x; } }
+    data { int N; vector[N] y; }
+    parameters { real mu; }
+    model {
+      real s = sq(mu);
+      for (n in 1:N) y[n] ~ normal(mu, 1 + s);
+    }
+  |} in
+  let mir passes =
+    match
+      Stanli_pipeline.compile_mir ~passes ~model_name:"pass_selection_test"
+        code
+    with
+    | {result= Ok mir; diagnostics= []; _} -> mir
+    | {result= Ok _; _} -> failwith "pass override emitted a diagnostic"
+    | {result= Error _; _} -> failwith "pass override did not compile" in
+  let portable ?passes () =
+    match
+      Stanli_pipeline.compile_portable ?passes ~model_name:"pass_selection_test"
+        code
+    with
+    | {result= Ok encoded; _} -> encoded
+    | {result= Error _; _} -> failwith "pass override did not compile" in
+  require
+    (String.equal (encode (mir (parse_passes "none")))
+       (encode (compile_upstream_o0 code)))
+    "--passes none is not the transformed O0 MIR";
+  require
+    (String.equal (portable ~passes:(parse_passes "o1") ()) (portable ()))
+    "--passes o1 differs from the production output";
+  let production_list =
+    "function_inlining,constant_propagation,copy_propagation,\
+     dead_code_elimination,vectorize_loops,list_collapsing,optimize_soa,\
+     allow_uninitialized_decls,block_fixing" in
+  require
+    (String.equal
+       (portable ~passes:(parse_passes production_list) ())
+       (portable ()))
+    "the production pass list differs from the production output";
+  require
+    (has_user_call "sq" (mir (parse_passes "none")))
+    "the O0 model lost its user function call";
+  let inlined = mir (parse_passes "function_inlining") in
+  require (not (has_user_call "sq" inlined))
+    "function_inlining alone left the user function call";
+  require
+    (count_log_prob_fors inlined = 1)
+    "function_inlining alone vectorized or unrolled the loop";
+  match Stanli_pipeline.parse_pass_override "function_inlining,bogus" with
+  | Ok _ -> failwith "an unknown pass name was accepted"
+  | Error message ->
+      let mentions word =
+        let n = String.length word in
+        let rec at i =
+          i + n <= String.length message
+          && (String.equal (String.sub message i n) word || at (i + 1)) in
+        at 0 in
+      require
+        (mentions "bogus" && mentions "lazy_code_motion"
+       && mentions "optimize_soa")
+        ("the unknown-pass error does not name the pass and the valid names: "
+       ^ message)
+
 let () =
+  pass_override_tests ();
   tuple_wire_tests ();
   tuple_print_test ();
   tuple_print_source_test ();

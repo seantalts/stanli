@@ -15,11 +15,13 @@
 #include <stanli/constfold.hpp>
 #include <stanli/density_registry.hpp>
 #include <stanli/graph.hpp>
+#include <stanli/island.hpp>
 #include <stanli/optable.hpp>
 
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
+#include <memory>
 #include <string>
 #include <utility>
 #include <vector>
@@ -123,6 +125,38 @@ static void test_refuses_midchain_reader() {
   expect_close("mid-chain gradient", got[1], want[1]);
 }
 
+// A compiled region that reads no slot at all, as an inlined loop over
+// literals lowers, is as constant as one that reads only data.
+static void test_folds_region_without_inputs() {
+  Graph g;
+  Fills fills;
+  const int p = g.add_slot(1, true);
+  auto prog = std::make_shared<IslandProg>();
+  prog->n_regs = 2;
+  prog->pool = {2.0, 3.0};
+  prog->code = {
+      {Program::CONST, 0, 0}, {Program::CONST, 1, 1}, {Program::ADD, 0, 0, 1}};
+  prog->out_regs = {0};
+  const int c = g.add_slot(1, false);
+  const int island = g.add_op(OP_ISLAND, {}, c);
+  g.ops[(size_t)island].udata = prog.get();
+  g.udata_pool.push_back(prog);
+  const int m = g.add_slot(1, false);
+  g.add_op(OP_MUL, {p, c}, m);
+  g.result_slot = m;
+
+  Graph ref = g;
+  const std::vector<double> want = run_grad(std::move(ref), fills);
+  expect_close("region value before folding", want[0], 0.3 * 5.0);
+
+  Fills f2 = fills;
+  const ConstFoldStats st = const_fold(g, f2, {m});
+  expect("region without inputs folded", st.ops_removed == 1);
+  const std::vector<double> got = run_grad(std::move(g), f2);
+  expect_close("folded region value", got[0], want[0]);
+  expect_close("folded region gradient", got[1], want[1]);
+}
+
 static void test_env_disable() {
   test_setenv("STANLI_NO_CONSTFOLD", "1", 1);
   Graph g;
@@ -190,6 +224,7 @@ int main() {
   }
   test_folds_data_arithmetic();
   test_refuses_midchain_reader();
+  test_folds_region_without_inputs();
   test_keeps_categorical_op();
   test_env_disable();
   test_known_outputs();

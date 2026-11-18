@@ -2,6 +2,14 @@
 // lowering, typed views and the ordinary kernel vocabulary.
 using RegionNode = StructuredLoop::Node;
 RegionNode* region_current = nullptr;
+// Puts region_current back when a scope ends. A refused candidate throws out
+// of a child node that is a local of the frame being unwound, and lowering
+// can catch the refusal and go on.
+struct RegionRestore {
+  RegionNode*& current;
+  RegionNode* const saved = current;
+  ~RegionRestore() { current = saved; }
+};
 size_t region_emitted = 0;
 std::map<std::string, Val> region_cells;
 std::map<std::string, IntRange> region_analysis_ints;
@@ -1512,7 +1520,7 @@ std::optional<Val> region_expr(const mir::Expr& e) {
     branch.kind = RegionNode::If;
     branch.condition = condition.slot;
     branch.children.resize(2);
-    RegionNode* parent = region_current;
+    const RegionRestore parent{region_current};
     region_current = &branch.children[0];
     Val a = lower_expr(e.args[1]);
     Val result{add_slot(g.slots[a.slot].len, false), expression_autodiff(e),
@@ -1525,7 +1533,7 @@ std::optional<Val> region_expr(const mir::Expr& e) {
       fail("structured ternary changes shape");
     region_alias(result.slot, b.slot);
     region_flush();
-    region_current = parent;
+    region_current = parent.saved;
     region_append(std::move(branch));
     result.si.param_free =
         condition.si.param_free && a.si.param_free && b.si.param_free;
@@ -2049,7 +2057,7 @@ Flow lower_region_stmt(const mir::Stmt& s) {
       loop.iterator = iterator.slot;
       loop.children.resize(1);
       region_flush();
-      RegionNode* parent = region_current;
+      const RegionRestore parent{region_current};
       region_current = &loop.children[0];
       const bool saved_control = region_control_active;
       region_control_active |= !lower.si.param_free || !upper.si.param_free;
@@ -2057,7 +2065,7 @@ Flow lower_region_stmt(const mir::Stmt& s) {
       lower_region_body(s.body);
       --region_control_depth;
       region_flush();
-      region_current = parent;
+      region_current = parent.saved;
       region_append(std::move(loop));
       region_control_active = saved_control;
       region_widen_carried(s, dependencies);
@@ -2105,7 +2113,7 @@ Flow lower_region_stmt(const mir::Stmt& s) {
       loop.kind = RegionNode::While;
       loop.children.resize(2);
       region_flush();
-      RegionNode* parent = region_current;
+      const RegionRestore parent{region_current};
       region_current = &loop.children[0];
       Val condition = lower_expr(s.cond);
       loop.condition = condition.slot;
@@ -2117,7 +2125,7 @@ Flow lower_region_stmt(const mir::Stmt& s) {
       lower_region_body(s.body);
       --region_control_depth;
       region_flush();
-      region_current = parent;
+      region_current = parent.saved;
       region_append(std::move(loop));
       region_control_active = saved_control;
       region_widen_carried(s, dependencies);
@@ -2162,7 +2170,7 @@ Flow lower_region_stmt(const mir::Stmt& s) {
       const auto base_ranges = int_ranges;
       const auto base_real_ranges = real_ranges;
       const bool base_control = region_control_active;
-      RegionNode* parent = region_current;
+      const RegionRestore parent{region_current};
       std::map<int, IntRange> arms[2];
       std::map<int, RealRange> real_arms[2];
       std::map<std::string, Val> arm_scopes[2];
@@ -2235,7 +2243,7 @@ Flow lower_region_stmt(const mir::Stmt& s) {
           } else
             real_ranges.erase(v->second.slot);
         }
-      region_current = parent;
+      region_current = parent.saved;
       region_append(std::move(branch));
       return Flow::Next;
     }

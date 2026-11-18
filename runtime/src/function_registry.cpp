@@ -1048,35 +1048,6 @@ bool numeric_kind(const mir::Expr& expression, FunctionArgumentKind* kind) {
   return false;
 }
 
-bool argument_kind(const mir::Expr& expression, FunctionArgumentKind* kind) {
-  if (!numeric_kind(expression, kind)) return false;
-  if (*kind != FunctionArgumentKind::Integer ||
-      expression.kind != mir::Expr::FunApp ||
-      expression.fn_lib != mir::Expr::Lib::StanLib ||
-      expression.args.size() > 64)
-    return true;
-  // Synthesized truncation expressions can carry UInt metadata through
-  // real CDFs, log_diff_exp and their enclosing arithmetic. Infer their
-  // registered results bottom-up, preserving promotions and user calls.
-  uint64_t integers = 0;
-  bool real_argument = false;
-  for (size_t index = 0; index < expression.args.size(); ++index) {
-    FunctionArgumentKind argument;
-    if (!argument_kind(expression.args[index], &argument)) return true;
-    if (argument == FunctionArgumentKind::Integer)
-      integers |= uint64_t{1} << index;
-    else
-      real_argument = true;
-  }
-  const FunctionSpec* spec =
-      function_spec(expression.name, expression.args.size(), integers, *kind);
-  // All-integer calls can have separately lowered integer overloads absent
-  // from the registry (sum, for example). A promoted real registry overload
-  // is not proof that their integer metadata is wrong. Probability functions
-  // always return real; otherwise require a real operand as evidence.
-  if (spec && (spec->density() || real_argument)) *kind = spec->result();
-  return true;
-}
 }  // namespace
 
 const FunctionSpec* function_spec(const mir::Expr& call) {
@@ -1084,7 +1055,7 @@ const FunctionSpec* function_spec(const mir::Expr& call) {
   uint64_t integer_arguments = 0;
   for (size_t index = 0; index < call.args.size(); ++index) {
     FunctionArgumentKind kind;
-    if (!argument_kind(call.args[index], &kind)) return nullptr;
+    if (!numeric_kind(call.args[index], &kind)) return nullptr;
     if (kind == FunctionArgumentKind::Integer)
       integer_arguments |= uint64_t{1} << index;
   }

@@ -239,13 +239,15 @@ def with_status(got, status, k):
     """A point from parse_output, completed from the status records.
 
     stanli_check prints no write_array row for a model with no section or
-    no columns; that is an empty row. A row that threw says why in the
-    point record.
+    no columns; that is an empty row. It runs write_array only after the
+    log density, so a point where that threw has no row. A row that threw
+    says why in the point record.
     """
     got = dict(got or {"status": None, "wa": None})
     record = status.points.get(k, {}).get("write_array")
     section = status.write_array()
-    if got["wa"] is None and record is None and (
+    ran = got["status"] is not None and got["status"][0] == "OK"
+    if got["wa"] is None and record is None and ran and (
             section["section"] == "none" or section.get("columns") == 0):
         got["wa"] = ("ok", [], [])
     got["wa_unsupported"] = bool(record) and not record["ok"] and unsupported(

@@ -1538,7 +1538,8 @@ struct ProgramCompiler {
 
   static bool same_view(const Range& a, const Range& b) {
     if (a.kind != b.kind) return false;
-    if (a.kind == ViewKind::Flat) return a.len == 1 && b.len == 1;
+    // A zero-width flat range is no value, as a void return gives.
+    if (a.kind == ViewKind::Flat) return a.len == b.len && a.len <= 1;
     if (a.kind == ViewKind::Vector || a.kind == ViewKind::RowVector)
       return a.len == b.len;
     if (a.kind == ViewKind::Array)
@@ -2140,8 +2141,6 @@ struct ProgramCompiler {
     patch_jumps(to_else);
     const Range bv = expr(b);
     if (bv.len != av.len) bail("conditional arms of different widths");
-    if (av.kind == ViewKind::Array || bv.kind == ViewKind::Array)
-      bail("conditional arms of different logical views");
     if (!same_view(av, bv)) bail("conditional arms of different logical views");
     for (int k = 0; k < bv.len; ++k) emit(Program::MOV, dst + k, bv.reg + k);
     p.code[(size_t)jmp].dst = (int)p.code.size();
@@ -4130,6 +4129,7 @@ struct ProgramCompiler {
       ~Scope() { current = saved; }
     } scope{return_frame, return_frame};
     return_frame = &frame;
+    const size_t start = p.code.size();
     const Path path = compile_body(body);
     if (results) *results = frame.results;
     if (path == Path::Returned) return frame.result;
@@ -4138,10 +4138,19 @@ struct ProgramCompiler {
     if (!frame.has_result && !void_call) bail("function returned no value");
     // Fall through at the final return instead of dispatching a no-op jump.
     // Path::Ended propagates only through all-return paths; handlers with a
-    // fallthrough edge to code.size() consume it before reaching here.
+    // fallthrough edge to code.size() consume it before reaching here. A
+    // branch already patched to land just after the jump, as the one for
+    // `if (c) return;` is, moves back with it. Only the body's own code can
+    // branch there.
     if (!frame.jumps.empty() && frame.jumps.back() == (int)p.code.size() - 1) {
+      const int after = (int)p.code.size();
       p.code.pop_back();
       frame.jumps.pop_back();
+      for (size_t i = start; i < p.code.size(); ++i) {
+        Program::Instr& I = p.code[i];
+        if ((I.code == Program::JZ || I.code == Program::JMP) && I.dst == after)
+          I.dst = after - 1;
+      }
     }
     for (int jump : frame.jumps) p.code[(size_t)jump].dst = (int)p.code.size();
     return frame.result;
@@ -4460,12 +4469,14 @@ struct ProgramCompiler {
             emit(Program::ADD, accumulator->reg, accumulator->reg, v.reg + k);
           return Path::Open;
         }
-        auto deferred = deferred_shapes.find(s.lhs);
-        if (deferred != deferred_shapes.end()) {
+        if (deferred_shapes.count(s.lhs)) {
           if (!s.lhs_idx.empty())
             bail("indexed assignment before unsized shape adoption for " +
                  s.lhs);
+          // Evaluating the value can inline a call, which replaces these
+          // maps and leaves any iterator into them dangling.
           const Range v = assignment_value(s);
+          auto deferred = deferred_shapes.find(s.lhs);
           if (!unsized_accepts(deferred->second, v))
             bail("assignment logical view mismatch for " + s.lhs);
           auto binding = reals.find(s.lhs);
@@ -4573,7 +4584,7 @@ struct ProgramCompiler {
             late_bound.emplace_back(nd.reg, v.len);
             for (int k = 0; k < v.len; ++k)
               emit(Program::MOV, nd.reg + k, v.reg + k);
-            it->second = nd;
+            reals[s.lhs] = nd;
             if (have_folded_ints) {
               known_int_arrays[s.lhs] = std::move(folded_ints);
               known_int_array_dims[s.lhs] = nd.dims;

@@ -285,6 +285,12 @@ long Lowering::eval_int(const mir::Expr& e) {
               static_cast<int>(eval_int(e.args[1])));
         fail(e.name + ": unsupported integer builtin arity", e.raw);
       }
+      if (const mir::ExtremaCall extrema = mir::extrema_call(e);
+          extrema.surface == mir::ExtremaSurface::IntPair) {
+        const long a = eval_int(e.args[0]), b = eval_int(e.args[1]);
+        return extrema.kind == mir::ExtremaKind::Max ? std::max(a, b)
+                                                     : std::min(a, b);
+      }
       if (e.name == "sum" && e.args.size() == 1) {
         long acc = 0;
         for (int v : const_ints(e.args[0])) acc += v;
@@ -1295,8 +1301,9 @@ Lowering::Val Lowering::lower_expr_impl(const mir::Expr& e) {
     case mir::Expr::FunApp:
       return lower_funapp(e);
     case mir::Expr::TernaryIf: {
-      if (expr_effectful(e.args[0]))
-        fail("effectful expression cannot be a compile-time condition", e.raw);
+      // Evaluating an effectful condition while compiling would print or
+      // draw at the wrong time, so the region decides it when it runs.
+      if (expr_effectful(e.args[0])) return lower_runtime_ternary(e);
       // Shape specialization and ordinary data evaluation can decide a
       // condition even when the complete expression's MIR adlevel is not
       // DataOnly (for example `rows(x) == 0 || theta > 0`).  Only the

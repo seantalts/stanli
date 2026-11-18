@@ -37,15 +37,34 @@ val selected_default_passes : ?fast_math:bool -> unit -> pass_selection
 (** The shipping selection with the explicit [STANLI_NO_O1_FALLBACK] override.
     [fast_math] (default false) turns partial evaluation on. *)
 
+(** An explicit pass set that replaces the shipping policy, for testing the
+    optimizer against unoptimized output. *)
+type pass_override =
+  | No_passes
+      (** The transformed O0 MIR that the structural budget fallback returns,
+          without its diagnostic. *)
+  | O1_without_fallback
+      (** The shipping selection with the structural budget turned off. *)
+  | Only of Analysis_and_optimization.Optimize.optimization_settings
+      (** These upstream settings with stability preserved and no budget. *)
+
+val pass_names : string list
+(** The [optimization_settings] field names that {!parse_pass_override}
+    accepts, in the order [optimization_suite] first applies each one. *)
+
+val parse_pass_override : string -> (pass_override, string) result
+(** [none], [o1], or a comma-separated list of {!pass_names}. *)
+
 val compile_mir :
      ?include_source:Frontend.Include_files.t
   -> ?model_only:bool
   -> ?fast_math:bool
+  -> ?passes:pass_override
   -> model_name:string
   -> string
   -> Middle.Program.Typed.t compilation
 (** Parse, typecheck, apply the Stan Math MIR transform, and run the exact
-    optimization policy selected by stanli. *)
+    optimization policy selected by stanli, or [passes] when given. *)
 
 val compile_mir_with_passes :
      ?include_source:Frontend.Include_files.t
@@ -63,6 +82,7 @@ val compile_portable :
      ?include_source:Frontend.Include_files.t
   -> ?model_only:bool
   -> ?fast_math:bool
+  -> ?passes:pass_override
   -> model_name:string
   -> string
   -> string compilation

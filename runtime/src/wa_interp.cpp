@@ -441,33 +441,29 @@ bool WaInterp::write_param(MirInterp<double>& in, const mir::Stmt& s,
       }
       base = &base->args[0];
     }
-    const mir::detail::TupleLeaf* tuple_named =
+    const mir::detail::TupleLeaf* tuple =
         base->kind == mir::Expr::Var
             ? mir::detail::tuple_leaf(*prog_, base->name)
             : nullptr;
+    const auto extent = [&in](const mir::Expr& dim) { return in.as_int(dim); };
     const mir::OutputVar* owner = output_cursor_.take(
-        tuple_named                    ? tuple_named->base
+        tuple                          ? tuple->base
         : base->kind == mir::Expr::Var ? base->name
                                        : std::string(),
-        len, [&](const mir::OutputVar& var) {
-          return mir::detail::output_columns(
-              prog_->tuples.get(), var,
-              [&in](const mir::Expr& dim) { return in.as_int(dim); });
+        mir::detail::leaf_index(prog_->tuples.get(), tuple), len,
+        [&](const mir::OutputVar& var) {
+          if (mir::detail::is_tuple(var.type))
+            return mir::detail::output_parts(prog_->tuples.get(), var, extent);
+          int64_t columns = 1;
+          for (const mir::Expr& dim : var.type.dims) columns *= extent(dim);
+          return std::vector<int64_t>{columns};
         });
     if (owner == nullptr)
       throw CompileError("an output write matches no output variable");
-    // A write may read a leaf of another tuple variable, the optimizer
-    // having made this value a copy of it.
-    const mir::detail::TupleLeaf* tuple =
-        tuple_named && tuple_named->base == owner->name ? tuple_named : nullptr;
-    if (!tuple && mir::detail::is_tuple(owner->type)) {
-      tuple = mir::detail::leaf_at(
-          prog_->tuples.get(), *owner, output_cursor_.offset(), len,
-          [&in](const mir::Expr& dim) { return in.as_int(dim); });
-      if (!tuple)
-        throw CompileError("cannot name a write of part of tuple " +
-                           owner->name);
-    }
+    tuple = mir::detail::output_leaf(prog_->tuples.get(), *owner, tuple,
+                                     output_cursor_.part());
+    if (!tuple && mir::detail::is_tuple(owner->type))
+      throw CompileError("cannot name a write of part of tuple " + owner->name);
     if (mir::is_complex(owner->type))
       throw CompileError("complex numbers are not supported yet (in output " +
                          owner->name + ")");
