@@ -900,9 +900,13 @@ Lowering::Val Lowering::lower_runtime_ternary(const mir::Expr& e) {
   std::vector<int> out_slots;
   emit_island(prog, reg, {value.len}, &out_slots);
   SlotInfo si;
-  si.rows = value.rows;
-  si.cols = value.cols;
-  si.kind = value.kind;
+  if (value.kind == ViewKind::Array) {
+    si = array_view(value.dims, value.leaf, false);
+  } else {
+    si.rows = value.rows;
+    si.cols = value.cols;
+    si.kind = value.kind;
+  }
   return {out_slots[0], scalar_autodiff(), si};
 }
 // Use the runtime-control compiler as a graph producer for higher-order

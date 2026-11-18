@@ -2140,8 +2140,6 @@ struct ProgramCompiler {
     patch_jumps(to_else);
     const Range bv = expr(b);
     if (bv.len != av.len) bail("conditional arms of different widths");
-    if (av.kind == ViewKind::Array || bv.kind == ViewKind::Array)
-      bail("conditional arms of different logical views");
     if (!same_view(av, bv)) bail("conditional arms of different logical views");
     for (int k = 0; k < bv.len; ++k) emit(Program::MOV, dst + k, bv.reg + k);
     p.code[(size_t)jmp].dst = (int)p.code.size();

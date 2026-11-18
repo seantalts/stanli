@@ -576,6 +576,14 @@ static void test_fixture_constants() {
        "early_return",
        make_data([](DataMap& d) { d.set_int("first", 1); }),
        {{{0.4}, 2.0 * 0.4, {2.0}}}},
+      // A parameter-dependent conditional expression with array arms. Below
+      // 0.25: 3 + p + 6. Above: (p + 3) + 1 + 2p.
+      {"parameter-condition array ternary",
+       "paramcond_array_ternary",
+       DataMap(),
+       {{{-0.5}, 8.5, {1.0}}, {{0.5}, 5.5, {3.0}}},
+       1,
+       true},
       // An integer min or max in an index, with a shape query of a parameter
       // as one argument. p[2] + 2 * p[3].
       {"integer extrema index",
