@@ -114,12 +114,6 @@ def has_tuple(t):
     return t.kind == "tuple" or (t.elem is not None and has_tuple(t.elem))
 
 
-def is_real_valued(t):
-    """Containers whose elements are real."""
-    return (t.kind in ("real", "vector", "row_vector", "matrix")
-            or (t.kind == "array" and is_real_valued(t.elem)))
-
-
 # ---------------------------------------------------------------------------
 # Expressions.
 
@@ -812,11 +806,6 @@ def dim_value(t, pos, p):
     return p.sizes[t.dims[0]]
 
 
-def index_result_dims(t, n):
-    """The types each successive single index position walks through."""
-    return t
-
-
 class _Checker:
     def __init__(self, p):
         self.p = p
@@ -897,6 +886,9 @@ class _Checker:
         if n > 1:
             self.bad("one_effect", f"{n} calls with effects in one "
                      "statement")
+        if isinstance(s, Tilde) and s.fn is None and s.dist in DENSITIES \
+                and not positive_scale(s.args[1], p):
+            self.bad("finite", f"{s.dist} scale {expr_str(s.args[1], p)}")
         if isinstance(s, (Target, Tilde)) and not ctx["target"]:
             self.bad("block", "target increment outside the model block "
                      "and _lp functions")
@@ -932,6 +924,14 @@ class _Checker:
                         isinstance(x.args[0], Call) and
                         x.args[0].name == "tanh"):
                     self.bad("finite", "exp of something other than tanh")
+                for i in SCALE_ARGS.get(x.name, ()):
+                    if not positive_scale(x.args[i], p):
+                        self.bad("finite", f"{x.name} scale "
+                                 f"{expr_str(x.args[i], p)}")
+                if x.name in RATE_ARGS and not bounded_rate(
+                        x.args[RATE_ARGS[x.name]], p):
+                    self.bad("finite", f"{x.name} log rate "
+                             f"{expr_str(x.args[RATE_ARGS[x.name]], p)}")
             effects = call_effects(x)
             if "rng" in effects and not ctx["rng"]:
                 self.bad("block", f"{x.name} where rng is not allowed")
@@ -993,9 +993,30 @@ class _Checker:
     def index_data_ok(self, i, n):
         for d in self.p.datavars:
             if d.name == i.name and d.role == "index":
-                return (self.p.sizes[d.target] == n or
-                        self.p.sizes[d.t.dims[0]] == 0)
+                return self.p.sizes[d.t.dims[0]] == 0 or (
+                    self.p.sizes[d.target] == n and n >= 1)
         return False
+
+
+# Arguments that must stay positive (a scale) or bounded (a log rate).
+SCALE_ARGS = {f"{d}_{k}": (2,) for d in ("normal", "cauchy", "logistic")
+              for k in ("lpdf", "lupdf")}
+SCALE_ARGS["normal_rng"] = (1,)
+RATE_ARGS = {"poisson_log_lpmf": 1, "poisson_log_lupmf": 1,
+             "poisson_log_rng": 0}
+
+
+def positive_scale(e, p):
+    if isinstance(e, Lit):
+        return e.t == REAL and elem_value(e.v, 0) > 0
+    return (isinstance(e, Call) and e.name == "exp" and
+            isinstance(e.args[0], Call) and e.args[0].name == "tanh")
+
+
+def bounded_rate(e, p):
+    if isinstance(e, Lit):
+        return e.t == REAL and abs(elem_value(e.v, 0)) <= 1.5
+    return isinstance(e, Call) and e.name == "tanh"
 
 
 def container_len(t, p):
@@ -1106,25 +1127,14 @@ def program_features(p):
         type_features(d.t, out)
     for q in p.params:
         type_features(q.t, out)
-    data_names = {d.name for d in p.datavars}
-    td_names = set(declared(p.td))
     callers = {}
+    readers = {e.name for e in all_exprs(p) if isinstance(e, Var)}
     for where, body in all_bodies(p):
-        _features_body(body, out, where, 0, callers, p)
+        _fb(body, out, where, [], callers, p, readers)
     for f, kinds in callers.items():
         if {"data", "param"} <= kinds:
             out.add("c_data_and_param_args")
-    del data_names, td_names
     return sorted(out & set(FEATURES))
-
-
-def _features_body(body, out, where, loops, callers, p):
-    readers = set()
-    for _, b in all_bodies(p):
-        for e in all_exprs_of(b):
-            if isinstance(e, Var):
-                readers.add(e.name)
-    _fb(body, out, where, [], callers, p, readers)
 
 
 def _fb(body, out, where, loops, callers, p, readers):
@@ -1723,10 +1733,6 @@ class Gen:
         return Call("poisson_log_rng", [Call(
             "tanh", [self.expr(REAL, ctx, d)], REAL)], INT)
 
-    def same_kind(self, t, s2):
-        """t with its first dimension replaced by s2."""
-        return T(t.kind, (s2,) + t.dims[1:], t.elem, t.items)
-
     def slice(self, t, ctx):
         """x[1:n] of a variable whose first extent is at least n."""
         s, n = t.dims[0], self.val(t.dims[0])
@@ -2035,7 +2041,8 @@ class Gen:
             v = self.name("i")
             bound = ival(hi, self.p)
             inner = ctx.child([VarInfo(v, INT, bound=bound)], loop=True)
-            return [For(v, hi, self.loop_body(inner, depth))]
+            body = self.stmts(inner, r.randint(1, 3), depth + 1)
+            return [For(v, hi, body)]
         if how == "foreach":
             ct = r.choice([vec(self.sym()), arr(self.sym(), REAL),
                            arr(self.sym(), INT), rvec(self.sym())])
@@ -2043,7 +2050,8 @@ class Gen:
             et = ct.elem if ct.kind == "array" else REAL
             v = self.name("e")
             inner = ctx.child([VarInfo(v, et)], loop=True)
-            return [ForEach(v, coll, self.loop_body(inner, depth))]
+            body = self.stmts(inner, r.randint(1, 3), depth + 1)
+            return [ForEach(v, coll, body)]
         if how == "while":
             s = self.sym()
             hi = self.size(s, c, 0) if r.random() < 0.7 else \
@@ -2051,7 +2059,8 @@ class Gen:
             v = self.name("w")
             inner = ctx.child([VarInfo(v, INT, bound=ival(hi, self.p))],
                               loop=True)
-            return [While(v, hi, self.loop_body(inner, depth))]
+            body = self.stmts(inner, r.randint(1, 3), depth + 1)
+            return [While(v, hi, body)]
         if how in ("break", "continue"):
             node = Break() if how == "break" else Continue()
             return [If(self.cond(c, 1), [node], None)]
@@ -2098,10 +2107,6 @@ class Gen:
             return [Block([d] + self.stmts(inner, r.randint(1, 2),
                                            depth + 1))]
         return None
-
-    def loop_body(self, inner, depth):
-        body = self.stmts(inner, self.r.randint(1, 3), depth + 1)
-        return body
 
     def reject_cond(self, c):
         """A condition that is true for some points and data, not all."""
@@ -2227,10 +2232,8 @@ class Gen:
             suffix = "_lupdf" if self.chance("lupdf", 0.3) else "_lpdf"
             core = Call(dist + suffix, [y, self.expr(REAL, c, 2),
                                         self.scale(c, 1)], REAL, bar=True)
-        elif self.r.random() < 0.5 and yt == INT:
-            core = Call("poisson_log_lpmf", [y, Call(
-                "tanh", [self.expr(REAL, c, 2)], REAL)], REAL, bar=True)
         else:
+            self.r.random()  # an unused draw that keeps existing seeds
             core = Call("poisson_log_lpmf", [y, Call(
                 "tanh", [self.expr(REAL, c, 2)], REAL)], REAL, bar=True)
         if self.r.random() < 0.4:
@@ -2401,9 +2404,7 @@ class Gen:
         if t.kind == "array" and t.elem == INT:
             return Op("*", Call("sum", [e], INT), Lit(REAL, 0.5), REAL)
         if t.kind == "array":
-            return Call("sum", [Index(e, [("one", Lit(INT, 1))], t.elem)],
-                        REAL) if False else Op(
-                "*", Call("size", [e], INT), Lit(REAL, 0.5), REAL)
+            return Op("*", Call("size", [e], INT), Lit(REAL, 0.5), REAL)
         return Lit(REAL, 0.5)
 
     def block_scope(self, block, upto=None):

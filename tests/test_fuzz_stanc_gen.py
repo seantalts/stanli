@@ -191,6 +191,23 @@ class RuleTest(unittest.TestCase):
                            g.Target(safe)])
         self.assertEqual(rules(p), [])
 
+    def test_scales_stay_positive(self):
+        def density(scale):
+            return g.Target(g.Call("normal_lpdf", [P0, HALF, scale],
+                                   g.REAL, bar=True))
+        safe = g.Call("exp", [g.Call("tanh", [P0], g.REAL)], g.REAL)
+        self.assertEqual(rules(program(model=[density(safe)])), [])
+        self.assertEqual(rules(program(model=[density(HALF)])), [])
+        self.assertEqual(rules(program(model=[density(P0)])), ["finite"])
+        self.assertEqual(rules(program(model=[density(
+            g.Lit(g.REAL, -0.5))])), ["finite"])
+        self.assertEqual(rules(program(model=[g.Tilde(P0, "cauchy",
+                                                      [HALF, P0])])),
+                         ["finite"])
+        rate = g.Call("poisson_log_rng", [P0], g.INT)
+        self.assertEqual(rules(program(gq=[g.Decl("k", g.INT, [], rate)])),
+                         ["finite"])
+
     def test_one_effect_per_statement(self):
         two = g.Op("+", rng(), rng(), g.REAL)
         p = program(gq=[g.Decl("y", g.REAL, [], two)])
@@ -227,6 +244,19 @@ class RuleTest(unittest.TestCase):
         clamp = g.Clamp(g.Lit(g.INT, 1), g.Size(0, "data"))
         p.model = [g.Target(g.Index(pv, [("one", clamp)], g.REAL))]
         self.assertEqual(rules(p), ["in_range"])
+
+    def test_multi_index_into_an_empty_base(self):
+        p = program()
+        p.sizes = [0, 1]
+        p.datavars.append(g.DataVar("ii", g.arr(1, g.INT), "index",
+                                    target=0))
+        pv = g.Var("pv", g.vec(0))
+        p.model = [g.Target(g.Call("sum", [g.Index(
+            pv, [("multi", g.Var("ii", g.arr(1, g.INT)))], g.vec(1))],
+            g.REAL))]
+        self.assertEqual(rules(p), ["in_range"])
+        p.sizes = [2, 1]
+        self.assertEqual(rules(p), [])
 
     def test_effects_only_where_stan_allows(self):
         p = program(model=[g.Target(rng())])

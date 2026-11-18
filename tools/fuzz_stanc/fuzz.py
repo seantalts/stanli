@@ -190,7 +190,7 @@ def examine(record, source, data_file, work, ctx):
     record["none"] = {k: none[0][k] for k in ("outcome", "seconds", "size")}
     if none[0]["outcome"] != "ok":
         if none[0]["outcome"] == "unsupported":
-            # stanli's compiler, not stanc, refuses the program.
+            # stanli's compiler refuses a program that stanc accepts.
             record["outcome"] = "not_comparable"
             record["not_comparable"] = "compiler_unsupported_none"
             record["refusal"] = none[0]["message"][:300]
