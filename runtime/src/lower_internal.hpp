@@ -982,6 +982,12 @@ struct Lowering {
   // density inside an inlined user function is unnormalized only if the
   // call that reached it was.
   bool propto_ctx = true;
+  // td folds data-only expressions of the body being lowered, so it follows
+  // the same propto__.
+  void set_propto_ctx(bool on) {
+    propto_ctx = on;
+    td.set_propto(on);
+  }
   // A loop-invariant target-only body is lowered once under the product of
   // its collapsed trip counts. TargetPE consumes the product at the edge,
   // so nested invariant loops still emit one scale rather than a MUL chain.

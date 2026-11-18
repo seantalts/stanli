@@ -78,7 +78,7 @@ Lowering::Lowering(Lowering& parent, RegionTrialTag,
   else
     for (const std::string& name : *names)
       if (parent.int_locals.count(name)) int_locals.insert(name);
-  propto_ctx = parent.propto_ctx;
+  set_propto_ctx(parent.propto_ctx);
   udf_depth = parent.udf_depth;
   udf_autodiff_ctx = parent.udf_autodiff_ctx;
   udf_formal_autodiff = parent.udf_formal_autodiff;
