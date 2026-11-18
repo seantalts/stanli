@@ -102,6 +102,7 @@ bool elt_costs_per_element(uint16_t opcode) {
 // pass knows how to concatenate. Groups may be scalar or exactly W wide.
 int64_t idata_width(const Op& op) {
   if (!has_op_trait(op.opcode, op_trait::kRerollIdataDensity)) return 1;
+  if (outcome_idata_header(op.opcode)) return 0;
   if (!has_int_groups(op.opcode)) return op.n_idata;
   const IntGroups groups = binomial_groups(op);
   int64_t w = 1;

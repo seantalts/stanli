@@ -848,6 +848,12 @@ constexpr uint8_t kVariantGrouped = 1 << 4;
 constexpr uint8_t kWholeInputPayload = 1 << 5;
 }  // namespace op_trait
 
+// Immediates after a kRerollIdataDensity op's outcomes: the vectorized
+// layout's header (density_layout.hpp), identical in every scalar lane.
+constexpr int64_t outcome_idata_header(uint16_t opcode) {
+  return opcode == OP_ORDERED_LOGISTIC_LPMF ? 3 : 0;
+}
+
 constexpr uint8_t op_traits(uint16_t opcode) {
   switch (opcode) {
     // Every real-argument lpdf in the scalar list has the same summed and
@@ -861,8 +867,9 @@ constexpr uint8_t op_traits(uint16_t opcode) {
     return op_trait::kRerollDensity;
 
     // Integer-outcome lpmfs whose scalar-lane idata can be concatenated.
-    // Ordered densities are intentionally absent: their cutpoint vector is
-    // shared by lanes and cannot be fused this way.
+    // ordered_logistic's outcomes are followed by a header its lanes share
+    // (outcome_idata_header); ordered_probit's cutpoints are not yet fused.
+    case OP_ORDERED_LOGISTIC_LPMF:
     case OP_BERNOULLI_LPMF:
     case OP_BERNOULLI_LOGIT_LPMF:
     case OP_POISSON_LPMF:

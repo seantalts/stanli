@@ -191,7 +191,7 @@ Outcomes outcomes_of(const Op& op) {
   Outcomes o;
   if (!has_op_trait(op.opcode, op_trait::kRerollIdataDensity)) return o;
   if (!has_int_groups(op.opcode)) {
-    if (op.n_idata < 1) {
+    if (op.n_idata < 1 || outcome_idata_header(op.opcode)) {
       o.ok = false;
       return o;
     }

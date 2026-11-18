@@ -97,8 +97,11 @@ shipped configuration, matched hardware/toolchains, and retained raw results.
 A focused benchmark or a passing numerical corpus replay does not substitute
 for the full performance run.
 
-A **2% or greater slowdown** is a major regression. Compare each model's
-source compilation, preparation, warm gradients, and fixed-work estimate;
+A model's slowdown is a major regression when its total sampling time
+(setup plus the gradients of a standard run, as
+[`docs/benchmarks.md`](docs/benchmarks.md#total-sampling-estimate) defines it)
+grows by **2% or 5 ms, whichever is greater**. Compare each model's source
+compilation, preparation and warm gradients to explain a change;
 aggregate gains must not hide an individual regression. Investigate apparent
 regressions with fresh, controlled measurements and fix confirmed regressions
 before merge. Preserve failures, timeouts, and noisy or incomplete evidence as
