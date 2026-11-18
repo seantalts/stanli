@@ -576,6 +576,12 @@ static void test_fixture_constants() {
        "early_return",
        make_data([](DataMap& d) { d.set_int("first", 1); }),
        {{{0.4}, 2.0 * 0.4, {2.0}}}},
+      // An integer min or max in an index, with a shape query of a parameter
+      // as one argument. p[2] + 2 * p[3].
+      {"integer extrema index",
+       "int_extrema_index",
+       make_data([](DataMap& d) { d.set_int("N", 3); }),
+       {{{0.5, 0.25, 1.5}, 3.25, {0.0, 1.0, 2.0}}}},
       // rows() in a necessity island reads the logical matrix geometry rather
       // than being rejected as an unknown register-machine function.
       {"parameter-condition rows",

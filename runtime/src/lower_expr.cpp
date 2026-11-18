@@ -285,6 +285,12 @@ long Lowering::eval_int(const mir::Expr& e) {
               static_cast<int>(eval_int(e.args[1])));
         fail(e.name + ": unsupported integer builtin arity", e.raw);
       }
+      if (const mir::ExtremaCall extrema = mir::extrema_call(e);
+          extrema.surface == mir::ExtremaSurface::IntPair) {
+        const long a = eval_int(e.args[0]), b = eval_int(e.args[1]);
+        return extrema.kind == mir::ExtremaKind::Max ? std::max(a, b)
+                                                     : std::min(a, b);
+      }
       if (e.name == "sum" && e.args.size() == 1) {
         long acc = 0;
         for (int v : const_ints(e.args[0])) acc += v;
