@@ -460,6 +460,17 @@ bool Lowering::peel_terminal_return(mir::Stmt* s, mir::Expr* value) {
     return peel_terminal_return(&s->body.back(), value);
   return false;
 }
+// Whether `e` reads the value of one of `names`. A shape query of a variable
+// reads only its declared extent, which a write cannot change.
+static bool reads_value_of(const mir::Expr& e,
+                           const std::set<std::string>& names) {
+  if (e.kind == mir::Expr::Var) return names.count(e.name) != 0;
+  if (Lowering::is_shape_query(e) && e.args[0].kind == mir::Expr::Var)
+    return false;
+  return std::any_of(e.args.begin(), e.args.end(), [&](const mir::Expr& a) {
+    return reads_value_of(a, names);
+  });
+}
 void Lowering::configure_island_compiler(ProgramCompiler& c,
                                          IslandProg& prog_ref,
                                          IslandRegion& region,
@@ -482,10 +493,7 @@ void Lowering::configure_island_compiler(ProgramCompiler& c,
   if (s) bound_names(*s, written.get());
   const auto region_eval =
       [this, &c, written](const mir::Expr& x) -> std::optional<DataMap::Entry> {
-    std::set<std::string> read;
-    mir::collect_names(x, &read);
-    for (const std::string& name : read)
-      if (written->count(name)) return std::nullopt;
+    if (reads_value_of(x, *written)) return std::nullopt;
     td.set_propto(c.propto_ctx);
     const ScopeExit restore{[&] { td.set_propto(propto_ctx); }};
     return try_eval_pure(x);
