@@ -1053,9 +1053,13 @@ set_tests_properties(test_prep_only PROPERTIES
 if(NOT STANLI_SANITIZE)
   add_test(NAME test_prep_deep_expression
            COMMAND ${Python3_EXECUTABLE} tests/test_prep_deep_expression.py
-                   $<TARGET_FILE:bench_grad>
+                   $<TARGET_FILE:bench_grad> DeepExpressionPrep
            WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
-  set_tests_properties(test_prep_deep_expression PROPERTIES RUN_SERIAL TRUE)
+  add_test(NAME test_prep_deep_expression_time
+           COMMAND ${Python3_EXECUTABLE} tests/test_prep_deep_expression.py
+                   $<TARGET_FILE:bench_grad> DeepExpressionPrepTime
+           WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
+  set_tests_properties(test_prep_deep_expression_time PROPERTIES RUN_SERIAL TRUE)
 endif()
 add_test(NAME test_prep_profile
          COMMAND bench_grad tests/fixtures/ar1.tmir.sexp
