@@ -350,6 +350,33 @@ void test_wanames_interpreter_schema() {
   }
 }
 
+// CmdStan's write_array adds `target +=` to an accumulator that starts at 0,
+// and target() reads it back: the generated C++ calls
+// f_lp<propto__>(lp__, lp_accum__, pstream__) and then
+// t = get_lp(lp__, lp_accum__). The interpreter used to refuse the statement.
+void test_interpreter_target_increment() {
+  using namespace stanli;
+  auto prog = std::make_shared<mir::Program>(mir::read_program(
+      sexp::parse(slurp("tests/fixtures/wa_interp_target.tmir.sexp"))));
+  WaInterp wi(prog, emit_env());
+  std::map<std::string, DataMap::Entry> params;
+  params["p"].r = {0.25};
+  WaRng rng(1234);
+  std::vector<double> row;
+  try {
+    row = wi.eval(params, rng);
+  } catch (const std::exception& e) {
+    ++failures;
+    std::printf("FAIL interpreted target increment threw: %s\n", e.what());
+    return;
+  }
+  expect_eq("interpreted target increment header", joined(wi.columns()), "p,t");
+  if (row != std::vector<double>{0.25, 0.5}) {
+    ++failures;
+    std::printf("FAIL interpreted target increment row\n");
+  }
+}
+
 // A bare real container is NaN in every element the block never assigns,
 // which is what CmdStan writes and what the interpreter already produced.
 void test_gq_bare_fill_is_nan() {
@@ -4538,6 +4565,7 @@ int main() {
   test_naming_rules();
   test_wanames_pipeline();
   test_wanames_interpreter_schema();
+  test_interpreter_target_increment();
   test_array_of_matrix_columns();
   test_gq_bare_fill_is_nan();
   test_gq_name_shadowing();

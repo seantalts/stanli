@@ -94,10 +94,9 @@ struct MirHooks {
   // live in that body's scope, not in whichever instance installed the hook.
   std::function<bool(MirInterp<double>&, const mir::Expr&, DataMap::Entry*)>
       fun;
-  // First shot at any statement (FnReadParam, FnWriteParam and `target +=`
-  // in the interpreted write_array). Return true when handled. As with
-  // `fun`, the interpreter running the statement is passed in.
-  std::function<bool(MirInterp<double>&, const mir::Stmt&)> stmt;
+  // First shot at any statement (FnReadParam and FnWriteParam in the
+  // interpreted write_array). Return true when handled.
+  std::function<bool(const mir::Stmt&)> stmt;
 };
 
 template <typename T>
@@ -117,6 +116,9 @@ class MirInterp {
   // CmdStan's generated code does, instead of a scalar fold. For the
   // interpreters whose values are the model's own results.
   void set_native_extrema(bool on) { native_extrema_ = on; }
+  // Where `target +=` adds in write_array, which accumulates from 0 like
+  // CmdStan's. Without one the statement is refused.
+  void set_target_sink(T* sum) { target_sink_ = sum; }
 
   // The caller's propto__ for this scope. Lowering sets it on entering a
   // user function body that it inlines.
@@ -318,7 +320,7 @@ class MirInterp {
 
   Flow exec(const mir::Stmt& st) {
     if constexpr (std::is_same_v<T, double>) {
-      if (hooks_.stmt && hooks_.stmt(*this, st)) return Flow::Next;
+      if (hooks_.stmt && hooks_.stmt(st)) return Flow::Next;
     }
     switch (st.kind) {
       case mir::Stmt::For: {
@@ -754,7 +756,12 @@ class MirInterp {
         return;
       }
       case mir::Stmt::TargetPE:
-        fail("target += is not available in " + where_, st.raw);
+        if (!target_sink_)
+          fail("target += is not available in " + where_, st.raw);
+        // write_array runs without the Jacobian.
+        if (st.jacobian) return;
+        for (const T& term : eval(st.target).r) *target_sink_ += term;
+        return;
       default:
         fail("unsupported statement", st.raw);
     }
@@ -1286,6 +1293,7 @@ class MirInterp {
   const std::map<std::string, const mir::FunDef*>& funs_;
   std::string where_;
   bool native_extrema_ = false;
+  T* target_sink_ = nullptr;
   MirHooks hooks_;
   std::map<std::string, Value> env_;
   Value returned_;
@@ -1855,6 +1863,7 @@ class MirInterp {
     if (udf_depth_ > 64) fail("UDF recursion too deep");
     MirInterp sub(funs_, where_, hooks_);
     sub.native_extrema_ = native_extrema_;
+    sub.target_sink_ = target_sink_;
     sub.udf_depth_ = udf_depth_ + 1;
     sub.propto_ctx_ = propto;
     sub.refuse_propto_ = refuse_propto_;
