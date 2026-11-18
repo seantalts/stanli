@@ -571,6 +571,9 @@ struct ProgramCompiler {
     for (mir::Expr& arg : e->args) literalize_external_ints(&arg);
   }
 
+  // Whether `e` reads a name this program binds itself. The extern_*
+  // callbacks answer from the lowering outside the region, which holds the
+  // value, size or shape such a name had before the region ran.
   bool refers_to_local_runtime(const mir::Expr& e) const {
     if (e.kind == mir::Expr::Var && reals.count(e.name) &&
         !extern_bound.count(e.name))
@@ -894,7 +897,8 @@ struct ProgramCompiler {
 
   std::optional<double> constant_real(const mir::Expr& e) {
     if (e.data_only && extern_real &&
-        mir::is_unsized(e, mir::UnsizedLeaf::Real)) {
+        mir::is_unsized(e, mir::UnsizedLeaf::Real) &&
+        !refers_to_local_runtime(e)) {
       double value = 0.0;
       if (extern_real(e, &value)) return value;
     }
@@ -1702,7 +1706,8 @@ struct ProgramCompiler {
     // remainder AutoDiffable even after all its actuals became data literals.
     if (e.kind == mir::Expr::FunApp &&
         e.fn_lib == mir::Expr::Lib::UserDefined &&
-        mir::is_unsized(e, mir::UnsizedLeaf::Real) && extern_real) {
+        mir::is_unsized(e, mir::UnsizedLeaf::Real) && extern_real &&
+        !refers_to_local_runtime(e)) {
       double value = 0.0;
       if (extern_real(e, &value)) return {konst(value), 1};
     }
