@@ -234,6 +234,14 @@ as the row tiles via `OP_REP_MAT` instead of blocking the region; and a row
 density whose result feeds another op (a mixture over rows) folds back with
 one `OP_SUM_ROWS` per lane, repacking first when the region's convention is
 column-major, since `OP_SUM_ROWS` needs each lane's elements contiguous.
+A lane that builds its row with `OP_CONCAT2` (`mu[n] = [a[n], b[n]]'`, the
+brms categorical and multivariate shape) commits the region to column-major,
+where the lanes' concatenations are one `OP_CONCAT2` of the packed operands;
+a shared operand such as brms's leading zero tiles to every lane. A row store
+whose container uses the other convention takes one `OP_TRANSPOSE`, and
+row-major row stores may fill any run of consecutive rows through one
+`OP_SET_SLICE` window. Store forwarding often leaves the last row out of
+the run, because that lane reads its values directly (#574).
 Partition's `indexed_read` and its own wide-operand check share the same
 affine classifier and the same tiling, so a lane found by structure there
 or by period here is priced and packed the same way.
