@@ -4916,7 +4916,12 @@ struct ProgramCompiler {
             path = compile_body(s.body);
           } catch (CompileContinue&) {
           } catch (CompileBreak&) {
-            broken = true;
+            // A runtime continue earlier in this trip skips the break, so
+            // the later trips stay reachable and the break becomes a jump.
+            if (loops.back().continues.empty())
+              broken = true;
+            else
+              loops.back().breaks.push_back(emit(Program::JMP, 0));
           }
           if (path == Path::Returned) {
             returned_directly = true;
