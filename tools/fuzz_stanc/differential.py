@@ -20,6 +20,7 @@ import hashlib
 import json
 import math
 import pathlib
+import re
 import shutil
 import subprocess
 import sys
@@ -363,14 +364,25 @@ def bisect_steps():
     return steps
 
 
-def guilty_step(steps, target):
+def detail(diffs):
+    """For a compile failure at o1, its message with generated names
+    replaced by V; None for other differences."""
+    for kind, d in diffs:
+        if kind == "compile_fail_o1":
+            text = d.get("stanli_refused") or d.get("message") or ""
+            return re.sub(r"\b[A-Za-z_]+\d+\w*", "V", text)[:200]
+    return None
+
+
+def guilty_step(steps, target, target_detail=None):
     """The pass added at the first step whose primary difference kind is
-    o1's. An intermediate pass list can make MIR that stanli refuses or
-    reads differently although o1 does not, so a step that differs in
-    another way is passed over. Without a match, the first step that
-    differs at all, marked with "?"."""
+    o1's, and for a compile failure, whose message is o1's too. An
+    intermediate pass list can make MIR that stanli refuses or reads
+    differently although o1 does not, so a step that differs in another
+    way is passed over. Without a match, the first step that differs at
+    all, marked with "?"."""
     for s in steps:
-        if s["primary"] == target:
+        if s["primary"] == target and s.get("detail") == target_detail:
             return s["added"]
     for s in steps:
         if s["primary"] is not None:
@@ -380,7 +392,8 @@ def guilty_step(steps, target):
 
 def bisect(ctx, source, data_file, work, none, o1):
     """(guilty pass, steps) for a model whose o1 answer differs."""
-    target = primary_kind(differences(none, o1)[0])
+    o1_diffs = differences(none, o1)[0]
+    target, target_detail = primary_kind(o1_diffs), detail(o1_diffs)
     steps, previous = [], none
     for i, (added, spec) in enumerate(bisect_steps()):
         result = evaluate(ctx, source, data_file, work, spec, f"step{i}",
@@ -389,11 +402,13 @@ def bisect(ctx, source, data_file, work, none, o1):
         steps.append({"added": added, "size": result[0]["size"],
                       "kinds": sorted({k for k, _ in diffs}),
                       "primary": primary_kind(diffs) if diffs else None,
+                      "detail": detail(diffs),
                       "not_comparable": reason})
         previous = result
-        if diffs and steps[-1]["primary"] == target:
+        if diffs and steps[-1]["primary"] == target and \
+                steps[-1]["detail"] == target_detail:
             break
-    guilty = guilty_step(steps, target)
+    guilty = guilty_step(steps, target, target_detail)
     if guilty == "unreproduced":
         return guilty, steps
     # Guard: the full cumulative list must reproduce the o1 MIR.

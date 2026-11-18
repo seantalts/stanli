@@ -216,6 +216,19 @@ class CompileAndBucketTest(unittest.TestCase):
         self.assertEqual(d.guilty_step(steps, "lp"), "function_inlining?")
         self.assertEqual(d.guilty_step(steps[:1], "lp"), "unreproduced")
 
+    def test_guilty_refusal_must_have_the_o1_message(self):
+        steps = [{"added": "function_inlining", "primary": "compile_fail_o1",
+                  "detail": "region produces nothing"},
+                 {"added": "copy_propagation", "primary": "compile_fail_o1",
+                  "detail": "logical view mismatch for V"}]
+        self.assertEqual(d.guilty_step(steps, "compile_fail_o1",
+                                       "logical view mismatch for V"),
+                         "copy_propagation")
+        self.assertEqual(d.detail([("compile_fail_o1", {
+            "stanli_refused": "logical view mismatch for inline_f4_a6_arg10__"
+        })]), "logical view mismatch for V")
+        self.assertIsNone(d.detail([("lp", {"none": "1", "o1": "2"})]))
+
     def test_production_passes_follow_the_suite(self):
         self.assertEqual(d.PRODUCTION_PASSES[0], "function_inlining")
         self.assertEqual(d.PRODUCTION_PASSES[-1], "block_fixing")
