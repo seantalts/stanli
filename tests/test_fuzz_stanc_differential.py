@@ -93,6 +93,27 @@ class CompareRunsTest(unittest.TestCase):
             kinds(d.compare_runs(ran(same(BODY)), ran(names))[0]),
             ["write_array"])
 
+    def test_tilde_programs_may_shift_lp_by_a_constant(self):
+        # `~` drops terms that are constant for the types it sees, and O1 can
+        # make an argument data, so the two sides may differ by a constant
+        # with the same gradient.
+        def body(lp, grad="0.25"):
+            return ["WANAMES a,b", "WAVALS 1 2", f"OK {lp} {grad} 3"]
+        none = {0: body(-1.5), 1: body(-1.4), 2: body(-1.3)}
+        shifted = {0: body(-2.5), 1: body(-2.4), 2: body(-2.3)}
+        self.assertEqual(kinds(d.compare_runs(ran(none), ran(shifted))[0]),
+                         ["lp", "lp", "lp"])
+        self.assertEqual(
+            d.compare_runs(ran(none), ran(shifted), tilde=True), ([], None))
+        uneven = {**shifted, 1: body(-2.5)}
+        self.assertEqual(
+            kinds(d.compare_runs(ran(none), ran(uneven), tilde=True)[0]),
+            ["lp", "lp", "lp"])
+        steeper = {**shifted, 2: body(-2.3, "0.5")}
+        self.assertEqual(
+            kinds(d.compare_runs(ran(none), ran(steeper), tilde=True)[0]),
+            ["lp", "lp", "lp", "grad"])
+
     def test_throws_and_messages(self):
         threw = same(BODY)
         threw[0] = ["EVAL_FAIL bad scale 1.5"]

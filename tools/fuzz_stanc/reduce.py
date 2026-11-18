@@ -483,7 +483,8 @@ def examine(p, ctx, fuzz):
         source.write_text(p.source())
         data_file = work / "data.json"
         data_file.write_text(json.dumps(p.data()))
-        r = fuzz.examine({"seed": p.seed, "features": [], "buckets": []},
+        r = fuzz.examine({"seed": p.seed, "features": p.features(),
+                          "buckets": []},
                          source, data_file, work, ctx)
         if r.get("outcome") in ("agree", "differ"):
             fuzz.retime_one(ctx, r, p.source(), p.data())

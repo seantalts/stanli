@@ -233,7 +233,11 @@ def examine(record, source, data_file, work, ctx):
     record["mir_identical"] = none[0]["sha"] == o1[0]["sha"]
     inl = d.compile_model(ctx, source, "function_inlining", work / "inl.mir")
     record["inlined_size"] = inl["size"]
-    diffs, reason = d.differences(none, o1)
+    tilde = "s_tilde" in record["features"]
+    diffs, reason = d.differences(none, o1, tilde)
+    if tilde and not reason and \
+            any(k == "lp" for k, _ in d.differences(none, o1)[0]):
+        record["tilde_lp_shift"] = True
     if reason:
         record["outcome"] = "not_comparable"
         record["not_comparable"] = reason
@@ -246,7 +250,8 @@ def examine(record, source, data_file, work, ctx):
             record["work"] = ad_work(ctx, source, data_file, work, none, o1)
     if diffs:
         record["diffs"] = [{"kind": k, **v} for k, v in diffs]
-        guilty, steps = d.bisect(ctx, source, data_file, work, none, o1)
+        guilty, steps = d.bisect(ctx, source, data_file, work, none, o1,
+                                 tilde)
         record["guilty"] = guilty
         record["bisect"] = steps
         record["buckets"].append(d.bucket(guilty, diffs))
@@ -347,6 +352,8 @@ def summarize(results, meta, out):
       f"{sum(not r['mir_identical'] for r in compiled)} of {len(compiled)}")
     valued = [r for r in results if r.get("points_with_values")]
     p(f"programs with values at some point on both sides: {len(valued)}")
+    p(f"lp shifted by a constant under ~, counted as agreeing: "
+      f"{sum(1 for r in results if r.get('tilde_lp_shift'))}")
     nc = {}
     for r in results:
         if r["outcome"] == "not_comparable":

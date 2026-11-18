@@ -94,6 +94,10 @@ class GeneratedProgramsTest(unittest.TestCase):
             seen.update(p.features())
         self.assertEqual(sorted(set(g.FEATURES) - seen), [])
 
+    def test_tilde_feature_marks_every_tilde(self):
+        for p in self.programs:
+            self.assertEqual("s_tilde" in p.features(), "~" in p.source())
+
     def test_tuple_arguments_with_effects_are_common(self):
         n = sum("c_effect_in_tuple_arg" in p.features()
                 for p in self.programs)
