@@ -9,9 +9,9 @@ first pass that causes it. Three performance checks add their own buckets:
                  the none compile (timed again serially before reporting)
   mir_growth     the o1 MIR is more than 8 times the size of the MIR after
                  function_inlining alone
-  more_ad_work   one gradient at o1 executes more than 1.5 times the op
-                 output elements that it executes unoptimized, counted by
-                 stanli's STANLI_PROFILE=1 report
+  more_ad_work   one gradient at o1 executes more than 1.5 times, and at
+                 least 10 more, op output elements than unoptimized,
+                 counted by stanli's STANLI_PROFILE=1 report
 
     tools/fuzz_stanc/fuzz.py --seeds 0:1000 --jobs 24 --out DIR
 """
@@ -40,6 +40,7 @@ KEEP_PER_BUCKET = 5
 SLOW_SECONDS, SLOW_RATIO = 1.0, 10.0
 GROWTH_RATIO = 8.0
 WORK_RATIO = 1.5
+WORK_FLOOR = 10  # elements; a few ops of difference is not a finding
 
 
 def parse_seeds(spec):
@@ -79,7 +80,8 @@ def perf_kinds(r):
         out.append("mir_growth")
     w = r.get("work")
     if w and w["none"]["elems"] > 0 and \
-            w["o1"]["elems"] > WORK_RATIO * w["none"]["elems"]:
+            w["o1"]["elems"] > WORK_RATIO * w["none"]["elems"] and \
+            w["o1"]["elems"] - w["none"]["elems"] >= WORK_FLOOR:
         out.append("more_ad_work")
     return out
 
@@ -187,18 +189,15 @@ def examine(record, source, data_file, work, ctx):
     none = d.evaluate(ctx, source, data_file, work, "none", "none")
     record["none"] = {k: none[0][k] for k in ("outcome", "seconds", "size")}
     if none[0]["outcome"] != "ok":
-        run = d.run_process([ctx["compiler"], "--model-only", "--passes",
-                             "none", "--filename", source.name, source],
-                            ctx["timeout"])
-        err = run[2] if run else "timeout"
         if none[0]["outcome"] == "unsupported":
             # stanli's compiler, not stanc, refuses the program.
             record["outcome"] = "not_comparable"
             record["not_comparable"] = "compiler_unsupported_none"
-            record["refusal"] = (err.strip().splitlines() or [""])[-1][:300]
+            record["refusal"] = none[0]["message"][:300]
         else:
             record["outcome"] = "reject"
-            record["reject"] = error_line(err)
+            record["reject"] = error_line(none[0]["message"]) or \
+                none[0]["outcome"]
         return record
     o1 = d.evaluate(ctx, source, data_file, work, "o1", "o1", reuse=none)
     if o1 is none:

@@ -71,11 +71,14 @@ class PerfTest(unittest.TestCase):
         self.assertEqual(fuzz.perf_kinds(r), [])
 
     def test_more_ad_work(self):
-        r = record(work={"none": {"calls": 10, "elems": 10},
-                         "o1": {"calls": 12, "elems": 16}})
+        r = record(work={"none": {"calls": 20, "elems": 20},
+                         "o1": {"calls": 24, "elems": 31}})
         self.assertEqual(fuzz.perf_kinds(r), ["more_ad_work"])
-        r["work"]["o1"]["elems"] = 15
+        r["work"]["o1"]["elems"] = 30
         self.assertEqual(fuzz.perf_kinds(r), [])
+        r["work"] = {"none": {"calls": 1, "elems": 1},
+                     "o1": {"calls": 3, "elems": 9}}
+        self.assertEqual(fuzz.perf_kinds(r), [], "too few extra elements")
         r["work"] = {"none": {"calls": 0, "elems": 0},
                      "o1": {"calls": 3, "elems": 3}}
         self.assertEqual(fuzz.perf_kinds(r), [])
