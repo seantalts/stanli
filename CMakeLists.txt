@@ -1501,11 +1501,22 @@ if(Python3_Interpreter_FOUND)
            COMMAND ${Python3_EXECUTABLE} tests/test_data_loop_memo.py
                    $<TARGET_FILE:stanli_check>
            WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
-  add_test(NAME test_prep_scaling
-           COMMAND ${Python3_EXECUTABLE} tests/test_prep_scaling.py
-                   $<TARGET_FILE:bench_grad> ${STANLI_STANC_EXECUTABLE}
+  # Only the preparation timings need to run alone; compiling the models
+  # with stanc is most of the work and can share the machine.
+  add_test(NAME test_prep_scaling_models
+           COMMAND ${Python3_EXECUTABLE} tests/test_prep_scaling.py compile
+                   ${STANLI_STANC_EXECUTABLE}
+                   ${CMAKE_CURRENT_BINARY_DIR}/prep_scaling
            WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
-  set_tests_properties(test_prep_scaling PROPERTIES RUN_SERIAL TRUE)
+  set_tests_properties(test_prep_scaling_models PROPERTIES
+    FIXTURES_SETUP prep_scaling_models PROCESSORS 4)
+  add_test(NAME test_prep_scaling
+           COMMAND ${Python3_EXECUTABLE} tests/test_prep_scaling.py time
+                   $<TARGET_FILE:bench_grad>
+                   ${CMAKE_CURRENT_BINARY_DIR}/prep_scaling
+           WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
+  set_tests_properties(test_prep_scaling PROPERTIES
+    RUN_SERIAL TRUE FIXTURES_REQUIRED prep_scaling_models)
   add_test(NAME test_prep_loop_body
            COMMAND ${Python3_EXECUTABLE} tests/test_prep_loop_body.py
                    $<TARGET_FILE:bench_grad> ${STANLI_STANC_EXECUTABLE}
