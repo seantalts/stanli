@@ -277,7 +277,12 @@ int forward_stores_to_loads(Graph& g, const std::vector<int>& roots) {
     }
     if (op.opcode == OP_INDEX && op.n_idata == 1) {
       const Store& hit = last_store[(size_t)op.in[0]];
-      if (hit.live && hit.elem == op.idata[0] && !root_set.count(op.out)) {
+      // Once something else has read the vector, this read belongs to a
+      // later loop over it. Forwarding it would give the last lane of the
+      // loop that wrote it an outside reader, and re-roll would leave that
+      // lane scalar.
+      if (hit.live && !hit.observed && hit.elem == op.idata[0] &&
+          !root_set.count(op.out)) {
         // Reading back exactly what the last write put there.
         rename[op.out] = hit.value;
         drop[i] = 1;

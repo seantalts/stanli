@@ -1556,6 +1556,7 @@ RerollStats reroll(Graph& g,
       // Emit only the accepted plan; classification and pricing above have
       // not changed graph storage, targets or lazy renaming.
       std::move(*selected).emit(g, fills, retired, term_set, result, renamed);
+      retry = Retry{};  // a fused region ends any failed run for P
       i += (size_t)P * (size_t)Luse;
       ++st.regions;
       for (const Pos& committed : selected->description().positions) {
