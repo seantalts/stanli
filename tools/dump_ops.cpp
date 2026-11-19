@@ -59,7 +59,8 @@ int main(int argc, char** argv) {
     std::fprintf(
         stderr,
         "usage: dump_ops mir.sexp data.json [max_ops|-1 "
-        "summary|--execution-json [--forbid-mir] [--execution-report]]\n");
+        "summary [--write-array]|--execution-json [--forbid-mir] "
+        "[--execution-report]]\n");
     return 2;
   }
   const bool execution_json =
@@ -97,7 +98,13 @@ int main(int argc, char** argv) {
     }
   }
   stanli::CompiledModel cm = stanli::compile_model(slurp(argv[1]), data);
-  const stanli::Graph& g = cm.graph;
+  // --write-array shows the generated-quantities graph instead.
+  const bool write_array = argc > 4 && std::string(argv[4]) == "--write-array";
+  if (write_array && !cm.write_array) {
+    std::fprintf(stderr, "model has no write_array graph\n");
+    return 1;
+  }
+  const stanli::Graph& g = write_array ? cm.write_array->graph : cm.graph;
   std::printf("slots=%zu ops=%zu result=%d\n", g.slots.size(), g.ops.size(),
               g.result_slot);
   if (max_ops < 0) {
