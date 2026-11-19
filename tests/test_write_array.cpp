@@ -1448,6 +1448,53 @@ void test_write_array_rng_loops() {
   expect_rng_loop_parity("wa_rng_loops auto", 20000, nullptr, 5);
 }
 
+// An inlined function declares a matrix whose row count multiplies a
+// comparison of two fixed integers by a data sum. Inside a retained loop the
+// comparison is a graph value, and its range has to be the one value it can
+// take for the declaration to have a fixed size.
+void test_write_array_compare_size() {
+  using namespace stanli;
+  DataMap data;
+  data.set_int("N", 40);
+  data.set_int("R", 3);
+  data.set_int_array("sizes", {2, 1, 3});
+  const std::string text =
+      slurp("tests/fixtures/structured_compare_size.tmir.sexp");
+  test_setenv("STANLI_STRUCTURED_LOOPS", "1");
+  CompiledModel retained = compile_model(text, data);
+  test_setenv("STANLI_STRUCTURED_LOOPS", "0");
+  CompiledModel unrolled = compile_model(text, data);
+  test_unsetenv("STANLI_STRUCTURED_LOOPS");
+  if (!compiled_completely(retained, "structured_compare_size") ||
+      !compiled_completely(unrolled, "structured_compare_size unrolled"))
+    return;
+  const auto& ops = retained.write_array->graph.ops;
+  const auto loops = std::count_if(ops.begin(), ops.end(), [](const Op& op) {
+    return op.opcode == OP_LOOP;
+  });
+  if (loops != 1) {
+    ++failures;
+    std::printf(
+        "FAIL structured_compare_size: %td retained loops, want the outer "
+        "one only\n",
+        loops);
+  }
+  Executor rex(retained.write_array->graph), uex(unrolled.write_array->graph);
+  retained.write_array->bind(rex);
+  unrolled.write_array->bind(uex);
+  for (const double mu : {-0.7, 0.2, 1.9}) {
+    rex.params_data()[0] = uex.params_data()[0] = mu;
+    WaRng rrng(5), urng(5);
+    rex.run_forward_only(EvalState{&rrng});
+    uex.run_forward_only(EvalState{&urng});
+    if (!same_double_bytes(read_row(retained.write_array->columns, rex),
+                           read_row(unrolled.write_array->columns, uex))) {
+      ++failures;
+      std::printf("FAIL structured_compare_size: rows differ at mu=%g\n", mu);
+    }
+  }
+}
+
 // Require both selection and repeated whole-row parity. The forced interpreter
 // is an oracle alongside the complete graph, never evidence of admission.
 void expect_bounded_output(const std::string& fixture,
@@ -4730,6 +4777,7 @@ int main() {
   test_write_array_block_order();
   test_write_array_vector_rng();
   test_write_array_rng_loops();
+  test_write_array_compare_size();
   test_write_array_bounded_blocks();
   test_write_array_selected_loop_refused();
   test_write_array_selected_loop_overflow();

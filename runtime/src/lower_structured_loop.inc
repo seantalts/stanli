@@ -795,8 +795,24 @@ std::optional<IntRange> region_range(const mir::Expr& e) {
   }
   const std::string& f = e.name;
   if (f == "Less__" || f == "Leq__" || f == "Greater__" || f == "Geq__" ||
-      f == "Equals__" || f == "NEquals__" || f == "PNot__")
-    return IntRange{0, 1};
+      f == "Equals__" || f == "NEquals__" || f == "PNot__") {
+    const auto fixed = [&](const mir::Expr& x) -> std::optional<int64_t> {
+      const auto r = region_range(x);
+      if (!r || r->lo != r->hi) return {};
+      return r->lo;
+    };
+    const auto a = e.args.empty() ? std::nullopt : fixed(e.args[0]);
+    const auto b = e.args.size() == 2 ? fixed(e.args[1]) : std::nullopt;
+    if (a && e.args.size() == 1) return bounded(*a == 0, *a == 0);
+    if (!a || !b) return IntRange{0, 1};
+    const bool v = f == "Less__"      ? *a < *b
+                   : f == "Leq__"     ? *a <= *b
+                   : f == "Greater__" ? *a > *b
+                   : f == "Geq__"     ? *a >= *b
+                   : f == "Equals__"  ? *a == *b
+                                      : *a != *b;
+    return bounded(v, v);
+  }
   if (f == "sum" && e.args.size() == 1 &&
       e.args[0].unsized.leaf == mir::UnsizedLeaf::Int) {
     const auto total =
@@ -1660,7 +1676,8 @@ std::optional<Val> lower_runtime_scalar(const mir::Expr& e) {
     }
     g.ops.back().variant = static_cast<uint8_t>(comparison->second);
     v.autodiff = false;
-    set_int_range(v, 0, 1);
+    const auto range = region_range(e).value_or(IntRange{0, 1});
+    set_int_range(v, range.lo, range.hi);
     return v;
   }
   if (e.unsized.leaf == mir::UnsizedLeaf::Int && e.unsized.depth == 0) {
