@@ -462,5 +462,21 @@
     "bound_ulp": 2,
     "cause": "y ~ foo(mu) appears four times with different truncation bounds, and each statement adds the same -square(y - mu) term. CSE merges the four into one term times 4 (#587), so the target sums in a different grouping and y's adjoint gets 4 times one pullback instead of four pullbacks added one at a time. passes_off gives the same bits as no_cse at 41 points. Measured at the three test points: grad[0] up to 3 ULP and grad[1] up to 1 ULP, the same on macOS arm64 and x86-64 Linux except grad[0] at point 0, which differs only on macOS. Against an 80-digit mpmath reference, default is closer on grad[1] at points 0 and 1 and grad[0] at point 1 (0.2-0.3 ULP against 0.7-0.8), but at point 0 on macOS default's grad[0] is 2.8 ULP off and no_cse's 0.2. Over 40 swept points on macOS neither is more accurate on grad[0] (mean 2.01 against 2.07 ULP, default closer at 7 points and farther at 5); on grad[1] default is closer (mean 0.64 against 0.85).",
     "since": "2026-11-18"
+  },
+  {
+    "model": "structured_ragged_linspaced",
+    "quantity": "grad[32]",
+    "pair": "default/no_partition",
+    "bound_ulp": 2,
+    "cause": "partition_lanes gathers the scalar terms of the single-row groups into one lane FMA and normal_lpdf (95 ops with the pass, 107 with STANLI_NO_PARTITION), so beta's adjoint adds those rows' contributions in a different grouping. no_partition and passes_off give the same bits, and the retained loop (structured_forced) agrees with default bitwise.",
+    "since": "2026-11-19"
+  },
+  {
+    "model": "structured_ragged_linspaced",
+    "quantity": "grad[32]",
+    "pair": "default/passes_off",
+    "bound_ulp": 2,
+    "cause": "partition_lanes gathers the scalar terms of the single-row groups into one lane FMA and normal_lpdf (95 ops with the pass, 107 with STANLI_NO_PARTITION), so beta's adjoint adds those rows' contributions in a different grouping. no_partition and passes_off give the same bits, and the retained loop (structured_forced) agrees with default bitwise.",
+    "since": "2026-11-19"
   }
 ]

@@ -3268,6 +3268,65 @@ static void ambiguous_return_shape_tests() {
     check_reference_point(*model, {mu}, lp, "ambiguous return shape reference");
 }
 
+// Ragged models build each group's row range from per-group data inside the
+// loop, so the extent and endpoints of linspaced_int_array are only known at
+// run time.
+static void ragged_linspaced_tests() {
+  const DataMap data = DataMap::from_json_file(
+      "tests/fixtures/structured_ragged_linspaced.json");
+  test_setenv("STANLI_STRUCTURED_LOOP_DIAGNOSTICS", "1");
+  stanli_test::StdoutCapture captured(stderr);
+  const auto native =
+      try_compile_fixture("structured_ragged_linspaced", data, Mode::Prefer);
+  const std::string diagnostics = captured.finish();
+  test_unsetenv("STANLI_STRUCTURED_LOOP_DIAGNOSTICS");
+  check(native.has_value(), "ragged linspaced model compiles");
+  if (!native) return;
+  check(diagnostics.find("stanli_structured selected") != std::string::npos,
+        "ragged linspaced loop is selected for retention");
+  check(retained(*native) != nullptr, "ragged linspaced loop retains OP_LOOP");
+  const auto legacy =
+      compile_fixture("structured_ragged_linspaced", data, Mode::Off);
+  const size_t width = static_cast<size_t>(native->n_unconstrained);
+  std::vector<std::vector<double>> points;
+  for (double shift : {0.0, .3, -.7}) {
+    std::vector<double> point(width);
+    for (size_t i = 0; i < width; ++i)
+      point[i] = shift + .4 * std::sin(1.7 * double(i) + shift);
+    points.push_back(std::move(point));
+  }
+  compare_gradients(*native, legacy, points, "ragged linspaced target parity",
+                    "ragged linspaced gradient parity");
+
+  check(native->write_array && !native->write_array->interp &&
+            legacy.write_array && !legacy.write_array->interp,
+        "ragged linspaced outputs compile");
+  if (!native->write_array || native->write_array->interp ||
+      !legacy.write_array || legacy.write_array->interp)
+    return;
+  check(std::any_of(native->write_array->graph.ops.begin(),
+                    native->write_array->graph.ops.end(),
+                    [](const Op& op) { return op.opcode == OP_LOOP; }),
+        "ragged linspaced write_array retains OP_LOOP");
+  // One executor per model, so later points replay the recorded loop.
+  Executor native_wa(native->write_array->graph),
+      legacy_wa(legacy.write_array->graph);
+  native->write_array->bind(native_wa);
+  legacy.write_array->bind(legacy_wa);
+  const auto fit = [&](const CompiledModel& model, Executor& ex,
+                       const std::vector<double>& point) {
+    std::copy(point.begin(), point.end(), ex.params_data());
+    ex.run_forward_only();
+    for (const auto& column : model.write_array->columns)
+      if (column.name == "fit") return ex.value_ptr(column.slot)[0];
+    check(false, "ragged linspaced write_array has fit");
+    return 0.0;
+  };
+  for (const auto& point : points)
+    close(fit(*native, native_wa, point), fit(legacy, legacy_wa, point),
+          "ragged linspaced write_array parity");
+}
+
 static void runtime_local_shape_tests() {
   for (Mode mode : {Mode::Auto, Mode::Force}) {
     const auto model =
@@ -8399,6 +8458,7 @@ int main() {
   prefer_parent_tests();
   direct_index_lowering_tests();
   runtime_local_shape_tests();
+  ragged_linspaced_tests();
   zero_length_matrix_udf_tests();
   sequence_local_tests();
   ambiguous_return_shape_tests();
