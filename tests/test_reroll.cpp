@@ -2335,6 +2335,136 @@ static void test_row_store_lanes() {
   }
 }
 
+// (c2) `mu[n] = transpose([0, a[n], b[n], c[n]])`: each lane builds its row
+// from a shared zero and three elements with a CONCAT2 chain, then stores
+// it. Packed column-major (element k of lane l at l + L*k), the lanes'
+// concatenations are one CONCAT2 of the packed operands, so the chain
+// widens as it is. A matrix container already has that order; an array of
+// vectors is row-major and takes one transpose.
+static void test_concat_row_store_lanes() {
+  using namespace rowlanes;
+  for (Rows rows : {Rows::kMatrix, Rows::kArray}) {
+    const int L = 8, C = 4;
+    const std::string tag = rows == Rows::kMatrix ? "concat-mat" : "concat-arr";
+    Graph g;
+    Fills fills;
+    const int sigma = g.add_slot(1, true);
+    std::vector<int> elems;
+    for (int k = 1; k < C; ++k) elems.push_back(g.add_slot(L, true));
+    const int zero = g.add_slot(1, false);
+    fills.emplace_back(zero, std::vector<double>{0.0});
+    const int decl = g.add_slot((int64_t)L * C, false);
+    fills.emplace_back(decl, std::vector<double>((size_t)(L * C), 0.0));
+    const int base = g.add_slot((int64_t)L * C, false);
+    const int ydata = g.add_slot((int64_t)L * C, false);
+    std::vector<double> yv((size_t)(L * C));
+    for (size_t i = 0; i < yv.size(); ++i) yv[i] = 0.3 * (double)i - 1.0;
+    fills.emplace_back(ydata, yv);
+    for (int l = 0; l < L; ++l) {
+      std::vector<int> picked;
+      for (int e : elems) {
+        const int s = g.add_slot(1, false);
+        g.add_op(OP_INDEX, {e}, s, {l});
+        picked.push_back(s);
+      }
+      int row = zero;
+      for (int k = 0; k < C - 1; ++k) {
+        const int next = g.add_slot(k + 2, false);
+        g.add_op(OP_CONCAT2, {row, picked[(size_t)k]}, next);
+        row = next;
+      }
+      const int src = l == 0 ? decl : base;
+      if (rows == Rows::kMatrix)
+        g.add_op(l == 0 ? OP_SET_SLICE_STRIDED : OP_SET_SLICE_STRIDED_INPLACE,
+                 {src, row}, base, {l, L});
+      else
+        g.add_op(l == 0 ? OP_SET_SLICE : OP_SET_SLICE_INPLACE, {src, row}, base,
+                 {l * C});
+    }
+    const int lp = g.add_slot(1, false);
+    const int id = stanli::testutil::add_density(g, OP_NORMAL_LPDF,
+                                                 {ydata, base, sigma}, lp);
+    g.ops[(size_t)id].variant = 0x06;
+    std::vector<int> terms{lp};
+
+    Graph ref = g;
+    reduce_into_result(ref, terms);
+    const std::vector<double> want = run_grad(std::move(ref), fills);
+    std::vector<int> tt = terms;
+    Fills f2 = fills;
+    const RerollStats st = reroll(g, f2, tt, {});
+    expect((tag + " regions==1").c_str(), st.regions == 1);
+    expect((tag + " element-store disposition").c_str(), st.element_store == 1);
+    expect((tag + " no row stores left").c_str(), row_stores(g) == 0);
+    expect((tag + " no element reads left").c_str(),
+           writefuse::count(g, OP_INDEX) == 0);
+    expect((tag + " one CONCAT2 per link").c_str(),
+           writefuse::count(g, OP_CONCAT2) == C - 1);
+    for (const Op& op : g.ops)
+      if (op.opcode == OP_CONCAT2)
+        expect((tag + " CONCAT2 widened").c_str(),
+               g.slots[(size_t)op.out].len % L == 0 &&
+                   g.slots[(size_t)op.out].len >= 2 * L);
+    expect((tag + " transposes").c_str(),
+           writefuse::count(g, OP_TRANSPOSE) == (rows == Rows::kArray));
+    reduce_into_result(g, tt);
+    const std::vector<double> got = run_grad(std::move(g), f2);
+    expect((tag + " sizes").c_str(), got.size() == want.size());
+    for (size_t i = 0; i < want.size() && i < got.size(); ++i)
+      expect_close((tag + " v" + std::to_string(i)).c_str(), got[i], want[i]);
+  }
+}
+
+// A lane that appends to a row read row-major has committed the region to
+// row-major packing, where the lanes' concatenations interleave and no one
+// op forms them. The lanes stay scalar.
+static void test_concat_row_major_region_bails() {
+  using namespace rowlanes;
+  const int L = 8, C = 2;
+  Graph g;
+  Fills fills;
+  const int sigma = g.add_slot(1, true);
+  const int rowsrc = g.add_slot((int64_t)L * C, true);
+  const int extra = g.add_slot(L, true);
+  const int decl = g.add_slot((int64_t)L * (C + 1), false);
+  fills.emplace_back(decl, std::vector<double>((size_t)(L * (C + 1)), 0.0));
+  const int base = g.add_slot((int64_t)L * (C + 1), false);
+  const int ydata = g.add_slot((int64_t)L * (C + 1), false);
+  std::vector<double> yv((size_t)(L * (C + 1)));
+  for (size_t i = 0; i < yv.size(); ++i) yv[i] = 0.2 * (double)i - 0.5;
+  fills.emplace_back(ydata, yv);
+  for (int l = 0; l < L; ++l) {
+    const int row = g.add_slot(C, false);
+    g.add_op(OP_SLICE, {rowsrc}, row, {l * C});
+    const int e = g.add_slot(1, false);
+    g.add_op(OP_INDEX, {extra}, e, {l});
+    const int cat = g.add_slot(C + 1, false);
+    g.add_op(OP_CONCAT2, {row, e}, cat);
+    g.add_op(l == 0 ? OP_SET_SLICE : OP_SET_SLICE_INPLACE,
+             {l == 0 ? decl : base, cat}, base, {l * (C + 1)});
+  }
+  const int lp = g.add_slot(1, false);
+  const int id = stanli::testutil::add_density(g, OP_NORMAL_LPDF,
+                                               {ydata, base, sigma}, lp);
+  g.ops[(size_t)id].variant = 0x06;
+  std::vector<int> terms{lp};
+  Graph ref = g;
+  reduce_into_result(ref, terms);
+  const std::vector<double> want = run_grad(std::move(ref), fills);
+  std::vector<int> tt = terms;
+  Fills f2 = fills;
+  const RerollStats st = reroll(g, f2, tt, {});
+  expect("concat-rowmajor not fused", st.regions == 0);
+  expect("concat-rowmajor CONCAT2 per lane",
+         writefuse::count(g, OP_CONCAT2) == L);
+  reduce_into_result(g, tt);
+  const std::vector<double> got = run_grad(std::move(g), f2);
+  expect("concat-rowmajor sizes", got.size() == want.size());
+  for (size_t i = 0; i < want.size() && i < got.size(); ++i)
+    expect_close(("concat-rowmajor v" + std::to_string(i)).c_str(), got[i],
+                 want[i]);
+}
+
 // `M[l, :] += x_l` over every row; `shift` reads another row instead.
 static void test_read_modify_write_rows() {
   using rowlanes::Rows;
@@ -2429,6 +2559,25 @@ static void test_row_lanes_bail() {
     const RerollStats st = reroll(b.g, f2, tt, {});
     expect("uncovered row stores not fused",
            st.regions == 0 && b.g.ops.size() == before && row_stores(b.g) == 6);
+  }
+  {  // row-major rows are contiguous, so uncovered rows still fuse: one
+     // window store, the remaining row keeps the declaration's values
+    Built b = build_store(6, 4, Rows::kArray, 1);
+    Graph ref = b.g;
+    reduce_into_result(ref, b.terms);
+    const std::vector<double> want = run_grad(std::move(ref), b.fills);
+    Fills f2 = b.fills;
+    std::vector<int> tt = b.terms;
+    const RerollStats st = reroll(b.g, f2, tt, {});
+    expect("uncovered row-major rows fuse into one window store",
+           st.regions == 1 && row_stores(b.g) == 1 &&
+               writefuse::count(b.g, OP_SET_SLICE) == 1);
+    reduce_into_result(b.g, tt);
+    const std::vector<double> got = run_grad(std::move(b.g), f2);
+    expect("row window sizes", got.size() == want.size());
+    for (size_t i = 0; i < want.size() && i < got.size(); ++i)
+      expect_close(("row window v" + std::to_string(i)).c_str(), got[i],
+                   want[i]);
   }
   {  // a later writer of the matrix: the run fuses into a whole-vector
      // store and the later write chains onto it
@@ -3288,6 +3437,8 @@ int main() {
   test_pow_widens();
   test_row_density_lanes();
   test_row_store_lanes();
+  test_concat_row_store_lanes();
+  test_concat_row_major_region_bails();
   test_row_lanes_bail();
   test_read_modify_write_rows();
   test_row_lane_shared_read();
