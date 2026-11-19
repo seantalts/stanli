@@ -46,8 +46,10 @@ point and the gradients agree, because `~` drops terms that the optimizer
 can make constant. The summary counts them.
 
 Performance checks use the bucket prefix `o1`: `slow_compile`,
-`inline_growth`, `mir_growth` and `slow_gradient`. The thresholds are in
-the docstring of `fuzz.py`. After the parallel run, fuzz.py times the
+`mir_growth` and `slow_gradient`. The thresholds are in the docstring of
+`fuzz.py`. `slow_compile` times the compile that users get, without
+`--passes`, so a program that the O1 budget sends back to unoptimized MIR
+counts only the time it takes to decide that. After the parallel run, fuzz.py times the
 candidates for `slow_compile` and `slow_gradient` again one at a time.
 `--retime-seconds S` stops that after S seconds, and the summary counts the
 candidates left untimed.
@@ -78,8 +80,8 @@ timing of performance candidates (`--retime-seconds 300`). A manual run
 filing issues.
 
 Only correctness buckets matter for the result. The performance buckets
-(`slow_compile`, `slow_gradient`, `inline_growth`, `mir_growth`) depend on
-timings on a shared runner or on fixed size ratios, so the job summary
+(`slow_compile`, `slow_gradient`, `mir_growth`) depend on timings on a
+shared runner or on fixed size ratios, so the job summary
 lists them and nothing else happens.
 
 `nightly.py` holds the steps:

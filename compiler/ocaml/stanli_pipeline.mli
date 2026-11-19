@@ -4,9 +4,14 @@ type error =
   | Unsupported of string
       (** a construct stanli's compiler does not support *)
 
+(** [Before_inlining] means the estimate of the inlined cost, which never
+    exceeds the real cost, was already over the budget. *)
+type budget_check = Before_inlining | After_inlining
+
 type diagnostic =
   | O1_budget_exceeded of
-      { cost: int
+      { checked: budget_check
+      ; cost: int
       ; budget: int
       ; statements: int
       ; max_control_depth: int }

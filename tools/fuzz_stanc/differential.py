@@ -294,8 +294,10 @@ def run_process(argv, timeout, cwd=None):
 
 def compile_model(ctx, source, passes, mir_path, repeat=1):
     """The compile's outcome, MIR size and hash, and its fastest wall time
-    over `repeat` runs."""
-    argv = [ctx["compiler"], "--model-only", "--passes", passes,
+    over `repeat` runs. `passes` None compiles as users do, with the shipping
+    passes and their fallback to unoptimized MIR."""
+    override = [] if passes is None else ["--passes", passes]
+    argv = [ctx["compiler"], "--model-only", *override,
             "--filename", source.name, source]
     run = run_process(argv, ctx["timeout"])
     for _ in range(repeat - 1):

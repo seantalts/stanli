@@ -101,7 +101,9 @@ Step by step:
    optimization policy: upstream O1 plus the separately selected upstream
    `vectorize_loops` pass. Before O1's dataflow passes, it isolates function
    inlining and measures the maximum statement-depth cost of any procedure.
-   A cost over 20,000 uses the untouched transformed O0 MIR and reports an
+   It first computes a lower bound on that cost without inlining, so a
+   program whose functions call each other many levels deep falls back
+   before inlining makes it exponentially large. A cost over 20,000 uses the untouched transformed O0 MIR and reports an
    O1 fallback notice, separate from the warnings (`O1FallbackWarning` in
    Python, a `stanli_o1_fallback` condition in R, `o1Fallback` in the npm
    package); `STANLI_NO_O1_FALLBACK=1` restores unconditional O1 for an A/B

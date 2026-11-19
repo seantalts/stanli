@@ -1267,7 +1267,63 @@ let pass_override_tests () =
         ("the unknown-pass error does not name the pass and the valid names: "
        ^ message)
 
+(* Each f_k calls f_(k-1) twice, so inlining f_depth copies f0 2^depth times. *)
+let call_chain depth =
+  let fn k =
+    Printf.sprintf "real f%d(real x) { return f%d(x) + f%d(x + 1); }" k (k - 1)
+      (k - 1) in
+  Printf.sprintf
+    "functions { real f0(real x) { return x; } %s } parameters { real y; } \
+     model { target += f%d(y); }"
+    (String.concat " " (List.init depth (fun k -> fn (k + 1))))
+    depth
+
+(* Long function bodies that the inliner leaves as calls: overloads, the
+   recursive call inside a recursive function, and calls in parameter bounds.
+   Counting any of them as inlined would put this program over the budget. *)
+let uninlined_calls =
+  let body = String.concat " " (List.init 60 (fun _ -> "t = t + 1;")) in
+  let repeat n f = String.concat " " (List.init n f) in
+  Printf.sprintf
+    "functions { real overloaded(real x) { real t = 0; %s return x; } \
+     real overloaded(int x) { real t = 0; %s return x; } \
+     real recursive(real x) { real t = 0; %s \
+     if (x > 10) return x; return recursive(x + 1); } \
+     real bound() { real t = 0; %s return 0; } } \
+     parameters { real y; %s } model { %s target += recursive(y); }"
+    body body body body
+    (repeat 400 (Printf.sprintf "real<lower=bound()> p%d;"))
+    (repeat 200 (fun _ -> "target += overloaded(y) + overloaded(1);"))
+
+let inlining_estimate_test () =
+  let deep = call_chain 14 in
+  let production = Stanli_pipeline.default_pass_selection in
+  let compiled = compile_result ~passes:production deep in
+  require
+    (match compiled.result with
+    | Ok mir -> String.equal (encode mir) (encode (compile_upstream_o0 deep))
+    | Error _ -> false)
+    "a deep call chain did not fall back to transformed O0 MIR";
+  require
+    (match compiled.diagnostics with
+    | [Stanli_pipeline.O1_budget_exceeded {checked= Before_inlining; _}] ->
+        true
+    | _ -> false)
+    "a deep call chain was inlined before the budget check";
+  let shallow = compile_result ~passes:production uninlined_calls in
+  require
+    (List.is_empty shallow.diagnostics)
+    "the estimate counted calls that the inliner leaves alone";
+  require
+    (match shallow.result with
+    | Ok mir ->
+        String.equal (encode mir)
+          (encode (compile ~passes:no_budget uninlined_calls))
+    | Error _ -> false)
+    "a program under the budget did not get O1"
+
 let () =
+  inlining_estimate_test ();
   pass_override_tests ();
   tuple_wire_tests ();
   tuple_print_test ();

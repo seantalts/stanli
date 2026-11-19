@@ -3,15 +3,29 @@ type error =
   | Internal_error of string
   | Unsupported of string
 
+type budget_check = Before_inlining | After_inlining
+
 type diagnostic =
   | O1_budget_exceeded of
-      { cost: int
+      { checked: budget_check
+      ; cost: int
       ; budget: int
       ; statements: int
       ; max_control_depth: int }
 
 let diagnostic_message = function
-  | O1_budget_exceeded {cost; budget; statements; max_control_depth} ->
+  | O1_budget_exceeded
+      {checked= Before_inlining; cost; budget; statements; max_control_depth}
+    ->
+      Fmt.str
+        "stanli compiler: skipped O1 because inlining functions would give \
+         the transformed MIR a structural cost of at least %d, over the \
+         budget of %d (at least %d statements, control depth at least %d); \
+         using transformed O0 MIR. Set STANLI_NO_O1_FALLBACK=1 to force O1."
+        cost budget statements max_control_depth
+  | O1_budget_exceeded
+      {checked= After_inlining; cost; budget; statements; max_control_depth}
+    ->
       Fmt.str
         "stanli compiler: skipped O1 because the inlined transformed MIR \
          structural cost %d exceeds budget %d (%d statements, maximum control \
@@ -60,43 +74,129 @@ let add_stats a b =
   ; statements= saturating_add a.statements b.statements
   ; max_control_depth= Int.max a.max_control_depth b.max_control_depth }
 
-let rec statement_stats depth (stmt : Middle.Stmt.Located.t) =
-  let controls_children =
-    match stmt.pattern with
-    | Middle.Stmt.Pattern.IfElse _ | While _ | For _ -> true
-    | _ -> false in
+let saturating_mul a b =
+  if a <> 0 && b > Stdlib.max_int / a then Stdlib.max_int else a * b
+
+(* The stats of a statement or inlined body moved [depth] levels deeper. *)
+let placed depth stats =
+  { cost= saturating_add stats.cost (saturating_mul depth stats.statements)
+  ; statements= stats.statements
+  ; max_control_depth= saturating_add depth stats.max_control_depth }
+
+let no_inlining (_ : string) = None
+
+(* The structural cost of [stmt] at [depth]. [inlined name] gives the stats
+   at depth 0 of the body that function_inlining puts in place of a call to
+   [name]. The inliner keeps every statement of that body, puts it at least
+   as deep as the call, and adds return wrappers and temporaries that are
+   not counted here, so with inlining the result is a lower bound. *)
+let rec statement_stats ?(inlined = no_inlining) depth
+    (stmt : Middle.Stmt.Located.t) =
+  let open Middle in
   let child_depth =
-    if controls_children then saturating_add depth 1 else depth in
+    match stmt.pattern with
+    | IfElse _ | While _ | For _ -> saturating_add depth 1
+    | _ -> depth in
   let own =
     { cost= saturating_add depth 1
     ; statements= 1
     ; max_control_depth= child_depth } in
-  Middle.Stmt.Pattern.fold
-    (fun stats (_ : Middle.Expr.Typed.t) -> stats)
-    (fun stats child -> add_stats stats (statement_stats child_depth child))
-    own stmt.pattern
+  (* Like the inliner, look only at a call's arguments. Calls in the
+     expressions of a compiler-internal function, such as a parameter's
+     bounds, stay calls. *)
+  let rec calls stats (e : Expr.Typed.t) =
+    match e.pattern with
+    | FunApp (kind, args) ->
+        let stats =
+          match kind with
+          | UserDefined (name, _) -> (
+            match inlined name with
+            | Some body -> add_stats stats (placed depth body)
+            | None -> stats )
+          | _ -> stats in
+        List.fold_left calls stats args
+    | pattern -> Expr.Pattern.fold calls stats pattern in
+  (* The expressions that Optimize.inline_function_statement inlines calls
+     in. It leaves the sizes in a declaration's type alone. *)
+  let own, exprs =
+    match stmt.pattern with
+    | NRFunApp (UserDefined (name, _), args) -> (
+      match inlined name with
+      | Some body -> (placed depth body, args)
+      | None -> (own, args) )
+    | NRFunApp (_, args) -> (own, args)
+    | Assignment (lhs, _, rhs) ->
+        (own, [Stmt.Helpers.expr_of_lvalue lhs ~meta:rhs.meta; rhs])
+    | TargetPE e | JacobianPE e | Return (Some e) | IfElse (e, _, _)
+     |While (e, _)
+     |Decl {initialize= Assign e; _} ->
+        (own, [e])
+    | For {lower; upper; _} -> (own, [lower; upper])
+    | Decl _ | Return None | Profile _ | Block _ | SList _ | Skip | Break
+     |Continue ->
+        (own, []) in
+  let stats = List.fold_left calls own exprs in
+  Stmt.Pattern.fold
+    (fun stats (_ : Expr.Typed.t) -> stats)
+    (fun stats child ->
+      add_stats stats (statement_stats ~inlined child_depth child))
+    stats stmt.pattern
 
-let statement_list_stats stmts =
+let statement_list_stats ?inlined stmts =
   List.fold_left
-    (fun stats stmt -> add_stats stats (statement_stats 0 stmt))
+    (fun stats stmt -> add_stats stats (statement_stats ?inlined 0 stmt))
     empty_stats stmts
 
 let max_stats a b = if a.cost >= b.cost then a else b
 
-let max_procedure_stats (mir : Middle.Program.Typed.t) =
-  let blocks =
-    [ mir.prepare_data; mir.log_prob; mir.reverse_mode_log_prob
-    ; mir.generate_quantities; mir.transform_inits; mir.unconstrain_array ] in
+(* function_inlining inlines every block but prepare_data. *)
+let max_procedure_stats ?inlined (mir : Middle.Program.Typed.t) =
+  let inlined_blocks =
+    [ mir.log_prob; mir.reverse_mode_log_prob; mir.generate_quantities
+    ; mir.transform_inits; mir.unconstrain_array ] in
   let block_max =
     List.fold_left
-      (fun current block -> max_stats current (statement_list_stats block))
-      empty_stats blocks in
+      (fun current block ->
+        max_stats current (statement_list_stats ?inlined block))
+      (statement_list_stats mir.prepare_data)
+      inlined_blocks in
   List.fold_left
     (fun current (fn : Middle.Stmt.Located.t Middle.Program.fun_def) ->
       match fn.fdbody with
       | None -> current
       | Some body -> max_stats current (statement_stats 0 body))
     block_max mir.functions_block
+
+module Function_stats = Map.Make (String)
+
+(* A lower bound on [max_procedure_stats] of the program after
+   function_inlining, computed without inlining. The inliner inlines a
+   function only when it has one definition and no separate declaration,
+   and inside a body only the functions defined before it, so recursive
+   calls stay calls. Each body is measured once, with those earlier
+   functions inlined. *)
+let estimated_inlined_stats (mir : Middle.Program.Typed.t) =
+  let definitions =
+    List.fold_left
+      (fun counts (fn : _ Middle.Program.fun_def) ->
+        Function_stats.update fn.fdname
+          (fun n -> Some (1 + Option.value n ~default:0))
+          counts)
+      Function_stats.empty mir.functions_block in
+  let inlinable =
+    List.fold_left
+      (fun earlier (fn : Middle.Stmt.Located.t Middle.Program.fun_def) ->
+        match fn.fdbody with
+        | Some body when Function_stats.find fn.fdname definitions = 1 ->
+            let inlined name = Function_stats.find_opt name earlier in
+            Function_stats.add fn.fdname
+              (statement_stats ~inlined 0 body)
+              earlier
+        | _ -> earlier)
+      Function_stats.empty mir.functions_block in
+  max_procedure_stats
+    ~inlined:(fun name -> Function_stats.find_opt name inlinable)
+    mir
 
 let selected_default_passes ?(fast_math = false) () =
   let selection = {default_pass_selection with partial_evaluation= fast_math} in
@@ -210,6 +310,14 @@ let compile_with_settings ?include_source ?(prune_unused_sections = true)
         Common.ICE.with_exn_message (fun () ->
             Analysis_and_optimization.Optimize.optimization_suite ~settings
               candidate) in
+      let fallback checked stats budget =
+        ( split mir
+        , [ O1_budget_exceeded
+              { checked
+              ; cost= stats.cost
+              ; budget
+              ; statements= stats.statements
+              ; max_control_depth= stats.max_control_depth } ] ) in
       (* Inline before dropping unused procedures: upstream uses a shared
          fresh-name supply, so skipping their inlining would rename later
          generated-quantities locals. Preserve the original structural-budget
@@ -220,33 +328,39 @@ let compile_with_settings ?include_source ?(prune_unused_sections = true)
           Common.ICE.with_exn_message (fun () ->
               Analysis_and_optimization.Optimize.function_inlining mir)
         else Ok mir in
-      match inline mir with
-      | Error internal -> (Error (Internal_error internal), [])
-      | Ok inlined ->
-          let stats = max_procedure_stats inlined in
-          match budget with
-          | Some budget when stats.cost > budget ->
-              ( split mir
-              , [O1_budget_exceeded
-                   { cost= stats.cost
-                   ; budget
-                   ; statements= stats.statements
-                   ; max_control_depth= stats.max_control_depth }] )
-          | _ ->
+      (* Inlining a deep call chain can take minutes, so check the estimate
+         first. *)
+      let estimate = Option.map (fun _ -> estimated_inlined_stats mir) budget in
+      match (budget, estimate) with
+      | Some budget, Some estimate when estimate.cost > budget ->
+          fallback Before_inlining estimate budget
+      | _ -> (
+        match inline mir with
+        | Error internal -> (Error (Internal_error internal), [])
+        | Ok inlined -> (
+            let stats = max_procedure_stats inlined in
+            match budget with
+            | Some budget when stats.cost > budget ->
+                fallback After_inlining stats budget
+            | _ -> (
               (* Tuples are split before pruning, so pruned and unpruned
                  compiles name their temporaries alike. *)
               match split inlined with
               | Error error -> (Error error, [])
-              | Ok inlined ->
-              let candidate =
-                if prune_unused_sections then
-                  if model_only then prune_portable_procedures inlined
-                  else {inlined with reverse_mode_log_prob= []; unconstrain_array= []}
-                else inlined in
-              let remaining_settings = {settings with function_inlining= false} in
-              (match optimize candidate remaining_settings with
-              | Error internal -> (Error (Internal_error internal), [])
-              | Ok optimized -> (Ok optimized, [])) ) in
+              | Ok inlined -> (
+                  let candidate =
+                    if prune_unused_sections then
+                      if model_only then prune_portable_procedures inlined
+                      else
+                        { inlined with
+                          reverse_mode_log_prob= []
+                        ; unconstrain_array= [] }
+                    else inlined in
+                  let remaining_settings =
+                    {settings with function_inlining= false} in
+                  match optimize candidate remaining_settings with
+                  | Error internal -> (Error (Internal_error internal), [])
+                  | Ok optimized -> (Ok optimized, []) ) ) ) ) ) in
   {result; warnings= compiled.warnings; diagnostics}
 
 let compile_mir_with_passes_uncached ?include_source ?prune_unused_sections

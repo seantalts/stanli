@@ -3,12 +3,12 @@
 
 Each seed's program from gen.py is compiled with --passes none and o1 and
 compared in stanli by differential.py. A difference is bisected to the
-first pass that causes it. Four performance checks add their own buckets:
+first pass that causes it. Three performance checks add their own buckets:
 
-  slow_compile   the o1 compile takes more than 1 s and more than 10 times
-                 the none compile (timed again serially before reporting)
-  inline_growth  the MIR after function_inlining alone is more than 50
-                 times the size of the unoptimized MIR
+  slow_compile   the compile that users get (no --passes, so with the O1
+                 budget and its fallback) takes more than 1 s and more than
+                 10 times the none compile (timed again serially before
+                 reporting)
   mir_growth     the o1 MIR is more than 8 times the size of the MIR after
                  function_inlining alone
   slow_gradient  a warm gradient at o1 takes more than 1.5 times, and at
@@ -43,14 +43,13 @@ import gen  # noqa: E402
 
 KEEP_PER_BUCKET = 5
 SLOW_SECONDS, SLOW_RATIO = 1.0, 10.0
-INLINE_GROWTH_RATIO = 50.0  # above the 99.9th percentile of 20,000 programs
 GROWTH_RATIO = 8.0
 WORK_RATIO = 1.5
 WORK_FLOOR = 10  # elements; a few ops of difference is not a finding
 GRADIENT_RATIO = 1.5
 GRADIENT_FLOOR_NS = 100.0
 REGION_OPS = ("OP_ISLAND", "OP_LOOP", "OP_REGION_MAP")
-PERF_KINDS = ("slow_compile", "inline_growth", "mir_growth", "slow_gradient")
+PERF_KINDS = ("slow_compile", "mir_growth", "slow_gradient")
 
 
 def parse_seeds(spec):
@@ -91,16 +90,17 @@ def more_work(w):
     return more_elems or b.get("regions", 0) > a.get("regions", 0)
 
 
+def slow_compile(seconds):
+    """Whether the shipped compile is slow, absolutely and next to none."""
+    a, b = seconds.get("none"), seconds.get("shipped")
+    return bool(a and b and b > SLOW_SECONDS and b > SLOW_RATIO * a)
+
+
 def perf_kinds(r):
     out = []
-    t = r.get("serial_seconds") or {
-        "none": r["none"].get("seconds"), "o1": r["o1"].get("seconds")}
-    if t["none"] and t["o1"] and t["o1"] > SLOW_SECONDS and \
-            t["o1"] > SLOW_RATIO * t["none"]:
+    if slow_compile(r.get("serial_seconds") or {
+            k: r[k].get("seconds") for k in ("none", "shipped")}):
         out.append("slow_compile")
-    if r.get("inlined_size") and r["none"].get("size") and \
-            r["inlined_size"] > INLINE_GROWTH_RATIO * r["none"]["size"]:
-        out.append("inline_growth")
     if r.get("inlined_size") and r["o1"].get("size") and \
             r["o1"]["size"] > GROWTH_RATIO * r["inlined_size"]:
         out.append("mir_growth")
@@ -183,13 +183,13 @@ def keep_failure(ctx, bucket, seed, work, record):
     dest = ctx["out"] / "failures" / bucket.replace(":", "__") / \
         f"seed-{seed}"
     dest.mkdir(parents=True, exist_ok=True)
-    for f in ("model.stan", "data.json", "none.mir", "o1.mir"):
+    for f in ("model.stan", "data.json", "none.mir", "o1.mir", "shipped.mir"):
         if (work / f).exists():
             shutil.copyfile(work / f, dest / f)
     (dest / "diffs.json").write_text(json.dumps(
         {k: record.get(k) for k in ("seed", "buckets", "guilty", "diffs",
-                                    "bisect", "none", "o1", "inlined_size",
-                                    "work", "gradient_ns")}, indent=1)
+                                    "bisect", "none", "o1", "shipped",
+                                    "inlined_size", "work", "gradient_ns")}, indent=1)
         + "\n")
 
 
@@ -232,6 +232,9 @@ def examine(record, source, data_file, work, ctx):
     record["o1"] = {k: o1[0][k] for k in ("outcome", "seconds", "size",
                                           "message")}
     record["mir_identical"] = none[0]["sha"] == o1[0]["sha"]
+    shipped = d.compile_model(ctx, source, None, work / "shipped.mir")
+    record["shipped"] = {k: shipped[k] for k in ("outcome", "seconds",
+                                                 "size")}
     inl = d.compile_model(ctx, source, "function_inlining", work / "inl.mir")
     record["inlined_size"] = inl["size"]
     tilde = "s_tilde" in record["features"]
@@ -310,9 +313,7 @@ def retime(ctx, cfg, results, seconds=None):
 def retime_reasons(r):
     """Whether the compile looks slow, and whether the profile suggests
     more work at o1."""
-    t = (r["none"]["seconds"], r["o1"]["seconds"])
-    slow = bool(t[0] and t[1] and t[1] > SLOW_SECONDS and
-                t[1] > SLOW_RATIO * t[0])
+    slow = slow_compile({k: r[k]["seconds"] for k in ("none", "shipped")})
     return slow, more_work(r.get("work"))
 
 
@@ -324,12 +325,16 @@ def retime_one(ctx, r, source, data):
         w = pathlib.Path(w)
         (w / "model.stan").write_text(source)
         (w / "data.json").write_text(json.dumps(data))
-        runs = {passes: d.compile_model(ctx, w / "model.stan", passes,
-                                        w / f"{passes}.mir",
-                                        repeat=3 if slow else 1)
-                for passes in ("none", "o1")}
+        def compile_as(name, passes):
+            return d.compile_model(ctx, w / "model.stan", passes,
+                                   w / f"{name}.mir", repeat=3 if slow else 1)
+        runs = {"none": compile_as("none", "none")}
+        if work:
+            runs["o1"] = compile_as("o1", "o1")
         if slow:
-            r["serial_seconds"] = {k: v["seconds"] for k, v in runs.items()}
+            r["serial_seconds"] = {
+                "none": runs["none"]["seconds"],
+                "shipped": compile_as("shipped", None)["seconds"]}
         if work:
             r["gradient_ns"] = {
                 k: gradient_ns(ctx, w / f"{k}.mir", w / "data.json")
