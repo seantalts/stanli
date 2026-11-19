@@ -33,6 +33,7 @@ FAKE_GH = """\
 } >> "$GH_LOG"
 case "$1 $2" in
   "issue list") cat "$GH_ISSUES" ;;
+  "issue view") cat "$GH_COMMENTS" ;;
   "label create") [ -n "$GH_LABEL_FAILS" ] && { echo 'HTTP 403' >&2; exit 1; }; true ;;
   "issue create") echo "https://github.com/o/r/issues/99" ;;
   "issue comment") echo "https://github.com/o/r/issues/7#issuecomment-1" ;;
@@ -56,6 +57,9 @@ def results(programs, seeds="0:10"):
             "programs": programs}
 
 
+NOW = "2026-12-20T03:40:00Z"
+OLD = "2026-12-01T03:40:00Z"
+RECENT = "2026-12-16T03:40:00Z"
 LP = [{"kind": "lp", "point": 0, "none": -1.5, "o1": -2.5}]
 
 
@@ -92,9 +96,13 @@ class Fixture(unittest.TestCase):
         self.log = self.tmp / "gh.log"
         self.issues = self.tmp / "issues.json"
         self.issues.write_text("[]")
-        self.env = {"GH_LOG": str(self.log), "GH_ISSUES": str(self.issues)}
+        self.comments = self.tmp / "comments.json"
+        self.comments.write_text('{"comments": []}')
+        self.env = {"GH_LOG": str(self.log), "GH_ISSUES": str(self.issues),
+                    "GH_COMMENTS": str(self.comments)}
         self.old_env = {k: os.environ.get(k) for k in
-                        ("GH_LOG", "GH_ISSUES", "GH_LABEL_FAILS")}
+                        ("GH_LOG", "GH_ISSUES", "GH_COMMENTS",
+                         "GH_LABEL_FAILS")}
         os.environ.update(self.env)
         os.environ.pop("GH_LABEL_FAILS", None)
 
@@ -117,7 +125,8 @@ class Fixture(unittest.TestCase):
     def file(self, *extra):
         return self.main("file", str(self.run_dir), "--repo", "o/r",
                          "--gh", str(self.gh), "--commit", "abc123",
-                         "--run-url", "https://example.invalid/run/1", *extra)
+                         "--run-url", "https://example.invalid/run/1",
+                         "--now", NOW, *extra)
 
     def calls(self):
         text = self.log.read_text() if self.log.exists() else ""
@@ -168,8 +177,9 @@ class FileTest(Fixture):
     def test_open_issue_gets_a_comment_with_the_new_seeds(self):
         self.write(standard_run())
         self.issues.write_text(json.dumps(
-            [{"number": 7, "title": "lcm:lp"},
-             {"number": 8, "title": "lcm:lp extra words"}]))
+            [{"number": 7, "title": "lcm:lp", "createdAt": OLD},
+             {"number": 8, "title": "lcm:lp extra words",
+              "createdAt": OLD}]))
         self.file()
         calls = self.calls()
         self.assertEqual(sum("issue create" in c for c in calls), 1)
@@ -185,9 +195,37 @@ class FileTest(Fixture):
         res["programs"] = [r for r in res["programs"]
                            if r["seed"] != 1_000_005]
         self.write(res)
-        self.issues.write_text(json.dumps([{"number": 7, "title": "lcm:lp"}]))
+        self.issues.write_text(json.dumps(
+            [{"number": 7, "title": "lcm:lp", "createdAt": OLD}]))
         self.file()
         self.assertFalse([c for c in self.calls() if "issue comment" in c])
+
+    def open_lcm(self, created, comments):
+        self.issues.write_text(json.dumps(
+            [{"number": 7, "title": "lcm:lp", "createdAt": created}]))
+        self.comments.write_text(json.dumps({"comments": comments}))
+
+    def comment_calls(self):
+        return [c for c in self.calls() if "issue comment" in c]
+
+    def test_at_most_one_comment_a_week(self):
+        self.write(standard_run())
+        self.open_lcm(OLD, [{"body": "The nightly fuzzer found 3 more",
+                             "createdAt": RECENT}])
+        self.file()
+        self.assertEqual(self.comment_calls(), [])
+        self.log.unlink()
+        self.open_lcm(RECENT, [])
+        self.file()
+        self.assertEqual(self.comment_calls(), [], "opened this week")
+        self.log.unlink()
+        self.open_lcm(OLD, [{"body": "I am looking at this",
+                             "createdAt": RECENT},
+                            {"body": "The nightly fuzzer found 3 more",
+                             "createdAt": OLD}])
+        self.file()
+        self.assertEqual(len(self.comment_calls()), 1,
+                         "a person's comment does not count")
 
     def test_label_failure_still_opens_the_issue(self):
         os.environ["GH_LABEL_FAILS"] = "1"
@@ -221,6 +259,46 @@ class FileTest(Fixture):
 
 
 class GateTest(Fixture):
+    def filed(self):
+        return json.loads((self.run_dir / "filed.json").read_text())
+
+    def test_only_newly_opened_issues_fail_after_filing(self):
+        self.write(standard_run())
+        self.issues.write_text(json.dumps(
+            [{"number": 7, "title": "lcm:lp", "createdAt": RECENT}]))
+        self.file()
+        self.assertEqual(self.filed()["opened"],
+                         ["copy_propagation:write_array"])
+        self.assertEqual(self.filed()["already_open"], ["lcm:lp"])
+        code, out = self.main("gate", str(self.run_dir))
+        self.assertEqual(code, 1)
+        self.assertIn("copy_propagation:write_array", out)
+        self.assertNotIn("lcm:lp", out)
+
+    def test_every_bucket_already_open_passes(self):
+        self.write(standard_run())
+        self.issues.write_text(json.dumps(
+            [{"number": 7, "title": "lcm:lp", "createdAt": OLD},
+             {"number": 9, "title": "copy_propagation:write_array",
+              "createdAt": RECENT}]))
+        self.file()
+        self.assertEqual(self.filed()["opened"], [])
+        self.assertEqual(self.filed()["commented"], ["lcm:lp"])
+        self.assertEqual(self.main("gate", str(self.run_dir))[0], 0)
+
+    def test_harness_errors_fail_after_filing(self):
+        res = standard_run()
+        res["programs"].append(program(11, "harness_error"))
+        self.write(res)
+        self.issues.write_text(json.dumps(
+            [{"number": 7, "title": "lcm:lp", "createdAt": OLD},
+             {"number": 9, "title": "copy_propagation:write_array",
+              "createdAt": OLD}]))
+        self.file()
+        code, out = self.main("gate", str(self.run_dir))
+        self.assertEqual(code, 1)
+        self.assertEqual(out.strip(), "1 harness errors")
+
     def test_new_correctness_bucket_fails(self):
         self.write(standard_run())
         code, out = self.main("gate", str(self.run_dir))

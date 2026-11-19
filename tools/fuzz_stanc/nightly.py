@@ -7,6 +7,11 @@
     nightly.py file RUN --repo OWNER/NAME    open or update one issue per bucket
     nightly.py gate RUN                      exit 1 when the run needs a look
 
+`file` writes RUN/filed.json with the buckets it opened issues for. When
+that file exists, `gate` fails only for those buckets, so a bucket with an
+open issue does not turn later nights red. It comments on an open issue at
+most once a week.
+
 RUN is a fuzz.py --out directory. Only correctness buckets open issues and
 decide the result. The performance buckets (fuzz.PERF_KINDS) time things on
 a shared runner or compare sizes against fixed ratios, so they appear in
@@ -39,6 +44,8 @@ BUDGET = 20_000
 BASE, STRIDE = 1_000_000, 50_000
 EPOCH = datetime.date(2026, 11, 1)
 MIN_AGREE = 0.5
+COMMENT_EVERY = datetime.timedelta(days=7)
+COMMENT_START = "The nightly fuzzer found"
 LABEL = "fuzzer"
 BODY_LIMIT = 60_000  # GitHub rejects bodies over 65,536 characters
 SECTION_LIMIT = 12_000
@@ -87,10 +94,12 @@ def outcome_counts(results):
     return count
 
 
-def problems(results):
-    """Reasons for the run to fail."""
+def problems(results, filed=None):
+    """Reasons for the run to fail. With `filed`, the `file` step's record,
+    only the buckets that it opened an issue for count."""
     out = [f"new bucket {b} ({len(s)} programs)"
-           for b, s in new_correctness(results).items()]
+           for b, s in new_correctness(results).items()
+           if filed is None or b in filed["opened"]]
     count = outcome_counts(results)
     n = len(results["programs"])
     if count.get("harness_error"):
@@ -234,7 +243,7 @@ def issue_body(run, results, bucket, seeds, context):
     record = by_seed(results)[seed]
     program = gen.generate(seed, results["config"])
     parts = [
-        f"The nightly fuzzer found programs in bucket `{bucket}` that "
+        f"{COMMENT_START} programs in bucket `{bucket}` that "
         f"`known.json` does not cover. tools/fuzz_stanc/README.md explains "
         f"buckets.",
         "",
@@ -273,7 +282,7 @@ def issue_body(run, results, bucket, seeds, context):
 
 
 def comment_body(bucket, seeds, context):
-    lines = [f"The nightly fuzzer found {len(seeds)} more programs in "
+    lines = [f"{COMMENT_START} {len(seeds)} more programs in "
              f"`{bucket}`: seeds {', '.join(map(str, seeds[:20]))}"
              f"{', ...' if len(seeds) > 20 else ''}."]
     if context.get("run_url"):
@@ -289,19 +298,38 @@ def gh(args, *argv, check=True):
     return r
 
 
+def timestamp(text):
+    return datetime.datetime.fromisoformat(text.replace("Z", "+00:00"))
+
+
+def last_post(args, issue):
+    """When the issue was opened or the fuzzer last commented on it."""
+    view = json.loads(gh(args, "issue", "view", str(issue["number"]),
+                         "--json", "comments").stdout)
+    times = [timestamp(issue["createdAt"])]
+    times += [timestamp(c["createdAt"]) for c in view.get("comments", [])
+              if c.get("body", "").startswith(COMMENT_START)]
+    return max(times)
+
+
 def cmd_file(args):
     results = load(args.run)
     todo = new_correctness(results)
+    filed = {"opened": [], "commented": [], "already_open": []}
+    record = args.run / "filed.json"
+    record.write_text(json.dumps(filed) + "\n")
     if not todo:
         print("no new correctness buckets")
         return 0
+    now = timestamp(args.now) if args.now else \
+        datetime.datetime.now(datetime.timezone.utc)
     regression = set(fuzz.parse_seeds(args.regression)) \
         if args.regression else set()
     context = {"commit": args.commit, "run_url": args.run_url}
     issues = json.loads(gh(args, "issue", "list", "--state", "open",
                            "--limit", "1000", "--json",
-                           "number,title").stdout)
-    open_by_title = {i["title"]: i["number"] for i in issues}
+                           "number,title,createdAt").stdout)
+    open_by_title = {i["title"]: i for i in issues}
     label = gh(args, "label", "create", LABEL, "--color", "d93f0b",
                "--description", "Found by the nightly stanc3 fuzzer",
                check=False)
@@ -310,15 +338,22 @@ def cmd_file(args):
         body_file = pathlib.Path(tmp) / "body.md"
         for bucket, seeds in todo.items():
             if bucket in open_by_title:
+                issue = open_by_title[bucket]
+                filed["already_open"].append(bucket)
                 fresh = [s for s in seeds if s not in regression]
                 if not fresh:
-                    print(f"{bucket}: #{open_by_title[bucket]} is open; "
+                    print(f"{bucket}: #{issue['number']} is open; "
                           f"only regression seeds this run")
                     continue
+                if now - last_post(args, issue) < COMMENT_EVERY:
+                    print(f"{bucket}: #{issue['number']} is open; the "
+                          f"fuzzer posted there within a week")
+                    continue
                 body_file.write_text(comment_body(bucket, fresh, context))
-                gh(args, "issue", "comment", str(open_by_title[bucket]),
+                gh(args, "issue", "comment", str(issue["number"]),
                    "--body-file", str(body_file))
-                print(f"{bucket}: commented on #{open_by_title[bucket]}")
+                filed["commented"].append(bucket)
+                print(f"{bucket}: commented on #{issue['number']}")
                 continue
             body_file.write_text(issue_body(args.run, results, bucket, seeds,
                                             context))
@@ -327,7 +362,10 @@ def cmd_file(args):
             if have_label:
                 argv += ["--label", LABEL]
             r = gh(args, *argv)
+            filed["opened"].append(bucket)
+            record.write_text(json.dumps(filed) + "\n")
             print(f"{bucket}: opened {r.stdout.strip()}")
+    record.write_text(json.dumps(filed) + "\n")
     return 0
 
 
@@ -346,7 +384,9 @@ def cmd_seeds(args):
 
 
 def cmd_gate(args):
-    reasons = problems(load(args.run))
+    record = args.run / "filed.json"
+    filed = json.loads(record.read_text()) if record.exists() else None
+    reasons = problems(load(args.run), filed)
     for r in reasons:
         print(r)
     return 1 if reasons else 0
@@ -378,6 +418,8 @@ def main(argv=None):
                                 "open issue")
             s.add_argument("--commit", default="")
             s.add_argument("--run-url", default="")
+            s.add_argument("--now", default="",
+                           help="the current time, ISO 8601 (for tests)")
     args = ap.parse_args(argv)
     return {"seeds": cmd_seeds, "summary": cmd_summary,
             "reduce": cmd_reduce, "file": cmd_file,

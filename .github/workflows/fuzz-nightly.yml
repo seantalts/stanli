@@ -229,7 +229,9 @@ jobs:
             --repo "$GITHUB_REPOSITORY" --commit "$GITHUB_SHA" \
             --run-url "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
 
-      # Fails on new correctness buckets, harness errors, or a run where
-      # too few programs agree to trust the tools.
+      # Fails on harness errors, on a run where too few programs agree to
+      # trust the tools, and on new correctness buckets. After filing, only
+      # buckets that got a new issue count, so an open issue keeps later
+      # nights green.
       - name: Gate on correctness buckets
         run: python3 tools/fuzz_stanc/nightly.py gate fuzz-run

@@ -92,11 +92,15 @@ lists them and nothing else happens.
   name and labeled `fuzzer`. The body has the seed, the commands to
   reproduce it, the differences, the reduced program when the reducer
   finished, and the program. When an open issue already has that title, it
-  comments with the new seeds instead, and stays quiet when only regression
-  seeds hit the bucket. Buckets in `known.json` never open issues.
-- `gate` fails the run on a new correctness bucket, on harness errors, or
-  when fewer than half the programs agree, which means the tools are
-  broken.
+  comments with the new seeds instead, at most once a week, and stays quiet
+  when only regression seeds hit the bucket. Buckets in `known.json` never
+  open issues. It writes the buckets it opened issues for to
+  `RUN/filed.json`.
+- `gate` fails the run on harness errors, or when fewer than half the
+  programs agree, which means the tools are broken. It also fails on new
+  correctness buckets: after `file`, only those that got a new issue in
+  this run, so a bucket with an open issue does not keep every night red.
+  Without `filed.json` every new bucket counts.
 
 The fuzzing job uploads its run directory as the `fuzz-run` artifact. A
 second job, which holds the only token that can write issues, downloads it
