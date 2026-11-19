@@ -117,10 +117,9 @@ stanli_install <- function(version = stanli_runtime_release, quiet = FALSE,
   tryCatch(
     utils::download.file(url, tmp, mode = "wb", quiet = quiet),
     error = function(e) {
-      stop("could not download the stanli runtime from ", url, ": ",
-           conditionMessage(e),
-           "\nBuild it from source and point STANLI_RUNTIME at the result ",
-           "if this platform has no release asset.", call. = FALSE)
+      stop(download_failure_message(url, version, asset, conditionMessage(e),
+                                    release_published(base, version)),
+           call. = FALSE)
     })
   # download.file() reports some failures through a non-zero status
   # rather than a condition, and a proxy or an error page can arrive as
@@ -151,6 +150,40 @@ stanli_install <- function(version = stanli_runtime_release, quiet = FALSE,
             " runtime; set STANLI_RUNTIME to use the one just installed")
   }
   invisible(dest)
+}
+
+# TRUE when the release page exists, FALSE when GitHub answers 404 for it,
+# NA when that cannot be told (offline, a proxy, an old R).
+release_published <- function(base, version) {
+  status <- tryCatch(
+    attr(curlGetHeaders(paste0(base, "/tag/", version)), "status"),
+    error = function(e) NA_integer_)
+  if (identical(status, 200L)) TRUE else if (identical(status, 404L)) FALSE else NA
+}
+
+download_failure_message <- function(url, version, asset, reason,
+                                     release_found,
+                                     paired = identical(version,
+                                                        stanli_runtime_release)) {
+  if (isFALSE(release_found))
+    return(paste0(
+      "stanli release ", version, " is not published on GitHub, so its ",
+      "runtime cannot be downloaded. ",
+      if (paired) paste0(
+        "This R package pairs with it, which happens when the package was ",
+        "installed from a commit while that release was being built. "),
+      "Install the latest published release with ",
+      "remotes::install_github(\"seantalts/stanli@*release\", subdir = \"r\") ",
+      "and run stanli_install() again, or wait until ", version,
+      " is published."))
+  if (isTRUE(release_found))
+    return(paste0(
+      "stanli release ", version, " has no ", asset, " for this platform. ",
+      "Build the runtime from source and point STANLI_RUNTIME at the result."))
+  paste0("could not download the stanli runtime from ", url, ": ", reason,
+         "\nCheck the network connection and try again. If this platform ",
+         "has no release asset, build the runtime from source and point ",
+         "STANLI_RUNTIME at the result.")
 }
 
 # remotes and pak record the commit that install_github() installed.
