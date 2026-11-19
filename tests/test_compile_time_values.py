@@ -53,14 +53,19 @@ def main(check, compile_):
                      "--point", "1"], capture_output=True, text=True)
                 line = next((l for l in result.stdout.splitlines()
                              if l.startswith(("OK ", "COMPILE_FAIL",
-                                              "EVAL_FAIL"))), result.stdout)
-                fields = line.split()
+                                              "EVAL_FAIL"))), None)
+                fields = line.split() if line else []
                 got = (tuple(float(x) for x in fields[1:3])
                        if fields[:1] == ["OK"] and len(fields) == 3 else None)
                 if got is None or not all(map(close, got, want)):
                     failures += 1
-                    print(f"FAIL {name} --passes {passes}: got {line.strip()}, "
+                    print(f"FAIL {name} --passes {passes}: got "
+                          f"{line.strip() if line else 'no result line'}, "
                           f"CmdStan lp {want[0]!r} gradient {want[1]!r}")
+                    if line is None:
+                        print(f"  stanli_check exited with {result.returncode}"
+                              f"\n  stdout:\n{result.stdout}"
+                              f"  stderr:\n{result.stderr}")
                 else:
                     print(f"ok {name} --passes {passes}")
     return 1 if failures else 0

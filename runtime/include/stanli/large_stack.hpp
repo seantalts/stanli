@@ -4,7 +4,10 @@
 // Windows, where the calling thread's stack is usually 1 MB) run on the
 // calling thread, as they always have. A deeper one is read and lowered on a
 // helper thread that has a large stack, and nesting beyond what that stack
-// holds is a CompileError rather than an overflow.
+// holds is a CompileError rather than an overflow. Lowering also inlines
+// user function calls, so a recursive user function needs stack in
+// proportion to how deep it recurses, which the nesting does not show; a
+// program with one is lowered on the large stack too.
 #ifndef STANLI_LARGE_STACK_HPP
 #define STANLI_LARGE_STACK_HPP
 
@@ -25,6 +28,10 @@ struct NestingTooDeep : std::runtime_error {
 // The deepest statement/expression nesting a reader accepts on this thread.
 // Emscripten has no threads, so it keeps to what its 8 MB stack holds.
 unsigned nesting_limit();
+
+// True when this thread is not already on the large stack and one can be
+// started.
+bool can_move_to_large_stack();
 
 // True when a program this deeply nested must be lowered on the large stack
 // and this thread is not already on it.

@@ -1762,6 +1762,10 @@ if(Python3_Interpreter_FOUND)
                      $<TARGET_FILE:stanli_check> ${_stanli_compile}
              WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
   endif()
+  add_test(NAME test_udf_recursion_stack
+           COMMAND ${Python3_EXECUTABLE} tests/test_udf_recursion_stack.py
+                   $<TARGET_FILE:stanli_check>
+           WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
   # The corpus replay's per-point verdicts, over a stub stanli_check. The
   # oracle itself needs posteriordb and a real binary and so runs in CI
   # rather than here; what runs here is the classification it depends on,

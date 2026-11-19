@@ -140,9 +140,12 @@ unsigned nesting_limit() {
   return inline_nesting_limit();
 }
 
+bool can_move_to_large_stack() {
+  return large_stack_limit == 0 && !large_stack_unavailable();
+}
+
 bool needs_large_stack(unsigned nesting) {
-  return large_stack_limit == 0 && !large_stack_unavailable() &&
-         nesting > inline_nesting_limit();
+  return can_move_to_large_stack() && nesting > inline_nesting_limit();
 }
 
 namespace detail {

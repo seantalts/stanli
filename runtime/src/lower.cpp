@@ -1515,6 +1515,44 @@ std::optional<DataMap> tuple_data_in_array_order(const mir::Program& p,
   return out;
 }
 
+// Whether a user function can reach itself through calls, directly or
+// through other functions. Any spelling of a defined function's key counts
+// as a call, which includes a callback passed to a higher-order function.
+bool has_recursive_functions(const mir::Program& p) {
+  std::map<std::string, std::set<std::string>> callees;
+  for (const mir::FunDef& f : p.fun_defs) callees[mir::function_key(f)];
+  for (const mir::FunDef& f : p.fun_defs) {
+    std::set<std::string>& out = callees[mir::function_key(f)];
+    const auto called = [&](const std::string& key) {
+      if (callees.count(key)) out.insert(key);
+    };
+    std::function<void(const mir::Expr&)> expr = [&](const mir::Expr& e) {
+      called(mir::function_key(e));
+      for (const mir::Expr& arg : e.args) expr(arg);
+    };
+    std::function<void(const mir::Stmt&)> stmt = [&](const mir::Stmt& s) {
+      if (!s.fn_name.empty()) called(mir::function_key(s));
+      mir::for_each_expr(s, expr);
+      for (const mir::Stmt& child : s.body) stmt(child);
+    };
+    for (const mir::Stmt& s : f.body) stmt(s);
+  }
+  // Depth-first search for a back edge: 1 is on the current path, 2 done.
+  std::map<std::string, int> state;
+  std::function<bool(const std::string&)> cycle = [&](const std::string& f) {
+    int& here = state[f];
+    if (here) return here == 1;
+    here = 1;
+    for (const std::string& g : callees[f])
+      if (cycle(g)) return true;
+    state[f] = 2;
+    return false;
+  };
+  for (const auto& [f, unused] : callees)
+    if (cycle(f)) return true;
+  return false;
+}
+
 }  // namespace
 
 CompiledModel compile_model(const std::string& mir_text, const DataMap& data,
@@ -1548,7 +1586,8 @@ CompiledModel compile_model(const std::string& mir_text, const DataMap& data,
   // model's whole life.
   const auto parse_time = prep.start();
   auto prog = std::make_shared<mir::Program>(decode_program(mir_text));
-  if (needs_large_stack(prog->nesting)) {
+  if (needs_large_stack(prog->nesting) ||
+      (can_move_to_large_stack() && has_recursive_functions(*prog))) {
     try {
       run_on_large_stack([&] { prog.reset(); });
       return run_on_large_stack(
