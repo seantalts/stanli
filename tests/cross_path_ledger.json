@@ -355,8 +355,8 @@
     "model": "region_map_hurdle_data",
     "quantity": "lp",
     "pair": "default/no_cse",
-    "bound_ulp": 1,
-    "cause": "every y == 0 row adds the same log(hu), and CSE now merges those terms into one term times their count (#587). Without CSE they are added one at a time, so the lp and the hu gradient round differently.",
+    "bound_ulp": 2,
+    "cause": "every y == 0 row adds the same log(hu), and CSE now merges those 13 terms into one term times 13 (#587). Without CSE they are added one at a time, so the lp and the hu gradient round differently. The gap is 2 ULP at point 0 on x86-64 Linux, where default's lp is 1 ULP from macOS arm64's and no_cse's is the same on both, and up to 2 ULP over 40 swept points on macOS. Against an 80-digit mpmath reference at point 0, default is 0.5 ULP off on Linux and 1.5 on macOS, no_cse 2.5 on both.",
     "since": "2026-11-18"
   },
   {
@@ -429,6 +429,38 @@
     "pair": "default/no_cse",
     "bound_ulp": 2,
     "cause": "graph_total adds the same 35 higher-order calls that the gate > 0 block adds to target. split_target_sums (#586) turns graph_total's chain of additions into separate target terms, and CSE then merges each one with its identical copy into one term times 2 (#587). Without CSE the copies are added one at a time, so the sum and the gradient round differently. Measured at 13 points on macOS arm64: up to 2 ULP.",
+    "since": "2026-11-18"
+  },
+  {
+    "model": "udf_truncate_shapes",
+    "quantity": "grad[0]",
+    "pair": "default/no_cse",
+    "bound_ulp": 4,
+    "cause": "y ~ foo(mu) appears four times with different truncation bounds, and each statement adds the same -square(y - mu) term. CSE merges the four into one term times 4 (#587), so the target sums in a different grouping and y's adjoint gets 4 times one pullback instead of four pullbacks added one at a time. passes_off gives the same bits as no_cse at 41 points. Measured at the three test points: grad[0] up to 3 ULP and grad[1] up to 1 ULP, the same on macOS arm64 and x86-64 Linux except grad[0] at point 0, which differs only on macOS. Against an 80-digit mpmath reference, default is closer on grad[1] at points 0 and 1 and grad[0] at point 1 (0.2-0.3 ULP against 0.7-0.8), but at point 0 on macOS default's grad[0] is 2.8 ULP off and no_cse's 0.2. Over 40 swept points on macOS neither is more accurate on grad[0] (mean 2.01 against 2.07 ULP, default closer at 7 points and farther at 5); on grad[1] default is closer (mean 0.64 against 0.85).",
+    "since": "2026-11-18"
+  },
+  {
+    "model": "udf_truncate_shapes",
+    "quantity": "grad[1]",
+    "pair": "default/no_cse",
+    "bound_ulp": 2,
+    "cause": "y ~ foo(mu) appears four times with different truncation bounds, and each statement adds the same -square(y - mu) term. CSE merges the four into one term times 4 (#587), so the target sums in a different grouping and y's adjoint gets 4 times one pullback instead of four pullbacks added one at a time. passes_off gives the same bits as no_cse at 41 points. Measured at the three test points: grad[0] up to 3 ULP and grad[1] up to 1 ULP, the same on macOS arm64 and x86-64 Linux except grad[0] at point 0, which differs only on macOS. Against an 80-digit mpmath reference, default is closer on grad[1] at points 0 and 1 and grad[0] at point 1 (0.2-0.3 ULP against 0.7-0.8), but at point 0 on macOS default's grad[0] is 2.8 ULP off and no_cse's 0.2. Over 40 swept points on macOS neither is more accurate on grad[0] (mean 2.01 against 2.07 ULP, default closer at 7 points and farther at 5); on grad[1] default is closer (mean 0.64 against 0.85).",
+    "since": "2026-11-18"
+  },
+  {
+    "model": "udf_truncate_shapes",
+    "quantity": "grad[0]",
+    "pair": "default/passes_off",
+    "bound_ulp": 4,
+    "cause": "y ~ foo(mu) appears four times with different truncation bounds, and each statement adds the same -square(y - mu) term. CSE merges the four into one term times 4 (#587), so the target sums in a different grouping and y's adjoint gets 4 times one pullback instead of four pullbacks added one at a time. passes_off gives the same bits as no_cse at 41 points. Measured at the three test points: grad[0] up to 3 ULP and grad[1] up to 1 ULP, the same on macOS arm64 and x86-64 Linux except grad[0] at point 0, which differs only on macOS. Against an 80-digit mpmath reference, default is closer on grad[1] at points 0 and 1 and grad[0] at point 1 (0.2-0.3 ULP against 0.7-0.8), but at point 0 on macOS default's grad[0] is 2.8 ULP off and no_cse's 0.2. Over 40 swept points on macOS neither is more accurate on grad[0] (mean 2.01 against 2.07 ULP, default closer at 7 points and farther at 5); on grad[1] default is closer (mean 0.64 against 0.85).",
+    "since": "2026-11-18"
+  },
+  {
+    "model": "udf_truncate_shapes",
+    "quantity": "grad[1]",
+    "pair": "default/passes_off",
+    "bound_ulp": 2,
+    "cause": "y ~ foo(mu) appears four times with different truncation bounds, and each statement adds the same -square(y - mu) term. CSE merges the four into one term times 4 (#587), so the target sums in a different grouping and y's adjoint gets 4 times one pullback instead of four pullbacks added one at a time. passes_off gives the same bits as no_cse at 41 points. Measured at the three test points: grad[0] up to 3 ULP and grad[1] up to 1 ULP, the same on macOS arm64 and x86-64 Linux except grad[0] at point 0, which differs only on macOS. Against an 80-digit mpmath reference, default is closer on grad[1] at points 0 and 1 and grad[0] at point 1 (0.2-0.3 ULP against 0.7-0.8), but at point 0 on macOS default's grad[0] is 2.8 ULP off and no_cse's 0.2. Over 40 swept points on macOS neither is more accurate on grad[0] (mean 2.01 against 2.07 ULP, default closer at 7 points and farther at 5); on grad[1] default is closer (mean 0.64 against 0.85).",
     "since": "2026-11-18"
   }
 ]
