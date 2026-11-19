@@ -404,7 +404,15 @@ CategoricalRows categorical_rows(const KernelCtx& ctx) {
   return {rows, ctx.in[1].len / rows};
 }
 
-double categorical_row_value(const KernelCtx& ctx, int outcome,
+int64_t categorical_scratch(const Op& op, const Slot* slots) {
+  constexpr uint8_t logit_scalar =
+      kCategoricalScalarOutcome | kCategoricalLogit | kCategoricalArgAutodiff;
+  return (op.variant & logit_scalar) == logit_scalar ? slots[op.in[0]].len : 0;
+}
+
+// The logit form spells out categorical_logit_lpmf<false>'s double body so
+// that the forward can keep each row's log_sum_exp for the backward.
+double categorical_row_value(const KernelCtx& ctx, int64_t r, int outcome,
                              const Eigen::Map<const Eigen::VectorXd>& arg) {
   // forward_value_only intentionally instantiates the expression on doubles:
   // a propto call whose source type was var therefore returns its dropped
@@ -412,25 +420,28 @@ double categorical_row_value(const KernelCtx& ctx, int outcome,
   // active-type path only for a normal forward/gradient evaluation.  With an
   // active argument, both <true> and <false> retain this summand; the double
   // <false> body is the same value/check order without a tape.
-  if ((ctx.variant & kCategoricalArgAutodiff) && !values_only(ctx))
-    return (ctx.variant & kCategoricalLogit)
-               ? stan::math::categorical_logit_lpmf<false>(outcome, arg)
-               : stan::math::categorical_lpmf<false>(outcome, arg);
+  if ((ctx.variant & kCategoricalArgAutodiff) && !values_only(ctx)) {
+    if (!(ctx.variant & kCategoricalLogit))
+      return stan::math::categorical_lpmf<false>(outcome, arg);
+    static constexpr const char* function = "categorical_logit_lpmf";
+    stan::math::check_bounded(function, "categorical outcome out of support",
+                              outcome, 1, arg.size());
+    stan::math::check_finite(function, "log odds parameter", arg);
+    const double normalizer = stan::math::log_sum_exp(arg);
+    ctx.scratch[r] = normalizer;
+    return arg.coeff(outcome - 1) - normalizer;
+  }
   return categorical_eval(ctx.variant, std::vector<int>{outcome}, arg);
 }
 
+// The forward has already checked the outcome and logits of every row.
 void categorical_row_adjoint(uint8_t variant, int outcome,
                              const Eigen::Map<const Eigen::VectorXd>& arg,
-                             double* adj, double out_adj) {
+                             double normalizer, double* adj, double out_adj) {
   if (!(variant & kCategoricalLogit)) {
     adj[outcome - 1] += out_adj / arg(outcome - 1);
     return;
   }
-  static constexpr const char* function = "categorical_logit_lpmf";
-  stan::math::check_bounded(function, "categorical outcome out of support",
-                            outcome, 1, arg.size());
-  stan::math::check_finite(function, "log odds parameter", arg);
-  const double normalizer = stan::math::log_sum_exp(arg);
   // Mirror categorical_logit_lpmf's subtraction followed by the scalar
   // AoS-var log_sum_exp callback (rev/fun/log_sum_exp.hpp). In particular,
   // update the selected logit first, and form the negative seed with -=
@@ -453,7 +464,7 @@ void categorical_fwd(KernelCtx& ctx) {
       const Eigen::Map<const Eigen::VectorXd> arg(
           ctx.in[1].data + r * rows.width, rows.width);
       const double row = categorical_row_value(
-          ctx, categorical_outcome(ctx.in[0].data[r]), arg);
+          ctx, r, categorical_outcome(ctx.in[0].data[r]), arg);
       lp = r == 0 ? row : lp + row;
     }
     ctx.out.data[0] = lp;
@@ -480,9 +491,11 @@ void categorical_bwd(KernelCtx& ctx) {
     for (int64_t r = 0; r < rows.rows; ++r) {
       const Eigen::Map<const Eigen::VectorXd> arg(
           ctx.in[1].data + r * rows.width, rows.width);
-      categorical_row_adjoint(ctx.variant,
-                              categorical_outcome(ctx.in[0].data[r]), arg,
-                              ctx.in_adj[1].data + r * rows.width, ctx.out_adj);
+      const double normalizer =
+          (ctx.variant & kCategoricalLogit) ? ctx.scratch[r] : 0.0;
+      categorical_row_adjoint(
+          ctx.variant, categorical_outcome(ctx.in[0].data[r]), arg, normalizer,
+          ctx.in_adj[1].data + r * rows.width, ctx.out_adj);
     }
     return;
   }
@@ -514,8 +527,8 @@ void register_message_kernels() {
                   Kernel{check_matching_dims_fwd, nullptr, nullptr});
   register_kernel(OP_CHECK_LOWER, Kernel{check_fwd<true>, nullptr, nullptr});
   register_kernel(OP_CHECK_UPPER, Kernel{check_fwd<false>, nullptr, nullptr});
-  register_kernel(OP_CATEGORICAL,
-                  Kernel{categorical_fwd, categorical_bwd, nullptr});
+  register_kernel(OP_CATEGORICAL, Kernel{categorical_fwd, categorical_bwd,
+                                         categorical_scratch});
   register_kernel(
       OP_ALL_INTEGER_DENSITY,
       Kernel{all_integer_density_fwd, all_integer_density_bwd, nullptr});
