@@ -2843,6 +2843,61 @@ static void region_range_cache_tests() {
   }
 }
 
+// logA[t] in a retained loop reads one whole row whose index changes every
+// trip, so the read cannot become a fixed gather.
+static void row_index_tests() {
+  auto data = [](int rows, int last) {
+    DataMap d;
+    d.set_int("N", rows);
+    d.set_int("L", last);
+    return d;
+  };
+  const auto native =
+      compile_fixture("structured_row_index", data(12, 12), Mode::Prefer);
+  const auto legacy =
+      compile_fixture("structured_row_index", data(12, 12), Mode::Off);
+  check(retained(native) != nullptr, "row index fixture retains OP_LOOP");
+  bool row_read = false;
+  for (const auto& loop : native.graph.ops) {
+    if (loop.opcode != OP_LOOP) continue;
+    const auto& plan = *static_cast<const StructuredLoop*>(loop.udata);
+    std::function<void(const Node&)> visit = [&](const Node& node) {
+      if (node.kind == Node::KernelCall && node.active) {
+        const Op& op = plan.body.ops[static_cast<size_t>(node.op)];
+        const auto* spec = static_cast<const DynamicIndexSpec*>(op.udata);
+        row_read |= op.opcode == OP_INDEX_DYNAMIC && spec &&
+                    spec->axes.size() == 2 && !spec->matrix_leaf &&
+                    spec->axes[0].kind == DynamicIndexSpec::Axis::Single &&
+                    spec->axes[1].kind == DynamicIndexSpec::Axis::All &&
+                    spec->axes[1].extent == 3;
+      }
+      for (const auto& child : node.children) visit(child);
+    };
+    visit(plan.root);
+  }
+  check(row_read, "row index fixture reads whole rows by a dynamic index");
+  compare_gradients(native, legacy, {{.1, -.4, .9}, {-1.2, .3, .5}, {0, 0, 0}},
+                    "row index target parity", "row index gradient parity");
+
+  std::string error;
+  try {
+    const auto past_end =
+        compile_fixture("structured_row_index", data(6, 7), Mode::Prefer);
+    check(retained(past_end) != nullptr,
+          "row index past the end still retains OP_LOOP");
+    Executor executor(past_end.graph);
+    past_end.bind(executor);
+    std::vector<double> gradient(3);
+    std::fill(executor.params_data(), executor.params_data() + 3, .2);
+    (void)executor.gradient(gradient.data());
+  } catch (const std::exception& e) {
+    error = e.what();
+  }
+  check(error == "structured index out of range",
+        "row index past the end reports the structured index error");
+  test_unsetenv("STANLI_STRUCTURED_LOOPS");
+}
+
 static void prefer_parent_tests() {
   DataMap data;
   data.set_int("N", 1);
@@ -8194,6 +8249,7 @@ int main() {
   refusal_tests();
   automatic_policy_tests();
   region_range_cache_tests();
+  row_index_tests();
   prefer_parent_tests();
   direct_index_lowering_tests();
   runtime_local_shape_tests();
