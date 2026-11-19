@@ -2375,79 +2375,110 @@ static void test_row_store_lanes() {
 // from a shared zero and three elements with a CONCAT2 chain, then stores
 // it. Packed column-major (element k of lane l at l + L*k), the lanes'
 // concatenations are one CONCAT2 of the packed operands, so the chain
-// widens as it is. A matrix container already has that order; an array of
-// vectors is row-major and takes one transpose.
+// widens as it is. A matrix container already has that order. An array of
+// vectors is row-major: a widened chain there would copy the growing
+// prefix once per link and then transpose, so instead the first column
+// fills the row-major matrix and each further column goes in with one
+// strided store. `lead_param` starts each row with a parameter instead of
+// the shared zero.
 static void test_concat_row_store_lanes() {
   using namespace rowlanes;
   for (Rows rows : {Rows::kMatrix, Rows::kArray}) {
-    const int L = 8, C = 4;
-    const std::string tag = rows == Rows::kMatrix ? "concat-mat" : "concat-arr";
-    Graph g;
-    Fills fills;
-    const int sigma = g.add_slot(1, true);
-    std::vector<int> elems;
-    for (int k = 1; k < C; ++k) elems.push_back(g.add_slot(L, true));
-    const int zero = g.add_slot(1, false);
-    fills.emplace_back(zero, std::vector<double>{0.0});
-    const int decl = g.add_slot((int64_t)L * C, false);
-    fills.emplace_back(decl, std::vector<double>((size_t)(L * C), 0.0));
-    const int base = g.add_slot((int64_t)L * C, false);
-    const int ydata = g.add_slot((int64_t)L * C, false);
-    std::vector<double> yv((size_t)(L * C));
-    for (size_t i = 0; i < yv.size(); ++i) yv[i] = 0.3 * (double)i - 1.0;
-    fills.emplace_back(ydata, yv);
-    for (int l = 0; l < L; ++l) {
-      std::vector<int> picked;
-      for (int e : elems) {
-        const int s = g.add_slot(1, false);
-        g.add_op(OP_INDEX, {e}, s, {l});
-        picked.push_back(s);
+    for (bool lead_param : {false, true}) {
+      const int L = 8, C = 4;
+      const std::string tag =
+          std::string(rows == Rows::kMatrix ? "concat-mat" : "concat-arr") +
+          (lead_param ? "-param" : "-zero");
+      Graph g;
+      Fills fills;
+      const int sigma = g.add_slot(1, true);
+      std::vector<int> elems;
+      for (int k = lead_param ? 0 : 1; k < C; ++k)
+        elems.push_back(g.add_slot(L, true));
+      const int zero = g.add_slot(1, false);
+      fills.emplace_back(zero, std::vector<double>{0.0});
+      const int decl = g.add_slot((int64_t)L * C, false);
+      fills.emplace_back(decl, std::vector<double>((size_t)(L * C), 0.0));
+      const int base = g.add_slot((int64_t)L * C, false);
+      const int ydata = g.add_slot((int64_t)L * C, false);
+      std::vector<double> yv((size_t)(L * C));
+      for (size_t i = 0; i < yv.size(); ++i) yv[i] = 0.3 * (double)i - 1.0;
+      fills.emplace_back(ydata, yv);
+      for (int l = 0; l < L; ++l) {
+        std::vector<int> picked;
+        for (int e : elems) {
+          const int s = g.add_slot(1, false);
+          g.add_op(OP_INDEX, {e}, s, {l});
+          picked.push_back(s);
+        }
+        int row = lead_param ? picked[0] : zero;
+        for (int k = 1; k < C; ++k) {
+          const int next = g.add_slot(k + 1, false);
+          g.add_op(OP_CONCAT2, {row, picked[(size_t)(k - !lead_param)]}, next);
+          row = next;
+        }
+        const int src = l == 0 ? decl : base;
+        if (rows == Rows::kMatrix)
+          g.add_op(l == 0 ? OP_SET_SLICE_STRIDED : OP_SET_SLICE_STRIDED_INPLACE,
+                   {src, row}, base, {l, L});
+        else
+          g.add_op(l == 0 ? OP_SET_SLICE : OP_SET_SLICE_INPLACE, {src, row},
+                   base, {l * C});
       }
-      int row = zero;
-      for (int k = 0; k < C - 1; ++k) {
-        const int next = g.add_slot(k + 2, false);
-        g.add_op(OP_CONCAT2, {row, picked[(size_t)k]}, next);
-        row = next;
-      }
-      const int src = l == 0 ? decl : base;
-      if (rows == Rows::kMatrix)
-        g.add_op(l == 0 ? OP_SET_SLICE_STRIDED : OP_SET_SLICE_STRIDED_INPLACE,
-                 {src, row}, base, {l, L});
-      else
-        g.add_op(l == 0 ? OP_SET_SLICE : OP_SET_SLICE_INPLACE, {src, row}, base,
-                 {l * C});
-    }
-    const int lp = g.add_slot(1, false);
-    const int id = stanli::testutil::add_density(g, OP_NORMAL_LPDF,
-                                                 {ydata, base, sigma}, lp);
-    g.ops[(size_t)id].variant = 0x06;
-    std::vector<int> terms{lp};
+      const int lp = g.add_slot(1, false);
+      const int id = stanli::testutil::add_density(g, OP_NORMAL_LPDF,
+                                                   {ydata, base, sigma}, lp);
+      g.ops[(size_t)id].variant = 0x06;
+      std::vector<int> terms{lp};
 
-    Graph ref = g;
-    reduce_into_result(ref, terms);
-    const std::vector<double> want = run_grad(std::move(ref), fills);
-    std::vector<int> tt = terms;
-    Fills f2 = fills;
-    const RerollStats st = reroll(g, f2, tt, {});
-    expect((tag + " regions==1").c_str(), st.regions == 1);
-    expect((tag + " element-store disposition").c_str(), st.element_store == 1);
-    expect((tag + " no row stores left").c_str(), row_stores(g) == 0);
-    expect((tag + " no element reads left").c_str(),
-           writefuse::count(g, OP_INDEX) == 0);
-    expect((tag + " one CONCAT2 per link").c_str(),
-           writefuse::count(g, OP_CONCAT2) == C - 1);
-    for (const Op& op : g.ops)
-      if (op.opcode == OP_CONCAT2)
-        expect((tag + " CONCAT2 widened").c_str(),
-               g.slots[(size_t)op.out].len % L == 0 &&
-                   g.slots[(size_t)op.out].len >= 2 * L);
-    expect((tag + " transposes").c_str(),
-           writefuse::count(g, OP_TRANSPOSE) == (rows == Rows::kArray));
-    reduce_into_result(g, tt);
-    const std::vector<double> got = run_grad(std::move(g), f2);
-    expect((tag + " sizes").c_str(), got.size() == want.size());
-    for (size_t i = 0; i < want.size() && i < got.size(); ++i)
-      expect_close((tag + " v" + std::to_string(i)).c_str(), got[i], want[i]);
+      Graph ref = g;
+      reduce_into_result(ref, terms);
+      const std::vector<double> want = run_grad(std::move(ref), fills);
+      std::vector<int> tt = terms;
+      Fills f2 = fills;
+      const RerollStats st = reroll(g, f2, tt, {});
+      expect((tag + " regions==1").c_str(), st.regions == 1);
+      expect((tag + " element-store disposition").c_str(),
+             st.element_store == 1);
+      expect((tag + " no element reads left").c_str(),
+             writefuse::count(g, OP_INDEX) == 0);
+      expect((tag + " no transpose").c_str(),
+             writefuse::count(g, OP_TRANSPOSE) == 0);
+      expect((tag + " one fill").c_str(),
+             writefuse::count(g, OP_REP_MAT) ==
+                 (rows == Rows::kArray || !lead_param));
+      if (rows == Rows::kMatrix) {
+        expect((tag + " no row stores left").c_str(), row_stores(g) == 0);
+        expect((tag + " one CONCAT2 per link").c_str(),
+               writefuse::count(g, OP_CONCAT2) == C - 1);
+        for (const Op& op : g.ops)
+          if (op.opcode == OP_CONCAT2)
+            expect((tag + " CONCAT2 widened").c_str(),
+                   g.slots[(size_t)op.out].len % L == 0 &&
+                       g.slots[(size_t)op.out].len >= 2 * L);
+      } else {
+        expect((tag + " no CONCAT2").c_str(),
+               writefuse::count(g, OP_CONCAT2) == 0);
+        int column = 1;
+        for (const Op& op : g.ops) {
+          if (op.opcode == OP_REP_MAT)
+            expect((tag + " fill covers the matrix").c_str(),
+                   g.slots[(size_t)op.out].len == L * C);
+          if (op.opcode != OP_SET_SLICE_STRIDED_INPLACE) continue;
+          expect((tag + " column store").c_str(),
+                 op.n_idata == 2 && op.idata[0] == column && op.idata[1] == C &&
+                     g.slots[(size_t)op.in[1]].len == L);
+          ++column;
+        }
+        expect((tag + " one store per further column").c_str(), column == C);
+      }
+      reduce_into_result(g, tt);
+      const std::vector<double> got = run_grad(std::move(g), f2);
+      expect((tag + " sizes").c_str(), got.size() == want.size());
+      for (size_t i = 0; i < want.size() && i < got.size(); ++i)
+        expect((tag + " bitwise v" + std::to_string(i)).c_str(),
+               got[i] == want[i]);
+    }
   }
 }
 

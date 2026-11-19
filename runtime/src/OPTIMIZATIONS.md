@@ -238,8 +238,13 @@ A lane that builds its row with `OP_CONCAT2` (`mu[n] = [a[n], b[n]]'`, the
 brms categorical and multivariate shape) commits the region to column-major,
 where the lanes' concatenations are one `OP_CONCAT2` of the packed operands;
 a shared operand such as brms's leading zero tiles to every lane. A row store
-whose container uses the other convention takes one `OP_TRANSPOSE`, and
-row-major row stores may fill any run of consecutive rows through one
+whose container uses the other convention takes one `OP_TRANSPOSE`. When
+that transpose's input is the widened chain of C length-L columns, the
+chain would copy its growing prefix once per link, so instead the first
+column fills the row-major matrix (`OP_REP_MAT`; a scalar such as the
+leading zero fills it whole) and each further column goes in with one
+`OP_SET_SLICE_STRIDED_INPLACE` of stride C. Each element is copied once
+and the transpose disappears. Row-major row stores may fill any run of consecutive rows through one
 `OP_SET_SLICE` window. Store forwarding often leaves the last row out of
 the run, because that lane reads its values directly (#574).
 Partition's `indexed_read` and its own wide-operand check share the same
