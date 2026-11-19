@@ -1663,33 +1663,51 @@ void test_write_array_selected_loop_refused() {
 // register-program-sized local. The whole-loop island fallback then
 // overflows too, and write_array has to fall back to the interpreter for
 // generated quantities specifically rather than raise a compile error.
+// At N=1 the rollback leaves only the parameter's slot, and one of the
+// slots it removed held the graph's first 0.0 constant.
 void test_write_array_selected_loop_overflow() {
   using namespace stanli;
-  const int n = 32;
-  DataMap data;
-  data.set_int("N", n);
-  std::vector<double> y(static_cast<size_t>(n));
-  for (int i = 0; i < n; ++i)
-    y[static_cast<size_t>(i)] = (i % 2 == 0) ? 1.5 : -1.5;
-  data.set_real_array("y", y);
   const std::string text =
       slurp("tests/fixtures/gq_selected_loop_overflow.tmir.sexp");
-  CompiledModel cm = compile_model(text, data);
-  if (!cm.write_array) {
-    ++failures;
-    std::printf("FAIL gq_selected_loop_overflow: no write_array\n");
-    return;
-  }
-  if (!cm.write_array->truncated ||
-      cm.write_array->truncated.value_or("").find("generated quantities") ==
-          std::string::npos) {
-    ++failures;
-    std::printf("FAIL gq_selected_loop_overflow: truncated message is [%s]\n",
-                cm.write_array->truncated.value_or("").c_str());
-  }
-  if (!cm.write_array->interp) {
-    ++failures;
-    std::printf("FAIL gq_selected_loop_overflow: no interpreter attached\n");
+  for (const int n : {32, 1}) {
+    const std::string what = "gq_selected_loop_overflow N=" + std::to_string(n);
+    DataMap data;
+    data.set_int("N", n);
+    std::vector<double> y(static_cast<size_t>(n));
+    for (int i = 0; i < n; ++i)
+      y[static_cast<size_t>(i)] = (i % 2 == 0) ? 1.5 : -1.5;
+    data.set_real_array("y", y);
+    CompiledModel cm = compile_model(text, data);
+    if (!cm.write_array) {
+      ++failures;
+      std::printf("FAIL %s: no write_array\n", what.c_str());
+      continue;
+    }
+    if (!cm.write_array->truncated ||
+        cm.write_array->truncated.value_or("").find("generated quantities") ==
+            std::string::npos) {
+      ++failures;
+      std::printf("FAIL %s: truncated message is [%s]\n", what.c_str(),
+                  cm.write_array->truncated.value_or("").c_str());
+    }
+    if (!cm.write_array->interp) {
+      ++failures;
+      std::printf("FAIL %s: no interpreter attached\n", what.c_str());
+    }
+    // The truncated prefix is still a graph, and its result has to name
+    // one of its own slots, holding 0.0.
+    const Graph& wg = cm.write_array->graph;
+    if (wg.result_slot < 0 || (size_t)wg.result_slot >= wg.slots.size()) {
+      ++failures;
+      std::printf("FAIL %s: result slot %d of %zu slots\n", what.c_str(),
+                  wg.result_slot, wg.slots.size());
+      continue;
+    }
+    for (const auto& [slot, values] : cm.write_array->fills)
+      if (slot == wg.result_slot && values != std::vector<double>{0.0}) {
+        ++failures;
+        std::printf("FAIL %s: result slot %d is not 0.0\n", what.c_str(), slot);
+      }
   }
 }
 

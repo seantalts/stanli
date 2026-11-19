@@ -2390,12 +2390,14 @@ struct Lowering {
 
   // Fills only grow and are truncated back, the graph is untouched, and the
   // data environment is journaled, so none of them is copied. The vectors in
-  // `out` only grow as well.
+  // `out` and the lists of slots below only grow as well.
   struct WaMark {
     std::optional<size_t> n_tp_start, n_gq_start;
     mir::OutputCursor output_cursor;
     size_t n_fills = 0, n_ops = 0, n_slots = 0, n_idata = 0, n_udata = 0,
            td_mark = 0;
+    size_t n_known_outputs = 0, n_target_terms = 0, n_jac_slots = 0,
+           n_extra_roots = 0;
     std::map<std::string, TupleBlock> tuple_blocks;
     size_t n_param_leaves = 0;
     size_t n_param_names = 0, n_views = 0, n_unc_params = 0,
@@ -2422,6 +2424,10 @@ struct Lowering {
     m.n_ops = g.ops.size();
     m.n_synthetic_names = synthetic_names.size();
     m.n_slots = g.slots.size();
+    m.n_known_outputs = known_outputs.size();
+    m.n_target_terms = target_terms.size();
+    m.n_jac_slots = jac_slots.size();
+    m.n_extra_roots = extra_roots.size();
     m.n_idata = g.idata_pool.size();
     m.n_udata = g.udata_pool.size();
     m.td_mark = td_journal.size();
@@ -2459,6 +2465,26 @@ struct Lowering {
     g.slots.resize(m.n_slots);
     g.idata_pool.resize(m.n_idata);
     g.udata_pool.resize(m.n_udata);
+    // Later lowering reuses the removed slot numbers, so drop every entry
+    // that names one. A stale cached constant would otherwise point at a
+    // slot that no longer exists, or at whatever the next statement puts
+    // there.
+    truncate(known_outputs, m.n_known_outputs);
+    truncate(target_terms, m.n_target_terms);
+    truncate(jac_slots, m.n_jac_slots);
+    truncate(extra_roots, m.n_extra_roots);
+    const int first_removed = static_cast<int>(m.n_slots);
+    for (auto it = const_cache.begin(); it != const_cache.end();)
+      it = it->second >= first_removed ? const_cache.erase(it) : std::next(it);
+    for (auto it = observations.begin(); it != observations.end();)
+      it = it->first.slot >= first_removed ? observations.erase(it)
+                                           : std::next(it);
+    int_ranges.erase(int_ranges.lower_bound(first_removed), int_ranges.end());
+    real_ranges.erase(real_ranges.lower_bound(first_removed),
+                      real_ranges.end());
+    int_initialized_prefix.erase(
+        int_initialized_prefix.lower_bound(first_removed),
+        int_initialized_prefix.end());
     td_rollback(m.td_mark);
     for (size_t i = m.n_synthetic_names; i < synthetic_names.size(); ++i) {
       scope.erase(synthetic_names[i]);
@@ -2490,8 +2516,7 @@ struct Lowering {
     }
   }
   // Restores only the given names, which must include every name the
-  // rolled-back statement can declare or assign. Slot-keyed range entries
-  // for slots the rollback removes are dropped.
+  // rolled-back statement can declare or assign.
   WaSnapshot wa_snapshot(const std::set<std::string>& names) {
     WaSnapshot s;
     static_cast<WaMark&>(s) = wa_mark();
@@ -2513,10 +2538,6 @@ struct Lowering {
       else
         int_locals.erase(name);
     }
-    int_ranges.erase(int_ranges.lower_bound(static_cast<int>(s.n_slots)),
-                     int_ranges.end());
-    real_ranges.erase(real_ranges.lower_bound(static_cast<int>(s.n_slots)),
-                      real_ranges.end());
     wa_rollback(s);
   }
 #include "lower_structured_loop.inc"
