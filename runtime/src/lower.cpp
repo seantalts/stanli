@@ -5,6 +5,7 @@
 #include "lower_worker.hpp"
 #include <stanli/debug_switch.hpp>
 #include <stanli/gp_cov_fusion.hpp>
+#include <stanli/target_sums.hpp>
 #include <stanli/execution_report.hpp>
 #include <stanli/large_stack.hpp>
 #include <stanli/threading.hpp>
@@ -1027,6 +1028,11 @@ void Lowering::run_passes(const std::vector<int>& roots, const PassPlan& plan) {
     all.insert(all.end(), target_terms.begin(), target_terms.end());
     return all;
   };
+  // The target is a sum whose order stanli already chooses (reduce_terms
+  // adds the terms in groups), so a local that accumulates terms before
+  // `target +=` can hand them over one by one, for reroll to vectorize.
+  // First, so that every pass configuration sees the same terms.
+  if (!in_write_array) split_target_sums(g, out.fills, target_terms, roots);
   const std::vector<int> update_roots = roots_with_terms();
   fuse_gp_diagonal_updates(g, update_roots);
   const auto inplace_time = prep.start();

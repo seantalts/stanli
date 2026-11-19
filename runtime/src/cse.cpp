@@ -26,6 +26,19 @@
 // Active outputs instead retain their slot identity and reverse callback.
 // Only their primal and read-only forward scratch are shared: summing seeds
 // before a nonlinear pullback would change floating-point accumulation.
+// The exception is an active op whose seed is a whole number: one that only
+// the target reads, which seeds each term with 1, or that reaches the target
+// only through scalar additions, which pass a seed on unchanged. Adding whole
+// seeds is exact, so k such copies merge into one op with one pullback, and
+// a term listed k times becomes that term multiplied by k: one rounding
+// where adding the copies took k - 1. The zeros of a brms hurdle model each
+// add bernoulli_lpmf(1 | hu), 5,308 identical terms in one 12,000-row model,
+// and each of its other rows adds bernoulli_lpmf(0 | hu) to its own term.
+//
+// The same model passes each zero's element of mu to a function branch that
+// never reads it, and each merged copy leaves the copies that computed its
+// arguments unread. Static reads and copies that nothing reads are dropped.
+// No other unused op is: it might still reject.
 #include <stanli/debug_switch.hpp>
 #include <stanli/cse.hpp>
 #include <stanli/optable.hpp>
@@ -49,10 +62,120 @@ bool never_merge(uint16_t oc) {
          oc == OP_ODE_ADJOINT;
 }
 
+// Whether an op whose value nothing reads can go. Lowering checked a static
+// read's immediates against the base's static length, so it cannot fail at
+// run time. A copy runs no forward of its own: its value, and any rejection,
+// come from the op it shares a primal with, which stays.
+bool droppable_if_unread(const Op& op) {
+  if (op.out2 >= 0 || op.udata != nullptr) return false;
+  if (op.primal_source >= 0 && op.primal_source != op.out) return true;
+  switch (op.opcode) {
+    case OP_INDEX:
+    case OP_SLICE:
+    case OP_SLICE_STRIDED:
+    case OP_GATHER:
+      return op.n_in == 1 && !op.dyn_lengths && op.dyn_extent_in < 0;
+    default:
+      return false;
+  }
+}
+
+// Whether each slot's adjoint is a whole number: the slot is written once,
+// and every read of it is a target term or an operand of a scalar ADD or
+// ADD_N whose own adjoint is whole. Readers follow their writer, so one
+// newest-first sweep settles each slot before its writer is reached.
+std::vector<char> whole_seeds(const Graph& g,
+                              const std::vector<int>& target_terms,
+                              const std::unordered_set<int>& keep,
+                              const std::vector<int>& writes) {
+  std::vector<char> read(g.slots.size(), 0), other(g.slots.size(), 0);
+  for (int t : target_terms) read[(size_t)t] = 1;
+  std::vector<char> whole(g.slots.size(), 0);
+  for (size_t i = g.ops.size(); i-- > 0;) {
+    const Op& op = g.ops[i];
+    if (op.out >= 0) {
+      const size_t o = (size_t)op.out;
+      whole[o] = read[o] && !other[o] && writes[o] == 1 && !keep.count(op.out);
+    }
+    const bool passes =
+        (op.opcode == OP_ADD_N || (op.opcode == OP_ADD && op.variant == 0)) &&
+        op.out >= 0 && op.out2 < 0 && op.udata == nullptr &&
+        g.slots[(size_t)op.out].len == 1 && whole[(size_t)op.out];
+    for (int j = 0; j < op.n_in; ++j) {
+      if (op.in[j] < 0) continue;
+      read[(size_t)op.in[j]] = 1;
+      if (!passes) other[(size_t)op.in[j]] = 1;
+    }
+    if (op.primal_source >= 0) other[(size_t)op.primal_source] = 1;
+  }
+  return whole;
+}
+
+// Replaces each run of k copies of one term with a single term times k, at
+// the position of its first copy.
+void scale_repeated_terms(Graph& g, Fills& fills,
+                          std::vector<int>& target_terms) {
+  std::unordered_map<int, int> copies;
+  for (int t : target_terms) ++copies[t];
+  if (copies.size() == target_terms.size()) return;
+  std::vector<int> scaled;
+  scaled.reserve(copies.size());
+  for (int t : target_terms) {
+    int& k = copies[t];
+    if (k == 1) scaled.push_back(t);
+    if (k <= 1) continue;
+    const int count = g.add_slot(1, false);
+    fills.emplace_back(count, std::vector<double>{(double)k});
+    const int term = g.add_slot(1, false);
+    g.add_op(OP_MUL, {t, count}, term);
+    scaled.push_back(term);
+    k = 0;
+  }
+  target_terms = std::move(scaled);
+}
+
+// Drops the ops droppable_if_unread allows whose value no op, root or term
+// reads, newest first so an op that only fed a dropped one goes too.
+int drop_unread(Graph& g, const std::vector<int>& target_terms,
+                const std::unordered_set<int>& keep) {
+  std::vector<int> reads(g.slots.size(), 0), writes(g.slots.size(), 0);
+  const auto for_each_read = [](const Op& op, auto&& f) {
+    for (int j = 0; j < op.n_in; ++j)
+      if (op.in[j] >= 0) f(op.in[j]);
+    if (op.primal_source >= 0 && op.primal_source != op.out)
+      f(op.primal_source);
+  };
+  for (const Op& op : g.ops) {
+    for_each_read(op, [&](int s) { ++reads[(size_t)s]; });
+    if (op.out >= 0) ++writes[(size_t)op.out];
+    if (op.out2 >= 0) ++writes[(size_t)op.out2];
+  }
+  for (int t : target_terms) ++reads[(size_t)t];
+  std::vector<char> drop(g.ops.size(), 0);
+  int dropped = 0;
+  for (size_t i = g.ops.size(); i-- > 0;) {
+    const Op& op = g.ops[i];
+    if (!droppable_if_unread(op) || op.out < 0 || reads[(size_t)op.out] != 0 ||
+        writes[(size_t)op.out] != 1 || keep.count(op.out) ||
+        g.slots[(size_t)op.out].is_param)
+      continue;
+    drop[i] = 1;
+    ++dropped;
+    for_each_read(op, [&](int s) { --reads[(size_t)s]; });
+    g.slots[(size_t)op.out].len = 0;
+  }
+  if (dropped == 0) return 0;
+  std::vector<Op> kept;
+  kept.reserve(g.ops.size() - (size_t)dropped);
+  for (size_t i = 0; i < g.ops.size(); ++i)
+    if (!drop[i]) kept.push_back(g.ops[i]);
+  g.ops = std::move(kept);
+  return dropped;
+}
+
 }  // namespace
 
-CseStats cse(Graph& g,
-             const std::vector<std::pair<int, std::vector<double>>>& fills,
+CseStats cse(Graph& g, std::vector<std::pair<int, std::vector<double>>>& fills,
              std::vector<int>& target_terms,
              const std::vector<int>& extra_roots, bool merge_active) {
   CseStats st;
@@ -70,11 +193,15 @@ CseStats cse(Graph& g,
   // A fill writes its slot at bind time from a buffer sized by the slot
   // length, so a filled slot must keep that length even once dead.
   for (const auto& f : fills) keep.insert(f.first);
+  const std::vector<char> whole =
+      merge_active ? std::vector<char>()
+                   : whole_seeds(g, target_terms, keep, writes);
 
   std::vector<int64_t> version(n_slots, 0);
   std::vector<char> active(n_slots, 0);
   for (size_t s = 0; s < n_slots; ++s) active[s] = g.slots[s].is_param;
   std::unordered_map<Key, size_t, KeyHash> table;
+  std::unordered_map<Key, int, KeyHash> whole_table;  // key -> surviving term
   std::unordered_map<int, int> rename;  // removed output -> surviving output
   std::unordered_map<int, int> primal;  // same value, independent adjoint
   const auto resolve = [&](int s) {
@@ -118,6 +245,18 @@ CseStats cse(Graph& g,
       }
       key.w.push_back(op.n_idata);
       for (int64_t k = 0; k < op.n_idata; ++k) key.w.push_back(op.idata[k]);
+      // An active value with a whole-number seed merges into an earlier one
+      // with a whole-number seed.
+      if (any_active && !merge_active && whole[(size_t)op.out]) {
+        auto term = whole_table.emplace(key, op.out);
+        if (!term.second) {
+          rename.emplace(op.out, term.first->second);
+          g.slots[(size_t)op.out].len = 0;
+          drop[i] = 1;
+          ++st.ops_removed;
+          continue;
+        }
+      }
       auto ins = table.emplace(key, i);
       if (!ins.second) {
         Op& survivor = g.ops[ins.first->second];
@@ -140,13 +279,16 @@ CseStats cse(Graph& g,
     if (op.out2 >= 0) ++version[(size_t)op.out2];
   }
 
-  if (st.ops_removed == 0) return st;
-  for (int& t : target_terms) t = resolve(t);
-  std::vector<Op> kept;
-  kept.reserve(g.ops.size() - (size_t)st.ops_removed);
-  for (size_t i = 0; i < g.ops.size(); ++i)
-    if (!drop[i]) kept.push_back(g.ops[i]);
-  g.ops = std::move(kept);
+  if (st.ops_removed > 0) {
+    for (int& t : target_terms) t = resolve(t);
+    std::vector<Op> kept;
+    kept.reserve(g.ops.size() - (size_t)st.ops_removed);
+    for (size_t i = 0; i < g.ops.size(); ++i)
+      if (!drop[i]) kept.push_back(g.ops[i]);
+    g.ops = std::move(kept);
+  }
+  scale_repeated_terms(g, fills, target_terms);
+  st.unread_dropped = drop_unread(g, target_terms, keep);
   return st;
 }
 

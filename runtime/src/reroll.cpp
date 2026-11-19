@@ -36,7 +36,9 @@
 // a density whose row-wide lp feeds another op folds back with one
 // OP_SUM_ROWS per lane (repacked first when the convention is column-major,
 // since OP_SUM_ROWS needs each lane's elements contiguous); and row stores
-// covering every row make the fused value the container.
+// covering every row make the fused value the container. A CONCAT2 lane
+// commits to column-major, where the lanes' concatenations are one CONCAT2;
+// a row store in the other convention goes through one OP_TRANSPOSE.
 //
 // Failed classifications report the longest still-classifiable lane
 // prefix and retry with it. This is what handles block-structured data
@@ -838,8 +840,8 @@ RerollStats reroll(Graph& g,
       const auto rigid_diverges = [&](int64_t base) {
         for (int p = 0; p < P; ++p) {
           const Op& t0 = op_at(p, base);
-          if (t0.opcode == OP_INDEX || is_element_store(t0) ||
-              is_row_store(t0) || is_row_read(t0) ||
+          if (t0.opcode == OP_INDEX || t0.opcode == OP_CONCAT2 ||
+              is_element_store(t0) || is_row_store(t0) || is_row_read(t0) ||
               has_op_trait(t0.opcode, op_trait::kRerollAnyDensity) ||
               has_op_trait(t0.opcode, op_trait::kRerollWidenable))
             continue;
@@ -1165,22 +1167,31 @@ RerollStats reroll(Graph& g,
             const int64_t w = g.slots[t.in[1]].len;
             const int64_t blen = g.slots[vec].len;
             const int64_t rows = strided ? t.idata[1] : Luse;
+            // Row-major lanes may fill any run of consecutive rows: that is
+            // one contiguous window, stored with one OP_SET_SLICE. Column-
+            // major lanes must fill every row.
+            const int64_t first = strided ? 0 : t.idata[0];
             int64_t br_row = Luse;
             bool shape = true;
             for (int64_t l = 0; l < Luse; ++l) {
               const Op& o = op_at(p, l);
               if (o.out != vec || (l > 0 && o.in[0] != vec)) shape = false;
               const bool row_l = strided ? o.idata[0] == l && o.idata[1] == rows
-                                         : o.idata[0] == l * w;
+                                         : o.idata[0] == first + l * w;
               if (!row_l && br_row == Luse) br_row = l;
             }
             const bool covering =
-                br_row == Luse && Luse == rows && blen == rows * w;
+                br_row == Luse && Luse == rows &&
+                (strided ? blen == rows * w
+                         : first >= 0 && first + rows * w <= blen);
             bool clean = shape && covering && !root_set.count(vec) &&
                          !term_set.count(vec);
+            // A region already packed the other way stores through one
+            // transpose into the container's order.
+            bool repack = false;
             if (clean && w != 1) {
               if (layout_set)
-                clean = layout_cols == strided;
+                repack = layout_cols != strided;
               else {
                 layout_set = true;
                 layout_cols = strided;
@@ -1239,7 +1250,9 @@ RerollStats reroll(Graph& g,
             } else {
               ap.store_vec = vec;
               ap.store_src = t.in[0];
+              ap.store_start = (int)first;
               ap.row_store = true;
+              ap.repack = repack;
               ap.store_written_after = written_after;
               any_store = true;
             }
@@ -1399,6 +1412,37 @@ RerollStats reroll(Graph& g,
             } else {
               ok = false;
               prefix = std::min(prefix, io_ok);
+            }
+          } else if (t.opcode == OP_CONCAT2 && t.n_in == 2) {
+            // `[x_l, y_l]` per lane. Packed column-major (element k of lane
+            // l at l + L*k), the lanes' concatenations are one CONCAT2 of
+            // the packed operands; row-major packing would interleave them,
+            // which no one op does. An operand that is the same in every
+            // lane is tiled to all of them.
+            const int64_t io_ok = std::min(br_internal, br_nonterm);
+            bool cols_ok = !layout_set || layout_cols;
+            for (int j = 0; j < 2; ++j) {
+              PosIn& in = ap.ins[j];
+              const bool shared = in.kind == InKind::kInvariant ||
+                                  (in.kind == InKind::kLaneLocal &&
+                                   pos[(size_t)in.producer_pos].hoist);
+              if (shared)
+                in.tile_wide = true;
+              else if (in.kind == InKind::kLaneLocal &&
+                       pos[(size_t)in.producer_pos].width !=
+                           g.slots[t.in[j]].len)
+                cols_ok = false;
+            }
+            if (io_ok < Luse) {
+              ok = false;
+              prefix = std::min(prefix, io_ok);
+            } else if (!cols_ok) {
+              ok = false;
+              prefix = 0;
+            } else {
+              layout_set = true;
+              layout_cols = true;
+              ap.width = g.slots[t.out].len;
             }
           } else if (has_op_trait(t.opcode, op_trait::kRerollWidenable)) {
             if (ap.width > 1 &&

@@ -556,13 +556,13 @@ void native_region_map() {
       for (const auto& child : spec.children) {
         expect_true("child runs a region map",
                     count_opcode(child.graph, OP_REGION_MAP) == 1);
-        expect_true("child views the slice and both data vectors",
-                    child.shared.size() == 3);
+        // The body never reads its slice of seq, so only y and x remain.
+        expect_true("child views both data vectors", child.shared.size() == 2);
         for (const auto& fill : child.fills)
           expect_true("child keeps no copy of the data",
                       fill.second.size() < 64);
       }
-      expect_true("one block per data argument", spec.blocks.size() == 3);
+      expect_true("one block per data vector", spec.blocks.size() == 2);
       expect_true("data arguments are not op inputs", op.n_in == 2);
     }
 
@@ -958,9 +958,47 @@ void inplace_store_imports() {
 
 }  // namespace
 
+// brms threading() programs add each term of the partial sum into a local
+// and return it. The local must not keep the terms in one scalar chain:
+// both accumulating forms lower like the terms added to target directly.
+void accumulated_terms() {
+  using namespace stanli;
+  const auto mir = slurp("tests/fixtures/reduce_sum_accumulator.tmir.sexp");
+  const int n = 64;
+  const auto compile = [&](int mode) {
+    std::ostringstream json;
+    json << "{\"N\":" << n << ",\"mode\":" << mode << ",\"y\":[";
+    for (int i = 0; i < n; ++i) json << (i ? "," : "") << (i * 7 % 5) / 2;
+    json << "],\"x\":[";
+    for (int i = 0; i < n; ++i)
+      json << (i ? "," : "") << -1.0 + 2.0 * i / (n - 1.0);
+    json << "]}";
+    return compile_model(mir, DataMap::from_json(json.str()));
+  };
+  auto direct = compile(2);
+  const size_t direct_ops = direct.graph.ops.size();
+  expect_true("direct terms lower to vector ops (" +
+                  std::to_string(direct_ops) + " ops)",
+              direct_ops < size_t(n));
+  const Run want = evaluate(direct);
+  for (int mode : {0, 1}) {
+    const std::string name = mode == 0 ? "reduce_sum" : "local accumulator";
+    auto accumulated = compile(mode);
+    const size_t ops = accumulated.graph.ops.size();
+    expect_true(name + " lowers to vector ops (" + std::to_string(ops) +
+                    " ops, direct terms " + std::to_string(direct_ops) + ")",
+                ops <= direct_ops + 2);
+    const Run got = evaluate(accumulated);
+    expect_true(name + " lp is bitwise the direct lp", got.lp == want.lp);
+    expect_true(name + " gradient is bitwise the direct gradient",
+                got.grad == want.grad);
+  }
+}
+
 int main() {
   using namespace stanli;
 
+  accumulated_terms();
   native_review_regressions();
   native_lifecycle();
   native_corners();

@@ -234,6 +234,14 @@ as the row tiles via `OP_REP_MAT` instead of blocking the region; and a row
 density whose result feeds another op (a mixture over rows) folds back with
 one `OP_SUM_ROWS` per lane, repacking first when the region's convention is
 column-major, since `OP_SUM_ROWS` needs each lane's elements contiguous.
+A lane that builds its row with `OP_CONCAT2` (`mu[n] = [a[n], b[n]]'`, the
+brms categorical and multivariate shape) commits the region to column-major,
+where the lanes' concatenations are one `OP_CONCAT2` of the packed operands;
+a shared operand such as brms's leading zero tiles to every lane. A row store
+whose container uses the other convention takes one `OP_TRANSPOSE`, and
+row-major row stores may fill any run of consecutive rows through one
+`OP_SET_SLICE` window. Store forwarding often leaves the last row out of
+the run, because that lane reads its values directly (#574).
 Partition's `indexed_read` and its own wide-operand check share the same
 affine classifier and the same tiling, so a lane found by structure there
 or by period here is priced and packed the same way.
@@ -592,6 +600,30 @@ the island carver a smaller residue. `Mt_model` falls from 1,062 ops to
 70 (16.1x per gradient), `Mh_model` gains 1.39x, and `gpcm_latent_reg_irt`
 enters the partition pass with 34,634 ops rather than 61,612. Forward
 results are bitwise unchanged.
+
+An active duplicate normally shares only its value and keeps its own
+pullback, so the reverse sweep accumulates in source order. A duplicate
+whose seed is a whole number is different. The target seeds each term
+with 1 and a scalar addition passes its seed on unchanged, so a copy that
+reaches the target only as a term or through additions has a whole-number
+seed, and adding such seeds is exact. Its k copies merge into one op with
+one pullback, and a term listed k times becomes one term multiplied by k.
+That rounds once where adding the copies rounded k - 1 times. A brms
+`hurdle_poisson` model with 5,308 zeros among 12,000 rows adds
+`bernoulli_lpmf(1 | hu)` once per zero; its log density was 588 to 1,267
+ULP from an 80-digit reference (CmdStan: 102 to 567) and is now 3 to 56,
+and a gradient runs 1.24x faster. Merging through additions matters for
+the gradient: in `s2_hurdle_cumulative` each nonzero row adds
+`bernoulli_lpmf(0 | hu)` to its own term, and merging only the zeros'
+terms left those 26 pullbacks accumulating against one large one (9.6 ULP
+on one entry, against 3.4 before). With both sides merged it is 0.4 ULP.
+
+The `hurdle_poisson` model passes each zero's `mu[n]` to a branch that
+never reads it, so the pass also drops a static `INDEX`, `SLICE` or
+`GATHER` whose value nothing reads, and a copy that shares another op's
+value once nothing reads it (merging terms leaves the copies that
+computed their arguments unread). It drops no other unused op, since an
+unused density can still reject.
 
 ## Native scalar probability categorical (`message.cpp`)
 
