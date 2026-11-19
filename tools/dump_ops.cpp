@@ -56,11 +56,10 @@ static void summarize(const stanli::Graph& g) {
 
 int main(int argc, char** argv) {
   if (argc < 3) {
-    std::fprintf(
-        stderr,
-        "usage: dump_ops mir.sexp data.json [max_ops|-1 "
-        "summary [--write-array]|--execution-json [--forbid-mir] "
-        "[--execution-report]]\n");
+    std::fprintf(stderr,
+                 "usage: dump_ops mir.sexp data.json [max_ops|-1 "
+                 "summary [--write-array]|--execution-json [--forbid-mir] "
+                 "[--execution-report]]\n");
     return 2;
   }
   const bool execution_json =
