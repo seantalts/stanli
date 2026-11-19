@@ -55,11 +55,18 @@ ENTRIES = [
           ref="refs/pull/576/merge"),
     entry(21, "emsdk-Linux-X64-6.0.6-v1", "2026-11-18T00:00:00Z",
           ref="refs/pull/568/merge"),
-    # Other branches and tags are left alone.
+    # A branch's entries go once the branch is deleted, which GitHub does
+    # when its pull request merges.
     entry(22, f"ccache-asan-{H3}-{H1}", "2026-11-01T00:00:00Z",
           ref="refs/heads/feature"),
+    entry(23, f"ccache-asan-{H3}-{H1}", "2026-11-18T11:00:00Z",
+          ref="refs/heads/fix/merged"),
+    # Tags are left alone.
+    entry(24, f"ccache-asan-{H3}-{H1}", "2026-11-01T00:00:00Z",
+          ref="refs/tags/v0.28.1"),
 ]
 PR_STATES = {"568": "closed", "576": "open"}
+BRANCHES = {"feature": True, "fix/merged": False}
 
 
 class PrunePlanTest(unittest.TestCase):
@@ -67,23 +74,26 @@ class PrunePlanTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             entries = Path(tmp) / "entries.json"
             states = Path(tmp) / "states.json"
+            branches = Path(tmp) / "branches.json"
             entries.write_text(json.dumps(ENTRIES))
             states.write_text(json.dumps(PR_STATES))
+            branches.write_text(json.dumps(BRANCHES))
             result = subprocess.run(
                 [sys.executable, str(ROOT / "tools/prune_caches.py"),
                  "--dry-run", "--entries", str(entries),
-                 "--pr-states", str(states), "--now", NOW, *extra],
+                 "--pr-states", str(states), "--branches", str(branches),
+                 "--now", NOW, *extra],
                 capture_output=True, text=True)
         self.assertEqual(result.returncode, 0, result.stderr)
         return result.stdout
 
-    def test_deletes_exactly_the_superseded_and_closed_entries(self):
+    def test_deletes_exactly_the_superseded_and_dead_entries(self):
         deleted = {int(line.split()[1]) for line in self.plan().splitlines()
                    if line.startswith("delete ")}
-        self.assertEqual(deleted, {1, 13, 15, 19, 21})
+        self.assertEqual(deleted, {1, 13, 15, 19, 21, 23})
 
     def test_reports_the_total_freed(self):
-        self.assertIn("would free 69.0 MB", self.plan())
+        self.assertIn("would free 92.0 MB", self.plan())
 
 
 if __name__ == "__main__":
