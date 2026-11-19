@@ -738,6 +738,33 @@ models that it contains. `publish_corpus_bench.py --vectorized` records in
 `combined.json` which run supplied each model. The renderer checks the
 inputs, settings, toolchain and compiler hash again.
 
+A default run can also replace the models that were timed while the machine
+was busy. The recorded load alone decides which models are replaced.
+`tools/loaded_models.py` lists the models whose 1-minute load
+average went above the threshold (default 6) at the start of any Stanli
+compile, gradient or preparation command. Time exactly those models again
+from the same checkout, binaries and settings as the first run, then publish
+both runs:
+
+```sh
+python3 harnesses/corpus_bench.py deps/cmdstan deps/posteriordb \
+  build/corpus-current/rerun.tsv --bench build-rel/bench_grad \
+  --corpus all --rounds 6 --warmup-ms 20 --measure-ms 40 --points 10 \
+  --gradient-timeout 60 --build-timeout 900 \
+  --models "$(python3 tools/loaded_models.py build/corpus-current/default.tsv)"
+python3 tools/publish_corpus_bench.py build/corpus-current/default.tsv \
+  output/corpus-performance --rerun build/corpus-current/rerun.tsv --max-load 6
+```
+
+The publisher rejects a rerun whose manifest identity differs from the first
+run's in anything other than its model list. The first rerun must contain
+exactly the loaded models, and its results are used even when they are
+slower or failed. A model whose rerun was loaded again is noted in the
+report. A further `--rerun` may time only those models. `substitutions.json`
+records the threshold and which run supplied each model, and each rerun is
+kept under `reruns/RUN_ID/`. The renderer checks the load rule again from
+the published events. Run each rerun once and publish what it measured.
+
 The [default evidence](../output/corpus-performance/README.md) and
 [loop-vectorization evidence](../output/corpus-performance-vectorized/README.md)
 directories hold the full inventories, manifests, summary TSVs, raw
