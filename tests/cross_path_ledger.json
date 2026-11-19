@@ -486,5 +486,13 @@
     "bound_ulp": 1,
     "cause": "Each group's sum(mu[g] + x[rows] * beta) and sum(scaled[rows] * beta) sums a matrix-vector product. The write_array graph forms the product with Eigen (OP_MATVEC, OP_GEMM) and sums it with Eigen's packet reduction (OP_SUM_VEC variant 1). The interpreter forms the product with a scalar loop and, finding no packet access in the expression's source layout, adds the elements in order. Switching both to Eigen in the interpreter gives the graph's bits; switching either one alone does not. Against an 80-digit mpmath reference at draw variant 0 the interpreter is 0.27 ULP off and the graph 1.27 ULP. The default graph unrolls this loop, so the gap does not involve retained loops.",
     "since": "2026-11-19"
+  },
+  {
+    "model": "structured_ragged_square_matvec",
+    "quantity": "grad[39]",
+    "pair": "default/passes_off",
+    "bound_ulp": 3,
+    "cause": "tau's adjoint is the sum of the twelve groups' contributions through scaled[g] = tau * L[g]. The default graph unrolls the loop, and reroll and inplace together add those contributions in a different order; turning off either one gives the passes_off bits, which the retained loop (STANLI_STRUCTURED_LOOPS=1) also gives. Against an 80-digit mpmath reference at draw variant 0 the default graph is 2.18 ULP off and passes_off 0.18 ULP.",
+    "since": "2026-11-19"
   }
 ]

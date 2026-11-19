@@ -3341,10 +3341,39 @@ static void ragged_matvec_tests() {
   ragged_parity_tests("structured_ragged_matvec", "ragged matvec");
 }
 
+// A square leading block of an array of matrices, L[g, :m[g], :m[g]], has
+// runtime rows and columns. Its product with a vector of runtime length must
+// check at execution time that the inner extents agree.
+static void ragged_square_matvec_tests() {
+  ragged_parity_tests("structured_ragged_square_matvec",
+                      "ragged square matvec");
+}
+
 // After stanc inlines a user function into the loop, a local sized by an
 // integer computed from a data argument needs a capacity from that data.
 static void udf_local_capacity_tests() {
   ragged_parity_tests("structured_udf_local_capacity", "udf local capacity");
+}
+
+// When the inner extents differ on one trip, the retained product reports the
+// mismatch as Stan's multiply does.
+static void ragged_square_matvec_mismatch_tests() {
+  const DataMap data = DataMap::from_json_file(
+      "tests/fixtures/structured_ragged_matvec_mismatch.json");
+  const auto native = try_compile_fixture("structured_ragged_matvec_mismatch",
+                                          data, Mode::Prefer);
+  check(native && retained(*native) != nullptr,
+        "mismatched square matvec retains OP_LOOP");
+  if (!native || !retained(*native)) return;
+  Executor ex(native->graph);
+  native->bind(ex);
+  std::fill_n(ex.params_data(), native->n_unconstrained, 0.25);
+  std::vector<double> gradient(static_cast<size_t>(native->n_unconstrained));
+  check(throws<std::invalid_argument>(
+            [&] { (void)ex.gradient(gradient.data()); },
+            "multiply: Columns of m1 (3) and Rows of m2 (1) must match in "
+            "size"),
+        "mismatched square matvec reports Stan's size error");
 }
 
 static void runtime_local_shape_tests() {
@@ -8480,6 +8509,8 @@ int main() {
   runtime_local_shape_tests();
   ragged_linspaced_tests();
   ragged_matvec_tests();
+  ragged_square_matvec_tests();
+  ragged_square_matvec_mismatch_tests();
   udf_local_capacity_tests();
   zero_length_matrix_udf_tests();
   sequence_local_tests();
