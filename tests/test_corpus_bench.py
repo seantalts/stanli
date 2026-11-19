@@ -632,6 +632,26 @@ class FastMathModeTests(SetupEstimateFixture):
         self.assertEqual(run_config(SimpleNamespace(**base))["points"], 4)
 
 
+class ModelSelectionTests(unittest.TestCase):
+    NAMES = ("arma11", "arma11_x", "dogs", "dogs_log")
+
+    def test_filter_is_a_substring_and_models_are_exact_names(self):
+        from harnesses.corpus_bench import selected_models
+        self.assertEqual(selected_models(self.NAMES, "dogs", ""), ["dogs", "dogs_log"])
+        self.assertEqual(selected_models(self.NAMES, "", "dogs,arma11"), ["arma11", "dogs"])
+        self.assertEqual(selected_models(self.NAMES, "", ""), list(self.NAMES))
+
+    def test_an_unknown_model_name_is_an_error(self):
+        from harnesses.corpus_bench import selected_models
+        with self.assertRaisesRegex(ValueError, "dgos"):
+            selected_models(self.NAMES, "", "dogs,dgos")
+
+    def test_model_list_is_part_of_the_run_identity_only_when_given(self):
+        base = dict(rounds=2, points=4, resume=False, output="x")
+        self.assertNotIn("models", run_config(SimpleNamespace(**base, models="")))
+        self.assertEqual(run_config(SimpleNamespace(**base, models="a,b"))["models"], "a,b")
+
+
 class BenchmarkCatalogTests(unittest.TestCase):
     def test_complete_rows_rank_by_unrounded_ratio_and_incomplete_rows_stay_separate(self):
         from tools.corpus_table import _catalog_tables
@@ -791,7 +811,8 @@ class BenchmarkCatalogTests(unittest.TestCase):
             self.render()
 
     def test_wrong_budget_or_old_sampling_protocol_is_rejected(self):
-        for field, value in (("gradient_budget", 2000), ("sampling", True), ("filter", "good")):
+        for field, value in (("gradient_budget", 2000), ("sampling", True), ("filter", "good"),
+                             ("models", "good")):
             config = copy.deepcopy(self.manifest["identity"]["config"])
             self.manifest["identity"]["config"][field] = value
             with self.subTest(field=field), self.assertRaisesRegex(ValueError, "unfiltered v5"):

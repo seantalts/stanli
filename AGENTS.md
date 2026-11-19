@@ -87,15 +87,43 @@ dependency warning cleanup.
 
 ### Compiler-pipeline performance
 
-Any change to the compiler pipeline requires a complete corpus benchmark
-before merge against the current remote-default-branch baseline. This includes
+Any change to the compiler pipeline requires a corpus benchmark before merge
+against the current remote-default-branch baseline. This includes
 source-to-MIR compilation, MIR decoding/lowering, graph passes, preparation,
-producer/backend selection, compiler pins, and pass flags or budgets. Follow
-[`docs/benchmarks.md`](docs/benchmarks.md#how-we-measure):
-run the full shared application-model corpus for both revisions with the
-shipped configuration, matched hardware/toolchains, and retained raw results.
-A focused benchmark or a passing numerical corpus replay does not substitute
-for the full performance run.
+kernels, producer/backend selection, compiler pins, and pass flags or budgets.
+Follow [`docs/benchmarks.md`](docs/benchmarks.md#how-we-measure):
+run both revisions with the shipped configuration, matched hardware/toolchains,
+and retained raw results. A focused benchmark or a passing numerical corpus
+replay does not substitute for this run.
+
+A change to graph passes, lowering, preparation or kernels (`runtime/`) may
+time a selected set of models instead of the full corpus.
+[`tools/bench_select.py`](tools/bench_select.py) prepares every corpus model
+with both builds and selects:
+
+1. every model whose prepared program (`dump_ops` and `dump_islands` output)
+   differs;
+2. every model that runs an opcode whose kernel the change edits. The author
+   names these opcodes with `--opcodes`, because a tool cannot infer them
+   reliably;
+3. every model whose preparation time grows beyond the threshold below. The
+   tool times preparation for every model in both builds, because a pass can
+   get slower without changing its output;
+4. a fixed set of control models with unchanged programs, which catch speed
+   changes that come from the binary alone.
+
+Time the selected models with `harnesses/corpus_bench.py --models`, using the
+same protocol, threshold and evidence rules as a full run
+([selected models](docs/benchmarks.md#selected-models)).
+
+The full corpus stays required for compiler pins, source-to-MIR compilation
+(`compiler/`, `tools/stanc_embed`, `deps/pins.env`), changes to how the
+benchmark harness or timer measures, and build flag or toolchain changes. It is
+also required when the selection tool fails on any model in either build. The
+tool lists such a model as selected and unresolved, and it is never dropped.
+The PR reports the selection evidence: the counts, each changed model with a
+one-line reason, the named opcodes, the controls, and the preparation
+comparison over all models.
 
 A model's slowdown is a major regression when its total sampling time
 (setup plus the gradients of a standard run, as

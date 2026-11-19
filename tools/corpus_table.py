@@ -103,7 +103,7 @@ def _catalog_config(manifest, allow_filter=False):
     legacy = identity.get("protocol") == "stanli-corpus-v5"
     if (not manifest.get("run_id")
             or identity.get("protocol") not in PROTOCOLS
-            or config.get("corpus") != "all" or (config.get("filter") and not allow_filter)
+            or config.get("corpus") != "all" or ((config.get("filter") or config.get("models")) and not allow_filter)
             or type(config.get("rounds")) is not int or config["rounds"] <= 0
             or ("gradient_budget" in config) != legacy
             or (legacy and (type(config["gradient_budget"]) is not int

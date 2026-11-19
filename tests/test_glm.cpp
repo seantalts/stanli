@@ -4,6 +4,7 @@
 #include "expect.hpp"
 #include "models.hpp"
 #include <stanli/density_registry.hpp>
+#include <stanli/program.hpp>
 
 #include <stan/math.hpp>
 #include <cmath>
@@ -445,17 +446,49 @@ static void test_categorical_native_scalar() {
   stan::math::recover_memory();
 }
 
+// The scratch that the kernel asks for: one double per row for the logit
+// scalar-outcome forms with an active argument, and none otherwise.
+static int64_t categorical_scratch_len(uint8_t variant, int32_t rows,
+                                       int32_t width) {
+  using namespace stanli;
+  const Kernel* kernel = find_kernel(OP_CATEGORICAL);
+  const int32_t lens[2] = {rows, rows * width};
+  return kernel_call_scratch(kernel->scratch_size, OP_CATEGORICAL, variant, 2,
+                             lens, 1, nullptr, 0, nullptr);
+}
+
 // Direct kernel edges for the same rule. A scalar categorical log only
 // connects the selected probability: an infinite seed must leave an
 // unselected signed zero untouched, while a zero seed over a selected zero
 // still follows the connected log edge and forms 0 / 0. Reusing the context
-// also pins that the native path carries no hidden scratch state.
+// also pins that the probability form carries no hidden scratch state.
 static void test_categorical_native_kernel_edges() {
   using namespace stanli;
   const Kernel* kernel = find_kernel(OP_CATEGORICAL);
   expect_true("categorical native kernel registered", kernel != nullptr);
-  expect_true("categorical native kernel scratchless",
-              kernel && kernel->scratch_size == nullptr);
+  // The forward keeps each row's log_sum_exp for the backward. Only the
+  // logit form with an active argument computes one.
+  expect_true("categorical kernel declares scratch",
+              kernel && kernel->scratch_size != nullptr);
+  const uint8_t logit_rows =
+      kCategoricalRows | kCategoricalScalarOutcome | kCategoricalLogit;
+  expect_true(
+      "categorical probability scalar has no scratch",
+      categorical_scratch_len(
+          kCategoricalScalarOutcome | kCategoricalArgAutodiff, 1, 2) == 0);
+  expect_true(
+      "categorical logit scalar scratch is one row",
+      categorical_scratch_len(kCategoricalScalarOutcome | kCategoricalLogit |
+                                  kCategoricalArgAutodiff,
+                              1, 5) == 1);
+  expect_true(
+      "categorical logit rows scratch is one per row",
+      categorical_scratch_len(logit_rows | kCategoricalArgAutodiff, 7, 5) == 7);
+  expect_true("categorical data logit rows have no scratch",
+              categorical_scratch_len(logit_rows, 7, 5) == 0);
+  expect_true("categorical array logit has no scratch",
+              categorical_scratch_len(
+                  kCategoricalLogit | kCategoricalArgAutodiff, 7, 5) == 0);
   if (kernel) {
     double outcome = 1.0;
     double theta[2] = {1.0, 0.0};
@@ -537,6 +570,10 @@ static void test_categorical_logit_scalar_bits() {
             ctx.out_adj = weight;
             ctx.variant = kCategoricalScalarOutcome | kCategoricalLogit |
                           kCategoricalArgAutodiff | (propto ? 0x80u : 0u);
+            std::vector<double> scratch(
+                (size_t)categorical_scratch_len(ctx.variant, 1, n),
+                std::numeric_limits<double>::quiet_NaN());
+            ctx.scratch = scratch.data();
             kernel->forward(ctx);
             kernel->backward(ctx);
             stan::math::var lp =
@@ -575,6 +612,10 @@ static void test_categorical_rows() {
     ctx.out_adj = weight;
     ctx.variant = kCategoricalRows | kCategoricalScalarOutcome |
                   kCategoricalArgAutodiff | form;
+    std::vector<double> scratch(
+        (size_t)categorical_scratch_len(ctx.variant, rows, k),
+        std::numeric_limits<double>::quiet_NaN());
+    ctx.scratch = scratch.data();
     std::copy(seed_adj, seed_adj + rows * k, adj);
     kernel->forward(ctx);
     kernel->backward(ctx);
@@ -630,6 +671,9 @@ static void test_categorical_rows() {
     ctx.out = Desc{&out, 1};
     ctx.variant = kCategoricalRows | kCategoricalScalarOutcome |
                   kCategoricalArgAutodiff | form;
+    std::vector<double> scratch(
+        (size_t)categorical_scratch_len(ctx.variant, rows, k));
+    ctx.scratch = scratch.data();
     try {
       kernel->forward(ctx);
     } catch (const std::domain_error&) {
@@ -650,6 +694,73 @@ static void test_categorical_rows() {
   bad[k + 2] = std::numeric_limits<double>::infinity();
   expect_true("categorical rows non-finite logit",
               throws(bad, kCategoricalLogit, outcomes[1]));
+}
+
+// The batched logit form must give each row the bits that a separate
+// Stan Math call would give it, over widths, extreme scales, signed-zero and
+// infinite seeds, prefilled adjoints and both propto settings.
+static void test_categorical_logit_rows_bits() {
+  using namespace stanli;
+  const Kernel* kernel = find_kernel(OP_CATEGORICAL);
+  const double inf = std::numeric_limits<double>::infinity();
+  const auto same_bits = [](double a, double b) {
+    return (std::isnan(a) && std::isnan(b)) ||
+           std::memcmp(&a, &b, sizeof(double)) == 0;
+  };
+  const int rows = 4;
+  int failures = 0;
+  for (int k : {1, 2, 3, 8, 32})
+    for (double scale : {0.0, 1.0, 1000.0, 1e308})
+      for (double weight : {0.0, -0.0, 1.0, -1.3, 1e308, 1e-308, inf})
+        for (bool propto : {false, true}) {
+          stan::math::nested_rev_autodiff nested;
+          const int n = rows * k;
+          std::vector<double> outcomes(rows), beta(n), adj(n);
+          Eigen::Matrix<stan::math::var, -1, 1> ref_beta(n);
+          for (int r = 0; r < rows; ++r) outcomes[r] = 1 + (3 * r + 1) % k;
+          for (int i = 0; i < n; ++i) {
+            beta[i] = scale * std::sin(1.7 * i + 1.0);
+            ref_beta(i) = beta[i];
+            adj[i] = i % 3 ? -0.0 : 0.3125;
+            ref_beta(i).adj() = adj[i];
+          }
+          double out = 0.0;
+          KernelCtx ctx{};
+          ctx.n_in = 2;
+          ctx.in[0] = Desc{outcomes.data(), rows};
+          ctx.in[1] = Desc{beta.data(), n};
+          ctx.in_adj[1] = Desc{adj.data(), n};
+          ctx.out = Desc{&out, 1};
+          ctx.out_adj = weight;
+          ctx.variant = kCategoricalRows | kCategoricalScalarOutcome |
+                        kCategoricalLogit | kCategoricalArgAutodiff |
+                        (propto ? 0x80u : 0u);
+          std::vector<double> scratch(
+              (size_t)categorical_scratch_len(ctx.variant, rows, k),
+              std::numeric_limits<double>::quiet_NaN());
+          ctx.scratch = scratch.data();
+          kernel->forward(ctx);
+          kernel->backward(ctx);
+          double want = 0.0;
+          stan::math::var total = 0.0;
+          for (int r = 0; r < rows; ++r) {
+            const Eigen::Matrix<stan::math::var, -1, 1> row =
+                ref_beta.segment(r * k, k);
+            const int y = (int)outcomes[r];
+            stan::math::var lp =
+                propto ? stan::math::categorical_logit_lpmf<true>(y, row)
+                       : stan::math::categorical_logit_lpmf<false>(y, row);
+            want = r == 0 ? lp.val() : want + lp.val();
+            total += lp * weight;
+          }
+          stan::math::grad(total.vi_);
+          if (!same_bits(out, want)) ++failures;
+          for (int i = 0; i < n; ++i)
+            if (!same_bits(adj[i], ref_beta(i).adj())) ++failures;
+        }
+  expect_true("categorical logit rows value and gradient bits (" +
+                  std::to_string(failures) + " mismatches)",
+              failures == 0);
 }
 
 // Array outcomes add one callback contribution per observation. Preserve
@@ -758,6 +869,7 @@ int main() {
   test_categorical_native_kernel_edges();
   test_categorical_logit_scalar_bits();
   test_categorical_rows();
+  test_categorical_logit_rows_bits();
   test_categorical_array_scaled();
 
   return finish("test_glm");

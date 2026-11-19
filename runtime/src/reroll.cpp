@@ -38,7 +38,8 @@
 // since OP_SUM_ROWS needs each lane's elements contiguous); and row stores
 // covering every row make the fused value the container. A CONCAT2 lane
 // commits to column-major, where the lanes' concatenations are one CONCAT2;
-// a row store in the other convention goes through one OP_TRANSPOSE.
+// a row store in the other convention goes through one OP_TRANSPOSE, or,
+// when the chain feeds it, one strided store per column instead.
 //
 // Failed classifications report the longest still-classifiable lane
 // prefix and retry with it. This is what handles block-structured data
@@ -605,6 +606,135 @@ int fuse_log_sum_exp_rows(Graph& g, std::vector<int>& target_terms,
   return regions;
 }
 
+// Re-roll packs `[x_l, y_l, ...]` rows column-major, so the lanes' rows are
+// a CONCAT2 chain of length-R columns. A row-major container then needs an
+// OP_TRANSPOSE, and the chain copies its growing prefix once per link:
+// quadratic in the column count. Fill the row-major matrix from the first
+// column instead and store each further column with stride C, so every
+// element is copied once.
+int store_concat_columns(Graph& g, const std::vector<int>& roots) {
+  std::vector<size_t> transposes;
+  for (size_t u = 0; u < g.ops.size(); ++u)
+    if (g.ops[u].opcode == OP_TRANSPOSE) transposes.push_back(u);
+  if (transposes.empty()) return 0;
+
+  std::vector<int> readers(g.slots.size(), 0), writers(g.slots.size(), 0);
+  std::vector<size_t> producer(g.slots.size(), 0);
+  for (int s : roots)
+    if (s >= 0) ++readers[(size_t)s];
+  if (g.result_slot >= 0) ++readers[(size_t)g.result_slot];
+  for (size_t u = 0; u < g.ops.size(); ++u) {
+    const Op& op = g.ops[u];
+    for (int j = 0; j < op.n_in; ++j)
+      if (op.in[j] >= 0) ++readers[(size_t)op.in[j]];
+    for (int s : {op.out, op.out2})
+      if (s >= 0) {
+        ++writers[(size_t)s];
+        producer[(size_t)s] = u;
+      }
+  }
+  // The op that alone writes `s`, if it is the only reader's input.
+  const auto sole = [&](int s, uint16_t opcode, int n_in) -> const Op* {
+    if (s < 0 || readers[(size_t)s] != 1 || writers[(size_t)s] != 1)
+      return nullptr;
+    const Op& op = g.ops[producer[(size_t)s]];
+    const bool plain = op.opcode == opcode && op.n_in == n_in && op.out2 < 0 &&
+                       op.udata == nullptr && op.dyn_capacity == 0;
+    return plain ? &op : nullptr;
+  };
+
+  std::vector<char> drop(g.ops.size(), 0);
+  std::vector<std::pair<size_t, std::vector<Op>>> replaced;
+  for (size_t t : transposes) {
+    const Op& tr = g.ops[t];
+    if (tr.n_in != 1 || tr.n_idata != 2 || tr.dyn_capacity != 0) continue;
+    const int R = tr.idata[0], C = tr.idata[1];
+    const Op* root = sole(tr.in[0], OP_CONCAT2, 2);
+    if (!root || root->n_idata != 0) continue;
+
+    // Leaves in order, each with the chain op that reads it.
+    std::vector<std::pair<int, size_t>> leaves;
+    std::vector<size_t> chain;
+    std::vector<std::pair<int, size_t>> todo{{tr.in[0], t}};
+    while (!todo.empty()) {
+      const auto [s, reader] = todo.back();
+      todo.pop_back();
+      const Op* cat = sole(s, OP_CONCAT2, 2);
+      if (cat && cat->n_idata == 0) {
+        const size_t u = producer[(size_t)s];
+        chain.push_back(u);
+        todo.push_back({cat->in[1], u});
+        todo.push_back({cat->in[0], u});
+      } else {
+        leaves.push_back({s, reader});
+      }
+    }
+    bool ok = (int64_t)leaves.size() == C;
+    for (const auto& [s, reader] : leaves)
+      ok = ok && g.slots[(size_t)s].len == R;
+    if (!ok) continue;
+
+    // A first column that is one scalar repeated becomes a fill of the
+    // whole matrix.
+    int lead = leaves[0].first;
+    const Op* rep = sole(lead, OP_REP_MAT, 1);
+    const bool fill = rep && g.slots[(size_t)rep->in[0]].len == 1;
+    if (fill) {
+      chain.push_back(producer[(size_t)lead]);
+      leaves[0] = {rep->in[0], producer[(size_t)lead]};
+      lead = rep->in[0];
+    }
+
+    // The new ops read the leaves at the transpose. Nothing may write a
+    // leaf after the chain read it.
+    const size_t lo = *std::min_element(chain.begin(), chain.end());
+    for (size_t u = lo + 1; u < t && ok; ++u)
+      for (int w : {g.ops[u].out, g.ops[u].out2})
+        for (const auto& [s, reader] : leaves)
+          if (w == s && u > reader) ok = false;
+    if (!ok) continue;
+
+    std::vector<Op> ops;
+    const auto with_idata = [&](Op op, std::vector<int> idata) {
+      g.idata_pool.push_back(std::move(idata));
+      op.idata = g.idata_pool.back().data();
+      op.n_idata = (int64_t)g.idata_pool.back().size();
+      ops.push_back(op);
+    };
+    Op base;
+    base.opcode = OP_REP_MAT;
+    base.n_in = 1;
+    base.in[0] = lead;
+    base.out = tr.out;
+    with_idata(base, {C, R, fill ? 0 : 2});
+    for (int k = 1; k < C; ++k) {
+      Op store;
+      store.opcode = OP_SET_SLICE_STRIDED_INPLACE;
+      store.n_in = 2;
+      store.in[0] = tr.out;
+      store.in[1] = leaves[(size_t)k].first;
+      store.out = tr.out;
+      with_idata(store, {k, C});
+    }
+    for (size_t u : chain) drop[u] = 1;
+    replaced.push_back({t, std::move(ops)});
+  }
+  if (replaced.empty()) return 0;
+
+  std::vector<Op> result;
+  result.reserve(g.ops.size());
+  size_t next = 0;
+  for (size_t u = 0; u < g.ops.size(); ++u) {
+    if (next < replaced.size() && replaced[next].first == u) {
+      for (const Op& op : replaced[next].second) result.push_back(op);
+      ++next;
+    } else if (!drop[u]) {
+      result.push_back(g.ops[u]);
+    }
+  }
+  g.ops = std::move(result);
+  return (int)replaced.size();
+}
 }  // namespace
 
 RerollStats reroll(Graph& g,
@@ -1581,6 +1711,11 @@ RerollStats reroll(Graph& g,
   g.ops = std::move(result);
   retired.apply(target_terms);
   st.term_steps = retired.steps;
+  if (st.regions > 0) {
+    std::vector<int> roots = extra_roots;
+    roots.insert(roots.end(), target_terms.begin(), target_terms.end());
+    store_concat_columns(g, roots);
+  }
   return st;
 }
 
