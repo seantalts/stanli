@@ -355,6 +355,24 @@ static void test_borrowed_data() {
   }
 }
 
+// A result slot that the graph does not have is refused when the executor
+// binds, instead of being read past the end of the slot table.
+static void test_result_slot_out_of_range() {
+  using namespace stanli;
+  for (const int result : {1, 2, -2}) {
+    Graph g;
+    g.add_slot(1, true);
+    g.result_slot = result;
+    bool refused = false;
+    try {
+      Executor ex(std::move(g));
+    } catch (const std::invalid_argument&) {
+      refused = true;
+    }
+    expect_i64("result slot outside the graph is refused", refused, 1);
+  }
+}
+
 int main() {
   using namespace stanli;
 
@@ -548,6 +566,7 @@ int main() {
   test_shared_data();
   test_shared_data_with_cached_primals();
   test_borrowed_data();
+  test_result_slot_out_of_range();
   test_compact_idata_lifecycle();
   test_compact_append_after_copy();
   test_mixed_owned_borrowed_idata();

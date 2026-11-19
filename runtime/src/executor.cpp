@@ -431,6 +431,9 @@ void Executor::bind_() {
       throw std::length_error("executor arena size overflow");
     return a + b;
   };
+  if (graph_.result_slot < -1 ||
+      graph_.result_slot >= static_cast<int>(graph_.slots.size()))
+    throw std::invalid_argument("result slot is not in the graph");
   // Only parameters and written slots need private value storage. Classify
   // both outputs, including inactive writes: activity is not immutability.
   std::vector<char> written(graph_.slots.size(), 0);
