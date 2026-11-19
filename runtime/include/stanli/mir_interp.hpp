@@ -44,6 +44,7 @@
 #include <cmath>
 #include <cstdint>
 #include <functional>
+#include <initializer_list>
 #include <limits>
 #include <map>
 #include <optional>
@@ -2194,20 +2195,22 @@ class MirInterp {
       return is_scalar(a) || is_scalar(b) ||
              (a.dims == b.dims && a.r.size() == b.r.size());
     };
-    const auto resolve_registered = [&](const std::vector<Value>& values) {
-      if (builtin == nullptr)
-        fail(e.name + ": missing builtin descriptor", e.raw);
-      std::vector<BuiltinArgumentShape> shapes;
-      shapes.reserve(values.size());
-      try {
-        for (size_t k = 0; k < values.size(); ++k)
-          shapes.push_back(function_argument_shape(e.args[k], values[k]));
-        return builtin_layout(*builtin, shapes, e.name,
-                              interpreter_autodiff(e));
-      } catch (const std::invalid_argument& error) {
-        fail_builtin(e.name, error, e.raw);
-      }
-    };
+    const auto resolve_registered =
+        [&](std::initializer_list<std::reference_wrapper<const Value>> values) {
+          if (builtin == nullptr)
+            fail(e.name + ": missing builtin descriptor", e.raw);
+          std::vector<BuiltinArgumentShape> shapes;
+          shapes.reserve(values.size());
+          try {
+            size_t k = 0;
+            for (const Value& value : values)
+              shapes.push_back(function_argument_shape(e.args[k++], value));
+            return builtin_layout(*builtin, shapes, e.name,
+                                  interpreter_autodiff(e));
+          } catch (const std::invalid_argument& error) {
+            fail_builtin(e.name, error, e.raw);
+          }
+        };
     // Elementwise with scalar broadcasting; results of real math are real
     // even on int inputs, and binary int results stay int only when both
     // sides are int scalars.

@@ -646,7 +646,7 @@ void Lowering::lower_read_param(const mir::Stmt& s) {
       sized_len(s.decl_type, nullptr, nullptr, s.decl_id);
   if (declared_len != con_len)
     fail("parameter view length does not match constrained storage", s.raw);
-  validate_view(psi, con_len, "parameter " + s.decl_id);
+  validate_view(psi, con_len, "parameter ", s.decl_id);
   decls[s.decl_id] = DeclView{con_len, scalar_autodiff(), psi};
   const mir::detail::TupleLeaf* tuple = tuple_leaf(s.decl_id);
   int raw = -1;

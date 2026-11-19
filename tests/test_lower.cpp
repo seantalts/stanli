@@ -716,6 +716,15 @@ static void test_fixture_constants() {
          d.set_int_array("idx", {0, 1});
        }),
        {{{0.4}, 0.4, {1.0}}, {{-0.4}, -0.8, {2.0}}}},
+      // The same scan forgets m, which a parameter-selected arm assigns, so
+      // that a later condition does not read it as constant. Lowering starts
+      // over from the integers held before the scan: the first pass folds
+      // m = 2, the second reads the value the arm left. 2 + 3 for a positive
+      // theta, 2 + 2 otherwise.
+      {"integers restored after the control scan",
+       "runtime_int_scan_restore",
+       make_data([](DataMap& d) { d.set_int("N", 2); }),
+       {{{0.5}, 2.5, {5.0}}, {{-0.5}, -2.0, {4.0}}}},
       // The same region written with `~`. Runtime density calls now use the
       // graph kernel ABI, including its argument-activity mask, so the propto
       // instantiation drops exactly the constants that generated Stan does.
