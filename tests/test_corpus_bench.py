@@ -1253,5 +1253,162 @@ class PublishVectorizedTests(VectorizedFixture):
         self.assertIn("README.md", sums)
 
 
+def write_run(summary, manifest, records, loads):
+    """A run directory whose measured commands record the given 1-minute load per model."""
+    from benchmark_artifact_fixture import write_artifacts
+    run = pathlib.Path(str(summary) + ".run")
+    run.mkdir(parents=True)
+    write_artifacts(summary, run / "unused.json.gz", run / "manifest.json",
+                    [copy.deepcopy(record["row"]) for record in records], records, manifest)
+    (run / "unused.json.gz").unlink()
+    for record in records:
+        (run / f"{record['model']}.result.json").write_text(json.dumps(record))
+    events = []
+    for model, load in loads.items():
+        # Builds run in parallel and are always loaded; only measured commands count.
+        phases = [f"{model}/cmdstan-build", f"{model}/stanli-mir", f"{model}/gradient/0/stanli",
+                  f"{model}/gradient/0/cmdstan", f"{model}/prepare/0"]
+        for phase in phases:
+            events.append(dict(id=len(events), phase=phase, status="ok",
+                               load_average=[20.0 if "build" in phase else
+                                             load if phase.endswith("cmdstan") else 4.0, 4.0, 4.0]))
+    (run / "events.jsonl").write_text("".join(json.dumps(event) + "\n" for event in events))
+    return summary
+
+
+class RerunFixture(unittest.TestCase):
+    def setUp(self):
+        from benchmark_artifact_fixture import artifact_fixture
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.root = pathlib.Path(self.temp.name)
+        self.manifest, self.records, _ = artifact_fixture()
+
+    def primary(self, loads):
+        return write_run(self.root / "primary.tsv", self.manifest, self.records, loads)
+
+    def rerun(self, name, models, loads, **identity):
+        manifest = copy.deepcopy(self.manifest)
+        manifest["run_id"] = name
+        manifest["started_utc"] = "2026-09-22T00:00:00Z"
+        manifest["identity"]["config"]["models"] = ",".join(models)
+        manifest["identity"]["inputs"] = {m: manifest["identity"]["inputs"][m] for m in models}
+        manifest["identity"].update(identity)
+        records = [copy.deepcopy(r) for r in self.records if r["model"] in models]
+        for record in records:
+            record["row"]["run_id"] = name
+        return write_run(self.root / f"{name}.tsv", manifest, records,
+                         {m: loads.get(m, 4.0) for m in models})
+
+    def publish(self, primary, reruns, max_load=6.0):
+        from tools.publish_corpus_bench import publish
+        with contextlib.redirect_stdout(io.StringIO()):
+            publish(primary, self.root / "published", reruns=reruns, max_load=max_load)
+        return self.root / "published"
+
+
+class LoadedModelTests(RerunFixture):
+    def test_lists_models_whose_measured_commands_ran_above_the_threshold(self):
+        from tools.loaded_models import main
+        primary = self.primary({"good": 9.0, "failed": 5.0})
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output), contextlib.redirect_stderr(io.StringIO()):
+            main([str(primary), "--max-load", "6"])
+        self.assertEqual(output.getvalue(), "good\n")
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output), contextlib.redirect_stderr(io.StringIO()):
+            main([str(primary), "--max-load", "4.5"])
+        self.assertEqual(output.getvalue(), "failed,good\n")
+
+    def test_a_measured_command_without_a_load_record_is_an_error(self):
+        from tools.loaded_models import measurement_loads
+        events = json.dumps(dict(id=0, phase="good/gradient/0/stanli", load_average=None))
+        with self.assertRaisesRegex(ValueError, "load"):
+            measurement_loads(events, {"good"})
+
+
+class PublishRerunTests(RerunFixture):
+    def test_rerun_replaces_exactly_the_loaded_models(self):
+        primary = self.primary({"good": 9.0, "failed": 5.0})
+        published = self.publish(primary, [self.rerun("rerun1", ["good"], {})])
+        substitutions = json.loads((published / "substitutions.json").read_text())
+        self.assertEqual(substitutions["max_load"], 6.0)
+        self.assertEqual(substitutions["models"], {"good": "rerun1"})
+        self.assertEqual(substitutions["still_loaded"], [])
+        with (published / "benchmark-summary.tsv").open() as stream:
+            rows = {row["model"]: row for row in csv.DictReader(stream, delimiter="\t")}
+        self.assertEqual(rows["good"]["run_id"], "rerun1")
+        self.assertEqual(rows["failed"]["run_id"], "current")
+        self.assertTrue((published / "reruns/rerun1/benchmark-manifest.json").exists())
+        self.assertTrue((published / "reruns/rerun1/events.jsonl.gz").exists())
+        readme = (published / "README.md").read_text()
+        self.assertIn("`good`", readme.split("| Model")[0])
+        self.assertIn("rerun1", readme)
+        self.assertIn("substitutions.json", (published / "SHA256SUMS").read_text())
+
+    def test_rerun_with_a_different_identity_is_rejected(self):
+        primary = self.primary({"good": 9.0, "failed": 5.0})
+        executables = dict(self.manifest["identity"]["executables"], bench="other-bench")
+        for name, change in (("bench", dict(executables=executables)),
+                             ("host", dict(machine=dict(self.manifest["identity"]["machine"], host="other")))):
+            with self.subTest(name), self.assertRaisesRegex(ValueError, "identity"):
+                self.publish(primary, [self.rerun("rerun-" + name, ["good"], {}, **change)])
+        config = dict(self.manifest["identity"]["config"], rounds=4)
+        with self.assertRaisesRegex(ValueError, "identity"):
+            self.publish(primary, [self.rerun("rerun-rounds", ["good"], {}, config=config)])
+        self.assertFalse((self.root / "published").exists())
+
+    def test_rerun_of_a_model_below_the_threshold_is_rejected(self):
+        primary = self.primary({"good": 9.0, "failed": 5.0})
+        with self.assertRaisesRegex(ValueError, "above the load threshold"):
+            self.publish(primary, [self.rerun("rerun1", ["good", "failed"], {})])
+
+    def test_rerun_must_cover_every_loaded_model(self):
+        primary = self.primary({"good": 9.0, "failed": 7.0})
+        with self.assertRaisesRegex(ValueError, "above the load threshold"):
+            self.publish(primary, [self.rerun("rerun1", ["good"], {})])
+
+    def test_model_loaded_again_is_noted_or_taken_from_a_second_rerun(self):
+        primary = self.primary({"good": 9.0, "failed": 5.0})
+        first = self.rerun("rerun1", ["good"], {"good": 8.0})
+        published = self.publish(primary, [first])
+        substitutions = json.loads((published / "substitutions.json").read_text())
+        self.assertEqual(substitutions["still_loaded"], ["good"])
+        self.assertIn("above 6 again", (published / "README.md").read_text())
+        shutil.rmtree(published)
+        second = self.rerun("rerun2", ["good"], {})
+        published = self.publish(primary, [first, second])
+        substitutions = json.loads((published / "substitutions.json").read_text())
+        self.assertEqual(substitutions["models"], {"good": "rerun2"})
+        self.assertEqual(substitutions["still_loaded"], [])
+
+    def test_second_rerun_may_not_replace_a_quiet_rerun(self):
+        primary = self.primary({"good": 9.0, "failed": 5.0})
+        with self.assertRaisesRegex(ValueError, "above the load threshold"):
+            self.publish(primary, [self.rerun("rerun1", ["good"], {}),
+                                   self.rerun("rerun2", ["good"], {})])
+
+    def test_renderer_rechecks_the_published_substitutions(self):
+        from tools.corpus_table import render_catalog
+        primary = self.primary({"good": 9.0, "failed": 5.0})
+        published = self.publish(primary, [self.rerun("rerun1", ["good"], {})])
+        paths = [published / name for name in ("benchmark-summary.tsv", "model-results.json.gz",
+                                               "benchmark-manifest.json")]
+        self.assertIn("rerun1", render_catalog(*paths))
+        substitutions = json.loads((published / "substitutions.json").read_text())
+        substitutions["max_load"] = 10.0
+        (published / "substitutions.json").write_text(json.dumps(substitutions))
+        with self.assertRaisesRegex(ValueError, "above the load threshold"):
+            render_catalog(*paths)
+
+    def test_max_load_needs_a_rerun(self):
+        from tools.publish_corpus_bench import main
+        primary = self.primary({"good": 9.0, "failed": 5.0})
+        argv = ["publish_corpus_bench.py", str(primary), str(self.root / "out"), "--max-load", "6"]
+        with mock.patch.object(sys, "argv", argv), contextlib.redirect_stderr(io.StringIO()), \
+                self.assertRaises(SystemExit):
+            main()
+
+
 if __name__ == "__main__":
     unittest.main()

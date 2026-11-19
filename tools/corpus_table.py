@@ -25,6 +25,8 @@ import statistics
 from pathlib import Path
 import sys
 
+from loaded_models import plan_substitutions
+
 CATALOG_ROOT = Path(__file__).resolve().parents[1]
 CATALOG_SUMMARY = CATALOG_ROOT / "output/corpus-performance/benchmark-summary.tsv"
 CATALOG_RECORDS = CATALOG_ROOT / "output/corpus-performance/model-results.json.gz"
@@ -249,11 +251,61 @@ def _catalog_setup(model, record, row, config, gradients, count):
     return values
 
 
+def _substitutions(directory, manifest):
+    """Published reruns of loaded models, rechecked against the recorded loads."""
+    path = directory / "substitutions.json"
+    if not path.exists():
+        return None
+    document = json.loads(path.read_text())
+    threshold = document.get("max_load")
+    if (document.get("primary_run_id") != manifest["run_id"]
+            or type(threshold) not in (int, float) or not math.isfinite(threshold) or threshold <= 0
+            or not isinstance(document.get("reruns"), list) or not document["reruns"]):
+        raise ValueError("Invalid substitutions.json")
+    reruns = []
+    for run_id in document["reruns"]:
+        rerun = json.loads((directory / "reruns" / run_id / "benchmark-manifest.json").read_text())
+        if rerun["run_id"] != run_id:
+            raise ValueError(f"Rerun identity differs: {run_id}")
+        reruns.append((rerun, gzip.decompress(
+            (directory / "reruns" / run_id / "events.jsonl.gz").read_bytes()).decode()))
+    events = gzip.decompress((directory / "events.jsonl.gz").read_bytes()).decode()
+    suppliers, still_loaded = plan_substitutions(manifest, events, reruns, threshold)
+    if (document.get("models") != {m: r for m, r in suppliers.items() if r != manifest["run_id"]}
+            or document.get("still_loaded") != still_loaded):
+        raise ValueError("substitutions.json differs from the recorded load averages")
+    document["started_utc"] = {rerun["run_id"]: rerun["started_utc"] for rerun, _ in reruns}
+    return document
+
+
+def _substitution_note(manifest_path):
+    directory = Path(manifest_path).parent
+    document = _substitutions(directory, json.loads(Path(manifest_path).read_text()))
+    if document is None:
+        return ""
+    models = document["models"]
+    plural = len(models) != 1
+    note = (f"{len(models)} model{'s were' if plural else ' was'} measured while the 1-minute load "
+            f"average was above {document['max_load']:g} and timed again.")
+    for run_id in document["reruns"]:
+        supplied = sorted(model for model, source in models.items() if source == run_id)
+        if supplied:
+            note += (" " + ", ".join(f"`{_catalog_cell(model)}`" for model in supplied)
+                     + f" {'is' if len(supplied) == 1 else 'are'} from run `{_catalog_cell(run_id)}` "
+                     f"({_catalog_cell(document['started_utc'][run_id][:10])}).")
+    if document["still_loaded"]:
+        note += (f" The load was above {document['max_load']:g} again in the rerun of "
+                 + ", ".join(f"`{_catalog_cell(model)}`" for model in document["still_loaded"]) + ".")
+    return note
+
+
 def validated_catalog(summary_path, records_path, manifest_path, allow_filter=False):
     """Return a complete current v5 inventory with validated raw evidence."""
     rows = _catalog_rows(summary_path)
     manifest = json.loads(Path(manifest_path).read_text())
     config = _catalog_config(manifest, allow_filter)
+    substitutions = _substitutions(Path(manifest_path).parent, manifest)
+    suppliers = substitutions["models"] if substitutions else {}
     with gzip.open(records_path, "rt") as stream:
         records = json.load(stream)
     if not isinstance(records, list):
@@ -267,7 +319,8 @@ def validated_catalog(summary_path, records_path, manifest_path, allow_filter=Fa
         model = row["model"]
         record = details[model]
         raw = record["row"]
-        if row.get("run_id") != manifest["run_id"] or raw.get("run_id") != manifest["run_id"]:
+        run_id = suppliers.get(model, manifest["run_id"])
+        if row.get("run_id") != run_id or raw.get("run_id") != run_id:
             raise ValueError(f"Gradient run identity differs: {model}")
         if any(not inputs[model].get(key) or record["inputs"].get(key) != inputs[model][key]
                for key in ("stan", "data")):
@@ -420,6 +473,9 @@ def render_catalog(summary_path=CATALOG_SUMMARY, records_path=CATALOG_RECORDS,
         f"Run `{_catalog_cell(manifest['run_id'])}` ({_catalog_cell(manifest['started_utc'][:10])}): "
         f"{len(rows)} models, {config['rounds']} alternating gradient pairs.\n\n"
     )
+    substituted = _substitution_note(manifest_path)
+    if substituted:
+        intro += substituted + "\n\n"
     return (intro + _reuse_note(_cached_models(details), len(rows))
             + _catalog_tables(rows, details, config["points"]))
 
@@ -438,6 +494,9 @@ def render_catalog_sections(summary_path=CATALOG_SUMMARY, records_path=CATALOG_R
     runs = (f"CmdStan stanc and build times for {reused} of {len(rows)} models were reused from "
             "the build cache and not remeasured." if reused
             else "Every CmdStan stanc and build time was measured in this run.")
+    substituted = _substitution_note(manifest_path)
+    if substituted:
+        runs += " " + substituted
     return {
         "table": "\n".join([CATALOG_HEADER, "| --- | ---: | ---: | ---: | ---: | ---: |", *complete]),
         "notes": "\n\n".join(notes),
