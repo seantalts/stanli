@@ -155,17 +155,25 @@ fit = model.sample(seed=1, samples=1000)
 fit = model.sample(continue_from=fit, samples=1000)   # 2000 per chain
 ```
 
-Only `samples`, `refresh`, `parallel_chains` and `threads_per_chain` can be
-given with `continue_from`; everything else comes from the fit.
+Only `samples`, `refresh` and `parallel_chains` can be given with
+`continue_from`; everything else comes from the fit.
 
 ### Within-chain parallelism
 
-For models that use `reduce_sum` or `reduce_sum_static`,
-`model.sample(threads_per_chain=4, parallel_chains=2)` runs eligible
-reductions on up to eight threads. Small or unsupported reductions stay
-serial. `model.reduce_sum_count` and `model.reduce_sum_fallbacks` report what
-was kept. If you change the thread count, stanli rebuilds the model. Rounding
-can then differ, so the draws can change. See
+For models that use `reduce_sum` or `reduce_sum_static`, set the thread count
+when you build the model:
+
+```python
+model = stanli.Model(stan_file="model.stan", data="data.json",
+                     threads_per_chain=4)
+fit = model.sample(parallel_chains=2)   # eligible reductions on up to 8 threads
+```
+
+Small or unsupported reductions stay serial. `model.reduce_sum_count` and
+`model.reduce_sum_fallbacks` report what was kept. To use another thread
+count, build a new model. Rounding can then differ, so the draws can change.
+Passing `threads_per_chain` to `sample()` is deprecated: it warns and
+rebuilds the model for that count. See
 [native reductions](https://github.com/seantalts/stanli/blob/main/docs/native-reduce-sum.md).
 
 ## Other algorithms
@@ -231,8 +239,8 @@ import stanli
 
 model = stanli.Model(stan_file="model.stan", data="data.json")
 model = stanli.Model(stan_code=src, data={"J": 8, "y": y, "sigma": sigma},
-                     include_paths=None, fast_math=False,
-                     allow_interpreter=True)
+                     threads_per_chain=1, include_paths=None,
+                     fast_math=False, allow_interpreter=True)
 
 model.n_unconstrained               # length of the unconstrained vector
 model.constrained_names             # ['mu', 'tau', 'theta[1]', ...]
@@ -243,9 +251,9 @@ lp, grad, hess = model.log_prob_hessian(q)   # and the (n, n) Hessian at q
 fit = model.sample(chains=4, seed=1, warmup=1000, samples=1000, delta=0.8,
                    max_depth=10, thin=1, save_warmup=False, inits=None,
                    init_radius=2.0, pathfinder_init=None,
-                   parallel_chains=None, refresh=100, threads_per_chain=None,
-                   metric="diag_e", inv_metric=None, step_size=None,
-                   adapt_engaged=True, adapt_metric=True, continue_from=None)
+                   parallel_chains=None, refresh=100, metric="diag_e",
+                   inv_metric=None, step_size=None, adapt_engaged=True,
+                   adapt_metric=True, continue_from=None)
 fit["theta"]                        # (chains*draws, 8), declared shape
 fit["theta[1]"]                     # one column, chains concatenated
 fit["lp__"]                         # sampler columns by name too

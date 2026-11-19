@@ -356,13 +356,14 @@ test_that("threads_per_chain on a model without reduce_sum is noted once", {
   skip_if_not(stanli_thread_safe())
   note <- paste0("Note: threads_per_chain = 2 has no effect on this model, ",
                  "which has no reduce_sum call to run in parallel.")
-  loud <- sampling_output("parameters { real x; } model { x ~ normal(0, 1); }",
-                          list(), chains = 2, warmup = 50, samples = 50,
-                          refresh = 100, threads_per_chain = 2)
+  m <- stanli_model(code = "parameters { real x; } model { x ~ normal(0, 1); }",
+                    threads_per_chain = 2)
+  run <- function(refresh)
+    paste(capture.output(sample_model(m, chains = 2, warmup = 50, samples = 50,
+                                      refresh = refresh)), collapse = "\n")
+  loud <- run(100)
   expect_equal(lengths(regmatches(loud, gregexpr(note, loud, fixed = TRUE))), 1L)
-  quiet <- sampling_output("parameters { real x; } model { x ~ normal(0, 1); }",
-                           list(), chains = 2, warmup = 50, samples = 50,
-                           refresh = 0, threads_per_chain = 2)
+  quiet <- run(0)
   expect_false(grepl(note, quiet, fixed = TRUE))
 })
 

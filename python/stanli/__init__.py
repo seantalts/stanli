@@ -1570,9 +1570,17 @@ class Model:
     run as it does in CmdStan. The rebuild replaces this object's model:
     afterwards ``log_prob_grad``, ``n_unconstrained`` and
     ``constrained_names`` all describe the model as built under the run
-    seed. Models are also rebuilt when sampling changes ``threads_per_chain``.
-    ``threads_per_chain`` on construction configures direct gradient calls;
-    sampling uses its own setting, which defaults to 1.
+    seed.
+
+    ``threads_per_chain`` is the number of threads each chain can use for
+    eligible ``reduce_sum`` calls. The model is compiled for this count, and
+    sampling, optimization and direct gradient calls all use it. To use
+    another count, build a new Model. Small or unsupported ``reduce_sum``
+    calls stay serial. ``reduce_sum_count`` is the number that run in
+    parallel, and ``reduce_sum_fallbacks`` gives the reasons that lowering
+    refused others. A different count
+    splits the sum differently, which can change floating-point rounding and
+    so the NUTS draws.
 
     ``include_paths`` accepts a directory or an iterable of directories for
     Stan ``#include`` files. These are searched in order, then the directory
@@ -1814,7 +1822,7 @@ class Model:
 
     @property
     def threads_per_chain(self):
-        """Thread setting of the currently prepared model."""
+        """Number of threads per chain that the model was built for."""
         return self._threads_per_chain
 
     @property
@@ -1829,16 +1837,16 @@ class Model:
         return [_lib.stanli_reduce_sum_fallback(m, i).decode()
                 for i in range(_lib.stanli_n_reduce_sum_fallbacks(m))]
 
-    def _prepare_run(self, seed, threads_per_chain):
+    def _prepare_run(self, seed, threads_per_chain=None):
+        # threads_per_chain is given only by sample()'s deprecated argument.
+        if threads_per_chain is None:
+            threads_per_chain = self.threads_per_chain
         construction_seed = (seed if _lib.stanli_transformed_data_rng(self._handle)
                              else self._seed)
         if (construction_seed != self._seed or
                 threads_per_chain != self.threads_per_chain):
             m = self._construct(construction_seed, threads_per_chain)
             self._adopt(m, construction_seed, threads_per_chain)
-
-    def _forward_seed(self, seed):
-        self._prepare_run(seed, self.threads_per_chain)
 
     def __del__(self):
         if getattr(self, "_m", None):
@@ -1998,7 +2006,7 @@ class Model:
             raise ValueError("init_radius must be a finite number >= 0")
         if init is not None:
             _reject_named_start("init", init)
-        self._forward_seed(seed)
+        self._prepare_run(seed)
         if not jacobian:
             raise NotImplementedError(
                 "stanli folds the Jacobian into the graph at lowering "
@@ -2078,15 +2086,13 @@ class Model:
         so it is on by default. A build without thread support clamps it
         to 1 (see ``thread_safe()``).
 
-        `threads_per_chain` defaults to 1, or with `continue_from` to the
-        fit's setting. Larger values enable native
-        within-chain parallelism for eligible reduce_sum calls; small or
-        unsupported calls remain serial. Changing it rebuilds the prepared
-        model. Each active chain can use this many threads, including its
-        sampling thread: up to `parallel_chains * threads_per_chain` total. Changing the reduction
-        partition can change floating-point rounding and thus NUTS draws.
-        `model.reduce_sum_count` and `model.reduce_sum_fallbacks` describe
-        retained reductions and graph-lowering refusals.
+        Sampling uses the `threads_per_chain` that the model was built with.
+        Each active chain can use this many threads, including its sampling
+        thread, so a run uses up to `parallel_chains * threads_per_chain`
+        threads. The `threads_per_chain` argument here is deprecated. When it
+        differs from the model's count, sample() warns and rebuilds this model
+        for the new count, and the model keeps that count afterwards. Build
+        the model with `Model(..., threads_per_chain=N)` instead.
 
         `metric` is "diag_e" (the default), "dense_e" or "unit_e", as in
         CmdStan. `inv_metric` is the starting inverse metric: shape (n,) for
@@ -2120,10 +2126,11 @@ class Model:
         returns a new Fit with the new draws and sampler statistics appended
         to the old ones per chain; `fit` itself is unchanged. The result is
         the run a single call with the summed `samples` would have made,
-        bitwise, generated quantities included. Only `samples`, `refresh`,
-        `parallel_chains` and `threads_per_chain` can be given with it; the
-        other settings come from the fit. The model and data must be the
-        ones that made the fit.
+        bitwise, generated quantities included, when the model has the same
+        `threads_per_chain` as the run that made the fit. Only `samples`,
+        `refresh`, `parallel_chains` and the deprecated `threads_per_chain`
+        can be given with it; the other settings come from the fit. The model
+        and data must be the ones that made the fit.
 
         Columns are every column CmdStan's CSV would carry -- constrained
         parameters, transformed parameters, generated quantities, with RNG
@@ -2147,12 +2154,16 @@ class Model:
             if metric != "unit_e":
                 inv_metric = continue_from.inv_metric
             adapt_engaged = False
-            if threads_per_chain is None:
-                threads_per_chain = getattr(continue_from,
-                                            "threads_per_chain", 1)
         if threads_per_chain is None:
-            threads_per_chain = 1
+            threads_per_chain = self.threads_per_chain
         threads_per_chain = _threads_per_chain(threads_per_chain)
+        if threads_per_chain != self.threads_per_chain:
+            warnings.warn(
+                f"passing threads_per_chain to sample() is deprecated. This "
+                f"call rebuilds the model for {threads_per_chain} threads, "
+                f"and the model keeps that count. Build the model with "
+                f"Model(..., threads_per_chain={threads_per_chain}) instead.",
+                DeprecationWarning, stacklevel=2)
         seed = _seed_arg(seed)
         if inits is not None:
             _reject_named_start("inits", inits)

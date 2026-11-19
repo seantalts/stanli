@@ -23,8 +23,9 @@ numbering continues from the fit's transitions. 0 is silent.}
 
 \item{parallel_chains}{Chains to run at once. Defaults to all of them.}
 
-\item{threads_per_chain}{Threads per chain for `reduce_sum`; defaults to
-the setting the fit's model was prepared with.}
+\item{threads_per_chain}{Deprecated, as in [sample_model()]: the run uses
+the thread count of the fit's model. Another count gives a warning of
+class `deprecatedWarning` and rebuilds the model with that count.}
 
 \item{...}{Not used; any other sampler setting is an error.}
 }

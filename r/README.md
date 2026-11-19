@@ -127,12 +127,16 @@ fit <- sample_more(fit, samples = 1000)   # 2000 per chain
 
 ### Within-chain parallelism
 
-To run eligible `reduce_sum` calls on worker threads, pass
-`threads_per_chain = 4` to `sample_model()`, `sample_cstan()` or
-`cstan_model(code)$sample()`. Small or unsupported calls run serially. When
-you change the thread count, stanli prepares a new model. The rounding can
-change, and so can the draws. `fit$model$reduce_sum_count` and
-`fit$model$reduce_sum_fallbacks` report what was kept. See
+To run eligible `reduce_sum` calls on worker threads, build the model with
+`stanli_model(..., threads_per_chain = 4)`, or pass `threads_per_chain = 4`
+to `sample_cstan()` or `cstan_model(code)$sample()`, which build the model
+themselves. Sampling, optimization, the approximate methods and direct
+gradients then use that count; `sample_nutpie()` does not use it. Small or
+unsupported calls run serially. To use another count, build a new model. The
+rounding can change with the count, and so can the draws. Passing
+`threads_per_chain` to `sample_model()` or `sample_more()` is deprecated.
+`fit$model$reduce_sum_count` and `fit$model$reduce_sum_fallbacks` report what
+was kept. See
 [native reductions](../docs/native-reduce-sum.md).
 
 ### Workflow packages
@@ -377,7 +381,7 @@ fit <- sample_model(m, chains = 4, seed = 1, warmup = 1000, samples = 1000,
                     thin = 1, delta = 0.8, max_depth = 10, save_warmup = FALSE,
                     init = NULL, init_radius = 2, pathfinder_init = NULL,
                     parallel_chains = NULL, refresh = 100,
-                    threads_per_chain = 1, fixed_param = FALSE,
+                    fixed_param = FALSE,
                     metric = "diag_e", inv_metric = NULL, step_size = NULL,
                     adapt_engaged = TRUE, adapt_metric = TRUE)
 optimize_model(m, seed = 1, iter = 2000, init = NULL, init_radius = 2)

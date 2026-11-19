@@ -8,7 +8,8 @@
 #' @param chains Number of chains.
 #' @param parallel_chains Maximum concurrent chains.
 #' @param threads_per_chain Threads per chain for eligible native `reduce_sum`
-#'   calls; see [sample_model()]. Defaults to 1.
+#'   calls. The model is built for this count; see [stanli_model()]. Defaults
+#'   to 1.
 #' @param iter_warmup,iter_sampling Iterations per chain before thinning.
 #' @param seed Integer seed. If NULL, draw one from R's RNG.
 #' @param init Constrained parameter list, one list per chain, a
@@ -94,7 +95,7 @@ sample_cstan <- function(model_code, data = list(), chains = 4, parallel_chains 
     warmup = iter_warmup, samples = iter_sampling, seed = seed, init = unconstrained,
     delta = adapt_delta, max_depth = max_treedepth, thin = thin, save_warmup = save_warmup,
     refresh = refresh, init_radius = init_radius, pathfinder_init = pathfinder_init,
-    threads_per_chain = threads_per_chain, metric = metric,
+    metric = metric,
     inv_metric = inv_metric, step_size = step_size,
     adapt_engaged = adapt_engaged, adapt_metric = adapt_metric))
 }

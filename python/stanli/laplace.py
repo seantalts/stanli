@@ -128,7 +128,7 @@ def _block_index(model, latent):
 
 
 def _pathfinder_mean(model, seed, n):
-    model._prepare_run(seed, 1)
+    model._prepare_run(seed)
     num_draws = max(1000, min(20 * n, 20000, 25_000_000 // n))
     draws = np.empty((num_draws, n))
     lp = np.empty(num_draws)

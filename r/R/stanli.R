@@ -81,16 +81,19 @@ read_utf8_file <- function(path) {
 #' @param mir Transformed MIR text, for a build without the embedded
 #'   compiler. Rarely needed.
 #' @param threads_per_chain Positive thread count for eligible native `reduce_sum`
-#'   calls. Defaults to 1. Sampling uses its own setting; direct gradients use
-#'   the model's setting. Requires a thread-safe runtime for values above 1.
+#'   calls. Defaults to 1. The model is compiled for this count, and
+#'   [sample_model()], optimization, the approximate methods and direct
+#'   gradients all use it.
+#'   To run with another count, build a new model with `stanli_model()`.
+#'   Requires a thread-safe runtime for values above 1.
 #' @param seed The model-construction seed: RNG calls in transformed data
 #'   draw from it once, here, the way CmdStan's generated constructor does.
 #'   [sample_model()] and [optimize_model()] forward their own `seed` here
 #'   when transformed data drew from it, rebuilding the model for that run,
 #'   so one seed governs a whole run as it does in CmdStan. The rebuilt
 #'   model is the one the fit carries as `fit$model`; the object passed in
-#'   is unchanged. Models are also rebuilt when sampling changes
-#'   `threads_per_chain`.
+#'   is unchanged. A rebuilt model keeps the `threads_per_chain` it was
+#'   built with.
 #' @param include_paths Character vector of directories searched in order for
 #'   Stan `#include` files, followed by the directory containing `file` (or the
 #'   current directory for `code`). Nested includes use the same search path.
@@ -241,9 +244,24 @@ build_model <- function(code, data_json, is_mir, seed,
             class = "stanli_model")
 }
 
+# The thread count of a run is the model's own. A different count passed to
+# sample_model() or sample_more() is deprecated but still rebuilds the model.
+run_threads <- function(model, threads_per_chain, caller) {
+  if (is.null(threads_per_chain)) return(model$threads_per_chain)
+  cstan_integer(threads_per_chain, "threads_per_chain")
+  if (threads_per_chain != model$threads_per_chain)
+    warning(warningCondition(paste0(
+      "threads_per_chain in ", caller, "() is deprecated. Build the model ",
+      "with stanli_model(threads_per_chain = ", threads_per_chain, ") ",
+      "instead. This run rebuilds the model with ", threads_per_chain,
+      if (threads_per_chain == 1) " thread." else " threads."),
+      class = "deprecatedWarning"))
+  threads_per_chain
+}
+
 # CmdStan builds the model under the run seed, so transformed data that
 # draws from it follows that seed. Rebuild for this run only when a draw
-# happened and the seed differs, or when the thread setting changes.
+# happened and the seed differs, or when a deprecated thread count differs.
 # The rebuilt model is what the run uses and what the fit carries as
 # `fit$model`; the caller's own object is a value and keeps its seed.
 with_run_seed <- function(model, seed, threads_per_chain = model$threads_per_chain) {
@@ -559,12 +577,15 @@ complete_partial_inits <- function(model, values, init_radius, seed) {
 #'   the same `seed`. With `pathfinder_init` the starts of all chains come from
 #'   one Pathfinder run seeded by the first chain's id, so that equality does
 #'   not hold.
-#' @param threads_per_chain Positive thread count per chain for eligible native
-#'   `reduce_sum` calls, default 1. Small or unsupported calls stay serial.
-#'   Changing this setting prepares a new graph; reduction rounding and NUTS
-#'   draws can differ across thread counts. Active chains may each use this
-#'   many threads. `fit$model$reduce_sum_count` and `reduce_sum_fallbacks`
-#'   report retained reductions and graph-lowering refusals (not opaque regions).
+#' @param threads_per_chain Deprecated. Set the thread count when building
+#'   the model, with `stanli_model(threads_per_chain = )`; sampling uses the
+#'   count the model was built with. `NULL` (the default) or the model's own
+#'   count changes nothing. Any other count still works but gives a warning of
+#'   class `deprecatedWarning`, and the model is rebuilt with that count for
+#'   this run. Reduction rounding and NUTS draws can differ across thread
+#'   counts. Active chains may each use the model's count of threads.
+#'   `fit$model$reduce_sum_count` and `reduce_sum_fallbacks` report retained
+#'   reductions and graph-lowering refusals (not opaque regions).
 #' @param parallel_chains Chains to run at once. Defaults to all of them.
 #' @param fixed_param `TRUE` runs Stan's fixed-parameter sampler instead of
 #'   NUTS: every chain keeps its parameters at its starting point and only
@@ -625,12 +646,12 @@ sample_model <- function(model, chains = 4, seed = 1, warmup = 1000,
                          max_depth = 10, save_warmup = FALSE, init = NULL,
                          init_radius = 2, pathfinder_init = NULL,
                          parallel_chains = NULL, refresh = 100,
-                         threads_per_chain = 1, fixed_param = FALSE,
+                         threads_per_chain = NULL, fixed_param = FALSE,
                          metric = c("diag_e", "dense_e", "unit_e"),
                          inv_metric = NULL, step_size = NULL,
                          adapt_engaged = TRUE, adapt_metric = TRUE,
                          chain_id = 1L) {
-  cstan_integer(threads_per_chain, "threads_per_chain")
+  threads_per_chain <- run_threads(model, threads_per_chain, "sample_model")
   cstan_integer(seed, "seed", 0)
   check_chain_id(chain_id, chains)
   chain_id <- as.integer(chain_id)
@@ -766,8 +787,9 @@ append_draws <- function(a, b) {
 #' @param refresh Print a progress update every `refresh` transitions; the
 #'   numbering continues from the fit's transitions. 0 is silent.
 #' @param parallel_chains Chains to run at once. Defaults to all of them.
-#' @param threads_per_chain Threads per chain for `reduce_sum`; defaults to
-#'   the setting the fit's model was prepared with.
+#' @param threads_per_chain Deprecated, as in [sample_model()]: the run uses
+#'   the thread count of the fit's model. Another count gives a warning of
+#'   class `deprecatedWarning` and rebuilds the model with that count.
 #' @param ... Not used; any other sampler setting is an error.
 #' @details Interrupting R stops every chain after its current transition and
 #'   raises the usual interrupt; no fit is returned.
@@ -799,8 +821,7 @@ sample_more <- function(fit, samples = 1000, refresh = 100,
       refresh > .Machine$integer.max)
     stop("refresh must be a single nonnegative integer", call. = FALSE)
   model <- fit$model
-  if (is.null(threads_per_chain)) threads_per_chain <- model$threads_per_chain
-  cstan_integer(threads_per_chain, "threads_per_chain")
+  threads_per_chain <- run_threads(model, threads_per_chain, "sample_more")
   load_runtime()
   if (is.null(parallel_chains)) parallel_chains <- fit$chains
   cstan_integer(parallel_chains, "parallel_chains")

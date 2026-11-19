@@ -808,14 +808,14 @@ def test_unused_threads_per_chain_is_noted_once():
         return
     note = ("Note: threads_per_chain = 2 has no effect on this model, "
             "which has no reduce_sum call to run in parallel.")
-    m = _normal()
+    m = stanli.Model(
+        stan_code="parameters { real x; } model { x ~ normal(0, 1); }",
+        threads_per_chain=2)
     _, text = _capture_stdout(
-        lambda: m.sample(chains=2, warmup=50, samples=50, refresh=100,
-                         threads_per_chain=2))
+        lambda: m.sample(chains=2, warmup=50, samples=50, refresh=100))
     assert text.count(note) == 1, text
     _, text = _capture_stdout(
-        lambda: m.sample(chains=2, warmup=50, samples=50, refresh=0,
-                         threads_per_chain=2))
+        lambda: m.sample(chains=2, warmup=50, samples=50, refresh=0))
     assert note not in text, text
 
 
@@ -1766,20 +1766,22 @@ def test_reduce_sum_threads_per_chain():
             raise AssertionError(f"accepted invalid thread count {invalid!r}")
     if not stanli.thread_safe():
         try:
-            m.sample(**args, threads_per_chain=2)
+            stanli.Model(stan_code=REDUCE_SUM_SOURCE, data=data,
+                         threads_per_chain=2)
         except RuntimeError as e:
             assert "thread-safe" in str(e)
         else:
             raise AssertionError("unsafe build accepted within-chain threads")
         return
-    first = m.sample(**args, threads_per_chain=4, parallel_chains=2)
-    assert m.threads_per_chain == 4 and m.reduce_sum_count == 1
-    assert m.reduce_sum_fallbacks == []
+    threaded = stanli.Model(stan_code=REDUCE_SUM_SOURCE, data=data,
+                            threads_per_chain=4)
+    first = threaded.sample(**args, parallel_chains=2)
+    assert threaded.threads_per_chain == 4 and threaded.reduce_sum_count == 1
+    assert threaded.reduce_sum_fallbacks == []
     assert first.draws().shape == (2, 10, 2)
-    # Returning to the default must restore the original serial graph.
-    restored = m.sample(**args)
+    again = m.sample(**args)
     assert m.threads_per_chain == 1 and m.reduce_sum_count == 0
-    np.testing.assert_array_equal(serial.draws(), restored.draws())
+    np.testing.assert_array_equal(serial.draws(), again.draws())
     # Both source and portable MIR constructors must retain the native op.
     mir = stanli.stan_to_mir(REDUCE_SUM_SOURCE)
     cached = stanli.Model(mir=mir, data=data, threads_per_chain=2)
@@ -1793,28 +1795,72 @@ def test_reduce_sum_threads_per_chain():
     assert small.reduce_sum_count == 0 and small.reduce_sum_fallbacks
 
 
-def test_continue_from_keeps_the_fits_threads_per_chain():
+REDUCE_SUM_ARGS = dict(chains=2, warmup=25, refresh=0, seed=123, max_depth=6)
+
+
+def _reduce_sum_model(threads_per_chain):
     data = {"N": 100000, "y": np.linspace(-1, 2, 100000).tolist()}
-    m = stanli.Model(stan_code=REDUCE_SUM_SOURCE, data=data)
-    args = dict(chains=2, warmup=25, refresh=0, seed=123, max_depth=6)
-    serial = m.sample(samples=10, **args)
-    assert serial.threads_per_chain == 1
-    if not stanli.thread_safe():
-        more = m.sample(continue_from=serial, samples=5, refresh=0)
-        assert more.threads_per_chain == 1
-        return
-    one = m.sample(samples=15, threads_per_chain=2, **args)
-    first = m.sample(samples=10, threads_per_chain=2, **args)
-    assert first.threads_per_chain == 2
-    m.sample(samples=5, **args)
-    assert m.threads_per_chain == 1
+    return stanli.Model(stan_code=REDUCE_SUM_SOURCE, data=data,
+                        threads_per_chain=threads_per_chain)
+
+
+def test_continue_from_keeps_the_models_threads_per_chain():
+    threads = 2 if stanli.thread_safe() else 1
+    m = _reduce_sum_model(threads)
+    one = m.sample(samples=15, **REDUCE_SUM_ARGS)
+    first = m.sample(samples=10, **REDUCE_SUM_ARGS)
+    assert first.threads_per_chain == threads
     more = m.sample(continue_from=first, samples=5, refresh=0)
-    assert m.threads_per_chain == 2 and more.threads_per_chain == 2
+    assert m.threads_per_chain == threads and more.threads_per_chain == threads
     assert _same_bits(more.draws(), one.draws())
     assert _same_bits(more.sampler_stats, one.sampler_stats)
-    explicit = m.sample(continue_from=first, samples=5, refresh=0,
-                        threads_per_chain=1)
-    assert m.threads_per_chain == 1 and explicit.threads_per_chain == 1
+
+
+def _sample_and_deprecations(m, **kw):
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        fit = m.sample(**kw)
+    return fit, [w for w in caught if issubclass(w.category, DeprecationWarning)]
+
+
+def test_sample_keeps_the_models_threads_per_chain():
+    if not stanli.thread_safe():
+        return
+    m = _reduce_sum_model(2)
+    handle = m._m
+    for given in ({}, {"threads_per_chain": 2}):
+        fit, deprecations = _sample_and_deprecations(
+            m, samples=10, **REDUCE_SUM_ARGS, **given)
+        assert not deprecations, [str(w.message) for w in deprecations]
+        assert m._m == handle, f"sample({given}) rebuilt the model"
+        assert m.threads_per_chain == 2 and m.reduce_sum_count == 1
+        assert fit.threads_per_chain == 2
+
+
+def test_sample_threads_per_chain_is_deprecated():
+    if not stanli.thread_safe():
+        return
+    m = _reduce_sum_model(2)
+    fit, deprecations = _sample_and_deprecations(
+        m, samples=10, **REDUCE_SUM_ARGS, threads_per_chain=1)
+    assert len(deprecations) == 1, deprecations
+    assert "Model(..., threads_per_chain=1)" in str(deprecations[0].message)
+    assert deprecations[0].filename == __file__
+    assert fit.threads_per_chain == 1 and m.reduce_sum_count == 0
+    serial = _reduce_sum_model(1).sample(samples=10, **REDUCE_SUM_ARGS)
+    assert _same_bits(fit.draws(), serial.draws())
+
+
+def test_continue_from_threads_per_chain_is_deprecated():
+    if not stanli.thread_safe():
+        return
+    m = _reduce_sum_model(2)
+    first = m.sample(samples=10, **REDUCE_SUM_ARGS)
+    more, deprecations = _sample_and_deprecations(
+        m, continue_from=first, samples=5, refresh=0, threads_per_chain=1)
+    assert len(deprecations) == 1, deprecations
+    assert "Model(..., threads_per_chain=1)" in str(deprecations[0].message)
+    assert more.threads_per_chain == 1 and m.reduce_sum_count == 0
 
 
 def test_reduce_sum_threads_preserve_transformed_data_seed():
@@ -1824,9 +1870,9 @@ def test_reduce_sum_threads_preserve_transformed_data_seed():
         "parameters {", "transformed data { real shift = normal_rng(0, 1); } parameters {")
     code = code.replace("mu ~ normal(0, 1)", "mu ~ normal(shift, 1)")
     data = {"N": 100000, "y": [0.5] * 100000}
-    m = stanli.Model(stan_code=code, data=data, seed=2)
+    m = stanli.Model(stan_code=code, data=data, seed=2, threads_per_chain=2)
     args = dict(chains=1, warmup=10, samples=5, seed=17, refresh=0,
-                max_depth=5, threads_per_chain=2)
+                max_depth=5)
     first = m.sample(**args)
     fresh = stanli.Model(stan_code=code, data=data, seed=17, threads_per_chain=2)
     second = fresh.sample(**args)
@@ -1863,7 +1909,7 @@ def test_fast_math_is_off_by_default_and_opt_in():
         np.testing.assert_allclose(fast_lp, lp, rtol=1e-12)
         np.testing.assert_allclose(fast_grad, grad, rtol=1e-12)
 
-    fast._forward_seed(7)
+    fast._prepare_run(7)
     assert fast.fast_math is True
     np.testing.assert_allclose(fast.log_prob_grad(q)[0], lp, rtol=1e-12)
     for bad in (1, "yes", None):
