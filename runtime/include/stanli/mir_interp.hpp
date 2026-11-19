@@ -117,6 +117,18 @@ class MirInterp {
   // CmdStan's generated code does, instead of a scalar fold. For the
   // interpreters whose values are the model's own results.
   void set_native_extrema(bool on) { native_extrema_ = on; }
+  // Where `target +=` adds in write_array, which accumulates from 0 like
+  // CmdStan's. Without one the statement is refused.
+  void set_target_sink(T* sum) { target_sink_ = sum; }
+
+  // The caller's propto__ for this scope. Lowering sets it on entering a
+  // user function body that it inlines.
+  bool propto_context() const { return propto_ctx_; }
+  void set_propto_context(bool on) { propto_ctx_ = on; }
+  // Lowering evaluates model-block expressions here with doubles where
+  // CmdStan may use vars, and the terms propto drops depend on which. So a
+  // density that drops terms refuses rather than guess.
+  void refuse_propto_densities() { refuse_propto_ = true; }
 
   // A host may bind a typed value directly and skip stanc's generated input
   // declaration/rebuild statements. Keep the declaration-owned geometry
@@ -744,6 +756,13 @@ class MirInterp {
           assign_whole(st.fn_args[k].name, std::move(values[k]));
         return;
       }
+      case mir::Stmt::TargetPE:
+        if (!target_sink_)
+          fail("target += is not available in " + where_, st.raw);
+        // write_array runs without the Jacobian.
+        if (st.jacobian) return;
+        for (const T& term : eval(st.target).r) *target_sink_ += term;
+        return;
       default:
         fail("unsupported statement", st.raw);
     }
@@ -862,8 +881,7 @@ class MirInterp {
     }
     DensityCallPlan plan;
     try {
-      plan =
-          density_call_plan(spec, plan_arguments, e.fn_propto && propto_ctx_);
+      plan = density_call_plan(spec, plan_arguments, propto(e));
     } catch (const std::exception& error) {
       fail_builtin(e.name, error, e.raw);
     }
@@ -929,8 +947,7 @@ class MirInterp {
     }
     const T precision = form.has_precision ? values[(size_t)nargs].r.at(0)
                                            : T(form.default_precision);
-    const bool propto =
-        form.kind == WienerKind::Lpdf && e.fn_propto && propto_ctx_;
+    const bool propto = form.kind == WienerKind::Lpdf && this->propto(e);
     std::vector<std::vector<T>> inputs;
     inputs.push_back(std::move(packed));
     inputs.push_back({precision});
@@ -1277,6 +1294,7 @@ class MirInterp {
   const std::map<std::string, const mir::FunDef*>& funs_;
   std::string where_;
   bool native_extrema_ = false;
+  T* target_sink_ = nullptr;
   MirHooks hooks_;
   std::map<std::string, Value> env_;
   Value returned_;
@@ -1411,6 +1429,16 @@ class MirInterp {
 
   int udf_depth_ = 0;
   bool propto_ctx_ = true;
+  bool refuse_propto_ = false;
+  bool propto(const mir::Expr& e) const {
+    const bool on = e.fn_propto && propto_ctx_;
+    if (on && refuse_propto_)
+      fail(e.name +
+               ": the terms propto drops depend on autodiff types that "
+               "compile-time evaluation does not know",
+           e.raw);
+    return on;
+  }
   // CmdStan instantiates a user function body with the actual argument
   // types: a formal is a var when its actual is, and a local not declared
   // data is a var when any real actual is. Empty outside a function body,
@@ -1836,8 +1864,10 @@ class MirInterp {
     if (udf_depth_ > 64) fail("UDF recursion too deep");
     MirInterp sub(funs_, where_, hooks_);
     sub.native_extrema_ = native_extrema_;
+    sub.target_sink_ = target_sink_;
     sub.udf_depth_ = udf_depth_ + 1;
     sub.propto_ctx_ = propto;
+    sub.refuse_propto_ = refuse_propto_;
     return sub;
   }
 
@@ -3412,7 +3442,7 @@ class MirInterp {
         if constexpr (!std::is_same_v<T, double>)
           if (!e.args[k].data_only) packed_active = 1;
       }
-      const bool propto = e.fn_propto && propto_ctx_;
+      const bool propto = this->propto(e);
       const bool y_active = !std::is_same_v<T, double> && !e.args[0].data_only;
       const uint8_t activity =
           (uint8_t)((y_active ? 1u : 0u) | (packed_active << 1));

@@ -350,6 +350,33 @@ void test_wanames_interpreter_schema() {
   }
 }
 
+// CmdStan's write_array adds `target +=` to an accumulator that starts at 0,
+// and target() reads it back: the generated C++ calls
+// f_lp<propto__>(lp__, lp_accum__, pstream__) and then
+// t = get_lp(lp__, lp_accum__). The interpreter used to refuse the statement.
+void test_interpreter_target_increment() {
+  using namespace stanli;
+  auto prog = std::make_shared<mir::Program>(mir::read_program(
+      sexp::parse(slurp("tests/fixtures/wa_interp_target.tmir.sexp"))));
+  WaInterp wi(prog, emit_env());
+  std::map<std::string, DataMap::Entry> params;
+  params["p"].r = {0.25};
+  WaRng rng(1234);
+  std::vector<double> row;
+  try {
+    row = wi.eval(params, rng);
+  } catch (const std::exception& e) {
+    ++failures;
+    std::printf("FAIL interpreted target increment threw: %s\n", e.what());
+    return;
+  }
+  expect_eq("interpreted target increment header", joined(wi.columns()), "p,t");
+  if (row != std::vector<double>{0.25, 0.5}) {
+    ++failures;
+    std::printf("FAIL interpreted target increment row\n");
+  }
+}
+
 // A bare real container is NaN in every element the block never assigns,
 // which is what CmdStan writes and what the interpreter already produced.
 void test_gq_bare_fill_is_nan() {
@@ -441,6 +468,46 @@ void test_gq_name_shadowing() {
   expect_row("interpreted", interpreted.eval(params, rng));
   expect_eq("gqshadow interpreted header", joined(interpreted.columns()),
             "mu,x.1,x.2");
+}
+
+// CmdStan's write_array runs `target +=` into its own accumulator, which
+// starts at zero, and skips `jacobian +=`. target() inside an _lp function
+// reads that accumulator. Here t = 0.5 + 0.375 + 1 and u = 0.875 + 0.5 + 1.
+void test_write_array_target_lp() {
+  using namespace stanli;
+  const std::string text = slurp("tests/fixtures/wa_target_lp.tmir.sexp");
+  const std::vector<double> want{0.25, 1.875, 2.375};
+  auto expect_row = [&](const char* what, const std::vector<double>& got) {
+    if (got == want) return;
+    ++failures;
+    std::printf("FAIL wa_target_lp %s row\n", what);
+    for (size_t i = 0; i < std::max(got.size(), want.size()); ++i)
+      std::printf("  [%zu] got %.17g want %.17g\n", i,
+                  i < got.size() ? got[i] : NAN,
+                  i < want.size() ? want[i] : NAN);
+  };
+
+  CompiledModel cm = compile_model(text, DataMap());
+  if (compiled_completely(cm, "wa_target_lp")) {
+    Executor wex(std::move(cm.write_array->graph));
+    cm.write_array->bind(wex);
+    wex.params_data()[0] = 0.25;
+    wex.run_forward_only();
+    expect_row("compiled", read_row(cm.write_array->columns, wex));
+  }
+
+  auto prog =
+      std::make_shared<mir::Program>(mir::read_program(sexp::parse(text)));
+  WaInterp interpreted(prog, emit_env());
+  std::map<std::string, DataMap::Entry> params;
+  params["x"].r = {0.25};
+  WaRng rng(1);
+  try {
+    expect_row("interpreted", interpreted.eval(params, rng));
+  } catch (const std::exception& e) {
+    ++failures;
+    std::printf("FAIL wa_target_lp interpreted threw: %s\n", e.what());
+  }
 }
 
 // WaInterp remains the independent oracle for caller-owned RNG and runtime
@@ -4498,9 +4565,11 @@ int main() {
   test_naming_rules();
   test_wanames_pipeline();
   test_wanames_interpreter_schema();
+  test_interpreter_target_increment();
   test_array_of_matrix_columns();
   test_gq_bare_fill_is_nan();
   test_gq_name_shadowing();
+  test_write_array_target_lp();
   test_interpreted_gq();
   test_compiled_extra_rng();
   test_compiled_region_rng();

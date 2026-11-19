@@ -988,10 +988,6 @@ struct Lowering {
   // generated quantity. Unset until such a column is emitted (a section can
   // be empty), which run_write_array then reads as "at the end".
   std::optional<size_t> n_tp_start, n_gq_start;
-  // CmdStan's propto__ template parameter, threaded by lower_call_udf: a
-  // density inside an inlined user function is unnormalized only if the
-  // call that reached it was.
-  bool propto_ctx = true;
   // A loop-invariant target-only body is lowered once under the product of
   // its collapsed trip counts. TargetPE consumes the product at the edge,
   // so nested invariant loops still emit one scale rather than a MUL chain.
@@ -1002,7 +998,13 @@ struct Lowering {
   bool scalar_autodiff() const {
     return udf_depth == 0 ? !in_write_array : udf_autodiff_ctx;
   }
-  bool propto(const mir::Expr& e) const { return e.fn_propto && propto_ctx; }
+  // CmdStan's propto__ template parameter lives in td, so that compile-time
+  // evaluation sees the same one. lower_call_udf threads it: a density
+  // inside an inlined user function is unnormalized only if the call that
+  // reached it was.
+  bool propto(const mir::Expr& e) const {
+    return e.fn_propto && td.propto_context();
+  }
   // Static C++ scalar type without lowering/evaluating the expression. This
   // is intentionally small: ordinary ops propagate Val::autodiff from their
   // lowered operands; only a data-condition ternary needs the unchosen arm.

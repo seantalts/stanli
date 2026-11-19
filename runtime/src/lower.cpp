@@ -38,6 +38,7 @@ Lowering::Lowering(const DataMap& d, PrepTrace& p, PassDumper& dump_to,
       prep_graph(graph_name),
       td_rng(std::move(stream)) {
   td.set_native_extrema(true);
+  td.refuse_propto_densities();
 }
 template <typename Map>
 static void copy_named(Map& to, const Map& from,
@@ -79,7 +80,7 @@ Lowering::Lowering(Lowering& parent, RegionTrialTag,
   else
     for (const std::string& name : *names)
       if (parent.int_locals.count(name)) int_locals.insert(name);
-  propto_ctx = parent.propto_ctx;
+  td.set_propto_context(parent.td.propto_context());
   udf_depth = parent.udf_depth;
   udf_autodiff_ctx = parent.udf_autodiff_ctx;
   udf_formal_autodiff = parent.udf_formal_autodiff;
@@ -1142,7 +1143,8 @@ CompiledModel::WriteArray Lowering::run_write_array(const mir::Program& p) {
   for (const auto& f : p.fun_defs) fun_defs[mir::function_key(f)] = &f;
   tuples = p.tuples.get();
   in_write_array = true;
-  output_cursor = mir::OutputCursor(p.output_vars);
+  output_cursor =
+      mir::OutputCursor(p.output_vars, mir::detail::whole_leaf_tuples(tuples));
   // The readers drop stanc3's section guards on these flags; a guard they
   // did not recognize still folds away with both pinned on.
   int_env["emit_transformed_parameters__"] = 1;

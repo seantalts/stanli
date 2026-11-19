@@ -667,6 +667,18 @@ static void test_fixture_constants() {
        "paramcond_empty",
        make_data([](DataMap& d) { d.set_int("n", 2); }),
        {{{0.5}, 0.5, {1.0}}, {{-0.5}, -0.5, {1.0}}}},
+      // A region that assigns nothing outside itself except an integer it
+      // folds has nothing to carry out.
+      {"region folded flag",
+       "region_folded_flag",
+       DataMap(),
+       {{{0.5}, 0.5, {1.0}}}},
+      // Nor does one whose only outer write sits in a loop that runs no
+      // times. v keeps its value 1.5 on both arms.
+      {"region zero-trip write",
+       "region_zero_trip_write",
+       DataMap(),
+       {{{0.5}, 0.75, {1.5}}, {{-0.5}, -0.75, {1.5}}}},
       // rep_vector inside a region: a run the compiler fills, at an extent it
       // knows. The repeated parameter is the part worth checking -- the
       // gradient is the broadcast's, every element adding into the one cell
@@ -1339,6 +1351,50 @@ static void test_udf_lp_propto() {
   expect_ulp("udf lp propto lp", ex.gradient(&grad), lp.val(), 10);
   expect_ulp("udf lp propto grad", grad, tau.adj(), 10);
   stan::math::recover_memory();
+}
+
+// An `_lpdf` call keeps the constants of the `_lupdf` calls in its body.
+// Lowering folds a call with data arguments in the MIR interpreter, which
+// has to use the call's normalization as the graph does. The branch in
+// shifted_lpdf makes lowering record the folded value for constant folding
+// to reuse. outer_lpdf runs in a region on a parameter, whose compiler asks
+// the lowering for the value of the data-only call inside it.
+static void test_udf_lpdf_folded_normalized() {
+  using namespace stanli;
+  const std::string mir =
+      slurp("tests/fixtures/udf_lpdf_folded_normalized.tmir.sexp");
+  const DataMap data = DataMap::from_json("{}");
+  CompiledModel cm;
+  try {
+    cm = compile_model(mir, data);
+  } catch (const std::exception& error) {
+    check(false, std::string("udf lpdf folded compile: ") + error.what());
+    return;
+  }
+  const double q = 0.1;
+  const double t = stan::math::normal_lpdf(0.25, 0.5, 0.5);
+  stan::math::var p = q;
+  stan::math::var lp = 2 * t + stan::math::normal_lpdf(p, 0.5, 0.5);
+  lp.grad();
+  Executor ex(cm.graph);
+  cm.bind(ex);
+  ex.params_data()[0] = q;
+  double grad = 0;
+  expect_ulp("udf lpdf folded lp", ex.gradient(&grad), lp.val(), 10);
+  expect_ulp("udf lpdf folded grad", grad, p.adj(), 10);
+  stan::math::recover_memory();
+
+  const std::vector<double> want = {q, t, t,
+                                    stan::math::normal_lpdf(0.75, 0.5, 0.5)};
+  for (bool interp : {false, true}) {
+    const std::string path = interp ? "interpreted" : "compiled";
+    const std::vector<double> row = write_array_row(mir, data, {q}, interp);
+    check(row.size() == want.size(), "udf lpdf folded write_array " + path);
+    for (size_t i = 0; i < row.size() && i < want.size(); ++i)
+      expect_ulp(
+          "udf lpdf folded write_array " + path + " " + std::to_string(i),
+          row[i], want[i], 10);
+  }
 }
 
 // The pinned stanc before 4b8c5f4c0 typed the cdf calls that it writes for
@@ -9423,6 +9479,7 @@ int main() {
   test_region_constant_shadow();
   test_udf_guard_returns();
   test_udf_lp_propto();
+  test_udf_lpdf_folded_normalized();
   test_udf_truncate();
   test_udf_lp_inlined_propto();
   test_udf_lp_branch_propto();
