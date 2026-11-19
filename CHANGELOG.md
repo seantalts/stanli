@@ -2,6 +2,63 @@
 
 ## Unreleased
 
+## 0.29.0
+
+brms categorical, multinomial, hurdle and `threading()` models are much
+faster, and so are long hidden Markov models. A new test that runs random
+programs found several rare wrong answers, which are now fixed.
+
+### Performance
+
+- brms models written with `threading()` now vectorize like the same models
+  without it, and they are 1.75x to 2.8x faster per gradient (#593).
+- brms categorical and multinomial models with 20 categories were 1.5x to
+  2.1x slower than CmdStan and now match or beat it (#593). After that, a categorical
+  gradient takes 4.41 ms instead of 6.75 ms (#600) and then 3.01 ms instead
+  of 4.60 ms (#602). CmdStan takes 8.33 ms. A multinomial gradient takes
+  4.88 ms instead of 11.66 ms (#600), and the corpus model `s2_multinomial`
+  samples 3x faster.
+- Hurdle models no longer add thousands of identical terms one at a time, so
+  `aalto_poisson_hurdle` is 3.7x faster. Over 362 corpus models, gradients
+  are 1.056x faster, and `dogs_hierarchical` is 1.69x faster (#593).
+- Large serial loops in the log density now stay loops when that is cheaper
+  than unrolling them. hmm_gaussian and iohmm_reg with 8000 time steps are
+  1.28x and 1.38x faster per gradient, and a user's large occupancy model
+  takes 25.1 ms per gradient instead of 40.5 ms, about the same as CmdStan
+  (#605, #606).
+- Models with deep chains of user function calls compile much faster: a
+  chain 18 calls deep compiles in 8 ms instead of 34.5 s (#598).
+
+### Fixes
+
+- A fuzzer that compares stanli with and without stanc3's optimizations found
+  wrong values in rare programs. For example, `cauchy_lupdf` inside a user
+  `_lpdf` function returned 0, an `_rng` call in an `&&` condition drew twice,
+  and an unused assignment skipped its size check and did not throw. All of
+  the wrong values that it found in 20,000 programs are fixed, and stanli
+  refuses 2,026 of those programs instead of 6,291 (#591, #596).
+- The log density of brms hurdle_poisson models is now 3 to 56 ULP from an
+  exact reference, down from up to 1,267 ULP (#593).
+- Programs with recursive user functions no longer crash with a stack
+  overflow on Windows (#601).
+- A model could crash, or read past the end of an internal table, when stanli
+  could not prepare one statement in generated quantities and fell back
+  (#599, #604).
+- In R, the package now says when it and the runtime come from different
+  commits, and shows the `@*release` install line. A failed download now
+  names the URL and the error (#605).
+
+### Docs
+
+- The contributor guide describes how to benchmark a change on only the
+  corpus models that it affects (#602).
+
+### Internal
+
+- The stanc3 fuzzer runs every night and opens an issue for each new kind of
+  wrong answer (#597). PR builds skip installing nutpieR (#592), and the cache
+  pruner deletes the caches of deleted branches (#603).
+
 ## 0.28.1
 
 `reduce_sum` now runs in parallel on many more models, and a long brms sum is
