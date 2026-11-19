@@ -767,6 +767,31 @@ Lowering::Val Lowering::lower_call_udf(const mir::Expr& e,
   ret.layout = owning_layout(ret.si);
   return ret;
 }
+// A matrix indexed by a runtime-length array inside a retained loop, as in
+// `x[rows] * beta`, keeps its capacity rows and stores its live rows packed
+// at the front. The product is stored the same way, and the kernels take
+// their live row count from the output extent.
+Lowering::Val Lowering::lower_runtime_rows_matvec(
+    const Val& a, const Val& b, const BuiltinProductMap& map) {
+  if (!is_matrix(a.si) || a.runtime_dims.size() != 2 || a.runtime_dims[0] < 0 ||
+      a.runtime_dims[1] >= 0 || has_runtime_shape(b))
+    fail("OP_MATVEC/OP_GEMM: needs one runtime row extent");
+  const int extent = a.runtime_dims[0];
+  const bool matvec = a.si.param_free && b.si.kind == ViewKind::Vector;
+  std::vector<int> idata{(int)map.m, (int)map.k};
+  if (!matvec) idata.push_back(1);
+  SlotInfo si = view_of(mir::UnsizedView{0, mir::UnsizedLeaf::Vector});
+  si.param_free = a.si.param_free && b.si.param_free;
+  Val result =
+      emit_raw(matvec ? OP_MATVEC : OP_GEMM, {a.slot, b.slot, extent}, map.m,
+               si, std::move(idata), -1, a.autodiff || b.autodiff);
+  Op& op = g.ops.back();
+  op.dyn_capacity = map.m;
+  op.dyn_extent_in = 2;
+  op.dyn_lengths = kDynamicLengthOutput;
+  result.runtime_dims = {extent};
+  return with_layout(result, owning_layout(si));
+}
 // wiener_lpdf's five- and seven-parameter forms and the wiener cdfs, each with
 // an optional precision. The real arguments are all scalars or all vectors of
 // one length.
@@ -1625,6 +1650,8 @@ std::optional<Lowering::Val> Lowering::lower_eltwise_fn(
             elementwise_layout({a, b}));
       }
       case BuiltinProductMap::Kind::MatVec:
+        if (has_runtime_shape(a) || has_runtime_shape(b))
+          return lower_runtime_rows_matvec(a, b, map);
         if (a.si.param_free && b.si.kind == ViewKind::Vector)
           return with_layout(
               emit_value(OP_MATVEC, {a, b}, map.m,

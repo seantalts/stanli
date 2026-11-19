@@ -478,5 +478,13 @@
     "bound_ulp": 2,
     "cause": "partition_lanes gathers the scalar terms of the single-row groups into one lane FMA and normal_lpdf (95 ops with the pass, 107 with STANLI_NO_PARTITION), so beta's adjoint adds those rows' contributions in a different grouping. no_partition and passes_off give the same bits, and the retained loop (structured_forced) agrees with default bitwise.",
     "since": "2026-11-19"
+  },
+  {
+    "model": "structured_ragged_matvec",
+    "quantity": "fit",
+    "pair": "graph/wa_interp",
+    "bound_ulp": 1,
+    "cause": "Each group's sum(mu[g] + x[rows] * beta) and sum(scaled[rows] * beta) sums a matrix-vector product. The write_array graph forms the product with Eigen (OP_MATVEC, OP_GEMM) and sums it with Eigen's packet reduction (OP_SUM_VEC variant 1). The interpreter forms the product with a scalar loop and, finding no packet access in the expression's source layout, adds the elements in order. Switching both to Eigen in the interpreter gives the graph's bits; switching either one alone does not. Against an 80-digit mpmath reference at draw variant 0 the interpreter is 0.27 ULP off and the graph 1.27 ULP. The default graph unrolls this loop, so the gap does not involve retained loops.",
+    "since": "2026-11-19"
   }
 ]

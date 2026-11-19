@@ -2179,6 +2179,8 @@ struct Lowering {
   // `(a, b) = f(x)`.
   void lower_multi_assign(const mir::Stmt& s);
 
+  Val lower_runtime_rows_matvec(const Val& a, const Val& b,
+                                const BuiltinProductMap& map);
   Val lower_multi_normal_rng(const mir::Expr& e, CallArguments& actuals);
 
   Val lower_dirichlet_rng(const mir::Expr& e, CallArguments& actuals);

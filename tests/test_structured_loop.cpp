@@ -3268,25 +3268,24 @@ static void ambiguous_return_shape_tests() {
     check_reference_point(*model, {mu}, lp, "ambiguous return shape reference");
 }
 
-// Ragged models build each group's row range from per-group data inside the
-// loop, so the extent and endpoints of linspaced_int_array are only known at
-// run time.
-static void ragged_linspaced_tests() {
-  const DataMap data = DataMap::from_json_file(
-      "tests/fixtures/structured_ragged_linspaced.json");
+// Retains the fixture's loops under Prefer and checks the log density,
+// gradient and write_array output `fit` against the unrolled loops.
+static void ragged_parity_tests(const std::string& fixture,
+                                const std::string& label) {
+  const DataMap data =
+      DataMap::from_json_file("tests/fixtures/" + fixture + ".json");
   test_setenv("STANLI_STRUCTURED_LOOP_DIAGNOSTICS", "1");
   stanli_test::StdoutCapture captured(stderr);
-  const auto native =
-      try_compile_fixture("structured_ragged_linspaced", data, Mode::Prefer);
+  const auto native = try_compile_fixture(fixture.c_str(), data, Mode::Prefer);
   const std::string diagnostics = captured.finish();
   test_unsetenv("STANLI_STRUCTURED_LOOP_DIAGNOSTICS");
-  check(native.has_value(), "ragged linspaced model compiles");
+  check(native.has_value(), (label + " model compiles").c_str());
   if (!native) return;
   check(diagnostics.find("stanli_structured selected") != std::string::npos,
-        "ragged linspaced loop is selected for retention");
-  check(retained(*native) != nullptr, "ragged linspaced loop retains OP_LOOP");
-  const auto legacy =
-      compile_fixture("structured_ragged_linspaced", data, Mode::Off);
+        (label + " loop is selected for retention").c_str());
+  check(retained(*native) != nullptr,
+        (label + " loop retains OP_LOOP").c_str());
+  const auto legacy = compile_fixture(fixture, data, Mode::Off);
   const size_t width = static_cast<size_t>(native->n_unconstrained);
   std::vector<std::vector<double>> points;
   for (double shift : {0.0, .3, -.7}) {
@@ -3295,19 +3294,19 @@ static void ragged_linspaced_tests() {
       point[i] = shift + .4 * std::sin(1.7 * double(i) + shift);
     points.push_back(std::move(point));
   }
-  compare_gradients(*native, legacy, points, "ragged linspaced target parity",
-                    "ragged linspaced gradient parity");
+  compare_gradients(*native, legacy, points, (label + " target parity").c_str(),
+                    (label + " gradient parity").c_str());
 
   check(native->write_array && !native->write_array->interp &&
             legacy.write_array && !legacy.write_array->interp,
-        "ragged linspaced outputs compile");
+        (label + " outputs compile").c_str());
   if (!native->write_array || native->write_array->interp ||
       !legacy.write_array || legacy.write_array->interp)
     return;
   check(std::any_of(native->write_array->graph.ops.begin(),
                     native->write_array->graph.ops.end(),
                     [](const Op& op) { return op.opcode == OP_LOOP; }),
-        "ragged linspaced write_array retains OP_LOOP");
+        (label + " write_array retains OP_LOOP").c_str());
   // One executor per model, so later points replay the recorded loop.
   Executor native_wa(native->write_array->graph),
       legacy_wa(legacy.write_array->graph);
@@ -3319,12 +3318,25 @@ static void ragged_linspaced_tests() {
     ex.run_forward_only();
     for (const auto& column : model.write_array->columns)
       if (column.name == "fit") return ex.value_ptr(column.slot)[0];
-    check(false, "ragged linspaced write_array has fit");
+    check(false, (label + " write_array has fit").c_str());
     return 0.0;
   };
   for (const auto& point : points)
     close(fit(*native, native_wa, point), fit(legacy, legacy_wa, point),
-          "ragged linspaced write_array parity");
+          (label + " write_array parity").c_str());
+}
+
+// Ragged models build each group's row range from per-group data inside the
+// loop, so the extent and endpoints of linspaced_int_array are only known at
+// run time.
+static void ragged_linspaced_tests() {
+  ragged_parity_tests("structured_ragged_linspaced", "ragged linspaced");
+}
+
+// A matrix indexed by such a range has a runtime row count, and its product
+// with a vector inherits it.
+static void ragged_matvec_tests() {
+  ragged_parity_tests("structured_ragged_matvec", "ragged matvec");
 }
 
 static void runtime_local_shape_tests() {
@@ -8459,6 +8471,7 @@ int main() {
   direct_index_lowering_tests();
   runtime_local_shape_tests();
   ragged_linspaced_tests();
+  ragged_matvec_tests();
   zero_length_matrix_udf_tests();
   sequence_local_tests();
   ambiguous_return_shape_tests();
