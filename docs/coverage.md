@@ -75,8 +75,10 @@ The name metric in the table above does not show these gaps:
   (six unexpected-unsupported signatures and two generator gaps).
 - `wiener_lcdf_unnorm` and `wiener_lccdf_unnorm` with all-real arguments have
   no graph operation and are refused.
-- `gp_periodic_cov` has no graph operation and is refused. The
-  exponentiated-quadratic, Matern 3/2, Matern 5/2 and exponential kernels work.
+- The cross-covariance forms of the GP kernels, which take two location
+  arrays (`gp_exp_quad_cov(x1, x2, sigma, l)` and the others), are refused.
+  The square forms of all five kernels work: exponentiated quadratic,
+  Matern 3/2, Matern 5/2, exponential and periodic.
 - Complex arguments and results are refused by policy. The graph holds real
   and integer values only.
 - Tuples work in data, parameters, locals, generated quantities and user

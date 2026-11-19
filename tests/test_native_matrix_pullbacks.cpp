@@ -30,18 +30,21 @@ static void check(double got, double want, const char* tag,
   if (++failures < 12) std::printf("FAIL %s %.17g != %.17g\n", tag, got, want);
 }
 
+// active bits: 1 x, 2 sigma, 4 length scale, 8 jitter, 16 period.
 static void gp(int n, int d, int active, uint8_t variant, bool repeated,
                double rho = 0.7, double sigma = 1.3, double seed_scale = 0.7,
                bool diagonal_update = false) {
   using namespace stanli;
   std::vector<double> x(n * d), xadj(n * d, 0.125), out(n * n), seed(n * n);
-  double sadj = 0.125, radj = 0.125;
-  double jitter = 1e-12, jadj = 0.125;
+  double sadj = 0.125, radj = 0.125, period = 2.7, padj = 0.125;
+  // Distinct from the period, so reading one in place of the other shows.
+  double jitter = 0.3, jadj = 0.125;
   for (int i = 0; i < n * d; ++i) x[i] = repeated ? 0.2 : std::sin(0.31 * i);
   for (int i = 0; i < n * n; ++i) seed[i] = std::cos(0.43 * i) * seed_scale;
   KernelCtx ctx;
   int dims[] = {n, d};
-  ctx.n_in = diagonal_update ? 4 : 3;
+  const int jitter_input = 1 + gp_cov_hyperparameters(variant);
+  ctx.n_in = jitter_input + (diagonal_update ? 1 : 0);
   ctx.idata = dims;
   ctx.n_idata = 2;
   ctx.variant = variant;
@@ -51,8 +54,12 @@ static void gp(int n, int d, int active, uint8_t variant, bool repeated,
   ctx.in_adj[0] = {active & 1 ? xadj.data() : nullptr, n * d};
   ctx.in_adj[1] = {active & 2 ? &sadj : nullptr, 1};
   ctx.in_adj[2] = {active & 4 ? &radj : nullptr, 1};
-  ctx.in[3] = {&jitter, 1};
-  ctx.in_adj[3] = {active & 8 ? &jadj : nullptr, 1};
+  if (variant == kGpPeriodic) {
+    ctx.in[3] = {&period, 1};
+    ctx.in_adj[3] = {active & 16 ? &padj : nullptr, 1};
+  }
+  ctx.in[jitter_input] = {&jitter, 1};
+  ctx.in_adj[jitter_input] = {active & 8 ? &jadj : nullptr, 1};
   ctx.out = {out.data(), n * n};
   ctx.out_adj_vec = {seed.data(), n * n};
   const Kernel& k = *find_kernel(OP_GP_COV);
@@ -69,10 +76,12 @@ static void gp(int n, int d, int active, uint8_t variant, bool repeated,
   std::vector<VarVec> points(n, VarVec(d));
   for (int i = 0; i < n; ++i)
     for (int j = 0; j < d; ++j) points[i][j] = x[i * d + j];
-  Var a = sigma, r = rho;
+  Var a = sigma, r = rho, q = period;
   Eigen::Matrix<Var, -1, -1> cov;
   const auto covariance = [&](const auto& locations) {
     switch (variant) {
+      case kGpPeriodic:
+        return stan::math::gp_periodic_cov(locations, a, r, q);
       case kGpMatern32:
         return stan::math::gp_matern32_cov(locations, a, r);
       case kGpMatern52:
@@ -91,7 +100,15 @@ static void gp(int n, int d, int active, uint8_t variant, bool repeated,
     std::vector<Vec> fixed(n, Vec(d));
     for (int i = 0; i < n; ++i)
       for (int j = 0; j < d; ++j) fixed[i][j] = x[i * d + j];
-    cov = covariance(fixed);
+    // Stan Math's periodic matrix callback needs both the length scale and
+    // the period to be var; CmdStan passes a data argument as double.
+    if (variant == kGpPeriodic && !(active & 4))
+      cov = active & 16 ? stan::math::gp_periodic_cov(fixed, a, rho, q)
+                        : stan::math::gp_periodic_cov(fixed, a, rho, period);
+    else if (variant == kGpPeriodic && !(active & 16))
+      cov = stan::math::gp_periodic_cov(fixed, a, r, period);
+    else
+      cov = covariance(fixed);
   }
   Var j = jitter;
   if (diagonal_update)
@@ -114,20 +131,27 @@ static void gp(int n, int d, int active, uint8_t variant, bool repeated,
     check(sadj, 0.125 + a.adj(), ("GP sigma" + context).c_str(), exact);
   if (active & 4)
     check(radj, 0.125 + r.adj(), ("GP rho" + context).c_str(), exact);
+  if (variant == kGpPeriodic && (active & 16))
+    check(padj, 0.125 + q.adj(), ("GP period" + context).c_str(), exact);
   if (diagonal_update && (active & 8))
     check(jadj, 0.125 + j.adj(), "GP diagonal increment", true);
 }
 
-static void gp_diagonal_fusion_proof() {
+static void gp_diagonal_fusion_proof(uint8_t variant) {
   using namespace stanli;
+  const bool periodic = variant == kGpPeriodic;
   for (int refusal = 0; refusal < 5; ++refusal) {
     Graph g;
     const int n = 3;
     const int x = g.add_slot(n, false), sigma = g.add_slot(1, true);
     const int rho = g.add_slot(1, true), jitter = g.add_slot(1, false);
+    const int period = g.add_slot(1, true);
     const int covariance = g.add_slot(n * n, false);
-    g.add_op(OP_GP_COV, {x, sigma, rho}, covariance, {n, 1});
-    g.ops.back().variant = kGpMatern32;
+    if (periodic)
+      g.add_op(OP_GP_COV, {x, sigma, rho, period}, covariance, {n, 1});
+    else
+      g.add_op(OP_GP_COV, {x, sigma, rho}, covariance, {n, 1});
+    g.ops.back().variant = variant;
     int current = covariance, interior = -1;
     for (int i = 0; i < n; ++i) {
       const int index = refusal == 3 ? (n - 1 - i) * (n + 1) : i * (n + 1);
@@ -147,7 +171,9 @@ static void gp_diagonal_fusion_proof() {
     check(fused, refusal == 0 ? 1 : 0, "GP fusion proof", true);
     if (!refusal) {
       check(g.ops.size(), 1, "GP fused op count", true);
-      check(g.ops[0].n_in, 4, "GP fused scalar input", true);
+      check(g.ops[0].n_in, periodic ? 5 : 4, "GP fused scalar input", true);
+      check(g.ops[0].in[periodic ? 4 : 3], jitter, "GP fused jitter", true);
+      if (periodic) check(g.ops[0].in[3], period, "GP fused period", true);
       check(g.ops[0].out, current, "GP output identity", true);
       check(g.slots[covariance].len, 0, "GP releases intermediate", true);
     }
@@ -1045,11 +1071,18 @@ int main(int argc, char** argv) {
           gp(n, d, mask, variant, false);
           gp(n, d, mask, variant, true);
         }
-  gp_diagonal_fusion_proof();
-  for (auto variant :
-       {stanli::kGpMatern32, stanli::kGpMatern52, stanli::kGpExponential})
+  for (int n : {0, 1, 5, 12})
+    for (int d : {1, 3})
+      for (int mask : {0, 1, 2, 4, 6, 7, 16, 17, 18, 20, 22, 23}) {
+        gp(n, d, mask, stanli::kGpPeriodic, false);
+        gp(n, d, mask, stanli::kGpPeriodic, true);
+      }
+  gp_diagonal_fusion_proof(stanli::kGpMatern32);
+  gp_diagonal_fusion_proof(stanli::kGpPeriodic);
+  for (auto variant : {stanli::kGpMatern32, stanli::kGpMatern52,
+                       stanli::kGpExponential, stanli::kGpPeriodic})
     for (int n : {1, 7, 30})
-      for (int active : {0, 2, 4, 6, 7, 8, 14, 15})
+      for (int active : {0, 2, 4, 6, 7, 8, 14, 15, 22, 24, 30, 31})
         gp(n, 2, active, variant, false, .7, 1.3, .7, true);
   gp(4, 2, 7, stanli::kGpExpQuad, false, 1e-110);
   gp(4, 2, 7, stanli::kGpExpQuad, false, 1e110);

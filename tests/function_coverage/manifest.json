@@ -143,6 +143,7 @@
     "gp_exponential_cov",
     "gp_matern32_cov",
     "gp_matern52_cov",
+    "gp_periodic_cov",
     "gumbel_cdf",
     "gumbel_lccdf",
     "gumbel_lcdf",
@@ -537,6 +538,7 @@
         "gp_exponential_cov",
         "gp_matern32_cov",
         "gp_matern52_cov",
+        "gp_periodic_cov",
         "logical_negation",
         "head",
         "inverse",
@@ -1256,7 +1258,7 @@
       ]
     }
   },
-  "name_count": 436,
+  "name_count": 437,
   "recognized_but_unsupported": {},
   "schema": 1,
   "scope": {

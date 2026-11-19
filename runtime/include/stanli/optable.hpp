@@ -995,6 +995,7 @@ enum GpCov : uint8_t {
   kGpMatern32,
   kGpMatern52,
   kGpExponential,
+  kGpPeriodic,
 };
 
 inline std::optional<GpCov> gp_cov_family(std::string_view name) {
@@ -1002,7 +1003,21 @@ inline std::optional<GpCov> gp_cov_family(std::string_view name) {
   if (name == "gp_matern32_cov") return kGpMatern32;
   if (name == "gp_matern52_cov") return kGpMatern52;
   if (name == "gp_exponential_cov") return kGpExponential;
+  if (name == "gp_periodic_cov") return kGpPeriodic;
   return std::nullopt;
+}
+
+// OP_GP_COV's inputs are the locations, then this many scalar
+// hyperparameters (sigma, the length scale and, for the periodic kernel, the
+// period), then an optional scalar that adds to every diagonal entry.
+inline int gp_cov_hyperparameters(uint8_t variant) {
+  return variant == kGpPeriodic ? 3 : 2;
+}
+inline int gp_cov_jitter_input(uint8_t variant) {
+  return 1 + gp_cov_hyperparameters(variant);
+}
+inline bool gp_cov_has_jitter(uint8_t variant, int n_in) {
+  return n_in > gp_cov_jitter_input(variant);
 }
 
 struct Kernel {
