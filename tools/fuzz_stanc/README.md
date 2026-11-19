@@ -47,7 +47,10 @@ can make constant. The summary counts them.
 
 Performance checks use the bucket prefix `o1`: `slow_compile`,
 `inline_growth`, `mir_growth` and `slow_gradient`. The thresholds are in
-the docstring of `fuzz.py`.
+the docstring of `fuzz.py`. After the parallel run, fuzz.py times the
+candidates for `slow_compile` and `slow_gradient` again one at a time.
+`--retime-seconds S` stops that after S seconds, and the summary counts the
+candidates left untimed.
 
 ## Known buckets
 
@@ -57,3 +60,55 @@ program's differences, and a `reason` that names the cause and the issue.
 A program whose bucket and differences match an entry is listed under
 "known buckets" in the summary. Add an entry only when the cause is found
 and tracked, and remove it when the fix lands.
+
+## Nightly job
+
+`.github/workflows/fuzz-nightly.yml` runs the fuzzer every night on one
+Linux runner. It builds `stanli-compile` from the pinned fork and
+`build-rel/{stanli_check,bench_grad}` with the shipped options, restoring
+the caches that `clang-ccache-seed.yml` and the wheels build save. It never
+saves a cache.
+
+Each night runs 20,000 seeds starting at `1,000,000 + 50,000 * N`, where N
+counts days since 2026-11-01, so every night covers new programs. Seeds
+`0:200` also run every night as a regression check. On a 4-core runner the
+fuzzing takes about 20 minutes, plus at most 5 minutes for the serial
+timing of performance candidates (`--retime-seconds 300`). A manual run
+(`workflow_dispatch`) takes a `seeds` list in fuzz.py's syntax and can skip
+filing issues.
+
+Only correctness buckets matter for the result. The performance buckets
+(`slow_compile`, `slow_gradient`, `inline_growth`, `mir_growth`) depend on
+timings on a shared runner or on fixed size ratios, so the job summary
+lists them and nothing else happens.
+
+`nightly.py` holds the steps:
+
+- `seeds` prints the night's seed list.
+- `reduce` runs `reduce.py` on the first seed of up to three new buckets,
+  stopping each after five minutes. Results go in `RUN/reduced/`.
+- `summary` writes the job summary.
+- `file` opens one issue per new correctness bucket, titled with the bucket
+  name and labeled `fuzzer`. The body has the seed, the commands to
+  reproduce it, the differences, the reduced program when the reducer
+  finished, and the program. When an open issue already has that title, it
+  comments with the new seeds instead, and stays quiet when only regression
+  seeds hit the bucket. Buckets in `known.json` never open issues.
+- `gate` fails the run on a new correctness bucket, on harness errors, or
+  when fewer than half the programs agree, which means the tools are
+  broken.
+
+The fuzzing job uploads its run directory as the `fuzz-run` artifact. A
+second job, which holds the only token that can write issues, downloads it
+and runs `file` and `gate`.
+
+To try the steps locally without touching GitHub, point `file` at a fake
+`gh`, as `tests/test_fuzz_stanc_nightly.py` does:
+
+```sh
+python3 tools/fuzz_stanc/fuzz.py --seeds 0:200 --jobs 4 --out run
+python3 tools/fuzz_stanc/nightly.py reduce run --time-limit 60
+python3 tools/fuzz_stanc/nightly.py summary run
+python3 tools/fuzz_stanc/nightly.py file run --repo OWNER/NAME --gh FAKE_GH
+python3 tools/fuzz_stanc/nightly.py gate run
+```

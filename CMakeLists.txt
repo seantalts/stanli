@@ -1748,7 +1748,7 @@ if(Python3_Interpreter_FOUND)
   add_test(NAME test_fuzz_stanc_differential
            COMMAND ${Python3_EXECUTABLE} tests/test_fuzz_stanc_differential.py
            WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
-  foreach(_fuzz_test gen fuzz reduce)
+  foreach(_fuzz_test gen fuzz reduce nightly)
     add_test(NAME test_fuzz_stanc_${_fuzz_test}
              COMMAND ${Python3_EXECUTABLE} tests/test_fuzz_stanc_${_fuzz_test}.py
              WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
