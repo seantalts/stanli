@@ -61,6 +61,7 @@ O0_FIXTURES = {
     "udf_void_return_in_branch",
     "udf_void_statements",
     "wa_target_lp",
+    "wa_tp_lp_refused",
     "whileloop",
 }
 

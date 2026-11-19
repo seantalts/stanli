@@ -510,6 +510,35 @@ void test_write_array_target_lp() {
   }
 }
 
+// The `~` statement adds a target term to the write_array graph before the
+// `||` on a parameter refuses, and the rollback must remove that term with
+// the slots it named. A stale term made CSE write past its slot tables,
+// which ASan reports and which crashed fuzz seeds 530 and 4962.
+void test_write_array_tp_lp_refused() {
+  using namespace stanli;
+  const std::string text = slurp("tests/fixtures/wa_tp_lp_refused.tmir.sexp");
+  CompiledModel cm = compile_model(text, DataMap());
+  if (!cm.write_array || !cm.write_array->interp) {
+    ++failures;
+    std::printf("FAIL wa_tp_lp_refused: no interpreter for write_array\n");
+    return;
+  }
+  const std::string truncated = cm.write_array->truncated.value_or("");
+  if (truncated.find("transformed parameters") == std::string::npos) {
+    ++failures;
+    std::printf("FAIL wa_tp_lp_refused: truncated message is [%s]\n",
+                truncated.c_str());
+  }
+  std::map<std::string, DataMap::Entry> params;
+  params["p"].r = {0.25};
+  WaRng rng(1);
+  const std::vector<double> got = cm.write_array->interp->eval(params, rng);
+  if (got != std::vector<double>{0.25, 1, 1}) {
+    ++failures;
+    std::printf("FAIL wa_tp_lp_refused: row has %zu values\n", got.size());
+  }
+}
+
 // WaInterp remains the independent oracle for caller-owned RNG and runtime
 // control now that the same section can also compile completely.
 void test_interpreted_gq() {
@@ -4588,6 +4617,7 @@ int main() {
   test_gq_bare_fill_is_nan();
   test_gq_name_shadowing();
   test_write_array_target_lp();
+  test_write_array_tp_lp_refused();
   test_interpreted_gq();
   test_compiled_extra_rng();
   test_compiled_region_rng();
