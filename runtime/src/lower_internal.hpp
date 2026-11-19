@@ -2413,6 +2413,7 @@ struct Lowering {
     NamedSaves<Val> scope;
     NamedSaves<DeclView> decls;
     NamedSaves<long> int_env;
+    NamedSaves<DataMap::Entry> data_env;
     std::vector<std::pair<std::string, bool>> int_locals;
   };
   WaMark wa_mark() {
@@ -2516,13 +2517,18 @@ struct Lowering {
     }
   }
   // Restores only the given names, which must include every name the
-  // rolled-back statement can declare or assign.
-  WaSnapshot wa_snapshot(const std::set<std::string>& names) {
+  // rolled-back statement can declare or assign. log_prob does not journal
+  // the data environment, so there the names in `data_written` keep their
+  // data values too.
+  WaSnapshot wa_snapshot(const std::set<std::string>& names,
+                         const std::set<std::string>* data_written = nullptr) {
     WaSnapshot s;
     static_cast<WaMark&>(s) = wa_mark();
     s.scope = save_named(scope, names);
     s.decls = save_named(decls, names);
     s.int_env = save_named(int_env, names);
+    if (data_written && !in_write_array)
+      s.data_env = save_named(td.env(), *data_written);
     s.int_locals.reserve(names.size());
     for (const std::string& name : names)
       s.int_locals.emplace_back(name, int_locals.count(name) > 0);
@@ -2532,6 +2538,7 @@ struct Lowering {
     restore_named(scope, s.scope);
     restore_named(decls, s.decls);
     restore_named(int_env, s.int_env);
+    restore_named(td.env(), s.data_env);
     for (const auto& [name, present] : s.int_locals) {
       if (present)
         int_locals.insert(name);

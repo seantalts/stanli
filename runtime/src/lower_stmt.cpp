@@ -2170,14 +2170,15 @@ Lowering::Flow Lowering::lower_stmt_impl(const mir::Stmt& s) {
           region_auto_profitable(s, std::pair<int64_t, int64_t>{lo, hi});
       // Asked before the unroll, which leaves the loop variable bound.
       std::string carry_diagnostic;
-      if (debug_env("STANLI_STRUCTURED_LOOP_DIAGNOSTICS") &&
-          structured_outer_depth <= 2)
+      const bool diagnostics =
+          debug_env("STANLI_STRUCTURED_LOOP_DIAGNOSTICS") &&
+          structured_outer_depth <= 2;
+      if (diagnostics)
         carry_diagnostic =
             std::string(" carries=") + (loop_carries_value(s) ? "1" : "0") +
             " dep=" + (loop_carries_dependence(s) ? "1" : "0");
-      const size_t ops_before = g.ops.size();
-      structured_unroll_depth += unrolled;
-      {
+      const auto unroll = [&]() -> std::optional<Flow> {
+        structured_unroll_depth += unrolled;
         const ScopeExit leave{[&] { structured_unroll_depth -= unrolled; }};
         for (int64_t v = lo; v <= hi; ++v) {
           int_env[s.loopvar] = static_cast<long>(v);
@@ -2185,14 +2186,48 @@ Lowering::Flow Lowering::lower_stmt_impl(const mir::Stmt& s) {
           if (flow == Flow::Break) break;
           if (flow == Flow::Return) return flow;
         }
+        return std::nullopt;
+      };
+      // Whether a large loop is worth keeping depends on how many operations
+      // it unrolls to, so unroll it and roll back if it should be kept.
+      const int64_t trips = hi - lo + 1;
+      std::optional<WaSnapshot> before_unroll;
+      if (log_prob_loop_may_retain(s, trips)) {
+        std::set<std::string> mentioned, written;
+        mir::collect_names(s, &mentioned);
+        mentioned.insert(s.loopvar);
+        std::vector<std::string> assigned;
+        assigned_names(s, &assigned);
+        collect_loop_locals(s, &written);
+        written.insert(assigned.begin(), assigned.end());
+        before_unroll = wa_snapshot(mentioned, &written);
       }
-      if (!carry_diagnostic.empty())
+      const size_t ops_before = g.ops.size();
+      if (const auto flow = unroll()) return *flow;
+      const size_t loop_ops = g.ops.size() - ops_before;
+      if (diagnostics)
         emit_diagnostic("stanli_structured unrolled loop=" + s.loopvar +
-                        " trips=" + std::to_string(hi - lo + 1) +
+                        " trips=" + std::to_string(trips) +
                         " graph=" + (in_write_array ? "wa" : "lp") +
                         " ops=" + std::to_string(g.ops.size()) +
-                        " delta=" + std::to_string(g.ops.size() - ops_before) +
+                        " delta=" + std::to_string(loop_ops) +
                         carry_diagnostic);
+      if (before_unroll && log_prob_loop_retained(loop_ops, trips)) {
+        wa_restore(*before_unroll);
+        bool kept = false;
+        {
+          const StructuredMode old_policy = structured_policy;
+          structured_policy = StructuredMode::Prefer;
+          const ScopeExit leave{[&] { structured_policy = old_policy; }};
+          kept = try_lower_region(s, std::pair<int64_t, int64_t>{lo, hi});
+        }
+        if (diagnostics)
+          emit_diagnostic(std::string("stanli_structured large loop ") +
+                          (kept ? "retained" : "unrolled again") +
+                          " loop=" + s.loopvar);
+        if (!kept)
+          if (const auto flow = unroll()) return *flow;
+      }
       int_env.erase(s.loopvar);
       return Flow::Next;
     }

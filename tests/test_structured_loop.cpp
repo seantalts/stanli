@@ -2748,6 +2748,90 @@ static void loop_carry_tests() {
   test_unsetenv("STANLI_STRUCTURED_LOOP_DIAGNOSTICS");
 }
 
+static DataMap large_loop_data(const char* length, int trips, int states) {
+  DataMap data;
+  data.set_int(length, trips);
+  data.set_int("K", states);
+  std::vector<double> y(static_cast<size_t>(trips));
+  for (int t = 0; t < trips; ++t) y[static_cast<size_t>(t)] = 2 * std::sin(.37 * t);
+  data.set_real_array("y", std::move(y));
+  return data;
+}
+
+// A serial recursion large enough that unrolling it is slower than keeping
+// it as a loop, and a loop of the same size whose iterations are
+// independent once its scratch array is accounted for.
+static void large_loop_tests() {
+  const int states = 5;
+  const auto recursion = [&](int trips) {
+    DataMap data = large_loop_data("T", trips, states);
+    std::vector<double> log_gamma;
+    for (int k = 0; k < states; ++k)
+      for (int j = 0; j < states; ++j)
+        log_gamma.push_back(std::log(j == k ? .6 : .1));
+    data.set_real_array("log_gamma", std::move(log_gamma), {states, states});
+    return data;
+  };
+  const auto small = compile_fixture("structured_large_recursion",
+                                     recursion(200), Mode::Auto);
+  check(retained(small) == nullptr, "a small recursion is unrolled");
+  const auto large = compile_fixture("structured_large_recursion",
+                                     recursion(4500), Mode::Auto);
+  check(retained(large) != nullptr, "a large recursion is kept as a loop");
+  const auto unrolled = compile_fixture("structured_large_recursion",
+                                        recursion(4500), Mode::Off);
+  check(retained(unrolled) == nullptr, "structured loops off unrolls it");
+  compare_gradients(large, unrolled,
+                    {{.1, -.2, .3, .5, -.4, .2}, {1, 0, -1, 2, -2, -.5}},
+                    "retained recursion target matches unrolled",
+                    "retained recursion gradient matches unrolled");
+
+  DataMap grouped = recursion(4500);
+  std::vector<int> group(4500);
+  for (size_t t = 0; t < group.size(); ++t) group[t] = 1 + int(t * t % 5);
+  grouped.set_int_array("group", std::move(group));
+  // A slice of varying length makes the retained loop refuse, so the loop
+  // is unrolled a second time. That must start from the data accumulator's
+  // value before the loop, not after it.
+  compare_gradients(
+      compile_fixture("structured_large_refused", grouped, Mode::Auto),
+      compile_fixture("structured_large_refused", grouped, Mode::Off),
+      {{.1, -.2, .3, .5, -.4, .2}},
+      "target after a refused large loop matches unrolled",
+      "gradient after a refused large loop matches unrolled");
+  // Counts kept by a retained loop would exist only at run time, too late
+  // to size the vector declared after it.
+  const auto sized =
+      compile_fixture("structured_large_sized", grouped, Mode::Auto);
+  check(retained(sized) == nullptr,
+        "a large loop that counts into an outer integer is unrolled");
+  compare_gradients(
+      sized, compile_fixture("structured_large_sized", grouped, Mode::Off),
+      {{.1, -.2, .3, .5, -.4, .2}}, "target sized by loop counts",
+      "gradient sized by loop counts");
+
+  const int trips = 13000;
+  DataMap mixture = large_loop_data("N", trips, 6);
+  mixture.set_real_array("w", std::vector<double>(6, 1.0 / 6));
+  test_setenv("STANLI_STRUCTURED_LOOP_DIAGNOSTICS", "1");
+  stanli_test::StdoutCapture captured(stderr);
+  const auto scratch =
+      compile_fixture("structured_large_scratch", mixture, Mode::Auto);
+  const std::string line = unrolled_line(captured.finish(), "n");
+  test_unsetenv("STANLI_STRUCTURED_LOOP_DIAGNOSTICS");
+  const auto field = [&](const std::string& name) -> size_t {
+    const size_t at = line.find(" " + name + "=");
+    return at == std::string::npos
+               ? 0
+               : std::stoul(line.substr(at + name.size() + 2));
+  };
+  check(retained(scratch) == nullptr,
+        "a large loop over a scratch array is unrolled");
+  check(field("dep") == 0 && field("ops") >= size_t{1} << 19 &&
+            field("delta") >= 32 * size_t(trips),
+        "the scratch loop is large enough to be kept otherwise");
+}
+
 static void automatic_policy_tests() {
   const auto small_auto = compile_fixture("structured_counted", 4, Mode::Auto);
   const auto small_off = compile_fixture("structured_counted", 4, Mode::Off);
@@ -8308,6 +8392,7 @@ int main() {
   refusal_tests();
   automatic_policy_tests();
   loop_carry_tests();
+  large_loop_tests();
   region_range_cache_tests();
   row_index_tests();
   prefer_parent_tests();

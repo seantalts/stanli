@@ -2668,6 +2668,41 @@ bool write_array_loop_retained(const mir::Stmt& s, int64_t lo, int64_t hi) {
          g.ops.size() >= kRetainWriteArrayLoopOps && hi - lo + 1 >= 32 &&
          !stmt_effectful(s) && loop_carries_value(s);
 }
+// log_prob has the same problem on a much larger scale. Each unrolled
+// operation costs about 6 ns per gradient in a small graph and 15 ns once
+// the graph passes 1M operations, from cache pressure on the 336-byte
+// KernelCtx that each one carries, while a retained loop replays at about
+// 10 ns per instruction. The two break even between 384k and 576k raw
+// operations, and a loop is kept only when it is itself large.
+static constexpr size_t kRetainLoopGraphOps = size_t{1} << 19;
+static constexpr size_t kRetainLoopOps = size_t{1} << 14;
+static constexpr size_t kRetainLoopOpsPerTrip = 32;
+// A retained loop's integers exist only at run time, too late for a later
+// declaration that a count kept by the loop sizes.
+static bool loop_assigns_outer_int(const mir::Stmt& loop) {
+  std::set<std::string> locals;
+  for (const auto& child : loop.body) collect_loop_locals(child, &locals);
+  std::function<bool(const mir::Stmt&)> assigns = [&](const mir::Stmt& s) {
+    if (s.kind == mir::Stmt::Assignment && !locals.count(s.lhs) &&
+        s.rhs.unsized.leaf == mir::UnsizedLeaf::Int)
+      return true;
+    for (const auto& child : s.body)
+      if (assigns(child)) return true;
+    return false;
+  };
+  for (const auto& child : loop.body)
+    if (assigns(child)) return true;
+  return false;
+}
+bool log_prob_loop_may_retain(const mir::Stmt& s, int64_t trips) {
+  return !in_write_array && structured_policy == StructuredMode::Auto &&
+         !bounded_specialization && trips >= 32 && !stmt_effectful(s) &&
+         !loop_assigns_outer_int(s) && loop_carries_dependence(s);
+}
+bool log_prob_loop_retained(size_t loop_ops, int64_t trips) const {
+  return g.ops.size() >= kRetainLoopGraphOps && loop_ops >= kRetainLoopOps &&
+         loop_ops / static_cast<size_t>(trips) >= kRetainLoopOpsPerTrip;
+}
 bool region_auto_profitable(
     const mir::Stmt& s,
     std::optional<std::pair<int64_t, int64_t>> exact_bounds) const {

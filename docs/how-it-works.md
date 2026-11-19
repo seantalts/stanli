@@ -408,6 +408,18 @@ operations to 45,581. Preparation is 5.5x faster, peak memory is 3.6x lower,
 and draws are 2.6x faster. The first draw records the loops and takes about
 50 ms.
 
+`log_prob` keeps such a loop too once the graph is very large. Each unrolled
+operation costs about 6 ns per gradient in a small graph and about 15 ns once
+the graph passes a million operations, while a retained loop replays each
+instruction for about 10 ns. stanli unrolls the loop first and counts what it
+added. It keeps the loop instead when the graph then holds at least 524,288
+operations, the loop added at least 16,384 of them, and it added at least 32
+per trip. The loop must also carry a value between iterations and must not
+count into an integer that is declared outside it, since a later declaration
+may need that count for its size. An array that each iteration overwrites in
+full before reading it, such as the per-component terms of a mixture, does
+not count as a carried value.
+
 A retained loop keeps its own tape. stanli decides at compile time how to
 store each kernel call in the body:
 
