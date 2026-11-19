@@ -1445,6 +1445,7 @@ void expect_rng_loop_parity(const std::string& label, int pad,
 
 void test_write_array_rng_loops() {
   expect_rng_loop_parity("wa_rng_loops prefer", 0, "1", 5);
+  expect_rng_loop_parity("wa_rng_loops auto", 20000, nullptr, 5);
 }
 
 // Require both selection and repeated whole-row parity. The forced interpreter

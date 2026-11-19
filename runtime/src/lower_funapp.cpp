@@ -90,7 +90,7 @@ unsigned Lowering::expr_effects(const mir::Expr& e) {
   unsigned effects = 0;
   if (mir::stateful_intrinsic_kind(e)) effects |= kStatefulEffect;
   if (e.kind == mir::Expr::FunApp && e.fn_suffix == mir::FnSuffix::Rng)
-    effects |= kStatefulEffect;
+    effects |= kRngEffect;
   if (e.kind == mir::Expr::FunApp && e.fn_lib == mir::Expr::Lib::UserDefined)
     effects |= fun_effects(mir::function_key(e));
   if (mir::is_reduce_sum(e) && reduce_sum_effectful(e))
@@ -131,7 +131,7 @@ unsigned Lowering::fun_effects(const std::string& name) {
     unsigned found = 0;
     if (mir::stateful_intrinsic_kind(e)) found |= kStatefulEffect;
     if (e.kind == mir::Expr::FunApp && e.fn_suffix == mir::FnSuffix::Rng)
-      found |= kStatefulEffect;
+      found |= kRngEffect;
     if (e.kind == mir::Expr::FunApp && e.fn_lib == mir::Expr::Lib::UserDefined)
       found |= visit_fun(mir::function_key(e));
     if (mir::is_reduce_sum(e)) {

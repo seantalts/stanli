@@ -2667,7 +2667,7 @@ static constexpr size_t kRetainWriteArrayLoopOps = size_t{1} << 16;
 bool write_array_loop_retained(const mir::Stmt& s, int64_t lo, int64_t hi) {
   return in_write_array && structured_policy == StructuredMode::Auto &&
          g.ops.size() >= kRetainWriteArrayLoopOps && hi - lo + 1 >= 32 &&
-         !stmt_effectful(s) && loop_carries_value(s);
+         (stmt_effects(s) & ~kRngEffect) == 0 && loop_carries_value(s);
 }
 // log_prob has the same problem on a much larger scale. Each unrolled
 // operation costs about 6 ns per gradient in a small graph and 15 ns once
@@ -2947,12 +2947,17 @@ bool try_lower_region(
       std::vector<std::string> writes;
       assigned_names(s, &writes);
       // Replay compares a data-only import with the value it recorded, so a
-      // loop that updates one records again on every draw.
-      if (retaining_write_array_loop)
-        for (const auto& name : writes)
-          if (const auto item = scope.find(name);
-              item != scope.end() && item->second.si.param_free)
-            trial.fail("write_array loop updates a data-only value");
+      // loop that updates one records again on every draw. A loop that draws
+      // is checked once its body shows whether a draw survived lowering.
+      const auto updates_data_only = [&] {
+        return retaining_write_array_loop &&
+               std::any_of(writes.begin(), writes.end(), [&](const auto& name) {
+                 const auto item = scope.find(name);
+                 return item != scope.end() && item->second.si.param_free;
+               });
+      };
+      if (!(stmt_effects(s) & kRngEffect) && updates_data_only())
+        trial.fail("write_array loop updates a data-only value");
       std::set<std::string> locals;
       collect_loop_locals(s, &locals);
       for (const auto& name : writes)
@@ -3042,7 +3047,8 @@ bool try_lower_region(
         fail(
             "structured body requires the per-draw fallback for a stateful "
             "call");
-      // A loop that draws runs its tree on every execution (LoopState).
+      // A loop that draws runs its tree on every execution (LoopState), so
+      // the refusals below that protect a recorded path do not apply.
       const bool draws =
           std::any_of(p->body.ops.begin(), p->body.ops.end(),
                       [](const Op& op) { return op.opcode == OP_RNG; });
@@ -3051,6 +3057,8 @@ bool try_lower_region(
         fail(
             "structured body requires the per-draw fallback for a stateful "
             "call");
+      if (!draws && updates_data_only())
+        fail("write_array loop updates a data-only value");
       if (!output_references && mode == StructuredMode::Auto) {
         const auto retains_control = [&](const auto& self,
                                          const RegionNode& node) -> bool {
@@ -3061,7 +3069,7 @@ bool try_lower_region(
           return false;
         };
         const bool control = retains_control(retains_control, p->root);
-        if (retaining_write_array_loop && control)
+        if (retaining_write_array_loop && control && !draws)
           fail("write_array loop retains runtime control");
         if (!retaining_write_array_loop && !control)
           fail("automatic candidate has no retained runtime control");

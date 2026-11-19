@@ -1986,6 +1986,7 @@ struct Lowering {
   // never fold because their value is instantiation-dependent.
   static constexpr unsigned kMessageEffect = 1;
   static constexpr unsigned kStatefulEffect = 2;
+  static constexpr unsigned kRngEffect = 4;
   bool expr_effectful(const mir::Expr& e);
   unsigned expr_effects(const mir::Expr& e);
   unsigned fun_effects(const std::string& name);
@@ -2011,6 +2012,7 @@ struct Lowering {
     return f == nullptr || fun_effectful(mir::function_key(*f));
   }
   bool stmt_effectful(const mir::Stmt& s);
+  unsigned stmt_effects(const mir::Stmt& s);
 
   static bool expr_references(const mir::Expr& e, const std::string& name) {
     if (e.kind == mir::Expr::Var && e.name == name) return true;
