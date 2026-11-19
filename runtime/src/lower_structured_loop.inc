@@ -3037,9 +3037,17 @@ bool try_lower_region(
                       [](const Op& op) { return op.opcode == OP_ISLAND; }))
         fail("structured body requires register-program fallback");
       if (std::any_of(p->body.ops.begin(), p->body.ops.end(), [](const Op& op) {
-            return op.opcode == OP_RNG || op.opcode == OP_PRINT ||
-                   op.opcode == OP_REJECT;
+            return op.opcode == OP_PRINT || op.opcode == OP_REJECT;
           }))
+        fail(
+            "structured body requires the per-draw fallback for a stateful "
+            "call");
+      // A loop that draws runs its tree on every execution (LoopState).
+      const bool draws =
+          std::any_of(p->body.ops.begin(), p->body.ops.end(),
+                      [](const Op& op) { return op.opcode == OP_RNG; });
+      if (draws && (output_references || (mode == StructuredMode::Auto &&
+                                          !retaining_write_array_loop)))
         fail(
             "structured body requires the per-draw fallback for a stateful "
             "call");

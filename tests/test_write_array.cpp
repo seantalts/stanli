@@ -1373,6 +1373,80 @@ void test_write_array_vector_rng() {
   }
 }
 
+size_t retained_rng_loops(const stanli::Graph& g) {
+  size_t loops = 0;
+  for (const auto& op : g.ops) {
+    if (op.opcode != stanli::OP_LOOP) continue;
+    const auto& body =
+        static_cast<const stanli::StructuredLoop*>(op.udata)->body.ops;
+    loops += std::any_of(body.begin(), body.end(), [](const stanli::Op& o) {
+      return o.opcode == stanli::OP_RNG;
+    });
+  }
+  return loops;
+}
+
+// A retained loop that draws must leave the stream exactly where the unrolled
+// loops leave it. One stream advances through every draw, so a draw that a
+// later execution repeated or skipped would shift every later value.
+void expect_rng_loop_parity(const std::string& label, int pad,
+                            const char* structured, size_t want_loops) {
+  using namespace stanli;
+  const int n = 40, k = 3;
+  DataMap data;
+  data.set_int("N", n);
+  data.set_int("K", k);
+  data.set_int("T", pad);
+  std::vector<double> x(n);
+  std::vector<int> len(n);
+  for (int i = 0; i < n; ++i) {
+    x[static_cast<size_t>(i)] = 0.3 * std::sin(1.3 * i);
+    len[static_cast<size_t>(i)] = 1 + (i * 7) % k;
+  }
+  data.set_real_array("x", x);
+  data.set_int_array("len", len);
+  const std::string text = slurp("tests/fixtures/wa_rng_loops.tmir.sexp");
+  if (structured)
+    test_setenv("STANLI_STRUCTURED_LOOPS", structured);
+  else
+    test_unsetenv("STANLI_STRUCTURED_LOOPS");
+  CompiledModel retained = compile_model(text, data);
+  test_setenv("STANLI_STRUCTURED_LOOPS", "0");
+  CompiledModel unrolled = compile_model(text, data);
+  test_unsetenv("STANLI_STRUCTURED_LOOPS");
+  if (!compiled_completely(retained, label) ||
+      !compiled_completely(unrolled, label + " unrolled"))
+    return;
+  const size_t loops = retained_rng_loops(retained.write_array->graph);
+  if (loops != want_loops) {
+    ++failures;
+    std::printf("FAIL %s: %zu retained loops draw, want %zu\n", label.c_str(),
+                loops, want_loops);
+  }
+  Executor rex(retained.write_array->graph), uex(unrolled.write_array->graph);
+  retained.write_array->bind(rex);
+  unrolled.write_array->bind(uex);
+  WaRng rrng(2026), urng(2026);
+  for (int draw = 0; draw < 200; ++draw) {
+    const double q[] = {0.8 * std::sin(0.37 * draw), 0.5 * std::cos(draw)};
+    for (Executor* ex : {&rex, &uex}) std::copy_n(q, 2, ex->params_data());
+    rex.run_forward_only(EvalState{&rrng});
+    uex.run_forward_only(EvalState{&urng});
+    const auto got = read_row(retained.write_array->columns, rex);
+    const auto want = read_row(unrolled.write_array->columns, uex);
+    if (!same_double_bytes(got, want)) {
+      ++failures;
+      std::printf("FAIL %s: draw %d differs from the unrolled loops\n",
+                  label.c_str(), draw);
+      return;
+    }
+  }
+}
+
+void test_write_array_rng_loops() {
+  expect_rng_loop_parity("wa_rng_loops prefer", 0, "1", 5);
+}
+
 // Require both selection and repeated whole-row parity. The forced interpreter
 // is an oracle alongside the complete graph, never evidence of admission.
 void expect_bounded_output(const std::string& fixture,
@@ -4654,6 +4728,7 @@ int main() {
   test_write_array_carried_loop();
   test_write_array_block_order();
   test_write_array_vector_rng();
+  test_write_array_rng_loops();
   test_write_array_bounded_blocks();
   test_write_array_selected_loop_refused();
   test_write_array_selected_loop_overflow();

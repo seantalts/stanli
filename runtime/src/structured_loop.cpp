@@ -1612,7 +1612,11 @@ struct LoopState : KernelState {
         ctx(plan.site_count),
         sites(plan.site_count, nullptr),
         observable(plan.site_count, 0) {
-    no_replay |= !plan.cache_execution_path;
+    // Replay would skip a draw it recorded as constant, and a guard that
+    // fails partway re-records after some draws have already been taken.
+    no_replay |= !plan.cache_execution_path ||
+                 std::any_of(plan.body.ops.begin(), plan.body.ops.end(),
+                             [](const Op& op) { return op.opcode == OP_RNG; });
     const char* frame_option = debug_env("STANLI_STRUCTURED_FRAMES");
     frame_mode = !no_replay && plan.outer_loop_index >= 0 && frame_option &&
                  frame_option[0] == '1';
