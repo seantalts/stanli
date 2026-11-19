@@ -72,7 +72,6 @@ namespace stanli {
   X(OP_MULTI_STUDENT_T_CHOL_LPDF)     \
   X(OP_MULTINOMIAL_LPMF)              \
   X(OP_MULTINOMIAL_LOGIT_LPMF)        \
-  X(OP_MULTINOMIAL_SOFTMAX_LPMF)      \
   X(OP_DIRICHLET_MULTINOMIAL_LPMF)    \
   X(OP_ORDERED_PROBIT_LPMF)           \
   X(OP_ORDERED_LOGISTIC_LPMF)         \
@@ -238,7 +237,8 @@ namespace stanli {
   X(OP_QR)                            \
   X(OP_QR_THIN)                       \
   X(OP_EIGENDECOMPOSE_SYM)            \
-  X(OP_SVD)
+  X(OP_SVD)                           \
+  X(OP_MULTINOMIAL_SOFTMAX_LPMF)
 
 // Scalar densities, one line each: this list generates the opcode, the
 // name, the kernel, its registration, and the lowering table entry
