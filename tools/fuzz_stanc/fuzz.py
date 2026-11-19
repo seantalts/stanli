@@ -50,6 +50,7 @@ WORK_FLOOR = 10  # elements; a few ops of difference is not a finding
 GRADIENT_RATIO = 1.5
 GRADIENT_FLOOR_NS = 100.0
 REGION_OPS = ("OP_ISLAND", "OP_LOOP", "OP_REGION_MAP")
+PERF_KINDS = ("slow_compile", "inline_growth", "mir_growth", "slow_gradient")
 
 
 def parse_seeds(spec):
@@ -288,20 +289,35 @@ def gradient_ns(ctx, mir, data_file):
     return best
 
 
-def retime(ctx, cfg, results):
+def retime(ctx, cfg, results, seconds=None):
     """Time the slow_compile and slow_gradient candidates again, one at a
-    time."""
+    time, for at most `seconds`. Returns how many candidates were left
+    untimed."""
+    deadline = None if seconds is None else time.monotonic() + seconds
+    skipped = 0
     for r in results:
-        if r.get("outcome") in ("agree", "differ"):
-            p = gen.generate(r["seed"], cfg)
-            retime_one(ctx, r, p.source(), p.data())
+        if r.get("outcome") not in ("agree", "differ") or \
+                not any(retime_reasons(r)):
+            continue
+        if deadline is not None and time.monotonic() >= deadline:
+            skipped += 1
+            continue
+        p = gen.generate(r["seed"], cfg)
+        retime_one(ctx, r, p.source(), p.data())
+    return skipped
 
 
-def retime_one(ctx, r, source, data):
+def retime_reasons(r):
+    """Whether the compile looks slow, and whether the profile suggests
+    more work at o1."""
     t = (r["none"]["seconds"], r["o1"]["seconds"])
     slow = bool(t[0] and t[1] and t[1] > SLOW_SECONDS and
                 t[1] > SLOW_RATIO * t[0])
-    work = more_work(r.get("work"))
+    return slow, more_work(r.get("work"))
+
+
+def retime_one(ctx, r, source, data):
+    slow, work = retime_reasons(r)
     if not (slow or work):
         return
     with tempfile.TemporaryDirectory(dir=ctx["work"]) as w:
@@ -335,6 +351,8 @@ def summarize(results, meta, out):
     secs = meta["seconds"]
     p(f"{n} programs in {secs:.1f} s ({n / secs:.1f} per second)")
     p(f"compiler {meta['compiler']}")
+    if meta.get("untimed"):
+        p(f"performance candidates left untimed: {meta['untimed']}")
     count = {}
     for r in results:
         count[r["outcome"]] = count.get(r["outcome"], 0) + 1
@@ -403,6 +421,9 @@ def main(argv=None):
                     default=REPO / "build-rel" / "bench_grad")
     ap.add_argument("--known", type=pathlib.Path, default=HERE / "known.json")
     ap.add_argument("--timeout", type=float, default=d.TIMEOUT)
+    ap.add_argument("--retime-seconds", type=float,
+                    help="stop the serial timing of performance candidates "
+                         "after this many seconds (default: time them all)")
     args = ap.parse_args(argv)
     for tool in (args.compiler, args.check, args.bench):
         if not tool.exists():
@@ -424,11 +445,12 @@ def main(argv=None):
             if n % 1000 == 0:
                 print(f"{n}/{len(seeds)} programs", file=sys.stderr)
     seconds = time.monotonic() - started
-    retime(ctx, cfg, results)
+    untimed = retime(ctx, cfg, results, args.retime_seconds)
     shutil.rmtree(work, ignore_errors=True)
     results.sort(key=lambda r: r["seed"])
     meta = {"compiler": str(args.compiler), "check": str(args.check),
-            "seeds": args.seeds, "config": cfg, "seconds": seconds}
+            "seeds": args.seeds, "config": cfg, "seconds": seconds,
+            "untimed": untimed}
     (args.out / "results.json").write_text(json.dumps(
         {**meta, "programs": results}) + "\n")
     with open(args.out / "summary.txt", "w") as f:

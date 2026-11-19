@@ -106,6 +106,16 @@ class PerfTest(unittest.TestCase):
                          "the profile alone is not a finding")
 
 
+class RetimeLimitTest(unittest.TestCase):
+    def test_zero_seconds_times_nothing(self):
+        slow = record(seed=7, o1={"seconds": 1.5, "size": 1},
+                      none={"seconds": 0.1, "size": 1000})
+        results = [record(seed=6), slow]
+        self.assertEqual(fuzz.retime(None, None, results, 0), 1)
+        self.assertNotIn("serial_seconds", slow)
+        self.assertEqual(fuzz.retime(None, None, [record()], 0), 0)
+
+
 class KnownTest(unittest.TestCase):
     KNOWN = [{"bucket": "function_inlining:output",
               "match": "pair", "reason": "r"}]

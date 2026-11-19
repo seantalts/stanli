@@ -1,0 +1,237 @@
+# Run the stanc3 differential fuzzer (tools/fuzz_stanc) every night and open
+# an issue for each new correctness bucket. tools/fuzz_stanc/README.md
+# describes the job.
+#
+# The build copies the seed job in clang-ccache-seed.yml and only restores
+# its caches: the main Clang ccache, the OCaml switch and the incremental
+# stanc3 build. Restoring and never saving keeps this workflow from writing
+# a cache entry that another workflow would then restore.
+name: nightly stanc3 fuzz
+
+on:
+  schedule:
+    - cron: '37 3 * * *'
+  workflow_dispatch:
+    inputs:
+      seeds:
+        description: fuzz.py --seeds list, such as 0:500 or 12,40:60 (empty for the nightly list)
+        type: string
+        default: ''
+      file_issues:
+        description: open or update issues for new buckets
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+  packages: read
+
+# Two runs at once could both open an issue for the same bucket.
+concurrency:
+  group: fuzz-nightly
+  cancel-in-progress: false
+
+env:
+  OPAM_VERSION: 2.5.2
+
+jobs:
+  fuzz:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 150
+    container:
+      image: ghcr.io/seantalts/stanli-manylinux:2_28-x86_64
+      credentials:
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+    outputs:
+      fuzzed: ${{ steps.fuzz.outcome }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: ./.github/actions/pins
+
+      - name: Install Clang
+        run: manylinux-install-clang
+
+      - name: Fingerprint Clang
+        id: toolchain
+        shell: bash
+        run: |
+          fingerprint=$(clang++ --version | sha256sum | cut -d' ' -f1)
+          echo "id=$fingerprint" >> "$GITHUB_OUTPUT"
+
+      # Same key as clang-ccache-seed.yml, so a prefix hit reuses main's
+      # objects.
+      - name: Restore the Clang compiler cache
+        uses: actions/cache/restore@v4
+        with:
+          path: .ccache
+          key: >-
+            ccache-manylinux_2_28_x86_64-release-clang-v6-${{ steps.toolchain.outputs.id }}-${{ hashFiles('CMakeLists.txt', '.github/manylinux/**', '.github/workflows/clang-ccache-seed.yml', '.github/workflows/wheels.yml', 'runtime/**', 'tests/**/*.cpp', 'tests/**/*.hpp', 'tools/**/*.cpp', 'tools/**/*.hpp', 'deps/fetch.sh', 'deps/pins.env') }}
+          restore-keys: >-
+            ccache-manylinux_2_28_x86_64-release-clang-v6-${{ steps.toolchain.outputs.id }}-
+
+      - name: Restore the vendored dependencies
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            deps/math
+            deps/stan
+          key: deps-${{ runner.os }}-sources3-${{ hashFiles('deps/pins.env', 'deps/fetch.sh') }}
+
+      - name: Fetch pinned dependencies
+        run: ./deps/fetch.sh
+
+      - name: Identify the stanc3 build toolchain
+        id: stanc-toolchain
+        shell: bash
+        run: |
+          echo "OPAMROOT=$GITHUB_WORKSPACE/.ci-opam" >> "$GITHUB_ENV"
+          fingerprint=$({ cc --version; ld --version; ldd --version; } | sha256sum | cut -d' ' -f1)
+          echo "id=$fingerprint" >> "$GITHUB_OUTPUT"
+
+      - name: Restore the OCaml toolchain
+        uses: actions/cache/restore@v4
+        with:
+          path: .ci-opam
+          key: >-
+            stanc-toolchain-v1-manylinux_2_28_x86_64-${{ steps.stanc-toolchain.outputs.id }}-${{ env.STANC3_SRC_SHA }}-ocaml${{ env.OCAML_VERSION }}-opam${{ env.OPAM_VERSION }}-${{ hashFiles('.github/manylinux/**', 'harnesses/conformance/build_stanc.sh', 'tools/dev_setup.sh', 'deps/pins.env') }}
+
+      - name: Restore the incremental stanc3 build
+        uses: actions/cache/restore@v4
+        with:
+          path: deps/stanc3-src
+          key: >-
+            stanc-dune-v1-manylinux_2_28_x86_64-${{ steps.stanc-toolchain.outputs.id }}-${{ env.STANC3_SRC_SHA }}-ocaml${{ env.OCAML_VERSION }}-opam${{ env.OPAM_VERSION }}-${{ hashFiles('.github/manylinux/**', 'harnesses/conformance/build_stanc.sh', 'tools/dev_setup.sh', 'deps/pins.env') }}-${{ hashFiles('compiler/native/**', 'compiler/ocaml/**', 'tools/stanc_embed/**') }}
+          restore-keys: >-
+            stanc-dune-v1-manylinux_2_28_x86_64-${{ steps.stanc-toolchain.outputs.id }}-${{ env.STANC3_SRC_SHA }}-ocaml${{ env.OCAML_VERSION }}-opam${{ env.OPAM_VERSION }}-${{ hashFiles('.github/manylinux/**', 'harnesses/conformance/build_stanc.sh', 'tools/dev_setup.sh', 'deps/pins.env') }}-
+
+      - name: Install opam ${{ env.OPAM_VERSION }}
+        run: |
+          url=https://github.com/ocaml/opam/releases/download
+          # manylinux's curl lacks --retry-all-errors.
+          for attempt in 1 2 3 4 5; do
+            if curl -fsSL -o /tmp/opam \
+              "$url/$OPAM_VERSION/opam-$OPAM_VERSION-x86_64-linux"; then
+              break
+            fi
+            [ "$attempt" -lt 5 ] || exit 1
+            sleep $((attempt * 2))
+          done
+          chmod +x /tmp/opam
+          sudo install -m 755 /tmp/opam /usr/local/bin/opam 2>/dev/null ||
+            install -m 755 /tmp/opam /usr/local/bin/opam
+          opam --version
+
+      # The fuzzer runs stanli-compile with --passes, so it needs the
+      # standalone compiler, which no cache holds. With the switch and the
+      # dune build restored this is an incremental build.
+      - name: Build stanli-compile
+        run: |
+          if [ -d deps/stanc3-src/.git ]; then
+            git -C deps/stanc3-src clean -ffd -e _build
+          fi
+          opam init --bare --disable-sandboxing --no-setup -y
+          ./tools/dev_setup.sh --no-embed --no-build
+          test -x deps/stanc3/stanli-compile
+        env:
+          OPAMYES: '1'
+
+      - name: Build stanli_check and bench_grad
+        shell: bash
+        run: |
+          export CC=clang CXX=clang++
+          export CCACHE_DIR="$PWD/.ccache" CCACHE_COMPRESS=1 CCACHE_MAXSIZE=600M
+          export CCACHE_SLOPPINESS=pch_defines,time_macros,include_file_mtime,include_file_ctime
+          ccache -z
+          cmake -B build-rel -DCMAKE_BUILD_TYPE=Release \
+            -DSTANLI_STAN_DENSITY_ORACLE=OFF \
+            -DSTANLI_DEBUG_SWITCHES=OFF \
+            -DCMAKE_C_COMPILER="$CC" \
+            -DCMAKE_CXX_COMPILER="$CXX" \
+            -DCMAKE_C_COMPILER_LAUNCHER=ccache \
+            -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
+            -DSTANLI_EMBED_STANC=OFF
+          cmake --build build-rel --target stanli_check bench_grad -j3
+          ccache -s
+
+      - name: Choose the seeds
+        id: seeds
+        env:
+          INPUT_SEEDS: ${{ inputs.seeds }}
+        run: |
+          seeds=$(python3 tools/fuzz_stanc/nightly.py seeds \
+            --date "$(date -u +%F)" --override "$INPUT_SEEDS")
+          echo "seeds=$seeds" >> "$GITHUB_OUTPUT"
+          echo "seeds $seeds"
+
+      - name: Fuzz
+        id: fuzz
+        timeout-minutes: 75
+        env:
+          SEEDS: ${{ steps.seeds.outputs.seeds }}
+        run: |
+          mkdir -p fuzz-run
+          start=$(date +%s)
+          python3 tools/fuzz_stanc/fuzz.py --seeds "$SEEDS" --jobs "$(nproc)" \
+            --retime-seconds 300 \
+            --compiler deps/stanc3/stanli-compile \
+            --check build-rel/stanli_check --bench build-rel/bench_grad \
+            --out fuzz-run > fuzz-run/fuzz.log
+          echo $(( $(date +%s) - start )) > fuzz-run/wall_seconds
+          cat fuzz-run/summary.txt
+
+      - name: Reduce one program of each new bucket
+        continue-on-error: true
+        timeout-minutes: 20
+        run: |
+          python3 tools/fuzz_stanc/nightly.py reduce fuzz-run \
+            --compiler deps/stanc3/stanli-compile \
+            --check build-rel/stanli_check --bench build-rel/bench_grad \
+            --jobs "$(nproc)" --time-limit 300 --max-buckets 3
+
+      - name: Write the job summary
+        if: always() && steps.fuzz.outcome == 'success'
+        run: python3 tools/fuzz_stanc/nightly.py summary fuzz-run >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload the run directory
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuzz-run
+          path: fuzz-run/
+          retention-days: 30
+
+  # A separate job so that the job running generated programs never holds a
+  # token that can write issues. The runner image has gh.
+  report:
+    needs: fuzz
+    if: always() && needs.fuzz.outputs.fuzzed == 'success'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: fuzz-run
+          path: fuzz-run
+
+      - name: Open or update an issue for each new bucket
+        if: github.event_name == 'schedule' || inputs.file_issues
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python3 tools/fuzz_stanc/nightly.py file fuzz-run \
+            --repo "$GITHUB_REPOSITORY" --commit "$GITHUB_SHA" \
+            --run-url "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+
+      # Fails on harness errors, on a run where too few programs agree to
+      # trust the tools, and on new correctness buckets. After filing, only
+      # buckets that got a new issue count, so an open issue keeps later
+      # nights green.
+      - name: Gate on correctness buckets
+        run: python3 tools/fuzz_stanc/nightly.py gate fuzz-run
