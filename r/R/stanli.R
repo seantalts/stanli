@@ -136,10 +136,10 @@ stanli_model <- function(file = NULL, code = NULL, data = NULL, mir = NULL,
     if (has_includes || !is.null(include_paths))
       paths <- stan_include_paths(include_paths, source_file)
     if (has_includes || fast_math) {
-      mir <- if (.Call("stanli_r_has_embedded_stanc"))
+      mir <- with_commit_note(if (.Call("stanli_r_has_embedded_stanc"))
         embedded_mir(code, paths, fast_math, source_file) else
         stanc_mir(code, include_paths = paths, fast_math = fast_math,
-                  file = source_file)
+                  file = source_file))
     }
   }
   data_json <- if (is.null(data)) {
@@ -157,15 +157,16 @@ stanli_model <- function(file = NULL, code = NULL, data = NULL, mir = NULL,
     # A runtime without the embedded compiler needs the MIR handed to it.
     # The release builds embed stanc3; a source build and the Windows
     # runtime do not, and ship a stanc binary beside the library instead.
-    mir <- stanc_mir(code, file = source_file)
+    mir <- with_commit_note(stanc_mir(code, file = source_file))
     is_mir <- TRUE
   }
-  model <- build_model(if (is_mir) mir else code, data_json, is_mir, seed,
+  model <- with_commit_note(build_model(
+    if (is_mir) mir else code, data_json, is_mir, seed,
     model_name = if (is.null(file)) "stanli_model" else
       tools::file_path_sans_ext(basename(file)),
     model_code = if (is.null(code)) character(0) else code,
     threads_per_chain = threads_per_chain, fast_math = fast_math,
-    allow_interpreter = allow_interpreter, file = source_file)
+    allow_interpreter = allow_interpreter, file = source_file))
   warn_compiler_messages(.Call("stanli_r_compiler_messages", model$ptr))
   note <- .Call("stanli_r_warnings", model$ptr)
   if (nzchar(note)) warning(note, call. = FALSE)

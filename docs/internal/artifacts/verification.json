@@ -2456,6 +2456,13 @@
   "point": 0,
   "status": "VERIFIED"
  },
+ "tuple_return_slices": {
+  "max_rel": 1.79e-16,
+  "max_ulp": 1,
+  "n_values": 5,
+  "point": 0,
+  "status": "VERIFIED"
+ },
  "wells_daae_c_model": {
   "max_rel": 0.0,
   "max_ulp": 0,

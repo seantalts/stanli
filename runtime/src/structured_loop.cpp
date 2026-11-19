@@ -817,6 +817,41 @@ int64_t fixed_scalar_index(const DynamicIndexSpec& p, const KernelCtx& c,
   return static_cast<int64_t>(raw) - 1;
 }
 
+// A whole-row read such as x[t] on an array of vectors selects one
+// contiguous run. As in fixed_scalar_index, prove the descriptor here and
+// check the one selector, or return -1 and leave it to validate_index.
+int64_t whole_row_start(const DynamicIndexSpec& p, const KernelCtx& c) {
+  IndexInputLayout layout;
+  if (p.matrix_leaf || p.axes.size() < 2 ||
+      !index_input_layout(p, false, layout) || c.n_in != layout.expected)
+    return -1;
+  int64_t width = 1;
+  for (size_t d = p.axes.size(); d-- > 1;) {
+    const auto& a = p.axes[d];
+    if (a.kind != DynamicIndexSpec::Axis::All || a.count != a.extent ||
+        a.stride != width || a.extent < 0 ||
+        (a.extent != 0 && width > exact_limit / a.extent) ||
+        a.count_input_offset >= 0 || a.extent_input_offset >= 0)
+      return -1;
+    width *= a.extent;
+  }
+  const auto& r = p.axes[0];
+  if (r.kind != DynamicIndexSpec::Axis::Single || r.count != 1 ||
+      r.stride != width || r.extent < 0 || r.extent > exact_limit ||
+      (width != 0 && r.extent > exact_limit / width) ||
+      r.count_input_offset >= 0 || r.extent_input_offset >= 0 ||
+      r.selector_input < 1 || r.selector_input >= layout.selector_end ||
+      r.input_offset < 0 || r.input_offset >= c.in[r.selector_input].len ||
+      p.selected_size != width || c.out.len != width ||
+      c.in[0].len != r.extent * width)
+    return -1;
+  const double raw = c.in[r.selector_input].data[r.input_offset];
+  if (!std::isfinite(raw) || std::trunc(raw) != raw || raw < 1 ||
+      raw > static_cast<double>(r.extent))
+    index_out_of_range();
+  return (static_cast<int64_t>(raw) - 1) * width;
+}
+
 template <class F>
 void index_positions(const DynamicIndexSpec& p, const KernelCtx& c, bool update,
                      F&& f) {
@@ -941,6 +976,13 @@ void index_backward(KernelCtx& c) {
   const int64_t fixed = fixed_scalar_index(p, c, false);
   if (fixed >= 0) {
     c.in_adj[0].data[fixed] += c.out_adj_vec.data[0];
+    return;
+  }
+  const int64_t row = whole_row_start(p, c);
+  if (row >= 0) {
+    double* adj = c.in_adj[0].data + row;
+    for (int64_t i = 0; i < p.selected_size; ++i)
+      adj[i] += c.out_adj_vec.data[i];
     return;
   }
   const IndexRuntime runtime = validate_index(p, c, false);
