@@ -544,6 +544,12 @@ A bucket is rewritten in one of these forms:
   `cumsum([0, ta - b_1, ...])[j] = j*t*a - sum_{i<=j} b_i`. Buckets refine
   on the subtracted vector (the item), and the slope is whichever of the
   two scalars that refinement holds still.
+- Lanes that each end in a scalar-outcome categorical over their own row
+  (brms categorical: one `categorical_logit` per observation) become one
+  categorical with `kCategoricalRows` set. It takes the lanes' outcomes as
+  one vector and their rows end to end, runs the per-row rule unchanged,
+  and adds the rows' lps left to right, so where those terms lead the
+  target the result is bitwise the per-row graph's.
 
 Fusing is not always a win, so each bucket is costed before it is
 emitted, in the currencies the island carver uses (`pass_util.hpp`'s

@@ -157,6 +157,10 @@ struct DensitySpec {
 inline constexpr uint8_t kCategoricalArgAutodiff = 1u << 0;
 inline constexpr uint8_t kCategoricalLogit = 1u << 1;
 inline constexpr uint8_t kCategoricalScalarOutcome = 1u << 2;
+// Set only by lane partitioning, with kCategoricalScalarOutcome: input 0
+// holds one outcome per row and input 1 the rows end to end, each row the
+// scalar-outcome call. The output is the rows' lps summed in order.
+inline constexpr uint8_t kCategoricalRows = 1u << 3;
 inline constexpr uint8_t kCategoricalPropto = DensityMode::kProptoBit;
 std::vector<int> pack_all_integer_density_arguments(
     const std::vector<IntegerDensityArgument>& arguments);

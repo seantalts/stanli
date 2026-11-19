@@ -389,43 +389,74 @@ Eigen::Matrix<stan::math::var, -1, 1> categorical_vars(const Desc& input) {
 // scalar rev rule directly below.  Array outcomes deliberately stay on the
 // replay: repeated selections share log nodes, and replacing that tape with
 // counts would regroup low bits (pinned in test_lower.cpp).
-bool native_scalar_probability(uint8_t variant) {
-  return !(variant & kCategoricalLogit) &&
-         (variant & kCategoricalScalarOutcome) &&
-         (variant & kCategoricalArgAutodiff);
-}
+//
+// kCategoricalRows runs that scalar-outcome rule once per row.
+struct CategoricalRows {
+  int64_t rows;
+  int64_t width;
+};
 
-bool native_scalar_logit(uint8_t variant) {
-  return (variant & kCategoricalLogit) &&
-         (variant & kCategoricalScalarOutcome) &&
-         (variant & kCategoricalArgAutodiff);
-}
-
-int categorical_scalar_outcome(const KernelCtx& ctx) {
-  if (ctx.in[0].len != 1)
+CategoricalRows categorical_rows(const KernelCtx& ctx) {
+  const int64_t rows =
+      (ctx.variant & kCategoricalRows) ? ctx.in[0].len : int64_t{1};
+  if (ctx.in[0].len != rows || rows < 1 || ctx.in[1].len % rows != 0)
     throw std::logic_error("categorical scalar outcome has wrong width");
-  return categorical_outcome(ctx.in[0].data[0]);
+  return {rows, ctx.in[1].len / rows};
+}
+
+double categorical_row_value(const KernelCtx& ctx, int outcome,
+                             const Eigen::Map<const Eigen::VectorXd>& arg) {
+  // forward_value_only intentionally instantiates the expression on doubles:
+  // a propto call whose source type was var therefore returns its dropped
+  // zero in that mode.  Preserve that existing contract and use the native
+  // active-type path only for a normal forward/gradient evaluation.  With an
+  // active argument, both <true> and <false> retain this summand; the double
+  // <false> body is the same value/check order without a tape.
+  if ((ctx.variant & kCategoricalArgAutodiff) && !values_only(ctx))
+    return (ctx.variant & kCategoricalLogit)
+               ? stan::math::categorical_logit_lpmf<false>(outcome, arg)
+               : stan::math::categorical_lpmf<false>(outcome, arg);
+  return categorical_eval(ctx.variant, std::vector<int>{outcome}, arg);
+}
+
+void categorical_row_adjoint(uint8_t variant, int outcome,
+                             const Eigen::Map<const Eigen::VectorXd>& arg,
+                             double* adj, double out_adj) {
+  if (!(variant & kCategoricalLogit)) {
+    adj[outcome - 1] += out_adj / arg(outcome - 1);
+    return;
+  }
+  static constexpr const char* function = "categorical_logit_lpmf";
+  stan::math::check_bounded(function, "categorical outcome out of support",
+                            outcome, 1, arg.size());
+  stan::math::check_finite(function, "log odds parameter", arg);
+  const double normalizer = stan::math::log_sum_exp(arg);
+  // Mirror categorical_logit_lpmf's subtraction followed by the scalar
+  // AoS-var log_sum_exp callback (rev/fun/log_sum_exp.hpp). In particular,
+  // update the selected logit first, and form the negative seed with -=
+  // from zero. Packet exp changes low bits and must not replace std::exp.
+  adj[outcome - 1] += out_adj;
+  double normalizer_adj = 0.0;
+  normalizer_adj -= out_adj;
+  for (int64_t i = 0; i < arg.size(); ++i)
+    adj[i] += normalizer_adj * std::exp(arg(i) - normalizer);
 }
 
 void categorical_fwd(KernelCtx& ctx) {
   if (ctx.n_in != 2 || ctx.out.len != 1)
     throw std::logic_error("malformed categorical op");
-  // forward_value_only intentionally instantiates the expression on doubles:
-  // a propto call whose source type was var therefore returns its dropped
-  // zero in that mode.  Preserve that existing contract and use the native
-  // active-type path only for a normal forward/gradient evaluation.
-  if (native_scalar_probability(ctx.variant) && !values_only(ctx)) {
-    const int outcome = categorical_scalar_outcome(ctx);
-    const Eigen::Map<const Eigen::VectorXd> arg(ctx.in[1].data, ctx.in[1].len);
-    // With an active argument, both <true> and <false> retain this summand;
-    // the double <false> body is the same value/check order without a tape.
-    ctx.out.data[0] = stan::math::categorical_lpmf<false>(outcome, arg);
-    return;
-  }
-  if (native_scalar_logit(ctx.variant) && !values_only(ctx)) {
-    const int outcome = categorical_scalar_outcome(ctx);
-    const Eigen::Map<const Eigen::VectorXd> arg(ctx.in[1].data, ctx.in[1].len);
-    ctx.out.data[0] = stan::math::categorical_logit_lpmf<false>(outcome, arg);
+  if (ctx.variant & kCategoricalScalarOutcome) {
+    const CategoricalRows rows = categorical_rows(ctx);
+    // Left to right, as the chained ADD_N of per-row terms adds them.
+    double lp = 0.0;
+    for (int64_t r = 0; r < rows.rows; ++r) {
+      const Eigen::Map<const Eigen::VectorXd> arg(
+          ctx.in[1].data + r * rows.width, rows.width);
+      const double row = categorical_row_value(
+          ctx, categorical_outcome(ctx.in[0].data[r]), arg);
+      lp = r == 0 ? row : lp + row;
+    }
+    ctx.out.data[0] = lp;
     return;
   }
   const std::vector<int> outcomes = categorical_outcomes(ctx);
@@ -444,29 +475,15 @@ void categorical_bwd(KernelCtx& ctx) {
       ctx.in_adj[1].data == nullptr ||
       (!(ctx.variant & kCategoricalScalarOutcome) && ctx.in[0].len == 0))
     return;
-  if (native_scalar_probability(ctx.variant)) {
-    const int outcome = categorical_scalar_outcome(ctx);
-    ctx.in_adj[1].data[outcome - 1] +=
-        ctx.out_adj / ctx.in[1].data[outcome - 1];
-    return;
-  }
-  if (native_scalar_logit(ctx.variant)) {
-    const int outcome = categorical_scalar_outcome(ctx);
-    const Eigen::Map<const Eigen::VectorXd> arg(ctx.in[1].data, ctx.in[1].len);
-    static constexpr const char* function = "categorical_logit_lpmf";
-    stan::math::check_bounded(function, "categorical outcome out of support",
-                              outcome, 1, arg.size());
-    stan::math::check_finite(function, "log odds parameter", arg);
-    const double normalizer = stan::math::log_sum_exp(arg);
-    // Mirror categorical_logit_lpmf's subtraction followed by the scalar
-    // AoS-var log_sum_exp callback (rev/fun/log_sum_exp.hpp). In particular,
-    // update the selected logit first, and form the negative seed with -=
-    // from zero. Packet exp changes low bits and must not replace std::exp.
-    ctx.in_adj[1].data[outcome - 1] += ctx.out_adj;
-    double normalizer_adj = 0.0;
-    normalizer_adj -= ctx.out_adj;
-    for (int64_t i = 0; i < arg.size(); ++i)
-      ctx.in_adj[1].data[i] += normalizer_adj * std::exp(arg(i) - normalizer);
+  if (ctx.variant & kCategoricalScalarOutcome) {
+    const CategoricalRows rows = categorical_rows(ctx);
+    for (int64_t r = 0; r < rows.rows; ++r) {
+      const Eigen::Map<const Eigen::VectorXd> arg(
+          ctx.in[1].data + r * rows.width, rows.width);
+      categorical_row_adjoint(ctx.variant,
+                              categorical_outcome(ctx.in[0].data[r]), arg,
+                              ctx.in_adj[1].data + r * rows.width, ctx.out_adj);
+    }
     return;
   }
   stan::math::nested_rev_autodiff nested;
