@@ -1491,6 +1491,9 @@ if(Python3_Interpreter_FOUND)
   add_test(NAME test_corpus_bench
            COMMAND ${Python3_EXECUTABLE} tests/test_corpus_bench.py
            WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
+  add_test(NAME test_bench_select
+           COMMAND ${Python3_EXECUTABLE} tests/test_bench_select.py
+           WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
   add_test(NAME test_corpus_bench_cache
            COMMAND ${Python3_EXECUTABLE} tests/test_corpus_bench_cache.py
            WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})

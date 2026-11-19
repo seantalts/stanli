@@ -673,7 +673,9 @@ python3 harnesses/corpus_bench.py deps/cmdstan deps/posteriordb \
   --stancflags=--O1
 ```
 
-`--corpus` selects a source collection, and `--filter` selects model IDs.
+`--corpus` selects a source collection. `--filter TEXT` keeps the models
+whose IDs contain `TEXT`, and `--models NAME,...` keeps exactly the named
+models. An unknown name is an error.
 
 `tools/gen_benchmark_points.py` reruns the reference runs and merges the
 results into the committed points file. By default it reruns every model.
@@ -753,9 +755,10 @@ how to measure one change against the branch that it targets.
 
 Before you merge a change to the compiler pipeline, benchmark both the
 current default branch and the candidate. Run the full inventory
-(`--corpus all`, no `--filter`) with the shipped configuration for both
-revisions. Use the same hardware, compiler, build mode, threads, inputs and
-settings for both, with separate output paths.
+(`--corpus all`, no `--filter` or `--models`) with the shipped configuration
+for both revisions, or the [selected models](#selected-models) when the
+change qualifies. Use the same hardware, compiler, build mode, threads,
+inputs and settings for both, with separate output paths.
 
 Compare each model's source-to-MIR time, preparation time, warm gradient and
 total sampling estimate as `100 * (candidate / baseline - 1)`. A model's
@@ -772,6 +775,75 @@ affected phases. Keep all samples, and add controls with identical binaries
 when needed. Do not rerun until a favorable sample appears. Fix a confirmed
 regression before merge. The PR lists both revision SHAs, build identities,
 exact commands, coverage, the phase comparison and links to the raw results.
+
+<a id="selected-models"></a>
+
+### Selected models
+
+A change to graph passes, lowering, preparation or kernels (`runtime/`) may
+time a selected set of models. Build `bench_grad`, `dump_ops` and
+`dump_islands` with the shipped configuration for both revisions, then run:
+
+```sh
+python3 tools/bench_select.py deps/posteriordb build/select \
+  --base ../main/build-bench --candidate build-bench --opcodes OP_CATEGORICAL
+```
+
+The tool reads the same corpus and data as the benchmark. It compiles every
+model with each revision's own compiler, prepares it with each revision's
+runtime, and selects these models:
+
+- Every model whose prepared program differs: the MIR, the `dump_ops` op list
+  or the `dump_islands` output.
+- Every model that runs an opcode named with `--opcodes`. Name each opcode
+  whose kernel the change edits. A kernel change leaves the program as it
+  was, and a tool cannot tell reliably which opcodes a source change touches.
+- Every model whose preparation gets slower by more than 2% or 5 ms. The
+  tool times preparation for every model in both revisions, one process at a
+  time with the revisions alternating, and keeps the best of three. A pass
+  can get slower without changing its output.
+- Every model that fails to compile, dump or prepare in either revision. It is
+  listed as unresolved, and the full corpus run is then required.
+- The control models below, whose programs normally do not change.
+
+The controls catch speed changes that come from the binary alone. For
+example, PR #600 inserted an opcode in the middle of the opcode list, which
+renumbered the opcodes after it. `i319_pois_re` got 3.4% slower with an
+identical program. The controls cover different kinds and sizes of model:
+
+| Model | Why it is a control |
+| --- | --- |
+| `i319_pois_re` | brms Poisson model with random effects; slowed in PR #600 with an identical program |
+| `arma11` | short scalar time-series loop; also flagged in PR #600 with an identical program |
+| `eight_schools_noncentered` | tiny model, where fixed per-gradient costs dominate |
+| `hmm_example` | hidden Markov model with a forward-algorithm loop |
+| `one_comp_mm_elim_abs` | ODE solver |
+| `gpcm_latent_reg_irt` | 530 parameters and large data |
+
+`OUT/selection.json` holds the evidence: build identities, counts, each
+changed model with a one-line summary of its opcode changes, the models that
+use the named opcodes, the preparation times of every model, failures, and
+the selected models with their reasons. Its `models` field is the list to
+pass to the benchmark:
+
+```sh
+python3 harnesses/corpus_bench.py deps/cmdstan deps/posteriordb \
+  build/selected/base.tsv --bench ../main/build-bench/bench_grad \
+  --corpus all --models "$(python3 -c 'import json; print(json.load(open("build/select/selection.json"))["models"])')" \
+  --rounds 6 --warmup-ms 20 --measure-ms 40 --points 10 \
+  --gradient-timeout 60 --build-timeout 900
+```
+
+Run the candidate the same way with its own `bench_grad` and output path.
+The threshold, re-measurement and evidence rules above apply unchanged. The
+PR also reports the selection: the counts, the changed models with their
+reasons, the named opcodes, the controls and the preparation comparison over
+all models.
+
+The full corpus stays required for compiler pins, source-to-MIR compilation
+(`compiler/`, `tools/stanc_embed`, `deps/pins.env`), changes to how the
+benchmark harness or timer measures, build flag or toolchain changes, and any run where the
+selection tool fails on a model in either revision.
 
 ### Focused execution-path benchmarks
 

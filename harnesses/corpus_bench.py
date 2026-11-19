@@ -697,10 +697,18 @@ def run_config(args):
     config = {k: str(v) if isinstance(v, pathlib.Path) else v for k, v in vars(args).items()
               if k not in ("resume", "output", "build_cache", "no_build_cache", "build_jobs",
                            "points_file")}
-    for flag in ("fast_math", "allow_unpinned_cmdstan"):
+    for flag in ("fast_math", "allow_unpinned_cmdstan", "models"):
         if not config.get(flag):
             config.pop(flag, None)
     return config
+
+
+def selected_models(names, substring, models):
+    wanted = [m for m in models.split(",") if m]
+    unknown = sorted(set(wanted) - set(names))
+    if unknown:
+        raise ValueError("models not in the corpus: " + ", ".join(unknown))
+    return [n for n in names if substring in n and (not wanted or n in wanted)]
 
 
 def measure_model(name, stan, data, directory, manifest, runner, args, build=None, reference=None):
@@ -800,7 +808,8 @@ def main(argv=None):
     parser.add_argument("output", type=pathlib.Path)
     parser.add_argument("--corpus", choices=[c for c in COLLECTIONS if c != "regressions"],
                         default="all")
-    parser.add_argument("--filter", default="")
+    parser.add_argument("--filter", default="", help="time models whose names contain this")
+    parser.add_argument("--models", default="", help="comma-separated exact model names to time")
     parser.add_argument("--rounds", type=int, default=6)
     parser.add_argument("--warmup-ms", type=int, default=20)
     parser.add_argument("--measure-ms", type=int, default=40,
@@ -877,9 +886,12 @@ def main(argv=None):
     with tempfile.TemporaryDirectory(prefix="stanli-bench-inputs-") as cache:
         inputs = {}
         cases = corpus_cases(args.pdb, args.corpus)
-        for name, case in sorted(cases.items()):
-            if args.filter and args.filter not in name:
-                continue
+        try:
+            names = selected_models(sorted(cases), args.filter, args.models)
+        except ValueError as exc:
+            parser.error(str(exc))
+        for name in names:
+            case = cases[name]
             data = pathlib.Path(cache) / f"{name}.json"
             shutil.copyfile(materialize_data(case, cache), data)
             inputs[name] = (case.source, data)
