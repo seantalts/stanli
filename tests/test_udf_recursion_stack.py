@@ -7,7 +7,7 @@ recursion ends or reaches its depth limit. A Windows thread has 1 MB by
 default, where Linux and macOS give the main thread 8 MB. Each model here
 runs once on the default stack and once on a 1 MB stack (set with
 setrlimit, or the Windows default), and both runs must print the same
-result.
+log density, gradient and write_array values.
 
   test_udf_recursion_stack.py STANLI_CHECK
 """
@@ -66,6 +66,28 @@ model {
 }
 """
 
+# The same recursion in generated quantities only, which write_array's
+# lowering inlines.
+GENERATED = """
+functions {
+  real rec(int n, real x) {
+    if (n <= 0) {
+      return x;
+    }
+    return tanh(rec(n - 1, x));
+  }
+}
+parameters {
+  real mu;
+}
+model {
+  mu ~ normal(0, 1);
+}
+generated quantities {
+  real g = rec(40, mu);
+}
+"""
+
 STACK_BYTES = 1 << 20
 
 
@@ -80,12 +102,15 @@ def small_stack():
 
 def run(check, stan, data, limit):
     preexec = small_stack if limit and sys.platform != "win32" else None
-    return subprocess.run([check, str(stan), str(data), "--point", "1"],
+    return subprocess.run([check, str(stan), str(data), "--point", "1",
+                           "--wa-values"],
                           capture_output=True, text=True, preexec_fn=preexec)
 
 
 def result_line(stdout):
-    return next((l for l in stdout.splitlines() if l.startswith("OK ")), None)
+    """The log density, gradient and write_array values, or None."""
+    lines = [l for l in stdout.splitlines() if l.startswith(("OK ", "WAVALS"))]
+    return " | ".join(lines) if any(l.startswith("OK ") for l in lines) else None
 
 
 def main(check):
@@ -94,7 +119,8 @@ def main(check):
         data = Path(work) / "data.json"
         data.write_text("{}\n")
         models = {"while_recursive_udf": WHILE_COUNTER}
-        for name, text in (("parameter", PARAMETER), ("mutual", MUTUAL)):
+        for name, text in (("parameter", PARAMETER), ("mutual", MUTUAL),
+                           ("generated", GENERATED)):
             models[name] = Path(work) / f"{name}.stan"
             models[name].write_text(text)
         for name, stan in models.items():
