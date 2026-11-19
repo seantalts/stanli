@@ -2174,9 +2174,9 @@ Lowering::Flow Lowering::lower_stmt_impl(const mir::Stmt& s) {
           debug_env("STANLI_STRUCTURED_LOOP_DIAGNOSTICS") &&
           structured_outer_depth <= 2;
       if (diagnostics)
-        carry_diagnostic =
-            std::string(" carries=") + (loop_carries_value(s) ? "1" : "0") +
-            " dep=" + (loop_carries_dependence(s) ? "1" : "0");
+        carry_diagnostic = std::string(" carries=") +
+                           (loop_carries_value(s) ? "1" : "0") +
+                           " dep=" + (loop_carries_dependence(s) ? "1" : "0");
       const auto unroll = [&]() -> std::optional<Flow> {
         structured_unroll_depth += unrolled;
         const ScopeExit leave{[&] { structured_unroll_depth -= unrolled; }};
@@ -2209,9 +2209,8 @@ Lowering::Flow Lowering::lower_stmt_impl(const mir::Stmt& s) {
         emit_diagnostic("stanli_structured unrolled loop=" + s.loopvar +
                         " trips=" + std::to_string(trips) +
                         " graph=" + (in_write_array ? "wa" : "lp") +
-                        " ops=" + std::to_string(g.ops.size()) +
-                        " delta=" + std::to_string(loop_ops) +
-                        carry_diagnostic);
+                        " ops=" + std::to_string(g.ops.size()) + " delta=" +
+                        std::to_string(loop_ops) + carry_diagnostic);
       if (before_unroll && log_prob_loop_retained(loop_ops, trips)) {
         wa_restore(*before_unroll);
         bool kept = false;

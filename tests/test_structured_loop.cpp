@@ -2753,7 +2753,8 @@ static DataMap large_loop_data(const char* length, int trips, int states) {
   data.set_int(length, trips);
   data.set_int("K", states);
   std::vector<double> y(static_cast<size_t>(trips));
-  for (int t = 0; t < trips; ++t) y[static_cast<size_t>(t)] = 2 * std::sin(.37 * t);
+  for (int t = 0; t < trips; ++t)
+    y[static_cast<size_t>(t)] = 2 * std::sin(.37 * t);
   data.set_real_array("y", std::move(y));
   return data;
 }
@@ -2772,14 +2773,14 @@ static void large_loop_tests() {
     data.set_real_array("log_gamma", std::move(log_gamma), {states, states});
     return data;
   };
-  const auto small = compile_fixture("structured_large_recursion",
-                                     recursion(200), Mode::Auto);
+  const auto small =
+      compile_fixture("structured_large_recursion", recursion(200), Mode::Auto);
   check(retained(small) == nullptr, "a small recursion is unrolled");
   const auto large = compile_fixture("structured_large_recursion",
                                      recursion(4500), Mode::Auto);
   check(retained(large) != nullptr, "a large recursion is kept as a loop");
-  const auto unrolled = compile_fixture("structured_large_recursion",
-                                        recursion(4500), Mode::Off);
+  const auto unrolled =
+      compile_fixture("structured_large_recursion", recursion(4500), Mode::Off);
   check(retained(unrolled) == nullptr, "structured loops off unrolls it");
   compare_gradients(large, unrolled,
                     {{.1, -.2, .3, .5, -.4, .2}, {1, 0, -1, 2, -2, -.5}},
