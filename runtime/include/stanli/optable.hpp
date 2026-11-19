@@ -237,7 +237,8 @@ namespace stanli {
   X(OP_QR)                            \
   X(OP_QR_THIN)                       \
   X(OP_EIGENDECOMPOSE_SYM)            \
-  X(OP_SVD)
+  X(OP_SVD)                           \
+  X(OP_MULTINOMIAL_SOFTMAX_LPMF)
 
 // Scalar densities, one line each: this list generates the opcode, the
 // name, the kernel, its registration, and the lowering table entry

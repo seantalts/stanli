@@ -61,9 +61,9 @@ constexpr int64_t kDensityElem = kLaneDensityElem;
 // not turn that into a quadratic term.
 constexpr int64_t kMaxSplits = 32;
 
-// OP_CATEGORICAL is admitted only as a lane delimiter, and only the GLM arm
-// below emits it. Its complete per-call contract now lives in the comparable
-// variant byte, like the other registered densities.
+// OP_CATEGORICAL is admitted only as a lane delimiter. Its complete per-call
+// contract lives in the comparable variant byte, like the other registered
+// densities.
 bool is_blocked(const Op& op, bool is_delimiter) {
   if (op.opcode == OP_CATEGORICAL) return !is_delimiter || op.out2 >= 0;
   return is_effectful_op(op.opcode) || (op.opcode == OP_ADD && op.variant) ||
@@ -687,6 +687,8 @@ PartitionStats partition_lanes(Graph& g, Fills& fills,
         in.kind = InKind::kConstLanes;
         in.values = std::move(vals);
         all_shared = false;
+        // A categorical's outcome is one per lane whatever its row's width.
+        if (t.opcode == OP_CATEGORICAL && j == 0) continue;
         if (width && width != 1) ok = false;
         width = 1;
       }
@@ -821,6 +823,22 @@ PartitionStats partition_lanes(Graph& g, Fills& fills,
           ap.ins[0].kind == InKind::kLaneLocal && width >= 2) {
         ap.emit = Emit::kRowSum;
         ap.width = 1;
+        continue;
+      }
+      // One scalar-outcome categorical per lane, each over its own row: the
+      // fused op takes the lanes' outcomes and their rows end to end.
+      if (t.opcode == OP_CATEGORICAL) {
+        constexpr uint8_t kScalar =
+            kCategoricalScalarOutcome | kCategoricalArgAutodiff;
+        ok = is_term && (t.variant & kScalar) == kScalar &&
+             !(t.variant & kCategoricalRows) &&
+             ap.ins[0].kind == InKind::kConstLanes &&
+             ap.ins[1].kind == InKind::kLaneLocal &&
+             width == g.slots[(size_t)t.in[1]].len;
+        if (!ok) break;
+        ap.width = 1;
+        ap.rows = width;
+        ap.emit = Emit::kTermDensity;
         continue;
       }
       if (has_op_trait(t.opcode, op_trait::kRerollAnyDensity)) {
@@ -1066,6 +1084,7 @@ PartitionStats partition_lanes(Graph& g, Fills& fills,
           break;
         case Emit::kTermDensity:
           op.out = g.add_slot(1, false);
+          if (op.opcode == OP_CATEGORICAL) op.variant |= kCategoricalRows;
           attach_outcomes(op, p, ap.rows);
           ap.out = op.out;
           break;

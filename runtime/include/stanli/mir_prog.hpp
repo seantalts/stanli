@@ -2900,6 +2900,12 @@ struct ProgramCompiler {
   // all-integer descriptors evaluate once as constants, with the same Stan
   // Math implementation used by graph lowering and MIR interpretation.
   Range density_call(const mir::Expr& e, const DensitySpec& spec) {
+    if (spec.opcode == OP_MULTINOMIAL_LPMF)
+      if (const mir::Expr* logits = mir::multinomial_softmax_logits(e)) {
+        mir::Expr call = e;
+        call.args[1] = *logits;
+        return density_call(call, multinomial_softmax_density());
+      }
     if ((int)e.args.size() != spec.arity)
       bail(e.name + ": wrong number of arguments");
 
@@ -2943,6 +2949,7 @@ struct ProgramCompiler {
       const DensityCallPlan plan =
           density_call_plan(spec, plan_arguments, e.fn_propto && propto_ctx);
       if (plan.empty_result) return {konst(0.0), 1};
+      if (plan.data_term) args.push_back(Range{konst(*plan.data_term), 1});
       Range out{0, 1};
       return kernel_call(spec.opcode, args, out, plan.variant,
                          plan.activity_mask, plan.idata, {}, e.name);

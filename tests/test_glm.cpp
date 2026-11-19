@@ -554,6 +554,104 @@ static void test_categorical_logit_scalar_bits() {
           }
 }
 
+// One op over several rows does each row's scalar-outcome arithmetic: the
+// value is the rows' lps added left to right from zero, as the chained
+// ADD_N of per-row terms adds them, and every gradient is that row's own.
+// Outcome and logit checks still reject per row.
+static void test_categorical_rows() {
+  using namespace stanli;
+  const Kernel* kernel = find_kernel(OP_CATEGORICAL);
+  const int rows = 3, k = 4;
+  const double outcomes[rows] = {2.0, 4.0, 1.0};
+  const auto run = [&](uint8_t form, const double* arg, const double* seed_adj,
+                       double weight, double* adj) {
+    double out = 0.0;
+    KernelCtx ctx{};
+    ctx.n_in = 2;
+    ctx.in[0] = Desc{const_cast<double*>(outcomes), rows};
+    ctx.in[1] = Desc{const_cast<double*>(arg), rows * k};
+    ctx.in_adj[1] = Desc{adj, rows * k};
+    ctx.out = Desc{&out, 1};
+    ctx.out_adj = weight;
+    ctx.variant = kCategoricalRows | kCategoricalScalarOutcome |
+                  kCategoricalArgAutodiff | form;
+    std::copy(seed_adj, seed_adj + rows * k, adj);
+    kernel->forward(ctx);
+    kernel->backward(ctx);
+    return out;
+  };
+  const double logits[rows * k] = {0.3,  -1.2, 2.5, 0.0, 1e-3, 4.0,
+                                   -0.5, 7.25, 0.1, 0.2, 0.3,  -9.0};
+  const double probs[rows * k] = {0.125, 0.25,  0.5,  0.125, 0.5,   0.25,
+                                  0.125, 0.125, 0.25, 0.25,  0.375, 0.125};
+  double seed[rows * k];
+  for (int i = 0; i < rows * k; ++i) seed[i] = i % 2 ? -0.0 : 0.3125;
+  for (uint8_t form : {kCategoricalLogit, (uint8_t)0}) {
+    const double* arg = form ? logits : probs;
+    const std::string what =
+        std::string("categorical rows ") + (form ? "logit" : "probability");
+    double adj[rows * k];
+    double got = 0.0;
+    try {
+      got = run(form, arg, seed, -1.3, adj);
+    } catch (const std::exception& e) {
+      expect_true(what + " evaluates (" + e.what() + ")", false);
+      continue;
+    }
+    stan::math::nested_rev_autodiff nested;
+    double want = 0.0;
+    stan::math::var total = 0.0;
+    Eigen::Matrix<stan::math::var, -1, 1> ref(rows * k);
+    for (int i = 0; i < rows * k; ++i) ref(i) = arg[i];
+    for (int i = 0; i < rows * k; ++i) ref(i).adj() = seed[i];
+    for (int r = 0; r < rows; ++r) {
+      const Eigen::Matrix<stan::math::var, -1, 1> row = ref.segment(r * k, k);
+      const int y = (int)outcomes[r];
+      stan::math::var lp =
+          form ? stan::math::categorical_logit_lpmf<false>(y, row)
+               : stan::math::categorical_lpmf<false>(y, row);
+      want += lp.val();
+      total += lp * -1.3;
+    }
+    stan::math::grad(total.vi_);
+    expect_eq(what + " value", got, want);
+    for (int i = 0; i < rows * k; ++i)
+      expect_eq(what + " g" + std::to_string(i), adj[i], ref(i).adj());
+  }
+
+  const auto throws = [&](const double* arg, uint8_t form, double bad_y) {
+    double y[rows] = {outcomes[0], bad_y, outcomes[2]};
+    double out = 0.0, adj[rows * k] = {};
+    KernelCtx ctx{};
+    ctx.n_in = 2;
+    ctx.in[0] = Desc{y, rows};
+    ctx.in[1] = Desc{const_cast<double*>(arg), rows * k};
+    ctx.in_adj[1] = Desc{adj, rows * k};
+    ctx.out = Desc{&out, 1};
+    ctx.variant = kCategoricalRows | kCategoricalScalarOutcome |
+                  kCategoricalArgAutodiff | form;
+    try {
+      kernel->forward(ctx);
+    } catch (const std::domain_error&) {
+      return true;
+    } catch (const std::exception&) {
+      return false;
+    }
+    return false;
+  };
+  expect_true("categorical rows outcome above support",
+              throws(logits, kCategoricalLogit, k + 1.0));
+  expect_true("categorical rows outcome below support",
+              throws(logits, kCategoricalLogit, 0.0));
+  expect_true("categorical rows probability outcome support",
+              throws(probs, 0, k + 1.0));
+  double bad[rows * k];
+  std::copy(std::begin(logits), std::end(logits), bad);
+  bad[k + 2] = std::numeric_limits<double>::infinity();
+  expect_true("categorical rows non-finite logit",
+              throws(bad, kCategoricalLogit, outcomes[1]));
+}
+
 // Array outcomes add one callback contribution per observation. Preserve
 // that exact accumulation order under a non-unit upstream adjoint; replacing
 // it with count * adjoint changes the selected gradient's low bit. The zero
@@ -659,6 +757,7 @@ int main() {
   test_categorical_native_scalar();
   test_categorical_native_kernel_edges();
   test_categorical_logit_scalar_bits();
+  test_categorical_rows();
   test_categorical_array_scaled();
 
   return finish("test_glm");

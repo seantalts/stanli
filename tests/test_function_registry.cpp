@@ -5,6 +5,8 @@
 #include <stanli/function_registry.hpp>
 #include <stanli/mir.hpp>
 
+#include <stan/math/prim.hpp>
+
 #include <cstdio>
 #include <set>
 #include <stdexcept>
@@ -278,9 +280,64 @@ static void check_density_layouts() {
     fail("a bare vector counting two is refused");
 }
 
+// Without propto, a multinomial with parameter probabilities gets the
+// multinomial coefficient of its counts from the plan, computed once. A
+// data-only call computes it in the kernel.
+static void check_multinomial_coefficient_plans() {
+  using namespace stanli;
+  const std::vector<int> counts{1, 0, 4};
+  for (const char* name : {"multinomial_lpmf", "multinomial_logit_lpmf"}) {
+    const FunctionSpec* f =
+        function_spec(name, 2, uint64_t{1}, FunctionArgumentKind::Real);
+    if (f == nullptr || f->density() == nullptr) {
+      ++failures;
+      std::printf("FAIL %s is not a registered density\n", name);
+      continue;
+    }
+    const bool logit = std::string(name) == "multinomial_logit_lpmf";
+    double expected = 0;
+    if (logit) {
+      const Eigen::Map<const Eigen::ArrayXi> n(counts.data(), 3);
+      expected =
+          stan::math::lgamma(1 + n.sum()) - stan::math::lgamma(1 + n).sum();
+    } else {
+      double total = 1;
+      for (int count : counts) {
+        total += count;
+        expected -= stan::math::lgamma(count + 1.0);
+      }
+      expected += stan::math::lgamma(total);
+    }
+    for (bool propto : {false, true})
+      for (bool active : {false, true}) {
+        std::vector<DensityCallArgument> args{
+            integer_density_argument(counts, false, true),
+            {make_function_shape(FunctionArgumentKind::Real,
+                                 FunctionContainerKind::Vector,
+                                 FunctionContainerKind::Scalar, {3}, 3),
+             {},
+             false,
+             !active,
+             active}};
+        const DensityCallPlan plan =
+            density_call_plan(*f->density(), args, propto);
+        const bool split = active && !propto;
+        const uint8_t variant =
+            (uint8_t)((active ? 0x1u : 0u) | (propto ? 0x80u : 0u));
+        if (plan.variant != variant || plan.data_term.has_value() != split ||
+            (split && *plan.data_term != expected)) {
+          ++failures;
+          std::printf("FAIL %s plan propto=%d active=%d: variant 0x%02x\n",
+                      name, (int)propto, (int)active, (unsigned)plan.variant);
+        }
+      }
+  }
+}
+
 int main() {
   using namespace stanli;
   check_density_layouts();
+  check_multinomial_coefficient_plans();
   std::set<std::string> keys;
   std::set<const FunctionSpec*> canonical_entries;
   size_t builtin_count = 0;

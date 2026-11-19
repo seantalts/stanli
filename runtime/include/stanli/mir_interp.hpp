@@ -847,6 +847,12 @@ class MirInterp {
   // all-integer policy instead calls the shared evaluator because there is no
   // differentiable input on which to hang a graph operation.
   Value density_eval(const mir::Expr& e, const DensitySpec& spec) {
+    if (spec.opcode == OP_MULTINOMIAL_LPMF)
+      if (const mir::Expr* logits = mir::multinomial_softmax_logits(e)) {
+        mir::Expr call = e;
+        call.args[1] = *logits;
+        return density_eval(call, multinomial_softmax_density());
+      }
     if ((int)e.args.size() != spec.arity)
       fail(e.name + ": wrong number of arguments", e.raw);
     std::vector<Value> values;
@@ -915,6 +921,7 @@ class MirInterp {
       inputs.push_back(std::move(input));
     }
 
+    if (plan.data_term) inputs.push_back({T(*plan.data_term)});
     Value result;
     result.r = {run_kernel_call(e, spec.opcode, plan.variant,
                                 plan.activity_mask, std::move(plan.idata),

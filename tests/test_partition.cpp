@@ -1291,6 +1291,108 @@ static void test_irt_refuse_near_miss(double lead, bool concat) {
          st.groups == 0 && g.ops.size() == before && tt == terms);
 }
 
+// ---- categorical rows -------------------------------------------------------
+
+// brms categorical: row l of a matrix of logits, sliced, and one
+// scalar-outcome categorical per row, each a target term. The base holds
+// `first + L` rows and lane l reads row first + l.
+struct CategoricalRows {
+  Graph g;
+  Fills fills;
+  std::vector<int> terms;
+  int base = -1;
+  int K = 0;
+};
+
+static CategoricalRows build_categorical_rows(int L, int K, uint8_t variant,
+                                              int first = 0) {
+  CategoricalRows b;
+  b.K = K;
+  b.base = b.g.add_slot((first + L) * K, true);
+  for (int l = 0; l < L; ++l) {
+    const int y = b.g.add_slot(1, false);
+    b.fills.emplace_back(y, std::vector<double>{(double)(1 + (3 * l) % K)});
+    const int row = b.g.add_slot(K, false);
+    b.g.add_op(OP_SLICE, {b.base}, row, {(first + l) * K});
+    const int lp = b.g.add_slot(1, false);
+    b.g.add_op(OP_CATEGORICAL, {y, row}, lp);
+    b.g.ops.back().variant = variant;
+    b.terms.push_back(lp);
+  }
+  return b;
+}
+
+// Each row's value and gradient is the per-row rule's, and the fused term
+// keeps the first row's place in the term list, so the result is bitwise.
+static void expect_categorical_rows(const std::string& what, CategoricalRows b,
+                                    double (*fill)(int64_t)) {
+  const int64_t L = (int64_t)b.terms.size();
+  const bool whole_base = b.g.slots[(size_t)b.base].len == L * b.K;
+  Graph ref = b.g;
+  reduce_into_result(ref, b.terms);
+  const std::vector<double> want =
+      testutil::run_grad(std::move(ref), b.fills, fill);
+
+  std::vector<int> tt = b.terms;
+  Fills f2 = b.fills;
+  const PartitionStats st = partition_lanes(b.g, f2, tt, {});
+  expect((what + " one group").c_str(), st.groups == 1 && st.lanes == L);
+  expect((what + " one term").c_str(), tt.size() == 1);
+  if (st.groups != 1 || tt.size() != 1) return;
+  int fused = 0;
+  for (const Op& op : b.g.ops) {
+    if (op.opcode != OP_CATEGORICAL) continue;
+    ++fused;
+    expect((what + " rows variant").c_str(),
+           (op.variant & kCategoricalRows) != 0 && op.out == tt[0]);
+    expect((what + " one outcome per row").c_str(),
+           b.g.slots[(size_t)op.in[0]].len == L);
+    expect((what + " reads the rows").c_str(),
+           whole_base ? op.in[1] == b.base
+                      : b.g.slots[(size_t)op.in[1]].len == L * b.K);
+  }
+  expect((what + " one categorical").c_str(), fused == 1);
+  expect((what + " slices").c_str(),
+         count_opcode(b.g, OP_SLICE) == (whole_base ? 0 : 1));
+  reduce_into_result(b.g, tt);
+  const std::vector<double> got = testutil::run_grad(std::move(b.g), f2, fill);
+  expect((what + " bitwise").c_str(), got == want);
+}
+
+static double simplex_at(int64_t i) {
+  static const double row[4] = {0.125, 0.25, 0.5, 0.125};
+  return row[i % 4];
+}
+
+static void test_categorical_rows() {
+  const uint8_t scalar = kCategoricalScalarOutcome | kCategoricalArgAutodiff;
+  expect_categorical_rows(
+      "categorical logit rows",
+      build_categorical_rows(6, 3, scalar | kCategoricalLogit), fill_at);
+  expect_categorical_rows(
+      "categorical logit rows propto",
+      build_categorical_rows(6, 3, scalar | kCategoricalLogit | 0x80u),
+      fill_at);
+  expect_categorical_rows("categorical probability rows",
+                          build_categorical_rows(6, 4, scalar), simplex_at);
+  expect_categorical_rows(
+      "categorical logit row span",
+      build_categorical_rows(12, 3, scalar | kCategoricalLogit, 2), fill_at);
+}
+
+// The array-outcome form is not the per-row rule, even with one outcome:
+// Stan Math's array overload sums differently.
+static void test_categorical_array_rows_refuse() {
+  CategoricalRows b =
+      build_categorical_rows(6, 3, kCategoricalArgAutodiff | kCategoricalLogit);
+  const size_t before = b.g.ops.size();
+  std::vector<int> tt = b.terms;
+  Fills f2 = b.fills;
+  const PartitionStats st = partition_lanes(b.g, f2, tt, {});
+  expect("categorical array rows refuse",
+         st.groups == 0 && b.g.ops.size() == before && tt == b.terms);
+}
+
 // ---- cost -----------------------------------------------------------------
 
 static double peak_rss_mb() {
@@ -1467,6 +1569,8 @@ int main() {
   test_irt_split_subtrahend();
   test_irt_refuse_near_miss(0.0, false);
   test_irt_refuse_near_miss(1.5, true);
+  test_categorical_rows();
+  test_categorical_array_rows_refuse();
   test_cost_declines();
   test_scaling();
   test_bucket_term_scaling();

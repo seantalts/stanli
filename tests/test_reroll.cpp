@@ -1824,24 +1824,27 @@ static void test_read_modify_write_lanes() {
 }
 
 static void adjacent_loops(int L, Graph& g, Fills& fills,
-                           std::vector<int>& terms) {
+                           std::vector<int>& terms, int loops = 2,
+                           bool last_lane_escapes = false) {
   const int J = 5;
   const int t0 = g.add_slot(1, true), a = g.add_slot(J, true);
   const int sigma = g.add_slot(1, true);
-  int mus[2], ys[2];
-  for (int v = 0; v < 2; ++v) {
-    mus[v] = g.add_slot(L, false);
-    g.add_op(OP_REP_VEC, {t0}, mus[v]);
-    ys[v] = g.add_slot(L, false);
+  std::vector<int> mus((size_t)loops), ys((size_t)loops);
+  for (int v = 0; v < loops; ++v) {
+    mus[(size_t)v] = g.add_slot(L, false);
+    g.add_op(OP_REP_VEC, {t0}, mus[(size_t)v]);
+    ys[(size_t)v] = g.add_slot(L, false);
     std::vector<double> yv((size_t)L);
     for (int k = 0; k < L; ++k) yv[(size_t)k] = 0.4 * k - 1.0 + v;
-    fills.emplace_back(ys[v], yv);
+    fills.emplace_back(ys[(size_t)v], yv);
   }
   int stage = 0;
-  for (int v = 0; v < 2; ++v) {
+  std::vector<int> last_values;
+  for (int v = 0; v < loops; ++v) {
+    const int mu = mus[(size_t)v];
     for (int l = 0; l < L; ++l, ++stage) {
       const int m = g.add_slot(1, false);
-      g.add_op(OP_INDEX, {mus[v]}, m, {l});
+      g.add_op(OP_INDEX, {mu}, m, {l});
       const int r = g.add_slot(1, false);
       g.add_op(OP_INDEX, {a}, r, {(l + v) % J});
       const int c = g.add_slot(1, false);
@@ -1850,16 +1853,24 @@ static void adjacent_loops(int L, Graph& g, Fills& fills,
       g.add_op(OP_MUL, {r, c}, h);
       const int s = g.add_slot(1, false);
       g.add_op(OP_ADD, {m, h}, s);
-      g.add_op(OP_SET_INDEX_INPLACE, {mus[v], s}, mus[v], {l});
+      g.add_op(OP_SET_INDEX_INPLACE, {mu, s}, mu, {l});
+      if (l == L - 1) last_values.push_back(s);
     }
   }
-  for (int v = 0; v < 2; ++v) {
+  for (int v = 0; v < loops; ++v) {
     const int lp = g.add_slot(1, false);
-    const int id = stanli::testutil::add_density(g, OP_NORMAL_LPDF,
-                                                 {ys[v], mus[v], sigma}, lp);
+    const int id = stanli::testutil::add_density(
+        g, OP_NORMAL_LPDF, {ys[(size_t)v], mus[(size_t)v], sigma}, lp);
     g.ops[(size_t)id].variant = 0x06;
     terms.push_back(lp);
   }
+  // A later read of mu[L] that store forwarding pointed at the stored value.
+  if (last_lane_escapes)
+    for (int s : last_values) {
+      const int sq = g.add_slot(1, false);
+      g.add_op(OP_MUL, {s, s}, sq);
+      terms.push_back(sq);
+    }
 }
 
 static void test_read_modify_write_adjacent_loops() {
@@ -1880,6 +1891,31 @@ static void test_read_modify_write_adjacent_loops() {
   const std::vector<double> got = run_grad(std::move(g), f2);
   for (size_t i = 0; i < want.size() && i < got.size(); ++i)
     expect_close(("adjacent loops v" + std::to_string(i)).c_str(), got[i],
+                 want[i]);
+}
+
+// Each loop's last lane stays scalar because its value escapes. Its scan
+// fails over a run of matching lanes that reaches into every later loop, and
+// that failure must not skip the loops after the next fused one.
+static void test_read_modify_write_loops_after_escaping_lanes() {
+  const int L = 16, loops = 4;
+  Graph g;
+  Fills fills;
+  std::vector<int> terms;
+  adjacent_loops(L, g, fills, terms, loops, true);
+  Graph ref = g;
+  reduce_into_result(ref, terms);
+  const std::vector<double> want = run_grad(std::move(ref), fills);
+  std::vector<int> tt = terms;
+  Fills f2 = fills;
+  const RerollStats st = reroll(g, f2, tt, {});
+  expect("escaping last lanes: every loop fused", st.regions == loops);
+  expect("escaping last lanes: only the last lanes stay scalar",
+         writefuse::count(g, OP_SET_INDEX_INPLACE) == loops);
+  reduce_into_result(g, tt);
+  const std::vector<double> got = run_grad(std::move(g), f2);
+  for (size_t i = 0; i < want.size() && i < got.size(); ++i)
+    expect_close(("escaping last lanes v" + std::to_string(i)).c_str(), got[i],
                  want[i]);
 }
 
@@ -2992,6 +3028,47 @@ static void test_read_modify_write_models() {
   }
 }
 
+// brms's random-effect shape: one `mu_k[n] += r_k[J_k[n]] * Z_k[n]` loop per
+// linear predictor, then a loop that reads every mu_k[n] back. Every lane of
+// every loop must fuse, including the last one, whose value the read-back
+// loop also reads.
+static void test_random_effect_loops_fully_rerolled() {
+  const auto ints = [](int i) { return (i * 7) % 5 + 1; };
+  const auto ones = [](int) { return 1.0; };
+  const int N = 96;
+  const std::string json =
+      "{\"N\":" + std::to_string(N) + ",\"N_1\":5,\"Y\":" +
+      json_array(N, [](int i) { return 0.3 * std::sin(1.7 * i); }) +
+      ",\"J_1\":" + json_int_array(N, ints) +
+      ",\"J_2\":" + json_int_array(N, ints) +
+      ",\"J_3\":" + json_int_array(N, ints) +
+      ",\"Z_1\":" + json_array(N, ones) + ",\"Z_2\":" + json_array(N, ones) +
+      ",\"Z_3\":" + json_array(N, ones) + "}";
+  const char* sexp = "tests/fixtures/rmw_re_adjacent.tmir.sexp";
+  size_t n_ops = 0;
+  test_setenv("STANLI_NO_REROLL", "1", 1);
+  test_setenv("STANLI_NO_PARTITION", "1", 1);
+  test_setenv("STANLI_NO_ISLAND", "1", 1);
+  const std::vector<double> want = e2e_grad(sexp, json.c_str(), &n_ops);
+  test_unsetenv("STANLI_NO_REROLL");
+  test_unsetenv("STANLI_NO_PARTITION");
+  test_unsetenv("STANLI_NO_ISLAND");
+  const std::vector<double> got = e2e_grad(sexp, json.c_str(), &n_ops);
+  expect("random-effect loops sizes", got.size() == want.size());
+  for (size_t i = 0; i < want.size() && i < got.size(); ++i)
+    expect_close(("random-effect loops v" + std::to_string(i)).c_str(), got[i],
+                 want[i]);
+
+  CompiledModel cm = compile_model(slurp(sexp), DataMap::from_json(json));
+  int scalar = 0;
+  for (const Op& op : cm.graph.ops)
+    scalar += op.opcode == OP_SET_INDEX || op.opcode == OP_SET_INDEX_INPLACE ||
+              op.opcode == OP_ISLAND;
+  std::printf("rmw_re_adjacent: %zu ops, %d scalar stores or islands\n",
+              cm.graph.ops.size(), scalar);
+  expect("random-effect loops: no scalar lanes left", scalar == 0);
+}
+
 // Signature prefilter: op_signature(a) != op_signature(b) must prove
 // ops_match(g, a, b, *) false, checked directly against ops_match on a mix
 // of handbuilt graphs covering every ops_match branch and a couple of
@@ -3432,6 +3509,7 @@ int main() {
   test_read_modify_write_recurrence_stays_scalar();
   test_read_modify_write_working_set_is_linear();
   test_read_modify_write_adjacent_loops();
+  test_read_modify_write_loops_after_escaping_lanes();
   test_post_reroll_slice_inplace();
   test_write_fusion_scalar_chain();
   test_pow_widens();
@@ -3446,6 +3524,7 @@ int main() {
   test_shared_vector_mean_row_major();
   test_e2e_fixtures();
   test_read_modify_write_models();
+  test_random_effect_loops_fully_rerolled();
   test_signature_soundness();
   if (failures) {
     std::printf("%d failures\n", failures);

@@ -905,14 +905,22 @@ static void check_multinomial_density() {
           Graph g;
           const int theta = g.add_slot(n, active), w = g.add_slot(1, false);
           const int out = g.add_slot(1, false), scaled = g.add_slot(1, false);
-          stanli::testutil::add_density(g, OP_MULTINOMIAL_LPMF, {theta}, out,
-                                        counts);
+          const int coefficient = g.add_slot(1, false);
+          const bool planned = !propto && weight == 1.0;
+          if (planned)
+            stanli::testutil::add_density(g, OP_MULTINOMIAL_LPMF,
+                                          {theta, coefficient}, out, counts);
+          else
+            stanli::testutil::add_density(g, OP_MULTINOMIAL_LPMF, {theta}, out,
+                                          counts);
           g.ops.back().variant = (propto ? 0x80u : 0u) | (active ? 0x1u : 0u);
           g.add_op(OP_MUL, {out, w}, scaled);
           g.result_slot = scaled;
           Executor ex(std::move(g));
           std::copy(values.begin(), values.end(), ex.value_ptr(theta));
           ex.value_ptr(w)[0] = weight;
+          ex.value_ptr(coefficient)[0] = multinomial_coefficient(
+              OP_MULTINOMIAL_LPMF, counts.data(), (int64_t)counts.size());
           std::vector<double> grad(active ? n : 1);
           const double got = ex.gradient(grad.data());
           stan::math::nested_rev_autodiff nested;
@@ -941,6 +949,131 @@ static void check_multinomial_density() {
           }
           expect_eq_or_both_nan("multinomial invalid simplex", threw, true);
         }
+}
+
+// multinomial_logit_lpmf, bitwise, and multinomial_lpmf(y | softmax(x))
+// evaluated from its logits. The softmax form has its own arithmetic for
+// finite logits: within 2 ULP of the terms that it sums, and of N times the
+// output adjoint for the gradient. It is Stan's multinomial_lpmf of
+// softmax(x) otherwise, including its messages.
+static void check_multinomial_logit_densities() {
+  using namespace stanli;
+  using stan::math::var;
+  const double inf = std::numeric_limits<double>::infinity();
+  const double nan = std::numeric_limits<double>::quiet_NaN();
+  struct Case {
+    std::vector<double> x;
+    std::vector<int> counts;
+  };
+  const std::vector<Case> cases{{{0.2, -1.3, 2.5}, {1, 0, 4}},
+                                {{-40.0, 30.0, 0.0, 1e-3}, {2, 7, 0, 1}},
+                                {{1.5}, {3}},
+                                {{0.0, 0.0}, {0, 0}},
+                                {{-inf, 0.5, 1.0}, {0, 2, 1}},
+                                {{-inf, 0.5, 1.0}, {1, 2, 1}},
+                                {{nan, 0.5}, {1, 2}},
+                                {{inf, 0.5}, {1, 2}},
+                                {{-inf, -inf}, {1, 2}},
+                                {{}, {}},
+                                {{0.1, 0.2}, {1, -1}},
+                                {{0.1, 0.2}, {1, 2, 3}}};
+  for (bool softmax : {false, true})
+    for (bool propto : {false, true})
+      for (bool active : {false, true})
+        for (bool planned : {false, true})
+          for (double weight : {1.0, -2.75, 0.0, 1e308})
+            for (const Case& c : cases) {
+              if (planned && propto) continue;
+              const uint16_t opcode = softmax ? OP_MULTINOMIAL_SOFTMAX_LPMF
+                                              : OP_MULTINOMIAL_LOGIT_LPMF;
+              const int n = (int)c.x.size();
+              Graph g;
+              const int x = g.add_slot(n, active), w = g.add_slot(1, false);
+              const int out = g.add_slot(1, false),
+                        scaled = g.add_slot(1, false);
+              const int coefficient = g.add_slot(1, false);
+              if (planned)
+                stanli::testutil::add_density(g, opcode, {x, coefficient}, out,
+                                              c.counts);
+              else
+                stanli::testutil::add_density(g, opcode, {x}, out, c.counts);
+              g.ops.back().variant =
+                  (propto ? 0x80u : 0u) | (active ? 0x1u : 0u);
+              g.add_op(OP_MUL, {out, w}, scaled);
+              g.result_slot = scaled;
+              Executor ex(std::move(g));
+              std::copy(c.x.begin(), c.x.end(), ex.value_ptr(x));
+              ex.value_ptr(w)[0] = weight;
+              ex.value_ptr(coefficient)[0] = multinomial_coefficient(
+                  opcode, c.counts.data(), (int64_t)c.counts.size());
+              std::vector<double> grad(active ? std::max(n, 1) : 1);
+              std::string got_error, ref_error;
+              double got = 0;
+              try {
+                got = ex.gradient(grad.data());
+              } catch (const std::exception& error) {
+                got_error = error.what();
+              }
+              stan::math::nested_rev_autodiff nested;
+              Eigen::Matrix<var, -1, 1> logits(n);
+              for (int i = 0; i < n; ++i) logits(i) = c.x[i];
+              const bool finite =
+                  std::all_of(c.x.begin(), c.x.end(),
+                              [](double v) { return std::isfinite(v); });
+              var ref;
+              try {
+                const auto call = [&](const auto& v) -> var {
+                  if (softmax)
+                    return propto ? stan::math::multinomial_lpmf<true>(
+                                        c.counts, stan::math::softmax(v))
+                                  : stan::math::multinomial_lpmf<false>(
+                                        c.counts, stan::math::softmax(v));
+                  return propto ? stan::math::multinomial_logit_lpmf<true>(
+                                      c.counts, v)
+                                : stan::math::multinomial_logit_lpmf<false>(
+                                      c.counts, v);
+                };
+                ref = active || !propto ? call(logits) : var(0.0);
+                if (!active && propto)
+                  (void)call(Eigen::VectorXd(logits.val()));
+                ref = ref * weight;
+                stan::math::grad(ref.vi_);
+              } catch (const std::exception& error) {
+                ref_error = error.what();
+              }
+              const std::string name =
+                  std::string(softmax ? "softmax" : "logit") +
+                  (propto ? " propto" : "") + (active ? " active" : "") +
+                  (planned ? " planned" : "") + " n=" + std::to_string(n);
+              expect_eq_or_both_nan((name + " error: " + got_error).c_str(),
+                                    got_error == ref_error, true);
+              if (!ref_error.empty() || !got_error.empty()) continue;
+              if (softmax && finite && n > 0) {
+                if (std::abs(weight) > 1e300) continue;
+                double terms = 0.0, total = 0.0;
+                const double m = *std::max_element(c.x.begin(), c.x.end());
+                for (int i = 0; i < n; ++i) {
+                  terms += c.counts[i] * (std::abs(c.x[i] - m) + n);
+                  total += c.counts[i];
+                }
+                const double coefficient =
+                    propto ? 0.0
+                           : std::abs(multinomial_coefficient(
+                                 opcode, c.counts.data(), n));
+                expect_ulp_of(name + " value", got, ref.val(),
+                              weight * (terms + coefficient), 2);
+                if (active)
+                  for (int i = 0; i < n; ++i)
+                    expect_ulp_of(name + " gradient", grad[i], logits(i).adj(),
+                                  weight * total, 2);
+                continue;
+              }
+              expect_eq_or_both_nan((name + " value").c_str(), got, ref.val());
+              if (active)
+                for (int i = 0; i < n; ++i)
+                  expect_eq_or_both_nan((name + " gradient").c_str(), grad[i],
+                                        logits(i).adj());
+            }
 }
 
 static void check_dirichlet_recorder() {
@@ -2083,6 +2216,7 @@ int main() {
                                       weight, width, true, shift);
           }
   check_multinomial_density();
+  check_multinomial_logit_densities();
   check_dirichlet_recorder();
   check_probit_alias();
   check_wiener_fixed_observation();

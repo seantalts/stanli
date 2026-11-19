@@ -11,6 +11,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <optional>
 #include <string>
 #include <utility>
 #include <vector>
@@ -127,6 +128,9 @@ struct DensityCallPlan {
   uint8_t variant = 0;
   uint8_t activity_mask = 0;
   bool empty_result = false;
+  // A term of the integer arguments alone, computed once here. Backends
+  // pass it to the kernel as one more real input.
+  std::optional<double> data_term;
 };
 
 struct DensitySpec {
@@ -157,6 +161,10 @@ struct DensitySpec {
 inline constexpr uint8_t kCategoricalArgAutodiff = 1u << 0;
 inline constexpr uint8_t kCategoricalLogit = 1u << 1;
 inline constexpr uint8_t kCategoricalScalarOutcome = 1u << 2;
+// Set only by lane partitioning, with kCategoricalScalarOutcome: input 0
+// holds one outcome per row and input 1 the rows end to end, each row the
+// scalar-outcome call. The output is the rows' lps summed in order.
+inline constexpr uint8_t kCategoricalRows = 1u << 3;
 inline constexpr uint8_t kCategoricalPropto = DensityMode::kProptoBit;
 std::vector<int> pack_all_integer_density_arguments(
     const std::vector<IntegerDensityArgument>& arguments);
@@ -180,6 +188,15 @@ VectorizedDensityLayout vectorized_density_layout(
 DensityCallPlan density_call_plan(
     const DensitySpec& spec, const std::vector<DensityCallArgument>& arguments,
     bool propto);
+
+// multinomial_lpmf(y | softmax(x)), called with the logits x in place of
+// softmax(x). Backends select it with mir::multinomial_softmax_logits.
+const DensitySpec& multinomial_softmax_density();
+
+// log(N! / (n_1! ... n_K!)), summed in the order Stan Math uses for the
+// opcode's density.
+double multinomial_coefficient(uint16_t opcode, const int* counts,
+                               int64_t size);
 
 }  // namespace stanli
 
