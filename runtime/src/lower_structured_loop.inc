@@ -2510,10 +2510,18 @@ static bool same_mir_expr(const mir::Expr& a, const mir::Expr& b) {
 // Whether an iteration of `loop`, or of a loop inside it, can read what an
 // earlier iteration wrote: a name from outside the loop is assigned in the
 // body and read other than at an index, shared with every write of it,
-// that depends on the loop variable.
-static bool loop_carries_value(const mir::Stmt& loop) {
+// that depends on the loop variable. Names in `scratch` count as local to
+// `loop` itself but not to the loops inside it. `inner_answers` holds what
+// was found for the loops inside, so a deep nest is not asked again at
+// every level.
+static bool loop_carries_value(
+    const mir::Stmt& loop, const std::set<std::string>* scratch = nullptr,
+    std::map<const mir::Stmt*, bool>* inner_answers = nullptr) {
+  std::map<const mir::Stmt*, bool> answers;
+  if (!inner_answers) inner_answers = &answers;
   std::set<std::string> locals;
   for (const auto& child : loop.body) collect_loop_locals(child, &locals);
+  if (scratch) locals.insert(scratch->begin(), scratch->end());
   std::map<std::string, std::vector<const std::vector<mir::Expr>*>> writes;
   bool inner = false;
   std::function<void(const mir::Stmt&)> collect = [&](const mir::Stmt& s) {
@@ -2523,18 +2531,44 @@ static bool loop_carries_value(const mir::Stmt& loop) {
         writes[name].push_back(s.kind == mir::Stmt::Assignment ? &s.lhs_idx
                                                                : &whole);
     });
-    if (s.kind == mir::Stmt::For && loop_carries_value(s)) inner = true;
+    if (s.kind == mir::Stmt::For) {
+      const auto found = inner_answers->find(&s);
+      const bool carries =
+          found != inner_answers->end()
+              ? found->second
+              : (*inner_answers)[&s] =
+                    loop_carries_value(s, nullptr, inner_answers);
+      inner = inner || carries;
+    }
     for (const auto& child : s.body) collect(child);
   };
   for (const auto& child : loop.body) collect(child);
   if (inner) return true;
+  const auto is_loopvar = [&](const mir::Expr& index) {
+    const mir::Expr* at = &index;
+    if (at->kind == mir::Expr::IndexSingle && at->args.size() == 1)
+      at = &at->args[0];
+    return at->kind == mir::Expr::Var && at->name == loop.loopvar;
+  };
   const auto own_element = [&](const mir::Expr& indexed) {
     const size_t rank = indexed.args.size() - 1;
+    const auto& name_writes = writes.at(indexed.args[0].name);
+    // Iteration t only touches x[t] when x is read and written at a leading
+    // index of exactly t, so a read of the row x[t] cannot see what another
+    // iteration wrote into x[t', j]. Any other expression of t can repeat
+    // across iterations and needs the rank to match below.
+    if (rank > 0 && is_loopvar(indexed.args[1])) {
+      bool sliced = true;
+      for (const auto* idx : name_writes)
+        sliced = sliced && !idx->empty() &&
+                 same_mir_expr((*idx)[0], indexed.args[1]);
+      if (sliced) return true;
+    }
     for (size_t k = 0; k < rank; ++k) {
       const mir::Expr& at = indexed.args[k + 1];
       if (!expr_references(at, loop.loopvar)) continue;
       bool shared = true;
-      for (const auto* idx : writes.at(indexed.args[0].name))
+      for (const auto* idx : name_writes)
         shared = shared && idx->size() == rank && same_mir_expr((*idx)[k], at);
       if (shared) return true;
     }
@@ -2559,6 +2593,67 @@ static bool loop_carries_value(const mir::Stmt& loop) {
   if (!writes.empty())
     for (const auto& child : loop.body) statement(child);
   return carried;
+}
+// Names from outside `loop` that each iteration overwrites in full before it
+// reads them, so none holds a value from one iteration to the next. A full
+// write is a whole assignment, or a loop over 1..n whose only statement
+// assigns x[k] where x has n elements, as in a mixture's
+// `for (k in 1:K) ps[k] = ...; target += log_sum_exp(ps);`.
+std::set<std::string> loop_scratch_names(const mir::Stmt& loop) {
+  const auto flatten = [](const std::vector<mir::Stmt>& body) {
+    std::vector<const mir::Stmt*> stmts;
+    std::function<void(const mir::Stmt&)> visit = [&](const mir::Stmt& st) {
+      if (st.kind == mir::Stmt::Block || st.kind == mir::Stmt::SList)
+        for (const auto& child : st.body) visit(child);
+      else
+        stmts.push_back(&st);
+    };
+    for (const auto& child : body) visit(child);
+    return stmts;
+  };
+  const auto full_write = [&](const mir::Stmt& st) -> std::string {
+    if (st.kind == mir::Stmt::Assignment && st.lhs_idx.empty() &&
+        !expr_references(st.rhs, st.lhs))
+      return st.lhs;
+    if (st.kind != mir::Stmt::For) return {};
+    const auto inner = flatten(st.body);
+    if (inner.size() != 1) return {};
+    const mir::Stmt& a = *inner[0];
+    if (a.kind != mir::Stmt::Assignment || a.lhs_idx.size() != 1 ||
+        expr_references(a.rhs, a.lhs))
+      return {};
+    const mir::Expr* at = &a.lhs_idx[0];
+    if (at->kind == mir::Expr::IndexSingle && at->args.size() == 1)
+      at = &at->args[0];
+    if (at->kind != mir::Expr::Var || at->name != st.loopvar) return {};
+    int64_t len = 0;
+    if (const auto d = decls.find(a.lhs);
+        d != decls.end() && !d->second.deferred_shape)
+      len = d->second.len;
+    else if (const auto v = scope.find(a.lhs); v != scope.end())
+      len = g.slots[v->second.slot].len;
+    else
+      return {};
+    try {
+      if (eval_int(st.lower) != 1 || eval_int(st.upper) != len) return {};
+    } catch (const CompileError&) {
+      return {};
+    }
+    return a.lhs;
+  };
+  std::set<std::string> seen, scratch;
+  for (const mir::Stmt* st : flatten(loop.body)) {
+    const std::string name = full_write(*st);
+    if (!name.empty() && !seen.count(name)) scratch.insert(name);
+    mir::collect_names(*st, &seen);
+  }
+  return scratch;
+}
+// loop_carries_value, except that scratch arrays carry nothing.
+bool loop_carries_dependence(const mir::Stmt& loop) {
+  if (!loop_carries_value(loop)) return false;
+  const std::set<std::string> scratch = loop_scratch_names(loop);
+  return scratch.empty() || loop_carries_value(loop, &scratch);
 }
 // Unrolling pays when later passes fold the copies of the body into fewer,
 // wider operations. A value carried between iterations leaves a serial

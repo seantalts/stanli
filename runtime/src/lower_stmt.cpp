@@ -2168,6 +2168,14 @@ Lowering::Flow Lowering::lower_stmt_impl(const mir::Stmt& s) {
       const int unrolled =
           bounded_specialization &&
           region_auto_profitable(s, std::pair<int64_t, int64_t>{lo, hi});
+      // Asked before the unroll, which leaves the loop variable bound.
+      std::string carry_diagnostic;
+      if (debug_env("STANLI_STRUCTURED_LOOP_DIAGNOSTICS") &&
+          structured_outer_depth <= 2)
+        carry_diagnostic =
+            std::string(" carries=") + (loop_carries_value(s) ? "1" : "0") +
+            " dep=" + (loop_carries_dependence(s) ? "1" : "0");
+      const size_t ops_before = g.ops.size();
       structured_unroll_depth += unrolled;
       {
         const ScopeExit leave{[&] { structured_unroll_depth -= unrolled; }};
@@ -2178,6 +2186,13 @@ Lowering::Flow Lowering::lower_stmt_impl(const mir::Stmt& s) {
           if (flow == Flow::Return) return flow;
         }
       }
+      if (!carry_diagnostic.empty())
+        emit_diagnostic("stanli_structured unrolled loop=" + s.loopvar +
+                        " trips=" + std::to_string(hi - lo + 1) +
+                        " graph=" + (in_write_array ? "wa" : "lp") +
+                        " ops=" + std::to_string(g.ops.size()) +
+                        " delta=" + std::to_string(g.ops.size() - ops_before) +
+                        carry_diagnostic);
       int_env.erase(s.loopvar);
       return Flow::Next;
     }

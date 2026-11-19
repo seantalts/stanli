@@ -2689,6 +2689,65 @@ static void refusal_tests() {
   }
 }
 
+// The "unrolled" diagnostic line for the outer loop named `loop`.
+static std::string unrolled_line(const std::string& diagnostics,
+                                 const std::string& loop) {
+  std::istringstream lines(diagnostics);
+  std::string line;
+  while (std::getline(lines, line))
+    if (line.find("stanli_structured unrolled loop=" + loop + " ") !=
+        std::string::npos)
+      return line;
+  return {};
+}
+
+static void loop_carry_tests() {
+  const int trips = 40, states = 3;
+  DataMap data;
+  data.set_int("T", trips);
+  data.set_int("K", states);
+  std::vector<double> x(static_cast<size_t>(trips * states));
+  for (size_t i = 0; i < x.size(); ++i) x[i] = std::sin(double(i));
+  data.set_real_array("x", std::move(x), {trips, states});
+  data.set_real_array("w", {.2, .3, .5});
+  test_setenv("STANLI_STRUCTURED_LOOP_DIAGNOSTICS", "1");
+  stanli_test::StdoutCapture captured(stderr);
+  (void)compile_fixture("structured_loop_carries", data, Mode::Auto);
+  const std::string diagnostics = captured.finish();
+  test_unsetenv("STANLI_STRUCTURED_LOOP_DIAGNOSTICS");
+  const auto has = [&](const std::string& loop, const std::string& field) {
+    return unrolled_line(diagnostics, loop).find(" " + field) !=
+           std::string::npos;
+  };
+  check(has("r", "carries=0"),
+        "a row read beside writes of its elements carries nothing");
+  check(has("u", "carries=1") && has("u", "dep=1"),
+        "a recurrence on the previous element carries a value");
+  check(has("s", "carries=1") && has("s", "dep=0"),
+        "an array overwritten in full each iteration carries nothing");
+  check(has("p", "dep=1"),
+        "an array read before its last element is rewritten carries it");
+  check(has("m", "carries=1"),
+        "a read of the previous row carries what that iteration wrote");
+  check(has("n", "carries=1"),
+        "a row read carries a write that another iteration made into it");
+  check(has("v", "dep=1"),
+        "a recurrence inside the loop over a scratch array still carries");
+
+  // 120 nested loops: asking each one must not ask its inner loops again.
+  test_setenv("STANLI_STRUCTURED_LOOP_DIAGNOSTICS", "1");
+  stanli_test::StdoutCapture deep_captured(stderr);
+  DataMap deep;
+  deep.set_int("flag", 1);
+  std::vector<double> small(250);
+  for (size_t i = 0; i < small.size(); ++i) small[i] = 1e-3 * double(i + 1);
+  deep.set_real_array("x", std::move(small));
+  (void)compile_fixture("wapar_deep", deep, Mode::Auto);
+  check(deep_captured.finish().find("unrolled loop=") != std::string::npos,
+        "deeply nested loops report their carries");
+  test_unsetenv("STANLI_STRUCTURED_LOOP_DIAGNOSTICS");
+}
+
 static void automatic_policy_tests() {
   const auto small_auto = compile_fixture("structured_counted", 4, Mode::Auto);
   const auto small_off = compile_fixture("structured_counted", 4, Mode::Off);
@@ -8248,6 +8307,7 @@ int main() {
   failure_tests();
   refusal_tests();
   automatic_policy_tests();
+  loop_carry_tests();
   region_range_cache_tests();
   row_index_tests();
   prefer_parent_tests();
