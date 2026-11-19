@@ -3268,7 +3268,7 @@ static void ambiguous_return_shape_tests() {
     check_reference_point(*model, {mu}, lp, "ambiguous return shape reference");
 }
 
-// Retains the fixture's loops under Prefer and checks the log density,
+// Retains every loop of the fixture under Prefer and checks the log density,
 // gradient and write_array output `fit` against the unrolled loops.
 static void ragged_parity_tests(const std::string& fixture,
                                 const std::string& label) {
@@ -3283,6 +3283,8 @@ static void ragged_parity_tests(const std::string& fixture,
   if (!native) return;
   check(diagnostics.find("stanli_structured selected") != std::string::npos,
         (label + " loop is selected for retention").c_str());
+  check(diagnostics.find("refused") == std::string::npos,
+        (label + " refuses no loop").c_str());
   check(retained(*native) != nullptr,
         (label + " loop retains OP_LOOP").c_str());
   const auto legacy = compile_fixture(fixture, data, Mode::Off);
@@ -3337,6 +3339,12 @@ static void ragged_linspaced_tests() {
 // with a vector inherits it.
 static void ragged_matvec_tests() {
   ragged_parity_tests("structured_ragged_matvec", "ragged matvec");
+}
+
+// After stanc inlines a user function into the loop, a local sized by an
+// integer computed from a data argument needs a capacity from that data.
+static void udf_local_capacity_tests() {
+  ragged_parity_tests("structured_udf_local_capacity", "udf local capacity");
 }
 
 static void runtime_local_shape_tests() {
@@ -8472,6 +8480,7 @@ int main() {
   runtime_local_shape_tests();
   ragged_linspaced_tests();
   ragged_matvec_tests();
+  udf_local_capacity_tests();
   zero_length_matrix_udf_tests();
   sequence_local_tests();
   ambiguous_return_shape_tests();

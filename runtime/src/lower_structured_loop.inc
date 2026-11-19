@@ -799,25 +799,27 @@ std::optional<IntRange> region_range(const mir::Expr& e) {
     return IntRange{0, 1};
   if (f == "sum" && e.args.size() == 1 &&
       e.args[0].unsized.leaf == mir::UnsizedLeaf::Int) {
+    const auto total =
+        [&](const DataMap::Entry* observed) -> std::optional<IntRange> {
+      if (!observed || !observed->is_int || observed->i.empty()) return {};
+      int64_t sum = 0;
+      for (int element : observed->i) sum += element;
+      return bounded(sum, sum);
+    };
     if (e.args[0].kind == mir::Expr::Var) {
       const auto value = scope.find(e.args[0].name);
-      if (value != scope.end()) {
-        if (const auto* observed = observation(value->second)) {
-          if (observed->is_int && !observed->i.empty()) {
-            int64_t total = 0;
-            for (int element : observed->i) total += element;
-            return bounded(total, total);
-          }
-        }
-        const auto element = int_ranges.find(value->second.slot);
-        if (element != int_ranges.end()) {
-          const int64_t count = g.slots[value->second.slot].len;
-          const int64_t lo =
-              element->second.lo < 0 ? count * int64_t(element->second.lo) : 0;
-          const int64_t hi =
-              element->second.hi > 0 ? count * int64_t(element->second.hi) : 0;
-          return bounded(lo, hi);
-        }
+      // stanc's inliner passes a data array argument by name, so the body of
+      // an inlined function sums the data array itself.
+      if (value == scope.end()) return total(td.find(e.args[0].name));
+      if (auto known = total(observation(value->second))) return known;
+      const auto element = int_ranges.find(value->second.slot);
+      if (element != int_ranges.end()) {
+        const int64_t count = g.slots[value->second.slot].len;
+        const int64_t lo =
+            element->second.lo < 0 ? count * int64_t(element->second.lo) : 0;
+        const int64_t hi =
+            element->second.hi > 0 ? count * int64_t(element->second.hi) : 0;
+        return bounded(lo, hi);
       }
     }
     return {};
@@ -2533,11 +2535,10 @@ static bool loop_carries_value(
     });
     if (s.kind == mir::Stmt::For) {
       const auto found = inner_answers->find(&s);
-      const bool carries =
-          found != inner_answers->end()
-              ? found->second
-              : (*inner_answers)[&s] =
-                    loop_carries_value(s, nullptr, inner_answers);
+      const bool carries = found != inner_answers->end()
+                               ? found->second
+                               : (*inner_answers)[&s] = loop_carries_value(
+                                     s, nullptr, inner_answers);
       inner = inner || carries;
     }
     for (const auto& child : s.body) collect(child);
