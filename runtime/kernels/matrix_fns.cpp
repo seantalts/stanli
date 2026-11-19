@@ -1599,7 +1599,7 @@ double mst_eval(KernelCtx& ctx) {
 
 // ---- multinomial family: (array[] int ns, vector theta) -----------------
 // The counts ride in idata; theta is the only propagator edge.
-enum MultKind { kMultinomial, kMultinomialLogit, kDirichletMultinomial };
+enum MultKind { kMultinomialSoftmax, kDirichletMultinomial };
 template <bool Grad, MultKind Kind>
 double mult_eval(KernelCtx& ctx) {
   const int64_t K = ctx.in[0].len;
@@ -1609,12 +1609,11 @@ double mult_eval(KernelCtx& ctx) {
   using stan::math::var;
   VarV theta = tail_v(ctx, 0, K);
   const auto call = [&](const auto& t) -> var {
-    if constexpr (Kind == kMultinomial) {
-      return propto ? stan::math::multinomial_lpmf<true>(ns, t)
-                    : stan::math::multinomial_lpmf<false>(ns, t);
-    } else if constexpr (Kind == kMultinomialLogit) {
-      return propto ? stan::math::multinomial_logit_lpmf<true>(ns, t)
-                    : stan::math::multinomial_logit_lpmf<false>(ns, t);
+    if constexpr (Kind == kMultinomialSoftmax) {
+      return propto ? stan::math::multinomial_lpmf<true>(ns,
+                                                         stan::math::softmax(t))
+                    : stan::math::multinomial_lpmf<false>(
+                          ns, stan::math::softmax(t));
     } else {
       return propto ? stan::math::dirichlet_multinomial_lpmf<true>(ns, t)
                     : stan::math::dirichlet_multinomial_lpmf<false>(ns, t);
@@ -1624,33 +1623,42 @@ double mult_eval(KernelCtx& ctx) {
   return finish_tail_density<Grad>(ctx, out, theta);
 }
 
+void check_multinomial_counts(const KernelCtx& ctx, const char* fn,
+                              const char* rows) {
+  stan::math::check_size_match(fn, "Size of number of trials variable",
+                               static_cast<size_t>(ctx.n_idata), rows,
+                               static_cast<Eigen::Index>(ctx.in[0].len));
+  if (std::any_of(ctx.idata, ctx.idata + ctx.n_idata,
+                  [](int count) { return count < 0; }))
+    stan::math::check_nonnegative(
+        fn, "Number of trials variable",
+        std::vector<int>(ctx.idata, ctx.idata + ctx.n_idata));
+}
+
+// A second input is the coefficient, which the plan computed once.
+double multinomial_coefficient_of(const KernelCtx& ctx, uint16_t opcode) {
+  return ctx.n_in == 2
+             ? ctx.in[1].data[0]
+             : multinomial_coefficient(opcode, ctx.idata, ctx.n_idata);
+}
+
 // Multinomial has one independent probability edge per count. Preserve the
 // validation and summation order of Stan Math's prim/prob/multinomial_lpmf.hpp.
 // The reverse uses the weighted multiply_log rule (rev/fun/multiply_log.hpp),
 // multiplying before dividing; caching unit partials changes that rounding.
 void multn_fwd(KernelCtx& ctx) {
-  const std::vector<int> counts(ctx.idata, ctx.idata + ctx.n_idata);
+  const int* counts = ctx.idata;
   const CMapV theta(ctx.in[0].data, ctx.in[0].len);
   constexpr const char* fn = "multinomial_lpmf";
-  stan::math::check_size_match(fn, "Size of number of trials variable",
-                               counts.size(), "rows of probabilities parameter",
-                               theta.rows());
-  stan::math::check_nonnegative(fn, "Number of trials variable", counts);
+  check_multinomial_counts(ctx, fn, "rows of probabilities parameter");
   stan::math::check_simplex(fn, "Probabilities parameter", theta);
   const DensityMode mode = density_mode(ctx);
   if (mode.propto && !mode.is_active(0)) {
     ctx.out.data[0] = 0;
     return;
   }
-  double value = 0;
-  if (!mode.propto) {
-    double total = 1;
-    for (int count : counts) {
-      total += count;
-      value -= stan::math::lgamma(count + 1.0);
-    }
-    value += stan::math::lgamma(total);
-  }
+  double value =
+      mode.propto ? 0.0 : multinomial_coefficient_of(ctx, OP_MULTINOMIAL_LPMF);
   for (int64_t i = 0; i < ctx.in[0].len; ++i)
     value += counts[i] == 1 ? std::log(theta(i))
                             : stan::math::multiply_log(counts[i], theta(i));
@@ -1663,6 +1671,100 @@ void multn_bwd(KernelCtx& ctx) {
         ctx.idata[i] == 1 ? ctx.out_adj / ctx.in[0].data[i]
                           : ctx.out_adj * ctx.idata[i] / ctx.in[0].data[i];
 }
+
+// multinomial_logit_lpmf follows Stan Math's
+// prim/prob/multinomial_logit_lpmf.hpp and the reverse rules of its var
+// operations.
+//
+// multinomial_lpmf(y | softmax(x)) is computed from the logits x. With
+// m = max(x) and S = sum(exp(x - m)), log softmax(x)_i is (x_i - m) - log(S),
+// and the derivative by x_i is (n_i S - N exp(x_i - m)) / S. Subtracting m
+// first keeps the large part of each logit exact. When a logit is not
+// finite, or there are none, the kernel calls Stan's multinomial_lpmf of
+// softmax(x). That gives Stan's error messages, and Stan's value when a
+// logit is -inf.
+template <bool Softmax>
+bool multinomial_softmax_fallback(const KernelCtx& ctx) {
+  if constexpr (!Softmax) return false;
+  const CMapV x(ctx.in[0].data, ctx.in[0].len);
+  return x.size() == 0 || !x.allFinite();
+}
+
+template <bool Softmax>
+void multinomial_logits_fwd(KernelCtx& ctx) {
+  if (multinomial_softmax_fallback<Softmax>(ctx)) {
+    ctx.out.data[0] = mult_eval<false, kMultinomialSoftmax>(ctx);
+    return;
+  }
+  const CMapV x(ctx.in[0].data, ctx.in[0].len);
+  if constexpr (Softmax) {
+    check_multinomial_counts(ctx, "multinomial_lpmf",
+                             "rows of probabilities parameter");
+  } else {
+    check_multinomial_counts(ctx, "multinomial_logit_lpmf",
+                             "rows of log-probabilities parameter");
+    stan::math::check_finite("multinomial_logit_lpmf",
+                             "log-probabilities parameter", x);
+  }
+  const DensityMode mode = density_mode(ctx);
+  if (mode.propto && !mode.is_active(0)) {
+    ctx.out.data[0] = 0;
+    return;
+  }
+  double value = 0.0;
+  if (!mode.propto)
+    value += multinomial_coefficient_of(
+        ctx, Softmax ? OP_MULTINOMIAL_SOFTMAX_LPMF : OP_MULTINOMIAL_LOGIT_LPMF);
+  if constexpr (Softmax) {
+    const double m = x.maxCoeff();
+    double sum = 0.0;
+    for (int64_t i = 0; i < x.size(); ++i) sum += std::exp(x(i) - m);
+    const double log_sum = std::log(sum);
+    ctx.scratch[0] = m;
+    ctx.scratch[1] = sum;
+    for (int64_t i = 0; i < x.size(); ++i)
+      if (ctx.idata[i] != 0) value += ctx.idata[i] * ((x(i) - m) - log_sum);
+  } else {
+    const double alpha = stan::math::log_sum_exp(x);
+    ctx.scratch[0] = alpha;
+    for (int64_t i = 0; i < x.size(); ++i)
+      if (ctx.idata[i] != 0) value += ctx.idata[i] * (x(i) - alpha);
+  }
+  ctx.out.data[0] = value;
+}
+
+// The logit form adds the adjoints of the terms first, then those of
+// log_sum_exp's callback, which calls std::exp for each element. Eigen's
+// packet exp would change the low bits.
+template <bool Softmax>
+void multinomial_logits_bwd(KernelCtx& ctx) {
+  if (multinomial_softmax_fallback<Softmax>(ctx)) {
+    mult_eval<true, kMultinomialSoftmax>(ctx);
+    return;
+  }
+  double* adj = ctx.in_adj[0].data;
+  if (!adj) return;
+  const double* x = ctx.in[0].data;
+  const int64_t K = ctx.in[0].len;
+  if constexpr (Softmax) {
+    const double m = ctx.scratch[0], sum = ctx.scratch[1];
+    double total = 0.0;
+    for (int64_t i = 0; i < K; ++i) total += ctx.idata[i];
+    for (int64_t i = 0; i < K; ++i)
+      adj[i] +=
+          ctx.out_adj * (ctx.idata[i] * sum - total * std::exp(x[i] - m)) / sum;
+    return;
+  }
+  const double alpha = ctx.scratch[0];
+  double alpha_adj = 0.0;
+  for (int64_t i = K - 1; i >= 0; --i)
+    if (ctx.idata[i] != 0) alpha_adj -= ctx.out_adj * ctx.idata[i];
+  for (int64_t i = 0; i < K; ++i)
+    if (ctx.idata[i] != 0) adj[i] += ctx.out_adj * ctx.idata[i];
+  for (int64_t i = 0; i < K; ++i) adj[i] += alpha_adj * std::exp(x[i] - alpha);
+}
+
+int64_t multinomial_logits_scratch(const Op&, const Slot*) { return 2; }
 
 // ---- the two the recorder cannot take ----------------------------------
 // ordered_probit does `c_vec[i].coeff(0) - lambda_vec[i]` and wiener
@@ -1855,7 +1957,6 @@ STANLI_TAIL_KERNEL(mgp, mgp_eval, kMultiGp)
 STANLI_TAIL_KERNEL(mgpc, mgp_eval, kMultiGpChol)
 STANLI_TAIL_KERNEL(mst, mst_eval, kMst)
 STANLI_TAIL_KERNEL(mstc, mst_eval, kMstChol)
-STANLI_TAIL_KERNEL(multnl, mult_eval, kMultinomialLogit)
 STANLI_TAIL_KERNEL(dirmult, mult_eval, kDirichletMultinomial)
 #undef STANLI_TAIL_KERNEL
 void ologistic_fwd(KernelCtx& ctx) {
@@ -2384,8 +2485,14 @@ void register_matrix_kernels() {
   register_kernel(OP_MULTI_STUDENT_T_CHOL_LPDF,
                   Kernel{mstc_fwd, mstc_bwd, nullptr});
   register_kernel(OP_MULTINOMIAL_LPMF, Kernel{multn_fwd, multn_bwd, nullptr});
-  register_kernel(OP_MULTINOMIAL_LOGIT_LPMF,
-                  Kernel{multnl_fwd, multnl_bwd, nullptr});
+  register_kernel(
+      OP_MULTINOMIAL_LOGIT_LPMF,
+      Kernel{multinomial_logits_fwd<false>, multinomial_logits_bwd<false>,
+             multinomial_logits_scratch});
+  register_kernel(
+      OP_MULTINOMIAL_SOFTMAX_LPMF,
+      Kernel{multinomial_logits_fwd<true>, multinomial_logits_bwd<true>,
+             multinomial_logits_scratch});
   register_kernel(OP_DIRICHLET_MULTINOMIAL_LPMF,
                   Kernel{dirmult_fwd, dirmult_bwd, nullptr});
   register_kernel(OP_ORDERED_LOGISTIC_LPMF, Kernel{ologistic_fwd, ologistic_bwd,

@@ -8,6 +8,7 @@
 #include <stan/math/prim/err/check_size_match.hpp>
 #include <stan/math/prim/prob/discrete_range_lpmf.hpp>
 #include <stan/math/prim/prob/hypergeometric_lpmf.hpp>
+#include <stan/math/prim/fun/lgamma.hpp>
 
 #include <algorithm>
 #include <limits>
@@ -80,6 +81,27 @@ double evaluate_all_integer(
 }  // namespace
 
 void density_layout_error(const char* what) { throw std::logic_error(what); }
+
+const DensitySpec& multinomial_softmax_density() {
+  static const DensitySpec spec{OP_MULTINOMIAL_SOFTMAX_LPMF, 2, 1, false,
+                                DensityShape::Plain};
+  return spec;
+}
+
+double multinomial_coefficient(uint16_t opcode, const int* counts,
+                               int64_t size) {
+  if (opcode == OP_MULTINOMIAL_LOGIT_LPMF) {
+    const Eigen::Map<const Eigen::ArrayXi> n(counts, size);
+    return stan::math::lgamma(1 + n.sum()) - stan::math::lgamma(1 + n).sum();
+  }
+  double total = 1.0;
+  double value = 0.0;
+  for (int64_t i = 0; i < size; ++i) {
+    total += counts[i];
+    value -= stan::math::lgamma(counts[i] + 1.0);
+  }
+  return value + stan::math::lgamma(total);
+}
 
 DensityCallArgument integer_density_argument(std::vector<int> values,
                                              bool scalar, bool data_only) {
@@ -468,6 +490,18 @@ DensityCallPlan density_call_plan(
                                ? uint8_t{0}
                                : static_cast<uint8_t>(spec.activity_mask);
     plan.variant = DensityMode{active, false, propto}.byte();
+  }
+
+  // The coefficient depends on the counts alone, so compute it once here
+  // instead of in every evaluation. With data probabilities the whole call
+  // is data, and constant folding evaluates it once anyway.
+  if ((spec.opcode == OP_MULTINOMIAL_LPMF ||
+       spec.opcode == OP_MULTINOMIAL_LOGIT_LPMF ||
+       spec.opcode == OP_MULTINOMIAL_SOFTMAX_LPMF) &&
+      !propto && plan.activity_mask != 0) {
+    plan.data_term =
+        multinomial_coefficient(spec.opcode, plan.idata.data(),
+                                static_cast<int64_t>(plan.idata.size()));
   }
 
   if (spec.shape == DensityShape::FirstMatrixRows) {

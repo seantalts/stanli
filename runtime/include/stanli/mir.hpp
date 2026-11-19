@@ -159,6 +159,21 @@ inline bool is_index(const Expr& e) {
          e.kind == Expr::IndexMulti;
 }
 
+// The logits x of a call `multinomial_lpmf(y | softmax(x))`. The softmax is
+// a temporary of the call, so nothing else reads it, and the density can be
+// evaluated from x directly, as multinomial_logit_lpmf does.
+inline const Expr* multinomial_softmax_logits(const Expr& e) {
+  if (e.kind != Expr::FunApp || e.fn_lib != Expr::Lib::StanLib ||
+      e.name != "multinomial_lpmf" || e.args.size() != 2)
+    return nullptr;
+  const Expr& theta = e.args[1];
+  if (theta.kind != Expr::FunApp || theta.fn_lib != Expr::Lib::StanLib ||
+      theta.name != "softmax" || theta.args.size() != 1 ||
+      !is_unsized(theta.args[0], UnsizedLeaf::Vector))
+    return nullptr;
+  return &theta.args[0];
+}
+
 // stanc leaves these calls in MIR rather than folding them: four have
 // non-finite/platform values, while the mathematical constants are still part
 // of the same language surface. Keep name recognition and values together so

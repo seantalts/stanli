@@ -1379,6 +1379,14 @@ std::optional<Lowering::Val> Lowering::lower_density_fn(
   // One integer group is the raw values; the other layouts are in
   // density_layout.hpp.
   const stanli::DensitySpec* density = selected;
+  if (density != nullptr && density->opcode == OP_MULTINOMIAL_LPMF)
+    if (const mir::Expr* logits = mir::multinomial_softmax_logits(e)) {
+      mir::Expr call = e;
+      call.args[1] = *logits;
+      CallArguments call_actuals(*this, call);
+      return lower_density_fn(call, call_actuals,
+                              &stanli::multinomial_softmax_density());
+    }
   if (density != nullptr) {
     const stanli::DensitySpec& spec = *density;
     if ((int)actuals.size() != spec.arity) {
@@ -1464,6 +1472,7 @@ std::optional<Lowering::Val> Lowering::lower_density_fn(
         fail(e.name + ": no form over a runtime-length operand", e.raw);
       ins.push_back(extent);
     }
+    if (plan.data_term) ins.push_back(constant(*plan.data_term).slot);
     Val dv = emit_raw(spec.opcode, ins, 1, result_si, plan.idata, -1,
                       result_autodiff);
     dv.layout = ExpressionLayout::scalar();
