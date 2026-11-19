@@ -1787,6 +1787,29 @@ std::optional<Lowering::Val> Lowering::lower_eltwise_fn(
                        elementwise_layout({a, b}));
   }
 
+  // In a retained loop the extent and endpoints can change every iteration,
+  // as in ragged models that build each group's row range. As for a
+  // runtime-sized declaration, the result is stored at a proved maximum
+  // capacity and its current extent is kept in a separate slot.
+  if (region_current && e.name == "linspaced_int_array" && e.args.size() == 3 &&
+      !try_eval_pure(e)) {
+    actuals.require_arity(3);
+    const auto range = region_range(e.args[0]);
+    if (!range || range->hi < 0)
+      fail(e.name + ": runtime extent needs a finite capacity", e.raw);
+    const Val n = actuals.at(0).value(), low = actuals.at(1).value(),
+              high = actuals.at(2).value();
+    for (const Val& argument : {n, low, high})
+      if (!is_scalar(argument) || argument.autodiff)
+        fail(e.name + ": runtime argument must be a data integer", e.raw);
+    SlotInfo si = array_view({range->hi}, ViewKind::Flat, true);
+    si.param_free = n.si.param_free && low.si.param_free && high.si.param_free;
+    Val result =
+        emit_value(OP_LINSPACED_INT_DYNAMIC, {n, low, high}, range->hi, si);
+    if (range->lo != range->hi) result.runtime_dims = {n.slot};
+    return with_layout(result, owning_layout(si));
+  }
+
   // Registered constructors: data-only scalar arguments folded through the
   // shared Stan Math evaluator into one constant container. No kernel or
   // graph edge -- the result is param-free by construction, and extents,

@@ -3,6 +3,7 @@
 #include <stanli/message_sink.hpp>
 #include <stanli/optable.hpp>
 #include <stanli/rejection.hpp>
+#include <stan/math/prim/fun/linspaced_int_array.hpp>
 
 #include <algorithm>
 #include <array>
@@ -542,6 +543,18 @@ void int_forward(KernelCtx& c) {
       throw std::logic_error("invalid integer arithmetic variant");
   }
   c.out.data[0] = static_cast<double>(integer(static_cast<double>(v)));
+}
+
+// The tail past the logical extent is never read; zero keeps it defined.
+void linspaced_int_forward(KernelCtx& c) {
+  const std::vector<int> values = stan::math::linspaced_int_array(
+      static_cast<int>(integer(c.in[0].data[0])),
+      static_cast<int>(integer(c.in[1].data[0])),
+      static_cast<int>(integer(c.in[2].data[0])));
+  if (static_cast<int64_t>(values.size()) > c.out.len)
+    throw std::domain_error("linspaced_int_array extent exceeds capacity");
+  std::copy(values.begin(), values.end(), c.out.data);
+  std::fill(c.out.data + values.size(), c.out.data + c.out.len, 0.0);
 }
 
 [[noreturn]] __attribute__((noinline)) void index_fault(const char* message) {
@@ -3766,6 +3779,8 @@ void register_structured_loop_kernel() {
                             nullptr, make_loop_state});
   register_kernel(OP_COMPARE, {compare_forward, nullptr, nullptr});
   register_kernel(OP_INT_ARITH, {int_forward, nullptr, nullptr});
+  register_kernel(OP_LINSPACED_INT_DYNAMIC,
+                  {linspaced_int_forward, nullptr, nullptr});
   register_kernel(OP_INDEX_DYNAMIC, {index_forward, index_backward, nullptr,
                                      nullptr, backward_reads_inputs_only});
   register_kernel(OP_SET_INDEX_DYNAMIC,
