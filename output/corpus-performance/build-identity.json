@@ -1,17 +1,17 @@
 {
-  "runtime_base": "1e0a66ffbcbed2a66b1aefcb8ea5524356634e5f",
+  "runtime_base": "29602320eb084eed320faa10216a3f915c163440",
   "files": {
-    "build-rel/CMakeCache.txt": "be456da295fc5b0a3eb56b392bc2a441ce57ad22566a5bce70cd1054bbe441ad",
-    "build-rel/bench_grad": "8d1b4c8d01213e198818bbb130655e5daa3e4b8537aaeb792d9f81ea5fcc4e4a",
-    "build-rel/stanli_check": "10460a02a395ac86778aa6097cb0db7c1dd055104c24d93e3e787e2b2b7d6351",
-    "build-rel/stanli_run": "147cccda3b28c135fd224f5b625c4e2a86e4ef1f6b17fb4f11f6fda7d2718f8b",
-    "build-rel/libstanli.dylib": "9c159935efa238a38b57f88a628163dad2baf7fe52fe2f5c325195ddd14c68fa",
-    "deps/stanc3/stanc": "c63bc07ab50b6c7e72ad453319298d1fbbfa165809fab5896f2850f552009a04",
+    "build-rel/CMakeCache.txt": "03ba83122e402c7a14f35b44838daf5fef7d3e05a1f8991bf0a7fd1d13436ddf",
+    "build-rel/bench_grad": "d0dc0a6325d1af1d1b4d0664e4882046b46f6783c16bf6548089424ac20d6ae5",
+    "build-rel/stanli_check": "8ef1248ffae319fc10db50416cd88f67cbc3f269c06b180bd2103d884490dde7",
+    "build-rel/stanli_run": "6964c8f33c4f4ef1b345f07e4646f833d93074103e29699c7d8f22de8129ab29",
+    "build-rel/libstanli.dylib": "0df9e022620427f984a715713f466a247e57079d14ba59db6ebffb11aca43527",
+    "deps/stanc3/stanc": "4bf58136e6d80f4b5f59868d7104edee72854734e3ecde3d6fcdc1e141a2d749",
     "deps/stanc3/stanc-pinned": "d549f0ddbccff17f6b882a54109339f2a0f718b3d1fc09fce118ccdf452adc2d",
-    "deps/stanc3/embed/691e6e07da34e9f9/stanc_embed.o": "e0019a91528f50b3777bfb73073a6ac34d410834f1f29f49c8bf73946ca72e51",
-    "deps/stanc3/embed/691e6e07da34e9f9/stanc_embed.o.stamp": "091d5d7dffbd33064e3a2f099b21243dc036455ac48f5497a5ff7a2df7b6896d",
-    "deps/stanc3/embed/691e6e07da34e9f9/stanli-vectorize-probe": "6e7739b75c9d5fec46728e60fdb38ea1ab332ceaa42c4acbb00e00c9ba47ae92",
-    "deps/stanc3/embed/691e6e07da34e9f9/stanli-vectorize-probe.stamp": "091d5d7dffbd33064e3a2f099b21243dc036455ac48f5497a5ff7a2df7b6896d"
+    "deps/stanc3/embed/61f48fe52bd26037/stanc_embed.o": "dc9d2b6468f4b9d53662d2270a6de39ed6f5d19b4284b418a83e60f9f2aa23d2",
+    "deps/stanc3/embed/61f48fe52bd26037/stanc_embed.o.stamp": "2596cb19dafa976ce5d5bd41b7532694ae57ebd59ca5172b3ab57c7f76233097",
+    "deps/stanc3/embed/61f48fe52bd26037/stanli-vectorize-probe": "80f6fa6a5cf4891bd669bff07190817c0f33bd69e09946b4ddcd10fa32814f24",
+    "deps/stanc3/embed/61f48fe52bd26037/stanli-vectorize-probe.stamp": "2596cb19dafa976ce5d5bd41b7532694ae57ebd59ca5172b3ab57c7f76233097"
   },
   "configuration": [
     "CMAKE_BUILD_TYPE:STRING=Release",
@@ -24,13 +24,13 @@
     "CMAKE_OSX_DEPLOYMENT_TARGET:STRING=11.0",
     "CMAKE_OSX_SYSROOT:STRING=",
     "STANLI_BASH:FILEPATH=/bin/bash",
-    "STANLI_DEBUG_SWITCHES:BOOL=OFF",
+    "STANLI_DEBUG_SWITCHES:BOOL=ON",
     "STANLI_EMBED_STANC:BOOL=ON",
     "STANLI_LIT_JOBS:STRING=24",
     "STANLI_PORTABLE_COMPILER:FILEPATH=",
     "STANLI_SANITIZE:STRING=",
     "STANLI_SHARED_TEST_RUNTIME:BOOL=ON",
-    "STANLI_STANC_EXECUTABLE:FILEPATH=/Users/xitrium/claud/stanrt/.worktrees/bench-refresh-028/deps/stanc3/stanc",
+    "STANLI_STANC_EXECUTABLE:FILEPATH=/Users/xitrium/claud/stanrt/.worktrees/bench-0290/deps/stanc3/stanc",
     "STANLI_STAN_DENSITY_ORACLE:BOOL=OFF",
     "STANLI_THREADS:BOOL=ON",
     "STANLI_WASM_SIDE:BOOL=OFF"
@@ -39,5 +39,5 @@
     "Apple M3 Ultra",
     "103079215104"
   ],
-  "numerical_replay": "references recorded against CmdStan 2.40.0 (d3d5df6a2256), math 5252d51d47c1, on Darwin arm64\n68 models retain per-model recording provenance overrides\nsame-platform ULP limits: 124 models on Darwin arm64; all models retain their scaled-error and structural checks\n\n373/373 models within 1e-09 of the CmdStan references at all 3 evaluation points (1071155 values compared); worst epinow2_estimate_infections at 4.25e-11 (299015 ulp)\n"
+  "numerical_replay": "references recorded against CmdStan 2.40.0 (d3d5df6a2256), math 5252d51d47c1, on Darwin arm64\n70 models retain per-model recording provenance overrides\nsame-platform ULP limits: 124 models on Darwin arm64; all models retain their scaled-error and structural checks\n\n375/375 models within 1e-09 of the CmdStan references at all 3 evaluation points (1071494 values compared); worst epinow2_estimate_infections at 4.25e-11 (299015 ulp)\n"
 }

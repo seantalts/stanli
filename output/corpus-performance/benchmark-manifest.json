@@ -1,25 +1,25 @@
 {
   "identity": {
     "config": {
-      "bench": "/Users/xitrium/claud/stanrt/.worktrees/bench-refresh-028/build-rel/bench_grad",
+      "bench": "/Users/xitrium/claud/stanrt/.worktrees/bench-0290/build-rel/bench_grad",
       "build_timeout": 900.0,
-      "cmdstan": "/Users/xitrium/claud/stanrt/deps/cmdstan",
+      "cmdstan": "/Users/xitrium/claud/stanrt/.worktrees/bench-0290/deps/cmdstan",
       "corpus": "all",
       "filter": "",
       "gradient_timeout": 60.0,
       "measure_ms": 40,
-      "pdb": "/Users/xitrium/claud/stanrt/deps/posteriordb",
+      "pdb": "/Users/xitrium/claud/stanrt/.worktrees/bench-0290/deps/posteriordb",
       "points": 10,
       "rounds": 6,
-      "stanc": "/Users/xitrium/claud/stanrt/.worktrees/bench-refresh-028/deps/stanc3/stanc-pinned",
+      "stanc": "/Users/xitrium/claud/stanrt/.worktrees/bench-0290/deps/stanc3/stanc-pinned",
       "stancflags": "",
-      "vectorize_probe": "/Users/xitrium/claud/stanrt/.worktrees/bench-refresh-028/deps/stanc3/embed/691e6e07da34e9f9/stanli-vectorize-probe",
+      "vectorize_probe": "/Users/xitrium/claud/stanrt/.worktrees/bench-0290/deps/stanc3/embed/61f48fe52bd26037/stanli-vectorize-probe",
       "warmup_ms": 20
     },
     "executables": {
-      "bench": "8d1b4c8d01213e198818bbb130655e5daa3e4b8537aaeb792d9f81ea5fcc4e4a",
+      "bench": "d0dc0a6325d1af1d1b4d0664e4882046b46f6783c16bf6548089424ac20d6ae5",
       "stanc": "d549f0ddbccff17f6b882a54109339f2a0f718b3d1fc09fce118ccdf452adc2d",
-      "vectorize_probe": "6e7739b75c9d5fec46728e60fdb38ea1ab332ceaa42c4acbb00e00c9ba47ae92"
+      "vectorize_probe": "80f6fa6a5cf4891bd669bff07190817c0f33bd69e09946b4ddcd10fa32814f24"
     },
     "inputs": {
       "2pl_latent_reg_irt": {
@@ -3304,7 +3304,7 @@
       "warmup": 1000
     },
     "sources": {
-      "harnesses/corpus_bench.py": "a1d525d81fe3c687d6af78ea2b7a7fc4cee08627a3bccbb476bf9a02937c741d",
+      "harnesses/corpus_bench.py": "b7eca9c458f195ee45d40cd49845f8e11d1090bea40ee827dd0a2ce454292b2f",
       "tools/bench_cmdstan_grad.cpp": "eb4ef7c0bb27aac34a189f605af5ed0ea0869928293ce5f0aa1793a3a782536f",
       "tools/bench_grad.cpp": "ef60ac8fd89886397c6c6a7b072db20b52f849ce1a3d1cee12c2bd6d9af30b95",
       "tools/benchmark_timer.hpp": "08c7b09589d126d78b91b8f81e53b8f772f58dbcdc906bad9ca70397d13181d4",
@@ -3313,7 +3313,7 @@
       "tools/verify_refs.py": "c4127018c6e51e53aa3b916263ceff9e40624a217661f0e0ca6cd505d8a17d2b"
     },
     "stanli_source": {
-      "head": "1e0a66ffbcbed2a66b1aefcb8ea5524356634e5f",
+      "head": "29602320eb084eed320faa10216a3f915c163440",
       "tracked_diff_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
     },
     "threads": {
@@ -3369,6 +3369,6 @@
       }
     }
   },
-  "run_id": "ca6d63336d009651",
-  "started_utc": "2026-11-18T05:44:29Z"
+  "run_id": "c08b96efbdcf4d78",
+  "started_utc": "2026-11-19T20:43:23Z"
 }

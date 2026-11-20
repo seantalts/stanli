@@ -1,0 +1,663 @@
+{
+  "identity": {
+    "config": {
+      "bench": "/Users/xitrium/claud/stanrt/.worktrees/bench-0290/build-rel/bench_grad",
+      "build_timeout": 900.0,
+      "cmdstan": "/Users/xitrium/claud/stanrt/.worktrees/bench-0290/deps/cmdstan",
+      "corpus": "all",
+      "filter": "",
+      "gradient_timeout": 60.0,
+      "measure_ms": 40,
+      "models": "s2_me2,s2_me2_nomecor,s2_mi_lognormal,s2_mi_trunc_lb,s2_mixture_theta,s2_mm,s2_mm_weights,s2_mmc,s2_mo_simo_prior,s2_multinomial,s2_mv_shared_re,s2_mv_subset,s2_nl_noloop,s2_nlf,s2_rate,s2_s_by,s2_s_cc,s2_sar,seeds_stanified_model,sesame_one_pred_a,sir,soil_incubation,state_space_stochastic_level_stochastic_seasonal,surgical_model,sw_acat,sw_acat_cs,sw_ar,sw_arma,sw_asymlaplace,sw_bernoulli,sw_beta,sw_binomial,sw_categorical,sw_cens,sw_cratio,sw_cratio_cs,sw_cumulative,sw_cumulative_cs,sw_dist_sigma,sw_exgaussian,sw_gamma,sw_gaussian,sw_gp,sw_hurdle_gamma,sw_hurdle_lognormal,sw_hurdle_pois,sw_lognormal,sw_ma,sw_me,sw_mi,sw_mixture,sw_mono,sw_mv_norescor,sw_mv_rescor,sw_negbinomial,sw_nonlinear,sw_poisson,sw_re_bern,sw_re_gauss,sw_re_negbin,sw_re_pois",
+      "pdb": "/Users/xitrium/claud/stanrt/.worktrees/bench-0290/deps/posteriordb",
+      "points": 10,
+      "rounds": 6,
+      "stanc": "/Users/xitrium/claud/stanrt/.worktrees/bench-0290/deps/stanc3/stanc-pinned",
+      "stancflags": "",
+      "vectorize_probe": "/Users/xitrium/claud/stanrt/.worktrees/bench-0290/deps/stanc3/embed/61f48fe52bd26037/stanli-vectorize-probe",
+      "warmup_ms": 20
+    },
+    "executables": {
+      "bench": "d0dc0a6325d1af1d1b4d0664e4882046b46f6783c16bf6548089424ac20d6ae5",
+      "stanc": "d549f0ddbccff17f6b882a54109339f2a0f718b3d1fc09fce118ccdf452adc2d",
+      "vectorize_probe": "80f6fa6a5cf4891bd669bff07190817c0f33bd69e09946b4ddcd10fa32814f24"
+    },
+    "inputs": {
+      "s2_me2": {
+        "collection": "brms",
+        "data": "8778f37bec6cf4471e4fc25f29691a8cd195ac94c1b3b80548561f9335cce243",
+        "gradient_count": 71628,
+        "point_source": "reference_run",
+        "points_sha256": "0601d963ad4965c02be3f28c26ce820a999b54802c67f219cf59dadf943e65fa",
+        "reference_sha256": "dd022c715108b2dd1a5c5f7ef98f2f49eff93a5a7b46c504063a78ce98dd0800",
+        "stan": "86844717dc956c9afa38dbdcf7a5e676804b970db5d0e49a233aeaf8977d910a"
+      },
+      "s2_me2_nomecor": {
+        "collection": "brms",
+        "data": "8778f37bec6cf4471e4fc25f29691a8cd195ac94c1b3b80548561f9335cce243",
+        "gradient_count": 50431,
+        "point_source": "reference_run",
+        "points_sha256": "ab89b62e2d75c803dfbd4cdfe6bb602d0a975d9e6a97a4f537990e942006c776",
+        "reference_sha256": "9f7bb710800c00f3f527e3ee731e065739441fd810cf8021a1f298b285e125d9",
+        "stan": "83080e2b1bf570b52ca80766746aea76a0b0a871fbeba48a7121d1fd99704de9"
+      },
+      "s2_mi_lognormal": {
+        "collection": "brms",
+        "data": "d66f9bb6cbeed28a2c16dfad5d92ed14a1d1dc44ec794f1a7ed1b5d4085d42ae",
+        "gradient_count": 14814,
+        "point_source": "reference_run",
+        "points_sha256": "ad9101695514f067946e80a41024c072a1a1ed5424c511683457ae4bc5835959",
+        "reference_sha256": "7072f156ddc0581201c25594c9bc16e3b8bd52e7a7d2d1e157e3d69db28aa418",
+        "stan": "a0705e724e5b6e9a88c0ba2483847f4106d2804ef94b985bf123bef93692ac74"
+      },
+      "s2_mi_trunc_lb": {
+        "collection": "brms",
+        "data": "67e1f45806f5d502fbd97093273a0fba4493d234eef7af7019b6a442d8785155",
+        "gradient_count": 37863,
+        "point_source": "reference_run",
+        "points_sha256": "c3ed969496ce6ab9049398e38ef8c57c078bfa9daf36673eb684e1ee889e6f8b",
+        "reference_sha256": "49ea00cad7d4443d883df70e32de4ab9d231b86844fa99278e41c0f60ea55cfb",
+        "stan": "0c369b0a17e5324a5fea57ccc03c837c7e39de721e7e4c71ec2d06abd9fb465b"
+      },
+      "s2_mixture_theta": {
+        "collection": "brms",
+        "data": "405347c2ff50068ea53aeb8dd71b09002f7611ea848710c5ee3ee8b31b025d66",
+        "gradient_count": 80361,
+        "point_source": "reference_run",
+        "points_sha256": "0ac00db9c1b744af76394788bd628a78560438ee044133aadf13774fe13acecb",
+        "reference_sha256": "a96e7380eb2fcc03582e51cf04fb11c438208d3360c0772cf4d9677b558345c6",
+        "stan": "dc8ddca689aea02cd247ddebd55b7ef22177397ecc59755e9defe7328f6f0950"
+      },
+      "s2_mm": {
+        "collection": "brms",
+        "data": "6ffc054d4a36e338a1c7693fe363d3e222128cf12da7ea96135405805a6417a3",
+        "gradient_count": 26596,
+        "point_source": "reference_run",
+        "points_sha256": "45d41f7b1aacfd07606b60993c1ebc5efb028db35e067b887bb9c6ab3249b8b6",
+        "reference_sha256": "6f2be0179f6af68aeab3f6da4ab30a28250df1ca1609e27310b32265e5379eeb",
+        "stan": "b0c0e0b698847ec60472cb57dd022bf437f4a1ef7e9a5ae2ed527c482651a145"
+      },
+      "s2_mm_weights": {
+        "collection": "brms",
+        "data": "b15045f072ecebf5f608006cf9d9b33719b209e1b1f20392404fabc901da6679",
+        "gradient_count": 27758,
+        "point_source": "reference_run",
+        "points_sha256": "028183c4a0fdcdbfb741ed9b28a24dd75d9b4e43906156ac4b79120fd2df2114",
+        "reference_sha256": "801af18d72490fe96656c74d4f9c75907e9da1ae965bfb29aa44dd1d239a4fb5",
+        "stan": "b0c0e0b698847ec60472cb57dd022bf437f4a1ef7e9a5ae2ed527c482651a145"
+      },
+      "s2_mmc": {
+        "collection": "brms",
+        "data": "86d0bf3d666206baa2ba6bed672692b36e37e644c44166f235dfe7015e698d67",
+        "gradient_count": 35428,
+        "point_source": "reference_run",
+        "points_sha256": "445113fe29145da34e9cb401ab2a076dbf865e529c9cf6331dfb183d88bc65e8",
+        "reference_sha256": "dc77231210e7681402428978029deb0fe6bc540746b065224ab87f030421f118",
+        "stan": "31c2f719f7abcf7f4aab70a66d33ccc1849815f6d6ef5962995503d093e44b16"
+      },
+      "s2_mo_simo_prior": {
+        "collection": "brms",
+        "data": "4e778e05a5ea39c2ac6e620f6db5808ed6f901b35d8bc35a9009dd059347add3",
+        "gradient_count": 21337,
+        "point_source": "reference_run",
+        "points_sha256": "21b0bd82ed738f300d558420ae7aaeae49934ae1fb01529553143aef682bcf62",
+        "reference_sha256": "c1e5d3cb9c21a6fabed18910298c3ec0093f6300d94e016c8ec385610ecedb9c",
+        "stan": "e57b4e6c54b65742da0f40d03615c239d1414cd3bd8da9e31de50bf88a472e8d"
+      },
+      "s2_multinomial": {
+        "collection": "brms",
+        "data": "a8d0cb535ef966554dca8089b794d1269688ad28d662e84b12aa943ed95a4606",
+        "gradient_count": 12874,
+        "point_source": "reference_run",
+        "points_sha256": "3f7d0d82d1e1af08f3a40e40541af85de1034db4088cb2440eed4512510ea7ae",
+        "reference_sha256": "b8287acd574ba0f8ed31d3e954298a0ab2546e80232585e35abb4c5219c2e6e5",
+        "stan": "51902f1d852cc4a607b1d14e4c5100ca2615780ddeb751bd230d28b33578eb5d"
+      },
+      "s2_mv_shared_re": {
+        "collection": "brms",
+        "data": "2b5001d9ab69c1dc1cba841b7a09f453e43a6a2e63d4bad3376107abdab23464",
+        "gradient_count": 36818,
+        "point_source": "reference_run",
+        "points_sha256": "e983dab67d91c7b7140a68975752525d0560467cdc599443950b80bebf8a1da5",
+        "reference_sha256": "ed368a2d9e07444ca97750ff1997822f6c0da76bf4f8d6c8043a1af84010b220",
+        "stan": "3cead87fd39b1ea43c7bb172c9871c362976e5baaf37ffa49e2999d960130021"
+      },
+      "s2_mv_subset": {
+        "collection": "brms",
+        "data": "6db93608dc2317a0bd88aaaf6b258314992c3722b4255c7b500ae9f2d0a1c90e",
+        "gradient_count": 12140,
+        "point_source": "reference_run",
+        "points_sha256": "8b7a882f4a48478ee095ef399e46039668fe77bd60ae3375df6e620f36c3dff7",
+        "reference_sha256": "d523996bef60b5c4c660e5248b4b4ead08fc4f44d6d51e34c9e6f97d6fa54586",
+        "stan": "5e8ba7045ced9a3f81f9ec60eb6f69f003d6f4de74d2a0b4ff064e484e4d8c8a"
+      },
+      "s2_nl_noloop": {
+        "collection": "brms",
+        "data": "385e6870e1e82cfeed415d2a2d9e854f791e05c9d24d7216587e2711832c569a",
+        "gradient_count": 52563,
+        "point_source": "reference_run",
+        "points_sha256": "2a8344f304f7cc98a385288089bf78c25c96f46ab3a71af61f7f38f5de420dfd",
+        "reference_sha256": "fd56e701df81f19c7e8864aa41b0a367fd2b0c09805bcbcd71790532e6f4283d",
+        "stan": "da05388144ee7f1eaf29105fdeeffd11475537ceebba58ec78fbc2bdbfa7e42a"
+      },
+      "s2_nlf": {
+        "collection": "brms",
+        "data": "887485161ed7d97a86d638f7052101356cc7ffc33f3e12f95ac1d6e2407e50fc",
+        "gradient_count": 9418,
+        "point_source": "reference_run",
+        "points_sha256": "533ef92a6eb54cf8019831b3832232560a2ca5a80d3fe2529b8cc6cd71727258",
+        "reference_sha256": "2ba463a1945e618330165ed978c6a0259cdb73e492090149714f994948aa6074",
+        "stan": "4b7f16646d0b5d0c3d22a785d77f84ea8729ebbb912897a6712f14c7c41aaa6a"
+      },
+      "s2_rate": {
+        "collection": "brms",
+        "data": "14e29c451a80db606989e3b876a4038d6321f1a6e9bbe8b672b46dacbc2a1a29",
+        "gradient_count": 7798,
+        "point_source": "reference_run",
+        "points_sha256": "3e49adc49b3739ae40d201d7b9da1150017558714582ada34bbf40ba460ae1c5",
+        "reference_sha256": "054de7f68b08ec97a89e8a751b9db336cb1c0b332b4f821524dc54b8d305201f",
+        "stan": "d4ca6c2a27765beb02e60970b7dc9755f7c75f493ca99ee8046e2688f0e04d46"
+      },
+      "s2_s_by": {
+        "collection": "brms",
+        "data": "16ae70f527a1f9b18a8fbd25961595bcc77bea5cb7eef884f72e27d0bef2c3ad",
+        "gradient_count": 70749,
+        "point_source": "reference_run",
+        "points_sha256": "d36107994f730a3b3aa86e093a96471ab0681bc005f5c6f09c58b361ef9d894b",
+        "reference_sha256": "26fb08208481ad229f90c3119b3679ed828b45d67121f941b10ce5b362c06096",
+        "stan": "a58b23f388e24c5aa5cac16ff3da1b9fb30573c1f2eb8aefc6660e296a8c29c2"
+      },
+      "s2_s_cc": {
+        "collection": "brms",
+        "data": "cd56693fcfd1c1d2e7c6e995215166590f12c824f4a714605f217a12a89988e0",
+        "gradient_count": 30464,
+        "point_source": "reference_run",
+        "points_sha256": "b6a64249a839fd0d342d831028c48f7fdfe058234b37806560bd44f55831213f",
+        "reference_sha256": "e8d067daf8423158d143171b855fe8b8ff64ae5cac37c651df0057eaab677007",
+        "stan": "4c3f4f4b63f1b2033a102a48b174f8b10b6eb5bdcb7a9cf3300d70dfaf1866b4"
+      },
+      "s2_sar": {
+        "collection": "brms",
+        "data": "1ae4687831fa38ba9f9c333cf4a3606b9dcfc215af8a2c7b6e8e668310a6d1e4",
+        "gradient_count": 10925,
+        "point_source": "reference_run",
+        "points_sha256": "59732f2b67bdc41856c496f8b9ca8183fbe6af262170f1ed5481419b46aca136",
+        "reference_sha256": "fc6c4e0127579400fa02d9a095ec1a62a4b291534af165bf7f83f8070efb0d7c",
+        "stan": "add67903c01f5eb3bfae8fdcc532bd612ab10a25a669a7ed4c687c7cded366cd"
+      },
+      "seeds_stanified_model": {
+        "collection": "posteriordb",
+        "data": "d68b8b94a93c03f121ce428000bb59e265b4817fefc0681bdc748524422fe865",
+        "gradient_count": 42185,
+        "point_source": "reference_run",
+        "points_sha256": "f47b73af8982313c899efbe12304c3ec2331c17680f03771b4b1604e824872d0",
+        "reference_sha256": "553f85f6f3fb65e9d011003d83f2116d2bdc9a3416587bc68c67e80bb37ce02d",
+        "stan": "a57822f654e024467fb7522ae013de10f0a4ba14797255b8c172c4418e57ecc4"
+      },
+      "sesame_one_pred_a": {
+        "collection": "posteriordb",
+        "data": "66f163f15d329a745161bc12b50c0c92964436de01f87a786e6e7a6bb6366262",
+        "gradient_count": 15535,
+        "point_source": "reference_run",
+        "points_sha256": "718aaf17494278164932475a9c31a2ef450bca4a47547bb2360e2c670afce319",
+        "reference_sha256": "94c4b36db795d7935df167eaa1bc05c6df6254122f30d325a1a29ba12219bf27",
+        "stan": "8fa82cd7e6c4d1f23db8de2cd0f8a5eb6efedc8369ddccc5e4f3476a61d6fc73"
+      },
+      "sir": {
+        "collection": "posteriordb",
+        "data": "fb673baf165532b8a46ee5ca12c6203ef79df7dfe6a46bacc0e37e01374b10b6",
+        "gradient_count": 127498,
+        "point_source": "reference_run",
+        "points_sha256": "78869fbe99ca290ffc227fadc8c3243b3fe1c9c4364face9d5a99b5c334d7fb6",
+        "reference_sha256": "f09a6860413175f61200ed0f11a62cc433069495d20985116926d88f1cd9e619",
+        "stan": "7d4cf584bf79ffec37b8adab67067bf544b1e8f62835e49859b2d423dbedb619"
+      },
+      "soil_incubation": {
+        "collection": "posteriordb",
+        "data": "4e5506af4aaeaf3ae44b163d6ea3dfbe9954e844d9cd4aeaca8fced27e1d1c2e",
+        "gradient_count": 202700,
+        "point_source": "reference_run",
+        "points_sha256": "4b15beb874438e42b7c5382d3efe1b8289ad41104c18864930d8481ae3c68d3b",
+        "reference_sha256": "d23e6cb9a272a602469af66063c985ad53acbd3d9ca11585967ca4c74a16d563",
+        "stan": "6c845fcee0e9e5a49508c5b3395bb09613495b2773d93dbeef9f72664ce10e57"
+      },
+      "state_space_stochastic_level_stochastic_seasonal": {
+        "collection": "posteriordb",
+        "data": "c48362b036a8bcff8d5be24e20cb7ffc026d243736d7b04d5b89376bf01e02dd",
+        "gradient_count": 1027340,
+        "point_source": "reference_run",
+        "points_sha256": "b3860b046456b5ab0d91ca20b5a18decde0390be2f61996e808a67ba381546f5",
+        "reference_sha256": "4a6c8ef950eaf759641957434813db2a3c59d049c68f379dec2cf77f21a34f7f",
+        "stan": "f0103754c910380b24d6a6619053eb04fb7ee9f74f4acfa301b6f6234e9b8dec"
+      },
+      "surgical_model": {
+        "collection": "posteriordb",
+        "data": "1cb463b630377b30ab27ec89a49269f58f5a0c1841fcb9a5ebe7cc638f9d422a",
+        "gradient_count": 22227,
+        "point_source": "reference_run",
+        "points_sha256": "46f5bd0cf063e6ec59f4de1abf22c9d10b874996708ae016a53e5d1b56eb6dfe",
+        "reference_sha256": "921b57848acbc0038f189e7104bad5a93177855df4d5de9a85f8f62f510b9d7c",
+        "stan": "10fdd6ddf107af6c0ef7ead174b5ad6f341ae3b3b80c54650d88e22d5c459696"
+      },
+      "sw_acat": {
+        "collection": "brms",
+        "data": "232718751ed3be160fe7a5dae73393a9383c7221ae5fe6d856fa8cc7121c683b",
+        "gradient_count": 12184,
+        "point_source": "reference_run",
+        "points_sha256": "3a490411be9c2f3fed4637cb14d9933f574dfe614b222fd6afd85868ba856270",
+        "reference_sha256": "8c3c20f6bc418cf7b60070447ca334de5eae885b8ea7b6db4bfabe67e5a4451b",
+        "stan": "cb6c07601c73a474150234de7a6df53234fe6015c90a39e048b7076634521eb2"
+      },
+      "sw_acat_cs": {
+        "collection": "brms",
+        "data": "968475350f51e88fed4377e17e5a249ca9b19276cb8f1e6cb5e83ab146313188",
+        "gradient_count": 18278,
+        "point_source": "reference_run",
+        "points_sha256": "3dc3a7574c0c24d837a4358f134033ea8a4a85f4f0ef9823181bd36207d09425",
+        "reference_sha256": "f8a4ae7936072df301c9100445238cbb752ff1f4498b238d2b2f76fcb3c6efe6",
+        "stan": "59cafd9120618e6b5a90d0b8a1b0bc81586ab6dc8c40394a2ea1b2809756d68f"
+      },
+      "sw_ar": {
+        "collection": "brms",
+        "data": "c1a41815ff60e17dbec3df57e80ef9d49463614a753e799c1b552511a9c8a741",
+        "gradient_count": 10370,
+        "point_source": "reference_run",
+        "points_sha256": "457b61a9da131236fce0bd90c2b49de42f32b74d39ac9ba4e380090f99626dbc",
+        "reference_sha256": "10712262b50760a3598bdcdb3a3cdf6c42df217014533cf0115d4a1ee25727ac",
+        "stan": "f890b755822ff211e6f3e67b907a44b2ac4e897f988b30fade82a6ecdd2bc8b9"
+      },
+      "sw_arma": {
+        "collection": "brms",
+        "data": "6d481a76b3014f2ed8b0ac6e2e5411a615e99bcd7289c5b8165b8d1343e9d3bf",
+        "gradient_count": 42235,
+        "point_source": "reference_run",
+        "points_sha256": "a4e672fcbd8c37f5822409282159bc2f81f4916fa89a41ab66edee3fad359fec",
+        "reference_sha256": "c58ea3c819cb7d28a0ef9706fec1ace6b75d48e6728a6f4057d967de70c0d284",
+        "stan": "69a8efd10664e6730895e582898052366191132f721860d1f52f3c977c336cb9"
+      },
+      "sw_asymlaplace": {
+        "collection": "brms",
+        "data": "fbf8dde1ba34cea9bc1279238045799a8468c23e040034504ad30ae590e6d446",
+        "gradient_count": 23396,
+        "point_source": "reference_run",
+        "points_sha256": "371108123a7225f8151346558f36faa81b515b60b796b569f57f842a8084fa51",
+        "reference_sha256": "bbb1e2b4f0b97d4edc9b1965529446110b37ed45763002137e5869487497ecdb",
+        "stan": "2e6eca41d5d5c1cbb2a5fec1fad726d316e75dcd2d88b3c141f46af38f2c1a29"
+      },
+      "sw_bernoulli": {
+        "collection": "brms",
+        "data": "795fad4669e85a7864df185ae673418275facf057fb6bdd6129dc2ad874655a5",
+        "gradient_count": 8632,
+        "point_source": "reference_run",
+        "points_sha256": "50bd15637f2b7acf0b28876ed19502bbca465ff668a9855ae98c60bc5cc98e97",
+        "reference_sha256": "b215f59b07ea25b62bad0cce9235f835852985003de3a0757605c27c9e0c348c",
+        "stan": "1c670b73e4e385bb28d3b1baea2efdbb9162e046501a46100f01a28c7b67b561"
+      },
+      "sw_beta": {
+        "collection": "brms",
+        "data": "25142fb271a6c6c88e6f82df2c60cbabb8b7ea7c01eff4f1e25cf3ff48ab99da",
+        "gradient_count": 8994,
+        "point_source": "reference_run",
+        "points_sha256": "b2e20fc6c6938e60c6c029ddf7611ccdddbb2da28eac4dfe9ca4b5c70455d1c3",
+        "reference_sha256": "a81c57c0e73353dd3dc0911430a6ea75e05eaa248acdc8902537bd445bfd378d",
+        "stan": "f655fbe0cba118054d127914aa0e50a844e0ab50fe1474b93b0b2520bd87f47a"
+      },
+      "sw_binomial": {
+        "collection": "brms",
+        "data": "3a6c7c25be8de0f1948002f657ca31466a19c34333580411e36635c28bde4331",
+        "gradient_count": 7524,
+        "point_source": "reference_run",
+        "points_sha256": "0d63b03af7686503bf2985f1cab69d532a6c695f2bfc50b3fb422c29c5f9a728",
+        "reference_sha256": "e9a00161dfe726a0de9a70b3ec1521bddbc33ff47565622e659bb0bc67d929b1",
+        "stan": "5e0a341b5dc8a9dfcfb42a51cd192c4115ec33c66c07456e752038c37e7e67d4"
+      },
+      "sw_categorical": {
+        "collection": "brms",
+        "data": "6c774920e2682d11d81c10766ca29bdd7b1d5ffd88d139540121cee604646fe0",
+        "gradient_count": 11043,
+        "point_source": "reference_run",
+        "points_sha256": "21281be6c91f12648ecb1d2e739b459c73816061df81a4e2520373abcc279f69",
+        "reference_sha256": "389dae0d04ce6391df726d0e6a219beb025351e67e77e1a53d3b98bb75b9791d",
+        "stan": "d744fc844b90867b676b3928b2d9d51f72fad4a08288cdd9625e0bbcd4065e9b"
+      },
+      "sw_cens": {
+        "collection": "brms",
+        "data": "eb59296619de7b2c8b07838eb527ed8ab0aad05745a84c1874e6654bd4a6cab2",
+        "gradient_count": 10783,
+        "point_source": "reference_run",
+        "points_sha256": "29cb29562ea371f07f532cc8f44462f382e0f05736e0b36f93f2003216dbe1e7",
+        "reference_sha256": "b02db3438990215290eb5325459d6e559e1e0ba9c4628aaf4a74cc0cfd9bd9be",
+        "stan": "7d708d59658f782d056a4e74b71851bc966721187a38c0c5e48e5cb737fc3030"
+      },
+      "sw_cratio": {
+        "collection": "brms",
+        "data": "232718751ed3be160fe7a5dae73393a9383c7221ae5fe6d856fa8cc7121c683b",
+        "gradient_count": 10362,
+        "point_source": "reference_run",
+        "points_sha256": "e05d072de3981f63c473e6e59a28b0c1e43e67b605933211ad694fb1cc9b0bf3",
+        "reference_sha256": "4550bd32498d8ce8e20e66fb347548effcafbb071e9cb433daf0763c43f0b3cf",
+        "stan": "e243920eebd2a619dd31cb8f13c70e7603f246678330144c04b5a13b3ae42ace"
+      },
+      "sw_cratio_cs": {
+        "collection": "brms",
+        "data": "968475350f51e88fed4377e17e5a249ca9b19276cb8f1e6cb5e83ab146313188",
+        "gradient_count": 13745,
+        "point_source": "reference_run",
+        "points_sha256": "42999be6523a92d2a5300af65a796c1f3ff5ec9812dde6fd37480275e3dcb3ce",
+        "reference_sha256": "06dca9488deb4c4af5ab6627a0d93e659ff8d6912e18d9d0053b1f051762b199",
+        "stan": "32ece7871063baa6ad572018fa1261baa907316e18472d100be7bbdcff5bd09c"
+      },
+      "sw_cumulative": {
+        "collection": "brms",
+        "data": "285717e8abce42018ff15ca4908fc138acb893ab303f3075dbe0dbe61d12dec5",
+        "gradient_count": 9892,
+        "point_source": "reference_run",
+        "points_sha256": "ff57b99babe89df44385c1556b83593f0625ed95d514081e287d9156ef30738f",
+        "reference_sha256": "b1f7e5182f06db0512a6ec541333c776a2219f4e05375dcbf4514e010d56020e",
+        "stan": "c1d616514c8caadfd5646d13f4307d028bf459d4a03f027c2f75753cecdc3d34"
+      },
+      "sw_cumulative_cs": {
+        "collection": "brms",
+        "data": "968475350f51e88fed4377e17e5a249ca9b19276cb8f1e6cb5e83ab146313188",
+        "gradient_count": 22328,
+        "point_source": "reference_run",
+        "points_sha256": "6ca3f0b12a28a393aa3d28f700dc77bce1ea6554aafd919f84e15035aa888cff",
+        "reference_sha256": "3f68cf628d9d266bed10a0bfe99860eefcdf41a4d874b21b457fc21b7971a4c6",
+        "stan": "8db09b2e6cd585c357a7f3671664f0cb5c3a9c5b2599d057ba7da59cf7012211"
+      },
+      "sw_dist_sigma": {
+        "collection": "brms",
+        "data": "dd682015d7b296497e67076d179d854310fde941285d8b27a07057c5ae6f2d87",
+        "gradient_count": 10692,
+        "point_source": "reference_run",
+        "points_sha256": "ca2f4f37605d4c909e3a3e12f116a29fc64e5c69e0b468d4d1734a190134b00c",
+        "reference_sha256": "735e36aa60c375890b0407981789f837cf0ab311c5bba4b882ab1951b0687424",
+        "stan": "b16df33e154393285e4f47191386800e243f13b9ebe48ced9a2d716fe4a0fde2"
+      },
+      "sw_exgaussian": {
+        "collection": "brms",
+        "data": "5f283d724a9a1458f6c31a5493ade456303bed40740b34494d83f62057e05ba2",
+        "gradient_count": 25066,
+        "point_source": "reference_run",
+        "points_sha256": "36e9b79b3ec6e15b7669795468b9cffcd0bfaaa2b9ad2c7c603c69fc085bce11",
+        "reference_sha256": "68e5edd75000e60a27925a976bb8c669c7e3217b2543032c872e6eb1a43d9516",
+        "stan": "975704b8b84f02623e40e0305c624fe29abf26258dea8bb14bb05a9e0b44715d"
+      },
+      "sw_gamma": {
+        "collection": "brms",
+        "data": "5f283d724a9a1458f6c31a5493ade456303bed40740b34494d83f62057e05ba2",
+        "gradient_count": 9448,
+        "point_source": "reference_run",
+        "points_sha256": "bfaba4012c4fa66c9daea82656eef82da8ca31b2756c5a5951e09650d0da055a",
+        "reference_sha256": "40745e7537ddb6100e1ef38062c95952ef888bcdb15039b5a5391bf457a97c2f",
+        "stan": "1ae44c603a7e75713e3781aaf7ecf86cd08c8ce71d7b950419ad875fae770df5"
+      },
+      "sw_gaussian": {
+        "collection": "brms",
+        "data": "bc7054e9e7c6f231fb6b16bd631becb96258853a5d32604f2e442425cdc3e169",
+        "gradient_count": 10882,
+        "point_source": "reference_run",
+        "points_sha256": "ab156a6c26c0de3e79a1dce32d1e3dc1ef3ad5f3b3e294d71b8c6273abdb691a",
+        "reference_sha256": "a32273b6de4e4535df7acca2dc754cb614e7e942416139e7dc5c19c940b29a07",
+        "stan": "77214f53507f0ade0a670883ae0a18734d15bfdbd32a722ab228a5819f2d7d9d"
+      },
+      "sw_gp": {
+        "collection": "brms",
+        "data": "efd4ac19ae25f26cb56b6159d85e5b09cd3ab7cebadf2efec1c9102ddba42f49",
+        "gradient_count": 47285,
+        "point_source": "reference_run",
+        "points_sha256": "309de653abb6a32c0a52687236186021d4c95d0c6cad9bf888da75651d784f0b",
+        "reference_sha256": "de5c1af2135b57326c4b223e222fd25af1b69a1ac2c032f7cf3c4048b01d2f26",
+        "stan": "909515313b2ee07bdd865deb403ccb4fa41b92d306b723c79c91562c474d36ae"
+      },
+      "sw_hurdle_gamma": {
+        "collection": "brms",
+        "data": "5f283d724a9a1458f6c31a5493ade456303bed40740b34494d83f62057e05ba2",
+        "gradient_count": 13308,
+        "point_source": "reference_run",
+        "points_sha256": "aab9178270232d0ac2828369f0795fcea44c53dc8bbbe166ec4e85c4bfdd7e37",
+        "reference_sha256": "6d6c77ff732faf39f14476cf6910dc0b185f0a6dc35be5ca8c30f4992e4b4bef",
+        "stan": "69c91afbe55f362b2b4653e65736546d1a4580a6294a4d9c23ec296fc92ed05d"
+      },
+      "sw_hurdle_lognormal": {
+        "collection": "brms",
+        "data": "5f283d724a9a1458f6c31a5493ade456303bed40740b34494d83f62057e05ba2",
+        "gradient_count": 12470,
+        "point_source": "reference_run",
+        "points_sha256": "c15c56b09c71b803dfedf9bf5e0196dd5d11bb38640bcbdcb4f360209c0d54ba",
+        "reference_sha256": "b5eec7f845c6977669e244206ffd016e770511037462e827f9cce8b8a11a00c7",
+        "stan": "a21f097896c5633b8be07169f8c3b2c1b4c6964667ce8a5feaa42e55b5f83dec"
+      },
+      "sw_hurdle_pois": {
+        "collection": "brms",
+        "data": "a2a77324440fb1d54978654f85243b61e8b6688b356b3479ba40ba37d6d0f8cf",
+        "gradient_count": 10352,
+        "point_source": "reference_run",
+        "points_sha256": "d4d57a52f8ad946fb4e0e74c5e737fec7871160b9bfff9cfa428f9e6e0dc536b",
+        "reference_sha256": "2e9958e7b8c2eb35d658985348d1f3bdbf5ad985a54cadac547b1bd24f137e1d",
+        "stan": "d4467a0638316f55d5a0b5f67535532a4cacf68d8c8916922f4ace2eb34108d3"
+      },
+      "sw_lognormal": {
+        "collection": "brms",
+        "data": "5f283d724a9a1458f6c31a5493ade456303bed40740b34494d83f62057e05ba2",
+        "gradient_count": 8278,
+        "point_source": "reference_run",
+        "points_sha256": "beafae81162f86e536f2b1939d1609be966addb26e152781065ef0148bb921bb",
+        "reference_sha256": "55aa83352ead9aa344acbe5074a2d3732c03fe592540abbce51245f6c7b064fb",
+        "stan": "464fd82100b9fc720375d055ef6e1ef96f8f6989dfa3a8e94b39f7392a5c80a9"
+      },
+      "sw_ma": {
+        "collection": "brms",
+        "data": "c95dec2db2cc11054391b296d25b6a061c6845dd4aa8f3914fa1a292b8848448",
+        "gradient_count": 11072,
+        "point_source": "reference_run",
+        "points_sha256": "a3eb1b997b5a334b0029d66a3d982c02d60b01ec52e4f51dc56ad32bc1dae058",
+        "reference_sha256": "bc2f3adf6635ed0e3ee834c3e80cc1171360d2a19a56f9c2389794bcec6fede4",
+        "stan": "e488657669bce08b13bc9339633e5548ec941a0710121d2d0d695ab921067178"
+      },
+      "sw_me": {
+        "collection": "brms",
+        "data": "8d8d62b963354bc236699776350a00ef643771e2d557ed6c9ad7f0abca24fea3",
+        "gradient_count": 57877,
+        "point_source": "reference_run",
+        "points_sha256": "22d916140735487a02ea41151f39c6af8ad46453c74e13c2130745c04e1f4280",
+        "reference_sha256": "bde30acff15f7cd9c9569e8baf87899027e4abf437229033f4483ff210455035",
+        "stan": "b802870dc81c1caf1cbe25effafe5c0f90f06317ac29e59ae83e75c4e99d11e7"
+      },
+      "sw_mi": {
+        "collection": "brms",
+        "data": "5fc568bd267fb2be6aec9610ff773f11363836542615774a408da566e05fba8c",
+        "gradient_count": 15080,
+        "point_source": "reference_run",
+        "points_sha256": "fcc3148cacaf33654279e358b3caad78fa850d5d427c7de03840a752c9038323",
+        "reference_sha256": "de1eb64455f47e99601722ff58500fce5efe28096430297f6c97567a1a520776",
+        "stan": "865b2760b8fdb3da822ab40cfef7de11d8d9c06942423d75eaad7812b1b8c675"
+      },
+      "sw_mixture": {
+        "collection": "brms",
+        "data": "651b4a382612c76d3efdf6960ed3ea4a62f95f812120119b7a1efb2534fef6b6",
+        "gradient_count": 303490,
+        "point_source": "reference_run",
+        "points_sha256": "cfa4f35dcd08a7087f8e93754d29c4279246629e6bce99cbad5be358afb43b23",
+        "reference_sha256": "3767c26902db212ed46835d351d4eec06b021b50fc404f30b761da1ce7f7062d",
+        "stan": "20dc072332bbef22e87d427c2e658d1803269be372d2b50ff00eee68a51f547f"
+      },
+      "sw_mono": {
+        "collection": "brms",
+        "data": "f5c536bf2019121c52cb23ca6639f82f1ce60d20d41168900697d594fb57679e",
+        "gradient_count": 20419,
+        "point_source": "reference_run",
+        "points_sha256": "d12059513f193db94e5393206d3f16c30acdfb81df17fe7e5742cefc7d2e8684",
+        "reference_sha256": "287c3d65cce802bafc36db04484caf733c2336ac247e5d16092609ef457aceb6",
+        "stan": "68abf8ca36e4816317350647d52726ede2f5169736e7135f7b63522500aab03a"
+      },
+      "sw_mv_norescor": {
+        "collection": "brms",
+        "data": "37ffe754b268b1b0ebe2507c0556da5eedae2f62336176fd827f096c3b8e9a0f",
+        "gradient_count": 11640,
+        "point_source": "reference_run",
+        "points_sha256": "6df4c3ceb95dc0974176a077cb1e03c8815b69487c62a0374377602689acb9c5",
+        "reference_sha256": "f7e7ebdc3f649961f540fa5d0000de1aeccefd8192e0187996f878e93f2c3fd6",
+        "stan": "98dd7e770d06dd8f3db5b12ae64f3741c424f6923c49e6487504ec74017b9d35"
+      },
+      "sw_mv_rescor": {
+        "collection": "brms",
+        "data": "4b2387e43591f87cb78ac7d81dc8b25577f78aeafdd0dffdfd2805ba36497338",
+        "gradient_count": 13320,
+        "point_source": "reference_run",
+        "points_sha256": "42d0bdac27f9b09102cd8766e3c70c12e4d25d997bfd3652667dc837eecf0603",
+        "reference_sha256": "33f804b8de83fd767c3ea01ce5db8ad4a8ad15fff663e4a098e8b1fbc4ce00ee",
+        "stan": "958144aa5dff14466d2c6331fbfc63ae393746a653a5b9fab04812aaa8d9dfde"
+      },
+      "sw_negbinomial": {
+        "collection": "brms",
+        "data": "9b7bb84a26e70142bc5e7c3467c56d052a5db5944e157bfebd6d25783d081142",
+        "gradient_count": 1486250,
+        "point_source": "reference_run",
+        "points_sha256": "a7285c6e5760d1760590cd044a0dd82500d157a37ca7ad912d723496d20efca3",
+        "reference_sha256": "9a135c6ea19b84eb4cb5da1774a36b41df6dd121e75854969cdab60a5385d6ae",
+        "stan": "f06ab092fb04e80a1c6e9f50a3dacec011fe0243b064ab43767d393bdeee3664"
+      },
+      "sw_nonlinear": {
+        "collection": "brms",
+        "data": "dcd07361f43681243be47f453b700acf2dd6882dfe4e1accd33150f4bcd7c47e",
+        "gradient_count": 10926,
+        "point_source": "reference_run",
+        "points_sha256": "7592eaea2ab6faaf2d840e74ef8c1506cba82f7eedf91bd1536fce29a059849f",
+        "reference_sha256": "a02f0c66b445c09c81fe8e14349b52dcf9ead2449b24edd24bc4ac5a6526134e",
+        "stan": "232bbb677c296093c0a03ef5c3b8362af9c6728f587fa3f547a10942cc07f088"
+      },
+      "sw_poisson": {
+        "collection": "brms",
+        "data": "9b7bb84a26e70142bc5e7c3467c56d052a5db5944e157bfebd6d25783d081142",
+        "gradient_count": 9848,
+        "point_source": "reference_run",
+        "points_sha256": "d3e173d29ec0c25de44f19297efb75eec06dd4ed2cb9cc5d5c65240b5718f4be",
+        "reference_sha256": "3f7fb65b716a64aed7aba22ed8a45a80f571d680f0c9da8be1af7f7bd959d491",
+        "stan": "c91fb93288e09032517b72c607d460a5f9a25a0b0daa512a3a50cb14b3c461bc"
+      },
+      "sw_re_bern": {
+        "collection": "brms",
+        "data": "ddb3789ec2b3dcbd4d26e1a0886c1c7279c2d646d8fa654b3d32e5d36a0aa22f",
+        "gradient_count": 27420,
+        "point_source": "reference_run",
+        "points_sha256": "526b2ce2f92eb820ee3d7c8a1997ec6d0f3840ed7101b783c73508054c30e51a",
+        "reference_sha256": "811657b08290d072cf6961d66f8ad3f6ce6658e58623541707145759ffb6b434",
+        "stan": "1f5169a789eb5fd1f69adcc16cef5d87c6ee44465b789b6c42f1c85b6252cec8"
+      },
+      "sw_re_gauss": {
+        "collection": "brms",
+        "data": "1e535c1fcec7dbc3b96a2ea5619f0b969b8f479594239ce1208d09d435dcd5e3",
+        "gradient_count": 29076,
+        "point_source": "reference_run",
+        "points_sha256": "4200e1677948f4e77179be312dc76b892e2123bf46843d96ef28ab53936e5553",
+        "reference_sha256": "011b1a21fc8fdad292536cb68065847cd5f5b76aafae053abcbaed75ae951c43",
+        "stan": "9347dfee61eaaaa28b42145198b96c577beca77dac2f579ab0f1927b2f559471"
+      },
+      "sw_re_negbin": {
+        "collection": "brms",
+        "data": "d5ae5ead6c4953503931aa7837f26505dc20230ee6247219be5712a916cc2d02",
+        "gradient_count": 30260,
+        "point_source": "reference_run",
+        "points_sha256": "15583876948d7a0da47fb60c7286bb2c022ea820c830a7c7707ec23c7f2bd9ca",
+        "reference_sha256": "b717c509e696a431c07d3330d473ea50958ec86abd58a19aca8f2f8e2484e5d8",
+        "stan": "464c4c7f2115c9f654e90d56b77d3db995a6f7ed02fe538a03baf04429b3fefc"
+      },
+      "sw_re_pois": {
+        "collection": "brms",
+        "data": "d5ae5ead6c4953503931aa7837f26505dc20230ee6247219be5712a916cc2d02",
+        "gradient_count": 30044,
+        "point_source": "reference_run",
+        "points_sha256": "d8b37ba4c464baf3de45674759175f81f9fdef88420f2c777ff42283a943fdb6",
+        "reference_sha256": "19b869a2b230f8411ad53713e547fe4c333dd8d54444806e1d43968ca0371c62",
+        "stan": "090c92475acb40059384bcbac33d04ddaad0bd1d1c478829691d1d2691e4ea4f"
+      }
+    },
+    "machine": {
+      "host": "Seans-Mac-Studio.local",
+      "logical_cpus": 32,
+      "platform": "macOS-26.6.2-arm64-arm-64bit",
+      "processor": "arm"
+    },
+    "points_file_sha256": "dff8488b2a13a2609e61457ee899ee7b9b604503b92a0c555a7288a23db512ac",
+    "protocol": "stanli-corpus-v6",
+    "reference_settings": {
+      "chains": 1,
+      "delta": 0.8,
+      "draws": 1000,
+      "max_depth": 10,
+      "points": 10,
+      "save_warmup": true,
+      "seed": 1,
+      "timeout_s": 1800,
+      "warmup": 1000
+    },
+    "sources": {
+      "harnesses/corpus_bench.py": "b7eca9c458f195ee45d40cd49845f8e11d1090bea40ee827dd0a2ce454292b2f",
+      "tools/bench_cmdstan_grad.cpp": "eb4ef7c0bb27aac34a189f605af5ed0ea0869928293ce5f0aa1793a3a782536f",
+      "tools/bench_grad.cpp": "ef60ac8fd89886397c6c6a7b072db20b52f849ce1a3d1cee12c2bd6d9af30b95",
+      "tools/benchmark_timer.hpp": "08c7b09589d126d78b91b8f81e53b8f772f58dbcdc906bad9ca70397d13181d4",
+      "tools/cmdstan_ref.py": "059099bf6f1786f8e5ed7c2c64ad0dfd25aafaa75b18056b6427690bb9b2968d",
+      "tools/corpus_inventory.py": "61c775e1b05b367e4b37c8aed7af583da8b8c80b4de3035ea718a87c215205b7",
+      "tools/verify_refs.py": "c4127018c6e51e53aa3b916263ceff9e40624a217661f0e0ca6cd505d8a17d2b"
+    },
+    "stanli_source": {
+      "head": "29602320eb084eed320faa10216a3f915c163440",
+      "tracked_diff_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "threads": {
+      "MKL_NUM_THREADS": "1",
+      "OMP_NUM_THREADS": "1",
+      "OPENBLAS_NUM_THREADS": "1",
+      "STAN_NUM_THREADS": "1",
+      "VECLIB_MAXIMUM_THREADS": "1"
+    },
+    "toolchains": {
+      "build_environment": {
+        "CC": null,
+        "CFLAGS": null,
+        "CPPFLAGS": null,
+        "CXX": null,
+        "CXXFLAGS": null,
+        "LDFLAGS": null,
+        "MAKEFLAGS": null
+      },
+      "clang_sha256": "b8763cf250e607a778bb4603cecb5b90338814d0a3dfcba0d57b1de242f610e9",
+      "cmdstan": {
+        "head": "d3d5df6a22565edbe13edbd4eb40762cc8c5a4d6",
+        "tracked_diff_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "libraries": {
+        "stan/lib/stan_math/lib/sundials_6.1.1/lib/libsundials_cvodes.a": "3c7398013f7c7c2d271be1107495b4af3fa6c91ce4b276987e7da589c1b3a9ab",
+        "stan/lib/stan_math/lib/sundials_6.1.1/lib/libsundials_idas.a": "c4fa89a1f841cba924769baf133fa60cd0fac4a94c1c3bfd247664600de62ca7",
+        "stan/lib/stan_math/lib/sundials_6.1.1/lib/libsundials_kinsol.a": "9c277256b65e09dc5b77e26ccf9c967cbd612c7f86f9334e334ed1678c19a2b7",
+        "stan/lib/stan_math/lib/sundials_6.1.1/lib/libsundials_nvecserial.a": "d1ea28ff4d38bb0e14febc427c257e67141451399ceb3a4f70ad348cfb2e60f3",
+        "stan/lib/stan_math/lib/tbb/libtbb.dylib": "3e1261fbe451cdfd7eddb0c93507065128c8ab02d4fcbbbfb20385a61f6f5289",
+        "stan/lib/stan_math/lib/tbb/libtbbmalloc.dylib": "9a6247602224ac8e233f06e381e38be4797a8120c9944828eeba971e75c5879f",
+        "stan/lib/stan_math/lib/tbb/libtbbmalloc_proxy.dylib": "0aba46a96c6c38bb32f8a7aa43dfd8d0b9aa1bc8537a1160d22b566dc8304e21"
+      },
+      "math": {
+        "head": "5252d51d47c1d5e78005fc043ad996fad6dd8da8",
+        "tracked_diff_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "stan": {
+        "head": "a6806ef8477a7b5f65b27449ec33528c162bc024",
+        "tracked_diff_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "stanli_fmt": {
+        "head": "40626af88bd7df9a5fb80be7b25ac85b122d6c21",
+        "tracked_diff_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "stanli_math": {
+        "head": "5252d51d47c1d5e78005fc043ad996fad6dd8da8",
+        "tracked_diff_sha256": "a46ab8328d3da9cfaa9b5787dc73261f9f96d46bf6a935d1af1e1aed6a8040eb"
+      },
+      "stanli_stan": {
+        "head": "a6806ef8477a7b5f65b27449ec33528c162bc024",
+        "tracked_diff_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      }
+    }
+  },
+  "run_id": "881dbca09738e257",
+  "started_utc": "2026-11-20T00:16:22Z"
+}

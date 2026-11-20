@@ -62,24 +62,24 @@ parameter at several positions are fused into vector operations.
 ## How much faster
 
 These results come from the shared test corpus on Apple M3 Ultra.
-Run: <!--gen:fast_runs-->fast mode 2026-11-13 (`b4247512`), default mode 2026-11-18 (`1e0a66ff`)<!--/gen-->.
+Run: <!--gen:fast_runs-->fast mode 2026-11-13 (`b4247512`), default mode 2026-11-19 (`29602320`)<!--/gen-->.
 
 | Measure | Result |
 | --- | ---: |
 | Models with timings | <!--gen:fast_population-->346<!--/gen--> |
-| Geometric-mean speedup over default mode | <!--gen:fast_geomean-->1.89x<!--/gen--> |
-| Median speedup over default mode | <!--gen:fast_median-->1.02x<!--/gen--> |
-| Models at least 2x faster than default mode | <!--gen:fast_ge_two-->82<!--/gen--> |
-| Models at least 10x faster | <!--gen:fast_ge_ten-->39<!--/gen--> |
-| Models at least 100x faster | <!--gen:fast_ge_hundred-->8<!--/gen--> |
-| Largest speedups | <!--gen:fast_top_two-->radon_pooled 537x, nes 253x<!--/gen--> |
-| Geometric-mean speedup over CmdStan, default mode | <!--gen:fast_cmdstan_default-->2.26x<!--/gen--> |
+| Geometric-mean speedup over default mode | <!--gen:fast_geomean-->1.83x<!--/gen--> |
+| Median speedup over default mode | <!--gen:fast_median-->1.06x<!--/gen--> |
+| Models at least 2x faster than default mode | <!--gen:fast_ge_two-->77<!--/gen--> |
+| Models at least 10x faster | <!--gen:fast_ge_ten-->33<!--/gen--> |
+| Models at least 100x faster | <!--gen:fast_ge_hundred-->10<!--/gen--> |
+| Largest speedups | <!--gen:fast_top_two-->radon_pooled 571x, nes 264x<!--/gen--> |
+| Geometric-mean speedup over CmdStan, default mode | <!--gen:fast_cmdstan_default-->2.42x<!--/gen--> |
 | Geometric-mean speedup over CmdStan, fast mode | <!--gen:fast_cmdstan_fast-->4.27x<!--/gen--> |
 | Models where fast mode is faster than CmdStan | <!--gen:fast_beats_fast-->338<!--/gen--> |
 
 Most models speed up only a little. Models with repeated observations or
 repeated work speed up a lot.
-In fast mode, <!--gen:fast_slowest-->the slowest model, `oncobayes2_blrm_exnex_combo2`, is 1.14x slower.<!--/gen-->
+In fast mode, <!--gen:fast_slowest-->the slowest model, `s2_multinomial`, is 4.90x slower.<!--/gen-->
 
 Details and the table for each model are in
 [Benchmarks](benchmarks.md#fast-mode).
