@@ -615,5 +615,90 @@ class DecodeSpeedGateTest(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
 
 
+class MainStatusTest(unittest.TestCase):
+    """The job that files an issue while main is red."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.jobs = workflow("wheels.yml")["jobs"]
+        cls.job = cls.jobs["main-status"]
+        cls.step = cls.job["steps"][0]
+        if not shutil.which("jq"):
+            raise unittest.SkipTest("jq is required to run the job's script")
+
+    def test_runs_after_every_merge_to_main_and_nowhere_else(self):
+        for event in ("push", "schedule", "workflow_dispatch"):
+            with self.subTest(event=event):
+                self.assertTrue(enabled(self.job, event))
+        self.assertFalse(enabled(self.job, "pull_request"))
+        self.assertFalse(enabled(self.job, "push", ref="refs/heads/other"))
+        self.assertFalse(enabled(self.job, "push", ref="refs/tags/v1.0.0"))
+
+    def test_waits_for_the_post_merge_jobs_and_only_writes_issues(self):
+        for name in ("build", "windows", "asan", "tsan", "wasm", "r-tests"):
+            with self.subTest(need=name):
+                self.assertIn(name, self.job["needs"])
+        self.assertEqual(self.job["permissions"], {"issues": "write"})
+        self.assertTrue(all("uses" not in step for step in self.job["steps"]))
+
+    def run_script(self, results, listing="[]"):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = Path(tmp)
+            bin_dir = tmp / "bin"
+            bin_dir.mkdir()
+            log = tmp / "log"
+            fake = bin_dir / "gh"
+            fake.write_text(
+                '#!/usr/bin/env bash\necho "gh $*" >> "$GH_LOG"\n'
+                '[ "$2" = list ] && printf "%s" "$GH_LIST"\nexit 0\n')
+            fake.chmod(0o755)
+            needs = {name: {"result": result} for name, result in results.items()}
+            subprocess.run(
+                ["bash", "-e", "-o", "pipefail", "-c", self.step["run"]],
+                cwd=tmp, capture_output=True, text=True, check=True,
+                env=dict(os.environ,
+                         PATH=str(bin_dir) + os.pathsep + os.environ["PATH"],
+                         GH_LOG=str(log), GH_LIST=listing,
+                         GITHUB_WORKFLOW="wheels", GITHUB_SHA="abc123",
+                         RUN_URL="https://example.test/run/1",
+                         RESULTS=json.dumps(needs)))
+            return log.read_text() if log.exists() else ""
+
+    TITLE = "main is red: wheels"
+    OPEN = json.dumps([{"number": 7, "title": "main is red: wheels"},
+                       {"number": 8, "title": "main is red: other"}])
+
+    def test_a_failure_opens_one_issue(self):
+        log = self.run_script({"asan": "failure", "build": "success"})
+        self.assertIn("gh issue create --title " + self.TITLE, log)
+        self.assertIn("Failed: asan.", log)
+
+    def test_a_failure_while_the_issue_is_open_adds_a_comment(self):
+        log = self.run_script({"asan": "failure", "tsan": "failure"},
+                              listing=self.OPEN)
+        self.assertIn("gh issue comment 7 ", log)
+        self.assertIn("Failed: asan,tsan.", log)
+        self.assertNotIn("issue create", log)
+
+    def test_a_run_with_nothing_failed_closes_the_open_issue(self):
+        log = self.run_script({"asan": "success", "wasm": "skipped"},
+                              listing=self.OPEN)
+        self.assertIn("gh issue close 7 ", log)
+        self.assertNotIn("close 8", log)
+
+    def test_a_green_run_with_no_open_issue_does_nothing(self):
+        log = self.run_script({"asan": "success"})
+        self.assertNotIn("issue close", log)
+        self.assertNotIn("issue create", log)
+
+    def test_a_cancelled_job_neither_opens_nor_closes(self):
+        for listing in ("[]", self.OPEN):
+            with self.subTest(listing=listing):
+                log = self.run_script({"asan": "cancelled", "build": "success"},
+                                      listing=listing)
+                for verb in ("create", "comment", "close"):
+                    self.assertNotIn("issue " + verb, log)
+
+
 if __name__ == "__main__":
     unittest.main()
