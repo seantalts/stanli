@@ -59,7 +59,7 @@ Lowering::Lowering(const DataMap& d, PrepTrace& p, PassDumper& dump_to,
                std::make_shared<ShapeInterner>(*prepared_context.shapes)) {
   const auto env_copy_time = prep.start();
   copy_named(td.env(), prepared_context.environment, &prepared_context.names);
-  omitted_data = prepared_context.omitted_data;
+  zero_size_data = prepared_context.zero_size_data;
   int_env = prepared_context.integers;
   copy_named(decls, prepared_context.declarations, &prepared_context.names);
   prepared_names = prepared_context.names;
@@ -71,7 +71,7 @@ Lowering::Lowering(Lowering& parent, RegionTrialTag,
                parent.td_rng,
                std::make_shared<ShapeInterner>(*parent.shape_pool)) {
   compile_options = parent.compile_options;
-  omitted_data = parent.omitted_data;
+  zero_size_data = parent.zero_size_data;
   fun_defs = parent.fun_defs;
   copy_named(decls, parent.decls, names);
   copy_named(td.env(), parent.td.env(), names);
@@ -89,8 +89,8 @@ Lowering::Lowering(Lowering& parent, RegionTrialTag,
 PreparedContext Lowering::prepared_context() {
   if (!data_prepared)
     throw std::logic_error("lowering has not prepared model data");
-  return {td_rng, shape_pool,   td.env(),      int_env_data,
-          decls,  omitted_data, prepared_names};
+  return {td_rng, shape_pool,     td.env(),      int_env_data,
+          decls,  zero_size_data, prepared_names};
 }
 Lowering Lowering::fork_region_trial(const std::set<std::string>* names) {
   return Lowering(*this, RegionTrialTag{}, names);
@@ -149,37 +149,25 @@ void Lowering::observe_indexed_rhs(const mir::Expr& rhs, const Val& v) {
     // graph values and deliberately do not acquire a compile-time binding.
   }
 }
-// CmdStan's var_context validates every declared dimension against the
-// supplied values before it reads one, and throws std::invalid_argument
-// naming the variable and both shapes. Without the same check the short
-// side is read past its end, and a host that tells bad data from a
-// broken model by the exception type sees the wrong answer. Only the
-// element count is compared: JSON carries a nested shape but stanc has
-// already flattened the read, and a declaration whose extents multiply
-// out to the supplied count is the shape the reader would produce.
+// The same rule as stan::json::json_data::validate_dims, which CmdStan
+// applies to every data variable before it reads one. A scalar counts as
+// zero elements and any empty value satisfies a declaration with a zero
+// extent, because JSON's [] cannot say which axis is empty. Otherwise the
+// found dims must equal the declared dims exactly, so a transposed matrix
+// or a scalar spelled [x] is rejected rather than read in the wrong order.
 void Lowering::validate_data_dims(const std::string& name,
                                   const mir::SizedType& t) {
-  const DataMap::Entry* supplied = data_entry(name);
-  if (!supplied) return;
-  const DataMap::Entry& en = *supplied;
-  // A declared-int variable must arrive integer-typed, as CmdStan's
-  // var_context requires (JSON 1.0 is not an int there either). Without
-  // this the entry binds as typeless reals and the failure surfaces at
-  // whatever consumer touches it first, e.g. the gather index guard.
-  if ((t.base == "SInt" || (t.base == "SArray" && t.elem_base == "SInt")) &&
-      !en.is_int)
-    throw std::invalid_argument(
-        "int variable contained non-int values; processing stage=data "
-        "initialization; variable name=" +
-        name + "; base type=int");
-  const int64_t found = (int64_t)std::max(en.r.size(), en.i.size());
+  if (!data.has(name)) return;
+  const DataMap::Entry& en = data.at(name);
   const std::vector<int64_t> declared = sized_dims(t);
   int64_t want = 1;
   for (int64_t d : declared) {
     if (d < 0) fail("negative extent for data " + name, t.raw);
     want *= d;
   }
-  if (want == found) return;
+  int64_t found = en.dims.empty() ? 0 : 1;
+  for (int64_t d : en.dims) found *= d;
+  if (found == 0 && want == 0) return;
   const auto tuple = [](const std::vector<int64_t>& dims) {
     std::string s = "(";
     for (size_t k = 0; k < dims.size(); ++k) {
@@ -188,12 +176,25 @@ void Lowering::validate_data_dims(const std::string& name,
     }
     return s + ")";
   };
-  throw std::invalid_argument(
-      "mismatch in dimension declared and found in context; processing "
-      "stage=data initialization; variable name=" +
-      name + "; position=0; dims declared=" + tuple(declared) +
-      "; dims found=" +
-      tuple(en.dims.empty() ? std::vector<int64_t>{found} : en.dims));
+  const std::string shapes =
+      "dims declared=" + tuple(declared) + "; dims found=" + tuple(en.dims);
+  if (en.dims.size() != declared.size())
+    throw std::invalid_argument(
+        "mismatch in number dimensions declared and found in context; "
+        "processing stage=data initialization; variable name=" +
+        name + "; " + shapes);
+  for (size_t k = 0; k < declared.size(); ++k)
+    if (en.dims[k] != declared[k])
+      throw std::invalid_argument(
+          "mismatch in dimension declared and found in context; processing "
+          "stage=data initialization; variable name=" +
+          name + "; position=" + std::to_string(k) + "; " + shapes);
+  if ((t.base == "SInt" || (t.base == "SArray" && t.elem_base == "SInt")) &&
+      !en.is_int)
+    throw std::invalid_argument(
+        "int variable contained non-int values; processing stage=data "
+        "initialization; variable name=" +
+        name + "; base type=int");
 }
 void Lowering::scan_rebuild(const mir::Stmt& s, RebuildShape& shape) {
   switch (s.kind) {
@@ -279,7 +280,7 @@ struct ExtentScope {
   ~ExtentScope() { flag = false; }
 };
 }  // namespace
-void Lowering::omit_zero_size(const std::string& name,
+void Lowering::bind_zero_size(const std::string& name,
                               const mir::SizedType& type) {
   if (type.dims.empty()) return;
   std::vector<int64_t> dims;
@@ -294,9 +295,9 @@ void Lowering::omit_zero_size(const std::string& name,
   if (size != 0) return;
   if (type.base == "SInt" ||
       (type.base == "SArray" && type.elem_base == "SInt"))
-    omitted_data.set_int_array(name, {}, std::move(dims));
+    zero_size_data.set_int_array(name, {}, std::move(dims));
   else
-    omitted_data.set_real_array(name, {}, std::move(dims));
+    zero_size_data.set_real_array(name, {}, std::move(dims));
 }
 void Lowering::bind_data(const mir::Program& p) {
   std::set<std::string> input_names;
@@ -306,7 +307,7 @@ void Lowering::bind_data(const mir::Program& p) {
     input_names.insert(name);
     // A tuple's leaf is read under its CmdStan key.
     const std::string& key = mir::detail::data_key(p, name);
-    if (!data_entry(key)) omit_zero_size(key, type);
+    bind_zero_size(key, type);
     if (!data_entry(key)) {
       all_inputs_bound = false;
       continue;
@@ -1474,7 +1475,7 @@ class WriteArrayLowering {
         data_, trace_, dumper_, "write_array",
         PreparedContext{log_prob.td_rng, log_prob.shape_pool, no_environment,
                         log_prob.int_env_data, no_declarations,
-                        log_prob.omitted_data, log_prob.prepared_names});
+                        log_prob.zero_size_data, log_prob.prepared_names});
     const auto select_time = trace_.start();
     // Moved, not copied: log_prob is done with them, and finish() moves
     // them back.

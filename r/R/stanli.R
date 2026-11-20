@@ -77,7 +77,9 @@ read_utf8_file <- function(path) {
 #'   array of any rank is written with its first index outermost, so a
 #'   matrix is an array of rows; an unnamed list is an array of its elements,
 #'   which is how to pass `array[K] matrix[N, M]`, `array[K] vector[N]` and
-#'   arrays of them. Zero-length extents are kept.
+#'   arrays of them. Zero-length extents are kept. A length-1 R vector
+#'   with no `dim` goes out as a scalar, as in rstan, so give a `vector[1]`
+#'   or `array[1]` as `array(x, 1)`.
 #' @param mir Transformed MIR text, for a build without the embedded
 #'   compiler. Rarely needed.
 #' @param threads_per_chain Positive thread count for eligible native `reduce_sum`

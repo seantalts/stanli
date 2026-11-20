@@ -290,6 +290,29 @@ void expect_runtime_bound_rejected() {
   stanli_model_free(model);
 }
 
+// The C API reads data through the same shape check as CmdStan: a 3x2
+// matrix given as two rows of three is rejected, with the variable and both
+// shapes in the message.
+void expect_transposed_data_rejected() {
+  const std::string mir = slurp("tests/fixtures/gqconst.tmir.sexp");
+  char err[8192]{};
+  stanli_model* model = stanli_model_new_with_opts(
+      mir.c_str(), R"({"rectangular":[[1,2,3],[4,5,6]]})", nullptr, err,
+      sizeof err);
+  if (model != nullptr) {
+    ++failures;
+    std::printf("FAIL C API accepted a transposed matrix\n");
+    stanli_model_free(model);
+    return;
+  }
+  if (std::strstr(err,
+                  "variable name=rectangular; position=0; dims "
+                  "declared=(3,2); dims found=(2,3)") == nullptr) {
+    ++failures;
+    std::printf("FAIL C API shape error: %s\n", err);
+  }
+}
+
 void expect_compiled_scalar_rng() {
   const std::string mir = slurp("tests/fixtures/gq_scalar_rng.tmir.sexp");
   char err[8192]{};
@@ -3273,6 +3296,7 @@ int main() {
   expect_invalid_data_rejected();
   expect_runtime_bound_rejected();
   expect_compiled_scalar_rng();
+  expect_transposed_data_rejected();
   expect_pathfinder();
   expect_sampling_progress();
   expect_sampling_progress_counts();
