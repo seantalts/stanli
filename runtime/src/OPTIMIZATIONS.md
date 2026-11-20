@@ -679,8 +679,8 @@ emitted, in the currencies of `pass_util.hpp` (`kLaneOpCost`,
 own region pricing uses). The island carver uses the same per-op cost
 (`kLaneOpCost`) with its own element weights in `island.cpp`. The currencies are about 5 ns per graph op against about 1 ns per
 element moved, and a density element is charged `kLaneDensityElem = 6`
-element units. The comment on that constant calls this six op dispatches, which
-is 30 units, so the code and the comment disagree; the question is open in
+element units, a little more than one op dispatch. The reasons for that reading
+are in
 [`notes/performance/audit-2026-11-20-open-questions.md`](../../notes/performance/audit-2026-11-20-open-questions.md).
 Two measured pessimizations live in that model rather
 than in the shipped graph. Lanes identical down to their immediates and
@@ -1155,8 +1155,17 @@ observation takes. The op is on by default.
 Lowering maps a loop when all of these hold (`lower_region_map.cpp`):
 
 - It is the log-density graph, the loop is the outermost one, the bounds are
-  fixed at lowering, and the trip count is at least 32. A model compiled with
-  `STANLI_STRUCTURED_LOOPS=1` or `=force` never maps.
+  fixed at lowering, and the loop runs at least twice. A model compiled with
+  `STANLI_STRUCTURED_LOOPS=1` or `=force` never maps. A short loop maps too.
+  Unrolled, such a loop gets one island per iteration, so it pays one graph
+  op and one program dispatch per iteration where the map pays one op and
+  runs its body once per 64-lane tile. Two costs do not shrink with the trip
+  count. The tile holds 64 lanes of the forward registers, and the body is
+  compiled for every iteration, so it reads by index what the unrolled form
+  knew at compile time. A 3-trip outer loop over a 100-trip inner loop (an
+  experiment, not a corpus model) became one map of 2,002 instructions with
+  300 dynamic-index calls per lane and a tile of about 616 KB, against 300
+  islands of about 19 instructions.
 - The body branches on a parameter: an `if`, a ternary, an `&&` or `||`, or a
   `while` whose condition depends on one, followed into user functions with each
   argument's dependence taken from the call site.
@@ -1280,9 +1289,14 @@ width, with length-1 operands broadcast, and a run that holds them is priced
 both whole and split at them. A call must have a single-number result, so any
 other op with a vector result still ends a run.
 
-The pass still refuses outright: short runs (under 32 ops), regions with
-more than six distinct inputs, densities in the dropped-constants form
-(see the refusal above), and regions producing target entries. The generated
+A region with more distinct inputs than an op's six descriptors packs the
+leading ones with an `OP_CONCAT2` chain, as necessity lowering does, and
+the estimate charges each link as one op plus the elements it copies forward
+and back.
+
+The pass still refuses outright: short runs (under 32 ops), densities in the
+dropped-constants form (see the refusal above), and regions producing target
+entries. The generated
 backward supports forward-only branches by recording which basic blocks ran
 and reversing only those blocks. Back edges, malformed jump targets,
 unsupported derivatives, and paths that can read an uninitialized register
@@ -1547,7 +1561,7 @@ gate.
 
 `OP_LOOP` keeps a loop whose body has a `while` or a parameter branch as one
 graph op (`lower.cpp`, `structured_loop.cpp`, `structured_recording.inc`). A
-loop of at least 32 independent iterations with a parameter branch goes to
+loop of independent iterations with a parameter branch goes to
 [`OP_REGION_MAP`](#parameter-branch-loops-over-many-observations-lower_region_mapcpp-disable-stanli_region_map0)
 first, and only a loop that op refuses reaches this path.
 In `write_array` it also keeps a loop that carries a value between

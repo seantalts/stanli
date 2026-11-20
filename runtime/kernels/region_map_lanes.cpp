@@ -25,6 +25,10 @@
 namespace stanli {
 namespace {
 
+// One case label per unary in STANLI_PROGRAM_UNARY_LIST, so that every
+// switch over the lane opcodes covers the same unaries as the kernels.
+#define STANLI_LANE_UNARY_CASE(code, fn, from_out, pullback) case Program::code:
+
 bool lane_opcode(Program::Code c) {
   switch (c) {
     case Program::CONST:
@@ -44,18 +48,7 @@ bool lane_opcode(Program::Code c) {
     case Program::FMAX:
     case Program::FMIN:
     case Program::NEG:
-    case Program::EXP:
-    case Program::INV_LOGIT:
-    case Program::LOG:
-    case Program::LOG1P_EXP:
-    case Program::ERFC:
-    case Program::LOG1P:
-    case Program::LOG1M_EXP:
-    case Program::INV_SQUARE:
-    case Program::SQRT:
-    case Program::SQUARE:
-    case Program::INV:
-    case Program::FABS:
+      STANLI_PROGRAM_UNARY_LIST(STANLI_LANE_UNARY_CASE)
     case Program::GT:
     case Program::GE:
     case Program::LT:
@@ -326,22 +319,12 @@ class Analysis {
         f(A.va, A.len);
         f(A.vd, 1);
         return;
-      case Program::LOG:
-      case Program::LOG1P_EXP:
-      case Program::ERFC:
-      case Program::LOG1P:
-      case Program::LOG1M_EXP:
-      case Program::INV_SQUARE:
-      case Program::SQUARE:
-      case Program::INV:
-      case Program::FABS:
-        f(A.va, 1);
-        return;
-      case Program::EXP:
-      case Program::INV_LOGIT:
-      case Program::SQRT:
-        f(A.vd, 1);
-        return;
+#define STANLI_LANE_UNARY_VALUE_READ(code, fn, from_out, pullback) \
+  case Program::code:                                              \
+    f((from_out) ? A.vd : A.va, 1);                                \
+    return;
+        STANLI_PROGRAM_UNARY_LIST(STANLI_LANE_UNARY_VALUE_READ)
+#undef STANLI_LANE_UNARY_VALUE_READ
       case Program::DYN_INDEX:
         f(A.vb, 1);
         return;
@@ -474,18 +457,7 @@ class Analysis {
         return;
       case Program::MOV:
       case Program::NEG:
-      case Program::EXP:
-      case Program::INV_LOGIT:
-      case Program::LOG:
-      case Program::LOG1P_EXP:
-      case Program::ERFC:
-      case Program::LOG1P:
-      case Program::LOG1M_EXP:
-      case Program::INV_SQUARE:
-      case Program::SQRT:
-      case Program::SQUARE:
-      case Program::INV:
-      case Program::FABS:
+        STANLI_PROGRAM_UNARY_LIST(STANLI_LANE_UNARY_CASE)
         f(A.a, 1);
         return;
       default:
@@ -513,18 +485,7 @@ class Analysis {
       switch (I.code) {
         case Program::MOV:
         case Program::NEG:
-        case Program::EXP:
-        case Program::INV_LOGIT:
-        case Program::LOG:
-        case Program::LOG1P_EXP:
-        case Program::ERFC:
-        case Program::LOG1P:
-        case Program::LOG1M_EXP:
-        case Program::INV_SQUARE:
-        case Program::SQRT:
-        case Program::SQUARE:
-        case Program::INV:
-        case Program::FABS:
+          STANLI_PROGRAM_UNARY_LIST(STANLI_LANE_UNARY_CASE)
         case Program::INEG:
           o.dst = reg_offset(I.dst);
           o.a = reg_offset(I.a);
@@ -1162,18 +1123,7 @@ class Analysis {
       switch (A.code) {
         case Program::MOV:
         case Program::NEG:
-        case Program::EXP:
-        case Program::INV_LOGIT:
-        case Program::LOG:
-        case Program::LOG1P_EXP:
-        case Program::ERFC:
-        case Program::LOG1P:
-        case Program::LOG1M_EXP:
-        case Program::INV_SQUARE:
-        case Program::SQRT:
-        case Program::SQUARE:
-        case Program::INV:
-        case Program::FABS:
+          STANLI_PROGRAM_UNARY_LIST(STANLI_LANE_UNARY_CASE)
           return {A.a};
         case Program::ADD:
         case Program::SUB:

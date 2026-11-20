@@ -1195,18 +1195,23 @@ static void test_udf_packed_branch() {
 
 // A runtime integer chosen by a parameter comparison indexes a parameter
 // vector inside a parameter-dependent region. The region compiles the index
-// as DYN_INDEX and must still get a generated adjoint.
-static void test_region_dynamic_index() {
+// as DYN_INDEX and must still get a generated adjoint, both as one region
+// map and, with the map off, as one island per iteration.
+static void test_region_dynamic_index(bool map) {
+  if (!map) SKIP_WITHOUT_DEBUG_SWITCHES();
   using namespace stanli;
   const DataMap data =
       DataMap::from_json(slurp("tests/fixtures/dynindex_region.json"));
   test_setenv("STANLI_STRUCTURED_LOOPS", "0", 1);
+  if (!map) test_setenv("STANLI_REGION_MAP", "0", 1);
   CompiledModel cm =
       compile_model(slurp("tests/fixtures/dynindex_region.tmir.sexp"), data);
   test_unsetenv("STANLI_STRUCTURED_LOOPS");
+  test_unsetenv("STANLI_REGION_MAP");
+  const uint16_t region = map ? OP_REGION_MAP : OP_ISLAND;
   int islands = 0, dynamic = 0, native = 0;
   for (const Op& op : cm.graph.ops) {
-    if (op.opcode != OP_ISLAND) continue;
+    if (op.opcode != region) continue;
     ++islands;
     const auto& prog = *static_cast<const IslandProg*>(op.udata);
     const bool indexed =
@@ -1216,7 +1221,7 @@ static void test_region_dynamic_index() {
     native += indexed && prog.native_adj;
   }
   check(islands > 0 && dynamic == islands,
-        "dynamic index regions lower every iteration through DYN_INDEX");
+        "dynamic index regions lower through DYN_INDEX");
   check(native == dynamic, "dynamic index regions get a native adjoint");
   const std::vector<double>& y = data.at("y").r;
   const double points[][4] = {{0.4, -0.2, 0.7, 0.6},
@@ -9654,7 +9659,8 @@ int main() {
   test_udf_tail_branch();
   test_udf_packed_branch();
   test_udf_constant_branch();
-  test_region_dynamic_index();
+  test_region_dynamic_index(true);
+  test_region_dynamic_index(false);
   test_region_constant_shadow();
   test_udf_guard_returns();
   test_udf_lp_propto();
