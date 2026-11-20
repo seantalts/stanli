@@ -5,10 +5,12 @@
       [--switch NAME ...] [--fast-math] [--json OUT]
 
 HP_DIR holds hp_eval.py results (one MODEL.json per model, with full
-finite-difference gradients). For each ledger entry that has a reference,
+finite-difference gradients, and with --wa for write_array entries). For
+each ledger entry that has a reference,
 the script runs stanli_check at each recorded point and reports, at the
 point and index where stanli is farthest from CmdStan, how many ULPs of the
-scale (|lp| for lp, the largest CmdStan gradient entry for a gradient) each
+scale (|lp| for lp, the largest CmdStan gradient entry for a gradient, the
+largest CmdStan value of the variable for a write_array column) each
 engine is from the true value. It is the measure that the ledger's reason
 strings record.
 
@@ -34,20 +36,25 @@ from decimal import Decimal
 from fractions import Fraction
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+import metrics  # noqa: E402
 from common import REPO, load_case, v  # noqa: E402
 
 
 def run(check, stan, dj, pt, env_extra, fast):
+    """lp and gradient, followed by {column: value} of the write_array row
+    (None if it failed), or None if the run failed."""
     env = dict(os.environ)
     env.update(env_extra)
-    cmd = [check, str(stan), str(dj), "--point", str(pt)]
+    cmd = [check, str(stan), str(dj), "--point", str(pt), "--wa-values"]
     if fast:
         cmd.append("--fast-math")
     p = subprocess.run(cmd, capture_output=True, text=True, env=env, timeout=1800)
     got = v.parse_status(p.stdout)
     if not got or got[0] != "OK":
         return None
-    return [float(x) for x in got[1:]]
+    row = v.parse_wa(p.stdout)
+    wa = dict(zip(row[0].split(","), [float(x) for x in row[1]])) if row else None
+    return [float(x) for x in got[1:]] + [wa]
 
 
 def indices(label, n):
@@ -60,6 +67,86 @@ def indices(label, n):
     return None
 
 
+def wa_ref(rp):
+    """{column: CmdStan value} of a recorded point, or {}."""
+    if "wa" not in rp:
+        return {}
+    return dict(zip(rp["wa"]["names"].split(","), [float(x) for x in rp["wa"]["values"]]))
+
+
+def wa_columns(label, entries, ref):
+    """The write_array columns that the ledger entry `label` covers."""
+    if label == "wa":
+        return [c for c in ref if "wa " + c not in entries]
+    return [label[3:]] if label[3:] in ref else []
+
+
+def wa_truth(h, column):
+    w = h.get("wa") if h else None
+    if not w or column not in w["names"]:
+        return None
+    return metrics.exact(w["values"][w["names"].index(column)])
+
+
+def pick_wa(label, entries, ref, got):
+    """(ulps, point, column, scale) where stanli is farthest from CmdStan."""
+    best = None
+    for p, rp in ref.items():
+        cw, gv = wa_ref(rp), got.get(p)
+        gw = gv[-1] if gv else None
+        if not cw or not gw:
+            continue
+        scale = metrics.wa_scales(list(cw), list(cw.values()))
+        for c in wa_columns(label, entries, cw):
+            sc = scale.get(c.split(".")[0].split(":")[0], 0.0)
+            if c in gw:
+                u = v.scaled_ulp(cw[c], gw[c], sc)
+                if best is None or u > best[0]:
+                    best = (u, p, c, sc)
+    return best
+
+
+def score_wa(p, c, sc, rp, gv, h):
+    t = wa_truth(h, c)
+    gw = gv[-1] if gv else None
+    if t is None or not gw or c not in gw:
+        return None
+    cw = wa_ref(rp)
+    return {"point": p, "index": c, "cmdstan": metrics.ulps_from_truth(cw[c], t, sc),
+            "stanli": metrics.ulps_from_truth(gw[c], t, sc), "same_as_cmdstan": gw[c] == cw[c]}
+
+
+def wa_row(model, lab, entries, ref_points, got, configs, pts, all_points):
+    """The ledger_accuracy row of a write_array entry, scored like `pick`
+    and `score` do a gradient entry."""
+    ref = {int(p): rp for p, rp in ref_points.items() if rp.get("values")}
+    b = pick_wa(lab, entries, ref, got["default"])
+    if b is None:
+        return {"model": model, "label": lab, "unscored": "stanli failed or no write_array"}
+    _, p, c, sc = b
+    hpt = pts.get(str(p))
+    if wa_truth(hpt, c) is None:
+        var = c.split(".")[0]
+        why = ("depends on " + hpt["wa_refused"][var] if var in (hpt or {}).get("wa_refused", {})
+               else (hpt or {}).get("wa_error") or "no 80-digit write_array at point %d" % p)
+        return {"model": model, "label": lab, "point": p, "index": c, "unscored": why}
+    row = {"model": model, "label": lab}
+    for name, _ in configs:
+        row[name] = score_wa(p, c, sc, ref[p], got[name].get(p), hpt)
+    if min(row["default"]["stanli"], row["default"]["cmdstan"]) > 1e6:
+        row["undecided"] = True
+    if all_points:
+        row["all"] = []
+        for q, rq in ref.items():
+            cw = wa_ref(rq)
+            if c in cw:
+                scale = metrics.wa_scales(list(cw), list(cw.values()))[c.split(".")[0]]
+                r = score_wa(q, c, scale, rq, got["default"].get(q), pts.get(str(q)))
+                if r:
+                    row["all"].append(r)
+    return row
+
+
 def truth(h, i):
     if i == 0:
         return Fraction(Decimal(h["lp"])) if "lp" in h else None
@@ -68,10 +155,6 @@ def truth(h, i):
     if str(i) in h.get("grad_coord", {}):
         return Fraction(Decimal(h["grad_coord"][str(i)]))
     return None
-
-
-def err(x, t, scale):
-    return float(abs(Fraction(x) - t) / Fraction(math.ulp(scale)))
 
 
 def pick(label, ref, got):
@@ -95,7 +178,8 @@ def score(p, i, sc, rv, gv, h):
     t = truth(h, i) if h else None
     if t is None or gv is None or not sc:
         return None
-    return {"point": p, "index": i, "cmdstan": err(rv[i], t, sc), "stanli": err(gv[i], t, sc),
+    return {"point": p, "index": i, "cmdstan": metrics.ulps_from_truth(rv[i], t, sc),
+            "stanli": metrics.ulps_from_truth(gv[i], t, sc),
             "same_as_cmdstan": gv[i] == rv[i]}
 
 
@@ -159,11 +243,13 @@ def main():
         pts = (h or {}).get("points", {})
         usable = {p for p, o in pts.items() if "lp" in o}
         labels = list(led[model])
-        lab_ok = [lab for lab in labels if indices(lab, 2) is not None]
+        has_wa = any("wa" in o for o in pts.values())
+        lab_ok = [lab for lab in labels if indices(lab, 2) is not None or has_wa]
         if not usable or not lab_ok:
             for lab in labels:
                 why = ("no 80-digit run" if h is None else h.get("error") or
-                       ("write_array value" if indices(lab, 2) is None else "no points"))
+                       ("no 80-digit write_array (hp_eval.py --wa)" if indices(lab, 2) is None
+                        else "no points"))
                 out.append({"model": model, "label": lab, "unscored": why})
         else:
             stan, dj, ref = load_case(model, tmp, refs)
@@ -173,7 +259,7 @@ def main():
                    for name, env in configs}
             for lab in labels:
                 if indices(lab, 2) is None:
-                    out.append({"model": model, "label": lab, "unscored": "write_array value"})
+                    out.append(wa_row(model, lab, led[model], ref["points"], got, configs, pts, a.all_points))
                     continue
                 b = pick(lab, rv, got["default"])
                 if b is None:
@@ -213,10 +299,10 @@ def main():
             cols = " ".join("%s=%.0f" % (n, r[n]["stanli"]) for n, _ in configs[1:] if r.get(n))
             flag = ("UNDECIDED" if r.get("undecided") else
                     "FARTHER" if d["stanli"] > d["cmdstan"] else "ok")
-            print("%-40s %-10s p%s i%-3d stanli %8.1f cmdstan %8.1f %-9s %s" % (
+            print("%-40s %-10s p%s i%-3s stanli %8.1f cmdstan %8.1f %-9s %s" % (
                 r["model"], r["label"], d["point"], d["index"], d["stanli"], d["cmdstan"], flag, cols))
             for x in r.get("all", []):
-                print("    p%d i%-3d stanli %8.1f cmdstan %8.1f" % (x["point"], x["index"], x["stanli"], x["cmdstan"]))
+                print("    p%d i%-3s stanli %8.1f cmdstan %8.1f" % (x["point"], x["index"], x["stanli"], x["cmdstan"]))
         sys.stdout.flush()
     if a.json:
         pathlib.Path(a.json).write_text(json.dumps(out, indent=1))

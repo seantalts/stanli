@@ -1,3 +1,5 @@
+import collections
+import itertools
 import json
 import math
 import sys
@@ -23,6 +25,43 @@ class Break(Exception):
 
 class Continue(Exception):
     pass
+
+
+class Draw(Exception):
+    """Raised by an `_rng` call, and by reading a variable that holds one."""
+
+    def __init__(self, fn):
+        self.fn = fn
+
+
+class Drawn:
+    """The value of a variable that depends on the draw of `fn`."""
+
+    def __init__(self, fn):
+        self.fn = fn
+
+
+Row = collections.namedtuple("Row", "columns refused stopped")
+
+
+def columns(name, val):
+    """[(column, value)] of one variable in Stan's column-major order, the
+    first index varying fastest, as CmdStan names the output."""
+    dims = []
+    t = val
+    while isinstance(t, list):
+        dims.append(len(t))
+        if not t:
+            break
+        t = t[0]
+    out = []
+    for rev in itertools.product(*[range(d) for d in reversed(dims)]):
+        ix = rev[::-1]
+        x = val
+        for i in ix:
+            x = x[i]
+        out.append((".".join([name] + [str(i + 1) for i in ix]), x))
+    return out
 
 
 def pat(n):
@@ -218,6 +257,35 @@ class Interp:
             raise RuntimeError("consumed %d of %d unconstrained" % (self.pos, len(theta)))
         return self.target
 
+    def write_array(self, theta):
+        """The write_array row at unconstrained theta: its transformed
+        parameters and generated quantities as well as the parameters.
+
+        A variable whose value depends on an `_rng` call is left out of
+        `columns` and named in `refused` with that function. Any statement
+        other than an assignment that depends on one, such as a branch
+        condition, ends the run, and `stopped` names the function; later
+        variables are then missing."""
+        self.theta = theta
+        self.pos = 0
+        self.target = mpf(0)
+        self.row, self.refused, stopped = [], {}, None
+        env = dict(self.env)
+        env["emit_transformed_parameters__"] = 1
+        env["emit_generated_quantities__"] = 1
+        try:
+            for s in field(self.mir, "generate_quantities"):
+                self.stmt(s)(env)
+        except Return:
+            pass
+        except Draw as d:
+            stopped = d.fn
+        if stopped is None and self.pos != len(theta):
+            raise RuntimeError("consumed %d of %d unconstrained" % (self.pos, len(theta)))
+        row = Row(self.row, self.refused, stopped)
+        self.row = self.refused = None
+        return row
+
     def nparams(self):
         saved = self.theta
         self.theta = None
@@ -305,9 +373,12 @@ class Interp:
 
             def var(env):
                 try:
-                    return env[name]
+                    x = env[name]
                 except KeyError:
                     raise RuntimeError("unbound " + name)
+                if isinstance(x, Drawn):
+                    raise Draw(x.fn)
+                return x
             return var
         if k == "Lit":
             sort, val = p[1], p[2]
@@ -415,6 +486,10 @@ class Interp:
         if name.endswith(("_lcdf", "_lccdf", "_cdf")):
             return self.cdf(name, ev)
         f = F.get(name)
+        if f is None and name.endswith("_rng"):
+            def draw(env):
+                raise Draw(name)
+            return draw
         if f is None:
             raise Unsupported("fn " + name)
         return lambda env: f(*[e(env) for e in ev])
@@ -707,7 +782,10 @@ class Interp:
             e = self.expr(init[1])
 
             def decl2(env):
-                env[name] = copy(e(env))
+                try:
+                    env[name] = copy(e(env))
+                except Draw as d:
+                    env[name] = Drawn(d.fn)
             return decl2
         if k == "Assignment":
             lv = p[1]
@@ -718,12 +796,20 @@ class Interp:
             idxs = [self.idx(i) for i in lv[1]]
             if not idxs:
                 def asg(env):
-                    env[name] = copy(rhs(env))
+                    try:
+                        env[name] = copy(rhs(env))
+                    except Draw as d:
+                        env[name] = Drawn(d.fn)
                 return asg
 
             def asg2(env):
-                v = rhs(env)
-                env[name] = set_idx(env[name], [f(env) for f in idxs], v)
+                if isinstance(env[name], Drawn):
+                    return
+                try:
+                    v = rhs(env)
+                    env[name] = set_idx(env[name], [f(env) for f in idxs], v)
+                except Draw as d:
+                    env[name] = Drawn(d.fn)
             return asg2
         if k == "TargetPE" or k == "JacobianPE":
             e = self.expr(p[1])
@@ -805,12 +891,38 @@ class Interp:
                     return rj
                 if nm == "FnReadData":
                     return self.read_data_stmt(p[2])
+                if nm == "FnWriteParam":
+                    return self.write_param(field(what, "var"))
                 return lambda env: None
             if fn[0] == "UserDefined":
                 ev = self.funapp_node_nr(p)
                 return ev
             return lambda env: None
         raise Unsupported("stmt " + k)
+
+    def write_param(self, node):
+        """Write one variable, or one element of it, which stanc writes
+        inside loops for some containers; the column takes its name from
+        the variable and the element's indices."""
+        e = self.expr(node)
+        idxs = []
+        if pat(node)[0] == "Indexed":
+            idxs = [i for i in pat(node)[2]]
+            if any(i[0] != "Single" for i in idxs):
+                raise Unsupported("write of a slice")
+            idxs = [self.expr(i[1]) for i in idxs]
+            node = pat(node)[1]
+        name = pat(node)[1]
+
+        def wr(env):
+            try:
+                value = e(env)
+            except Draw as d:
+                self.refused[name] = d.fn
+                return
+            prefix = ".".join([name] + [str(f(env)) for f in idxs])
+            self.row.extend(columns(prefix, value))
+        return wr
 
     def read_data_stmt(self, args):
         """FnReadData__(x, context__, "x"): the named input, whole, into the

@@ -82,6 +82,53 @@ class GateAgreement(unittest.TestCase):
             self.assertEqual(metrics.lp_error(x, y), verify_refs.pair_dev(x, y)[0])
 
 
+class WriteArrayScale(unittest.TestCase):
+    def test_scale_is_the_largest_finite_value_of_each_variable(self):
+        names = ["y.1", "y.2", "y.3", "m", "M.1.2"]
+        values = [-4.0, math.inf, 2.0, 0.5, -3.0]
+        self.assertEqual(metrics.wa_scales(names, values), {"y": 4.0, "m": 0.5, "M": 3.0})
+
+    def test_distance_from_truth_in_ulps_of_the_scale(self):
+        from fractions import Fraction
+        # One ULP of 2**54 is 4, and one ULP of 1 is 2**-52.
+        self.assertEqual(metrics.ulps_from_truth(2.0 ** 54 + 12, Fraction(2 ** 54), 2.0 ** 54), 3.0)
+        self.assertEqual(metrics.ulps_from_truth(0.5, Fraction(1, 2) + Fraction(1, 2 ** 54), 1.0), 0.25)
+        self.assertEqual(metrics.ulps_from_truth(math.nan, Fraction(1), 1.0), math.inf)
+
+
+class LedgerWriteArray(unittest.TestCase):
+    """How ledger_accuracy.py picks the write_array value that an entry covers."""
+
+    @staticmethod
+    def point(values):
+        return {"values": [0.0], "wa": {"names": ",".join(values), "values": [repr(x) for x in values.values()]}}
+
+    def setUp(self):
+        sys.path.insert(0, str(REPO / "tools"))
+        import ledger_accuracy
+        self.la = ledger_accuracy
+        self.ref = {0: self.point({"y.1": 100.0, "y.2": 1.0, "m": 3.0}),
+                    1: self.point({"y.1": 100.0, "y.2": 2.0, "m": 3.0})}
+
+    def test_kind_entry_covers_the_columns_without_their_own(self):
+        cols = self.la.wa_columns("wa", {"wa": {}, "wa m": {}}, self.la.wa_ref(self.ref[0]))
+        self.assertEqual(cols, ["y.1", "y.2"])
+        self.assertEqual(self.la.wa_columns("wa m", {}, self.la.wa_ref(self.ref[0])), ["m"])
+
+    def test_picks_the_column_farthest_from_cmdstan_in_ulps_of_its_variable(self):
+        got = {0: [0.0, {"y.1": 100.0, "y.2": 1.0 + 2 ** -45, "m": 3.0}],
+               1: [0.0, {"y.1": 100.0 + 2 ** -40, "y.2": 2.0, "m": 3.0 + 2 ** -40}]}
+        u, p, c, sc = self.la.pick_wa("wa", {"wa": {}, "wa m": {}}, self.ref, got)
+        # One ULP of 100 is 2**-46: y.1 at point 1 is 64 of them away and
+        # y.2 at point 0 only 2, though it is 128 of its own ULPs away.
+        self.assertEqual((u, p, c, sc), (64, 1, "y.1", 100.0))
+
+    def test_nonfinite_truth_is_not_scored(self):
+        self.assertIsNone(metrics.exact("nan"))
+        self.assertIsNone(metrics.exact("-Infinity"))
+        self.assertEqual(metrics.exact("0.25"), 0.25)
+
+
 class Directions(unittest.TestCase):
     def test_unit_length_and_deterministic(self):
         a = metrics.direction("m:0:1", 50)
@@ -372,6 +419,28 @@ model {
 }
 """
 
+WRITE_ARRAY_MODEL = """
+data { int N; }
+parameters { real<lower=0> s; vector[N] z; }
+transformed parameters {
+  vector[N] y = s * z;
+}
+model { z ~ normal(0, s); }
+generated quantities {
+  real m = mean(y);
+  matrix[2, N] M;
+  array[2] vector[N] a;
+  for (i in 1:2) {
+    M[i] = (i * y)';
+    a[i] = i + y;
+  }
+  real d = normal_rng(0, 1);
+  real e = d + 1;
+  real after = 2 * m;
+}
+"""
+
+
 def interp(model, data):
     import subprocess
     import tempfile
@@ -407,6 +476,27 @@ class Interpreter(unittest.TestCase):
         want = (-(x / mpf("0.25")) ** 2 / 2 - (x / 3) ** 2 / 2
                 - (1 / x) ** 2 / 2 - mp.log(x * x))
         self.assertLess(abs(it.logp([x]) - want), mpf(10) ** -45)
+
+    def test_write_array_row(self):
+        mp.dps = 50
+        it = interp(WRITE_ARRAY_MODEL, {"N": 3})
+        u = [mpf("0.2"), mpf(1), mpf(2), mpf("-0.5")]
+        row = it.write_array(u)
+        s = mp.exp(u[0])
+        y = [s * z for z in u[1:]]
+        m = sum(y) / 3
+        want = {"s": s, "z.1": u[1], "z.3": u[3], "y.2": y[1], "m": m,
+                "M.2.1": 2 * y[0], "M.1.3": y[2], "a.2.1": 2 + y[0], "a.1.3": 1 + y[2]}
+        got = dict(row.columns)
+        for name, value in want.items():
+            self.assertLess(abs(got[name] - value), mpf(10) ** -45, name)
+        # Stan writes each variable in column-major order, first index fastest.
+        self.assertEqual([c for c, _ in row.columns if c.split(".")[0] in ("M", "a")],
+                         ["M.1.1", "M.2.1", "M.1.2", "M.2.2", "M.1.3", "M.2.3",
+                          "a.1.1", "a.2.1", "a.1.2", "a.2.2", "a.1.3", "a.2.3"])
+        self.assertEqual(row.refused, {"d": "normal_rng", "e": "normal_rng"})
+        self.assertLess(abs(got["after"] - 2 * m), mpf(10) ** -45)
+        self.assertIsNone(row.stopped)
 
 
 if __name__ == "__main__":
