@@ -446,24 +446,6 @@ void Lowering::forget_runtime_ints(const mir::Stmt& s) {
   if (!writes_int || decided_statically(s)) return;
   visit_assigned(s, [&](const std::string& n) { scan_erase_int(n); });
 }
-// Remove a return at the lexical end of a statement arm, preserving every
-// statement that precedes it.  This is the structured form used by UDFs
-// such as ctsem's mcalc: each arm returns, but one arm first updates a local
-// matrix.  The updates can lower as an ordinary statement island and the
-// two returned expressions can then join through a ternary value island.
-bool Lowering::peel_terminal_return(mir::Stmt* s, mir::Expr* value) {
-  if (s->kind == mir::Stmt::Return) {
-    if (!s->has_init) return false;
-    *value = s->rhs;
-    s->kind = mir::Stmt::Skip;
-    s->body.clear();
-    return true;
-  }
-  if ((s->kind == mir::Stmt::Block || s->kind == mir::Stmt::SList) &&
-      !s->body.empty())
-    return peel_terminal_return(&s->body.back(), value);
-  return false;
-}
 void Lowering::configure_island_compiler(ProgramCompiler& c,
                                          IslandProg& prog_ref,
                                          IslandRegion& region,
@@ -852,13 +834,33 @@ void Lowering::lower_runtime_ifelse(const mir::Stmt& s) {
   std::vector<int> out_lens;
   for (const Range& v : reg.out_views) out_lens.push_back(v.len);
   if (reg.has_target) out_lens.push_back(1);
+  const auto region_view = [&](size_t k) {
+    const Range& out_view = reg.out_views[k];
+    if (out_view.kind == ViewKind::Array)
+      return array_view(out_view.dims, out_view.leaf);
+    SlotInfo si;
+    si.rows = out_view.rows;
+    si.cols = out_view.cols;
+    si.kind = out_view.kind;
+    return si;
+  };
   // Nothing to carry out and no target to accumulate: every live-out is
   // zero-width, so the region has no observable effect and its values
   // keep the empty shape they already have outside. A `target +=` would
   // have put its own register here, so this cannot drop one -- and a
   // print()/reject() have no live-out by design, so it cannot either.
-  if (prog->out_regs.empty() && !reg.out_names.empty() && !reg.has_effect)
+  // An unsized local that the region assigned only empty values still
+  // takes their shape, so a later read sees an empty container.
+  if (prog->out_regs.empty() && !reg.out_names.empty() && !reg.has_effect) {
+    for (size_t k = 0; k < reg.out_names.size(); ++k) {
+      auto dl = decls.find(reg.out_names[k]);
+      if (dl != decls.end() && dl->second.deferred_shape) {
+        dl->second.si = region_view(k);
+        dl->second.deferred_shape = false;
+      }
+    }
     return;
+  }
   std::vector<int> out_slots;
   emit_island(prog, reg, out_lens, &out_slots);
   // Later statements read the island's results, not the old values.
@@ -894,15 +896,7 @@ void Lowering::lower_runtime_ifelse(const mir::Stmt& s) {
     if (!shaped_outside) {
       // The outside declaration was zero-size, which Stan's assignment
       // resizes; the region's registers carry the real shape.
-      const Range& out_view = reg.out_views[k];
-      if (out_view.kind == ViewKind::Array) {
-        si = array_view(out_view.dims, out_view.leaf);
-      } else {
-        si = SlotInfo{};
-        si.rows = out_view.rows;
-        si.cols = out_view.cols;
-        si.kind = out_view.kind;
-      }
+      si = region_view(k);
       auto dl = decls.find(name);
       if (dl != decls.end()) {
         dl->second.len = reg.out_views[k].len;
@@ -2282,28 +2276,6 @@ Lowering::Flow Lowering::lower_stmt_impl(const mir::Stmt& s) {
       if (known) {
         const size_t arm = c ? 0 : 1;
         return arm < s.body.size() ? lower_stmt(s.body[arm]) : Flow::Next;
-      }
-      if (udf_depth > 0 && s.body.size() == 2) {
-        mir::Stmt effects = s;
-        mir::Expr then_value, else_value;
-        if (peel_terminal_return(&effects.body[0], &then_value) &&
-            peel_terminal_return(&effects.body[1], &else_value)) {
-          std::vector<std::string> assigned;
-          assigned_names(effects, &assigned);
-          if (!assigned.empty() || has_target_pe(effects) ||
-              stmt_effectful(effects))
-            lower_runtime_ifelse(effects);
-
-          mir::Expr choice;
-          choice.kind = mir::Expr::TernaryIf;
-          choice.args = {s.cond, then_value, else_value};
-          choice.unsized = then_value.unsized;
-          choice.data_only =
-              s.cond.data_only && then_value.data_only && else_value.data_only;
-          choice.raw = s.raw;
-          return_value = lower_expr(choice);
-          return Flow::Return;
-        }
       }
       // Data-only or not, an unfoldable condition compiles to an island.
       // Data-only says the MIR adlevel is DataOnly, not that the values are

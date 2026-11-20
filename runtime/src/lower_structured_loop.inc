@@ -962,6 +962,9 @@ bool region_size_deferred(const std::string& name, const mir::Stmt& s) {
   visit(s);
   if (!assigned) return true;
   if (!agree || !shape) return false;
+  declaration->second.len = shape->len;
+  declaration->second.si = shape->si;
+  declaration->second.deferred_shape = false;
   if (shape->len == 0) return true;
   Val value{add_slot(shape->len, false), false, shape->si};
   out.fills.emplace_back(
@@ -969,9 +972,6 @@ bool region_size_deferred(const std::string& name, const mir::Stmt& s) {
       std::vector<double>((size_t)shape->len,
                           std::numeric_limits<double>::quiet_NaN()));
   scope[name] = value;
-  declaration->second.len = shape->len;
-  declaration->second.si = shape->si;
-  declaration->second.deferred_shape = false;
   return true;
 }
 // A reusable body must account for every iteration, not just the incoming
@@ -1571,9 +1571,9 @@ std::optional<Val> region_expr(const mir::Expr& e) {
         "structured target reads and Jacobian calls need a separate "
         "contract");
   if (e.fn_lib == mir::Expr::Lib::UserDefined) {
-    // Inline first.  Structured statement lowering handles terminal
-    // two-arm returns directly; genuinely unsupported early-return shapes
-    // reject the native candidate and retain the whole-region fallback.
+    // Inline first. lower_call_udf rewrites early returns into assignments
+    // to one result; a shape that the region still cannot lower rejects the
+    // native candidate and keeps the whole-region fallback.
     try {
       return lower_call_udf(e);
     } catch (const CompileError& error) {
@@ -2160,24 +2160,6 @@ Flow lower_region_stmt(const mir::Stmt& s) {
       return Flow::Next;
     }
     case mir::Stmt::IfElse: {
-      if (udf_depth > 0 && s.body.size() == 2) {
-        mir::Stmt effects = s;
-        mir::Expr then_value, else_value;
-        if (peel_terminal_return(&effects.body[0], &then_value) &&
-            peel_terminal_return(&effects.body[1], &else_value)) {
-          if (const Flow flow = lower_stmt(effects); flow != Flow::Next)
-            return flow;
-          mir::Expr choice;
-          choice.kind = mir::Expr::TernaryIf;
-          choice.args = {s.cond, then_value, else_value};
-          choice.unsized = then_value.unsized;
-          choice.data_only =
-              s.cond.data_only && then_value.data_only && else_value.data_only;
-          choice.raw = s.raw;
-          return_value = lower_expr(choice);
-          return Flow::Return;
-        }
-      }
       if (auto c = region_static_truth(s.cond)) {
         const size_t arm = *c ? 0 : 1;
         return arm < s.body.size() ? lower_stmt(s.body[arm]) : Flow::Next;
