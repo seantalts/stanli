@@ -887,6 +887,9 @@ class MirInterp {
     DensityCallPlan plan;
     try {
       plan = density_call_plan(spec, plan_arguments, propto(e));
+    } catch (const DensitySizeError& error) {
+      reject(MessageError::InvalidArgument, e.name + ": " + error.what(),
+             e.raw);
     } catch (const std::exception& error) {
       fail_builtin(e.name, error, e.raw);
     }
@@ -963,6 +966,41 @@ class MirInterp {
         {nargs, (int)lanes, active, propto ? 1 : 0, (int)form.kind},
         std::move(inputs), 1)[0]};
     return result;
+  }
+
+  // How Stan Math's Eigen reduction groups a sum over a vector, row vector
+  // or matrix operand, with the phase offset; nullopt for any other operand.
+  static std::optional<std::pair<SumGrouping, int64_t>> eigen_sum_grouping(
+      const mir::Expr& operand) {
+    if (!mir::eigen_leaf(operand) || operand.unsized.depth != 0)
+      return std::nullopt;
+    ExpressionLayout layout = mir::source_expression_layout(operand);
+    const mir::Expr* base = &operand;
+    if (base->kind == mir::Expr::Indexed && !base->args.empty() &&
+        base->args[0].unsized.depth > 0)
+      base = &base->args[0];
+    CallableTransformSpec transform;
+    if (base->kind == mir::Expr::FunApp &&
+        callable_transform(base->name, &transform))
+      layout = ExpressionLayout::direct();
+    return sum_grouping(layout);
+  }
+
+  // The exp-quad, Matern and exponential covariances. L is one length scale
+  // or a std::vector with one per dimension.
+  template <typename P, typename L>
+  static Eigen::Matrix<T, Eigen::Dynamic, Eigen::Dynamic> gp_family_cov(
+      GpCov family, const P& pts, const T& sigma, const L& length_scale) {
+    switch (family) {
+      case kGpMatern32:
+        return stan::math::gp_matern32_cov(pts, sigma, length_scale);
+      case kGpMatern52:
+        return stan::math::gp_matern52_cov(pts, sigma, length_scale);
+      case kGpExponential:
+        return stan::math::gp_exponential_cov(pts, sigma, length_scale);
+      default:
+        return stan::math::gp_exp_quad_cov(pts, sigma, length_scale);
+    }
   }
 
   // Bind and execute one graph-kernel CALL over materialized inputs. Shared
@@ -2835,56 +2873,52 @@ class MirInterp {
                                      v.r.at((size_t)j);
       return o;
     }
-    if (e.name == "gp_exp_quad_cov" && e.args.size() == 3) {
-      // K(i,j) = alpha^2 exp(-|x_i - x_j|^2 / (2 rho^2)); x is array[N]
-      // real or array[N] vector[D] in Fortran storage.
-      Value x = eval(e.args[0]);
-      const T alpha = eval(e.args[1]).r.at(0);
-      const T rho = eval(e.args[2]).r.at(0);
-      const int64_t N = x.dims.size() == 2 ? x.dims[0] : (int64_t)x.r.size();
-      const int64_t D = x.dims.size() == 2 ? x.dims[1] : 1;
-      const T a2 = alpha * alpha;
-      const T inv2r2 = T(1.0) / (T(2.0) * rho * rho);
-      Value o;
-      o.dims = {N, N};
-      o.r.resize((size_t)(N * N));
-      for (int64_t j = 0; j < N; ++j)
-        for (int64_t i = 0; i < N; ++i) {
-          T sq = T(0.0);
-          for (int64_t d = 0; d < D; ++d) {
-            const T diff =
-                x.r.at((size_t)(i + N * d)) - x.r.at((size_t)(j + N * d));
-            sq += diff * diff;
-          }
-          o.r[(size_t)(j * N + i)] = a2 * stan::math::exp(-sq * inv2r2);
-        }
-      return o;
-    }
     if (const std::optional<GpCov> gp = gp_cov_family(e.name);
         gp && (int)e.args.size() == 1 + gp_cov_hyperparameters(*gp)) {
       Value x = eval(e.args[0]);
       const T sigma = eval(e.args[1]).r.at(0);
-      const T length_scale = eval(e.args[2]).r.at(0);
+      const Value rho = eval(e.args[2]);
       const int64_t N = x.dims.size() == 2 ? x.dims[0] : (int64_t)x.r.size();
       const int64_t D = x.dims.size() == 2 ? x.dims[1] : 1;
+      // array[] real is the per-dimension overload, whatever its length.
+      const bool per_dimension =
+          e.args[2].unsized.depth == 1 || rho.r.size() != 1;
+      Value o;
+      o.dims = {N, N};
+      o.r.resize((size_t)(N * N));
+      if (*gp == kGpExpQuad && !per_dimension) {
+        // K(i,j) = alpha^2 exp(-|x_i - x_j|^2 / (2 rho^2)); x is array[N]
+        // real or array[N] vector[D] in Fortran storage.
+        const T a2 = sigma * sigma;
+        const T inv2r2 = T(1.0) / (T(2.0) * rho.r.at(0) * rho.r.at(0));
+        for (int64_t j = 0; j < N; ++j)
+          for (int64_t i = 0; i < N; ++i) {
+            T sq = T(0.0);
+            for (int64_t d = 0; d < D; ++d) {
+              const T diff =
+                  x.r.at((size_t)(i + N * d)) - x.r.at((size_t)(j + N * d));
+              sq += diff * diff;
+            }
+            o.r[(size_t)(j * N + i)] = a2 * stan::math::exp(-sq * inv2r2);
+          }
+        return o;
+      }
       using Vec = Eigen::Matrix<T, Eigen::Dynamic, 1>;
       std::vector<Vec> pts((size_t)N, Vec((Eigen::Index)D));
       for (int64_t n = 0; n < N; ++n)
         for (int64_t d = 0; d < D; ++d)
           pts[(size_t)n]((Eigen::Index)d) = x.r.at((size_t)(n + N * d));
       Eigen::Matrix<T, Eigen::Dynamic, Eigen::Dynamic> c;
-      if (*gp == kGpPeriodic)
-        c = stan::math::gp_periodic_cov(pts, sigma, length_scale,
+      if (*gp == kGpPeriodic) {
+        if (per_dimension)
+          fail(e.name + ": the length scale must be a scalar", e.raw);
+        c = stan::math::gp_periodic_cov(pts, sigma, rho.r.at(0),
                                         eval(e.args[3]).r.at(0));
-      else if (*gp == kGpMatern32)
-        c = stan::math::gp_matern32_cov(pts, sigma, length_scale);
-      else if (*gp == kGpMatern52)
-        c = stan::math::gp_matern52_cov(pts, sigma, length_scale);
-      else
-        c = stan::math::gp_exponential_cov(pts, sigma, length_scale);
-      Value o;
-      o.dims = {N, N};
-      o.r.resize((size_t)(N * N));
+      } else if (per_dimension) {
+        c = gp_family_cov(*gp, pts, sigma, rho.r);
+      } else {
+        c = gp_family_cov(*gp, pts, sigma, rho.r.at(0));
+      }
       for (int64_t j = 0; j < N; ++j)
         for (int64_t i = 0; i < N; ++i) o.r[(size_t)(j * N + i)] = c(i, j);
       return o;
@@ -2903,39 +2937,37 @@ class MirInterp {
         return r;
       }
       if constexpr (std::is_same_v<T, double>) {
-        const mir::Expr& operand = e.args[0];
-        if (mir::eigen_leaf(operand) && operand.unsized.depth == 0) {
-          ExpressionLayout layout = mir::source_expression_layout(operand);
-          const mir::Expr* base = &operand;
-          if (base->kind == mir::Expr::Indexed && !base->args.empty() &&
-              base->args[0].unsized.depth > 0)
-            base = &base->args[0];
-          CallableTransformSpec transform;
-          if (base->kind == mir::Expr::FunApp &&
-              callable_transform(base->name, &transform))
-            layout = ExpressionLayout::direct();
-          if (layout.packet_access()) {
-            if (a.r.empty())
-              r.r = {0.0};
-            else if (layout.direct_access() && layout.element_offset != 0)
-              r.r = {reduce_phased(a.r.data(), (int64_t)a.r.size(),
-                                   layout.element_offset,
-                                   Eigen::internal::scalar_sum_op<double>())};
-            else {
-              const Eigen::Map<const Eigen::VectorXd> input(a.r.data(),
-                                                            a.r.size());
-              r.r = {input
-                         .unaryExpr(
-                             Eigen::internal::core_cast_op<double, double>())
-                         .sum()};
-            }
-            return r;
-          }
+        const auto grouping = eigen_sum_grouping(e.args[0]);
+        if (grouping && grouping->first != SumGrouping::InOrder) {
+          r.r = {sum_grouped(a.r.data(), (int64_t)a.r.size(), grouping->first,
+                             grouping->second)};
+          return r;
         }
       }
       const BuiltinSpec* reduction = reduction_builtin_spec(e.name, 1);
       if (reduction == nullptr)
         fail("sum: missing reduction descriptor", e.raw);
+      std::vector<Value> values;
+      values.push_back(std::move(a));
+      return builtin_kernel_eval(e, *reduction, std::move(values));
+    }
+    // mean is the grouped sum over n, as Eigen's mean() computes it for the
+    // container Stan Math receives: in order for autodiff values, and for
+    // data the grouping of the Eigen view or, for a std::vector, packets.
+    if (e.name == "mean" && e.args.size() == 1) {
+      Value a = eval(e.args[0]);
+      if constexpr (std::is_same_v<T, double>) {
+        stan::math::check_nonzero_size("mean", "m", a.r);
+        const auto grouping = eigen_sum_grouping(e.args[0]).value_or(
+            std::pair<SumGrouping, int64_t>{SumGrouping::Packet, 0});
+        r.r = {sum_grouped(a.r.data(), (int64_t)a.r.size(), grouping.first,
+                           grouping.second) /
+               static_cast<double>(a.r.size())};
+        return r;
+      }
+      const BuiltinSpec* reduction = reduction_builtin_spec(e.name, 1);
+      if (reduction == nullptr)
+        fail("mean: missing reduction descriptor", e.raw);
       std::vector<Value> values;
       values.push_back(std::move(a));
       return builtin_kernel_eval(e, *reduction, std::move(values));

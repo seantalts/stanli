@@ -2975,6 +2975,14 @@ struct ProgramCompiler {
       Range out{0, 1};
       return kernel_call(spec.opcode, args, out, plan.variant,
                          plan.activity_mask, plan.idata, {}, e.name);
+    } catch (const DensitySizeError& error) {
+      // Stan rejects the call when it runs, so the program rejects there too.
+      Program::Message message;
+      message.spec.chunks = {e.name + ": " + error.what()};
+      message.spec.error = MessageError::InvalidArgument;
+      p.messages.push_back(std::move(message));
+      emit(Program::REJECT, 0, (int)p.messages.size() - 1);
+      return {konst(0.0), 1};
     } catch (const std::exception& error) {
       bail(builtin_error_message(e.name, error));
     }
@@ -3510,9 +3518,23 @@ struct ProgramCompiler {
           reduction->opcode != OP_LOG_SUM_EXP) {
         const std::vector<Range> args{expr(e.args[0])};
         (void)resolved_builtin_layout(e, *reduction, args);
+        // mean groups its sum as Stan Math's Eigen mean does: in order for
+        // an autodiff operand, by the source layout for a data vector, in
+        // packets for a data std::vector.
+        std::pair<SumGrouping, int64_t> grouping{SumGrouping::InOrder, 0};
+        if (reduction->opcode == OP_MEAN &&
+            (in_write_array || e.args[0].data_only))
+          grouping = sum_grouping(mir::eigen_leaf(e.args[0]) &&
+                                          e.args[0].unsized.depth == 0
+                                      ? mir::source_expression_layout(e.args[0])
+                                      : ExpressionLayout::direct());
+        std::vector<int> idata;
+        if (grouping.first == SumGrouping::Phased)
+          idata.push_back(static_cast<int>(grouping.second));
         Range out{0, 1};
-        return kernel_call(reduction->opcode, args, out, 0,
-                           reduction->activity_mask, {}, {}, e.name);
+        return kernel_call(
+            reduction->opcode, args, out, static_cast<uint8_t>(grouping.first),
+            reduction->activity_mask, std::move(idata), {}, e.name);
       }
     }
     // Matrix right-division is a solve, not the scalar/elementwise DIV in the

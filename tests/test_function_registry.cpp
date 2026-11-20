@@ -4,8 +4,12 @@
 #include <stanli/density_registry.hpp>
 #include <stanli/function_registry.hpp>
 #include <stanli/mir.hpp>
+#include <stanli/optable.hpp>
 
 #include <stan/math/prim.hpp>
+
+#include <utility>
+#include <vector>
 
 #include <cstdio>
 #include <set>
@@ -334,9 +338,131 @@ static void check_multinomial_coefficient_plans() {
   }
 }
 
+// A density's size check must name the arguments, and report the message,
+// that its Stan Math function does. Every argument is a container of size 2
+// except the probed one, of size 1, so the function reports the first named
+// container and the first one whose size differs. Functions without a check
+// are not called: Stan Math reads past a short container there.
+static int probed_size_checks = 0;
+
+template <size_t... I, size_t... J, typename F>
+static void call_density(F&& f, const std::vector<std::vector<int>>& ints,
+                         const std::vector<std::vector<double>>& reals,
+                         std::index_sequence<I...>, std::index_sequence<J...>) {
+  (void)f(ints[I]..., reals[J]...);
+}
+
+template <size_t NInt, size_t NReal, typename F>
+static void probe_density_sizes(const char* name, F&& f) {
+  using namespace stanli;
+  const FunctionSpec* spec =
+      function_spec(name, NInt + NReal, FunctionFamily::Density);
+  if (spec == nullptr || spec->density() == nullptr) {
+    ++failures;
+    std::printf("FAIL size check probe: %s is not registered\n", name);
+    return;
+  }
+  const DensitySizeCheck* check = spec->density()->size_check;
+  if (check == nullptr) return;
+  ++probed_size_checks;
+  for (const DensitySizeName& probed : check->arguments) {
+    std::vector<std::vector<int>> ints(NInt, std::vector<int>(2, 1));
+    std::vector<std::vector<double>> reals(NReal, std::vector<double>(2, 0.5));
+    std::vector<DensityCallArgument> arguments(NInt + NReal);
+    for (size_t k = 0; k < NInt + NReal; ++k) {
+      const size_t size = (int)k == probed.argument ? 1 : 2;
+      if (k < NInt) {
+        ints[k].resize(size, 1);
+        arguments[k] = integer_density_argument(ints[k], false, true);
+      } else {
+        reals[k - NInt].resize(size, 0.5);
+        arguments[k].shape.container = FunctionContainerKind::Array;
+        arguments[k].shape.dimensions = {(int64_t)size};
+        arguments[k].shape.storage_size = (int64_t)size;
+      }
+    }
+    // The plan's message leaves out the function name, which the backends
+    // add; a few Stan Math functions report another one (the cdf of
+    // skew_double_exponential says skew_double_exponential_lcdf).
+    std::string want, got;
+    try {
+      call_density(f, ints, reals, std::make_index_sequence<NInt>{},
+                   std::make_index_sequence<NReal>{});
+    } catch (const std::invalid_argument& error) {
+      want = error.what();
+      want.erase(0, want.find(": ") + 2);
+    }
+    try {
+      (void)density_call_plan(*spec->density(), arguments, false);
+    } catch (const DensitySizeError& error) {
+      got = error.what();
+    } catch (const std::exception&) {
+    }
+    if (want.empty() || got != want) {
+      ++failures;
+      std::printf(
+          "FAIL %s size check for %s:\n  Stan Math: %s\n  plan:      %s\n",
+          name, probed.name, want.c_str(), got.c_str());
+    }
+  }
+}
+
+static void check_density_size_names() {
+  using namespace stanli;
+#define STANLI_PROBE(code, fn, n, tier) \
+  probe_density_sizes<0, n>(            \
+      #fn, [](const auto&... a) { return stan::math::fn(a...); });
+#define STANLI_PROBE_INT(code, fn, nreal, tier) \
+  probe_density_sizes<1, nreal>(                \
+      #fn, [](const auto&... a) { return stan::math::fn(a...); });
+#define STANLI_PROBE_TWO_INT(code, fn, nreal, tier) \
+  probe_density_sizes<2, nreal>(                    \
+      #fn, [](const auto&... a) { return stan::math::fn(a...); });
+  STANLI_SCALAR_DENSITY_LIST(STANLI_PROBE)
+  STANLI_SCALAR_CDF_LIST(STANLI_PROBE)
+  STANLI_TAIL_CDF_LIST(STANLI_PROBE)
+  STANLI_INT_DENSITY_LIST(STANLI_PROBE_INT)
+  STANLI_INT_CDF_LIST(STANLI_PROBE_INT)
+  STANLI_TAIL_INT_CDF_LIST(STANLI_PROBE_INT)
+  STANLI_TWO_INT_CDF_LIST(STANLI_PROBE_TWO_INT)
+  STANLI_PROBE_INT(0, poisson_lpmf, 1, 0)
+  STANLI_PROBE_INT(0, poisson_log_lpmf, 1, 0)
+  STANLI_PROBE_INT(0, bernoulli_lpmf, 1, 0)
+  STANLI_PROBE_INT(0, bernoulli_logit_lpmf, 1, 0)
+  STANLI_PROBE_INT(0, neg_binomial_2_lpmf, 2, 0)
+  STANLI_PROBE_TWO_INT(0, binomial_lpmf, 1, 0)
+  STANLI_PROBE_TWO_INT(0, binomial_logit_lpmf, 1, 0)
+  STANLI_PROBE_TWO_INT(0, beta_binomial_lpmf, 2, 0)
+  STANLI_PROBE(0, wiener_lpdf, 5, 0)
+#undef STANLI_PROBE
+#undef STANLI_PROBE_INT
+#undef STANLI_PROBE_TWO_INT
+  for (const char* name : {"ordered_logistic_lpmf", "ordered_probit_lpmf"})
+    probe_density_sizes<1, 2>(
+        name, [name](const std::vector<int>& y, const std::vector<double>& eta,
+                     const std::vector<double>& c) {
+          const Eigen::Map<const Eigen::VectorXd> eta_v(eta.data(), eta.size());
+          const Eigen::VectorXd c_v = Eigen::VectorXd::LinSpaced(2, -1.0, 1.0);
+          (void)c;
+          return std::string(name) == "ordered_logistic_lpmf"
+                     ? stan::math::ordered_logistic_lpmf(y, eta_v, c_v)
+                     : stan::math::ordered_probit_lpmf(y, eta_v, c_v);
+        });
+  int registered = 0;
+  for (const FunctionSpec& spec : function_specs())
+    if (spec.density() != nullptr && spec.density()->size_check != nullptr)
+      ++registered;
+  if (registered != probed_size_checks) {
+    ++failures;
+    std::printf("FAIL size checks: %d registered, %d probed\n", registered,
+                probed_size_checks);
+  }
+}
+
 int main() {
   using namespace stanli;
   check_density_layouts();
+  check_density_size_names();
   check_multinomial_coefficient_plans();
   std::set<std::string> keys;
   std::set<const FunctionSpec*> canonical_entries;

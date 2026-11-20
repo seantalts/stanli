@@ -889,7 +889,7 @@ Val region_cell(const std::string& name) {
     source = scope.at(name);
   }
   Val binding{add_slot(g.slots[source.slot].len, false), source.autodiff,
-              source.si, source.runtime_dims};
+              source.si, source.layout, source.runtime_dims};
   // Newly admitted output containers are owned named values. Their Eigen
   // sums use the owning layout, including after indexed writes or aliases.
   if (bounded_output) binding.layout = owning_layout(binding.si);

@@ -2093,6 +2093,50 @@ void test_constant_folded_gq_column() {
   }
 }
 
+// mean() groups its sum the way Stan Math's Eigen reduction does, so the
+// result does not depend on where the slot sits. CmdStan gives lp 51.75 and
+// these generated quantities at this data: a strided row adds in order
+// (0.25), contiguous data in packets (0.5), and an autodiff value in order.
+void test_mean_grouping() {
+  using namespace stanli;
+  DataMap data = DataMap::from_json_file("tests/fixtures/mean_grouping.json");
+  const std::string text = slurp("tests/fixtures/mean_grouping.tmir.sexp");
+  test_setenv("STANLI_WA_FORCE_INTERP", "1");
+  CompiledModel cm = compile_model(text, data);
+  test_unsetenv("STANLI_WA_FORCE_INTERP");
+  if (!cm.write_array || !cm.write_array->interp ||
+      cm.write_array->truncated.has_value()) {
+    ++failures;
+    std::printf("FAIL mean_grouping did not compile completely\n");
+    return;
+  }
+  Executor pex(cm.graph);
+  cm.bind(pex);
+  pex.params_data()[0] = 0.1;
+  double grad = 1.0;
+  const double lp = pex.gradient(&grad);
+  if (lp != 51.75 || grad != 0.0) {
+    ++failures;
+    std::printf("FAIL mean_grouping lp %.17g grad %.17g\n", lp, grad);
+  }
+  Executor wex(std::move(cm.write_array->graph));
+  cm.write_array->bind(wex);
+  const std::vector<double> row =
+      cross_checked_row(cm, pex, wex, {0.1}, 1, "mean_grouping");
+  const std::vector<double> want{0.5, 0.5, 0.5, 0.25, 0.5};
+  if (row.size() != 18) {
+    ++failures;
+    std::printf("FAIL mean_grouping row: got %zu values\n", row.size());
+    return;
+  }
+  for (size_t k = 0; k < want.size(); ++k)
+    if (row[13 + k] != want[k]) {
+      ++failures;
+      std::printf("FAIL mean_grouping gq %zu: %.17g, CmdStan %.17g\n", k,
+                  row[13 + k], want[k]);
+    }
+}
+
 // A zero-size output before a folded one: its loop writes nothing, so
 // naming the folded write "the variable after the last one written" calls
 // it z. The writes' widths against output_vars name it w.
@@ -3929,8 +3973,8 @@ void test_gq_reduction_lowering_guards() {
   std::string empty = base;
   if (replace_reduction_after(empty, prod_call, vector_node, empty_vector,
                               "empty product"))
-    expect_reduction_interp(empty, "",
-                            "empty dynamic product stays interpreted");
+    expect_compiled(empty, reduction_data(),
+                    "empty dynamic product lowers to Stan's 1");
 
   const std::string segment =
       "((pattern\n"
@@ -4954,6 +4998,7 @@ int main() {
   test_interpreted_lkj();
   test_constant_folded_gq_column();
   test_constant_folded_gq_after_empty_output();
+  test_mean_grouping();
   test_categorical_rng_lowering_guards();
   test_compiled_categorical_rng();
   test_categorical_rng_empty_vector();

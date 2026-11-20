@@ -426,8 +426,6 @@ BuiltinLayout builtin_layout(const BuiltinSpec& spec,
   if (spec.shape == BuiltinShapePolicy::Reduction) {
     if (spec.arity != 1)
       throw std::invalid_argument("unsupported reduction arity");
-    if (spec.nonempty_input && arguments[0].storage_size == 0)
-      throw std::invalid_argument("input must have a positive size");
     layout.lanes = 1;
     return layout;
   }
