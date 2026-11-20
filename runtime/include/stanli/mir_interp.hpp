@@ -966,6 +966,29 @@ class MirInterp {
     return result;
   }
 
+  // How Stan Math's Eigen reduction groups a sum over a vector, row vector
+  // or matrix operand, with the phase offset; nullopt for any other operand.
+  static std::optional<std::pair<SumGrouping, int64_t>> eigen_sum_grouping(
+      const mir::Expr& operand) {
+    if (!mir::eigen_leaf(operand) || operand.unsized.depth != 0)
+      return std::nullopt;
+    ExpressionLayout layout = mir::source_expression_layout(operand);
+    const mir::Expr* base = &operand;
+    if (base->kind == mir::Expr::Indexed && !base->args.empty() &&
+        base->args[0].unsized.depth > 0)
+      base = &base->args[0];
+    CallableTransformSpec transform;
+    if (base->kind == mir::Expr::FunApp &&
+        callable_transform(base->name, &transform))
+      layout = ExpressionLayout::direct();
+    if (!layout.packet_access())
+      return std::pair<SumGrouping, int64_t>{SumGrouping::InOrder, 0};
+    if (layout.direct_access() && layout.element_offset != 0)
+      return std::pair<SumGrouping, int64_t>{SumGrouping::Phased,
+                                             layout.element_offset};
+    return std::pair<SumGrouping, int64_t>{SumGrouping::Packet, 0};
+  }
+
   // The exp-quad, Matern and exponential covariances. L is one length scale
   // or a std::vector with one per dimension.
   template <typename P, typename L>
@@ -2896,39 +2919,37 @@ class MirInterp {
         return r;
       }
       if constexpr (std::is_same_v<T, double>) {
-        const mir::Expr& operand = e.args[0];
-        if (mir::eigen_leaf(operand) && operand.unsized.depth == 0) {
-          ExpressionLayout layout = mir::source_expression_layout(operand);
-          const mir::Expr* base = &operand;
-          if (base->kind == mir::Expr::Indexed && !base->args.empty() &&
-              base->args[0].unsized.depth > 0)
-            base = &base->args[0];
-          CallableTransformSpec transform;
-          if (base->kind == mir::Expr::FunApp &&
-              callable_transform(base->name, &transform))
-            layout = ExpressionLayout::direct();
-          if (layout.packet_access()) {
-            if (a.r.empty())
-              r.r = {0.0};
-            else if (layout.direct_access() && layout.element_offset != 0)
-              r.r = {reduce_phased(a.r.data(), (int64_t)a.r.size(),
-                                   layout.element_offset,
-                                   Eigen::internal::scalar_sum_op<double>())};
-            else {
-              const Eigen::Map<const Eigen::VectorXd> input(a.r.data(),
-                                                            a.r.size());
-              r.r = {input
-                         .unaryExpr(
-                             Eigen::internal::core_cast_op<double, double>())
-                         .sum()};
-            }
-            return r;
-          }
+        const auto grouping = eigen_sum_grouping(e.args[0]);
+        if (grouping && grouping->first != SumGrouping::InOrder) {
+          r.r = {sum_grouped(a.r.data(), (int64_t)a.r.size(), grouping->first,
+                             grouping->second)};
+          return r;
         }
       }
       const BuiltinSpec* reduction = reduction_builtin_spec(e.name, 1);
       if (reduction == nullptr)
         fail("sum: missing reduction descriptor", e.raw);
+      std::vector<Value> values;
+      values.push_back(std::move(a));
+      return builtin_kernel_eval(e, *reduction, std::move(values));
+    }
+    // mean is the grouped sum over n, as Eigen's mean() computes it for the
+    // container Stan Math receives: in order for autodiff values, and for
+    // data the grouping of the Eigen view or, for a std::vector, packets.
+    if (e.name == "mean" && e.args.size() == 1) {
+      Value a = eval(e.args[0]);
+      if constexpr (std::is_same_v<T, double>) {
+        stan::math::check_nonzero_size("mean", "m", a.r);
+        const auto grouping = eigen_sum_grouping(e.args[0]).value_or(
+            std::pair<SumGrouping, int64_t>{SumGrouping::Packet, 0});
+        r.r = {sum_grouped(a.r.data(), (int64_t)a.r.size(), grouping.first,
+                           grouping.second) /
+               static_cast<double>(a.r.size())};
+        return r;
+      }
+      const BuiltinSpec* reduction = reduction_builtin_spec(e.name, 1);
+      if (reduction == nullptr)
+        fail("mean: missing reduction descriptor", e.raw);
       std::vector<Value> values;
       values.push_back(std::move(a));
       return builtin_kernel_eval(e, *reduction, std::move(values));

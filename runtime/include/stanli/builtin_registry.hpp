@@ -249,8 +249,6 @@ struct BuiltinSpec {
   BuiltinCompatibilityPolicy compatibility =
       BuiltinCompatibilityPolicy::LogicalShape;
   uint8_t activity_mask = 0;
-  // Reductions which reject an empty container (sd, variance).
-  bool nonempty_input = false;
   // PairedReduction: fold the elementwise difference (squared_distance).
   bool difference = false;
   // Constructor descriptors: what is built and which container holds it.

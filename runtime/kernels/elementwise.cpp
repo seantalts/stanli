@@ -58,23 +58,11 @@ void matvec_bwd(KernelCtx& ctx) {
   }
 }
 
-// OP_SUM_VEC: scalar out = sum(x). Matrix<var> and std::vector use scalar
-// traversal. Data Eigen expressions retain their packet/offset grouping.
+// OP_SUM_VEC: scalar out = sum(x), grouped by the variant (SumGrouping).
 void sum_vec_fwd(KernelCtx& ctx) {
-  if (ctx.in[0].len && ctx.variant) {
-    using Vec = Eigen::Matrix<double, Eigen::Dynamic, 1>;
-    const Eigen::Map<const Vec> input(ctx.in[0].data, ctx.in[0].len);
-    ctx.out.data[0] =
-        ctx.variant == 2
-            ? reduce_phased(ctx.in[0].data, ctx.in[0].len, ctx.idata[0],
-                            Eigen::internal::scalar_sum_op<double>())
-            : input.unaryExpr(Eigen::internal::core_cast_op<double, double>())
-                  .sum();
-    return;
-  }
-  double acc = 0;
-  for (int64_t i = 0; i < ctx.in[0].len; ++i) acc += ctx.in[0].data[i];
-  ctx.out.data[0] = acc;
+  ctx.out.data[0] =
+      sum_grouped(ctx.in[0].data, ctx.in[0].len, (SumGrouping)ctx.variant,
+                  ctx.n_idata > 0 ? ctx.idata[0] : 0);
 }
 void sum_vec_bwd(KernelCtx& ctx) {
   if (ctx.in_adj[0].data)

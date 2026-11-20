@@ -259,17 +259,14 @@ constexpr BuiltinSpec append_builtin(
   return spec;
 }
 
-constexpr BuiltinSpec reduction_builtin(uint16_t opcode,
-                                        bool nonempty_input = false) {
-  BuiltinSpec spec{opcode,
-                   1,
-                   {BuiltinArgumentKind::Real, BuiltinArgumentKind::Real},
-                   FunctionArgumentKind::Real,
-                   BuiltinShapePolicy::Reduction,
-                   BuiltinCompatibilityPolicy::LogicalShape,
-                   0x1};
-  spec.nonempty_input = nonempty_input;
-  return spec;
+constexpr BuiltinSpec reduction_builtin(uint16_t opcode) {
+  return {opcode,
+          1,
+          {BuiltinArgumentKind::Real, BuiltinArgumentKind::Real},
+          FunctionArgumentKind::Real,
+          BuiltinShapePolicy::Reduction,
+          BuiltinCompatibilityPolicy::LogicalShape,
+          0x1};
 }
 
 constexpr BuiltinSpec unary_builtin(uint16_t opcode) {
@@ -512,8 +509,8 @@ const std::vector<FunctionSpec>& function_specs() {
     // registry deliberately.
     builtin("sum", reduction_builtin(OP_SUM_VEC));
     builtin("mean", reduction_builtin(OP_MEAN));
-    builtin("sd", reduction_builtin(OP_SD, true));
-    builtin("variance", reduction_builtin(OP_VARIANCE, true));
+    builtin("sd", reduction_builtin(OP_SD));
+    builtin("variance", reduction_builtin(OP_VARIANCE));
     builtin("log_sum_exp", reduction_builtin(OP_LOG_SUM_EXP));
     builtin("dot_product", paired_reduction_builtin(2));
     builtin("dot_self", paired_reduction_builtin(1));

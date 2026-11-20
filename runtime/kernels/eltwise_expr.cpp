@@ -3,6 +3,7 @@
 // accumulation shapes (see constrain.cpp for why: packet math vs libm).
 // Shape dispatch is runtime: len==1 broadcasts.
 #include <stanli/builtin_registry.hpp>
+#include <stanli/extrema_grouping.hpp>
 #include <stanli/graph.hpp>
 #include <stanli/optable.hpp>
 
@@ -581,7 +582,15 @@ void logitv_bwd(KernelCtx& ctx) {
   }
 }
 
-void mean_fwd(KernelCtx& ctx) { ctx.out.data[0] = in_a(ctx, 0).mean(); }
+// mean = sum / n, the sum grouped like OP_SUM_VEC's (the variant), which is
+// what Eigen's mean() computes for the container Stan Math was given.
+void mean_fwd(KernelCtx& ctx) {
+  const int64_t n = ctx.in[0].len;
+  stan::math::check_nonzero_size("mean", "m", in_a(ctx, 0));
+  ctx.out.data[0] = sum_grouped(ctx.in[0].data, n, (SumGrouping)ctx.variant,
+                                ctx.n_idata > 0 ? ctx.idata[0] : 0) /
+                    static_cast<double>(n);
+}
 void mean_bwd(KernelCtx& ctx) {
   if (!ctx.in_adj[0].data) return;
   const double d = ctx.out_adj / static_cast<double>(ctx.in[0].len);
@@ -594,6 +603,8 @@ void mean_bwd(KernelCtx& ctx) {
 template <bool StdDev>
 void dispersion_fwd(KernelCtx& ctx) {
   const int64_t n = ctx.in[0].len;
+  stan::math::check_nonzero_size(StdDev ? "sd" : "variance", StdDev ? "x" : "m",
+                                 in_a(ctx, 0));
   if (n == 1) {
     ctx.out.data[0] = 0.0;
     ctx.scratch[0] = 0.0;

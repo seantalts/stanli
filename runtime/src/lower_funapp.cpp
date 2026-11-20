@@ -2109,14 +2109,24 @@ std::optional<Lowering::Val> Lowering::lower_eltwise_fn(
     actuals.require_arity(1);
     Val a = actuals.at(0).value();
     (void)resolved_builtin_layout(e, *reduction, std::vector<Val>{a});
-    if (reduction->opcode == OP_SUM_VEC && mir::eigen_leaf(e.args[0]) &&
-        e.args[0].unsized.depth == 0 && (!a.autodiff || in_write_array)) {
-      const ReductionGrouping grouping = reduction_grouping(a, false);
-      Val result = emit_value(OP_SUM_VEC, {a}, 1, {},
-                              reduction_phase_idata(a, grouping, "sum"));
-      g.ops.back().variant = grouping == ReductionGrouping::Packet   ? 1u
-                             : grouping == ReductionGrouping::Phased ? 2u
-                                                                     : 0u;
+    const bool grouped_sum =
+        reduction->opcode == OP_SUM_VEC || reduction->opcode == OP_MEAN;
+    const bool eigen_value =
+        mir::eigen_leaf(e.args[0]) && e.args[0].unsized.depth == 0;
+    if (grouped_sum && (!a.autodiff || in_write_array) &&
+        (eigen_value || reduction->opcode == OP_MEAN)) {
+      // Stan Math's mean maps a std::vector<double> as an aligned Eigen
+      // vector, while its sum of one adds in order.
+      const ReductionGrouping grouping = eigen_value
+                                             ? reduction_grouping(a, false)
+                                             : ReductionGrouping::Packet;
+      Val result = emit_value(reduction->opcode, {a}, 1, {},
+                              reduction_phase_idata(a, grouping, e.name));
+      const SumGrouping sum =
+          grouping == ReductionGrouping::Packet   ? SumGrouping::Packet
+          : grouping == ReductionGrouping::Phased ? SumGrouping::Phased
+                                                  : SumGrouping::InOrder;
+      g.ops.back().variant = static_cast<uint8_t>(sum);
       return with_layout(result, ExpressionLayout::scalar());
     }
     return with_layout(emit_value(reduction->opcode, {a}, 1),
@@ -2188,8 +2198,10 @@ std::optional<Lowering::Val> Lowering::lower_eltwise_fn(
       fail("prod needs exactly one scalar-real result", e.raw);
     actuals.require_arity(1);
     Val a = actuals.at(0).value();
-    if ((!is_vector(a.si) && !is_row_vector(a.si)) || g.slots[a.slot].len <= 0)
-      fail("prod needs a nonempty vector or row-vector argument", e.raw);
+    if (!is_vector(a.si) && !is_row_vector(a.si))
+      fail("prod needs a vector or row-vector argument", e.raw);
+    // Stan Math's product of an empty container is 1.
+    if (g.slots[a.slot].len == 0) return constant(1.0);
     const bool active = a.autodiff && !in_write_array;
     const ReductionGrouping grouping = reduction_grouping(a, active);
     if (grouping == ReductionGrouping::Unknown)
