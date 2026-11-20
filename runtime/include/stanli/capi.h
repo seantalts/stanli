@@ -566,12 +566,11 @@ int stanli_sample_check(const stanli_sample_opts* o,
  * thread as they are stored, so the work runs in parallel across chains,
  * inside the sampling progress. `values` receives
  * chains * stanli_n_stored_draws(opts) rows of W doubles, chain-major exactly
- * like `draws`, where W is stanli_wa_n_columns(m) when that is positive and
- * stanli_n_constrained(m) otherwise. Generated quantities advance the live
- * sampler RNG between stored transitions, as in CmdStan. Thus RNG-bearing
- * models have different seeded trajectories when `values` is null, since
- * generated quantities then do not run. The model's own stanli_wa_seed stream
- * is untouched.
+ * like `draws`, where W is stanli_n_output_columns(m). Generated quantities
+ * advance the live sampler RNG between stored transitions, as in CmdStan. Thus
+ * RNG-bearing models have different seeded trajectories when `values` is null,
+ * since generated quantities then do not run. The model's own stanli_wa_seed
+ * stream is untouched.
  *
  * A domain error while producing a row fills that output row with NaNs and
  * sampling continues, retaining any consumed randomness. Other exceptions
@@ -723,10 +722,9 @@ int stanli_optimize_opts_check(const stanli_optimize_opts* o, char* err,
                                size_t err_len);
 
 /* Writes the mode to `unconstrained` (n_unconstrained doubles) and, when
- * `values` is non-null, every CSV column there (stanli_wa_n_columns, or
- * n_constrained when the model has no generated quantities). *lp receives
- * the log density at the mode. The start and the generated quantities at the
- * mode draw from the stream of (seed, chain_id), in that order, as in
+ * `values` is non-null, every CSV column there (stanli_n_output_columns). *lp
+ * receives the log density at the mode. The start and the generated quantities
+ * at the mode draw from the stream of (seed, chain_id), in that order, as in
  * CmdStan; the model's stanli_wa_seed stream is not touched.
  *
  * Returns 0 when the optimizer converged, nonzero otherwise with a
@@ -861,9 +859,8 @@ int stanli_pathfinder_inits_with_poll(stanli_model* m, uint32_t seed,
  * contract that differs from the entry points above in one way that matters:
  *
  * DRAWS COME BACK CONSTRAINED. Each row is every CSV column of the model, in
- * CmdStan's order: stanli_wa_n_columns(m) doubles when that is positive,
- * stanli_n_constrained(m) otherwise, named by stanli_wa_column_name or
- * stanli_constrained_name. The services draw generated quantities from their
+ * CmdStan's order: stanli_n_output_columns(m) doubles, named by
+ * stanli_output_column_name. The services draw generated quantities from their
  * own generator between their other draws, so the rows are written as the
  * run goes; that is what makes a seed name the run it names in CmdStan. The
  * model's stanli_wa_seed stream is not touched.
@@ -1048,6 +1045,12 @@ int stanli_variational(stanli_model* m, const stanli_variational_opts* opts,
  * evaluates at unconstrained q and writes n_columns doubles; returns 0 on
  * success. */
 int64_t stanli_wa_n_columns(const stanli_model* m);
+/* The row every entry point writes (`values` of the samplers and optimize,
+ * the rows of fixed_param, Laplace, Pathfinder and ADVI): the write_array
+ * columns when stanli_wa_n_columns is positive, the constrained parameters
+ * otherwise. Use these instead of choosing between the two. */
+int64_t stanli_n_output_columns(const stanli_model* m);
+const char* stanli_output_column_name(const stanli_model* m, int64_t i);
 /* Index of the first generated-quantity column in the write_array output.
  * It equals n_columns when there are no generated quantities in that output.
  * Returns 0 when write_array is unavailable. */
@@ -1072,11 +1075,13 @@ const char* stanli_model_compiler_message(const stanli_model* m, int64_t i);
 /* The declared variables behind a set of output columns, in column order.
  * Variable i covers the product of its dims consecutive columns, first index
  * fastest (CmdStan's order); a scalar has no dims and one column. `set` is
- * STANLI_CONSTRAINED_COLUMNS (stanli_constrained_name) or
- * STANLI_WRITE_ARRAY_COLUMNS (stanli_wa_column_name). Strings are owned by
- * the model; out-of-range indices return 0 or null. */
+ * STANLI_CONSTRAINED_COLUMNS (stanli_constrained_name),
+ * STANLI_WRITE_ARRAY_COLUMNS (stanli_wa_column_name) or STANLI_OUTPUT_COLUMNS
+ * (stanli_output_column_name). Strings are owned by the model; out-of-range
+ * indices return 0 or null. */
 #define STANLI_CONSTRAINED_COLUMNS 0
 #define STANLI_WRITE_ARRAY_COLUMNS 1
+#define STANLI_OUTPUT_COLUMNS 2
 int64_t stanli_n_variables(const stanli_model* m, int set);
 const char* stanli_variable_name(const stanli_model* m, int set, int64_t i);
 int64_t stanli_variable_n_dims(const stanli_model* m, int set, int64_t i);

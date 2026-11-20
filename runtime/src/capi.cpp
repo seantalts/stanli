@@ -226,8 +226,15 @@ void constrained_row(stanli::Executor& ex, const stanli::CompiledModel& cm,
   }
 }
 
+// The output row of every entry point: the write_array columns when the
+// model has a generate_quantities section, the constrained parameters
+// otherwise.
 int64_t row_width(const stanli_model& m) {
   return m.wa_n > 0 ? m.wa_n : m.n_con;
+}
+
+const std::vector<std::string>& row_names(const stanli_model& m) {
+  return m.wa_n > 0 ? m.wa_names : m.flat_names;
 }
 
 // One output row at unconstrained q, drawing generated quantities from the
@@ -264,7 +271,7 @@ stanli::AlgorithmHost algorithm_host(stanli_model* m, stanli_log_cb log,
                                      void* log_user, stanli_sample_poll_cb poll,
                                      void* poll_user) {
   stanli::AlgorithmHost host;
-  host.names = m->wa_n > 0 ? m->wa_names : m->flat_names;
+  host.names = row_names(*m);
   host.row = [m](const double* q, double* out, stanli::WaRng& rng) {
     write_row(*m, *m->ex, m->wa_ex.get(), q, out, rng);
   };
@@ -1563,7 +1570,7 @@ int stanli_sample_multi_metric(stanli_model* m, const stanli_sample_opts* opts,
     if (poll != nullptr)
       poll_fn = [poll, poll_user] { return poll(poll_user) != 0; };
 
-    const int64_t width = m->wa_n > 0 ? m->wa_n : m->n_con;
+    const int64_t width = row_width(*m);
     std::vector<std::unique_ptr<stanli::Executor>> wa_clones;
     std::vector<stanli::Executor*> wa_execs;
     // A large write_array executor is shared: chains take turns with it
@@ -2187,6 +2194,14 @@ int64_t stanli_param_block_size(const stanli_model* m, int64_t i) {
 
 int64_t stanli_wa_n_columns(const stanli_model* m) { return m->wa_n; }
 
+int64_t stanli_n_output_columns(const stanli_model* m) { return row_width(*m); }
+
+const char* stanli_output_column_name(const stanli_model* m, int64_t i) {
+  const std::vector<std::string>& names = row_names(*m);
+  if (i < 0 || i >= (int64_t)names.size()) return nullptr;
+  return names[(size_t)i].c_str();
+}
+
 const char* stanli_warnings(const stanli_model* m) {
   return m->warnings.c_str();
 }
@@ -2211,6 +2226,8 @@ namespace {
 const std::vector<Variable>* variable_set(const stanli_model* m, int set) {
   if (set == STANLI_CONSTRAINED_COLUMNS) return &m->con_vars;
   if (set == STANLI_WRITE_ARRAY_COLUMNS) return &m->wa_vars;
+  if (set == STANLI_OUTPUT_COLUMNS)
+    return m->wa_n > 0 ? &m->wa_vars : &m->con_vars;
   return nullptr;
 }
 

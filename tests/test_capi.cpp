@@ -3706,7 +3706,46 @@ void test_single_chain_arguments() {
   stanli_model_free(m);
 }
 
+// The row every entry point writes has one definition in the C layer: the
+// write_array columns when the model has them, the constrained parameters
+// otherwise. Bindings read it from stanli_*output* instead of choosing.
+void test_output_columns() {
+  stanli_model* with_gq = from_stan(
+      "parameters { vector[2] b; } model { b ~ normal(0, 1); }\n"
+      "generated quantities { matrix[0, 2] w; real y = b[1]; }\n");
+  stanli_model* without =
+      from_stan("parameters { vector[2] b; } model { b ~ normal(0, 1); }\n");
+  if (with_gq == nullptr || without == nullptr) return;
+  for (stanli_model* m : {with_gq, without}) {
+    const bool wa = stanli_wa_n_columns(m) > 0;
+    const int64_t n = stanli_n_output_columns(m);
+    expect_true("output width is the row width",
+                n == (wa ? stanli_wa_n_columns(m) : stanli_n_constrained(m)));
+    for (int64_t i = 0; i < n; ++i)
+      expect_eq(
+          "output column name", stanli_output_column_name(m, i),
+          wa ? stanli_wa_column_name(m, i) : stanli_constrained_name(m, i));
+    expect_true("output column name out of range",
+                stanli_output_column_name(m, n) == nullptr);
+    const int set =
+        wa ? STANLI_WRITE_ARRAY_COLUMNS : STANLI_CONSTRAINED_COLUMNS;
+    expect_true("output variables are the row's variables",
+                stanli_n_variables(m, STANLI_OUTPUT_COLUMNS) ==
+                    stanli_n_variables(m, set));
+    for (int64_t v = 0; v < stanli_n_variables(m, set); ++v)
+      expect_eq("output variable name",
+                stanli_variable_name(m, STANLI_OUTPUT_COLUMNS, v),
+                stanli_variable_name(m, set, v));
+  }
+  expect_true("the model with generated quantities has its columns",
+              stanli_n_output_columns(with_gq) == 3 &&
+                  std::string(stanli_output_column_name(with_gq, 2)) == "y");
+  stanli_model_free(with_gq);
+  stanli_model_free(without);
+}
+
 int main() {
+  test_output_columns();
   test_single_chain_arguments();
   test_models_on_separate_threads();
   test_init_retries_only_rejections();

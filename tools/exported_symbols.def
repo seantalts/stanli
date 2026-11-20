@@ -65,6 +65,8 @@ EXPORTS
   stanli_param_block_size
   stanli_constrain
   stanli_wa_n_columns
+  stanli_n_output_columns
+  stanli_output_column_name
   stanli_wa_n_generated_start
   stanli_wa_column_name
   stanli_wa_seed
