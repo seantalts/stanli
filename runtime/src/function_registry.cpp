@@ -673,9 +673,9 @@ const std::vector<FunctionSpec>& function_specs() {
     builtin("is_nan", predicate_builtin(BuiltinPredicate::IsNan, 1));
     builtin("is_inf", predicate_builtin(BuiltinPredicate::IsInf, 1));
     builtin("int_step", predicate_builtin(BuiltinPredicate::IntStep, 1));
-    // The scalar RNG tranche. The container draws (multi_normal_rng,
-    // dirichlet_rng, categorical_rng) and the remaining stan-math draws the
-    // interpreted write_array reaches by suffix stay on their bespoke paths.
+    // The scalar RNG families. The container draws (multi_normal_rng,
+    // dirichlet_rng, categorical_rng and the LibraryRng table in
+    // wa_interp.cpp) stay on their own paths.
     builtin("poisson_log_rng", rng_builtin(ScalarRng::PoissonLog));
     builtin("uniform_rng", rng_builtin(ScalarRng::Uniform));
     builtin("bernoulli_rng", rng_builtin(ScalarRng::Bernoulli));
@@ -701,6 +701,23 @@ const std::vector<FunctionSpec>& function_specs() {
     builtin("neg_binomial_2_rng", rng_builtin(ScalarRng::NegBinomial2));
     builtin("neg_binomial_2_log_rng", rng_builtin(ScalarRng::NegBinomial2Log));
     builtin("yule_simon_rng", rng_builtin(ScalarRng::YuleSimon));
+    builtin("beta_neg_binomial_rng", rng_builtin(ScalarRng::BetaNegBinomial));
+    builtin("beta_proportion_rng", rng_builtin(ScalarRng::BetaProportion));
+    builtin("discrete_range_rng", rng_builtin(ScalarRng::DiscreteRange));
+    builtin("exp_mod_normal_rng", rng_builtin(ScalarRng::ExpModNormal));
+    builtin("frechet_rng", rng_builtin(ScalarRng::Frechet));
+    builtin("inv_chi_square_rng", rng_builtin(ScalarRng::InvChiSquare));
+    builtin("loglogistic_rng", rng_builtin(ScalarRng::Loglogistic));
+    builtin("neg_binomial_rng", rng_builtin(ScalarRng::NegBinomial));
+    builtin("pareto_rng", rng_builtin(ScalarRng::Pareto));
+    builtin("pareto_type_2_rng", rng_builtin(ScalarRng::ParetoType2));
+    builtin("rayleigh_rng", rng_builtin(ScalarRng::Rayleigh));
+    builtin("scaled_inv_chi_square_rng",
+            rng_builtin(ScalarRng::ScaledInvChiSquare));
+    builtin("skew_double_exponential_rng",
+            rng_builtin(ScalarRng::SkewDoubleExponential));
+    builtin("skew_normal_rng", rng_builtin(ScalarRng::SkewNormal));
+    builtin("von_mises_rng", rng_builtin(ScalarRng::VonMises));
 
     constexpr auto kInt = BuiltinArgumentKind::Integer;
     constexpr auto kReal = BuiltinArgumentKind::Real;

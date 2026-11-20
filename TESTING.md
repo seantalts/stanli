@@ -232,7 +232,7 @@ generated quantities compare too. Per-model status and worst deviations are in
 
 | corpus | models | CTest |
 | --- | --- | --- |
-| `functions` | [10 models calling 437 names](tests/function_coverage/README.md), including data-only helpers, RNGs, solvers and five operators | `test_function_models` |
+| `functions` | [10 models calling 468 names](tests/function_coverage/README.md), including data-only helpers, RNGs, solvers and five operators | `test_function_models` |
 | `signatures` | 74 generated models covering 19,641 signatures, one output per case | `signature_refs_*` |
 | `sized_functions` | 5 models calling library functions at real sizes | `test_sized_functions_reference` |
 | `container_flow` | 66 models that write each container shape in each block and read it back | `test_container_flow_reference` |
@@ -259,9 +259,7 @@ Stan Math. [`tools/toolchain.py`](tools/toolchain.py) makes the recording
 tools stop with an error on an unpinned CmdStan checkout. A model that stanli
 refuses, or whose `write_array` it cannot run, does not fail the run if it is
 listed in `KNOWN_GAPS`; the entry excuses the whole model, so the replay stops
-enforcing its log density and gradient too. It has two entries today,
-`cjs_mnl_ran` and `hmm_marginal`, whose generated quantities call
-`multinomial_rng` and `hmm_latent_rng`.
+enforcing its log density and gradient too. It is empty today.
 Once stanli supports the model, the run fails until you delete the entry.
 
 [`tools/check_corpus_sampling.py`](tools/check_corpus_sampling.py) runs the

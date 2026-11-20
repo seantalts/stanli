@@ -39,6 +39,8 @@ size_t scalar_rng_arity(ScalarRng family) {
     case ScalarRng::Poisson:
     case ScalarRng::BernoulliLogit:
     case ScalarRng::YuleSimon:
+    case ScalarRng::InvChiSquare:
+    case ScalarRng::Rayleigh:
       return 1;
     case ScalarRng::Uniform:
     case ScalarRng::Normal:
@@ -54,20 +56,57 @@ size_t scalar_rng_arity(ScalarRng family) {
     case ScalarRng::Weibull:
     case ScalarRng::NegBinomial2:
     case ScalarRng::NegBinomial2Log:
+    case ScalarRng::BetaProportion:
+    case ScalarRng::DiscreteRange:
+    case ScalarRng::Frechet:
+    case ScalarRng::Loglogistic:
+    case ScalarRng::NegBinomial:
+    case ScalarRng::Pareto:
+    case ScalarRng::ScaledInvChiSquare:
+    case ScalarRng::VonMises:
       return 2;
     case ScalarRng::BetaBinomial:
     case ScalarRng::StudentT:
+    case ScalarRng::BetaNegBinomial:
+    case ScalarRng::ExpModNormal:
+    case ScalarRng::ParetoType2:
+    case ScalarRng::SkewDoubleExponential:
+    case ScalarRng::SkewNormal:
       return 3;
   }
   throw std::logic_error("unknown scalar RNG family");
 }
 
 bool scalar_rng_is_int(ScalarRng family) {
-  return family == ScalarRng::PoissonLog || family == ScalarRng::Bernoulli ||
-         family == ScalarRng::Poisson || family == ScalarRng::BernoulliLogit ||
-         family == ScalarRng::Binomial || family == ScalarRng::BetaBinomial ||
-         family == ScalarRng::NegBinomial2 ||
-         family == ScalarRng::NegBinomial2Log || family == ScalarRng::YuleSimon;
+  switch (family) {
+    case ScalarRng::PoissonLog:
+    case ScalarRng::Bernoulli:
+    case ScalarRng::Poisson:
+    case ScalarRng::BernoulliLogit:
+    case ScalarRng::Binomial:
+    case ScalarRng::BetaBinomial:
+    case ScalarRng::NegBinomial2:
+    case ScalarRng::NegBinomial2Log:
+    case ScalarRng::YuleSimon:
+    case ScalarRng::BetaNegBinomial:
+    case ScalarRng::DiscreteRange:
+    case ScalarRng::NegBinomial:
+      return true;
+    default:
+      return false;
+  }
+}
+
+unsigned scalar_rng_int_arguments(ScalarRng family) {
+  switch (family) {
+    case ScalarRng::Binomial:
+    case ScalarRng::BetaBinomial:
+      return 1;
+    case ScalarRng::DiscreteRange:
+      return 3;
+    default:
+      return 0;
+  }
 }
 
 namespace {
@@ -91,6 +130,22 @@ void with_rng_argument(const RngArgument& arg, F&& f) {
   }
 }
 
+// Calls `call` with the first N arguments, each in its scalar or container
+// form. Bit k of IntArguments makes argument k a Stan int.
+template <size_t N, unsigned IntArguments = 0, size_t K = 0, class F,
+          class... Bound>
+void with_rng_arguments(const RngArgument* args, F&& call,
+                        const Bound&... bound) {
+  if constexpr (K == N) {
+    call(bound...);
+  } else {
+    with_rng_argument<((IntArguments >> K) & 1u) != 0>(
+        args[K], [&](const auto& a) {
+          with_rng_arguments<N, IntArguments, K + 1>(args, call, bound..., a);
+        });
+  }
+}
+
 template <class T>
 void copy_rng_result(const T& result, double* output, size_t size) {
   if constexpr (std::is_arithmetic_v<T>) {
@@ -106,122 +161,154 @@ void copy_rng_result(const T& result, double* output, size_t size) {
 
 void container_rng_draw(ScalarRng family, const RngArgument* args, size_t nargs,
                         double* output, size_t output_size, WaRng& rng) {
-  if (nargs != scalar_rng_arity(family) || nargs == 0 || args == nullptr ||
+  if (nargs != scalar_rng_arity(family) || (nargs != 0 && args == nullptr) ||
       (output_size != 0 && output == nullptr))
     throw std::logic_error("malformed container RNG arguments");
   for (size_t k = 0; k < nargs; ++k)
     if ((args[k].scalar && args[k].size != 1) ||
         (args[k].size != 0 && args[k].data == nullptr))
       throw std::logic_error("malformed container RNG argument");
-  const auto save = [&](const auto& result) {
+  auto& g = rng.gen();
+  const auto draw = [&](const auto& result) {
     copy_rng_result(result, output, output_size);
   };
-  auto& g = rng.gen();
-  if (family == ScalarRng::Binomial || family == ScalarRng::BetaBinomial) {
-    with_rng_argument<true>(args[0], [&](const auto& a) {
-      with_rng_argument(args[1], [&](const auto& b) {
-        if (family == ScalarRng::Binomial) {
-          save(stan::math::binomial_rng(a, b, g));
-        } else {
-          with_rng_argument(args[2], [&](const auto& c) {
-            save(stan::math::beta_binomial_rng(a, b, c, g));
-          });
-        }
+  namespace m = stan::math;
+  switch (family) {
+    case ScalarRng::StdNormal:
+      return draw(m::std_normal_rng(g));
+    case ScalarRng::ChiSquare:
+      return with_rng_arguments<1>(
+          args, [&](const auto&... a) { draw(m::chi_square_rng(a..., g)); });
+    case ScalarRng::PoissonLog:
+      return with_rng_arguments<1>(
+          args, [&](const auto&... a) { draw(m::poisson_log_rng(a..., g)); });
+    case ScalarRng::Bernoulli:
+      return with_rng_arguments<1>(
+          args, [&](const auto&... a) { draw(m::bernoulli_rng(a..., g)); });
+    case ScalarRng::Exponential:
+      return with_rng_arguments<1>(
+          args, [&](const auto&... a) { draw(m::exponential_rng(a..., g)); });
+    case ScalarRng::Poisson:
+      return with_rng_arguments<1>(
+          args, [&](const auto&... a) { draw(m::poisson_rng(a..., g)); });
+    case ScalarRng::BernoulliLogit:
+      return with_rng_arguments<1>(args, [&](const auto&... a) {
+        draw(m::bernoulli_logit_rng(a..., g));
       });
-    });
-  } else if (family == ScalarRng::StudentT) {
-    with_rng_argument(args[0], [&](const auto& a) {
-      with_rng_argument(args[1], [&](const auto& b) {
-        with_rng_argument(args[2], [&](const auto& c) {
-          save(stan::math::student_t_rng(a, b, c, g));
-        });
+    case ScalarRng::YuleSimon:
+      return with_rng_arguments<1>(
+          args, [&](const auto&... a) { draw(m::yule_simon_rng(a..., g)); });
+    case ScalarRng::InvChiSquare:
+      return with_rng_arguments<1>(args, [&](const auto&... a) {
+        draw(m::inv_chi_square_rng(a..., g));
       });
-    });
-  } else if (nargs == 1) {
-    with_rng_argument(args[0], [&](const auto& a) {
-      switch (family) {
-        case ScalarRng::ChiSquare:
-          save(stan::math::chi_square_rng(a, g));
-          break;
-        case ScalarRng::PoissonLog:
-          save(stan::math::poisson_log_rng(a, g));
-          break;
-        case ScalarRng::Bernoulli:
-          save(stan::math::bernoulli_rng(a, g));
-          break;
-        case ScalarRng::Exponential:
-          save(stan::math::exponential_rng(a, g));
-          break;
-        case ScalarRng::Poisson:
-          save(stan::math::poisson_rng(a, g));
-          break;
-        case ScalarRng::BernoulliLogit:
-          save(stan::math::bernoulli_logit_rng(a, g));
-          break;
-        case ScalarRng::YuleSimon:
-          save(stan::math::yule_simon_rng(a, g));
-          break;
-        default:
-          throw std::logic_error("unknown unary RNG family");
-      }
-    });
-  } else {
-    with_rng_argument(args[0], [&](const auto& a) {
-      with_rng_argument(args[1], [&](const auto& b) {
-        switch (family) {
-          case ScalarRng::Uniform:
-            save(stan::math::uniform_rng(a, b, g));
-            break;
-          case ScalarRng::Normal:
-            save(stan::math::normal_rng(a, b, g));
-            break;
-          case ScalarRng::Lognormal:
-            save(stan::math::lognormal_rng(a, b, g));
-            break;
-          case ScalarRng::Gumbel:
-            save(stan::math::gumbel_rng(a, b, g));
-            break;
-          case ScalarRng::Gamma:
-            save(stan::math::gamma_rng(a, b, g));
-            break;
-          case ScalarRng::InvGamma:
-            save(stan::math::inv_gamma_rng(a, b, g));
-            break;
-          case ScalarRng::Beta:
-            save(stan::math::beta_rng(a, b, g));
-            break;
-          case ScalarRng::Cauchy:
-            save(stan::math::cauchy_rng(a, b, g));
-            break;
-          case ScalarRng::DoubleExponential:
-            save(stan::math::double_exponential_rng(a, b, g));
-            break;
-          case ScalarRng::Logistic:
-            save(stan::math::logistic_rng(a, b, g));
-            break;
-          case ScalarRng::Weibull:
-            save(stan::math::weibull_rng(a, b, g));
-            break;
-          case ScalarRng::NegBinomial2:
-            save(stan::math::neg_binomial_2_rng(a, b, g));
-            break;
-          case ScalarRng::NegBinomial2Log:
-            save(stan::math::neg_binomial_2_log_rng(a, b, g));
-            break;
-          default:
-            throw std::logic_error("unknown binary RNG family");
-        }
+    case ScalarRng::Rayleigh:
+      return with_rng_arguments<1>(
+          args, [&](const auto&... a) { draw(m::rayleigh_rng(a..., g)); });
+    case ScalarRng::Uniform:
+      return with_rng_arguments<2>(
+          args, [&](const auto&... a) { draw(m::uniform_rng(a..., g)); });
+    case ScalarRng::Normal:
+      return with_rng_arguments<2>(
+          args, [&](const auto&... a) { draw(m::normal_rng(a..., g)); });
+    case ScalarRng::Lognormal:
+      return with_rng_arguments<2>(
+          args, [&](const auto&... a) { draw(m::lognormal_rng(a..., g)); });
+    case ScalarRng::Binomial:
+      return with_rng_arguments<2, 1>(
+          args, [&](const auto&... a) { draw(m::binomial_rng(a..., g)); });
+    case ScalarRng::Gumbel:
+      return with_rng_arguments<2>(
+          args, [&](const auto&... a) { draw(m::gumbel_rng(a..., g)); });
+    case ScalarRng::Gamma:
+      return with_rng_arguments<2>(
+          args, [&](const auto&... a) { draw(m::gamma_rng(a..., g)); });
+    case ScalarRng::InvGamma:
+      return with_rng_arguments<2>(
+          args, [&](const auto&... a) { draw(m::inv_gamma_rng(a..., g)); });
+    case ScalarRng::Beta:
+      return with_rng_arguments<2>(
+          args, [&](const auto&... a) { draw(m::beta_rng(a..., g)); });
+    case ScalarRng::Cauchy:
+      return with_rng_arguments<2>(
+          args, [&](const auto&... a) { draw(m::cauchy_rng(a..., g)); });
+    case ScalarRng::DoubleExponential:
+      return with_rng_arguments<2>(args, [&](const auto&... a) {
+        draw(m::double_exponential_rng(a..., g));
       });
-    });
+    case ScalarRng::Logistic:
+      return with_rng_arguments<2>(
+          args, [&](const auto&... a) { draw(m::logistic_rng(a..., g)); });
+    case ScalarRng::Weibull:
+      return with_rng_arguments<2>(
+          args, [&](const auto&... a) { draw(m::weibull_rng(a..., g)); });
+    case ScalarRng::NegBinomial2:
+      return with_rng_arguments<2>(args, [&](const auto&... a) {
+        draw(m::neg_binomial_2_rng(a..., g));
+      });
+    case ScalarRng::NegBinomial2Log:
+      return with_rng_arguments<2>(args, [&](const auto&... a) {
+        draw(m::neg_binomial_2_log_rng(a..., g));
+      });
+    case ScalarRng::BetaProportion:
+      return with_rng_arguments<2>(args, [&](const auto&... a) {
+        draw(m::beta_proportion_rng(a..., g));
+      });
+    case ScalarRng::DiscreteRange:
+      return with_rng_arguments<2, 3>(args, [&](const auto&... a) {
+        draw(m::discrete_range_rng(a..., g));
+      });
+    case ScalarRng::Frechet:
+      return with_rng_arguments<2>(
+          args, [&](const auto&... a) { draw(m::frechet_rng(a..., g)); });
+    case ScalarRng::Loglogistic:
+      return with_rng_arguments<2>(
+          args, [&](const auto&... a) { draw(m::loglogistic_rng(a..., g)); });
+    case ScalarRng::NegBinomial:
+      return with_rng_arguments<2>(
+          args, [&](const auto&... a) { draw(m::neg_binomial_rng(a..., g)); });
+    case ScalarRng::Pareto:
+      return with_rng_arguments<2>(
+          args, [&](const auto&... a) { draw(m::pareto_rng(a..., g)); });
+    case ScalarRng::ScaledInvChiSquare:
+      return with_rng_arguments<2>(args, [&](const auto&... a) {
+        draw(m::scaled_inv_chi_square_rng(a..., g));
+      });
+    case ScalarRng::VonMises:
+      return with_rng_arguments<2>(
+          args, [&](const auto&... a) { draw(m::von_mises_rng(a..., g)); });
+    case ScalarRng::BetaBinomial:
+      return with_rng_arguments<3, 1>(
+          args, [&](const auto&... a) { draw(m::beta_binomial_rng(a..., g)); });
+    case ScalarRng::StudentT:
+      return with_rng_arguments<3>(
+          args, [&](const auto&... a) { draw(m::student_t_rng(a..., g)); });
+    case ScalarRng::BetaNegBinomial:
+      return with_rng_arguments<3>(args, [&](const auto&... a) {
+        draw(m::beta_neg_binomial_rng(a..., g));
+      });
+    case ScalarRng::ExpModNormal:
+      return with_rng_arguments<3>(args, [&](const auto&... a) {
+        draw(m::exp_mod_normal_rng(a..., g));
+      });
+    case ScalarRng::ParetoType2:
+      return with_rng_arguments<3>(
+          args, [&](const auto&... a) { draw(m::pareto_type_2_rng(a..., g)); });
+    case ScalarRng::SkewDoubleExponential:
+      return with_rng_arguments<3>(args, [&](const auto&... a) {
+        draw(m::skew_double_exponential_rng(a..., g));
+      });
+    case ScalarRng::SkewNormal:
+      return with_rng_arguments<3>(
+          args, [&](const auto&... a) { draw(m::skew_normal_rng(a..., g)); });
   }
+  throw std::logic_error("unknown scalar RNG family");
 }
 
 double scalar_rng_draw(ScalarRng family, const double* args, size_t nargs,
                        WaRng& rng) {
   if (nargs != scalar_rng_arity(family) || (nargs != 0 && args == nullptr))
     throw std::logic_error("malformed scalar RNG arguments");
-  if (family == ScalarRng::StdNormal)
-    return stan::math::std_normal_rng(rng.gen());
   RngArgument container_args[3]{};
   for (size_t k = 0; k < nargs; ++k) container_args[k] = {args + k, 1, true};
   double result = 0.0;
@@ -294,6 +381,187 @@ void dirichlet_rng_draw(const double* alpha, size_t alpha_size, double* output,
   const Eigen::VectorXd draw = stan::math::dirichlet_rng(a, rng.gen());
   for (size_t i = 0; i < output_size; ++i)
     output[i] = draw[static_cast<Eigen::Index>(i)];
+}
+
+namespace {
+constexpr auto kReal = RngArgumentKind::Real;
+constexpr auto kInt = RngArgumentKind::Int;
+constexpr auto kVector = RngArgumentKind::Vector;
+constexpr auto kMatrix = RngArgumentKind::Matrix;
+
+constexpr LibraryRngSpec kLibraryRngs[] = {
+    {LibraryRng::Multinomial,
+     "multinomial_rng",
+     2,
+     {kVector, kInt},
+     RngResultKind::IntArray},
+    {LibraryRng::MultinomialLogit,
+     "multinomial_logit_rng",
+     2,
+     {kVector, kInt},
+     RngResultKind::IntArray},
+    {LibraryRng::DirichletMultinomial,
+     "dirichlet_multinomial_rng",
+     2,
+     {kVector, kInt},
+     RngResultKind::IntArray},
+    {LibraryRng::HmmLatent,
+     "hmm_latent_rng",
+     3,
+     {kMatrix, kMatrix, kVector},
+     RngResultKind::IntArray},
+    {LibraryRng::MultiStudentT,
+     "multi_student_t_rng",
+     3,
+     {kReal, kVector, kMatrix},
+     RngResultKind::Vector},
+    {LibraryRng::MultiStudentTCholesky,
+     "multi_student_t_cholesky_rng",
+     3,
+     {kReal, kVector, kMatrix},
+     RngResultKind::Vector},
+    {LibraryRng::OrderedLogistic,
+     "ordered_logistic_rng",
+     2,
+     {kReal, kVector},
+     RngResultKind::Int},
+    {LibraryRng::OrderedProbit,
+     "ordered_probit_rng",
+     2,
+     {kReal, kVector},
+     RngResultKind::Int},
+    {LibraryRng::Hypergeometric,
+     "hypergeometric_rng",
+     3,
+     {kInt, kInt, kInt},
+     RngResultKind::Int},
+    {LibraryRng::LkjCorr,
+     "lkj_corr_rng",
+     2,
+     {kInt, kReal},
+     RngResultKind::Matrix},
+    {LibraryRng::LkjCorrCholesky,
+     "lkj_corr_cholesky_rng",
+     2,
+     {kInt, kReal},
+     RngResultKind::Matrix},
+    {LibraryRng::Wishart,
+     "wishart_rng",
+     2,
+     {kReal, kMatrix},
+     RngResultKind::Matrix},
+    {LibraryRng::WishartCholesky,
+     "wishart_cholesky_rng",
+     2,
+     {kReal, kMatrix},
+     RngResultKind::Matrix},
+    {LibraryRng::InvWishart,
+     "inv_wishart_rng",
+     2,
+     {kReal, kMatrix},
+     RngResultKind::Matrix},
+    {LibraryRng::InvWishartCholesky,
+     "inv_wishart_cholesky_rng",
+     2,
+     {kReal, kMatrix},
+     RngResultKind::Matrix},
+    {LibraryRng::BernoulliLogitGlm,
+     "bernoulli_logit_glm_rng",
+     3,
+     {kMatrix, kVector, kVector},
+     RngResultKind::IntArray},
+};
+
+Eigen::VectorXd rng_vector(const RngArgument& arg) {
+  return Eigen::Map<const Eigen::VectorXd>(arg.data, arg.size);
+}
+Eigen::MatrixXd rng_matrix(const RngArgument& arg) {
+  if (arg.rows * arg.cols != arg.size)
+    throw std::logic_error("malformed library RNG matrix argument");
+  return Eigen::Map<const Eigen::MatrixXd>(arg.data, arg.rows, arg.cols);
+}
+int rng_int(const RngArgument& arg) { return static_cast<int>(arg.data[0]); }
+
+RngDraw rng_result(int value) { return {{static_cast<double>(value)}, 1, 1}; }
+RngDraw rng_result(const std::vector<int>& values) {
+  return {std::vector<double>(values.begin(), values.end()),
+          static_cast<int64_t>(values.size()), 1};
+}
+RngDraw rng_result(const Eigen::MatrixXd& values) {
+  return {std::vector<double>(values.data(), values.data() + values.size()),
+          values.rows(), values.cols()};
+}
+}  // namespace
+
+const LibraryRngSpec* library_rng_spec(const std::string& name) {
+  for (const LibraryRngSpec& spec : kLibraryRngs)
+    if (name == spec.name) return &spec;
+  return nullptr;
+}
+
+const LibraryRngSpec* library_rng_spec(uint8_t variant) {
+  for (const LibraryRngSpec& spec : kLibraryRngs)
+    if (variant == static_cast<uint8_t>(spec.family)) return &spec;
+  return nullptr;
+}
+
+RngDraw library_rng_draw(const LibraryRngSpec& spec, const RngArgument* args,
+                         size_t nargs, WaRng& rng) {
+  if (nargs != spec.arity || args == nullptr)
+    throw std::logic_error("malformed library RNG arguments");
+  for (size_t k = 0; k < nargs; ++k)
+    if (args[k].size != 0 && args[k].data == nullptr)
+      throw std::logic_error("malformed library RNG argument");
+  auto& g = rng.gen();
+  namespace m = stan::math;
+  const RngArgument* a = args;
+  switch (spec.family) {
+    case LibraryRng::Multinomial:
+      return rng_result(m::multinomial_rng(rng_vector(a[0]), rng_int(a[1]), g));
+    case LibraryRng::MultinomialLogit:
+      return rng_result(
+          m::multinomial_logit_rng(rng_vector(a[0]), rng_int(a[1]), g));
+    case LibraryRng::DirichletMultinomial:
+      return rng_result(
+          m::dirichlet_multinomial_rng(rng_vector(a[0]), rng_int(a[1]), g));
+    case LibraryRng::HmmLatent:
+      return rng_result(m::hmm_latent_rng(rng_matrix(a[0]), rng_matrix(a[1]),
+                                          rng_vector(a[2]), g));
+    case LibraryRng::MultiStudentT:
+      return rng_result(m::multi_student_t_rng(a[0].data[0], rng_vector(a[1]),
+                                               rng_matrix(a[2]), g));
+    case LibraryRng::MultiStudentTCholesky:
+      return rng_result(m::multi_student_t_cholesky_rng(
+          a[0].data[0], rng_vector(a[1]), rng_matrix(a[2]), g));
+    case LibraryRng::OrderedLogistic:
+      return rng_result(
+          m::ordered_logistic_rng(a[0].data[0], rng_vector(a[1]), g));
+    case LibraryRng::OrderedProbit:
+      return rng_result(
+          m::ordered_probit_rng(a[0].data[0], rng_vector(a[1]), g));
+    case LibraryRng::Hypergeometric:
+      return rng_result(m::hypergeometric_rng(rng_int(a[0]), rng_int(a[1]),
+                                              rng_int(a[2]), g));
+    case LibraryRng::LkjCorr:
+      return rng_result(m::lkj_corr_rng(rng_int(a[0]), a[1].data[0], g));
+    case LibraryRng::LkjCorrCholesky:
+      return rng_result(
+          m::lkj_corr_cholesky_rng(rng_int(a[0]), a[1].data[0], g));
+    case LibraryRng::Wishart:
+      return rng_result(m::wishart_rng(a[0].data[0], rng_matrix(a[1]), g));
+    case LibraryRng::WishartCholesky:
+      return rng_result(
+          m::wishart_cholesky_rng(a[0].data[0], rng_matrix(a[1]), g));
+    case LibraryRng::InvWishart:
+      return rng_result(m::inv_wishart_rng(a[0].data[0], rng_matrix(a[1]), g));
+    case LibraryRng::InvWishartCholesky:
+      return rng_result(
+          m::inv_wishart_cholesky_rng(a[0].data[0], rng_matrix(a[1]), g));
+    case LibraryRng::BernoulliLogitGlm:
+      return rng_result(m::bernoulli_logit_glm_rng(
+          rng_matrix(a[0]), rng_vector(a[1]), rng_vector(a[2]), g));
+  }
+  throw std::logic_error("unknown library RNG family");
 }
 
 double wa_probe_point(int64_t i, int variant) {
@@ -504,6 +772,45 @@ bool WaInterp::write_param(MirInterp<double>& in, const mir::Stmt& s,
   return true;
 }
 
+namespace {
+// A library RNG call in the interpreter, with the same argument rules as the
+// graph lowering: the containers are single vectors and matrices, and a row
+// vector design matrix is left unsupported.
+bool interpreted_library_rng(const LibraryRngSpec& spec, const mir::Expr& e,
+                             const std::vector<DataMap::Entry>& av,
+                             DataMap::Entry* out, WaRng& rng) {
+  if (av.size() != spec.arity) return false;
+  RngArgument args[3]{};
+  for (size_t k = 0; k < spec.arity; ++k) {
+    const mir::UnsizedView& type = e.args[k].unsized;
+    if (type.depth != 0) return false;
+    const DataMap::Entry& v = av[k];
+    args[k] = {v.r.data(), v.r.size(),
+               spec.args[k] == RngArgumentKind::Real ||
+                   spec.args[k] == RngArgumentKind::Int};
+    if (spec.args[k] == RngArgumentKind::Matrix) {
+      if (type.leaf != mir::UnsizedLeaf::Matrix || v.dims.size() != 2)
+        return false;
+      args[k].rows = static_cast<size_t>(v.dims[0]);
+      args[k].cols = static_cast<size_t>(v.dims[1]);
+    }
+  }
+  RngDraw draw = library_rng_draw(spec, args, spec.arity, rng);
+  out->r = std::move(draw.values);
+  out->is_int = spec.result == RngResultKind::Int ||
+                spec.result == RngResultKind::IntArray;
+  out->dims.clear();
+  if (spec.result == RngResultKind::Matrix)
+    out->dims = {draw.rows, draw.cols};
+  else if (spec.result != RngResultKind::Int)
+    out->dims = {static_cast<int64_t>(out->r.size())};
+  out->i.clear();
+  if (out->is_int)
+    for (double x : out->r) out->i.push_back(static_cast<int>(x));
+  return true;
+}
+}  // namespace
+
 bool interpreted_rng_call(MirInterp<double>& in, const mir::Expr& e,
                           DataMap::Entry* out, WaRng& rng) {
   stan::rng_t& g = rng.gen();
@@ -574,6 +881,9 @@ bool interpreted_rng_call(MirInterp<double>& in, const mir::Expr& e,
     out->r = {static_cast<double>(k)};
     return true;
   }
+
+  if (const LibraryRngSpec* spec = library_rng_spec(f))
+    return interpreted_library_rng(*spec, e, av, out, rng);
 
   const ScalarRng* family = scalar_rng_family(f);
   if (!family) return false;

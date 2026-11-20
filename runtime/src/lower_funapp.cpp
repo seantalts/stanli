@@ -75,6 +75,7 @@ Lowering::BuiltinDispatch Lowering::resolve_builtin(const mir::Expr& e) {
   // still carried into the handler, so dispatch performs this lookup once.
   if (const ScalarRng* rng = scalar_rng_family(e.name))
     return rng_dispatch(*rng);
+  if (library_rng_spec(e.name)) return {BuiltinFamily::LibraryRng};
   if (ends_with(e.name, "_lpdf") || ends_with(e.name, "_lpmf") ||
       ends_with(e.name, "_cdf") || ends_with(e.name, "_ccdf") ||
       ends_with(e.name, "_lcdf") || ends_with(e.name, "_lccdf"))
@@ -938,6 +939,116 @@ Lowering::Val Lowering::lower_categorical_rng(const mir::Expr& e,
   set_int_initialized(draw);
   return draw;
 }
+Lowering::Val Lowering::lower_library_rng(const mir::Expr& e,
+                                          CallArguments& actuals,
+                                          const LibraryRngSpec& spec) {
+  if (!in_write_array)
+    fail(e.name + " is supported only in generated quantities", e.raw);
+  if (actuals.size() != spec.arity)
+    fail(e.name + ": expected " + std::to_string(spec.arity) + " arguments",
+         e.raw);
+  std::vector<Val> args;
+  // Each argument's rows and columns; zero for a non-matrix.
+  std::vector<int> idata;
+  for (size_t k = 0; k < spec.arity; ++k) {
+    const mir::UnsizedView& type = actuals.at(k).expr().unsized;
+    const bool scalar_type = type.leaf == mir::UnsizedLeaf::Real ||
+                             type.leaf == mir::UnsizedLeaf::Int;
+    bool matches = type.depth == 0;
+    switch (spec.args[k]) {
+      case RngArgumentKind::Real:
+        matches = matches && scalar_type;
+        break;
+      case RngArgumentKind::Int:
+        matches = matches && type.leaf == mir::UnsizedLeaf::Int;
+        break;
+      case RngArgumentKind::Vector:
+        matches = matches && (type.leaf == mir::UnsizedLeaf::Vector ||
+                              type.leaf == mir::UnsizedLeaf::RowVector);
+        break;
+      case RngArgumentKind::Matrix:
+        matches = matches && type.leaf == mir::UnsizedLeaf::Matrix;
+        break;
+    }
+    if (!matches) fail(e.name + ": unsupported argument types", e.raw);
+    Val v = actuals.at(k).value();
+    if (has_runtime_shape(v))
+      fail(e.name + ": RNG arguments need fixed extents", e.raw);
+    const bool matrix = spec.args[k] == RngArgumentKind::Matrix;
+    if (matrix && !is_matrix(v.si))
+      fail(e.name + ": argument has no known matrix shape", e.raw);
+    idata.push_back(matrix ? (int)v.si.rows : 0);
+    idata.push_back(matrix ? (int)v.si.cols : 0);
+    args.push_back(v);
+  }
+  const auto len = [&](size_t k) { return g.slots[args[k].slot].len; };
+  int64_t rows = 1, cols = 1;
+  switch (spec.family) {
+    case LibraryRng::Multinomial:
+    case LibraryRng::MultinomialLogit:
+    case LibraryRng::DirichletMultinomial:
+      rows = len(0);
+      break;
+    case LibraryRng::HmmLatent:
+      rows = idata[1];
+      break;
+    case LibraryRng::MultiStudentT:
+    case LibraryRng::MultiStudentTCholesky:
+      rows = len(1);
+      break;
+    case LibraryRng::OrderedLogistic:
+    case LibraryRng::OrderedProbit:
+    case LibraryRng::Hypergeometric:
+      break;
+    case LibraryRng::LkjCorr:
+    case LibraryRng::LkjCorrCholesky:
+      rows = cols = actuals.at(0).require_constant_int("LKJ dimension");
+      if (rows < 0) fail(e.name + ": negative dimension", e.raw);
+      break;
+    case LibraryRng::Wishart:
+    case LibraryRng::WishartCholesky:
+    case LibraryRng::InvWishart:
+    case LibraryRng::InvWishartCholesky:
+      rows = idata[2];
+      cols = idata[3];
+      break;
+    case LibraryRng::BernoulliLogitGlm:
+      rows = idata[0];
+      break;
+  }
+  SlotInfo si;
+  ExpressionLayout layout = ExpressionLayout::direct();
+  switch (spec.result) {
+    case RngResultKind::Int:
+      si = view_of(e.unsized);
+      layout = ExpressionLayout::scalar();
+      break;
+    case RngResultKind::IntArray:
+      si = array_view({rows}, ViewKind::Flat, false);
+      layout = owning_layout(si);
+      break;
+    case RngResultKind::Vector:
+      si = view_of(e.unsized);
+      break;
+    case RngResultKind::Matrix:
+      si = matrix_view(rows, cols);
+      layout = owning_layout(si);
+      break;
+  }
+  const int64_t n = rows * cols;
+  Val draw = with_layout(
+      spec.arity == 2
+          ? emit_value(OP_RNG, {args[0], args[1]}, n, si, idata)
+          : emit_value(OP_RNG, {args[0], args[1], args[2]}, n, si, idata),
+      layout);
+  g.ops.back().variant = static_cast<uint8_t>(spec.family);
+  draw.si.param_free = false;
+  draw.autodiff = false;
+  if (spec.result == RngResultKind::Int ||
+      spec.result == RngResultKind::IntArray)
+    set_int_initialized(draw);
+  return draw;
+}
 Lowering::Val Lowering::lower_scalar_rng(const mir::Expr& e,
                                          CallArguments& actuals,
                                          ScalarRng family) {
@@ -954,13 +1065,16 @@ Lowering::Val Lowering::lower_scalar_rng(const mir::Expr& e,
                             e.unsized.leaf == mir::UnsizedLeaf::Real;
   if (e.unsized.leaf != result_leaf && !promoted_int)
     fail(e.name + ": result type does not match RNG family", e.raw);
-  // Unlike the other scalar families, binomial's (and beta_binomial's)
-  // first argument is a population count. Valid stanc MIR always marks it
-  // UInt; fail closed on malformed hand-authored MIR rather than silently
-  // truncating a real in the runtime helper's graph-storage conversion.
-  if ((family == ScalarRng::Binomial || family == ScalarRng::BetaBinomial) &&
-      actuals.at(0).expr().unsized.leaf != mir::UnsizedLeaf::Int)
-    fail(e.name + ": first argument must be int", e.raw);
+  // Some families take counts or range bounds. Valid stanc MIR always marks
+  // them UInt; fail closed on malformed hand-authored MIR rather than
+  // silently truncating a real in the runtime helper's graph-storage
+  // conversion.
+  for (size_t i = 0; i < actuals.size(); ++i)
+    if ((scalar_rng_int_arguments(family) >> i & 1u) &&
+        actuals.at(i).expr().unsized.leaf != mir::UnsizedLeaf::Int)
+      fail(e.name + (i == 0 ? ": first argument" : ": second argument") +
+               " must be int",
+           e.raw);
   std::vector<Val> args;
   args.reserve(arity);
   int64_t n = 1;
@@ -1255,6 +1369,8 @@ Lowering::Val Lowering::lower_funapp(const mir::Expr& e) {
     case BuiltinFamily::ScalarRng:
       assert(dispatch.scalar_rng.has_value());
       return lower_scalar_rng(e, actuals, *dispatch.scalar_rng);
+    case BuiltinFamily::LibraryRng:
+      return lower_library_rng(e, actuals, *library_rng_spec(e.name));
     case BuiltinFamily::Density:
       if (auto v = lower_density_fn(e, actuals, dispatch.density)) return *v;
       break;
