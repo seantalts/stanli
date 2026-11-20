@@ -857,7 +857,9 @@ class Matrix {
       if (!baseline.empty()) compare_run(base, runs[i]);
     }
     if (want("wa")) compare_write_array(runs[0]);
-    if (opt_.only.empty() && opt_.variant < 0) report_unused_entries();
+    if (opt_.only.empty() && opt_.variant < 0 &&
+        opt_.points >= kDefaultPoints && debug_switches_available())
+      report_unused_entries();
     res_.ok = res_.failures == 0;
     return std::move(res_);
   }

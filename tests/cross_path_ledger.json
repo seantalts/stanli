@@ -117,7 +117,7 @@
     "quantity": "lp",
     "pair": "default/no_partition",
     "bound_ulp": 1,
-    "cause": "partition_lanes regroups this loop's per-iteration terms into lane SUM_VEC ops (76 ops with the pass, 110 with STANLI_NO_PARTITION, which turns them back into INDEX/ADD_N chains), so the 64 target terms sum in a different grouping. It is the only fixture on which the pass changes the graph. Unused on macOS arm64 (2026-11-20, bitwise there); kept for linux-x86_64, where it was recorded, until it can be rechecked.",
+    "cause": "partition_lanes regroups this loop's per-iteration terms into lane SUM_VEC ops (76 ops with the pass, 110 with STANLI_NO_PARTITION, which turns them back into INDEX/ADD_N chains), so the 64 target terms sum in a different grouping. It is the only fixture on which the pass changes the graph. Unused on macOS arm64 (2026-11-20, bitwise there). Scoped to linux-x86_64 on a guess about where it was recorded; not rechecked.",
     "since": "2026-11-12",
     "platform": "linux-x86_64"
   },
@@ -190,7 +190,7 @@
     "quantity": "lp",
     "pair": "default/no_partition",
     "bound_ulp": 4,
-    "cause": "partition_lanes groups the 200 per-row terms into lane sums; no_partition and passes_off give the same bits at every point, so no other pass contributes. Against a 50-digit mpmath reference at point 8 (beta_lcdf through regularized incomplete beta) the default path is 10 ULP off and the ungrouped sum 6 ULP, the shared remainder being per-row beta_lcdf error. Unused on macOS arm64 (2026-11-20, bitwise there); kept for linux-x86_64, where it was recorded, until it can be rechecked.",
+    "cause": "partition_lanes groups the 200 per-row terms into lane sums; no_partition and passes_off give the same bits at every point, so no other pass contributes. Against a 50-digit mpmath reference at point 8 (beta_lcdf through regularized incomplete beta) the default path is 10 ULP off and the ungrouped sum 6 ULP, the shared remainder being per-row beta_lcdf error. Unused on macOS arm64 (2026-11-20, bitwise there). Scoped to linux-x86_64 on a guess about where it was recorded; not rechecked.",
     "since": "2026-11-12",
     "platform": "linux-x86_64"
   },
@@ -199,7 +199,7 @@
     "quantity": "lp",
     "pair": "default/passes_off",
     "bound_ulp": 4,
-    "cause": "the partition_lanes regrouping of default/no_partition on this model; passes_off gives the same bits at every point. Unused on macOS arm64 (2026-11-20, bitwise there); kept for linux-x86_64, where it was recorded, until it can be rechecked.",
+    "cause": "the partition_lanes regrouping of default/no_partition on this model; passes_off gives the same bits at every point. Unused on macOS arm64 (2026-11-20, bitwise there). Scoped to linux-x86_64 on a guess about where it was recorded; not rechecked.",
     "since": "2026-11-12",
     "platform": "linux-x86_64"
   },
