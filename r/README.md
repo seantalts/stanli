@@ -220,6 +220,27 @@ pass other `nutpieR::nutpie_sample()` arguments, such as `target_accept` and
 To drive any other BridgeStan client, load `stanli_runtime_path()` as the
 model library and pass `bridgestan_data(m)` as the data argument.
 
+## WALNUTS
+
+`sample_walnuts()` samples the model with WALNUTS
+([arXiv:2506.18746](https://arxiv.org/abs/2506.18746)), a version of NUTS
+that halves its step size inside a trajectory where the posterior is hard,
+such as the neck of a funnel. It is built into the runtime, so it needs no
+other package:
+
+```r
+fit <- sample_walnuts(m, chains = 4, seed = 1, max_error = 0.5)
+```
+
+The chains run one after another. Seeds, chain ids and starting values work
+as in `sample_model()`, so chain 1 starts where NUTS chain 1 with the same
+seed starts. The result is a `stanli_fit`, so `summary()`, `as_draws_array()`,
+`log_lik()` and the fit adapters work on it. `fit$sampler` holds `lp__` and
+`stepsize__`: the runtime does not report divergences, tree depths or the
+adapted metric for WALNUTS. For the same reason, `sample_more()`,
+`stanli_diagnose()` and `nuts_params()` refuse the fit. There is no thinning
+and no saved warmup.
+
 ## Fit adapters
 
 If you have code written for RStan or CmdStanR, three adapters turn a fit
@@ -390,6 +411,9 @@ pathfinder_model(m, draws = 1000, ...)
 laplace_model(m, mode = NULL, draws = 1000, ...)
 sample_nutpie(m, chains = 4, seed = 1, warmup = NULL, samples = 1000,
               adaptation = "diag", ...)   # needs nutpieR
+sample_walnuts(m, chains = 4, seed = 1, warmup = 1000, samples = 1000,
+               max_error = 0.5, init = NULL, init_radius = 2, chain_id = 1,
+               refresh = 100)
 laplace_whiten(m, latent = NULL, init = NULL, seed = 1, ...)  # experimental, needs Matrix
 whiten(m, q_hat, perm, L, lowrank = NULL); parameter_annotations(m)
 bridgestan_data(m); stanli_build_id()

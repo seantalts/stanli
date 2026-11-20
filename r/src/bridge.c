@@ -15,6 +15,7 @@
 #include <math.h>
 #include <stdio.h>
 #include <string.h>
+#include <time.h>
 
 #include <R.h>
 #include <Rinternals.h>
@@ -119,6 +120,7 @@ typedef void (*stanli_sample_progress_cb)(int32_t, int64_t, int64_t, int32_t,
                                           int64_t, int64_t, void*);
 typedef void (*stanli_path_cb)(int32_t, double, void*);
 typedef int (*stanli_sample_poll_cb)(void*);
+typedef void (*stanli_draw_cb)(int32_t, int32_t, void*);
 
 typedef struct {
   uint32_t seed;
@@ -300,6 +302,10 @@ static int (*p_sample_multi_metric)(void*, const stanli_sample_opts*,
                                     double*, double*, stanli_sample_progress_cb,
                                     void*, stanli_sample_poll_cb, void*, int*,
                                     stanli_sample_report*, char*, size_t);
+static int (*p_sample_walnuts_stats_init)(void*, uint32_t, int, int, int,
+                                          double, double, const double*,
+                                          double*, double*, stanli_draw_cb,
+                                          void*, char*, size_t);
 static int (*p_pathfinder_inits)(void*, uint32_t, int, int, int, int, int,
                                  double, double*, stanli_path_cb, void*, char*,
                                  size_t);
@@ -567,6 +573,8 @@ SEXP stanli_bridge_load(SEXP path) {
   BIND("stanli_n_stored_draws", p_n_stored_draws);
   BIND("stanli_sample_opts_check", p_sample_opts_check);
   BIND("stanli_sample_multi_metric", p_sample_multi_metric);
+  BIND_OPTIONAL("stanli_sample_walnuts_stats_init",
+                p_sample_walnuts_stats_init);
   BIND("stanli_pathfinder_inits", p_pathfinder_inits);
   BIND("stanli_sampler_column_name", p_sampler_column_name);
   BIND("stanli_summary_stats", p_summary_stats);
@@ -1686,6 +1694,105 @@ SEXP stanli_r_fixed_param(SEXP m, SEXP optlist, SEXP inits) {
   const char* names[] = {"values", "chains", "draws", "notes", "seconds"};
   SEXP out = named_list(5, names, values);
   UNPROTECT(5);
+  return out;
+}
+
+typedef struct {
+  int chain;
+  int warmup;
+  int samples;
+  int refresh;
+  int interrupted;
+  clock_t polled;
+} walnuts_run;
+
+/* The draw callback returns nothing, so an interrupt cannot stop the chain.
+ * It is noted here, progress stops, and the chain runs to its end. */
+static void walnuts_progress(int32_t i, int32_t warmup, void* user) {
+  walnuts_run* run = (walnuts_run*)user;
+  if (run->interrupted) return;
+  const clock_t now = clock();
+  if (now - run->polled >= CLOCKS_PER_SEC / 10) {
+    run->polled = now;
+    if (!R_ToplevelExec(check_interrupt, NULL)) {
+      run->interrupted = 1;
+      return;
+    }
+  }
+  if (run->refresh <= 0) return;
+  const int64_t completed = (int64_t)i + 1;
+  const int64_t phase_total = warmup ? run->warmup : run->samples;
+  if (completed != 1 && completed != phase_total &&
+      completed % run->refresh != 0)
+    return;
+  int max_depth = 0;
+  sample_progress(run->chain, warmup ? completed : run->warmup + completed,
+                  (int64_t)run->warmup + run->samples, warmup, 0, 0,
+                  &max_depth);
+}
+
+/* One WALNUTS chain. optlist: seed, warmup, samples, max_error, refresh,
+ * chain_id, init_radius. `init` is empty for a random start. */
+SEXP stanli_r_walnuts(SEXP m, SEXP optlist, SEXP init) {
+  require_loaded();
+  if (p_sample_walnuts_stats_init == NULL)
+    error(
+        "this stanli runtime cannot run WALNUTS from R. " OLDER_RUNTIME_ADVICE);
+  void* mm = model_ptr(m);
+  const uint32_t seed = (uint32_t)asInteger(VECTOR_ELT(optlist, 0));
+  walnuts_run run;
+  run.warmup = asInteger(VECTOR_ELT(optlist, 1));
+  run.samples = asInteger(VECTOR_ELT(optlist, 2));
+  const double max_error = asReal(VECTOR_ELT(optlist, 3));
+  run.refresh = asInteger(VECTOR_ELT(optlist, 4));
+  run.chain = asInteger(VECTOR_ELT(optlist, 5));
+  const double init_radius = asReal(VECTOR_ELT(optlist, 6));
+  run.interrupted = 0;
+  run.polled = clock();
+  if (run.warmup < 0 || run.samples < 1)
+    error("warmup must be nonnegative and samples positive");
+
+  const int64_t n = p_n_unconstrained(mm);
+  if (XLENGTH(init) != 0 && XLENGTH(init) != n)
+    error("init must hold %lld values", (long long)n);
+  const int64_t width = row_width(mm);
+  const int wa = p_wa_n_columns(mm) > 0;
+  const int ncols = p_n_sampler_columns();
+  SEXP raw = PROTECT(allocVector(REALSXP, (R_xlen_t)(run.samples * n)));
+  SEXP vals = PROTECT(allocVector(REALSXP, (R_xlen_t)(run.samples * width)));
+  SEXP stats = PROTECT(allocVector(REALSXP, (R_xlen_t)(run.samples * ncols)));
+  char err[4096];
+  err[0] = '\0';
+  const int rc = p_sample_walnuts_stats_init(
+      mm, seed, run.chain, run.warmup, run.samples, max_error, init_radius,
+      XLENGTH(init) > 0 ? REAL(init) : NULL, REAL(raw), REAL(stats),
+      walnuts_progress, &run, err, sizeof err);
+  flush_messages();
+  if (rc != 0) {
+    UNPROTECT(3);
+    error("WALNUTS failed: %s", err[0] ? err : "(no message)");
+  }
+  if (run.interrupted) {
+    UNPROTECT(3);
+    return interrupted_result();
+  }
+
+  if (wa) p_wa_seed_chain(mm, seed, (uint32_t)run.chain);
+  for (int64_t s = 0; s < run.samples; ++s) {
+    const double* q = REAL(raw) + s * n;
+    double* row = REAL(vals) + s * width;
+    const int bad = wa ? p_wa_row(mm, q, row) : p_constrain(mm, q, row);
+    if (bad != 0) {
+      flush_messages();
+      UNPROTECT(3);
+      error("write_array failed on draw %lld", (long long)(s + 1));
+    }
+  }
+  flush_messages();
+  SEXP values[3] = {vals, raw, stats};
+  const char* names[] = {"values", "unconstrained", "stats"};
+  SEXP out = named_list(3, names, values);
+  UNPROTECT(3);
   return out;
 }
 

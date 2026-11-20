@@ -1328,6 +1328,59 @@ void expect_streaming_stats() {
   stanli_model_free(model);
 }
 
+void expect_walnuts_chain_and_stats() {
+  const std::string mir = slurp("tests/fixtures/es.tmir.sexp");
+  const std::string data = slurp("tests/fixtures/es.json");
+  char err[8192]{};
+  auto* model = stanli_model_new_with_opts(mir.c_str(), data.c_str(), nullptr,
+                                           err, sizeof err);
+  expect_true("walnuts model", model != nullptr);
+  if (!model) return;
+  const int warmup = 100, samples = 40;
+  const int64_t n = stanli_n_unconstrained(model);
+  const size_t len = (size_t)(samples * n);
+  const size_t slen = (size_t)(samples * STANLI_N_SAMPLER_COLS);
+  std::vector<double> old_draws(len), one(len), two(len), fixed(len);
+  std::vector<double> stats(slen), fixed_stats(slen);
+  expect_true("walnuts old entry point",
+              stanli_sample_walnuts_stream(model, 31, warmup, samples, 0,
+                                           old_draws.data(), nullptr, nullptr,
+                                           err, sizeof err) == 0);
+  expect_true("walnuts chain 1",
+              stanli_sample_walnuts_stats_init(
+                  model, 31, 1, warmup, samples, 0, 2, nullptr, one.data(),
+                  stats.data(), nullptr, nullptr, err, sizeof err) == 0);
+  expect_true("walnuts chain 2",
+              stanli_sample_walnuts_stats_init(
+                  model, 31, 2, warmup, samples, 0, 2, nullptr, two.data(),
+                  nullptr, nullptr, nullptr, err, sizeof err) == 0);
+  expect_true("old entry point is chain 1", old_draws == one);
+  expect_true("chain 2 differs from chain 1", one != two);
+  std::vector<double> grad((size_t)n);
+  for (int s = 0; s < samples; ++s) {
+    const double* row = stats.data() + s * STANLI_N_SAMPLER_COLS;
+    double lp = 0;
+    stanli_grad(model, one.data() + s * n, &lp, grad.data());
+    expect_true(
+        "walnuts stats lp__ is the density at the draw " + std::to_string(s),
+        row[0] == lp);
+    expect_true("walnuts stats stepsize__ positive", row[2] > 0);
+    expect_true("walnuts stats accept_stat__ unreported", std::isnan(row[1]));
+  }
+  std::vector<double> init((size_t)n, 0.25);
+  expect_true("walnuts explicit init",
+              stanli_sample_walnuts_stats_init(model, 31, 1, warmup, samples, 0,
+                                               2, init.data(), fixed.data(),
+                                               fixed_stats.data(), nullptr,
+                                               nullptr, err, sizeof err) == 0);
+  expect_true("explicit init changes the chain", fixed != one);
+  expect_true("walnuts rejects chain_id 0",
+              stanli_sample_walnuts_stats_init(
+                  model, 31, 0, warmup, samples, 0, 2, nullptr, one.data(),
+                  nullptr, nullptr, nullptr, err, sizeof err) != 0);
+  stanli_model_free(model);
+}
+
 void expect_sample_options_validated() {
   const std::string mir = slurp("tests/fixtures/es.tmir.sexp");
   const std::string data = slurp("tests/fixtures/es.json");
@@ -3189,6 +3242,7 @@ int main() {
   expect_captured_messages();
   expect_sampling_warnings_api();
   expect_streaming_stats();
+  expect_walnuts_chain_and_stats();
   expect_sample_options_validated();
   expect_summary_stats();
   expect_diagnose_text();

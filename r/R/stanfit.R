@@ -261,7 +261,7 @@ as_stanfit.stanli_fit <- function(x, model = x$model, exclude = NULL, ...,
   algorithm <- fit_algorithm(x)
   nuts <- algorithm == "sampling"
   # an approximation: independent draws, no chain to diagnose
-  approximate <- !algorithm %in% c("sampling", "fixed_param")
+  approximate <- !algorithm %in% c("sampling", "fixed_param", "walnuts")
   required <- c("warmup", "thin", "samples", "save_warmup", "chains",
                 if (nuts) "delta")
   if (!all(required %in% names(x)))
@@ -301,12 +301,15 @@ as_stanfit.stanli_fit <- function(x, model = x$model, exclude = NULL, ...,
   # a variational, Pathfinder or Laplace run.
   sampler_names <- if (nuts) c("accept_stat__", "treedepth__", "stepsize__",
                                "divergent__", "n_leapfrog__", "energy__")
-                   else if (approximate) character(0) else "accept_stat__"
+                   else if (approximate || algorithm == "walnuts") character(0)
+                   else "accept_stat__"
   control <- if (nuts) stanfit_nuts_control(x)
-  sampler_t <- if (nuts) paste0("NUTS(", control$metric, ")") else if (!approximate) "Fixed_param"
+  sampler_t <- if (nuts) paste0("NUTS(", control$metric, ")") else
+    if (algorithm == "walnuts") "WALNUTS" else if (!approximate) "Fixed_param"
   method_args <- switch(algorithm,
     sampling = list(method = "sampling", algorithm = "NUTS"),
     fixed_param = list(method = "sampling", algorithm = "Fixed_param"),
+    walnuts = list(method = "sampling", algorithm = "WALNUTS"),
     meanfield = , fullrank = list(method = "variational", algorithm = algorithm),
     pathfinder = list(method = "pathfinder", algorithm = "lbfgs"),
     laplace = list(method = "laplace", algorithm = "lbfgs"),

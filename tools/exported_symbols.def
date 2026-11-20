@@ -52,6 +52,7 @@ EXPORTS
   stanli_sparse_factor_free
   stanli_sample_stream_stats_init
   stanli_sample_walnuts_stream
+  stanli_sample_walnuts_stats_init
   stanli_run_pathfinder
   stanli_pathfinder_inits
   stanli_n_constrained

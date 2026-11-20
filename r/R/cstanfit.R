@@ -44,7 +44,7 @@
 as_cstanfit <- function(x) {
   if (inherits(x, "stanli_cstanfit")) return(x)
   if (!inherits(x, "stanli_fit")) stop("x must be a stanli_fit", call. = FALSE)
-  require_nuts_fit(x, "as_cstanfit()")
+  if (!is_walnuts_fit(x)) require_nuts_fit(x, "as_cstanfit()")
   required <- c("warmup", "samples", "thin", "chains", "warmup_draws", "save_warmup")
   if (!all(required %in% names(x)))
     stop("fit lacks sampling metadata; sample with the current Stanli version", call. = FALSE)
@@ -53,7 +53,7 @@ as_cstanfit <- function(x) {
   stanfit_flag(x$save_warmup, "save_warmup")
   warmup <- if (x$save_warmup) ceiling(x$warmup / x$thin) else 0L
   dims <- c(warmup + ceiling(x$samples / x$thin), x$chains, length(x$columns))
-  diagnostics <- cstan_diagnostic_names()
+  diagnostics <- cstan_diagnostic_names(x)
   if (!identical(dim(x$draws), as.integer(dims)) ||
       length(dim(x$sampler)) != 3L ||
       !identical(dim(x$sampler)[1:2], as.integer(dims[1:2])) ||
@@ -106,24 +106,26 @@ cstan_summary <- function(x, variables = NULL, ...) {
   posterior::summarise_draws(cstan_draws(x, variables), ...)
 }
 
-cstan_diagnostic_names <- function() {
+cstan_diagnostic_names <- function(x) {
+  if (is_walnuts_fit(x)) return(character(0))
   c("accept_stat__", "divergent__", "energy__", "n_leapfrog__", "stepsize__", "treedepth__")
 }
 
 cstan_diagnostics <- function(x, inc_warmup = FALSE, format = "draws_array") {
-  cstan_format(x$sampler[cstan_rows(x, inc_warmup), , cstan_diagnostic_names(), drop = FALSE], format)
+  cstan_format(x$sampler[cstan_rows(x, inc_warmup), , cstan_diagnostic_names(x), drop = FALSE], format)
 }
 
 cstan_metadata <- function(x) {
   layout <- variable_layout(c(list(lp__ = integer(0)),
                               variable_groups(model_variables(x))))
-  list(method = "sample", algorithm = "hmc", engine = "nuts",
+  list(method = "sample", algorithm = "hmc",
+    engine = if (is_walnuts_fit(x)) "walnuts" else "nuts",
     model_name = x$model$model_name, iter_warmup = x$warmup, iter_sampling = x$samples,
     thin = x$thin, save_warmup = x$save_warmup, chains = x$chains,
     id = fit_chain_ids(x), variables = c("lp__", x$columns),
     stan_variables = layout$parameters,
     stan_variable_sizes = lapply(layout$dimensions, function(d) if (length(d)) d else 1L),
-    sampler_diagnostics = cstan_diagnostic_names(), adapt_delta = x$delta,
+    sampler_diagnostics = cstan_diagnostic_names(x), adapt_delta = x$delta,
     max_treedepth = x$max_depth, seed = x$seed,
     metric = if (is.null(x$metric)) "diag_e" else x$metric,
     step_size_adaptation = if (is.null(x$step_size)) rep(NA_real_, x$chains) else x$step_size,
@@ -135,6 +137,9 @@ cstan_inv_metric <- function(x, matrix = TRUE) {
   if (identical(x$sampler_backend, "nutpie"))
     stop("a fit from sample_nutpie() has no Stan inverse metric: nutpie's ",
          "mass matrix is not one another run can start from", call. = FALSE)
+  if (is_walnuts_fit(x))
+    stop("a fit from sample_walnuts() has no Stan inverse metric: WALNUTS ",
+         "does not report the metric it adapts", call. = FALSE)
   if (is.null(x$metric) || length(x$inv_metric) != x$chains ||
       (x$metric != "unit_e" && any(vapply(x$inv_metric, is.null, logical(1)))))
     stop("this fit does not carry the adapted inverse metric; sample with ",
