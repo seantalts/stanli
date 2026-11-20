@@ -3503,6 +3503,32 @@ void test_grad_messages() {
   expect_true("stanli_grad keeps its return codes",
               stanli_grad(m, &x, &lp, &grad) == 1);
   stanli_model_free(m);
+
+  // Initialization retries only REJECTED points, so the checks that guard
+  // a model's support must all be domain errors, as in Stan.
+  const char* support[] = {
+      "parameters { real x; }\n"
+      "transformed parameters { real<lower=0> t = x; }\n"
+      "model { x ~ normal(0, 1); }\n",
+      "parameters { real x; } model { 1 ~ normal(0, x); }\n",
+      "parameters { real x; }\n"
+      "model { matrix[2, 2] S = [[1, x], [x, 1]];\n"
+      "  target += multi_normal_lpdf([0, 0]' | [0, 0]', S); }\n",
+      "parameters { real x; }\n"
+      "model { matrix[2, 2] S = [[1, x], [x, 1]];\n"
+      "  target += sum(cholesky_decompose(S)); }\n",
+      "parameters { real x; } model { target += lgamma(x) + log(x); }\n"};
+  for (const char* code : support) {
+    stanli_model* s = from_stan(code);
+    if (s == nullptr) continue;
+    x = -2.0;
+    const int status = stanli_grad_err(s, &x, &lp, &grad, err, sizeof err);
+    expect_true(
+        std::string("a support check is a rejection: ") + err + "\n" + code,
+        status == STANLI_EVAL_REJECTED ||
+            (status == STANLI_EVAL_OK && !std::isfinite(lp)));
+    stanli_model_free(s);
+  }
 }
 
 // Every indexed accessor answers an index out of range the same way: null
@@ -3648,7 +3674,40 @@ void test_models_on_separate_threads() {
             same_bits(parallel[j].values, serial[j].values));
 }
 
+// The single-chain entry points check their arguments by the same rules.
+void test_single_chain_arguments() {
+  const std::string mir = slurp("tests/fixtures/es.tmir.sexp");
+  const std::string data = slurp("tests/fixtures/es.json");
+  char err[4096]{};
+  stanli_model* m = stanli_model_new_with_opts(mir.c_str(), data.c_str(),
+                                               nullptr, err, sizeof err);
+  if (m == nullptr) return;
+  std::vector<double> draws((size_t)(10 * stanli_n_unconstrained(m)));
+  expect_true("stream sampling checks delta",
+              stanli_sample_stream_stats_init(m, 1, 10, 10, 0.05, nullptr,
+                                              draws.data(), nullptr, nullptr,
+                                              nullptr, err, sizeof err) != 0 &&
+                  std::string(err) == "delta must be a number >= 0.1 and < 1");
+  expect_true("stream sampling checks samples",
+              stanli_sample_stream_stats_init(m, 1, 10, -1, 0.8, nullptr,
+                                              draws.data(), nullptr, nullptr,
+                                              nullptr, err, sizeof err) != 0 &&
+                  std::string(err) == "samples must be an integer >= 0");
+  expect_true(
+      "pathfinder checks the chain id",
+      stanli_run_pathfinder(m, 1, -1, 10, draws.data(), nullptr, nullptr,
+                            nullptr, nullptr, nullptr, err, sizeof err) != 0 &&
+          std::string(err) == "chain_id must be an integer >= 0");
+  expect_true(
+      "pathfinder checks num_draws",
+      stanli_run_pathfinder(m, 1, 1, 0, draws.data(), nullptr, nullptr, nullptr,
+                            nullptr, nullptr, err, sizeof err) != 0 &&
+          std::string(err) == "num_draws must be an integer >= 1");
+  stanli_model_free(m);
+}
+
 int main() {
+  test_single_chain_arguments();
   test_models_on_separate_threads();
   test_init_retries_only_rejections();
   test_out_of_range_accessors();

@@ -1079,6 +1079,12 @@ int stanli_sample_stream_stats_init(stanli_model* m, uint32_t seed, int warmup,
                                     double* stats, stanli_draw_cb cb,
                                     void* user, char* err, size_t err_len) {
   try {
+    Rules rules;
+    rules.at_least("warmup", warmup, 0);
+    rules.at_least("samples", samples, 0);
+    rules.require(delta >= 0.1 && delta < 1.0,
+                  "delta must be a number >= 0.1 and < 1");
+    if (!rules.ok()) throw std::invalid_argument(rules.problem());
     stanli::NutsConfig cfg;
     cfg.seed = seed;
     cfg.warmup = warmup;
@@ -1172,6 +1178,10 @@ int stanli_run_pathfinder(stanli_model* m, uint32_t seed, int chain_id,
                           double* lp_approx, double* summary, stanli_path_cb cb,
                           void* user, char* err, size_t err_len) {
   try {
+    Rules rules;
+    rules.chain_ids(chain_id, 1);
+    rules.at_least("num_draws", num_draws, 1);
+    if (!rules.ok()) throw std::invalid_argument(rules.problem());
     stanli::PathfinderConfig cfg;
     cfg.seed = seed;
     cfg.chain_id = chain_id;
