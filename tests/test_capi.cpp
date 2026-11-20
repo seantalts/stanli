@@ -2936,6 +2936,48 @@ void expect_init_shapes_follow_cmdstan() {
   stanli_model_free(model);
 }
 
+// CmdStan evaluates a data-only expression in the model block on every
+// log density, so a print in an ODE right-hand side runs on every gradient
+// and never while the model is built. Preparation must not evaluate the
+// solve once and keep its value.
+void expect_callback_print_each_evaluation() {
+  if (!stanli_has_embedded_stanc()) return;
+  const Compilation c = compile(
+      "functions { vector rhs(real t, vector y, real k) {"
+      "  print(\"rhs called\"); return -k * y; } }\n"
+      "data { vector[1] y0; array[1] real ts; real k; }\n"
+      "parameters { real mu; }\n"
+      "model { vector[1] y = ode_rk45(rhs, y0, 0, ts, k)[1];"
+      "  mu ~ normal(y[1], 1); }\n",
+      "ode_print.stan");
+  stanli_capture_messages(1);
+  char err[8192]{};
+  stanli_model* model =
+      c.ok ? stanli_model_new_with_opts(c.mir.c_str(),
+                                        R"({"y0": [1], "ts": [0.1], "k": 1})",
+                                        nullptr, err, sizeof err)
+           : nullptr;
+  if (model == nullptr) {
+    stanli_capture_messages(0);
+    ++failures;
+    std::printf("FAIL ODE print model: %s %s\n", c.error.c_str(), err);
+    return;
+  }
+  expect_true("an ODE callback does not print while the model is built",
+              count_substring(take_messages(), "rhs called") == 0);
+  double q = 0.1, lp = 0, grad = 0;
+  size_t per_evaluation[2] = {0, 0};
+  for (size_t& n : per_evaluation) {
+    expect_true("ODE print model gradient",
+                stanli_grad(model, &q, &lp, &grad) == 0);
+    n = count_substring(take_messages(), "rhs called");
+  }
+  expect_true("an ODE callback prints on every evaluation",
+              per_evaluation[0] > 0 && per_evaluation[1] == per_evaluation[0]);
+  stanli_capture_messages(0);
+  stanli_model_free(model);
+}
+
 // Tuple names as CmdStan's generated constrained_param_names and
 // unconstrained_param_names spell them: ':' before a slot, '.' before an
 // index, a simplex's free values one fewer.
@@ -3499,6 +3541,7 @@ int main() {
   test_interpreter_probe_failure();
   expect_unconstrain_inits_round_trip();
   expect_init_shapes_follow_cmdstan();
+  expect_callback_print_each_evaluation();
   expect_parameterless_unconstrain();
   expect_parameterless_sampling();
 

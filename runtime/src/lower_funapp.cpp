@@ -96,6 +96,11 @@ unsigned Lowering::expr_effects(const mir::Expr& e) {
     effects |= fun_effects(mir::function_key(e));
   if (mir::is_reduce_sum(e) && reduce_sum_effectful(e))
     effects |= kStatefulEffect;
+  // A function passed to an ODE solver or another higher-order call runs
+  // when the call does.
+  if (e.kind == mir::Expr::Var)
+    if (const mir::FunDef* callback = mir::find_function(fun_defs, e))
+      effects |= fun_effects(mir::function_key(*callback));
   for (const auto& a : e.args) effects |= expr_effects(a);
   return effects;
 }
@@ -135,6 +140,9 @@ unsigned Lowering::fun_effects(const std::string& name) {
       found |= kRngEffect;
     if (e.kind == mir::Expr::FunApp && e.fn_lib == mir::Expr::Lib::UserDefined)
       found |= visit_fun(mir::function_key(e));
+    if (e.kind == mir::Expr::Var)
+      if (const mir::FunDef* callback = mir::find_function(fun_defs, e))
+        found |= visit_fun(mir::function_key(*callback));
     if (mir::is_reduce_sum(e)) {
       if (e.args.empty() || e.args[0].kind != mir::Expr::Var) {
         found |= kStatefulEffect;
