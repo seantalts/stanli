@@ -6,6 +6,7 @@
 #include <stanli/extrema_grouping.hpp>
 #include <stanli/graph.hpp>
 #include <stanli/optable.hpp>
+#include <stanli/pairwise_sum.hpp>
 
 #include <stan/math/prim.hpp>
 
@@ -43,10 +44,9 @@ void add_fwd(KernelCtx& ctx) {
   else
     out_a(ctx) = in_a(ctx, 0) + in_a(ctx, 1);
 }
-// Scalar-broadcast adjoints accumulate ascending, directly into the
-// accumulator: the rev overloads' reverse callbacks loop coefficients in
-// ascending order (measured against add(var, Matrix<var>); a local Eigen
-// sum added once differs by 1 ULP).
+// A broadcast scalar's adjoint adds the vector's adjoints with add_sum. When
+// a pass merges a loop into this op the sum has thousands of terms, and a
+// plain loop loses more accuracy than CmdStan's one call per element does.
 void add_bwd(KernelCtx& ctx) {
   if (ctx.variant) {
     const int original = ctx.variant == kAddTransposeRight ? 0 : 1;
@@ -67,8 +67,8 @@ void add_bwd(KernelCtx& ctx) {
       if (ctx.out.len == 1) {
         ctx.in_adj[k].data[0] += ctx.out_adj;
       } else {
-        for (int64_t i = 0; i < ctx.out.len; ++i)
-          ctx.in_adj[k].data[0] += ctx.out_adj_vec.data[i];
+        add_sum(ctx.in_adj[k].data[0], ctx.out.len,
+                [&](int64_t i) { return ctx.out_adj_vec.data[i]; });
       }
     } else {
       dx_a(ctx, k) += dout_a(ctx);
@@ -92,8 +92,8 @@ void sub_bwd(KernelCtx& ctx) {
       if (ctx.out.len == 1) {
         ctx.in_adj[0].data[0] += ctx.out_adj;
       } else {
-        for (int64_t i = 0; i < ctx.out.len; ++i)
-          ctx.in_adj[0].data[0] += ctx.out_adj_vec.data[i];
+        add_sum(ctx.in_adj[0].data[0], ctx.out.len,
+                [&](int64_t i) { return ctx.out_adj_vec.data[i]; });
       }
     } else {
       dx_a(ctx, 0) += dout_a(ctx);
@@ -104,8 +104,8 @@ void sub_bwd(KernelCtx& ctx) {
       if (ctx.out.len == 1) {
         ctx.in_adj[1].data[0] -= ctx.out_adj;
       } else {
-        for (int64_t i = 0; i < ctx.out.len; ++i)
-          ctx.in_adj[1].data[0] -= ctx.out_adj_vec.data[i];
+        add_sum(ctx.in_adj[1].data[0], ctx.out.len,
+                [&](int64_t i) { return -ctx.out_adj_vec.data[i]; });
       }
     } else {
       dx_a(ctx, 1) -= dout_a(ctx);
@@ -130,15 +130,17 @@ void fma_bwd(KernelCtx& ctx) {
   const auto adj = [&](int64_t i) {
     return ctx.out.len == 1 ? ctx.out_adj : ctx.out_adj_vec.data[i];
   };
-  for (int k = 0; k < 2; ++k) {
+  for (int k = 0; k < 3; ++k) {
     if (!ctx.in_adj[k].data) continue;
-    const int other = 1 - k;
-    for (int64_t i = 0; i < ctx.out.len; ++i)
-      ctx.in_adj[k].data[ctx.in[k].len == 1 ? 0 : i] += adj(i) * v(other, i);
+    const auto term = [&](int64_t i) {
+      return k == 2 ? adj(i) : adj(i) * v(1 - k, i);
+    };
+    if (ctx.in[k].len == 1 && ctx.out.len > 1)
+      add_sum(ctx.in_adj[k].data[0], ctx.out.len, term);
+    else
+      for (int64_t i = 0; i < ctx.out.len; ++i)
+        ctx.in_adj[k].data[i] += term(i);
   }
-  if (ctx.in_adj[2].data)
-    for (int64_t i = 0; i < ctx.out.len; ++i)
-      ctx.in_adj[2].data[ctx.in[2].len == 1 ? 0 : i] += adj(i);
 }
 
 void mul_fwd(KernelCtx& ctx) {
@@ -162,8 +164,9 @@ void mul_bwd(KernelCtx& ctx) {
   }
   if (ctx.in_adj[0].data) {
     if (s0) {
-      for (int64_t i = 0; i < ctx.out.len; ++i)
-        ctx.in_adj[0].data[0] += ctx.out_adj_vec.data[i] * ctx.in[1].data[i];
+      add_sum(ctx.in_adj[0].data[0], ctx.out.len, [&](int64_t i) {
+        return ctx.out_adj_vec.data[i] * ctx.in[1].data[i];
+      });
     } else if (s1) {
       dx_a(ctx, 0) += dout_a(ctx) * ctx.in[1].data[0];
     } else {
@@ -172,8 +175,9 @@ void mul_bwd(KernelCtx& ctx) {
   }
   if (ctx.in_adj[1].data) {
     if (s1) {
-      for (int64_t i = 0; i < ctx.out.len; ++i)
-        ctx.in_adj[1].data[0] += ctx.out_adj_vec.data[i] * ctx.in[0].data[i];
+      add_sum(ctx.in_adj[1].data[0], ctx.out.len, [&](int64_t i) {
+        return ctx.out_adj_vec.data[i] * ctx.in[0].data[i];
+      });
     } else if (s0) {
       dx_a(ctx, 1) += dout_a(ctx) * ctx.in[0].data[0];
     } else {

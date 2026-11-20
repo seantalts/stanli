@@ -1,4 +1,5 @@
 #include "density_fused.hpp"
+#include <stanli/pairwise_sum.hpp>
 
 #include <stan/math/prim/err.hpp>
 #include <stan/math/prim/fun/Eigen.hpp>
@@ -593,12 +594,17 @@ void ordered_logistic_summed(const Lambda& lambda_val, const int* y,
     o.lambda_buf[0] = d1.coeff(0) - d2.coeff(0);
   else
     OutView(o.lambda_buf, o.lambda_len) = d1 - d2;
-  std::fill_n(o.cut_buf, static_cast<std::size_t>(o.cut_len), 0.0);
-  for (Eigen::Index i = 0; i < N; ++i) {
-    const int c = y[i];
-    if (c != K) o.cut_buf[c - 1] += d2.coeff(i);
-    if (c != 1) o.cut_buf[c - 2] -= d1.coeff(i);
-  }
+  // Observation i adds d2 to cut point y[i] - 1 and -d1 to cut point
+  // y[i] - 2. With cut point j at sums[j + 1], the first and the last
+  // category's missing cut points fall in sums[0] and sums[K], unused.
+  std::vector<double> sums(static_cast<std::size_t>(K) + 1, 0.0);
+  scatter_add_pairwise(
+      sums.data(), K + 1, 2 * N,
+      [y](Eigen::Index k) { return y[k / 2] - k % 2; },
+      [&](Eigen::Index k) {
+        return k % 2 == 0 ? d2.coeff(k / 2) : -d1.coeff(k / 2);
+      });
+  std::copy(sums.begin() + 1, sums.begin() + K, o.cut_buf);
   *o.value = logp;
   *o.connected = 1.0;
 }
