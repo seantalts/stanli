@@ -12,6 +12,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -301,6 +302,54 @@ std::string matrix_dims_mismatch_message(const std::string& function,
 // "array[uni, ...] index") reports it.
 std::string index_out_of_range_message(const char* function, int64_t size,
                                        int64_t index);
+
+// How Stan resolves a range selector on one axis of `extent` positions:
+// `lo:hi` (stanc also spells `:hi` as `1:hi`) or `lo:` (no `hi`).
+// stan/model/indexing/rvalue.hpp and assign.hpp have two rules. On a vector,
+// row vector or matrix axis, `lo:hi` with hi < lo is empty and otherwise
+// both ends must lie in 1..extent, while `lo:` always needs lo in 1..extent,
+// so `v[N + 1:]` is an error. On an array axis, `lo:hi` with hi < lo is
+// empty and otherwise each position is checked in order, while `lo:` selects
+// extent - lo + 1 positions, so `a[N + 1:]` is empty and `a[N + 2:]` has a
+// negative size, which is an error.
+enum class SelectorSite : uint8_t {
+  Vector,        // a vector or row vector, or the leaf of an array of them
+  MatrixRow,     // the first index of a matrix
+  MatrixColumn,  // the second index of a matrix
+  Array          // an array dimension
+};
+struct RangeSelection {
+  int64_t first = 1;  // the first selected position, 1-based
+  int64_t count = 0;  // negative for an array `lo:` past extent + 1
+  bool out_of_range = false;
+  int64_t bad_index = 0;   // the index Stan reports when out_of_range
+  bool bad_upper = false;  // the failing check was the upper end's
+  bool ok() const { return !out_of_range && count >= 0; }
+};
+RangeSelection resolve_range_selector(SelectorSite site, int64_t extent,
+                                      int64_t lo, std::optional<int64_t> hi);
+// The site of logical axis `axis` of a value whose first `array_depth`
+// axes are array dimensions.
+inline SelectorSite selector_site(size_t axis, size_t array_depth,
+                                  bool matrix_leaf) {
+  if (axis < array_depth) return SelectorSite::Array;
+  if (!matrix_leaf) return SelectorSite::Vector;
+  return axis == array_depth ? SelectorSite::MatrixRow
+                             : SelectorSite::MatrixColumn;
+}
+
+// Stan Math's error for a selection that is not ok(), worded for a read or
+// an assignment. `out_of_range` is false for a read's negative array size,
+// which Stan throws as std::domain_error. An assignment compares a negative
+// size with the right-hand side's before it checks any position, so its
+// caller reports that as a size mismatch and never asks for it here.
+struct RangeSelectorError {
+  std::string message;
+  bool out_of_range = true;
+};
+RangeSelectorError range_selector_error(const RangeSelection& selection,
+                                        SelectorSite site, bool upfrom,
+                                        bool assign, int64_t extent);
 
 // Validate one selected overload and resolve its lane broadcasts and result
 // geometry once for every backend. A one-element container is deliberately

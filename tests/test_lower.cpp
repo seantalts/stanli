@@ -3459,10 +3459,14 @@ int main() {
       check(rejects(d, tag, message), tag + " rejected");
     };
     expect_oob("k", 7, "oob v[7]", "accessing element out of range");
-    expect_oob("hi", 9, "oob v[2:9]");
+    expect_oob("hi", 9, "oob v[2:9]",
+               "vector[min_max] max indexing: accessing element out of range. "
+               "index 9 out of range");
     expect_oob("i1", 5, "oob M[5]", "accessing element out of range");
     expect_oob("j1", 5, "oob M[:,5]", "accessing element out of range");
-    expect_oob("rh", 9, "oob M[2:9]");
+    expect_oob("rh", 9, "oob M[2:9]",
+               "matrix[min_max] max row indexing: accessing element out of "
+               "range. index 9 out of range");
     expect_oob("m", 9, "oob interp xs[9]",
                "array[uni, ...] index: accessing element out of range. index "
                "9 out of range");

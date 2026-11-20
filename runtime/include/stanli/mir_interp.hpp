@@ -608,13 +608,12 @@ class MirInterp {
               drops[d] = true;
             } else if (index.kind == mir::Expr::IndexBetween ||
                        index.kind == mir::Expr::IndexUpfrom) {
-              const long lo = as_int(index.args[0]);
-              const long hi = index.kind == mir::Expr::IndexBetween
-                                  ? as_int(index.args[1])
-                                  : extent;
-              if (hi >= lo && (lo < 1 || hi > extent))
-                fail("multi-index assignment range out of bounds", st.raw);
-              for (long k = lo; k <= hi; ++k) selected[d].push_back(k - 1);
+              const RangeSelection range = range_selection(
+                  index, extent,
+                  assign_site(st.lhs, d).value_or(SelectorSite::Array), true,
+                  st.raw);
+              for (int64_t k = 0; k < range.count; ++k)
+                selected[d].push_back(range.first - 1 + k);
             } else if (index.kind == mir::Expr::IndexMulti) {
               const Value positions = eval(index.args[0]);
               if (!positions.is_int)
@@ -1377,11 +1376,15 @@ class MirInterp {
     std::vector<int> listed;
     if (index.kind == mir::Expr::IndexBetween ||
         index.kind == mir::Expr::IndexUpfrom) {
-      first = as_int(index.args[0]);
-      const long last = index.kind == mir::Expr::IndexBetween
-                            ? as_int(index.args[1])
-                            : extent;
-      count = last >= first ? static_cast<int64_t>(last) - first + 1 : 0;
+      // The nominal size, negative for `lo:` past extent + 1; the
+      // positions are checked below, after the size.
+      const RangeSelection range = resolve_range_selector(
+          SelectorSite::Array, extent, as_int(index.args[0]),
+          index.kind == mir::Expr::IndexBetween
+              ? std::optional<int64_t>(as_int(index.args[1]))
+              : std::nullopt);
+      first = static_cast<long>(range.first);
+      count = range.count;
     } else if (index.kind == mir::Expr::IndexMulti) {
       const Value positions = eval(index.args[0]);
       if (!positions.is_int)
@@ -1539,22 +1542,62 @@ class MirInterp {
     }
   }
 
-  // Stan Math's label for a multi, range or open-ended selector at dimension
-  // `dim` of the read `e`; `upper` picks the end of a range. Null where the
-  // container is a matrix and the generic message stays.
-  static const char* selector_read_label(const mir::Expr& e, size_t dim,
-                                         mir::Expr::Kind index,
-                                         bool upper = false) {
+  // Stan Math's label for a multi-index selector at dimension `dim` of the
+  // read `e`. Null where the container is a matrix and the generic message
+  // stays.
+  static const char* multi_read_label(const mir::Expr& e, size_t dim) {
     const mir::UnsizedView& base = e.args[0].unsized;
     if (dim < base.depth || base.leaf == mir::UnsizedLeaf::Unknown ||
         base.leaf == mir::UnsizedLeaf::Int ||
         base.leaf == mir::UnsizedLeaf::Real)
       return "array[..., ...] index";
     if (base.leaf == mir::UnsizedLeaf::Matrix) return nullptr;
-    if (index == mir::Expr::IndexMulti) return "vector[multi] indexing";
-    if (index == mir::Expr::IndexUpfrom) return "vector[min] indexing";
-    return upper ? "vector[min_max] max indexing"
-                 : "vector[min_max] min indexing";
+    return "vector[multi] indexing";
+  }
+
+  // The site of dimension `dim` of the read `e`, for Stan's range rules.
+  static SelectorSite read_site(const mir::Expr& e, size_t dim) {
+    const mir::UnsizedView& base = e.args[0].unsized;
+    if (dim < base.depth) return SelectorSite::Array;
+    if (base.leaf == mir::UnsizedLeaf::Vector ||
+        base.leaf == mir::UnsizedLeaf::RowVector)
+      return SelectorSite::Vector;
+    if (base.leaf == mir::UnsizedLeaf::Matrix)
+      return dim == base.depth ? SelectorSite::MatrixRow
+                               : SelectorSite::MatrixColumn;
+    return SelectorSite::Array;
+  }
+
+  // The site of dimension `dim` of the assigned variable `name`, when its
+  // declared shape is known.
+  std::optional<SelectorSite> assign_site(const std::string& name,
+                                          size_t dim) const {
+    const auto it = assign_shape_.find(name);
+    if (it == assign_shape_.end() || it->second.leaf == AssignLeaf::None)
+      return std::nullopt;
+    return selector_site(dim, it->second.array_levels,
+                         it->second.leaf == AssignLeaf::Matrix);
+  }
+
+  // A `lo:hi` or `lo:` selector over `extent` positions, resolved by Stan's
+  // rule for `site` and raising Stan's error. In a probe, an error marks
+  // the probe failed and returns an empty selection.
+  RangeSelection range_selection(const mir::Expr& index, int64_t extent,
+                                 SelectorSite site, bool assign,
+                                 const std::string& raw) {
+    const bool upfrom = index.kind == mir::Expr::IndexUpfrom;
+    const RangeSelection selection = resolve_range_selector(
+        site, extent, as_int(index.args[0]),
+        upfrom ? std::nullopt : std::optional<int64_t>(as_int(index.args[1])));
+    if (selection.ok()) return selection;
+    if (probe_) {
+      probe_failed_ = true;
+      return RangeSelection{};
+    }
+    const RangeSelectorError error =
+        range_selector_error(selection, site, upfrom, assign, extent);
+    reject(error.out_of_range ? MessageError::OutOfRange : MessageError::Domain,
+           error.message, raw);
   }
 
   static double val(const T& x) { return stan::math::value_of(x); }
@@ -2032,8 +2075,7 @@ class MirInterp {
       r.dims = {(int64_t)n};
       for (size_t k = 0; k < n; ++k) {
         const long p = k < ix.i.size() ? ix.i[k] : (long)val(ix.r.at(k));
-        bounds(p, (int64_t)base.r.size(), e,
-               selector_read_label(e, 0, mir::Expr::IndexMulti));
+        bounds(p, (int64_t)base.r.size(), e, multi_read_label(e, 0));
         if (probe_failed_) return r;
         r.r.push_back(base.r.at((size_t)(p - 1)));
         if (base.is_int) r.i.push_back(base.i.at((size_t)(p - 1)));
@@ -2043,19 +2085,12 @@ class MirInterp {
     // Between subrange of a 1-D value: v[a:b].
     if (e.args.size() == 2 && e.args[1].kind == mir::Expr::IndexBetween &&
         base.dims.size() <= 1) {
-      const long a = as_int(e.args[1].args[0]);
-      const long b = as_int(e.args[1].args[1]);
-      if (b >= a) {
-        bounds(a, (int64_t)base.r.size(), e,
-               selector_read_label(e, 0, mir::Expr::IndexBetween));
-        if (probe_failed_) return r;
-        bounds(b, (int64_t)base.r.size(), e,
-               selector_read_label(e, 0, mir::Expr::IndexBetween, true));
-        if (probe_failed_) return r;
-      }
+      const RangeSelection range = range_selection(
+          e.args[1], (int64_t)base.r.size(), read_site(e, 0), false, e.raw);
+      if (probe_failed_) return r;
       r.is_int = base.is_int;
-      r.dims = {b >= a ? b - a + 1 : 0};  // b < a is an empty range
-      for (long k = a; k <= b; ++k) {
+      r.dims = {range.count};
+      for (int64_t k = range.first; k < range.first + range.count; ++k) {
         r.r.push_back(base.r.at(k - 1));
         if (base.is_int) r.i.push_back(base.i.at(k - 1));
       }
@@ -2065,20 +2100,15 @@ class MirInterp {
     if (e.args.size() == 3 && e.args[1].kind == mir::Expr::IndexSingle &&
         e.args[2].kind == mir::Expr::IndexBetween && base.dims.size() == 2) {
       const long i = as_int(e.args[1].args[0]);
-      const long a = as_int(e.args[2].args[0]);
-      const long b = as_int(e.args[2].args[1]);
       const int64_t R = base.dims[0];
       bounds(i, R, e);
       if (probe_failed_) return r;
-      if (b >= a) {
-        bounds(a, base.dims[1], e);
-        if (probe_failed_) return r;
-        bounds(b, base.dims[1], e);
-        if (probe_failed_) return r;
-      }
+      const RangeSelection range = range_selection(
+          e.args[2], base.dims[1], read_site(e, 1), false, e.raw);
+      if (probe_failed_) return r;
       r.is_int = base.is_int;
-      r.dims = {b >= a ? b - a + 1 : 0};  // b < a is an empty range
-      for (long j = a; j <= b; ++j) {
+      r.dims = {range.count};
+      for (int64_t j = range.first; j < range.first + range.count; ++j) {
         r.r.push_back(base.r.at((j - 1) * R + (i - 1)));
         if (base.is_int) r.i.push_back(base.i.at((j - 1) * R + (i - 1)));
       }
@@ -2087,21 +2117,20 @@ class MirInterp {
     // X[a:b, j] on a matrix / 2-D array: rows a..b of column j.
     if (e.args.size() == 3 && e.args[1].kind == mir::Expr::IndexBetween &&
         e.args[2].kind == mir::Expr::IndexSingle && base.dims.size() == 2) {
-      const long a = as_int(e.args[1].args[0]);
-      const long b = as_int(e.args[1].args[1]);
       const long j = as_int(e.args[2].args[0]);
       const int64_t R = base.dims[0];
       bounds(j, base.dims[1], e);
       if (probe_failed_) return r;
-      if (b >= a) {
-        bounds(a, R, e);
-        if (probe_failed_) return r;
-        bounds(b, R, e);
-        if (probe_failed_) return r;
-      }
+      // Stan selects a matrix column first and indexes it as a vector.
+      const SelectorSite site = read_site(e, 0) == SelectorSite::MatrixRow
+                                    ? SelectorSite::Vector
+                                    : read_site(e, 0);
+      const RangeSelection range =
+          range_selection(e.args[1], R, site, false, e.raw);
+      if (probe_failed_) return r;
       r.is_int = base.is_int;
-      r.dims = {b >= a ? b - a + 1 : 0};  // b < a is an empty range
-      for (long k = a; k <= b; ++k) {
+      r.dims = {range.count};
+      for (int64_t k = range.first; k < range.first + range.count; ++k) {
         r.r.push_back(base.r.at((j - 1) * R + (k - 1)));
         if (base.is_int) r.i.push_back(base.i.at((j - 1) * R + (k - 1)));
       }
@@ -2137,27 +2166,18 @@ class MirInterp {
             const long i = k < positions.i.size()
                                ? positions.i[k]
                                : static_cast<long>(val(positions.r.at(k)));
-            bounds(i, extent, e, selector_read_label(e, d, index.kind));
+            bounds(i, extent, e, multi_read_label(e, d));
             if (probe_failed_) return r;
             selected[d].push_back(i - 1);
           }
-        } else if (index.kind == mir::Expr::IndexBetween) {
-          const long lo = as_int(index.args[0]);
-          const long hi = as_int(index.args[1]);
-          if (hi >= lo) {
-            bounds(lo, extent, e, selector_read_label(e, d, index.kind));
-            if (probe_failed_) return r;
-            bounds(hi, extent, e, selector_read_label(e, d, index.kind, true));
-            if (probe_failed_) return r;
-          }
-          selected[d].reserve(static_cast<size_t>(hi >= lo ? hi - lo + 1 : 0));
-          for (long i = lo; i <= hi; ++i) selected[d].push_back(i - 1);
-        } else if (index.kind == mir::Expr::IndexUpfrom) {
-          const long lo = as_int(index.args[0]);
-          bounds(lo, extent, e, selector_read_label(e, d, index.kind));
+        } else if (index.kind == mir::Expr::IndexBetween ||
+                   index.kind == mir::Expr::IndexUpfrom) {
+          const RangeSelection range =
+              range_selection(index, extent, read_site(e, d), false, e.raw);
           if (probe_failed_) return r;
-          selected[d].reserve(static_cast<size_t>(extent - lo + 1));
-          for (long i = lo; i <= extent; ++i) selected[d].push_back(i - 1);
+          selected[d].reserve(static_cast<size_t>(range.count));
+          for (int64_t k = 0; k < range.count; ++k)
+            selected[d].push_back(range.first - 1 + k);
         } else {
           supported = false;
           break;

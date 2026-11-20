@@ -326,6 +326,73 @@ std::string index_out_of_range_message(const char* function, int64_t size,
   return {};
 }
 
+RangeSelection resolve_range_selector(SelectorSite site, int64_t extent,
+                                      int64_t lo, std::optional<int64_t> hi) {
+  RangeSelection out;
+  out.first = lo;
+  const auto reject = [&](int64_t index, bool upper) {
+    out.out_of_range = true;
+    out.bad_index = index;
+    out.bad_upper = upper;
+  };
+  const bool lo_outside = lo < 1 || lo > extent;
+  if (hi) {
+    out.count = *hi >= lo ? *hi - lo + 1 : 0;
+    if (out.count == 0) return out;
+    if (lo_outside)
+      reject(lo, false);
+    else if (*hi > extent)
+      // An array checks its positions in order, so the first one past the
+      // end is the one reported.
+      reject(site == SelectorSite::Array ? extent + 1 : *hi, true);
+    return out;
+  }
+  out.count = extent - lo + 1;
+  if (site != SelectorSite::Array ? lo_outside : out.count > 0 && lo < 1)
+    reject(lo, false);
+  return out;
+}
+
+RangeSelectorError range_selector_error(const RangeSelection& selection,
+                                        SelectorSite site, bool upfrom,
+                                        bool assign, int64_t extent) {
+  if (!selection.out_of_range)
+    return {"array[..., ...] indexing: size is " +
+                std::to_string(selection.count) +
+                ", but must be greater than or equal to 0.000000",
+            false};
+  const bool upper = selection.bad_upper;
+  const char* label = nullptr;
+  switch (site) {
+    case SelectorSite::Vector:
+      label = assign ? (upfrom  ? "vector[min] assign"
+                        : upper ? "vector[min_max] max assign"
+                                : "vector[min_max] min assign")
+                     : (upfrom  ? "vector[min] indexing"
+                        : upper ? "vector[min_max] max indexing"
+                                : "vector[min_max] min indexing");
+      break;
+    case SelectorSite::MatrixRow:
+      label = upfrom  ? (assign ? "matrix[min] assign row"
+                                : "matrix[min] row indexing")
+              : upper ? "matrix[min_max] max row indexing"
+                      : "matrix[min_max] min row indexing";
+      break;
+    case SelectorSite::MatrixColumn:
+      label = assign ? (upfrom  ? "matrix[..., min] assign column"
+                        : upper ? "matrix[..., min_max] assign max column"
+                                : "matrix[..., min_max] assign min column")
+                     : (upfrom  ? "matrix[..., min] column indexing"
+                        : upper ? "matrix[..., min_max] max column indexing"
+                                : "matrix[..., min_max] min column indexing");
+      break;
+    case SelectorSite::Array:
+      label = assign ? "array[multi, ...] assign" : "array[..., ...] index";
+      break;
+  }
+  return {index_out_of_range_message(label, extent, selection.bad_index), true};
+}
+
 BuiltinLayout builtin_layout(const BuiltinSpec& spec,
                              const std::vector<BuiltinArgumentShape>& arguments,
                              const std::string& function, bool autodiff) {

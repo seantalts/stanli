@@ -857,10 +857,13 @@ struct ProgramCompiler {
         return true;
       }
       if (b.kind == ViewKind::Matrix && e.args.size() == 3) {
-        const int64_t nr =
-            (int64_t)matrix_positions(e.args[1], b.rows, "row").size();
+        const int64_t nr = (int64_t)matrix_positions(e.args[1], b.rows, "row",
+                                                     SelectorSite::MatrixRow)
+                               .size();
         const int64_t nc =
-            (int64_t)matrix_positions(e.args[2], b.cols, "column").size();
+            (int64_t)matrix_positions(e.args[2], b.cols, "column",
+                                      SelectorSite::MatrixColumn)
+                .size();
         const int64_t width = nr * nc;
         Range r{0, (int)width};
         if (width == 1 && !mir::is_unsized(e, mir::UnsizedLeaf::Matrix) &&
@@ -884,8 +887,11 @@ struct ProgramCompiler {
       if ((b.kind == ViewKind::Vector || b.kind == ViewKind::RowVector ||
            b.kind == ViewKind::Flat) &&
           e.args.size() == 2) {
-        const int64_t n =
-            (int64_t)matrix_positions(e.args[1], b.len, "index").size();
+        const int64_t n = (int64_t)matrix_positions(e.args[1], b.len, "index",
+                                                    b.kind == ViewKind::Flat
+                                                        ? SelectorSite::Array
+                                                        : SelectorSite::Vector)
+                              .size();
         *out = typed(Range{0, (int)n}, e.unsized);
         return true;
       }
@@ -1360,8 +1366,8 @@ struct ProgramCompiler {
       std::vector<std::vector<int64_t>> positions;
       positions.reserve(dims.size());
       for (size_t d = 0; d < dims.size(); ++d)
-        positions.push_back(
-            matrix_positions(e.args[d + 1], dims[d], "array selector"));
+        positions.push_back(matrix_positions(
+            e.args[d + 1], dims[d], "array selector", SelectorSite::Array));
 
       std::vector<long> values;
       std::vector<int64_t> chosen(dims.size());
@@ -1414,8 +1420,15 @@ struct ProgramCompiler {
     }
   }
 
+  // The 0-based positions that `index` selects along an axis of `extent`.
+  // A range selector follows Stan's rule for `site`. When `emit` is set, a
+  // range that Stan rejects compiles to a run-time rejection and selects
+  // nothing, because the code may sit in a branch that never runs;
+  // otherwise it refuses, as a query that cannot answer.
   std::vector<int64_t> matrix_positions(const mir::Expr& index, int64_t extent,
-                                        const std::string& axis) {
+                                        const std::string& axis,
+                                        SelectorSite site, bool emit = false,
+                                        bool assign = false) {
     if (extent < 0 || extent > kMaxRegs)
       bail("matrix " + axis + " has an invalid extent");
     std::vector<long> values;
@@ -1424,26 +1437,26 @@ struct ProgramCompiler {
       for (int64_t i = 1; i <= extent; ++i) values.push_back((long)i);
     } else if (index.kind == mir::Expr::IndexSingle && index.args.size() == 1) {
       values.push_back(cint(index.args[0]));
-    } else if (index.kind == mir::Expr::IndexBetween &&
-               index.args.size() == 2) {
-      const long lo = cint(index.args[0]), hi = cint(index.args[1]);
-      if (hi >= lo) {
-        if (lo < 1 || hi > extent)
-          bail("matrix " + axis + " range is outside its extent");
-        const uint64_t count = (uint64_t)hi - (uint64_t)lo + 1;
-        if (count > (uint64_t)kMaxRegs)
-          bail("matrix " + axis + " range is too large");
-        values.reserve((size_t)count);
-        for (long i = lo; i <= hi; ++i) values.push_back(i);
+    } else if ((index.kind == mir::Expr::IndexBetween &&
+                index.args.size() == 2) ||
+               (index.kind == mir::Expr::IndexUpfrom &&
+                index.args.size() == 1)) {
+      const bool upfrom = index.kind == mir::Expr::IndexUpfrom;
+      const RangeSelection range = resolve_range_selector(
+          site, extent, cint(index.args[0]),
+          upfrom ? std::nullopt : std::optional<int64_t>(cint(index.args[1])));
+      if (!range.ok()) {
+        if (!emit) bail("matrix " + axis + " range is outside its extent");
+        emit_range_reject(range, site, upfrom, assign, extent);
+        return {};
       }
+      if (range.count > kMaxRegs)
+        bail("matrix " + axis + " range is too large");
+      values.reserve((size_t)range.count);
+      for (int64_t k = 0; k < range.count; ++k)
+        values.push_back((long)(range.first + k));
     } else if (index.kind == mir::Expr::IndexMulti && index.args.size() == 1) {
       values = cints(index.args[0]);
-    } else if (index.kind == mir::Expr::IndexUpfrom && index.args.size() == 1) {
-      const long lo = cint(index.args[0]);
-      if (lo < 1 || lo > extent + 1)
-        bail("matrix " + axis + " upfrom is outside its extent");
-      values.reserve((size_t)(extent - lo + 1));
-      for (long i = lo; i <= extent; ++i) values.push_back(i);
     } else {
       bail("matrix " + axis + " index form");
     }
@@ -1818,9 +1831,11 @@ struct ProgramCompiler {
         // order and duplicate gather indices.
         if (b.kind == ViewKind::Matrix && e.args.size() == 3) {
           const std::vector<int64_t> rows =
-              matrix_positions(e.args[1], b.rows, "row of " + e.args[0].name);
-          const std::vector<int64_t> cols = matrix_positions(
-              e.args[2], b.cols, "column of " + e.args[0].name);
+              matrix_positions(e.args[1], b.rows, "row of " + e.args[0].name,
+                               SelectorSite::MatrixRow, true);
+          const std::vector<int64_t> cols =
+              matrix_positions(e.args[2], b.cols, "column of " + e.args[0].name,
+                               SelectorSite::MatrixColumn, true);
           if (!rows.empty() && cols.size() > (size_t)kMaxRegs / rows.size())
             bail("matrix selection needs too many registers");
           const size_t width = rows.size() * cols.size();
@@ -1854,15 +1869,8 @@ struct ProgramCompiler {
           return matrix_row(b, cint(e.args[1].args[0]));
         if ((b.kind == ViewKind::Vector || b.kind == ViewKind::RowVector ||
              b.kind == ViewKind::Flat) &&
-            e.args.size() == 2 && e.args[1].kind == mir::Expr::IndexBetween) {
-          const long lo = cint(e.args[1].args[0]);
-          const long hi = cint(e.args[1].args[1]);
-          if (hi < lo) return typed(Range{b.reg, 0}, e.unsized);
-          if (lo < 1 || hi > b.len)
-            bail("range index out of the declared range");
-          return typed(Range{b.reg + (int)lo - 1, (int)(hi - lo + 1)},
-                       e.unsized);
-        }
+            e.args.size() == 2 && e.args[1].kind == mir::Expr::IndexBetween)
+          return one_dimensional_range(b, e);
         if ((b.kind == ViewKind::Vector || b.kind == ViewKind::RowVector ||
              b.kind == ViewKind::Flat) &&
             e.args.size() == 2 && e.args[1].kind == mir::Expr::IndexMulti) {
@@ -1888,7 +1896,8 @@ struct ProgramCompiler {
           // over the column-major registers.
           if (e.args.size() == 2) {
             const std::vector<int64_t> rows =
-                matrix_positions(e.args[1], b.rows, "row of " + e.args[0].name);
+                matrix_positions(e.args[1], b.rows, "row of " + e.args[0].name,
+                                 SelectorSite::MatrixRow, true);
             const BuiltinIndexMap map =
                 builtin_index_map({b.rows, b.cols}, 2, {rows},
                                   {e.args[1].kind == mir::Expr::IndexSingle},
@@ -1921,13 +1930,8 @@ struct ProgramCompiler {
         if (b.kind == ViewKind::Vector || b.kind == ViewKind::RowVector ||
             b.kind == ViewKind::Flat) {
           if (e.args.size() != 2) bail("one-dimensional index form");
-          if (e.args[1].kind == mir::Expr::IndexUpfrom) {
-            const long lo = cint(e.args[1].args[0]);
-            if (lo < 1 || lo > b.len + 1)
-              bail("upfrom index out of the declared range");
-            return typed(Range{b.reg + (int)lo - 1, (int)(b.len - lo + 1)},
-                         e.unsized);
-          }
+          if (e.args[1].kind == mir::Expr::IndexUpfrom)
+            return one_dimensional_range(b, e);
           // Only a Single selects one element; any other index kind was
           // silently misread as one before this guard.
           if (e.args[1].kind != mir::Expr::IndexSingle)
@@ -1983,7 +1987,11 @@ struct ProgramCompiler {
               break;
             }
           }
-          positions.push_back(matrix_positions(index, dims[d], "array"));
+          positions.push_back(
+              matrix_positions(index, dims[d], "array",
+                               selector_site(d, dims.size() - leaf_rank(b.leaf),
+                                             b.leaf == ViewKind::Matrix),
+                               true));
           drops.push_back(index.kind == mir::Expr::IndexSingle);
         }
         if (!all_static) {
@@ -2504,7 +2512,9 @@ struct ProgramCompiler {
         // A range may coexist with runtime selectors on other axes, but its
         // length must remain static. Variable-length ranges still refuse.
         const auto positions =
-            matrix_positions(*index, dims[d], "runtime selection");
+            matrix_positions(*index, dims[d], "runtime selection",
+                             selector_site(d, outer, leaf == ViewKind::Matrix),
+                             true, rhs != nullptr);
         axis.kind = DynamicIndexSpec::Axis::Range;
         axis.count = positions.size();
         values =
@@ -4292,6 +4302,43 @@ struct ProgramCompiler {
     return copy;
   }
 
+  void emit_range_reject(const RangeSelection& range, SelectorSite site,
+                         bool upfrom, bool assign, int64_t extent) {
+    Program::Message m;
+    if (assign && !range.out_of_range) {
+      m.spec.chunks = {"array range assignment selects " +
+                       std::to_string(range.count) + " elements"};
+      m.spec.error = MessageError::InvalidArgument;
+    } else {
+      const RangeSelectorError error =
+          range_selector_error(range, site, upfrom, assign, extent);
+      m.spec.chunks = {error.message};
+      m.spec.error =
+          error.out_of_range ? MessageError::OutOfRange : MessageError::Domain;
+    }
+    p.messages.push_back(std::move(m));
+    emit(Program::REJECT, 0, (int)p.messages.size() - 1);
+  }
+
+  // `b[lo:hi]` or `b[lo:]` on a vector, row vector or array of scalars: a
+  // view of the base's registers.
+  Range one_dimensional_range(const Range& b, const mir::Expr& e) {
+    const mir::Expr& index = e.args[1];
+    const bool upfrom = index.kind == mir::Expr::IndexUpfrom;
+    const SelectorSite site =
+        b.kind == ViewKind::Flat ? SelectorSite::Array : SelectorSite::Vector;
+    const RangeSelection range = resolve_range_selector(
+        site, b.len, cint(index.args[0]),
+        upfrom ? std::nullopt : std::optional<int64_t>(cint(index.args[1])));
+    if (!range.ok()) {
+      emit_range_reject(range, site, upfrom, false, b.len);
+      return typed(Range{b.reg, 0}, e.unsized);
+    }
+    if (range.count == 0) return typed(Range{b.reg, 0}, e.unsized);
+    return typed(Range{b.reg + (int)range.first - 1, (int)range.count},
+                 e.unsized);
+  }
+
   // Stan checks an assignment's sizes when the statement runs, and the
   // statement may sit in a branch that never runs, so a mismatch compiles
   // to a run-time rejection rather than a refusal.
@@ -4796,9 +4843,11 @@ struct ProgramCompiler {
         }
         if (dst.kind == ViewKind::Matrix && s.lhs_idx.size() == 2) {
           const std::vector<int64_t> rows = matrix_positions(
-              s.lhs_idx[0], dst.rows, "assignment row of " + s.lhs);
+              s.lhs_idx[0], dst.rows, "assignment row of " + s.lhs,
+              SelectorSite::MatrixRow, true, true);
           const std::vector<int64_t> cols = matrix_positions(
-              s.lhs_idx[1], dst.cols, "assignment column of " + s.lhs);
+              s.lhs_idx[1], dst.cols, "assignment column of " + s.lhs,
+              SelectorSite::MatrixColumn, true, true);
           if (!rows.empty() && cols.size() > (size_t)kMaxRegs / rows.size())
             bail("matrix assignment selection is too large");
           const size_t width = rows.size() * cols.size();
@@ -4826,7 +4875,10 @@ struct ProgramCompiler {
           for (size_t d = 0; d < dims.size(); ++d) {
             if (d < s.lhs_idx.size()) {
               positions.push_back(matrix_positions(
-                  s.lhs_idx[d], dims[d], "assignment array of " + s.lhs));
+                  s.lhs_idx[d], dims[d], "assignment array of " + s.lhs,
+                  selector_site(d, dims.size() - leaf_rank(dst.leaf),
+                                dst.leaf == ViewKind::Matrix),
+                  true, true));
             } else {
               if (dims[d] < 0 || dims[d] > kMaxRegs)
                 bail("array assignment has an invalid omitted extent");
@@ -4926,8 +4978,11 @@ struct ProgramCompiler {
             known_int_arrays.erase(s.lhs);
             return Path::Open;
           }
-          const std::vector<int64_t> positions =
-              matrix_positions(s.lhs_idx[0], dst.len, "assignment vector");
+          const std::vector<int64_t> positions = matrix_positions(
+              s.lhs_idx[0], dst.len, "assignment vector",
+              dst.kind == ViewKind::Flat ? SelectorSite::Array
+                                         : SelectorSite::Vector,
+              true, true);
           if (v.len != static_cast<int>(positions.size())) {
             emit_assign_size_reject(selected_assign_size_message(
                 s.lhs, s.lhs_idx[0], dst.kind == ViewKind::Flat,

@@ -18,26 +18,51 @@ bool Lowering::expression_autodiff(const mir::Expr& e) const {
                                     : scalar_autodiff();
       });
 }
+RangeSelection Lowering::range_selection(const mir::Expr& ix, int64_t extent,
+                                         SelectorSite site,
+                                         const std::string& raw, bool assign) {
+  if (ix.kind == mir::Expr::IndexAll) {
+    RangeSelection all;
+    all.count = extent;
+    return all;
+  }
+  const bool upfrom = ix.kind == mir::Expr::IndexUpfrom;
+  const RangeSelection selection = resolve_range_selector(
+      site, extent, eval_int(ix.args[0]),
+      upfrom ? std::nullopt : std::optional<int64_t>(eval_int(ix.args[1])));
+  if (selection.ok()) return selection;
+  // An assignment compares a negative array size with its right-hand side,
+  // which it can never match.
+  if (assign && !selection.out_of_range)
+    fail("assignment width mismatch: the selection has size " +
+             std::to_string(selection.count),
+         raw);
+  const RangeSelectorError error =
+      range_selector_error(selection, site, upfrom, assign, extent);
+  const MessageError kind =
+      error.out_of_range ? MessageError::OutOfRange : MessageError::Domain;
+  // As for a single index, a write is checked here (check_uni_index) and a
+  // read when it runs (stan_index), with an empty selection standing in.
+  if (assign) reject(kind, error.message, raw);
+  emit_error(kind, error.message);
+  return RangeSelection{};
+}
 // Every index the lowering sees is a bind-time constant, so what CmdStan
 // bounds-checks at runtime is checked here instead.
-std::vector<int64_t> Lowering::index_positions(const mir::Expr& ix,
-                                               int64_t extent, const char* what,
-                                               const std::string& raw) {
+std::vector<int64_t> Lowering::index_positions(
+    const mir::Expr& ix, int64_t extent, SelectorSite site, const char* what,
+    const std::string& raw, bool assign) {
   std::vector<int64_t> out;
-  if (ix.kind == mir::Expr::IndexAll) {
-    for (int64_t i = 0; i < extent; ++i) out.push_back(i);
+  if (ix.kind == mir::Expr::IndexAll || is_range(ix)) {
+    const RangeSelection range = range_selection(ix, extent, site, raw, assign);
+    for (int64_t k = 0; k < range.count; ++k)
+      out.push_back(range.first - 1 + k);
     return out;
   }
   if (ix.kind == mir::Expr::IndexSingle) {
     const int64_t i = eval_int(ix.args[0]);
     check_index(i, extent, what, raw);
     return {i - 1};
-  }
-  if (is_range(ix)) {
-    const StaticRange range = *static_range(ix, extent);
-    check_range(range.lo, range.hi, extent, what, raw);
-    for (int64_t i = range.lo; i <= range.hi; ++i) out.push_back(i - 1);
-    return out;
   }
   if (ix.kind == mir::Expr::IndexMulti) {
     DataMap::Entry iv = eval_pure(ix.args[0], "an index list");
@@ -46,12 +71,6 @@ std::vector<int64_t> Lowering::index_positions(const mir::Expr& ix,
       check_index(i, extent, what, raw);
       out.push_back(i - 1);
     }
-    return out;
-  }
-  if (ix.kind == mir::Expr::IndexUpfrom) {
-    const int64_t lo = eval_int(ix.args[0]);
-    check_range(lo, extent, extent, what, raw);
-    for (int64_t i = lo; i <= extent; ++i) out.push_back(i - 1);
     return out;
   }
   fail(std::string("unsupported ") + what + " " + ix.name, raw);
@@ -837,11 +856,11 @@ Lowering::Val Lowering::lower_expr_impl(const mir::Expr& e) {
       if (e.args.size() == 2 && is_matrix(base.si) &&
           (is_range(e.args[1]) || e.args[1].kind == mir::Expr::IndexMulti)) {
         std::vector<int> rows;
-        if (auto range = static_range(e.args[1], base.si.rows)) {
-          check_range(range->lo, range->hi, base.si.rows, "matrix row range",
-                      e.raw);
-          for (int64_t i = range->lo; i <= range->hi; ++i)
-            rows.push_back((int)i - 1);
+        if (is_range(e.args[1])) {
+          const RangeSelection range = range_selection(
+              e.args[1], base.si.rows, SelectorSite::MatrixRow, e.raw);
+          for (int64_t k = 0; k < range.count; ++k)
+            rows.push_back((int)(range.first - 1 + k));
         } else {
           DataMap::Entry iv = eval_pure(e.args[1].args[0], "a gather index");
           if (!iv.is_int) fail("matrix row gather needs int data", e.raw);
@@ -867,37 +886,26 @@ Lowering::Val Lowering::lower_expr_impl(const mir::Expr& e) {
       // the complete suffix shape even when its storage width is zero.
       if (e.args.size() == 2 && is_array(base.si) && is_range(e.args[1])) {
         const ArrayShape& sh = array_shape(base.si);
-        const StaticRange range = *static_range(e.args[1], sh.dims.front());
-        const int64_t lo = range.lo;
-        const int64_t hi = range.hi;
-        // hi < lo is an empty slice whatever the endpoints (CmdStan's
-        // rvalue checks bounds only when a range is nonempty), and the
-        // bounds are data, so rejecting it would make compilation
-        // data-dependent.
-        if (hi >= lo && (lo < 1 || hi > sh.dims.front()))
-          fail("array outer range out of bounds", e.raw);
+        const RangeSelection range = range_selection(
+            e.args[1], sh.dims.front(), SelectorSite::Array, e.raw);
         std::vector<int64_t> out_dims = sh.dims;
-        out_dims[0] = hi >= lo ? hi - lo + 1 : 0;
+        out_dims[0] = range.count;
         const std::vector<int64_t> suffix(sh.dims.begin() + 1, sh.dims.end());
         const int64_t width = checked_product(suffix, "array element");
         const int64_t len = checked_product(out_dims, "array range");
-        const int64_t offset = hi >= lo ? (lo - 1) * width : 0;
+        const int64_t offset = range.count ? (range.first - 1) * width : 0;
         SlotInfo si = array_view(std::move(out_dims), sh.leaf);
         return with_layout(
             emit_value(OP_SLICE, {base}, len, si,
                        {checked_immediate(offset, "array range offset")}),
             owning_layout(si));
       }
-      // Between subrange read on a 1-D value: v[a:b] is contiguous.
-      // hi < lo is empty, not negative-length.
+      // Range read on a vector or row vector: v[a:b] is contiguous.
       if (e.args.size() == 2 && is_range(e.args[1])) {
-        const StaticRange range =
-            *static_range(e.args[1], g.slots[base.slot].len);
-        const int64_t lo = range.lo;
-        const int64_t hi = range.hi;
-        check_range(lo, hi, g.slots[base.slot].len, "range", e.raw);
-        const int64_t len = hi >= lo ? hi - lo + 1 : 0;
-        const int64_t offset = len ? lo - 1 : 0;
+        const RangeSelection range = range_selection(
+            e.args[1], g.slots[base.slot].len, SelectorSite::Vector, e.raw);
+        const int64_t len = range.count;
+        const int64_t offset = len ? range.first - 1 : 0;
         return with_layout(
             emit_value(OP_SLICE, {base}, len, view_of(e.unsized),
                        {checked_immediate(offset, "range offset")}),
@@ -997,12 +1005,14 @@ Lowering::Val Lowering::lower_expr_impl(const mir::Expr& e) {
           is_range(e.args[2])) {
         const int64_t i = eval_int(e.args[1].args[0]);
         const int64_t S = (*bdims)[1];
-        const StaticRange range = *static_range(e.args[2], S);
-        const int64_t lo = range.lo;
-        const int64_t hi = range.hi;
         check_uni_index(i, (*bdims)[0], "array[uni, ...] index", e.raw);
-        check_range(lo, hi, S, "array range", e.raw);
-        const int64_t len = hi >= lo ? hi - lo + 1 : 0;
+        const RangeSelection range = range_selection(
+            e.args[2], S,
+            array_shape(base.si).leaf == ViewKind::Flat ? SelectorSite::Array
+                                                        : SelectorSite::Vector,
+            e.raw);
+        const int64_t lo = range.first;
+        const int64_t len = range.count;
         SlotInfo si = array_shape(base.si).leaf == ViewKind::Flat
                           ? array_view({len}, ViewKind::Flat)
                           : view_of(e.unsized);
@@ -1037,14 +1047,14 @@ Lowering::Val Lowering::lower_expr_impl(const mir::Expr& e) {
       // Row-range column read M[a:b, j] (contiguous within the column).
       if (e.args.size() == 3 && is_matrix(base.si) && is_range(e.args[1]) &&
           e.args[2].kind == mir::Expr::IndexSingle) {
-        const StaticRange range = *static_range(e.args[1], base.si.rows);
-        const int64_t lo = range.lo;
-        const int64_t hi = range.hi;
         const int64_t j = eval_int(e.args[2].args[0]);
         check_uni_index(j, base.si.cols, "matrix[..., uni] column indexing",
                         e.raw);
-        check_range(lo, hi, base.si.rows, "matrix row range", e.raw);
-        const int64_t len = hi >= lo ? hi - lo + 1 : 0;
+        // Stan selects the column first and indexes it as a vector.
+        const RangeSelection range = range_selection(
+            e.args[1], base.si.rows, SelectorSite::Vector, e.raw);
+        const int64_t lo = range.first;
+        const int64_t len = range.count;
         const int64_t offset = len ? (j - 1) * base.si.rows + lo - 1 : 0;
         return with_layout(
             emit_value(OP_SLICE, {base}, len, view_of(e.unsized),
@@ -1065,10 +1075,12 @@ Lowering::Val Lowering::lower_expr_impl(const mir::Expr& e) {
           is_matrix_selector(e.args[1]) && is_matrix_selector(e.args[2]) &&
           (e.args[1].kind != mir::Expr::IndexSingle ||
            e.args[2].kind != mir::Expr::IndexSingle)) {
-        const std::vector<int64_t> rows = index_positions(
-            e.args[1], base.si.rows, "matrix row gather", e.raw);
-        const std::vector<int64_t> cols = index_positions(
-            e.args[2], base.si.cols, "matrix column gather", e.raw);
+        const std::vector<int64_t> rows =
+            index_positions(e.args[1], base.si.rows, SelectorSite::MatrixRow,
+                            "matrix row gather", e.raw);
+        const std::vector<int64_t> cols =
+            index_positions(e.args[2], base.si.cols, SelectorSite::MatrixColumn,
+                            "matrix column gather", e.raw);
         std::vector<int> gather;
         gather.reserve(rows.size() * cols.size());
         for (int64_t j : cols)
@@ -1144,15 +1156,11 @@ Lowering::Val Lowering::lower_expr_impl(const mir::Expr& e) {
             ix.push_back(one - 1);
           }
           const Addr a = flat_addr(*bdims, false, ix);
-          int64_t lo = 1, hi = a.len;
           const bool ranged = is_range(last);
-          if (ranged) {
-            const StaticRange range = *static_range(last, a.len);
-            lo = range.lo;
-            hi = range.hi;
-            check_range(lo, hi, a.len, "array leaf range", e.raw);
-          }
-          const int64_t len = hi >= lo ? hi - lo + 1 : 0;
+          const RangeSelection range =
+              range_selection(last, a.len, SelectorSite::Vector, e.raw);
+          const int64_t lo = range.first;
+          const int64_t len = range.count;
           SlotInfo si = view_of(e.unsized);
           const int64_t offset = len ? a.off + lo - 1 : a.off;
           const ExpressionLayout layout =
@@ -1241,8 +1249,12 @@ Lowering::Val Lowering::lower_expr_impl(const mir::Expr& e) {
         selected.reserve(indexes);
         drops.reserve(indexes);
         for (size_t k = 0; k < indexes; ++k) {
-          selected.push_back(index_positions(e.args[1 + k], shape.dimensions[k],
-                                             "index", e.raw));
+          selected.push_back(index_positions(
+              e.args[1 + k], shape.dimensions[k],
+              selector_site(
+                  k, shape.array_depth,
+                  function_leaf(shape) == FunctionContainerKind::Matrix),
+              "index", e.raw));
           drops.push_back(e.args[1 + k].kind == mir::Expr::IndexSingle);
         }
         BuiltinIndexMap map;
@@ -1477,27 +1489,23 @@ Lowering::StaticProbe<Lowering::StaticSelector> Lowering::try_static_selector(
           StaticProbeState::Invalid, {}, "static matrix index out of bounds"};
     return {StaticProbeState::Known, {1, true}, {}};
   }
-  if (index.kind == mir::Expr::IndexBetween && index.args.size() == 2) {
+  if ((index.kind == mir::Expr::IndexBetween && index.args.size() == 2) ||
+      (index.kind == mir::Expr::IndexUpfrom && index.args.size() == 1)) {
     const auto lo = try_static_int(index.args[0]);
     if (lo.state != StaticProbeState::Known) return {lo.state, {}, lo.error};
-    const auto hi = try_static_int(index.args[1]);
-    if (hi.state != StaticProbeState::Known) return {hi.state, {}, hi.error};
-    // Stan's range indexing treats hi < lo as empty and performs no bounds
-    // check on either endpoint (the same rule check_range implements).
-    if (hi.value < lo.value) return {StaticProbeState::Known, {0, false}, {}};
-    if (lo.value < 1 || hi.value > extent)
+    std::optional<int64_t> upper;
+    if (index.kind == mir::Expr::IndexBetween) {
+      const auto hi = try_static_int(index.args[1]);
+      if (hi.state != StaticProbeState::Known) return {hi.state, {}, hi.error};
+      upper = hi.value;
+    }
+    // Both matrix axes follow the same rule.
+    const RangeSelection range = resolve_range_selector(
+        SelectorSite::MatrixRow, extent, lo.value, upper);
+    if (!range.ok())
       return {
           StaticProbeState::Invalid, {}, "static matrix range out of bounds"};
-    return {StaticProbeState::Known, {hi.value - lo.value + 1, false}, {}};
-  }
-  if (index.kind == mir::Expr::IndexUpfrom && index.args.size() == 1) {
-    const auto lo = try_static_int(index.args[0]);
-    if (lo.state != StaticProbeState::Known) return {lo.state, {}, lo.error};
-    if (extent < lo.value) return {StaticProbeState::Known, {0, false}, {}};
-    if (lo.value < 1)
-      return {
-          StaticProbeState::Invalid, {}, "static matrix range out of bounds"};
-    return {StaticProbeState::Known, {extent - lo.value + 1, false}, {}};
+    return {StaticProbeState::Known, {range.count, false}, {}};
   }
   if (index.kind == mir::Expr::IndexMulti && index.args.size() == 1) {
     auto evaluated = try_eval_interpreter(index.args[0]);

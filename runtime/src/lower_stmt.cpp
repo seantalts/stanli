@@ -1520,9 +1520,12 @@ void Lowering::lower_simple_stmt(const mir::Stmt& s) {
             selected.reserve(s.lhs_idx.size());
             drops.reserve(s.lhs_idx.size());
             for (size_t d = 0; d < s.lhs_idx.size(); ++d) {
-              selected.push_back(index_positions(s.lhs_idx[d],
-                                                 shape.dimensions[d],
-                                                 "assignment index", s.raw));
+              selected.push_back(index_positions(
+                  s.lhs_idx[d], shape.dimensions[d],
+                  selector_site(
+                      d, shape.array_depth,
+                      function_leaf(shape) == FunctionContainerKind::Matrix),
+                  "assignment index", s.raw, true));
               drops.push_back(s.lhs_idx[d].kind == mir::Expr::IndexSingle);
             }
             try {
