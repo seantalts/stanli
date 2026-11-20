@@ -170,6 +170,7 @@ branch, use `gh workflow run wheels.yml --ref BRANCH`. The jobs are in
 | [posteriordb cross-path](#comparing-stanli-execution-paths) | the posteriordb models under the same configurations plus one pass-off set | each other, within 1e-11 | by hand after pass changes | an error present in both cells |
 | [sampler parity](#samplers-and-other-algorithms) | NUTS draws and statistics across metrics and options | Stan's own NUTS services on the same executor, bitwise | PR (CTest) | compiler numerics (both sides share the executor) |
 | [algorithm checks](#samplers-and-other-algorithms) | optimize, Laplace, Pathfinder, ADVI, fixed_param, RNG streams | a known Gaussian posterior; Stan's generator | PR (CTest) | non-Gaussian posteriors |
+| [reference posteriors](#samplers-and-other-algorithms) | NUTS means and standard deviations of the 39 posteriordb models with reference draws | posteriordb reference draws, within 4 Monte Carlo standard errors | by hand, post-merge | WALNUTS; models without reference draws |
 | [sampler trace](#samplers-and-other-algorithms) | step counts, tree depth, step size, divergences, mean `lp__` | CmdStan with the same settings | by hand after sampler changes | statistical validity of NUTS |
 | [compiler producer parity](#compiler-producer-parity) | compact MIR bytes from the native, JavaScript and Windows compilers | each other, byte for byte | PR | numerical behavior |
 | MIR wire cost | compact MIR decode time and size on Eight Schools | legacy MIR; each must be at most half | post-merge | other models |
@@ -461,6 +462,22 @@ difference in leapfrog steps. Keep its default adaptation target, because
 [`harnesses/fast_sampling_check.py`](harnesses/fast_sampling_check.py)
 compares fast-mode posteriors with default-mode and posteriordb reference
 posteriors. You run it by hand. CTest tests its flag rules.
+
+[`tools/verify_posteriors.py`](tools/verify_posteriors.py) samples each
+posteriordb corpus model that has posteriordb reference draws (39 models) with
+NUTS: 4 chains, 1000 warmup and 1000 kept iterations, adapt delta 0.8 and a
+fixed seed. For each parameter it compares the mean and the standard
+deviation with the reference draws by
+`z = (stanli - reference) / sqrt(mcse_stanli^2 + mcse_reference^2)`, and fails a
+model when any `|z|` exceeds 4. Each side's Monte Carlo standard error comes
+from its own draws by batch means, with batches of `sqrt(n)` draws per chain;
+for the standard deviation, the delta method is applied to the batched squared
+deviations. It reports split R-hat of the stanli chains and the divergence
+count, which do not fail a model. The `deps/posteriordb` checkout has no
+reference draws, so pass a checkout of the same posteriordb revision that has
+`posterior_database/reference_posteriors` with `--references`. It runs by hand
+or after merge, not in pull request CI, and covers NUTS only. CTest runs its
+statistics tests (`tests/test_verify_posteriors.py`) on synthetic draws.
 
 [`harnesses/brms_end_to_end.R`](harnesses/brms_end_to_end.R) fits each brms
 formula and checks the common post-processing calls.
