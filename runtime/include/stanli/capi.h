@@ -1,7 +1,25 @@
 /* stanli C ABI: the versioned boundary language bindings speak to.
  * Exception-free; every entry returns an error code or null on failure and
  * writes a message into the caller's buffer. One stanli_model per (model,
- * data) pair; not thread-safe per instance (use one per chain).
+ * data) pair.
+ *
+ * Threads. Different stanli_model handles are independent: calls on
+ * different handles may run at the same time on different threads,
+ * construction and compilation included (the embedded compiler runs one
+ * compilation at a time by itself). One handle is NOT safe for concurrent
+ * use. A call that evaluates the model (stanli_grad, stanli_grad_err,
+ * stanli_hessian*, stanli_constrain, stanli_wa_row, stanli_wa_seed*,
+ * stanli_unconstrain_inits, the samplers, optimize and the other
+ * algorithms) uses the handle's own executors and its stanli_wa_seed
+ * stream, so at most one such call may run on a handle at a time, and none
+ * while stanli_model_free runs. Calls that only read what construction
+ * fixed (counts, names, variables, layouts, warnings, messages,
+ * stanli_resume_size) may run at any time while the handle lives. A call's
+ * callbacks (progress, poll, log) run on the calling thread during the call
+ * and must not evaluate the same handle. A sampling call runs its chains on
+ * threads of its own; that is internal to the call. To evaluate one model
+ * on several threads at once, build one handle per thread, or use the
+ * BridgeStan facade, whose handles lend each call an executor of its own.
  *
  * Indexed accessors (name i of n, message i of n, ...) answer an index
  * outside [0, n) with null for a string, 0 for a count or dimension, -1 for

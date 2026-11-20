@@ -3591,7 +3591,65 @@ void test_init_retries_only_rejections() {
   stanli_model_free(rejects);
 }
 
+// capi.h: different models may be built and used on different threads at
+// once. Two threads each build, evaluate and sample their own model, and
+// get what a serial run gets. Run under ThreadSanitizer, this also checks
+// the library's shared state (lowering, the message sink, chain threads).
+void test_models_on_separate_threads() {
+  struct Job {
+    const char* mir;
+    const char* data;
+    std::vector<double> lp, values;
+  };
+  const auto run = [](Job& job) {
+    const std::string mir = slurp(job.mir);
+    char err[4096]{};
+    stanli_model* m = stanli_model_new_with_opts(mir.c_str(), job.data, nullptr,
+                                                 err, sizeof err);
+    if (m == nullptr) return;
+    const int64_t n = stanli_n_unconstrained(m);
+    std::vector<double> q((size_t)n), grad((size_t)n);
+    for (int k = 0; k < 50; ++k) {
+      for (int64_t i = 0; i < n; ++i) q[(size_t)i] = 0.01 * (double)(k + i);
+      double lp = 0;
+      stanli_grad(m, q.data(), &lp, grad.data());
+      job.lp.push_back(lp);
+    }
+    stanli_sample_opts o;
+    stanli_sample_opts_init(&o);
+    o.chains = 2;
+    o.warmup = 30;
+    o.samples = 30;
+    o.num_threads = stanli_thread_safe() ? 2 : 1;
+    const int64_t width = stanli_wa_n_columns(m) > 0 ? stanli_wa_n_columns(m)
+                                                     : stanli_n_constrained(m);
+    job.values.assign((size_t)(o.chains * stanli_n_stored_draws(&o) * width),
+                      0.0);
+    stanli_sample_multi_metric(m, &o, nullptr, 0, nullptr, nullptr,
+                               job.values.data(), nullptr, nullptr, nullptr,
+                               nullptr, nullptr, nullptr, err, sizeof err);
+    stanli_model_free(m);
+  };
+  Job serial[2] = {{"tests/fixtures/gqrng.tmir.sexp", R"({"N":3})", {}, {}},
+                   {"tests/fixtures/es.tmir.sexp", nullptr, {}, {}}};
+  const std::string es_data = slurp("tests/fixtures/es.json");
+  serial[1].data = es_data.c_str();
+  Job parallel[2] = {serial[0], serial[1]};
+  for (Job& job : serial) run(job);
+  std::thread a(run, std::ref(parallel[0])), b(run, std::ref(parallel[1]));
+  a.join();
+  b.join();
+  for (int j = 0; j < 2; ++j)
+    expect_true(
+        std::string("a model on its own thread matches a serial run: ") +
+            serial[j].mir,
+        !serial[j].lp.empty() && parallel[j].lp == serial[j].lp &&
+            !serial[j].values.empty() &&
+            same_bits(parallel[j].values, serial[j].values));
+}
+
 int main() {
+  test_models_on_separate_threads();
   test_init_retries_only_rejections();
   test_out_of_range_accessors();
   test_grad_messages();
