@@ -85,6 +85,6 @@ not count.
   builds with threads.
 - **Recommendation**: add `-DSTANLI_THREADS=OFF` to the `cmake` call in
   `tools/check_no_stdio.sh`. That post-merge job already compiles every
-  runtime object, so it would then also cover the native no-threads
-  configuration that stanr uses, without a new job. Check first that stanr
-  defines no `STAN_THREADS`, since the point is to match its build.
+  runtime object, so it would then also compile the native no-threads
+  configuration, without a new job. If stanr's own build of the runtime also
+  leaves out `STAN_THREADS` (not checked here), that job would match it too.
