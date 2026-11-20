@@ -1794,6 +1794,9 @@ if(Python3_Interpreter_FOUND)
              COMMAND ${Python3_EXECUTABLE} tests/test_hp_reference.py
              WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
   endif()
+  add_test(NAME test_verify_posteriors
+           COMMAND ${Python3_EXECUTABLE} tests/test_verify_posteriors.py
+           WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
 endif()
 
 # Tests that set developer switches, to turn a pass off for a differential

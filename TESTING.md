@@ -55,16 +55,81 @@ CI enforces:
   CmdStan built on arm64, with Eigen's kernel changed to round each product,
   matches stanli on Linux within 2 ULP. Against an 80-digit reference, the
   largest gradient error is the same on both platforms.
-- A scaled error `|a-b| / max(|a|, |b|, 1)` below 1e-9 for every other
-  reference comparison. It does not prove a ULP bound; per-model ULP
-  distances are in [`docs/corpus-status.md`](docs/corpus-status.md).
+- A scaled error `|a-b| / max(|a|, |b|, 1)` below 1e-9 for every reference
+  comparison. For a value below 1 in magnitude this is an absolute error of
+  1e-9, so it does not prove a ULP bound.
+- The [ULP gate](#the-ulp-gate) on every value of every corpus replay, on the
+  platforms that the ledger has measured (macOS arm64 today).
 - Limits from measured deviations for the ill-conditioned models
-  (`ILL_CONDITIONED`) and `kronecker_gp`.
+  (`ILL_CONDITIONED`: 1.5e-6 scaled error on gradient entries only) and for
+  the two `kronecker_gp` gradient entries in `MISMATCH_OUTPUTS` (the
+  `gate_for` floor, 3.3e-2 or more). Every other value of these models keeps
+  the 1e-9 gate.
 - Matching rejection: stanli must reject a point that CmdStan rejects, and a
   non-finite value must match in kind.
 - 10 ULP by default in the generated conformance sweep, with reviewed
   per-case exceptions.
 - A separate limit for [fast mode](#fast-mode).
+
+<a id="the-ulp-gate"></a>
+
+### The ULP gate
+
+[`tools/verify_refs.py`](tools/verify_refs.py) counts the distance between
+each stanli value `b` and its CmdStan value `a` as
+
+    min(ulp_distance(a, b), ceil(|a - b| / ulp(S)))
+
+where `S` is the largest finite CmdStan magnitude among the values computed
+together with `a`: the whole gradient for a gradient entry, `|a|` itself for
+the log density, and the other columns of the same variable for a
+`write_array` value (`scaled_ulp`). The second term keeps a gradient entry
+that cancels to nearly zero from counting as 1e18 ULP when stanli and CmdStan
+round one term differently; it is measured against the size of the terms that
+formed the entry, not against the constant 1. `S` comes from CmdStan's values
+only, so a wrong large stanli value cannot widen it. In the `signatures`
+corpus, one gradient holds many independent cases, so `S` is the largest case
+(at most 2.8 there) and not the terms of each case. A small case is then held
+to an absolute error of about `10 ulp(S)`, at most 4.4e-15. 186 nonzero
+signature values are more than 10 ULP from CmdStan in their own magnitude and
+pass this way; the worst is grad[1178] of `density_signatures_13`, 1.02e-6 and
+5243 ULP from CmdStan in its own magnitude, 1 ULP of `S`. Both NaN, or the same
+infinity, is a distance of 0; a nonfinite value on one side only fails.
+
+Every value must be within 10 of these ULP (`DEFAULT_ULP_BOUND`) unless
+[`tests/ulp_ledger.json`](tests/ulp_ledger.json) lists a measured bound for
+it. The ledger is keyed by platform, then corpus (`main` for the main corpus,
+the local corpus name, with ` --stanc` for the stock-stanc replays), then
+model. An entry covers one value (`lp`, `grad[3]`, `wa mu.2`) or, when one
+model has more than 8 such values of one kind, every `grad` or `wa` value
+that has no entry of its own. Each entry has the bound, which is the worst
+value measured over the three points, and a reason. A replay on a platform
+with no section in the ledger skips this gate, as do fast mode and the
+WebAssembly replay (`--no-wa`). The gate adds to the scaled-error gate and
+the per-element brms limits above; it replaces neither.
+
+The bounds come only from a tool run:
+
+    tools/verify_refs.py deps/posteriordb --update-ulp-ledger
+    tools/verify_refs.py --corpus NAME [--stanc STANC] --update-ulp-ledger
+
+The run writes nothing unless every model passes every gate, including the
+ledger's current bounds. It creates entries for values over 10 that no entry
+covers, lowers an entry to the new measurement, and deletes an entry that is
+back within 10. It never raises a bound: a value over its bound fails the
+replay, and raising it means editing the entry by hand in a commit that says
+why. A generated entry's reason says only where it was measured; a person
+replaces it with the cause. A replay that measures half the bound or less
+prints a `ULP LEDGER` note asking for a rerun to tighten it.
+
+The reasons in the macOS arm64 section compare both engines with the 80-digit
+evaluator in [`tools/hp`](tools/hp/README.md) where it can score the value.
+Of the 134 main-corpus entries, it scores 81. stanli is at least as close to
+the true value as CmdStan in 54 of them, including 28 of the 30 lp entries.
+Entries whose reason says
+"stanli is farther from it than CmdStan" are open findings under the budgets
+above. Linux and Windows have no section yet, so pull request CI does not run
+this gate; record a section by running the commands above on that platform.
 
 Kernels keep the reference summation order where practical, so the unit tests
 are stricter than the corpus check. A reordered matrix-vector
@@ -105,6 +170,7 @@ branch, use `gh workflow run wheels.yml --ref BRANCH`. The jobs are in
 | [posteriordb cross-path](#comparing-stanli-execution-paths) | the posteriordb models under the same configurations plus one pass-off set | each other, within 1e-11 | by hand after pass changes | an error present in both cells |
 | [sampler parity](#samplers-and-other-algorithms) | NUTS draws and statistics across metrics and options | Stan's own NUTS services on the same executor, bitwise | PR (CTest) | compiler numerics (both sides share the executor) |
 | [algorithm checks](#samplers-and-other-algorithms) | optimize, Laplace, Pathfinder, ADVI, fixed_param, RNG streams | a known Gaussian posterior; Stan's generator | PR (CTest) | non-Gaussian posteriors |
+| [reference posteriors](#samplers-and-other-algorithms) | NUTS means and standard deviations of the 39 posteriordb models with reference draws | posteriordb reference draws, within 4 Monte Carlo standard errors | by hand, post-merge | WALNUTS; models without reference draws |
 | [sampler trace](#samplers-and-other-algorithms) | step counts, tree depth, step size, divergences, mean `lp__` | CmdStan with the same settings | by hand after sampler changes | statistical validity of NUTS |
 | [compiler producer parity](#compiler-producer-parity) | compact MIR bytes from the native, JavaScript and Windows compilers | each other, byte for byte | PR | numerical behavior |
 | MIR wire cost | compact MIR decode time and size on Eight Schools | legacy MIR; each must be at most half | post-merge | other models |
@@ -417,6 +483,22 @@ difference in leapfrog steps. Keep its default adaptation target, because
 [`harnesses/fast_sampling_check.py`](harnesses/fast_sampling_check.py)
 compares fast-mode posteriors with default-mode and posteriordb reference
 posteriors. You run it by hand. CTest tests its flag rules.
+
+[`tools/verify_posteriors.py`](tools/verify_posteriors.py) samples each
+posteriordb corpus model that has posteriordb reference draws (39 models) with
+NUTS: 4 chains, 1000 warmup and 1000 kept iterations, adapt delta 0.8 and a
+fixed seed. For each parameter it compares the mean and the standard
+deviation with the reference draws by
+`z = (stanli - reference) / sqrt(mcse_stanli^2 + mcse_reference^2)`, and fails a
+model when any `|z|` exceeds 4. Each side's Monte Carlo standard error comes
+from its own draws by batch means, with batches of `sqrt(n)` draws per chain;
+for the standard deviation, the delta method is applied to the batched squared
+deviations. It reports split R-hat of the stanli chains and the divergence
+count, which do not fail a model. The `deps/posteriordb` checkout has no
+reference draws, so pass a checkout of the same posteriordb revision that has
+`posterior_database/reference_posteriors` with `--references`. It runs by hand
+or after merge, not in pull request CI, and covers NUTS only. CTest runs its
+statistics tests (`tests/test_verify_posteriors.py`) on synthetic draws.
 
 [`harnesses/brms_end_to_end.R`](harnesses/brms_end_to_end.R) fits each brms
 formula and checks the common post-processing calls.

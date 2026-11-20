@@ -146,8 +146,10 @@ moving the GP covariates by one ulp on arm64 moves those gradients by
 6.38e-9 against the arm64 references (CI run 33938697559). Which points
 come out clean is therefore a property of the recording machine, so both
 models are listed in `ILL_CONDITIONED` in
-[`tools/verify_refs.py`](../../tools/verify_refs.py) and every one of
-their points is held to the limit a `MISMATCH` point gets.
+[`tools/verify_refs.py`](../../tools/verify_refs.py), and the gradient
+entries at every one of their points are held to `ILL_CONDITIONED_GATE`
+(1.5e-6 scaled error) instead of 1e-9. Their lp and `write_array` values
+keep the 1e-9 gate.
 
 `s2_gp_by_gr` is the third. `gp(x, by = g, gr = TRUE)` builds one
 covariance per level of `g`, five of them over eight distinct covariate
