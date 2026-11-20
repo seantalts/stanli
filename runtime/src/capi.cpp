@@ -11,6 +11,7 @@
 #include <stanli/optable.hpp>
 #include <stanli/stanc_result.hpp>
 #include <stanli/reduce_sum.hpp>
+#include <stanli/rejection.hpp>
 #include <stanli/walnuts.hpp>
 #include <stanli/wa_interp.hpp>
 #include <stanli/sparse_factor.hpp>
@@ -944,20 +945,31 @@ int stanli_sparse_factor_lowrank(const stanli_sparse_factor* f, int64_t k,
 
 void stanli_sparse_factor_free(stanli_sparse_factor* f) { delete f; }
 
-int stanli_grad(stanli_model* m, const double* q, double* lp, double* grad) {
+int stanli_grad_err(stanli_model* m, const double* q, double* lp, double* grad,
+                    char* err, size_t err_len) {
   const int64_t n = m->ex->n_params();
   copy_doubles(m->ex->params_data(), q, n);
+  int status = STANLI_EVAL_OK;
   try {
-    if (grad == nullptr) {
-      *lp = m->ex->forward();
-    } else {
-      *lp = m->ex->gradient(grad);
-    }
-    return 0;
-  } catch (const std::exception&) {
-    *lp = -std::numeric_limits<double>::infinity();
-    return 1;
+    *lp = grad == nullptr ? m->ex->forward() : m->ex->gradient(grad);
+    return STANLI_EVAL_OK;
+  } catch (const std::domain_error& e) {
+    status = STANLI_EVAL_REJECTED;
+    put_err(err, err_len, e.what());
+  } catch (const std::exception& e) {
+    status = stanli::is_internal_error(e) ? STANLI_EVAL_INTERNAL_ERROR
+                                          : STANLI_EVAL_FAILED;
+    put_err(err, err_len, e.what());
+  } catch (...) {
+    status = STANLI_EVAL_INTERNAL_ERROR;
+    put_err(err, err_len, "unknown error in stanli_grad");
   }
+  *lp = -std::numeric_limits<double>::infinity();
+  return status;
+}
+
+int stanli_grad(stanli_model* m, const double* q, double* lp, double* grad) {
+  return stanli_grad_err(m, q, lp, grad, nullptr, 0) == STANLI_EVAL_OK ? 0 : 1;
 }
 
 int stanli_hessian(stanli_model* m, const double* q, double* lp, double* grad,

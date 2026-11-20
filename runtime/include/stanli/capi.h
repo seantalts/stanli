@@ -224,6 +224,25 @@ int stanli_unconstrain_inits(stanli_model* m, const char* inits_json, double* q,
  * 1 on a rejected evaluation (domain error; *lp set to -inf). */
 int stanli_grad(stanli_model* m, const double* q, double* lp, double* grad);
 
+/* Why an evaluation failed. REJECTED is a std::domain_error, which is how
+ * Stan's reject() and its argument checks refuse a point: CmdStan's samplers
+ * reject the proposal and its initialization tries another point. FAILED is
+ * any other error in evaluating the model, such as an index out of range;
+ * CmdStan stops initialization at once on these. INTERNAL_ERROR is a failed
+ * check inside stanli itself, which is a bug worth reporting. */
+typedef enum {
+  STANLI_EVAL_OK = 0,
+  STANLI_EVAL_REJECTED = 1,
+  STANLI_EVAL_FAILED = 2,
+  STANLI_EVAL_INTERNAL_ERROR = 3
+} stanli_eval_status;
+
+/* stanli_grad with the reason for a failure: returns a stanli_eval_status
+ * and, unless it is STANLI_EVAL_OK, writes the evaluation's message into err
+ * and sets *lp to -inf. err is not touched on success. */
+int stanli_grad_err(stanli_model* m, const double* q, double* lp, double* grad,
+                    char* err, size_t err_len);
+
 /* The log density of stanli_grad, its gradient, and the n_unconstrained by
  * n_unconstrained Hessian at unconstrained q[n]. The Hessian is symmetric, so
  * row- and column-major agree. `grad` may be null.

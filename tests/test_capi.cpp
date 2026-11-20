@@ -61,6 +61,19 @@ void expect_near(const std::string& what, double got, double want) {
   std::printf("FAIL %s: got %.17g want %.17g\n", what.c_str(), got, want);
 }
 
+// A model from Stan source, or null when this build has no embedded stanc.
+stanli_model* from_stan(const char* code, const char* data = "{}") {
+  if (!stanli_has_embedded_stanc()) return nullptr;
+  char err[8192]{};
+  stanli_model* m = stanli_model_new_from_stan_with_opts(code, data, nullptr,
+                                                         err, sizeof err);
+  if (m == nullptr) {
+    ++failures;
+    std::printf("FAIL compiling a test model: %s\n", err);
+  }
+  return m;
+}
+
 void expect_names(const char* fixture, const std::string& data,
                   const std::vector<std::string>& expected,
                   const std::vector<double>& q = {},
@@ -3336,7 +3349,46 @@ void test_sample_setup_error() {
   stanli_model_free(m);
 }
 
+// stanli_grad_err says why an evaluation failed: Stan's own message, and
+// whether the model rejected the point or could not be evaluated there.
+void test_grad_messages() {
+  stanli_model* m = from_stan(
+      "parameters { real x; }\n"
+      "model {\n"
+      "  array[2] real a = {1.0, 2.0};\n"
+      "  int i = 1;\n"
+      "  if (x < -1) i = 3;\n"
+      "  if (x > 1) reject(\"x is too big: \", x);\n"
+      "  target += a[i];\n"
+      "  x ~ normal(0, 1);\n"
+      "}\n");
+  if (m == nullptr) return;
+  double lp = 0, grad = 0;
+  char err[512] = "untouched";
+  double x = 0.5;
+  expect_true(
+      "grad_err succeeds inside the support",
+      stanli_grad_err(m, &x, &lp, &grad, err, sizeof err) == STANLI_EVAL_OK &&
+          std::string(err) == "untouched" && grad == -0.5);
+  x = 2.0;
+  int rc = stanli_grad_err(m, &x, &lp, nullptr, err, sizeof err);
+  expect_true(
+      std::string("grad_err reports a reject: ") + err,
+      rc == STANLI_EVAL_REJECTED &&
+          std::string(err).find("x is too big: 2") != std::string::npos &&
+          lp == -std::numeric_limits<double>::infinity());
+  x = -2.0;
+  rc = stanli_grad_err(m, &x, &lp, &grad, err, sizeof err);
+  expect_true(std::string("grad_err reports an index out of range: ") + err,
+              rc == STANLI_EVAL_FAILED &&
+                  std::string(err).find("index") != std::string::npos);
+  expect_true("stanli_grad keeps its return codes",
+              stanli_grad(m, &x, &lp, &grad) == 1);
+  stanli_model_free(m);
+}
+
 int main() {
+  test_grad_messages();
   test_shared_write_array_executor();
   test_sampled_write_array_rows_match_draws();
   test_build_id_names_the_abi();

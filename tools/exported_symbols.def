@@ -41,6 +41,7 @@ EXPORTS
   stanli_n_unconstrained
   stanli_unconstrain_inits
   stanli_grad
+  stanli_grad_err
   stanli_hessian
   stanli_model_whiten
   stanli_model_whiten_lowrank
