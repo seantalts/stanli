@@ -851,6 +851,40 @@ void test_necessity_effects() {
                 bs_set_print_callback(nullptr, &err), 0);
 }
 
+// No parameters: theta_unc is null and the parameter buffer is empty, so
+// the copy into it must be skipped rather than made from a null pointer.
+void test_parameterless() {
+  const std::string mir = slurp("tests/fixtures/view_gq_data_matrix.tmir.sexp");
+  char* err = nullptr;
+  bs_model* m =
+      bs_model_from_mir(mir.c_str(), R"({"M":[[1,2,3],[4,5,6]]})", 1234, &err);
+  if (m == nullptr) {
+    fail(std::string("parameterless construct: ") +
+         (err ? err : "(no message)"));
+    bs_free_error_msg(err);
+    return;
+  }
+  expect_eq_int("parameterless bs_param_unc_num", bs_param_unc_num(m), 0);
+  double lp = 1.0;
+  expect_eq_int("parameterless bs_log_density",
+                bs_log_density(m, true, true, nullptr, &lp, &err), 0);
+  expect_bitwise("parameterless log density", lp, 0.0);
+  lp = 1.0;
+  expect_eq_int(
+      "parameterless bs_log_density_gradient",
+      bs_log_density_gradient(m, true, true, nullptr, &lp, nullptr, &err), 0);
+  expect_bitwise("parameterless gradient log density", lp, 0.0);
+  bs_rng* rng = bs_rng_construct(1, &err);
+  std::vector<double> row((size_t)bs_param_num(m, true, true), -1.0);
+  expect_eq_int(
+      "parameterless bs_param_constrain",
+      bs_param_constrain(m, true, true, nullptr, row.data(), rng, &err), 0);
+  if (row.size() != 2 || row[0] != 6.0)
+    fail("parameterless bs_param_constrain row is wrong");
+  bs_rng_destruct(rng);
+  bs_model_destruct(m);
+}
+
 // The manifest reader on its own: the manifest is read and its build id
 // checked before anything is compiled.
 void test_manifest() {
@@ -1344,6 +1378,7 @@ int main() {
   test_initialize();
   test_print_callback();
   test_necessity_effects();
+  test_parameterless();
   test_manifest();
   test_embedded_manifest();
   test_whitened_manifest();

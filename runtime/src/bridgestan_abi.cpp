@@ -45,6 +45,7 @@
 #include <stanli/whiten.hpp>
 
 #include "build_id.hpp"
+#include "copy_doubles.hpp"
 #include "data_document.hpp"
 
 #include <boost/random/uniform_real_distribution.hpp>
@@ -191,8 +192,7 @@ class bs_model {
     std::vector<double> row;
     if (wa_interp) {
       auto lease = pool->acquire();
-      std::memcpy(lease->params_data(), theta_unc,
-                  sizeof(double) * (size_t)lease->n_params());
+      stanli::copy_doubles(lease->params_data(), theta_unc, lease->n_params());
       lease->run_forward_only();
       // The interpreter has no per-section switch: one eval produces the
       // whole row, generated quantities included. A caller who asked for
@@ -206,8 +206,7 @@ class bs_model {
     }
     stanli::ExecutorPool& p = wa_pool ? *wa_pool : *pool;
     auto lease = p.acquire();
-    std::memcpy(lease->params_data(), theta_unc,
-                sizeof(double) * (size_t)lease->n_params());
+    stanli::copy_doubles(lease->params_data(), theta_unc, lease->n_params());
     // The compiled graph, like WaInterp above, always evaluates the complete
     // row. Discarded generated quantities therefore draw from a scratch
     // stream when the caller did not request them.
@@ -223,8 +222,7 @@ class bs_model {
   // forward(), or forward + reverse when grad is non-null.
   double density(const double* theta_unc, double* grad) const {
     auto lease = pool->acquire();
-    std::memcpy(lease->params_data(), theta_unc,
-                sizeof(double) * (size_t)lease->n_params());
+    stanli::copy_doubles(lease->params_data(), theta_unc, lease->n_params());
     return grad == nullptr ? lease->forward() : lease->gradient(grad);
   }
 };
