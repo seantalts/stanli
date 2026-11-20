@@ -17,6 +17,7 @@
 #include <stanli/region_map.hpp>
 #include <stanli/wa_interp.hpp>
 
+#include <stan/io/dump.hpp>
 #include <stan/math.hpp>
 #include <algorithm>
 #include <cmath>
@@ -9040,6 +9041,45 @@ int main() {
   }
 
   {
+    // Every way into a DataMap carries the dims that its source found, and
+    // they must equal the declared dims, as in CmdStan. A 3x3 matrix given
+    // nine flat values, or nine values under a 1x9 shape, has the right
+    // count but the wrong shape.
+    const std::string mir = slurp("tests/fixtures/quad_form_sym.tmir.sexp");
+    const auto message = [&](const DataMap& d) {
+      try {
+        compile_model(mir, d);
+      } catch (const std::invalid_argument& e) {
+        return std::string(e.what());
+      } catch (const std::exception& e) {
+        return std::string("wrong exception type: ") + e.what();
+      }
+      return std::string("accepted");
+    };
+    DataMap flat;
+    flat.set_real_array("d", std::vector<double>(9, 1.0));
+    flat.set_real_array("dv", std::vector<double>(3, 1.0));
+    const std::string flat_msg = message(flat);
+    check(flat_msg.find("mismatch in number dimensions declared and found in "
+                        "context; processing stage=data initialization; "
+                        "variable name=d; dims declared=(3,3); dims "
+                        "found=(9)") != std::string::npos,
+          "a flat matrix is rejected by its shape: " + flat_msg);
+
+    std::istringstream dumped(
+        "d <- structure(c(1, 2, 3, 4, 5, 6, 7, 8, 9), .Dim = c(1, 9))\n"
+        "dv <- c(1, 2, 3)\n");
+    stan::io::dump context(dumped);
+    const std::string context_msg = message(DataMap::from_var_context(context));
+    check(context_msg.find("mismatch in dimension declared and found in "
+                           "context; processing stage=data initialization; "
+                           "variable name=d; position=0; dims "
+                           "declared=(3,3); dims found=(1,9)") !=
+              std::string::npos,
+          "a var_context matrix is rejected by its shape: " + context_msg);
+  }
+
+  {
     // `target += <container>`. Stan defines the increment for a container
     // `e` as adding `sum(e)`; lowering used to push the container's slot
     // straight into the target terms, where a scalar consumer read element
@@ -9267,7 +9307,7 @@ int main() {
     const std::vector<double> dm = {1.5, 0.3,  -0.2, 0.3, 2.0,
                                     0.7, -0.2, 0.7,  1.1};
     const std::vector<double> dvv = {0.6, -1.2, 0.4};
-    d.set_real_array("d", dm);
+    d.set_real_array("d", dm, {3, 3});
     d.set_real_array("dv", dvv);
     CompiledModel mm =
         compile_model(slurp("tests/fixtures/quad_form_sym.tmir.sexp"), d);
@@ -9320,7 +9360,7 @@ int main() {
   // returning the finite unsymmetrized c.
   {
     DataMap d;
-    d.set_real_array("d", std::vector<double>(9, 0.0));
+    d.set_real_array("d", std::vector<double>(9, 0.0), {3, 3});
     d.set_real_array("dv", std::vector<double>(3, 0.0));
     CompiledModel qm =
         compile_model(slurp("tests/fixtures/quad_form_sym.tmir.sexp"), d);

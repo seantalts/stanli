@@ -55,7 +55,7 @@ test_that("bridgestan_data replaces a manifest already in the data", {
   model <- stanli_model(code = bridgestan_code,
                         data = bridgestan_data(stanli_model(
                           code = bridgestan_code,
-                          data = list(N = 1L, y = 0.5))))
+                          data = list(N = 1L, y = array(0.5, 1)))))
   text <- bridgestan_data(model)
   expect_length(gregexpr("\"__stanli\"", text, fixed = TRUE)[[1L]], 1L)
   parsed <- parse_bridgestan_data(text)

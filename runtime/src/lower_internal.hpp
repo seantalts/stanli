@@ -505,7 +505,7 @@ struct PreparedContext {
   const std::map<std::string, DataMap::Entry>& environment;
   const std::map<std::string, long>& integers;
   const std::map<std::string, DeclView>& declarations;
-  const DataMap& omitted_data;
+  const DataMap& zero_size_data;
   const std::set<std::string>& names;
 };
 
@@ -823,10 +823,14 @@ struct Lowering {
     return query == "cols" ? 1 : 0;
   }
   const DataMap& data;
-  DataMap omitted_data;
+  // The empty value of each data variable whose declared size is zero.
+  // CmdStan reads no elements for such a variable, so it may be left out or
+  // given any value with no elements, and this binding wins over the value
+  // supplied.
+  DataMap zero_size_data;
   const DataMap::Entry* data_entry(const std::string& name) const {
+    if (zero_size_data.has(name)) return &zero_size_data.at(name);
     if (data.has(name)) return &data.at(name);
-    if (omitted_data.has(name)) return &omitted_data.at(name);
     return nullptr;
   }
   std::shared_ptr<ShapeInterner> shape_pool;
@@ -1625,7 +1629,7 @@ struct Lowering {
 
   void bind_data(const mir::Program& p);
   void report_missing_data(const mir::Program& p);
-  void omit_zero_size(const std::string& name, const mir::SizedType& type);
+  void bind_zero_size(const std::string& name, const mir::SizedType& type);
 
   // Lazily materialize an env value as a data slot when log_prob uses it.
   int env_slot(const std::string& name);

@@ -144,3 +144,19 @@ test_that("a model reads zero-extent containers", {
                       refresh = 0)
   expect_equal(unname(fit$draws[1, 1, ]), c(2, 0, 0, 0, 0, 0))
 })
+
+test_that("a length-1 container needs array(x, 1), as in CmdStan", {
+  skip_without_runtime()
+  code <- "data { vector[1] v; array[1] int k; }
+           parameters { real mu; } model { mu ~ normal(v[1] + k[1], 1); }"
+  expect_error(stanli_model(code = code, data = list(v = 0.5, k = 2L)),
+               "variable name=v; dims declared=(1); dims found=()",
+               fixed = TRUE)
+  expect_error(stanli_model(code = code,
+                            data = list(v = array(0.5, 1), k = 2L)),
+               "variable name=k; dims declared=(1); dims found=()",
+               fixed = TRUE)
+  m <- stanli_model(code = code,
+                    data = list(v = array(0.5, 1), k = array(2L, 1)))
+  expect_s3_class(m, "stanli_model")
+})
