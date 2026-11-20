@@ -1198,6 +1198,10 @@ CompiledModel::WriteArray Lowering::run_write_array(const mir::Program& p) {
   // slot, so point it at one.
   g.result_slot = const_slot(0.0);
   g.forward_only = true;
+  // Callers read the columns after a run, and bind writes the fills once,
+  // so neither can share storage with another slot.
+  for (int slot : roots) g.slots[(size_t)slot].pinned = true;
+  for (const auto& fill : out.fills) g.slots[(size_t)fill.first].pinned = true;
   wa.n_unconstrained = out.n_unconstrained;
   prep.graph(prep_graph, "finalize", finalize_time, g, out.fills,
              target_terms.size(), out.views.size());

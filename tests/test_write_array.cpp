@@ -1314,6 +1314,45 @@ void test_write_array_forward_only() {
   }
 }
 
+// A forward-only executor runs its ops in one fixed order, so a slot that
+// no later op reads can give its storage to a slot written after it. Columns
+// stay where the caller reads them. Rows match an executor that gives every
+// slot its own storage.
+void test_write_array_reused_values() {
+  using namespace stanli;
+  DataMap data;
+  data.set_int("N", 64);
+  data.set_int("T", 8);
+  std::vector<double> x(64);
+  for (int i = 0; i < 64; ++i) x[(size_t)i] = 0.25 * (i % 5) - 0.5;
+  data.set_real_array("x", x);
+  CompiledModel cm = compile_model(
+      slurp("tests/fixtures/structured_wa_carried.tmir.sexp"), data);
+  if (!compiled_completely(cm, "reused write_array values")) return;
+  Graph separate = cm.write_array->graph;
+  separate.forward_only = false;
+  Executor reused(cm.write_array->graph), own(std::move(separate));
+  cm.write_array->bind(reused);
+  cm.write_array->bind(own);
+  if (reused.mutable_value_size() >= own.mutable_value_size()) {
+    ++failures;
+    std::printf("FAIL reused write_array values: %lld of %lld doubles\n",
+                (long long)reused.mutable_value_size(),
+                (long long)own.mutable_value_size());
+  }
+  for (const double mu : {0.4, -1.1, 2.0}) {
+    reused.params_data()[0] = own.params_data()[0] = mu;
+    WaRng a(3), b(3);
+    reused.run_forward_only(EvalState{&a});
+    own.run_forward_only(EvalState{&b});
+    if (!same_double_bytes(read_row(cm.write_array->columns, reused),
+                           read_row(cm.write_array->columns, own))) {
+      ++failures;
+      std::printf("FAIL reused write_array values: rows differ at mu=%g\n", mu);
+    }
+  }
+}
+
 void test_write_array_carried_loop() {
   using namespace stanli;
   const std::string text =
@@ -4929,6 +4968,7 @@ int main() {
   test_transformed_parameter_checks();
   test_write_array_retained_loop();
   test_write_array_forward_only();
+  test_write_array_reused_values();
   test_write_array_carried_loop();
   test_write_array_block_order();
   test_write_array_vector_rng();

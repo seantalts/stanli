@@ -262,6 +262,8 @@ class Executor {
       return const_cast<double*>(borrowed_[slot]);
     return const_cast<double*>(values_.data()) + graph_.slots[slot].offset;
   }
+  int64_t reuse_values_(const std::vector<char>& written,
+                        const std::vector<int>& primal_sources, int64_t end);
   KernelCtx make_ctx_(const Op& op, int64_t scratch_offset,
                       const std::vector<char>& written,
                       const std::vector<int64_t>& adjoint_offsets);

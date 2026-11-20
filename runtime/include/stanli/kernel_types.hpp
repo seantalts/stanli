@@ -50,6 +50,10 @@ struct Slot {
   int64_t offset = 0;  // within its bound value buffer (filled at bind)
   int64_t len = 0;
   bool is_param = false;
+  // Read from outside the graph after a forward run, such as a write_array
+  // column, or filled once at bind. A forward-only executor never gives a
+  // pinned slot's storage to another slot.
+  bool pinned = false;
 };
 
 struct Op {
