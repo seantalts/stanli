@@ -123,9 +123,7 @@ double dirichlet_eval(KernelCtx& ctx) {
         lp = call(theta_arg, arg);
       });
   };
-  if (propto && !a0 && !a1) {
-    lp = 0.0;
-  } else if (a0) {
+  if (a0) {
     with_vectorized_argument(theta, theta_array, with_alpha);
   } else {
     with_vectorized_argument(theta_d, theta_array, with_alpha);
@@ -160,8 +158,11 @@ void dirichlet_fwd(KernelCtx& ctx) {
   s.len[1] = ctx.in[1].len;
   std::fill_n(ctx.scratch, s.len[0] + s.len[1], 0.0);
   if (propto && mask == 0) {
-    // Preserve the legacy all-data propto shortcut, including validation.
-    ctx.out.data[0] = 0.0;
+    // Every term drops, but Stan still checks the simplex and the
+    // concentrations.
+    ctx.out.data[0] = stan::math::dirichlet_lpdf<true>(
+        Eigen::Map<const Eigen::VectorXd>(ctx.in[0].data, ctx.in[0].len),
+        Eigen::Map<const Eigen::VectorXd>(ctx.in[1].data, ctx.in[1].len));
     return;
   }
   sink_scope active(s);
