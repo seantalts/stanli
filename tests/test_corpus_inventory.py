@@ -125,5 +125,13 @@ class InventoryTest(unittest.TestCase):
             inventory.local_cases()
 
 
+class RepositoryCollectionsTest(unittest.TestCase):
+    def test_every_local_collection_has_a_readme_and_model_pairs(self):
+        for collection in inventory.LOCAL_COLLECTIONS:
+            directory = REPO / "tests" / collection
+            self.assertTrue((directory / "README.md").is_file(), collection)
+            self.assertTrue(list(directory.glob("*.stan")), collection)
+
+
 if __name__ == "__main__":
     unittest.main()

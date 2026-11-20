@@ -97,3 +97,11 @@ as test inputs. Each directory's `licenses/` holds the license text.
 - `tests/ecoensemble/`: EcoEnsemble 1.2.0, GPL (>= 3), by Michael A. Spence,
   James A. Martindale, Michael J. Thomson, Thomas I. J. Bartos and Luke E. K.
   Broadbent. The model has no `#include` and is copied as published.
+
+Also in the repository, not in the binary: `tests/examplemodels/` holds 23
+programs from stan-dev/example-models at commit `e5b7d9e2`, unchanged, with
+their data. The repository's README places the examples under the new BSD
+license unless a directory says otherwise; the `BPA/` directory carries
+BSD-3-Clause, Copyright (c) 2016 Hiroki Itô, and `jupyter/sum-to-zero/` carries
+BSD-3-Clause for its code, Copyright (c) 2018-2022 Stan Development Team and
+their assignees. The license texts are in `tests/examplemodels/licenses/`.

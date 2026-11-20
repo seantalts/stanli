@@ -835,7 +835,9 @@ That is the 119 runnable posteriordb posteriors, the lowering
 regressions in [`tests/regressions/`](../tests/regressions/README.md), the brms
 output in [`tests/brms/`](../tests/brms/README.md), cogmod's custom
 brms families in [`tests/cogmod/`](../tests/cogmod/README.md), ctsem's
-state-space template in [`tests/ctsem/`](../tests/ctsem/README.md), and
+state-space template in [`tests/ctsem/`](../tests/ctsem/README.md),
+programs from stan-dev/example-models in
+[`tests/examplemodels/`](../tests/examplemodels/README.md), and
 models from CRAN packages, one directory per package (such as
 [`tests/oncobayes2/`](../tests/oncobayes2/README.md)), listed in
 `CRAN_PACKAGES` in [`tools/corpus_inventory.py`](../tools/corpus_inventory.py). It is the

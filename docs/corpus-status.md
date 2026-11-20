@@ -1,11 +1,11 @@
 # Corpus status
 
-Models that evaluate: 369/370
-Models with CmdStan reference values: 369/370, at 1107 evaluation points in total.
+Models that evaluate: 398/399
+Models with CmdStan reference values: 398/399, at 1194 evaluation points in total.
 
 The corpus includes models from posteriordb, generated brms and cogmod models, ctsem's state-space template, models from CRAN packages, imported teaching models, and language fixtures. The source collection column says where each model came from. `tools/verify_refs.py` checks all reference values the same way.
 
-For 354 verified models, the table below shows how far stanli was from CmdStan at the primary evaluation point. These numbers were measured when the reference was recorded. Imported references keep their original CmdStan answers and a record of how each one was made. No deviation was recorded for them, so their rows say "not recorded". Having a reference for a model does not mean that the current build matches it. The numerical replay checks the current build.
+For 383 verified models, the table below shows how far stanli was from CmdStan at the primary evaluation point. These numbers were measured when the reference was recorded. Imported references keep their original CmdStan answers and a record of how each one was made. No deviation was recorded for them, so their rows say "not recorded". Having a reference for a model does not mean that the current build matches it. The numerical replay checks the current build.
 
 A model passes only when tools/verify_sample.py finds that stanli's log_prob and full gradient match CmdStan's at a shared, fixed evaluation point. The accuracy columns show the worst deviation over lp and every gradient component, as a relative difference and in ULPs. 0 ULP means bitwise identical to CmdStan. The bitwise results are for information only. The replay requires a scaled error of at most 1e-9, with documented exceptions for ill-conditioned models. Models that evaluate but are not verified are listed in a separate section and do not count as passing.
 
@@ -149,8 +149,32 @@ A model passes only when tools/verify_sample.py finds that stanli's log_prob and
 | `eight_schools_centered` | posteriordb | 11 | 0 (bitwise) | 0 |
 | `eight_schools_noncentered` | posteriordb | 11 | 0 (bitwise) | 0 |
 | `election88_full` | posteriordb | 91 | 9.9e-15 | 82 |
+| `empty_return_shape` | regressions | 4 | 0 (bitwise) | 0 |
 | `epinow2_estimate_infections` | epinow2 | 25 | 4.2e-11 | 299015 |
 | `epinow2_estimate_secondary` | epinow2 | 5 | 7.3e-15 | 64 |
+| `examplemodels_arch1` | examplemodels | 4 | 0 (bitwise) | 0 |
+| `examplemodels_cjs_cov_raneff` | examplemodels | 24 | 1.8e-15 | 14 |
+| `examplemodels_cjs_mnl_ran` | examplemodels | 22 | 1.1e-15 | 6 |
+| `examplemodels_covid_sens_spec` | examplemodels | 24 | 2.4e-16 | 2 |
+| `examplemodels_dlm_fx_equicorr` | examplemodels | 8 | 2.3e-16 | 2 |
+| `examplemodels_dlm_fx_factor` | examplemodels | 8 | 0 (bitwise) | 0 |
+| `examplemodels_dlm_nile` | examplemodels | 3 | 0 (bitwise) | 0 |
+| `examplemodels_gp_fit_multi_output` | examplemodels | 312 | 0 (bitwise) | 0 |
+| `examplemodels_hmm_marginal` | examplemodels | 11 | 4.0e-16 | 3 |
+| `examplemodels_irt_1pl_hier` | examplemodels | 34 | 0 (bitwise) | 0 |
+| `examplemodels_irt_multilevel` | examplemodels | 56 | 1.2e-15 | 32 |
+| `examplemodels_kidney` | examplemodels | 47 | 0 (bitwise) | 0 |
+| `examplemodels_mr_ss` | examplemodels | 3 | 2.0e-13 | 1457 |
+| `examplemodels_ms` | examplemodels | 7 | 3.3e-13 | 2629 |
+| `examplemodels_ode_one_comp_mm` | examplemodels | 5 | 3.6e-15 | 256 |
+| `examplemodels_probit_multi_good` | examplemodels | 2039 | 1.7e-15 | 4096 |
+| `examplemodels_radon_group` | examplemodels | 93 | 9.4e-15 | 64 |
+| `examplemodels_roaches_overdispersion` | examplemodels | 268 | 0 (bitwise) | 0 |
+| `examplemodels_ssm` | examplemodels | 29 | 0 (bitwise) | 0 |
+| `examplemodels_stagnant2` | examplemodels | 6 | 0 (bitwise) | 0 |
+| `examplemodels_stochvol_optimized` | examplemodels | 504 | 0 (bitwise) | 0 |
+| `examplemodels_sum_to_zero_binomial` | examplemodels | 20 | 1.4e-15 | 8 |
+| `examplemodels_sur` | examplemodels | 28 | 2.5e-16 | 2 |
 | `extra_hurdle_poisson` | rethinking | 3 | 2.2e-16 | 1 |
 | `garch11` | posteriordb | 5 | 1.6e-15 | 8 |
 | `gp_pois_regr` | posteriordb | 14 | 0 (bitwise) | 0 |
@@ -364,9 +388,14 @@ A model passes only when tools/verify_sample.py finds that stanli's log_prob and
 | `sw_zi_binomial` | brms | 4 | 7.1e-16 | 4 |
 | `sw_zi_negbin` | brms | 5 | 4.2e-16 | 2 |
 | `sw_zi_poisson` | brms | 4 | 3.9e-16 | 2 |
+| `tuple_array_params` | regressions | 55 | 1.6e-16 | 1 |
 | `tuple_coef_cont` | regressions | 41 | 2.2e-16 | 4 |
 | `tuple_decompositions` | regressions | 10 | 5.6e-17 | 1 |
+| `tuple_decompositions_more` | regressions | 4 | 6.9e-18 | 4 |
+| `tuple_effect_once` | regressions | 2 | 0 (bitwise) | 0 |
 | `tuple_loops` | regressions | 7 | 4.2e-16 | 2 |
+| `tuple_reduce_sum` | regressions | 5 | 0 (bitwise) | 0 |
+| `tuple_return_slices` | regressions | 5 | 1.8e-16 | 1 |
 | `wells_daae_c_model` | posteriordb | 7 | 0 (bitwise) | 0 |
 | `wells_dae_c_model` | posteriordb | 6 | 0 (bitwise) | 0 |
 | `wells_dae_inter_model` | posteriordb | 8 | 0 (bitwise) | 0 |
@@ -383,6 +412,7 @@ Numerical notes:
 
 - `dogs`: CmdStan sums Bernoulli terms one call per iteration; stanli's merged call uses Eigen reductions and vectorized exp/log1p. The different reduction order can change final rounding in the log density and gradient. Worst recorded deviation across all points: 32 ULP.
 - `dogs_log`: As for dogs, merging Bernoulli terms changes their reduction order and can change final rounding. The primary point need not have the largest deviation of the three probes. Worst recorded deviation across all points: 25 ULP.
+- `tuple_array_params`: At the third point the gradient of grid[1, 2].1's free value is 1 - x - x^2 * sum(v^2) / 9 with x = 1 and v = (1/3, 1/3, 1/3), which cancels to -1/27. Its terms are summed in a different order: evaluated exactly at the same inputs, stanli is 8 ulp from the result and CmdStan 24 ulp, 32 ulp apart. Worst recorded deviation across all points: 32 ULP.
 
 ## write_array references
 
@@ -528,8 +558,30 @@ The reference recorder also saves CmdStan's write_array output at the same point
 | `eight_schools_centered` | 10 |
 | `eight_schools_noncentered` | 18 |
 | `election88_full` | 11656 |
+| `empty_return_shape` | 4 |
 | `epinow2_estimate_infections` | 352 |
 | `epinow2_estimate_secondary` | 72 |
+| `examplemodels_arch1` | 3 |
+| `examplemodels_cjs_cov_raneff` | 16574 |
+| `examplemodels_covid_sens_spec` | 41 |
+| `examplemodels_dlm_fx_equicorr` | 25 |
+| `examplemodels_dlm_fx_factor` | 10 |
+| `examplemodels_dlm_nile` | 2 |
+| `examplemodels_gp_fit_multi_output` | 326 |
+| `examplemodels_irt_1pl_hier` | 33 |
+| `examplemodels_irt_multilevel` | 55 |
+| `examplemodels_kidney` | 51 |
+| `examplemodels_mr_ss` | 19602 |
+| `examplemodels_ms` | 72036 |
+| `examplemodels_ode_one_comp_mm` | 44 |
+| `examplemodels_probit_multi_good` | 2064 |
+| `examplemodels_radon_group` | 92 |
+| `examplemodels_roaches_overdispersion` | 267 |
+| `examplemodels_ssm` | 55 |
+| `examplemodels_stagnant2` | 5 |
+| `examplemodels_stochvol_optimized` | 1003 |
+| `examplemodels_sum_to_zero_binomial` | 833 |
+| `examplemodels_sur` | 33 |
 | `extra_hurdle_poisson` | 2 |
 | `garch11` | 4 |
 | `gp_pois_regr` | 24 |
@@ -743,9 +795,14 @@ The reference recorder also saves CmdStan's write_array output at the same point
 | `sw_zi_binomial` | 5 |
 | `sw_zi_negbin` | 6 |
 | `sw_zi_poisson` | 5 |
+| `tuple_array_params` | 109 |
 | `tuple_coef_cont` | 49 |
 | `tuple_decompositions` | 30 |
+| `tuple_decompositions_more` | 68 |
+| `tuple_effect_once` | 4 |
 | `tuple_loops` | 96 |
+| `tuple_reduce_sum` | 5 |
+| `tuple_return_slices` | 100 |
 | `wells_daae_c_model` | 6 |
 | `wells_dae_c_model` | 5 |
 | `wells_dae_inter_model` | 7 |

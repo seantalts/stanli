@@ -895,6 +895,167 @@
   "point": 0,
   "status": "VERIFIED"
  },
+ "examplemodels_arch1": {
+  "max_rel": 0.0,
+  "max_ulp": 0,
+  "n_values": 4,
+  "point": 0,
+  "status": "VERIFIED"
+ },
+ "examplemodels_cjs_cov_raneff": {
+  "max_rel": 1.7718825273580923e-15,
+  "max_ulp": 14,
+  "n_values": 24,
+  "point": 0,
+  "status": "VERIFIED"
+ },
+ "examplemodels_cjs_mnl_ran": {
+  "max_rel": 1.0549107215403058e-15,
+  "max_ulp": 6,
+  "n_values": 22,
+  "point": 0,
+  "status": "VERIFIED"
+ },
+ "examplemodels_covid_sens_spec": {
+  "max_rel": 2.3747577338937203e-16,
+  "max_ulp": 2,
+  "n_values": 24,
+  "point": 0,
+  "status": "VERIFIED"
+ },
+ "examplemodels_dlm_fx_equicorr": {
+  "max_rel": 2.267563960644649e-16,
+  "max_ulp": 2,
+  "n_values": 8,
+  "point": 0,
+  "status": "VERIFIED"
+ },
+ "examplemodels_dlm_fx_factor": {
+  "max_rel": 0.0,
+  "max_ulp": 0,
+  "n_values": 8,
+  "point": 0,
+  "status": "VERIFIED"
+ },
+ "examplemodels_dlm_nile": {
+  "max_rel": 0.0,
+  "max_ulp": 0,
+  "n_values": 3,
+  "point": 0,
+  "status": "VERIFIED"
+ },
+ "examplemodels_gp_fit_multi_output": {
+  "max_rel": 0.0,
+  "max_ulp": 0,
+  "n_values": 312,
+  "point": 0,
+  "status": "VERIFIED"
+ },
+ "examplemodels_hmm_marginal": {
+  "max_rel": 3.9658723716814427e-16,
+  "max_ulp": 3,
+  "n_values": 11,
+  "point": 0,
+  "status": "VERIFIED"
+ },
+ "examplemodels_irt_1pl_hier": {
+  "max_rel": 0.0,
+  "max_ulp": 0,
+  "n_values": 34,
+  "point": 0,
+  "status": "VERIFIED"
+ },
+ "examplemodels_irt_multilevel": {
+  "max_rel": 1.1662672879089248e-15,
+  "max_ulp": 32,
+  "n_values": 56,
+  "point": 0,
+  "status": "VERIFIED"
+ },
+ "examplemodels_kidney": {
+  "max_rel": 0.0,
+  "max_ulp": 0,
+  "n_values": 47,
+  "point": 1,
+  "status": "VERIFIED"
+ },
+ "examplemodels_mr_ss": {
+  "max_rel": 2.0165283220630803e-13,
+  "max_ulp": 1457,
+  "n_values": 3,
+  "point": 0,
+  "status": "VERIFIED"
+ },
+ "examplemodels_ms": {
+  "max_rel": 3.33753440878101e-13,
+  "max_ulp": 2629,
+  "n_values": 7,
+  "point": 0,
+  "status": "VERIFIED"
+ },
+ "examplemodels_ode_one_comp_mm": {
+  "max_rel": 3.552713678800501e-15,
+  "max_ulp": 256,
+  "n_values": 5,
+  "point": 0,
+  "status": "VERIFIED"
+ },
+ "examplemodels_probit_multi_good": {
+  "max_rel": 1.7210946806609115e-15,
+  "max_ulp": 4096,
+  "n_values": 2039,
+  "point": 0,
+  "status": "VERIFIED"
+ },
+ "examplemodels_radon_group": {
+  "max_rel": 9.392146949238973e-15,
+  "max_ulp": 64,
+  "n_values": 93,
+  "point": 0,
+  "status": "VERIFIED"
+ },
+ "examplemodels_roaches_overdispersion": {
+  "max_rel": 0.0,
+  "max_ulp": 0,
+  "n_values": 268,
+  "point": 0,
+  "status": "VERIFIED"
+ },
+ "examplemodels_ssm": {
+  "max_rel": 0.0,
+  "max_ulp": 0,
+  "n_values": 29,
+  "point": 0,
+  "status": "VERIFIED"
+ },
+ "examplemodels_stagnant2": {
+  "max_rel": 0.0,
+  "max_ulp": 0,
+  "n_values": 6,
+  "point": 0,
+  "status": "VERIFIED"
+ },
+ "examplemodels_stochvol_optimized": {
+  "max_rel": 0.0,
+  "max_ulp": 0,
+  "n_values": 504,
+  "point": 0,
+  "status": "VERIFIED"
+ },
+ "examplemodels_sum_to_zero_binomial": {
+  "max_rel": 1.4242572301239327e-15,
+  "max_ulp": 8,
+  "n_values": 20,
+  "point": 0,
+  "status": "VERIFIED"
+ },
+ "examplemodels_sur": {
+  "max_rel": 2.522913079222526e-16,
+  "max_ulp": 2,
+  "n_values": 28,
+  "point": 0,
+  "status": "VERIFIED"
+ },
  "extra_hurdle_poisson": {
   "max_rel": 2.171523542565541e-16,
   "max_ulp": 1,
