@@ -398,8 +398,11 @@ _lib = _load_lib()
 _lib.stanli_capture_messages(1)
 
 
-def _flush_messages():
-    """Write the runtime's queued messages to the current sys.stdout."""
+def _flush_messages(show=True):
+    """Write the runtime's queued messages to the current sys.stdout.
+
+    With show false the messages are taken and dropped.
+    """
     p = _lib.stanli_take_messages()
     if not p:
         return
@@ -407,6 +410,8 @@ def _flush_messages():
         text = ctypes.cast(p, ctypes.c_char_p).value.decode("utf-8", "replace")
     finally:
         _lib.stanli_string_free(p)
+    if not show:
+        return
     out = sys.stdout
     if out is not None:
         out.write(text)
@@ -416,12 +421,15 @@ def _flush_messages():
 class _native_output:
     """Delivers the runtime's printed messages when a native call ends."""
 
+    def __init__(self, show=True):
+        self.show = show
+
     def __enter__(self):
         return self
 
     def __exit__(self, exc_type, *_rest):
         try:
-            _flush_messages()
+            _flush_messages(self.show)
         except Exception:
             if exc_type is None:
                 raise
@@ -604,16 +612,17 @@ class _InterruptWatch:
     and the poll simply never fires.
     """
 
-    def __init__(self):
+    def __init__(self, show_messages=True):
         self.tripped = False
         self.previous = None
         self.flush_error = None
+        self.show_messages = show_messages
         self.poll = _SamplePollCallback(self._poll)
 
     def _poll(self, _user):
         if self.flush_error is None:
             try:
-                _flush_messages()
+                _flush_messages(self.show_messages)
             except BaseException as exc:  # ctypes cannot propagate it
                 self.flush_error = exc
         return 1 if self.tripped else 0
@@ -1533,8 +1542,8 @@ def _continue_settings(fit, given):
     if passed:
         raise ValueError(
             "continue_from continues the fit's chains with the fit's "
-            "settings, so only samples, refresh, parallel_chains and "
-            "threads_per_chain can be given; got " + ", ".join(passed))
+            "settings, so only samples, refresh, show_messages, "
+            "parallel_chains and threads_per_chain can be given; got " + ", ".join(passed))
     records = getattr(fit, "_resume", None)
     if not records or len(records) != fit.n_chains:
         raise ValueError(
@@ -2086,8 +2095,8 @@ class Model:
     def sample(self, *, chains=4, seed=1, warmup=1000, samples=1000,
                delta=0.8, max_depth=10, thin=1, save_warmup=False,
                inits=None, init_radius=2.0, pathfinder_init=None,
-               parallel_chains=None, refresh=100, threads_per_chain=None,
-               metric="diag_e", inv_metric=None, step_size=None,
+               parallel_chains=None, refresh=100, show_messages=True,
+               threads_per_chain=None, metric="diag_e", inv_metric=None, step_size=None,
                adapt_engaged=None, adapt_metric=True, continue_from=None):
         """NUTS draws as a Fit.
 
@@ -2152,8 +2161,11 @@ class Model:
         `adapt_engaged=False`.
 
         `refresh` is the number of transitions between CmdStan-shaped
-        progress updates. The default is 100; zero disables all automatic
-        progress, timing, and sampler-problem output. Reporting only observes
+        progress updates. The default is 100; zero disables the automatic
+        progress, timing, and sampler-problem summaries. The sampler's own
+        notices (a rejected proposal, too few warmup iterations to adapt) print
+        whatever `refresh` is, as in CmdStan. `show_messages=False` drops them,
+        and with them anything the model itself prints. Reporting only observes
         the run and does not change draws, sampler statistics, or RNG streams.
 
         `continue_from=fit` runs `samples` more transitions of each of the
@@ -2164,9 +2176,9 @@ class Model:
         the run a single call with the summed `samples` would have made,
         bitwise, generated quantities included, when the model has the same
         `threads_per_chain` as the run that made the fit. Only `samples`,
-        `refresh`, `parallel_chains` and the deprecated `threads_per_chain`
-        can be given with it; the other settings come from the fit. The model
-        and data must be the ones that made the fit.
+        `refresh`, `show_messages`, `parallel_chains` and the deprecated
+        `threads_per_chain` can be given with it; the other settings come
+        from the fit. The model and data must be the ones that made the fit.
 
         Columns are every column CmdStan's CSV would carry -- constrained
         parameters, transformed parameters, generated quantities, with RNG
@@ -2212,6 +2224,8 @@ class Model:
             raise TypeError("adapt_engaged must be a bool or None")
         if not isinstance(adapt_metric, (bool, np.bool_)):
             raise TypeError("adapt_metric must be a bool")
+        if not isinstance(show_messages, (bool, np.bool_)):
+            raise TypeError("show_messages must be a bool")
         if isinstance(refresh, (bool, np.bool_)):
             raise TypeError("refresh must be a nonnegative integer")
         try:
@@ -2332,7 +2346,7 @@ class Model:
                 if callback_errors:
                     return
                 try:
-                    _flush_messages()
+                    _flush_messages(show_messages)
                     _print_sample_progress(chain_id, iteration, total,
                                            is_warmup, n_divergent,
                                            n_max_treedepth, opts.max_depth)
@@ -2345,8 +2359,8 @@ class Model:
             progress_cb = _SampleProgressCallback(progress)
 
         interrupted = ctypes.c_int(0)
-        watch = _InterruptWatch()
-        with watch, _native_output():
+        watch = _InterruptWatch(show_messages)
+        with watch, _native_output(show_messages):
             failed = _lib.stanli_sample_multi_metric(
                 self._handle, ctypes.byref(opts), ctypes.byref(metric_opts),
                 refresh, None, _dptr(stats), _dptr(out), progress_cb,

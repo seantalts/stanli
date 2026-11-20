@@ -294,7 +294,15 @@ test_that("sampling progress is informative and observational", {
                           init = 0, init_radius = 0, parallel_chains = 1,
                           refresh = 0)
   })
-  expect_length(quiet_text, 0)
+  expect_false(any(grepl("Iteration:|Elapsed Time", quiet_text)))
+  expect_true(any(grepl("^Chain \\[1\\] WARNING", quiet_text)))
+  silent_text <- capture.output({
+    silent <- sample_model(m, chains = 1, seed = 9182, warmup = 3, samples = 4,
+                           init = 0, init_radius = 0, parallel_chains = 1,
+                           refresh = 0, show_messages = FALSE)
+  })
+  expect_length(silent_text, 0)
+  expect_identical(loud$draws, silent$draws)
   expect_identical(loud$draws, quiet$draws)
   expect_identical(loud$sampler, quiet$sampler)
   expect_identical(loud$unconstrained, quiet$unconstrained)
@@ -351,9 +359,32 @@ test_that("rejected proposals are reported with their chain", {
                           warmup = 100, samples = 100, refresh = 50)
   expect_match(loud, "Chain [1] Informational Message", fixed = TRUE)
   expect_match(loud, "Chain [2] Informational Message", fixed = TRUE)
+  no_progress <- sampling_output(reject_code, list(), chains = 2, seed = 3,
+                                 warmup = 100, samples = 100, refresh = 0)
+  expect_match(no_progress, "Chain [1] Informational Message", fixed = TRUE)
+  expect_false(grepl("Iteration:", no_progress, fixed = TRUE))
   quiet <- sampling_output(reject_code, list(), chains = 2, seed = 3,
-                           warmup = 100, samples = 100, refresh = 0)
+                           warmup = 100, samples = 100, refresh = 50,
+                           show_messages = FALSE)
   expect_false(grepl("Informational", quiet, fixed = TRUE))
+  expect_match(quiet, "Iteration:", fixed = TRUE)
+})
+
+test_that("show_messages must be TRUE or FALSE and sample_more takes it too", {
+  skip_without_runtime()
+  m <- progress_model()
+  for (bad in list("no", 0, NA, c(TRUE, FALSE), NULL))
+    expect_error(sample_model(m, chains = 1, warmup = 5, samples = 5,
+                              refresh = 0, show_messages = bad),
+                 "show_messages must be TRUE or FALSE", fixed = TRUE)
+  fit <- sample_model(m, chains = 1, seed = 1, warmup = 5, samples = 5,
+                      refresh = 0, show_messages = FALSE)
+  text <- capture.output(more <- sample_more(fit, samples = 5, refresh = 0,
+                                             show_messages = FALSE))
+  expect_length(text, 0)
+  expect_identical(dim(more$draws)[1], 10L)
+  expect_error(sample_more(fit, samples = 5, show_messages = NA),
+               "show_messages must be TRUE or FALSE", fixed = TRUE)
 })
 
 test_that("divergence and low E-BFMI warnings come with every sampling run", {

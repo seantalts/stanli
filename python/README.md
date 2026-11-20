@@ -70,8 +70,10 @@ Chain [1] Elapsed Time: 0.821 seconds (Warm-up)
                         0.990 seconds (Total)
 ```
 
-`refresh=0` turns progress off, and another positive integer changes the
-interval. Output goes through `sys.stdout`, so notebooks and
+`refresh=0` turns progress, timing and the divergence summary off, and another
+positive integer changes the interval. The sampler's own notices, such as a
+rejected proposal, print either way, as in CmdStan; `show_messages=False`
+drops them, along with anything the model prints. Output goes through `sys.stdout`, so notebooks and
 `contextlib.redirect_stdout()` work. Printing progress does not change the
 draws or the RNG streams. Once a chain has post-warmup divergences or
 transitions that hit the maximum treedepth, its sampling lines show the
@@ -157,8 +159,8 @@ fit = model.sample(seed=1, samples=1000)
 fit = model.sample(continue_from=fit, samples=1000)   # 2000 per chain
 ```
 
-Only `samples`, `refresh` and `parallel_chains` can be given with
-`continue_from`; everything else comes from the fit.
+Only `samples`, `refresh`, `show_messages` and `parallel_chains` can be
+given with `continue_from`; everything else comes from the fit.
 
 ### Within-chain parallelism
 
@@ -253,9 +255,9 @@ lp, grad, hess = model.log_prob_hessian(q)   # and the (n, n) Hessian at q
 fit = model.sample(chains=4, seed=1, warmup=1000, samples=1000, delta=0.8,
                    max_depth=10, thin=1, save_warmup=False, inits=None,
                    init_radius=2.0, pathfinder_init=None,
-                   parallel_chains=None, refresh=100, metric="diag_e",
-                   inv_metric=None, step_size=None, adapt_engaged=None,
-                   adapt_metric=True, continue_from=None)
+                   parallel_chains=None, refresh=100, show_messages=True,
+                   metric="diag_e", inv_metric=None, step_size=None,
+                   adapt_engaged=None, adapt_metric=True, continue_from=None)
 fit["theta"]                        # (chains*draws, 8), declared shape
 fit["theta[1]"]                     # one column, chains concatenated
 fit["lp__"]                         # sampler columns by name too

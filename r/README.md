@@ -84,7 +84,10 @@ sequential one.
 
 While it samples, stanli prints the progress and elapsed time of each chain.
 It also prints notices for rejected proposals, and warnings for divergences,
-maximum treedepth or low E-BFMI. Set `refresh = 0` to turn this output off.
+maximum treedepth or low E-BFMI. Set `refresh = 0` to turn off the progress,
+timing and warnings. The notices for rejected proposals print either way, as
+in CmdStan; `show_messages = FALSE` drops them, along with anything the model
+prints.
 Once a chain has post-warmup divergences or maximum-treedepth hits, its
 progress lines show the counts so far:
 
@@ -419,7 +422,8 @@ fit <- sample_model(m, chains = 4, seed = 1, warmup = 1000, samples = 1000,
                     parallel_chains = NULL, refresh = 100,
                     fixed_param = FALSE,
                     metric = "diag_e", inv_metric = NULL, step_size = NULL,
-                    adapt_engaged = NULL, adapt_metric = TRUE)
+                    adapt_engaged = NULL, adapt_metric = TRUE,
+                    show_messages = TRUE)
 optimize_model(m, seed = 1, iter = 2000, init = NULL, init_radius = 2)
 variational_model(m, algorithm = "meanfield", iter = 10000, draws = 1000, ...)
 pathfinder_model(m, draws = 1000, ...)

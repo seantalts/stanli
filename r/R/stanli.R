@@ -629,7 +629,12 @@ complete_partial_inits <- function(model, values, init_radius, seed) {
 #'   `report` only the time each chain took.
 #' @param refresh Print a progress update every `refresh` transitions within
 #'   each phase, plus the first and last transition of the phase. Set to 0 to
-#'   suppress all automatic sampling output.
+#'   suppress the progress lines and the timing and sampler-problem summaries.
+#'   The sampler's own notices (a rejected proposal, too few warmup iterations
+#'   to adapt) print whatever `refresh` is, as in CmdStan.
+#' @param show_messages `FALSE` drops those notices, and with them anything
+#'   the model itself prints, during sampling. `TRUE` (the default) shows them.
+#'   It does not apply with `fixed_param = TRUE`, which has no sampler notices.
 #' @param metric The metric: `"diag_e"` (the default), `"dense_e"` or
 #'   `"unit_e"`, as in CmdStan.
 #' @param inv_metric Optional starting inverse metric. For `"diag_e"`, a
@@ -680,7 +685,7 @@ sample_model <- function(model, chains = 4, seed = 1, warmup = 1000,
                          metric = c("diag_e", "dense_e", "unit_e"),
                          inv_metric = NULL, step_size = NULL,
                          adapt_engaged = NULL, adapt_metric = TRUE,
-                         chain_id = 1L) {
+                         chain_id = 1L, show_messages = TRUE) {
   threads_per_chain <- run_threads(model, threads_per_chain, "sample_model")
   cstan_integer(seed, "seed", 0)
   check_chain_id(chain_id, chains)
@@ -698,6 +703,7 @@ sample_model <- function(model, chains = 4, seed = 1, warmup = 1000,
   metric <- match.arg(metric)
   if (!is.null(adapt_engaged)) stanfit_flag(adapt_engaged, "adapt_engaged")
   stanfit_flag(adapt_metric, "adapt_metric")
+  stanfit_flag(show_messages, "show_messages")
   check_step_size(step_size)
   if (fixed_param && (metric != "diag_e" || !is.null(inv_metric) ||
                       !is.null(step_size) || isFALSE(adapt_engaged) ||
@@ -748,7 +754,7 @@ sample_model <- function(model, chains = 4, seed = 1, warmup = 1000,
                                 adapt_metric, as.integer(chains),
                                 model$n_unconstrained)
   res <- .Call("stanli_r_sample", model$ptr, opts, init_vec, refresh,
-               metric_opts, NULL)
+               metric_opts, NULL, show_messages)
   algorithm_interrupt(res, "sampling")
   run <- nuts_arrays(res, model)
   nchain <- res$chains
@@ -818,7 +824,9 @@ append_draws <- function(a, b) {
 #' @param fit A `stanli_fit` from [sample_model()].
 #' @param samples Further transitions per chain, before thinning.
 #' @param refresh Print a progress update every `refresh` transitions; the
-#'   numbering continues from the fit's transitions. 0 is silent.
+#'   numbering continues from the fit's transitions. 0 prints no progress.
+#' @param show_messages `FALSE` drops the sampler's notices and the model's own
+#'   output, as in [sample_model()].
 #' @param parallel_chains Chains to run at once. Defaults to all of them.
 #' @param threads_per_chain Deprecated, as in [sample_model()]: the run uses
 #'   the thread count of the fit's model. Another count gives a warning of
@@ -834,14 +842,14 @@ append_draws <- function(a, b) {
 #' @export
 sample_more <- function(fit, samples = 1000, refresh = 100,
                         parallel_chains = NULL, threads_per_chain = NULL,
-                        ...) {
+                        show_messages = TRUE, ...) {
   if (!inherits(fit, "stanli_fit"))
     stop("fit must be a stanli_fit from sample_model()", call. = FALSE)
   extra <- names(list(...))
   if (length(extra) > 0L)
     stop("sample_more() continues the fit's chains with the fit's settings, ",
-         "so only samples, refresh, parallel_chains and threads_per_chain ",
-         "can be given; got ", paste(extra, collapse = ", "), call. = FALSE)
+         "so only samples, refresh, show_messages, parallel_chains and ",
+         "threads_per_chain can be given; got ", paste(extra, collapse = ", "), call. = FALSE)
   require_nuts_fit(fit, "sample_more()")
   if (identical(fit$sampler_backend, "nutpie"))
     stop("this fit has no resume record: sample_nutpie() fits cannot be ",
@@ -853,6 +861,7 @@ sample_more <- function(fit, samples = 1000, refresh = 100,
       !is.finite(refresh) || refresh < 0 || refresh != floor(refresh) ||
       refresh > .Machine$integer.max)
     stop("refresh must be a single nonnegative integer", call. = FALSE)
+  stanfit_flag(show_messages, "show_messages")
   model <- fit$model
   threads_per_chain <- run_threads(model, threads_per_chain, "sample_more")
   load_runtime()
@@ -868,7 +877,7 @@ sample_more <- function(fit, samples = 1000, refresh = 100,
     fit$metric, if (fit$metric == "unit_e") NULL else fit$inv_metric, NULL,
     FALSE, TRUE, as.integer(fit$chains), model$n_unconstrained)
   res <- .Call("stanli_r_sample", model$ptr, opts, numeric(0),
-               as.integer(refresh), metric_opts, fit$resume)
+               as.integer(refresh), metric_opts, fit$resume, show_messages)
   algorithm_interrupt(res, "sampling")
   run <- nuts_arrays(res, model)
   out <- fit

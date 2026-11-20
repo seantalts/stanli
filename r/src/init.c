@@ -32,7 +32,7 @@ extern SEXP stanli_r_sparse_factor_lowrank(SEXP, SEXP, SEXP);
 extern SEXP stanli_r_unconstrain_inits(SEXP, SEXP);
 extern SEXP stanli_r_pathfinder_inits(SEXP, SEXP, SEXP, SEXP, SEXP);
 extern SEXP stanli_r_check_sample_options(SEXP);
-extern SEXP stanli_r_sample(SEXP, SEXP, SEXP, SEXP, SEXP, SEXP);
+extern SEXP stanli_r_sample(SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP);
 extern SEXP stanli_r_sampler_columns(void);
 extern SEXP stanli_r_summary(SEXP, SEXP);
 extern SEXP stanli_r_diagnose(SEXP, SEXP, SEXP, SEXP, SEXP);
@@ -80,7 +80,7 @@ static const R_CallMethodDef CallEntries[] = {
     {"stanli_r_pathfinder_inits", (DL_FUNC)&stanli_r_pathfinder_inits, 5},
     {"stanli_r_check_sample_options", (DL_FUNC)&stanli_r_check_sample_options,
      1},
-    {"stanli_r_sample", (DL_FUNC)&stanli_r_sample, 6},
+    {"stanli_r_sample", (DL_FUNC)&stanli_r_sample, 7},
     {"stanli_r_sampler_columns", (DL_FUNC)&stanli_r_sampler_columns, 0},
     {"stanli_r_summary", (DL_FUNC)&stanli_r_summary, 2},
     {"stanli_r_diagnose", (DL_FUNC)&stanli_r_diagnose, 5},

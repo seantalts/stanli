@@ -26,7 +26,8 @@ sample_model(
   step_size = NULL,
   adapt_engaged = NULL,
   adapt_metric = TRUE,
-  chain_id = 1L
+  chain_id = 1L,
+  show_messages = TRUE
 )
 }
 \arguments{
@@ -62,7 +63,13 @@ not perform PSIS resampling.}
 
 \item{refresh}{Print a progress update every `refresh` transitions within
 each phase, plus the first and last transition of the phase. Set to 0 to
-suppress all automatic sampling output.}
+suppress the progress lines and the timing and sampler-problem summaries.
+The sampler's own notices (a rejected proposal, too few warmup iterations
+to adapt) print whatever `refresh` is, as in CmdStan.}
+
+\item{show_messages}{`FALSE` drops those notices, and with them anything
+the model itself prints, during sampling. `TRUE` (the default) shows them.
+It does not apply with `fixed_param = TRUE`, which has no sampler notices.}
 
 \item{threads_per_chain}{Deprecated. Set the thread count when building
 the model, with `stanli_model(threads_per_chain = )`; sampling uses the

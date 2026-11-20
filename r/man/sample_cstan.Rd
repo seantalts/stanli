@@ -27,6 +27,7 @@ sample_cstan(
   step_size = NULL,
   adapt_engaged = NULL,
   adapt_metric = TRUE,
+  show_messages = TRUE,
   ...
 )
 }
@@ -60,6 +61,9 @@ CmdStanR.}
 \item{save_warmup}{Retain warmup draws.}
 
 \item{refresh}{Progress interval; zero suppresses progress.}
+
+\item{show_messages}{`FALSE` drops the sampler's notices and the model's own
+output during sampling; see [sample_model()].}
 
 \item{init_radius}{Radius for random initialization on the unconstrained scale.}
 
