@@ -3,14 +3,17 @@
 
   tools/hp/hp_eval.py MODEL [MODEL ...] [--dps 80] [--points 0,1,2] [--out DIR]
                       [--full-grad-max 300] [--dirs 4] [--timeout S] [--no-grad]
-                      [--skip-stanli] [--dps-check] [-v]
+                      [--skip-stanli] [--dps-check] [--grad-index I,I,...] [-v]
 
 For each recorded point the model is evaluated with mpmath at --dps digits.
 The arms are the recorded CmdStan values, stanli default and stanli
 --fast-math (build-rel/stanli_check). Up to --full-grad-max unconstrained
 parameters the reference gradient is by central finite differences; above that
 it is --dirs directional derivatives along seeded unit vectors, compared with
-the arm's gradient projected on the same vectors.
+the arm's gradient projected on the same vectors. --grad-index adds, for a
+model above that size, central differences along the listed coordinates
+(1-based gradient positions, as stanli_check prints them and the ULP ledger
+names them), stored under "grad_coord".
 
 Errors: log density |a-b| / max(|a|,|b|,1); full gradient max|g-r| / max(1,
 max|g|, max|r|); directional |g.v - D| / max(1, |g_cmdstan|_2) with |v| = 1.
@@ -88,6 +91,13 @@ def hp_gradient(it, theta, h, model, pt, args, n, lp_s):
     return "directional", None, dirs
 
 
+def coordinate_derivative(it, theta, h, j):
+    tp, tm = list(theta), list(theta)
+    tp[j] += h
+    tm[j] -= h
+    return (it.logp(tp) - it.logp(tm)) / (2 * h)
+
+
 def run_model(model, args, refs, tmp, res):
     stan, dj, ref = load_case(model, tmp, refs)
     t0 = time.time()
@@ -132,6 +142,9 @@ def run_model(model, args, refs, tmp, res):
                 entry["grad"] = [mp.nstr(x, 55) for x in g]
             else:
                 entry["dirs"] = [{k: d[k] for k in ("seed", "D_hp")} for d in dirs]
+                if args.grad_index:
+                    entry["grad_coord"] = {str(i): mp.nstr(coordinate_derivative(it, theta, h, i - 1), 55)
+                                           for i in args.grad_index}
         hp_lp = float(lp)
         rv = [float(x) for x in rp["values"]]
         scale = metrics.l2(rv[1:])
@@ -167,8 +180,10 @@ def main():
     ap.add_argument("-v", action="store_true")
     ap.add_argument("--skip-stanli", action="store_true")
     ap.add_argument("--dps-check", action="store_true")
+    ap.add_argument("--grad-index", default="")
     args = ap.parse_args()
     args.points = [int(x) for x in args.points.split(",")]
+    args.grad_index = [int(x) for x in args.grad_index.split(",") if x]
     refs, _ = v.replay_refs(v.native_platform(), "clang")
     signal.signal(signal.SIGALRM, alarm)
     tmp = tempfile.mkdtemp()
