@@ -973,6 +973,13 @@ struct Lowering {
   // Set while try_lower_region considers a write_array loop that
   // write_array_loop_retained selected.
   bool retaining_write_array_loop = false;
+  // Retained write_array loops that assign an integer declared outside them,
+  // and the loops a retry of write_array lowering must unroll instead. A
+  // retained loop produces its integers only at run time, so a later size
+  // that reads one cannot be laid out (WriteArrayLowering::finish).
+  std::set<const mir::Stmt*> write_array_int_loops;
+  std::set<const mir::Stmt*> write_array_unrolled_loops;
+  bool write_array_unroll_int_loops = false;
   // Which output variable each FnWriteParam writes, and which section of
   // write_array the statement being lowered belongs to.
   mir::OutputCursor output_cursor;

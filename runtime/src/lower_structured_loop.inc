@@ -2869,6 +2869,10 @@ bool try_lower_region(
     const std::set<std::string>* output_references = nullptr) {
   const StructuredMode mode = structured_policy;
   if (mode == StructuredMode::Off) return false;
+  if (in_write_array && !output_references &&
+      (write_array_unrolled_loops.count(&s) ||
+       (write_array_unroll_int_loops && loop_assigns_outer_int(s))))
+    return false;
   // Make the representation decision before constructing a trial graph.
   // In auto mode, incomplete cost information is evidence for nothing.
   if (!output_references && mode == StructuredMode::Auto &&
@@ -3120,6 +3124,8 @@ bool try_lower_region(
   // No proof/refusal follows publication. Allocation failure aborts this
   // whole compilation; it never falls through into a partially changed graph.
   *shape_pool = std::move(*shapes);
+  if (in_write_array && !region_current && loop_assigns_outer_int(s))
+    write_array_int_loops.insert(&s);
   std::vector<int> inputs = parent_inputs;
   if (inputs.size() > 6) {
     const size_t count = inputs.size() - 5;

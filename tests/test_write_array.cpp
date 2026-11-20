@@ -1531,6 +1531,14 @@ void test_write_array_data_branch() {
   expect_replayed_write_array_loops("structured_wa_data_branch", 2);
 }
 
+// The first two carried loops count into integers that later declarations use
+// as sizes. Retained, a loop produces its counts only at run time, too late to
+// lay out those declarations, so write_array is lowered again with both loops
+// unrolled. The third loop carries only a real and stays retained.
+void test_write_array_counted_size() {
+  expect_replayed_write_array_loops("structured_wa_counted_size", 1);
+}
+
 // An inlined function declares a matrix whose row count multiplies a
 // comparison of two fixed integers by a data sum. Inside a retained loop the
 // comparison is a graph value, and its range has to be the one value it can
@@ -4862,6 +4870,7 @@ int main() {
   test_write_array_rng_loops();
   test_write_array_data_start();
   test_write_array_data_branch();
+  test_write_array_counted_size();
   test_write_array_compare_size();
   test_write_array_bounded_blocks();
   test_write_array_selected_loop_refused();
