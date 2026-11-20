@@ -4,7 +4,7 @@ Run `859eab5ba5680f2a`, started 2026-11-13T15:45:18Z, records 347 application mo
 
 The manifest identifies the exact sources, inputs, binaries and settings. The summary, raw paired observations and command events are retained here. The table below gives each model's setup time plus its gradient count times its measured gradient time. Full sampling is not run. Failures remain in the inventory.
 
-Full inputs, generated code and command logs remain locally at `/private/tmp/claude-501/-Users-xitrium-claud/464f5da1-aa71-4efb-be11-cd1664cf85f7/scratchpad/bench-publish/fast.tsv.run`; these larger artifacts are not hosted with this report.
+The full inputs, generated code and command logs of this run were not retained.
 
 Run `859eab5ba5680f2a` (2026-11-13): 347 models, 6 alternating gradient pairs.
 
