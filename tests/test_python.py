@@ -384,18 +384,35 @@ def test_unconstrain_round_trip():
 
     # The forward direction has no public wrapper yet, so drive the C entry
     # point the module already binds. The point of this test is unconstrain().
-    names, _ = m._column_names()
+    names = m._column_names()
     row = np.empty(len(names))
     rc = stanli._lib.stanli_wa_row(m._m, stanli._dptr(q), stanli._dptr(row))
     assert rc == 0
 
-    values = {}
+    # Each variable in its declared shape, which CmdStan requires of a
+    # starting value. The columns list it first index fastest.
+    columns = {}
     for name, value in zip(names, row):
-        values.setdefault(name.split("[")[0], []).append(float(value))
-    values = {k: (v[0] if len(v) == 1 else v) for k, v in values.items()}
+        base, _, index = name.rstrip("]").partition("[")
+        columns.setdefault(base, []).append(
+            ([int(i) for i in index.split(",")] if index else [], value))
+    values = {}
+    for base, entries in columns.items():
+        dims = np.max([i for i, _ in entries], axis=0) if entries[0][0] else ()
+        flat = np.array([v for _, v in entries])
+        values[base] = flat.reshape(dims, order="F") if len(dims) else flat[0]
 
     back = m.unconstrain(values)
     assert np.allclose(back, q, atol=1e-9), (back, q)
+
+    # A flat list for an array of matrices is refused, as in CmdStan, rather
+    # than read in an order the caller did not mean.
+    try:
+        m.unconstrain({**values, "m": values["m"].ravel(order="F")})
+    except ValueError as e:
+        assert "variable name=m" in str(e), str(e)
+    else:
+        raise AssertionError("expected ValueError for a flat matrix value")
 
     values["not_a_parameter"] = 1.0
     try:
@@ -425,9 +442,25 @@ def test_failing_gradient_raises():
         stan_code="parameters { real x; } model { x ~ normal(0, -1); }")
     try:
         m.log_prob_grad(np.zeros(1))
-    except RuntimeError:
+    except RuntimeError as e:
+        assert "rejected" in str(e), str(e)
+        assert "Scale parameter is -1" in str(e), str(e)
         return
     raise AssertionError("expected RuntimeError from a failing gradient")
+
+
+def test_gradient_error_that_is_not_a_rejection_says_so():
+    m = stanli.Model(
+        stan_code="data { int k; } parameters { real x; } "
+                  "model { vector[2] v = [x, x]'; target += v[k]; }",
+        data={"k": 3})
+    try:
+        m.log_prob_grad(np.zeros(1))
+    except RuntimeError as e:
+        assert "rejected" not in str(e), str(e)
+        assert "index" in str(e).lower(), str(e)
+        return
+    raise AssertionError("expected RuntimeError from an index out of range")
 
 
 def test_sample_returns_transformed_parameters():
@@ -500,10 +533,18 @@ def test_sample_progress_output_and_refresh_zero():
     assert "seconds (Sampling)" in text
     assert "seconds (Total)" in text
 
+    no_progress = io.StringIO()
+    with contextlib.redirect_stdout(no_progress):
+        _normal().sample(chains=1, warmup=4, samples=3,
+                         parallel_chains=1, refresh=0)
+    assert "Iteration:" not in no_progress.getvalue()
+    assert "Elapsed Time" not in no_progress.getvalue()
+    assert "Chain [1] WARNING" in no_progress.getvalue()
+
     quiet = io.StringIO()
     with contextlib.redirect_stdout(quiet):
         _normal().sample(chains=1, warmup=4, samples=3,
-                         parallel_chains=1, refresh=0)
+                         parallel_chains=1, refresh=0, show_messages=False)
     assert quiet.getvalue() == ""
 
 
@@ -589,7 +630,8 @@ def test_sample_refresh_validation():
                        (True, TypeError), (np.bool_(False), TypeError),
                        (None, TypeError), (2 ** 31, OverflowError)]:
         try:
-            m.sample(chains=1, warmup=0, samples=1, refresh=bad)
+            m.sample(chains=1, warmup=0, samples=1, refresh=bad,
+                     adapt_engaged=False)
         except error:
             pass
         else:
@@ -598,7 +640,7 @@ def test_sample_refresh_validation():
     # numpy integer scalars are useful in programmatic configurations and
     # satisfy Python's integer-index protocol.
     with contextlib.redirect_stdout(io.StringIO()):
-        fit = m.sample(chains=1, warmup=0, samples=1,
+        fit = m.sample(chains=1, warmup=0, samples=1, adapt_engaged=False,
                        refresh=np.int64(0))
     assert fit.n_draws == 1
 
@@ -699,7 +741,7 @@ def test_model_print_goes_through_sys_stdout():
     assert text == "model mu=0.5\n", text
 
     _, text = _assert_no_leak_to_fd1(
-        lambda: m.sample(chains=1, warmup=3, samples=2, refresh=0, seed=1))
+        lambda: m.sample(chains=1, warmup=150, samples=2, refresh=0, seed=1))
     lines = text.splitlines()
     assert any(line.startswith("model mu=") for line in lines), text
     assert sum(line.startswith("gq mu=") for line in lines) == 2, text
@@ -712,7 +754,7 @@ def test_model_print_goes_through_sys_stdout():
 def test_model_print_from_parallel_chains_arrives_whole():
     m = stanli.Model(stan_code=PRINTING)
     _, text = _assert_no_leak_to_fd1(
-        lambda: m.sample(chains=4, warmup=50, samples=50, refresh=0, seed=3,
+        lambda: m.sample(chains=4, warmup=150, samples=50, refresh=0, seed=3,
                          parallel_chains=4))
     lines = text.splitlines()
     assert len(lines) > 400, len(lines)
@@ -763,15 +805,39 @@ def test_function_print_goes_through_sys_stdout():
 
 def test_sampling_reports_rejected_proposals_with_the_chain():
     m = stanli.Model(stan_code=REJECTING)
-    _, quiet = _capture_stdout(
-        lambda: m.sample(chains=2, warmup=100, samples=100, seed=3,
-                         refresh=0))
-    assert quiet == "", quiet
     _, text = _capture_stdout(
         lambda: m.sample(chains=2, warmup=100, samples=100, seed=3,
                          refresh=50))
     assert "Chain [1] Informational Message" in text, text
     assert "Chain [2] Informational Message" in text, text
+    _, no_progress = _capture_stdout(
+        lambda: m.sample(chains=2, warmup=100, samples=100, seed=3,
+                         refresh=0))
+    assert "Chain [1] Informational Message" in no_progress, no_progress
+    assert "Iteration:" not in no_progress, no_progress
+    _, quiet = _capture_stdout(
+        lambda: m.sample(chains=2, warmup=100, samples=100, seed=3,
+                         refresh=50, show_messages=False))
+    assert "Informational" not in quiet, quiet
+    assert "Iteration:" in quiet, quiet
+
+
+def test_show_messages_false_silences_notices_and_changes_no_draws():
+    m = stanli.Model(stan_code=REJECTING)
+    kw = dict(chains=2, warmup=100, samples=100, seed=3, refresh=0)
+    loud_fit, loud = _capture_stdout(lambda: m.sample(**kw))
+    quiet_fit, quiet = _capture_stdout(
+        lambda: m.sample(show_messages=False, **kw))
+    assert "Informational Message" in loud, loud
+    assert quiet == "", quiet
+    assert np.array_equal(loud_fit.draws(), quiet_fit.draws())
+    for bad in ("no", 0, None):
+        try:
+            m.sample(show_messages=bad, **kw)
+        except TypeError as e:
+            assert str(e) == "show_messages must be a bool", str(e)
+        else:
+            raise AssertionError(f"no TypeError for show_messages={bad!r}")
 
 
 def test_sampling_warnings_are_automatic_and_shared():
@@ -792,9 +858,14 @@ def test_sampling_warnings_are_automatic_and_shared():
     assert re.search(r"Warning: \d+ of 100 \(\d+\.\d%\) transitions hit the "
                      r"maximum treedepth limit of 3\.\n"
                      + re.escape(SEE_WARNINGS), treedepth), treedepth
-    _, quiet = _capture_stdout(
+    _, no_progress = _capture_stdout(
         lambda: m.sample(chains=1, warmup=100, samples=500, seed=42,
                          refresh=0))
+    assert "transitions ended with a divergence" not in no_progress, no_progress
+    assert "Elapsed Time" not in no_progress, no_progress
+    _, quiet = _capture_stdout(
+        lambda: m.sample(chains=1, warmup=100, samples=500, seed=42,
+                         refresh=0, show_messages=False))
     assert quiet == "", quiet
     _, healthy = _capture_stdout(
         lambda: _normal().sample(chains=2, warmup=200, samples=100, seed=1,
@@ -1007,6 +1078,48 @@ def test_ctrl_c_stops_sampling():
     assert time.perf_counter() - started < 60, "the stop took too long"
     assert signal.getsignal(signal.SIGINT) is signal.default_int_handler, \
         "the SIGINT handler was not restored"
+
+
+def test_ctrl_c_stops_optimize_pathfinder_inits_and_the_hessian():
+    # A poll that always answers "stop" stands for a Ctrl-C that is already
+    # pending: each call asks it once before its first gradient.
+    m = _es()
+    calls = (
+        lambda: m.optimize(seed=1),
+        lambda: m.sample(chains=1, seed=1, warmup=10, samples=10, refresh=0,
+                         pathfinder_init={}),
+        lambda: m.log_prob_hessian(np.zeros(m.n_unconstrained)),
+    )
+    with mock.patch.object(stanli._InterruptWatch, "_poll",
+                           lambda self, user: 1):
+        for call in calls:
+            try:
+                call()
+            except KeyboardInterrupt:
+                continue
+            raise AssertionError("the call ran through a pending interrupt")
+    assert signal.getsignal(signal.SIGINT) is signal.default_int_handler, \
+        "the SIGINT handler was not restored"
+
+
+def test_one_model_shared_by_threads_gives_the_serial_answers():
+    # The C API allows one evaluating call per handle at a time; the Model
+    # serializes them, so threads that share it get the serial results.
+    m = _es()
+    q = np.linspace(-1, 1, m.n_unconstrained)
+
+    def run(seed):
+        fit = m.sample(chains=1, seed=seed, warmup=150, samples=50,
+                       refresh=0)
+        return fit.draws(), m.log_prob_grad(q * seed)[1], \
+            m.optimize(seed=seed).unconstrained
+
+    serial = [run(seed) for seed in range(1, 7)]
+    with concurrent.futures.ThreadPoolExecutor(max_workers=6) as pool:
+        threaded = list(pool.map(run, range(1, 7)))
+    for want, got in zip(serial, threaded):
+        for a, b in zip(want, got):
+            np.testing.assert_array_equal(a, b)
 
 
 def test_sampling_off_the_main_thread_still_works():
@@ -2151,6 +2264,21 @@ def test_sample_rejects_bad_seed_and_wrong_types():
 def test_sample_still_accepts_zero_warmup_and_integral_floats():
     fit = _metric_fit(chains=2, warmup=0, samples=0 + 10, thin=1.0)
     assert fit.n_chains == 2 and fit.n_draws == 10
+
+
+def test_zero_warmup_runs_at_the_given_step_size_unless_adaptation_is_asked_for():
+    fit = _metric_fit(chains=2, warmup=0, samples=10, step_size=0.25)
+    assert np.all(fit.sampler_stats[:, :, 2] == 0.25)
+    for engaged in (True, np.True_):
+        try:
+            _metric_fit(chains=2, warmup=0, samples=10, adapt_engaged=engaged)
+        except RuntimeError as e:
+            assert "warmup must be an integer >= 1 when adaptation is " \
+                   "engaged" in str(e), str(e)
+        else:
+            raise AssertionError("adapt_engaged=True with warmup=0 must fail")
+    _bad_sample_argument(TypeError, "adapt_engaged must be a bool or None",
+                         adapt_engaged="yes")
 
 
 def test_optimize_rejects_bad_arguments():

@@ -24,9 +24,10 @@ sample_model(
   metric = c("diag_e", "dense_e", "unit_e"),
   inv_metric = NULL,
   step_size = NULL,
-  adapt_engaged = TRUE,
+  adapt_engaged = NULL,
   adapt_metric = TRUE,
-  chain_id = 1L
+  chain_id = 1L,
+  show_messages = TRUE
 )
 }
 \arguments{
@@ -62,7 +63,13 @@ not perform PSIS resampling.}
 
 \item{refresh}{Print a progress update every `refresh` transitions within
 each phase, plus the first and last transition of the phase. Set to 0 to
-suppress all automatic sampling output.}
+suppress the progress lines and the timing and sampler-problem summaries.
+The sampler's own notices (a rejected proposal, too few warmup iterations
+to adapt) print whatever `refresh` is, as in CmdStan.}
+
+\item{show_messages}{`FALSE` drops those notices, and with them anything
+the model itself prints, during sampling. `TRUE` (the default) shows them.
+It does not apply with `fixed_param = TRUE`, which has no sampler notices.}
 
 \item{threads_per_chain}{Deprecated. Set the thread count when building
 the model, with `stanli_model(threads_per_chain = )`; sampling uses the
@@ -99,14 +106,12 @@ With adaptation on, the metric is adapted during warmup from this start.}
 by every chain. `NULL` uses 1, as CmdStan does. With adaptation on it is
 the starting point of the step size search and of dual averaging.}
 
-\item{adapt_engaged}{`TRUE` (the default) adapts the step size and, unless
+\item{adapt_engaged}{`TRUE` adapts the step size and, unless
 `metric = "unit_e"`, the metric during warmup. `FALSE` runs no adaptation:
 `warmup` iterations are ordinary transitions and `inv_metric` and
-`step_size` are used as given. With `warmup = 0` and `adapt_engaged =
-TRUE`, stanli still runs Stan's initial step size search, as Stan's
-adaptive sampler does, so the step size in use differs from `step_size`.
-To use a supplied step size exactly, set `adapt_engaged = FALSE`, as with
-CmdStanR.}
+`step_size` are used as given. The default, `NULL`, means `TRUE` unless
+`warmup = 0`, which then runs at exactly `step_size`; an explicit
+`adapt_engaged = TRUE` with `warmup = 0` is an error, as in CmdStan.}
 
 \item{adapt_metric}{`TRUE` (the default) adapts the metric during warmup
 when `adapt_engaged` is `TRUE`. `FALSE` adapts only the step size and

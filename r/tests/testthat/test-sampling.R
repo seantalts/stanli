@@ -131,6 +131,28 @@ test_that("parameter_names lists declared parameters, not outputs", {
   expect_identical(parameter_names(none), character(0))
 })
 
+test_that("partial starting values keep each parameter's shape", {
+  skip_without_runtime()
+  m <- stanli_model(code = "
+    parameters { real s; matrix[2, 3] P; vector[1] v1; matrix[0, 3] Z;
+      array[2] tuple(real, vector[2]) atp; }
+    model { s ~ normal(0, 1); to_vector(P) ~ normal(0, 1); v1 ~ normal(0, 1);
+      for (k in 1:2) { atp[k].1 ~ normal(0, 1); atp[k].2 ~ normal(0, 1); } }")
+  # The parameters a list leaves out start at the drawn point, so filling
+  # in s alone gives that point back with s replaced.
+  point <- local({ set.seed(4); stats::runif(m$n_unconstrained, -2, 2) })
+  got <- unconstrain(m, list(s = 0.3), partial = TRUE, seed = 4)
+  expect_equal(got, c(0.3, point[-1]))
+  P <- matrix(1:6, 2, 3)
+  expect_equal(unconstrain(m, list(P = P), partial = TRUE, seed = 4)[2:7],
+               as.double(1:6))
+  # CmdStan refuses a flat or transposed matrix rather than reorder it.
+  expect_error(unconstrain(m, list(P = as.vector(P)), partial = TRUE),
+               "number dimensions declared and found")
+  expect_error(unconstrain(m, list(P = t(P)), partial = TRUE),
+               "dims declared=\\(2,3\\); dims found=\\(3,2\\)")
+})
+
 test_that("unconstrain can drop names that are not parameters", {
   skip_without_runtime()
   m <- stanli_model(code = "
@@ -272,7 +294,15 @@ test_that("sampling progress is informative and observational", {
                           init = 0, init_radius = 0, parallel_chains = 1,
                           refresh = 0)
   })
-  expect_length(quiet_text, 0)
+  expect_false(any(grepl("Iteration:|Elapsed Time", quiet_text)))
+  expect_true(any(grepl("^Chain \\[1\\] WARNING", quiet_text)))
+  silent_text <- capture.output({
+    silent <- sample_model(m, chains = 1, seed = 9182, warmup = 3, samples = 4,
+                           init = 0, init_radius = 0, parallel_chains = 1,
+                           refresh = 0, show_messages = FALSE)
+  })
+  expect_length(silent_text, 0)
+  expect_identical(loud$draws, silent$draws)
   expect_identical(loud$draws, quiet$draws)
   expect_identical(loud$sampler, quiet$sampler)
   expect_identical(loud$unconstrained, quiet$unconstrained)
@@ -329,9 +359,32 @@ test_that("rejected proposals are reported with their chain", {
                           warmup = 100, samples = 100, refresh = 50)
   expect_match(loud, "Chain [1] Informational Message", fixed = TRUE)
   expect_match(loud, "Chain [2] Informational Message", fixed = TRUE)
+  no_progress <- sampling_output(reject_code, list(), chains = 2, seed = 3,
+                                 warmup = 100, samples = 100, refresh = 0)
+  expect_match(no_progress, "Chain [1] Informational Message", fixed = TRUE)
+  expect_false(grepl("Iteration:", no_progress, fixed = TRUE))
   quiet <- sampling_output(reject_code, list(), chains = 2, seed = 3,
-                           warmup = 100, samples = 100, refresh = 0)
+                           warmup = 100, samples = 100, refresh = 50,
+                           show_messages = FALSE)
   expect_false(grepl("Informational", quiet, fixed = TRUE))
+  expect_match(quiet, "Iteration:", fixed = TRUE)
+})
+
+test_that("show_messages must be TRUE or FALSE and sample_more takes it too", {
+  skip_without_runtime()
+  m <- progress_model()
+  for (bad in list("no", 0, NA, c(TRUE, FALSE), NULL))
+    expect_error(sample_model(m, chains = 1, warmup = 5, samples = 5,
+                              refresh = 0, show_messages = bad),
+                 "show_messages must be TRUE or FALSE", fixed = TRUE)
+  fit <- sample_model(m, chains = 1, seed = 1, warmup = 5, samples = 5,
+                      refresh = 0, show_messages = FALSE)
+  text <- capture.output(more <- sample_more(fit, samples = 5, refresh = 0,
+                                             show_messages = FALSE))
+  expect_length(text, 0)
+  expect_identical(dim(more$draws)[1], 10L)
+  expect_error(sample_more(fit, samples = 5, show_messages = NA),
+               "show_messages must be TRUE or FALSE", fixed = TRUE)
 })
 
 test_that("divergence and low E-BFMI warnings come with every sampling run", {
@@ -600,15 +653,21 @@ test_that("adapt_metric = FALSE adapts only the step size", {
   expect_false(fit$adapt_metric)
 })
 
-test_that("warmup = 0 searches for a step size only while adaptation is engaged", {
+test_that("warmup = 0 runs at the given step size unless adaptation is asked for", {
   skip_without_runtime()
   m <- metric_model()
-  searched <- sample_model(m, chains = 1, seed = 3, warmup = 0, samples = 10,
-                           step_size = 0.25, refresh = 0)
-  expect_false(all(searched$sampler[, , "stepsize__"] == 0.25))
   fixed <- sample_model(m, chains = 1, seed = 3, warmup = 0, samples = 10,
-                        step_size = 0.25, adapt_engaged = FALSE, refresh = 0)
+                        step_size = 0.25, refresh = 0)
   expect_true(all(fixed$sampler[, , "stepsize__"] == 0.25))
+  expect_false(fixed$adapt_engaged)
+  expect_error(
+    sample_model(m, chains = 1, seed = 3, warmup = 0, samples = 10,
+                 adapt_engaged = TRUE, refresh = 0),
+    "warmup must be an integer >= 1 when adaptation is engaged",
+    fixed = TRUE)
+  adapted <- sample_model(m, chains = 1, seed = 3, warmup = 20, samples = 10,
+                          refresh = 0)
+  expect_true(adapted$adapt_engaged)
 })
 
 test_that("a length-one inverse metric fits a one-parameter model", {

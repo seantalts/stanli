@@ -1,5 +1,6 @@
 #include <stanli/builtin_registry.hpp>
 #include <stanli/function_registry.hpp>
+#include <stanli/int_arith.hpp>
 
 #include <stan/math/prim/err/check_greater.hpp>
 #include <stan/math/prim/err/check_less_or_equal.hpp>
@@ -1871,14 +1872,13 @@ int evaluate_integer_binary_builtin(const BuiltinSpec& spec, int lhs, int rhs) {
 int evaluate_integer_binary_builtin(uint16_t opcode, int lhs, int rhs) {
   switch (opcode) {
     case OP_ADD:
-      return lhs + rhs;
+      return int_arith(IntOp::Add, lhs, rhs);
     case OP_SUB:
-      return lhs - rhs;
+      return int_arith(IntOp::Sub, lhs, rhs);
     case OP_MUL:
-      return lhs * rhs;
+      return int_arith(IntOp::Mul, lhs, rhs);
     case OP_DIV:
-      if (rhs == 0) throw std::domain_error("integer division by zero");
-      return lhs / rhs;
+      return int_arith(IntOp::Div, lhs, rhs);
     case OP_CHOOSE:
       return stan::math::choose(lhs, rhs);
     default:
@@ -1892,7 +1892,7 @@ int evaluate_integer_unary_builtin(const BuiltinSpec& spec, int value) {
     throw std::logic_error("builtin is not an integer unary function");
   switch (spec.opcode) {
     case OP_NEG:
-      return -value;
+      return int_negate(value);
     case OP_ABS:
       return value < 0 ? -value : value;
     case OP_TO_INT:

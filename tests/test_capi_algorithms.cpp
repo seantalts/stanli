@@ -1184,6 +1184,70 @@ void test_optimize_rejected_mode() {
   stanli_model_free(m);
 }
 
+// A binding may call any entry point from a thread of its own, one that
+// has never evaluated a model. Each must work there as on the main thread.
+void test_algorithms_on_a_new_thread(stanli_model* m) {
+  const auto on_new_thread = [](const std::function<int(char*)>& call) {
+    char err[4096]{};
+    int rc = -1;
+    std::thread([&] { rc = call(err); }).join();
+    return rc == 0 ? std::string() : std::string(err) + " ";
+  };
+  std::vector<double> q(3), values((size_t)(400 * kWidth));
+  std::vector<double> lp(400), lq(400), path(400);
+  const std::string optimize = on_new_thread([&](char* err) {
+    stanli_optimize_opts o;
+    stanli_optimize_opts_init(&o);
+    double mode_lp = 0;
+    return stanli_optimize(m, &o, q.data(), values.data(), &mode_lp, err, 4096);
+  });
+  expect("optimize on a new thread " + optimize, optimize.empty());
+  const std::string inits = on_new_thread([&](char* err) {
+    std::vector<double> starts(3 * 2);
+    return stanli_pathfinder_inits(m, 1, 1, 2, 1000, 25, 5, 2.0, starts.data(),
+                                   nullptr, nullptr, err, 4096);
+  });
+  expect("pathfinder_inits on a new thread " + inits, inits.empty());
+  const std::string laplace = on_new_thread([&](char* err) {
+    stanli_laplace_opts o;
+    stanli_laplace_opts_init(&o);
+    o.draws = 400;
+    return stanli_laplace_sample(m, &o, q.data(), values.data(), lp.data(),
+                                 lq.data(), nullptr, nullptr, nullptr, nullptr,
+                                 nullptr, err, 4096);
+  });
+  expect("laplace on a new thread " + laplace, laplace.empty());
+  const std::string pathfinder = on_new_thread([&](char* err) {
+    stanli_pathfinder_opts o;
+    stanli_pathfinder_opts_init(&o);
+    o.num_draws = 400;
+    int64_t rows = 0;
+    return stanli_pathfinder(m, &o, values.data(), lp.data(), lq.data(),
+                             path.data(), &rows, nullptr, nullptr, nullptr,
+                             nullptr, nullptr, err, 4096);
+  });
+  expect("pathfinder on a new thread " + pathfinder, pathfinder.empty());
+  const std::string advi = on_new_thread([&](char* err) {
+    stanli_variational_opts o;
+    stanli_variational_opts_init(&o);
+    o.output_samples = 400;
+    std::vector<double> mean((size_t)kWidth);
+    return stanli_variational(m, &o, mean.data(), values.data(), lp.data(),
+                              lq.data(), nullptr, nullptr, nullptr, nullptr,
+                              nullptr, err, 4096);
+  });
+  expect("variational on a new thread " + advi, advi.empty());
+  const std::string fixed = on_new_thread([&](char* err) {
+    stanli_fixed_param_opts o;
+    stanli_fixed_param_opts_init(&o);
+    o.chains = 1;
+    o.samples = 400;
+    return stanli_fixed_param(m, &o, values.data(), nullptr, nullptr, nullptr,
+                              nullptr, nullptr, nullptr, err, 4096);
+  });
+  expect("fixed_param on a new thread " + fixed, fixed.empty());
+}
+
 int main() {
   stanli_model* m = load("alg_gauss");
   if (m != nullptr) {
@@ -1196,6 +1260,7 @@ int main() {
     test_pathfinder(m);
     test_variational(m);
     test_hessian(m);
+    test_algorithms_on_a_new_thread(m);
     // The algorithms borrow the model's executor; it must still sample.
     std::vector<double> draws(200 * 3);
     char err[4096]{};

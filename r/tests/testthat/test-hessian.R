@@ -30,3 +30,18 @@ test_that("log_prob_hessian checks its arguments and reports rejections", {
     model { t ~ normal(0, s); s ~ lognormal(0, 1); }")
   expect_error(log_prob_hessian(bad, c(-800, 0)), "Hessian")
 })
+
+test_that("log_prob_grad and log_prob say why an evaluation failed", {
+  skip_without_runtime()
+  m <- stanli_model(code = "parameters { real x; } model { x ~ normal(0, -1); }")
+  expect_error(log_prob_grad(m, 0), "rejected.*Scale parameter is -1")
+  expect_error(.Call("stanli_r_log_prob", m$ptr, 0),
+               "rejected.*Scale parameter is -1")
+  idx <- stanli_model(
+    code = "data { int k; } parameters { real x; }
+            model { vector[2] v = [x, x]'; target += v[k]; }",
+    data = list(k = 3L))
+  err <- tryCatch(log_prob_grad(idx, 0), error = conditionMessage)
+  expect_false(grepl("rejected", err, fixed = TRUE))
+  expect_match(err, "index", ignore.case = TRUE)
+})

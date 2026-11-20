@@ -151,52 +151,16 @@ void Lowering::observe_indexed_rhs(const mir::Expr& rhs, const Val& v) {
     // graph values and deliberately do not acquire a compile-time binding.
   }
 }
-// The same rule as stan::json::json_data::validate_dims, which CmdStan
-// applies to every data variable before it reads one. A scalar counts as
-// zero elements and any empty value satisfies a declaration with a zero
-// extent, because JSON's [] cannot say which axis is empty. Otherwise the
-// found dims must equal the declared dims exactly, so a transposed matrix
-// or a scalar spelled [x] is rejected rather than read in the wrong order.
+// CmdStan checks every data variable's dims before it reads one.
 void Lowering::validate_data_dims(const std::string& name,
                                   const mir::SizedType& t) {
   if (!data.has(name)) return;
-  const DataMap::Entry& en = data.at(name);
   const std::vector<int64_t> declared = sized_dims(t);
-  int64_t want = 1;
-  for (int64_t d : declared) {
+  for (int64_t d : declared)
     if (d < 0) fail("negative extent for data " + name, t.raw);
-    want *= d;
-  }
-  int64_t found = en.dims.empty() ? 0 : 1;
-  for (int64_t d : en.dims) found *= d;
-  if (found == 0 && want == 0) return;
-  const auto tuple = [](const std::vector<int64_t>& dims) {
-    std::string s = "(";
-    for (size_t k = 0; k < dims.size(); ++k) {
-      if (k) s += ',';
-      s += std::to_string(dims[k]);
-    }
-    return s + ")";
-  };
-  const std::string shapes =
-      "dims declared=" + tuple(declared) + "; dims found=" + tuple(en.dims);
-  if (en.dims.size() != declared.size())
-    throw std::invalid_argument(
-        "mismatch in number dimensions declared and found in context; "
-        "processing stage=data initialization; variable name=" +
-        name + "; " + shapes);
-  for (size_t k = 0; k < declared.size(); ++k)
-    if (en.dims[k] != declared[k])
-      throw std::invalid_argument(
-          "mismatch in dimension declared and found in context; processing "
-          "stage=data initialization; variable name=" +
-          name + "; position=" + std::to_string(k) + "; " + shapes);
-  if ((t.base == "SInt" || (t.base == "SArray" && t.elem_base == "SInt")) &&
-      !en.is_int)
-    throw std::invalid_argument(
-        "int variable contained non-int values; processing stage=data "
-        "initialization; variable name=" +
-        name + "; base type=int");
+  check_declared_dims(
+      VarStage::Data, name, declared, data.at(name),
+      t.base == "SInt" || (t.base == "SArray" && t.elem_base == "SInt"));
 }
 void Lowering::scan_rebuild(const mir::Stmt& s, RebuildShape& shape) {
   switch (s.kind) {

@@ -35,8 +35,10 @@ struct KnownOutput {
 // that motivates it.
 //
 // Runs the ops through a real Executor over a sub-graph of just those ops, so
-// there is one implementation of what an op means. If that evaluation throws
-// -- a density rejecting its own data, say -- the graph is left untouched.
+// there is one implementation of what an op means. An op whose evaluation
+// throws -- a density rejecting its own data, say -- stays in the graph with
+// the ops that read it, and the others fold. An op whose payload can print
+// or reject, such as an ODE whose right-hand side prints, is not folded.
 // STANLI_NO_CONSTFOLD=1 disables the pass.
 ConstFoldStats const_fold(
     Graph& g, std::vector<std::pair<int, std::vector<double>>>& fills,

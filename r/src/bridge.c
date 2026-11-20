@@ -264,9 +264,10 @@ static const char* (*p_build_id)(void);
 static char* (*p_bridgestan_data)(const char*, const char*, const char*, char*,
                                   size_t);
 static int64_t (*p_n_unconstrained)(const void*);
-static int (*p_grad)(void*, const double*, double*, double*);
-static int (*p_hessian)(void*, const double*, double*, double*, double*, char*,
-                        size_t);
+static int (*p_grad_err)(void*, const double*, double*, double*, char*, size_t);
+static int (*p_hessian_with_poll)(void*, const double*, double*, double*,
+                                  double*, stanli_sample_poll_cb, void*, int*,
+                                  char*, size_t);
 
 /* Experimental Laplace whitening. Bound when the runtime has them; a runtime
  * from before they existed still loads and these calls say so. */
@@ -306,9 +307,10 @@ static int (*p_sample_walnuts_stats_init)(void*, uint32_t, int, int, int,
                                           double, double, const double*,
                                           double*, double*, stanli_draw_cb,
                                           void*, char*, size_t);
-static int (*p_pathfinder_inits)(void*, uint32_t, int, int, int, int, int,
-                                 double, double*, stanli_path_cb, void*, char*,
-                                 size_t);
+static int (*p_pathfinder_inits_with_poll)(void*, uint32_t, int, int, int, int,
+                                           int, double, double*, stanli_path_cb,
+                                           void*, stanli_sample_poll_cb, void*,
+                                           int*, char*, size_t);
 static const char* (*p_sampler_column_name)(int);
 static int (*p_summary_stats)(const double*, int64_t, int64_t, int64_t,
                               double*);
@@ -319,32 +321,40 @@ static int64_t (*p_sampling_warnings)(const stanli_sample_opts*,
                                       const stanli_sample_report*,
                                       const double*, char*, size_t);
 static int64_t (*p_wa_n_columns)(const void*);
-static const char* (*p_wa_column_name)(const void*, int64_t);
+static int64_t (*p_n_output_columns)(const void*);
 static void (*p_wa_seed_chain)(void*, uint32_t, uint32_t);
 static int (*p_wa_row)(void*, const double*, double*);
 static const char* (*p_warnings)(const void*);
 static int (*p_transformed_data_rng)(const void*);
 static void (*p_optimize_opts_init)(stanli_optimize_opts*);
-static int (*p_optimize)(void*, const stanli_optimize_opts*, double*, double*,
-                         double*, char*, size_t);
+static int (*p_optimize_with_poll)(void*, const stanli_optimize_opts*, double*,
+                                   double*, double*, stanli_sample_poll_cb,
+                                   void*, int*, char*, size_t);
 
 static void (*p_fixed_param_opts_init)(stanli_fixed_param_opts*);
+static int (*p_fixed_param_opts_check)(const stanli_fixed_param_opts*, char*,
+                                       size_t);
 static int64_t (*p_fixed_param_n_draws)(const stanli_fixed_param_opts*);
 static int (*p_fixed_param)(void*, const stanli_fixed_param_opts*, double*,
                             double*, stanli_log_cb, void*,
                             stanli_sample_poll_cb, void*, int*, char*, size_t);
 static void (*p_laplace_opts_init)(stanli_laplace_opts*);
+static int (*p_laplace_opts_check)(const stanli_laplace_opts*, char*, size_t);
 static int (*p_laplace_sample)(void*, const stanli_laplace_opts*, const double*,
                                double*, double*, double*, stanli_log_cb, void*,
                                stanli_sample_poll_cb, void*, int*, char*,
                                size_t);
 static void (*p_pathfinder_opts_init)(stanli_pathfinder_opts*);
+static int (*p_pathfinder_opts_check)(const stanli_pathfinder_opts*, char*,
+                                      size_t);
 static int64_t (*p_pathfinder_max_draws)(const stanli_pathfinder_opts*);
 static int (*p_pathfinder)(void*, const stanli_pathfinder_opts*, double*,
                            double*, double*, double*, int64_t*, stanli_log_cb,
                            void*, stanli_sample_poll_cb, void*, int*, char*,
                            size_t);
 static void (*p_variational_opts_init)(stanli_variational_opts*);
+static int (*p_variational_opts_check)(const stanli_variational_opts*, char*,
+                                       size_t);
 static int (*p_variational)(void*, const stanli_variational_opts*, double*,
                             double*, double*, double*, stanli_log_cb, void*,
                             stanli_sample_poll_cb, void*, int*, char*, size_t);
@@ -551,8 +561,8 @@ SEXP stanli_bridge_load(SEXP path) {
   BIND("stanli_build_id", p_build_id);
   BIND("stanli_bridgestan_data", p_bridgestan_data);
   BIND("stanli_n_unconstrained", p_n_unconstrained);
-  BIND("stanli_grad", p_grad);
-  BIND("stanli_hessian", p_hessian);
+  BIND("stanli_grad_err", p_grad_err);
+  BIND("stanli_hessian_with_poll", p_hessian_with_poll);
   BIND_OPTIONAL("stanli_model_whiten_lowrank", p_model_whiten_lowrank);
   BIND_OPTIONAL("stanli_sparse_factor_new", p_sparse_factor_new);
   BIND_OPTIONAL("stanli_sparse_factor_nnz", p_sparse_factor_nnz);
@@ -575,28 +585,32 @@ SEXP stanli_bridge_load(SEXP path) {
   BIND("stanli_sample_multi_metric", p_sample_multi_metric);
   BIND_OPTIONAL("stanli_sample_walnuts_stats_init",
                 p_sample_walnuts_stats_init);
-  BIND("stanli_pathfinder_inits", p_pathfinder_inits);
+  BIND("stanli_pathfinder_inits_with_poll", p_pathfinder_inits_with_poll);
   BIND("stanli_sampler_column_name", p_sampler_column_name);
   BIND("stanli_summary_stats", p_summary_stats);
   BIND("stanli_diagnose_text", p_diagnose_text);
   BIND("stanli_sampling_warnings", p_sampling_warnings);
   BIND("stanli_wa_n_columns", p_wa_n_columns);
-  BIND("stanli_wa_column_name", p_wa_column_name);
+  BIND("stanli_n_output_columns", p_n_output_columns);
   BIND("stanli_wa_seed_chain", p_wa_seed_chain);
   BIND("stanli_wa_row", p_wa_row);
   BIND("stanli_warnings", p_warnings);
   BIND("stanli_transformed_data_rng", p_transformed_data_rng);
   BIND("stanli_optimize_opts_init", p_optimize_opts_init);
-  BIND("stanli_optimize", p_optimize);
+  BIND("stanli_optimize_with_poll", p_optimize_with_poll);
   BIND("stanli_fixed_param_opts_init", p_fixed_param_opts_init);
+  BIND("stanli_fixed_param_opts_check", p_fixed_param_opts_check);
   BIND("stanli_fixed_param_n_draws", p_fixed_param_n_draws);
   BIND("stanli_fixed_param", p_fixed_param);
   BIND("stanli_laplace_opts_init", p_laplace_opts_init);
+  BIND("stanli_laplace_opts_check", p_laplace_opts_check);
   BIND("stanli_laplace_sample", p_laplace_sample);
   BIND("stanli_pathfinder_opts_init", p_pathfinder_opts_init);
+  BIND("stanli_pathfinder_opts_check", p_pathfinder_opts_check);
   BIND("stanli_pathfinder_max_draws", p_pathfinder_max_draws);
   BIND("stanli_pathfinder", p_pathfinder);
   BIND("stanli_variational_opts_init", p_variational_opts_init);
+  BIND("stanli_variational_opts_check", p_variational_opts_check);
   BIND("stanli_variational", p_variational);
   p_capture_messages(1);
   return mkString("");
@@ -638,9 +652,15 @@ static const char* file_label(SEXP file) {
  * drains the queue as soon as the native call returns, before any error()
  * can unwind, and the sampler callbacks drain it as they run so the text
  * keeps its order. */
+static int messages_shown = 1;
+
 static void flush_messages(void) {
   char* text = p_take_messages();
   if (text == NULL) return;
+  if (!messages_shown) {
+    p_string_free(text);
+    return;
+  }
   const void* vmax = vmaxget();
   const size_t len = strlen(text);
   char* copy = R_alloc(len + 1, 1);
@@ -732,13 +752,11 @@ SEXP stanli_r_compiler_messages(SEXP m) {
 }
 
 /* list(name = character, dims = list of integer vectors): the constrained
- * parameters when `parameters` is TRUE, else the columns
- * stanli_r_column_names reports. */
+ * parameters when `parameters` is TRUE, else the output columns. */
 SEXP stanli_r_variables(SEXP m, SEXP parameters) {
   require_loaded();
   const void* mm = model_ptr(m);
-  const int set =
-      asLogical(parameters) != TRUE && p_wa_n_columns(mm) > 0 ? 1 : 0;
+  const int set = asLogical(parameters) == TRUE ? 0 : 2;
   const int64_t n = p_n_variables(mm, set);
   SEXP names = PROTECT(allocVector(STRSXP, (R_xlen_t)n));
   SEXP dims = PROTECT(allocVector(VECSXP, (R_xlen_t)n));
@@ -826,24 +844,6 @@ SEXP stanli_r_n_unconstrained(SEXP m) {
   return ScalarInteger((int)p_n_unconstrained(model_ptr(m)));
 }
 
-SEXP stanli_r_column_names(SEXP m) {
-  require_loaded();
-  void* mm = model_ptr(m);
-  /* write_array columns when the model has generated quantities, the
-   * constrained parameters otherwise -- the same rule the Python
-   * wrapper follows, so both report the same CSV. */
-  int64_t n = p_wa_n_columns(mm);
-  int wa = n > 0;
-  if (!wa) n = p_n_constrained(mm);
-  SEXP out = PROTECT(allocVector(STRSXP, (R_xlen_t)n));
-  for (int64_t i = 0; i < n; ++i) {
-    const char* s = wa ? p_wa_column_name(mm, i) : p_constrained_name(mm, i);
-    SET_STRING_ELT(out, (R_xlen_t)i, mkChar(s ? s : ""));
-  }
-  UNPROTECT(1);
-  return out;
-}
-
 SEXP stanli_r_warnings(SEXP m) {
   require_loaded();
   const char* s = p_warnings(model_ptr(m));
@@ -876,11 +876,9 @@ SEXP stanli_r_write_array(SEXP m, SEXP q) {
   const int64_t n = p_n_unconstrained(mm);
   if (TYPEOF(q) != REALSXP || XLENGTH(q) != n)
     error("upars must contain %lld unconstrained values", (long long)n);
-  const int64_t wa_n = p_wa_n_columns(mm);
-  const int64_t ncol = wa_n > 0 ? wa_n : p_n_constrained(mm);
-  SEXP out = PROTECT(allocVector(REALSXP, (R_xlen_t)ncol));
-  const int rc = wa_n > 0 ? p_wa_row(mm, REAL(q), REAL(out))
-                          : p_constrain(mm, REAL(q), REAL(out));
+  SEXP out = PROTECT(allocVector(REALSXP, (R_xlen_t)p_n_output_columns(mm)));
+  const int rc = p_wa_n_columns(mm) > 0 ? p_wa_row(mm, REAL(q), REAL(out))
+                                        : p_constrain(mm, REAL(q), REAL(out));
   flush_messages();
   if (rc != 0) {
     UNPROTECT(1);
@@ -892,6 +890,20 @@ SEXP stanli_r_write_array(SEXP m, SEXP q) {
   return out;
 }
 
+/* stanli_eval_status in capi.h. */
+enum { EVAL_REJECTED = 1, EVAL_INTERNAL_ERROR = 3 };
+
+/* An error for a failed stanli_grad_err, by its status. */
+static void eval_error(int status, const char* message) {
+  const char* what =
+      status == EVAL_REJECTED ? "the log density rejected this point"
+      : status == EVAL_INTERNAL_ERROR
+          ? "log density evaluation failed inside stanli at this point (this "
+            "is a bug in stanli; please report it)"
+          : "log density evaluation failed at this point";
+  error("%s: %s", what, message);
+}
+
 /* Value-only evaluation avoids a reverse pass; gradient evaluation reuses
  * the existing bridge routine and its domain-error handling below. */
 SEXP stanli_r_log_prob(SEXP m, SEXP q) {
@@ -901,12 +913,10 @@ SEXP stanli_r_log_prob(SEXP m, SEXP q) {
   if (TYPEOF(q) != REALSXP || XLENGTH(q) != n)
     error("upars must contain %lld unconstrained values", (long long)n);
   double lp = 0;
-  const int rc = p_grad(mm, REAL(q), &lp, NULL);
+  char err[4096];
+  const int status = p_grad_err(mm, REAL(q), &lp, NULL, err, sizeof err);
   flush_messages();
-  if (rc != 0)
-    error(
-        "log density evaluation failed at this point (domain error in a "
-        "distribution or function)");
+  if (status != 0) eval_error(status, err);
   return ScalarReal(lp);
 }
 
@@ -942,13 +952,12 @@ SEXP stanli_r_grad(SEXP m, SEXP q) {
           (long long)XLENGTH(q), (long long)n);
   SEXP grad = PROTECT(allocVector(REALSXP, (R_xlen_t)n));
   double lp = 0;
-  const int rc = p_grad(mm, REAL(q), &lp, REAL(grad));
+  char err[4096];
+  const int status = p_grad_err(mm, REAL(q), &lp, REAL(grad), err, sizeof err);
   flush_messages();
-  if (rc != 0) {
+  if (status != 0) {
     UNPROTECT(1);
-    error(
-        "log density evaluation failed at this point (domain error in a "
-        "distribution or function)");
+    eval_error(status, err);
   }
   SEXP out = PROTECT(allocVector(VECSXP, 2));
   SET_VECTOR_ELT(out, 0, ScalarReal(lp));
@@ -958,6 +967,30 @@ SEXP stanli_r_grad(SEXP m, SEXP q) {
   SET_STRING_ELT(nm, 1, mkChar("grad"));
   setAttrib(out, R_NamesSymbol, nm);
   UNPROTECT(3);
+  return out;
+}
+
+static void check_interrupt(void* unused) {
+  (void)unused;
+  R_CheckUserInterrupt();
+}
+
+/* A pending interrupt would longjmp straight through the runtime's C++
+ * frames. R_ToplevelExec catches it instead and answers FALSE, which the
+ * runtime turns into a stop; the R side raises the interrupt again once the
+ * sampler has returned. */
+static int sample_poll(void* user) {
+  (void)user;
+  R_ToplevelExec(flush_messages_cb, NULL);
+  return R_ToplevelExec(check_interrupt, NULL) ? 0 : 1;
+}
+
+/* What a stopped call returns; algorithm_interrupt() in R raises it. */
+static SEXP interrupted_result(void) {
+  const char* names[] = {"interrupted", ""};
+  SEXP out = PROTECT(mkNamed(VECSXP, names));
+  SET_VECTOR_ELT(out, 0, ScalarLogical(1));
+  UNPROTECT(1);
   return out;
 }
 
@@ -973,12 +1006,18 @@ SEXP stanli_r_hessian(SEXP m, SEXP q) {
   double lp = 0;
   char err[4096];
   err[0] = '\0';
+  int interrupted = 0;
   const int rc =
-      p_hessian(mm, REAL(q), &lp, REAL(grad), REAL(hess), err, sizeof err);
+      p_hessian_with_poll(mm, REAL(q), &lp, REAL(grad), REAL(hess), sample_poll,
+                          NULL, &interrupted, err, sizeof err);
   flush_messages();
   if (rc != 0) {
     UNPROTECT(2);
     error("Hessian evaluation failed at this point: %s", err);
+  }
+  if (interrupted) {
+    UNPROTECT(2);
+    return interrupted_result();
   }
   SEXP out = PROTECT(allocVector(VECSXP, 3));
   SET_VECTOR_ELT(out, 0, ScalarReal(lp));
@@ -1272,21 +1311,6 @@ static void sample_progress(int32_t chain_id, int64_t iteration, int64_t total,
   R_FlushConsole();
 }
 
-static void check_interrupt(void* unused) {
-  (void)unused;
-  R_CheckUserInterrupt();
-}
-
-/* A pending interrupt would longjmp straight through the runtime's C++
- * frames. R_ToplevelExec catches it instead and answers FALSE, which the
- * runtime turns into a stop; the R side raises the interrupt again once the
- * sampler has returned. */
-static int sample_poll(void* user) {
-  (void)user;
-  R_ToplevelExec(flush_messages_cb, NULL);
-  return R_ToplevelExec(check_interrupt, NULL) ? 0 : 1;
-}
-
 static void print_sample_reports(const stanli_sample_opts* o, int64_t nchain,
                                  const stanli_sample_report* reports,
                                  const double* stats) {
@@ -1319,15 +1343,17 @@ SEXP stanli_r_pathfinder_inits(SEXP m, SEXP seed, SEXP chains, SEXP options,
   double* raw = (double*)R_alloc((size_t)nchain * (size_t)n, sizeof(double));
   char err[4096];
   err[0] = '\0';
-  const int rc = p_pathfinder_inits(
+  int interrupted = 0;
+  const int rc = p_pathfinder_inits_with_poll(
       mm, (uint32_t)asInteger(seed), asInteger(chain_id), nchain,
       asInteger(VECTOR_ELT(options, 0)), asInteger(VECTOR_ELT(options, 1)),
       asInteger(VECTOR_ELT(options, 2)), asReal(VECTOR_ELT(options, 3)), raw,
-      NULL, NULL, err, sizeof err);
+      NULL, NULL, sample_poll, NULL, &interrupted, err, sizeof err);
   flush_messages();
   if (rc != 0)
     error("Pathfinder initialization failed: %s",
           err[0] ? err : "unknown error");
+  if (interrupted) return interrupted_result();
 
   /* Return an ordinary chains-by-parameters R matrix. R owns columns, while
    * the C ABI owns chain-major rows, so transpose the memory layout here. */
@@ -1357,7 +1383,7 @@ SEXP stanli_r_check_sample_options(SEXP optlist) {
 /* `resume` is NULL for a fresh run, else a list of one raw resume record per
  * chain, as an earlier run returned them. */
 SEXP stanli_r_sample(SEXP m, SEXP optlist, SEXP inits, SEXP refresh,
-                     SEXP metric_list, SEXP resume) {
+                     SEXP metric_list, SEXP resume, SEXP show_messages) {
   require_loaded();
   void* mm = model_ptr(m);
   stanli_sample_opts o;
@@ -1393,9 +1419,7 @@ SEXP stanli_r_sample(SEXP m, SEXP optlist, SEXP inits, SEXP refresh,
 
   SEXP raw = PROTECT(allocVector(REALSXP, (R_xlen_t)(nchain * rows * n)));
   SEXP stats = PROTECT(allocVector(REALSXP, (R_xlen_t)(nchain * rows * 7)));
-  int64_t ncol = p_wa_n_columns(mm);
-  const int wa = ncol > 0;
-  if (!wa) ncol = p_n_constrained(mm);
+  const int64_t ncol = p_n_output_columns(mm);
   SEXP vals = PROTECT(allocVector(REALSXP, (R_xlen_t)(nchain * rows * ncol)));
   char err[4096];
   err[0] = '\0';
@@ -1422,11 +1446,13 @@ SEXP stanli_r_sample(SEXP m, SEXP optlist, SEXP inits, SEXP refresh,
   mo.adapted_step_size = REAL(adapted_step);
   mo.adapted_inv_metric = metric_len > 0 ? REAL(adapted_inv) : NULL;
   int interrupted = 0;
+  messages_shown = asLogical(show_messages) == TRUE;
   const int failed = p_sample_multi_metric(
       mm, &o, &mo, refresh_rate, REAL(raw), REAL(stats), REAL(vals),
       refresh_rate > 0 ? sample_progress : NULL, &o.max_depth, sample_poll,
       NULL, &interrupted, reports, err, sizeof err);
   flush_messages();
+  messages_shown = 1;
   if (failed < 0) {
     UNPROTECT(5);
     error("%s", err[0] ? err : "stanli: sampling could not start");
@@ -1437,11 +1463,8 @@ SEXP stanli_r_sample(SEXP m, SEXP optlist, SEXP inits, SEXP refresh,
           err[0] ? err : "(no message)");
   }
   if (interrupted) {
-    const char* names[] = {"interrupted", ""};
-    SEXP out = PROTECT(mkNamed(VECSXP, names));
-    SET_VECTOR_ELT(out, 0, ScalarLogical(1));
-    UNPROTECT(6);
-    return out;
+    UNPROTECT(5);
+    return interrupted_result();
   }
   if (refresh_rate > 0) print_sample_reports(&o, nchain, reports, REAL(stats));
 
@@ -1558,18 +1581,24 @@ SEXP stanli_r_optimize(SEXP m, SEXP optlist, SEXP init) {
   if (XLENGTH(init) > 0) o.init = REAL(init);
 
   const int64_t n = p_n_unconstrained(mm);
-  int64_t ncol = p_wa_n_columns(mm);
-  if (ncol == 0) ncol = p_n_constrained(mm);
+  const int64_t ncol = p_n_output_columns(mm);
   SEXP q = PROTECT(allocVector(REALSXP, (R_xlen_t)n));
   SEXP vals = PROTECT(allocVector(REALSXP, (R_xlen_t)ncol));
   double lp = 0;
   char err[4096];
   err[0] = '\0';
-  const int rc = p_optimize(mm, &o, REAL(q), REAL(vals), &lp, err, sizeof err);
+  int interrupted = 0;
+  const int rc =
+      p_optimize_with_poll(mm, &o, REAL(q), REAL(vals), &lp, sample_poll, NULL,
+                           &interrupted, err, sizeof err);
   flush_messages();
   if (rc != 0) {
     UNPROTECT(2);
     error("optimize failed: %s", err[0] ? err : "(no message)");
+  }
+  if (interrupted) {
+    UNPROTECT(2);
+    return interrupted_result();
   }
   SEXP out = PROTECT(allocVector(VECSXP, 3));
   SET_VECTOR_ELT(out, 0, vals);
@@ -1620,11 +1649,6 @@ static void run_log_init(run_log* log, int verbose) {
   log->notes[0] = '\0';
 }
 
-static int64_t row_width(void* mm) {
-  const int64_t n = p_wa_n_columns(mm);
-  return n > 0 ? n : p_n_constrained(mm);
-}
-
 /* A named list from parallel arrays; `values` are already protected by the
  * caller, and stay so until it returns. */
 static SEXP named_list(int n, const char** names, SEXP* values) {
@@ -1639,12 +1663,10 @@ static SEXP named_list(int n, const char** names, SEXP* values) {
   return out;
 }
 
-static SEXP interrupted_result(void) {
-  const char* names[] = {"interrupted", ""};
-  SEXP out = PROTECT(mkNamed(VECSXP, names));
-  SET_VECTOR_ELT(out, 0, ScalarLogical(1));
-  UNPROTECT(1);
-  return out;
+/* Raises the message of an options check that failed. Called before the
+ * options size any buffer. */
+static void check_opts(int failed, const char* err) {
+  if (failed) error("%s", err[0] ? err : "invalid options");
 }
 
 /* optlist: seed, chains, samples, thin, init_radius, refresh, chain_id. */
@@ -1661,16 +1683,16 @@ SEXP stanli_r_fixed_param(SEXP m, SEXP optlist, SEXP inits) {
   o.refresh = asInteger(VECTOR_ELT(optlist, 5));
   o.chain_id = asInteger(VECTOR_ELT(optlist, 6));
   if (XLENGTH(inits) > 0) o.inits = REAL(inits);
-  if (o.chains < 1) error("chains must be positive");
+  char err[4096];
+  err[0] = '\0';
+  check_opts(p_fixed_param_opts_check(&o, err, sizeof err), err);
 
   const int64_t rows = p_fixed_param_n_draws(&o);
-  const int64_t width = row_width(mm);
+  const int64_t width = p_n_output_columns(mm);
   SEXP vals =
       PROTECT(allocVector(REALSXP, (R_xlen_t)(o.chains * rows * width)));
   run_log log;
   run_log_init(&log, o.refresh > 0);
-  char err[4096];
-  err[0] = '\0';
   int interrupted = 0;
   SEXP seconds = PROTECT(allocVector(REALSXP, (R_xlen_t)o.chains));
   const int rc =
@@ -1755,7 +1777,7 @@ SEXP stanli_r_walnuts(SEXP m, SEXP optlist, SEXP init) {
   const int64_t n = p_n_unconstrained(mm);
   if (XLENGTH(init) != 0 && XLENGTH(init) != n)
     error("init must hold %lld values", (long long)n);
-  const int64_t width = row_width(mm);
+  const int64_t width = p_n_output_columns(mm);
   const int wa = p_wa_n_columns(mm) > 0;
   const int ncols = p_n_sampler_columns();
   SEXP raw = PROTECT(allocVector(REALSXP, (R_xlen_t)(run.samples * n)));
@@ -1807,20 +1829,20 @@ SEXP stanli_r_laplace(SEXP m, SEXP optlist, SEXP mode) {
   o.jacobian = asLogical(VECTOR_ELT(optlist, 2));
   o.calculate_lp = asLogical(VECTOR_ELT(optlist, 3));
   o.refresh = asInteger(VECTOR_ELT(optlist, 4));
-  if (o.draws < 1) error("draws must be positive");
+  char err[4096];
+  err[0] = '\0';
+  check_opts(p_laplace_opts_check(&o, err, sizeof err), err);
   if (XLENGTH(mode) != (R_xlen_t)p_n_unconstrained(mm))
     error("mode must hold %lld unconstrained values",
           (long long)p_n_unconstrained(mm));
 
-  const int64_t width = row_width(mm);
+  const int64_t width = p_n_output_columns(mm);
   SEXP values[4];
   values[0] = PROTECT(allocVector(REALSXP, (R_xlen_t)(o.draws * width)));
   values[1] = PROTECT(allocVector(REALSXP, (R_xlen_t)o.draws));
   values[2] = PROTECT(allocVector(REALSXP, (R_xlen_t)o.draws));
   run_log log;
   run_log_init(&log, o.refresh > 0);
-  char err[4096];
-  err[0] = '\0';
   int interrupted = 0;
   const int rc = p_laplace_sample(
       mm, &o, REAL(mode), REAL(values[0]), REAL(values[1]), REAL(values[2]),
@@ -1868,19 +1890,20 @@ SEXP stanli_r_pathfinder(SEXP m, SEXP optlist, SEXP inits) {
   o.calculate_lp = asLogical(VECTOR_ELT(optlist, 15));
   o.refresh = asInteger(VECTOR_ELT(optlist, 16));
   if (XLENGTH(inits) > 0) o.inits = REAL(inits);
+  char err[4096];
+  err[0] = '\0';
+  check_opts(p_pathfinder_opts_check(&o, err, sizeof err), err);
 
-  /* Zero for options the runtime refuses, more than one path among them. */
+  /* Zero for the options that pass the check and that the run refuses. */
   const int64_t cap = p_pathfinder_max_draws(&o);
-  if (cap < 1) error("num_paths must be 1 and draws positive");
-  const int64_t width = row_width(mm);
+  if (cap < 1) error("num_paths must be 1");
+  const int64_t width = p_n_output_columns(mm);
   double* raw = (double*)R_alloc((size_t)(cap * width), sizeof(double));
   double* lp = (double*)R_alloc((size_t)cap, sizeof(double));
   double* lp_approx = (double*)R_alloc((size_t)cap, sizeof(double));
   double* path = (double*)R_alloc((size_t)cap, sizeof(double));
   run_log log;
   run_log_init(&log, o.refresh > 0);
-  char err[4096];
-  err[0] = '\0';
   int interrupted = 0;
   int64_t rows = 0;
   const int rc =
@@ -1931,9 +1954,11 @@ SEXP stanli_r_variational(SEXP m, SEXP optlist, SEXP init) {
   o.init_radius = asReal(VECTOR_ELT(optlist, 11));
   const int refresh = asInteger(VECTOR_ELT(optlist, 12));
   if (XLENGTH(init) > 0) o.init = REAL(init);
-  if (o.output_samples < 1) error("draws must be positive");
+  char err[4096];
+  err[0] = '\0';
+  check_opts(p_variational_opts_check(&o, err, sizeof err), err);
 
-  const int64_t width = row_width(mm);
+  const int64_t width = p_n_output_columns(mm);
   SEXP values[5];
   values[0] = PROTECT(allocVector(REALSXP, (R_xlen_t)width));
   values[1] =
@@ -1942,8 +1967,6 @@ SEXP stanli_r_variational(SEXP m, SEXP optlist, SEXP init) {
   values[3] = PROTECT(allocVector(REALSXP, (R_xlen_t)o.output_samples));
   run_log log;
   run_log_init(&log, refresh > 0);
-  char err[4096];
-  err[0] = '\0';
   int interrupted = 0;
   const int rc =
       p_variational(mm, &o, REAL(values[0]), REAL(values[1]), REAL(values[2]),

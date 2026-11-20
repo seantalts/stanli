@@ -2707,7 +2707,7 @@ class MirInterp {
     }
     if (e.name == "Modulo__") {
       const long x = as_int(e.args[0]), y = as_int(e.args[1]);
-      const long q = stan::math::modulus((int)x, (int)y);
+      const long q = int_arith(IntOp::Mod, (int)x, (int)y);
       r.is_int = true;
       r.i = {(int)q};
       r.r = {T((double)q)};
@@ -2918,10 +2918,10 @@ class MirInterp {
     }
     if ((e.name == "PMinus__" || e.name == "minus") && e.args.size() == 1 &&
         mir::is_unsized(e, mir::UnsizedLeaf::Int)) {
-      const long x = as_int(e.args[0]);
+      const int x = int_negate((int)as_int(e.args[0]));
       r.is_int = true;
-      r.i = {(int)(-x)};
-      r.r = {T((double)(-x))};
+      r.i = {x};
+      r.r = {T((double)x)};
       return r;
     }
     if (e.name == "PPlus__" || (e.name == "plus" && e.args.size() == 1))

@@ -226,8 +226,7 @@ stanmodel_control <- function(control) {
        max_depth = if (is.null(control$max_treedepth)) 10L else
          control$max_treedepth,
        step_size = control$stepsize, metric = metric,
-       adapt_engaged = if (is.null(control$adapt_engaged)) TRUE else
-         control$adapt_engaged,
+       adapt_engaged = control$adapt_engaged,
        adapt_metric = if (is.null(control$adapt_metric)) TRUE else
          control$adapt_metric)
 }

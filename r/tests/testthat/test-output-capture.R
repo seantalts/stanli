@@ -15,7 +15,7 @@ test_that("print() from the model is captured at every entry point", {
   text <- capture.output(invisible(log_prob_grad(model, 0.5)))
   expect_identical(text, "model mu=0.5")
 
-  text <- capture.output(fit <- sample_model(model, chains = 1, warmup = 3,
+  text <- capture.output(fit <- sample_model(model, chains = 1, warmup = 150,
                                              samples = 2, refresh = 0,
                                              seed = 1))
   expect_true(any(startsWith(text, "model mu=")))
@@ -41,7 +41,7 @@ test_that("print() from the model is captured at every entry point", {
 test_that("print() from parallel chains arrives as whole lines", {
   skip_without_runtime()
   capture.output(model <- stanli_model(code = printing_code))
-  text <- capture.output(invisible(sample_model(model, chains = 4, warmup = 50,
+  text <- capture.output(invisible(sample_model(model, chains = 4, warmup = 150,
                                       samples = 50, refresh = 0, seed = 3)))
   text <- text[nzchar(text)]
   expect_gt(length(text), 400L)

@@ -129,9 +129,6 @@ stanfit_unconstrain_pars <- function(object, pars) {
   # RStan's initialization context ignores non-parameter entries, including
   # transformed parameters and GQ returned by constrain_pars().
   values <- pars[intersect(names(pars), declared)]
-  # The inverse-transform interpreter accepts flat Stan-order values and owns
-  # the declared shapes.
-  values <- lapply(values, function(value) if (is.array(value)) as.vector(value) else value)
   unconstrain(model, values)
 }
 

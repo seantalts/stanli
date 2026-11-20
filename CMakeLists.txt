@@ -389,6 +389,7 @@ set(STANLI_RUNTIME_SOURCES
   runtime/src/lower_expr.cpp
   runtime/src/lower_stmt.cpp
   runtime/src/lower_region_map.cpp
+  runtime/src/lower_structured_loop.cpp
   runtime/src/lower_funapp.cpp
   runtime/src/lower_higher_order.cpp
   runtime/src/structured_loop.cpp

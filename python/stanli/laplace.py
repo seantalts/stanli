@@ -113,7 +113,7 @@ def _block_index(model, latent):
     for name, size in layout:
         ranges[name] = (start, start + size)
         start += size
-    columns = {c.split("[")[0] for c in model._column_names()[0]}
+    columns = {c.split("[")[0] for c in model._column_names()}
     for name in latent:
         if name in ranges:
             continue
@@ -128,18 +128,20 @@ def _block_index(model, latent):
 
 
 def _pathfinder_mean(model, seed, n):
-    model._prepare_run(seed)
-    num_draws = max(1000, min(20 * n, 20000, 25_000_000 // n))
-    draws = np.empty((num_draws, n))
-    lp = np.empty(num_draws)
-    lp_approx = np.empty(num_draws)
-    summary = np.empty(4)
-    err = ctypes.create_string_buffer(4096)
-    callback = _PATH_CB(lambda *_: None)
-    with _native_output():
-        rc = _lib.stanli_run_pathfinder(
-            model._handle, seed, 1, num_draws, _dptr(draws), _dptr(lp),
-            _dptr(lp_approx), _dptr(summary), callback, None, err, len(err))
+    with model._lock:
+        model._prepare_run(seed)
+        num_draws = max(1000, min(20 * n, 20000, 25_000_000 // n))
+        draws = np.empty((num_draws, n))
+        lp = np.empty(num_draws)
+        lp_approx = np.empty(num_draws)
+        summary = np.empty(4)
+        err = ctypes.create_string_buffer(4096)
+        callback = _PATH_CB(lambda *_: None)
+        with _native_output():
+            rc = _lib.stanli_run_pathfinder(
+                model._handle, seed, 1, num_draws, _dptr(draws), _dptr(lp),
+                _dptr(lp_approx), _dptr(summary), callback, None, err,
+                len(err))
     if rc != 0:
         raise RuntimeError("Pathfinder failed (" + err.value.decode()
                            + "); pass init= to choose the starting point")

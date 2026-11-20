@@ -1,5 +1,6 @@
 #include <stanli/builtin_registry.hpp>
 #include <stanli/debug_switch.hpp>
+#include <stanli/int_arith.hpp>
 #include <stanli/structured_loop.hpp>
 #include <stanli/message_sink.hpp>
 #include <stanli/optable.hpp>
@@ -516,34 +517,16 @@ int64_t integer(double x) {
   return static_cast<int64_t>(x);
 }
 void int_forward(KernelCtx& c) {
-  const int64_t a = integer(c.in[0].data[0]);
-  const int64_t b = c.n_in > 1 ? integer(c.in[1].data[0]) : 0;
-  int64_t v;
-  switch (c.variant) {
-    case 0:
-      v = a + b;
-      break;
-    case 1:
-      v = a - b;
-      break;
-    case 2:
-      v = a * b;
-      break;
-    case 3:
-      if (b == 0) throw std::domain_error("integer division by zero");
-      v = a / b;
-      break;
-    case 4:
-      if (b == 0) throw std::domain_error("integer remainder by zero");
-      v = a % b;
-      break;
-    case 5:
-      v = -a;
-      break;
-    default:
-      throw std::logic_error("invalid integer arithmetic variant");
-  }
-  c.out.data[0] = static_cast<double>(integer(static_cast<double>(v)));
+  const int a = static_cast<int>(integer(c.in[0].data[0]));
+  const int b = c.n_in > 1 ? static_cast<int>(integer(c.in[1].data[0])) : 0;
+  static constexpr IntOp kOps[] = {IntOp::Add, IntOp::Sub, IntOp::Mul,
+                                   IntOp::Div, IntOp::Mod};
+  if (c.variant == 5)
+    c.out.data[0] = int_negate(a);
+  else if (c.variant < 5)
+    c.out.data[0] = int_arith(kOps[c.variant], a, b);
+  else
+    throw std::logic_error("invalid integer arithmetic variant");
 }
 
 // The tail past the logical extent is never read; zero keeps it defined.
