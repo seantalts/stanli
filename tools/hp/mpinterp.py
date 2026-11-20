@@ -1,3 +1,5 @@
+import collections
+import itertools
 import json
 import math
 import sys
@@ -23,6 +25,43 @@ class Break(Exception):
 
 class Continue(Exception):
     pass
+
+
+class Draw(Exception):
+    """Raised by an `_rng` call, and by reading a variable that holds one."""
+
+    def __init__(self, fn):
+        self.fn = fn
+
+
+class Drawn:
+    """The value of a variable that depends on the draw of `fn`."""
+
+    def __init__(self, fn):
+        self.fn = fn
+
+
+Row = collections.namedtuple("Row", "columns refused stopped")
+
+
+def columns(name, val):
+    """[(column, value)] of one variable in Stan's column-major order, the
+    first index varying fastest, as CmdStan names the output."""
+    dims = []
+    t = val
+    while isinstance(t, list):
+        dims.append(len(t))
+        if not t:
+            break
+        t = t[0]
+    out = []
+    for rev in itertools.product(*[range(d) for d in reversed(dims)]):
+        ix = rev[::-1]
+        x = val
+        for i in ix:
+            x = x[i]
+        out.append((".".join([name] + [str(i + 1) for i in ix]), x))
+    return out
 
 
 def pat(n):
@@ -198,6 +237,7 @@ class Interp:
         self.theta = None
         self.pos = 0
         self.dyn = [True]
+        self.frames = [{}]
         self.cache = {}
         for fd in field(mir, "functions_block"):
             name = field(fd, "fdname")
@@ -216,6 +256,35 @@ class Interp:
         if self.pos != len(theta):
             raise RuntimeError("consumed %d of %d unconstrained" % (self.pos, len(theta)))
         return self.target
+
+    def write_array(self, theta):
+        """The write_array row at unconstrained theta: its transformed
+        parameters and generated quantities as well as the parameters.
+
+        A variable whose value depends on an `_rng` call is left out of
+        `columns` and named in `refused` with that function. Any statement
+        other than an assignment that depends on one, such as a branch
+        condition, ends the run, and `stopped` names the function; later
+        variables are then missing."""
+        self.theta = theta
+        self.pos = 0
+        self.target = mpf(0)
+        self.row, self.refused, stopped = [], {}, None
+        env = dict(self.env)
+        env["emit_transformed_parameters__"] = 1
+        env["emit_generated_quantities__"] = 1
+        try:
+            for s in field(self.mir, "generate_quantities"):
+                self.stmt(s)(env)
+        except Return:
+            pass
+        except Draw as d:
+            stopped = d.fn
+        if stopped is None and self.pos != len(theta):
+            raise RuntimeError("consumed %d of %d unconstrained" % (self.pos, len(theta)))
+        row = Row(self.row, self.refused, stopped)
+        self.row = self.refused = None
+        return row
 
     def nparams(self):
         saved = self.theta
@@ -304,9 +373,12 @@ class Interp:
 
             def var(env):
                 try:
-                    return env[name]
+                    x = env[name]
                 except KeyError:
                     raise RuntimeError("unbound " + name)
+                if isinstance(x, Drawn):
+                    raise Draw(x.fn)
+                return x
             return var
         if k == "Lit":
             sort, val = p[1], p[2]
@@ -352,11 +424,30 @@ class Interp:
             return rv
         raise Unsupported("expr " + k)
 
-    def args_ad(self, args):
-        return [self.ad(a) for a in args]
+    def ad(self, node):
+        """Whether `node` is an autodiff value at run time, as Stan's
+        template types decide it: inside a function, a formal is autodiff
+        only if its argument was, and any other variable only if some
+        argument was."""
+        if not ad_of(node):
+            return lambda: False
+        names = []
 
-    def ad(self, a):
-        return ad_of(a)
+        def walk(n):
+            if isinstance(n, list):
+                if len(n) == 2 and isinstance(n[0], list) and n[0][:1] == ["pattern"]:
+                    if not ad_of(n):
+                        return
+                    if n[0][1][0] == "Var":
+                        names.append(n[0][1][1])
+                walk(n[0])
+                for e in n[1:]:
+                    walk(e)
+        walk(node)
+        frames, dyn = self.frames, self.dyn
+        if not names:
+            return lambda: dyn[-1]
+        return lambda: any(frames[-1].get(nm, dyn[-1]) for nm in names)
 
     def funapp(self, node, p):
         fn = p[1]
@@ -375,10 +466,10 @@ class Interp:
         if name in ("reduce_sum", "reduce_sum_static") and pat(args[0])[0] == "Var":
             sl = ev[1]
             ev2 = [sl, lambda env: 1, lambda env: len(sl(env))] + ev[3:]
-            flags2 = [ad_of(args[1]), False, False] + [ad_of(a) for a in args[3:]]
+            flags2 = [self.ad(args[1]), lambda: False, lambda: False] + [self.ad(a) for a in args[3:]]
             return self.user_call(pat(args[0])[1], fn, None, ev2, flags2)
         suffix = fn[2]
-        flags = [ad_of(a) for a in args]
+        flags = [self.ad(a) for a in args]
         if isinstance(suffix, list) and suffix[0] in ("FnDist", "FnLpdf", "FnLpmf"):
             propto = (suffix[2] == "Unnormalized" if suffix[0] == "FnDist"
                       else suffix[1] == "true")
@@ -395,6 +486,10 @@ class Interp:
         if name.endswith(("_lcdf", "_lccdf", "_cdf")):
             return self.cdf(name, ev)
         f = F.get(name)
+        if f is None and name.endswith("_rng"):
+            def draw(env):
+                raise Draw(name)
+            return draw
         if f is None:
             raise Unsupported("fn " + name)
         return lambda env: f(*[e(env) for e in ev])
@@ -410,14 +505,9 @@ class Interp:
         if base not in mpdens.TERMS:
             if base in EXTRA_DENS:
                 g = EXTRA_DENS[base]
-                return lambda env: g([e(env) for e in ev], flags, propto)
+                return lambda env: g([e(env) for e in ev], [f() for f in flags], propto)
             raise Unsupported("density " + base)
-        dyn = self.dyn
-
-        def run(env):
-            fl = [f and dyn[-1] for f in flags]
-            return mpdens.lpdf(base, [e(env) for e in ev], fl, propto)
-        return run
+        return lambda env: mpdens.lpdf(base, [e(env) for e in ev], [f() for f in flags], propto)
 
     def operator(self, name, ev):
         if len(ev) == 1:
@@ -617,7 +707,7 @@ class Interp:
         fargs = field(fd, "fdargs")
         body = field(fd, "fdbody")
         if flags is None:
-            flags = [ad_of(a) for a in args]
+            flags = [self.ad(a) for a in args]
         names = [a[1] for a in fargs]
         fad = [a[0] == "AutoDiffable" for a in fargs]
         # Compiled on the first call and shared, so a recursive function
@@ -628,8 +718,9 @@ class Interp:
             if not compiled:
                 compiled.append([self.stmt(s) for s in body])
             local = {n: copy(e(env)) for n, e in zip(names, ev)}
-            dyn = any(f and a for f, a in zip(flags, fad))
-            self.dyn.append(dyn and self.dyn[-1])
+            frame = {n: a and f() for n, f, a in zip(names, flags, fad)}
+            self.dyn.append(any(frame.values()))
+            self.frames.append(frame)
             try:
                 for s in compiled[0]:
                     s(local)
@@ -637,6 +728,7 @@ class Interp:
                 return r.v
             finally:
                 self.dyn.pop()
+                self.frames.pop()
             return None
         return call
 
@@ -690,7 +782,10 @@ class Interp:
             e = self.expr(init[1])
 
             def decl2(env):
-                env[name] = copy(e(env))
+                try:
+                    env[name] = copy(e(env))
+                except Draw as d:
+                    env[name] = Drawn(d.fn)
             return decl2
         if k == "Assignment":
             lv = p[1]
@@ -701,12 +796,20 @@ class Interp:
             idxs = [self.idx(i) for i in lv[1]]
             if not idxs:
                 def asg(env):
-                    env[name] = copy(rhs(env))
+                    try:
+                        env[name] = copy(rhs(env))
+                    except Draw as d:
+                        env[name] = Drawn(d.fn)
                 return asg
 
             def asg2(env):
-                v = rhs(env)
-                env[name] = set_idx(env[name], [f(env) for f in idxs], v)
+                if isinstance(env[name], Drawn):
+                    return
+                try:
+                    v = rhs(env)
+                    env[name] = set_idx(env[name], [f(env) for f in idxs], v)
+                except Draw as d:
+                    env[name] = Drawn(d.fn)
             return asg2
         if k == "TargetPE" or k == "JacobianPE":
             e = self.expr(p[1])
@@ -788,12 +891,38 @@ class Interp:
                     return rj
                 if nm == "FnReadData":
                     return self.read_data_stmt(p[2])
+                if nm == "FnWriteParam":
+                    return self.write_param(field(what, "var"))
                 return lambda env: None
             if fn[0] == "UserDefined":
                 ev = self.funapp_node_nr(p)
                 return ev
             return lambda env: None
         raise Unsupported("stmt " + k)
+
+    def write_param(self, node):
+        """Write one variable, or one element of it, which stanc writes
+        inside loops for some containers; the column takes its name from
+        the variable and the element's indices."""
+        e = self.expr(node)
+        idxs = []
+        if pat(node)[0] == "Indexed":
+            idxs = [i for i in pat(node)[2]]
+            if any(i[0] != "Single" for i in idxs):
+                raise Unsupported("write of a slice")
+            idxs = [self.expr(i[1]) for i in idxs]
+            node = pat(node)[1]
+        name = pat(node)[1]
+
+        def wr(env):
+            try:
+                value = e(env)
+            except Draw as d:
+                self.refused[name] = d.fn
+                return
+            prefix = ".".join([name] + [str(f(env)) for f in idxs])
+            self.row.extend(columns(prefix, value))
+        return wr
 
     def read_data_stmt(self, args):
         """FnReadData__(x, context__, "x"): the named input, whole, into the

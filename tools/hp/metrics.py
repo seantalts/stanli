@@ -6,6 +6,9 @@ full finite differences.
 """
 import math
 import random
+import re
+from decimal import Decimal
+from fractions import Fraction
 
 GATE = 1e-12
 FLOOR = 1e-14
@@ -40,6 +43,32 @@ def grad_error(g, ref):
         diff = max(diff, abs(a - b))
         scale = max(scale, abs(a), abs(b))
     return diff / scale
+
+
+def ulps_from_truth(x, t, scale):
+    """|x - t| in ULPs of `scale`, with t exact (a Fraction): the distance
+    from the 80-digit value that the ULP ledger's reasons state."""
+    if not finite(x):
+        return math.inf
+    return float(abs(Fraction(x) - t) / Fraction(math.ulp(scale)))
+
+
+def exact(text):
+    """The Fraction that a stored 80-digit value names, or None if it is not
+    finite."""
+    d = Decimal(text)
+    return Fraction(d) if d.is_finite() else None
+
+
+def wa_scales(names, values):
+    """{variable: largest finite |value|} of one write_array row, the scale
+    that the replay gate scores each column of the variable against."""
+    out = {}
+    for name, x in zip(names, values):
+        var = re.split(r"[.:]", name, maxsplit=1)[0]
+        if finite(x):
+            out[var] = max(out.get(var, 0.0), abs(x))
+    return out
 
 
 def l2(x):

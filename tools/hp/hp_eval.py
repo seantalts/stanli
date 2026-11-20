@@ -3,17 +3,26 @@
 
   tools/hp/hp_eval.py MODEL [MODEL ...] [--dps 80] [--points 0,1,2] [--out DIR]
                       [--full-grad-max 300] [--dirs 4] [--timeout S] [--no-grad]
-                      [--skip-stanli] [--dps-check] [--grad-index I,I,...] [-v]
+                      [--skip-stanli] [--check BIN] [--dps-check] [--grad-index I,I,...]
+                      [--wa COLUMN_OR_VARIABLE ...] [-v]
 
 For each recorded point the model is evaluated with mpmath at --dps digits.
 The arms are the recorded CmdStan values, stanli default and stanli
---fast-math (build-rel/stanli_check). Up to --full-grad-max unconstrained
-parameters the reference gradient is by central finite differences; above that
-it is --dirs directional derivatives along seeded unit vectors, compared with
+--fast-math (--check, by default build-rel/stanli_check). Up to
+--full-grad-max unconstrained parameters the reference gradient is by central
+finite differences; above that it is --dirs directional derivatives along seeded unit vectors, compared with
 the arm's gradient projected on the same vectors. --grad-index adds, for a
 model above that size, central differences along the listed coordinates
 (1-based gradient positions, as stanli_check prints them and the ULP ledger
 names them), stored under "grad_coord".
+
+--wa also evaluates the write_array row (transformed parameters and
+generated quantities) and stores it under "wa", leaving out every variable
+that depends on an `_rng` call ("wa_refused"). For each named column, or
+each column of a named variable, it prints each arm's distance from the
+80-digit value in ULPs of the variable's largest CmdStan value, the scale
+of the replay gate. With no names it only stores the row, which
+ledger_accuracy.py reads.
 
 Errors: log density |a-b| / max(|a|,|b|,1); full gradient max|g-r| / max(1,
 max|g|, max|r|); directional |g.v - D| / max(1, |g_cmdstan|_2) with |v| = 1.
@@ -21,6 +30,7 @@ Per-model JSON goes to --out.
 """
 import argparse
 import json
+import re
 import pathlib
 import signal
 import subprocess
@@ -34,6 +44,7 @@ import metrics  # noqa: E402
 from common import REPO, compile_mir, load_case, v  # noqa: E402
 from mpmath import mp, mpf  # noqa: E402
 from mpinterp import Interp  # noqa: E402
+from mpvals import Unsupported  # noqa: E402
 
 
 def point_value(i, variant):
@@ -52,16 +63,44 @@ def alarm(_s, _f):
     raise Timeout()
 
 
-def stanli(stan, dj, point, fast):
-    cmd = [str(REPO / "build-rel" / "stanli_check"), str(stan), str(dj), "--point", str(point)]
+def stanli(check, stan, dj, point, fast, wa=False):
+    """(lp and gradient, {column: value} or None), or (None, None) if the run failed."""
+    cmd = [check, str(stan), str(dj), "--point", str(point)]
     if fast:
         cmd.append("--fast-math")
+    if wa:
+        cmd.append("--wa-values")
     p = subprocess.run(cmd, capture_output=True, text=True, cwd=REPO, timeout=900)
     got = v.parse_status(p.stdout)
-    if not got or got[0] != "OK":
-        return None
-    vals = [float(x) for x in got[1:]]
-    return vals if v.accepted(got) else None
+    if not got or got[0] != "OK" or not v.accepted(got):
+        return None, None
+    row = v.parse_wa(p.stdout) if wa else None
+    return [float(x) for x in got[1:]], (wa_dict(*row) if row else None)
+
+
+def wa_dict(names, values):
+    return dict(zip(names.split(","), [float(x) for x in values]))
+
+
+def wa_scores(entry, rp, arms, wanted):
+    """{column: {arm: ULPs of the scale from the 80-digit value}} for the
+    wanted columns that the reference row holds."""
+    ref = wa_dict(rp["wa"]["names"], rp["wa"]["values"])
+    scale = metrics.wa_scales(list(ref), list(ref.values()))
+    out = {}
+    for name, t in zip(entry["wa"]["names"], entry["wa"]["values"]):
+        var = re.split(r"[.:]", name, maxsplit=1)[0]
+        if name not in ref or not (name in wanted or var in wanted):
+            continue
+        t = metrics.exact(t)
+        if t is None:
+            continue
+        row = {"truth": float(t), "cmdstan": metrics.ulps_from_truth(ref[name], t, scale[var])}
+        for label, got in arms.items():
+            if got and name in got:
+                row[label] = metrics.ulps_from_truth(got[name], t, scale[var])
+        out[name] = row
+    return out
 
 
 def arm_errors(vals, hp_lp, hp_grad, dirs, scale):
@@ -150,9 +189,23 @@ def run_model(model, args, refs, tmp, res):
         scale = metrics.l2(rv[1:])
         entry["grad_scale"] = scale
         entry["arms"] = {"cmdstan": arm_errors(rv, hp_lp, hp_grad, dirs, scale)}
+        if args.wa is not None:
+            try:
+                row = it.write_array(theta)
+                entry["wa"] = {"names": [c for c, _ in row.columns],
+                               "values": [mp.nstr(x, 55) for _, x in row.columns]}
+                entry["wa_refused"] = row.refused
+                if row.stopped:
+                    entry["wa_stopped"] = row.stopped
+            except Unsupported as e:
+                entry["wa_error"] = "Unsupported: %s" % e
+        wa_arms = {}
         if not args.skip_stanli:
             for label, fast in (("default", False), ("fast", True)):
-                entry["arms"][label] = arm_errors(stanli(stan, dj, pt, fast), hp_lp, hp_grad, dirs, scale)
+                vals, wa_arms[label] = stanli(args.check, stan, dj, pt, fast, args.wa is not None)
+                entry["arms"][label] = arm_errors(vals, hp_lp, hp_grad, dirs, scale)
+        if "wa" in entry and "wa" in rp:
+            entry["wa_scores"] = wa_scores(entry, rp, wa_arms, set(args.wa))
     res["total_s"] = round(time.time() - t0, 3)
 
 
@@ -181,6 +234,8 @@ def main():
     ap.add_argument("--skip-stanli", action="store_true")
     ap.add_argument("--dps-check", action="store_true")
     ap.add_argument("--grad-index", default="")
+    ap.add_argument("--check", default=str(REPO / "build-rel" / "stanli_check"))
+    ap.add_argument("--wa", nargs="*", metavar="COLUMN_OR_VARIABLE")
     args = ap.parse_args()
     args.points = [int(x) for x in args.points.split(",")]
     args.grad_index = [int(x) for x in args.grad_index.split(",") if x]
@@ -211,6 +266,13 @@ def main():
                 e = o["arms"].get(a, {})
                 row += "  %s lp %s grad %s" % (a[:4], fmt(e.get("lp")), fmt(e.get("grad")))
             print(row)
+            for name, s in o.get("wa_scores", {}).items():
+                print("%-28s pt%s wa %s truth %.17g  ULPs of scale from it: %s" % (
+                    m, pt, name, s["truth"], "  ".join(
+                        "%s %.1f" % (a[:4], s[a]) for a in ("cmdstan", "default", "fast") if a in s)))
+            for name, fn in o.get("wa_refused", {}).items():
+                if name in (args.wa or ()):
+                    print("%-28s pt%s wa %s not scored: it depends on %s" % (m, pt, name, fn))
         sys.stdout.flush()
 
 
