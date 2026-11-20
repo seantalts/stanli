@@ -966,6 +966,23 @@ class MirInterp {
     return result;
   }
 
+  // The exp-quad, Matern and exponential covariances. L is one length scale
+  // or a std::vector with one per dimension.
+  template <typename P, typename L>
+  static Eigen::Matrix<T, Eigen::Dynamic, Eigen::Dynamic> gp_family_cov(
+      GpCov family, const P& pts, const T& sigma, const L& length_scale) {
+    switch (family) {
+      case kGpMatern32:
+        return stan::math::gp_matern32_cov(pts, sigma, length_scale);
+      case kGpMatern52:
+        return stan::math::gp_matern52_cov(pts, sigma, length_scale);
+      case kGpExponential:
+        return stan::math::gp_exponential_cov(pts, sigma, length_scale);
+      default:
+        return stan::math::gp_exp_quad_cov(pts, sigma, length_scale);
+    }
+  }
+
   // Bind and execute one graph-kernel CALL over materialized inputs. Shared
   // by density_eval and builtin_kernel_eval: the double interpreter runs the
   // kernel forward directly and the var interpreter replays it through the
@@ -2815,56 +2832,52 @@ class MirInterp {
                                      v.r.at((size_t)j);
       return o;
     }
-    if (e.name == "gp_exp_quad_cov" && e.args.size() == 3) {
-      // K(i,j) = alpha^2 exp(-|x_i - x_j|^2 / (2 rho^2)); x is array[N]
-      // real or array[N] vector[D] in Fortran storage.
-      Value x = eval(e.args[0]);
-      const T alpha = eval(e.args[1]).r.at(0);
-      const T rho = eval(e.args[2]).r.at(0);
-      const int64_t N = x.dims.size() == 2 ? x.dims[0] : (int64_t)x.r.size();
-      const int64_t D = x.dims.size() == 2 ? x.dims[1] : 1;
-      const T a2 = alpha * alpha;
-      const T inv2r2 = T(1.0) / (T(2.0) * rho * rho);
-      Value o;
-      o.dims = {N, N};
-      o.r.resize((size_t)(N * N));
-      for (int64_t j = 0; j < N; ++j)
-        for (int64_t i = 0; i < N; ++i) {
-          T sq = T(0.0);
-          for (int64_t d = 0; d < D; ++d) {
-            const T diff =
-                x.r.at((size_t)(i + N * d)) - x.r.at((size_t)(j + N * d));
-            sq += diff * diff;
-          }
-          o.r[(size_t)(j * N + i)] = a2 * stan::math::exp(-sq * inv2r2);
-        }
-      return o;
-    }
     if (const std::optional<GpCov> gp = gp_cov_family(e.name);
         gp && (int)e.args.size() == 1 + gp_cov_hyperparameters(*gp)) {
       Value x = eval(e.args[0]);
       const T sigma = eval(e.args[1]).r.at(0);
-      const T length_scale = eval(e.args[2]).r.at(0);
+      const Value rho = eval(e.args[2]);
       const int64_t N = x.dims.size() == 2 ? x.dims[0] : (int64_t)x.r.size();
       const int64_t D = x.dims.size() == 2 ? x.dims[1] : 1;
+      // array[] real is the per-dimension overload, whatever its length.
+      const bool per_dimension =
+          e.args[2].unsized.depth == 1 || rho.r.size() != 1;
+      Value o;
+      o.dims = {N, N};
+      o.r.resize((size_t)(N * N));
+      if (*gp == kGpExpQuad && !per_dimension) {
+        // K(i,j) = alpha^2 exp(-|x_i - x_j|^2 / (2 rho^2)); x is array[N]
+        // real or array[N] vector[D] in Fortran storage.
+        const T a2 = sigma * sigma;
+        const T inv2r2 = T(1.0) / (T(2.0) * rho.r.at(0) * rho.r.at(0));
+        for (int64_t j = 0; j < N; ++j)
+          for (int64_t i = 0; i < N; ++i) {
+            T sq = T(0.0);
+            for (int64_t d = 0; d < D; ++d) {
+              const T diff =
+                  x.r.at((size_t)(i + N * d)) - x.r.at((size_t)(j + N * d));
+              sq += diff * diff;
+            }
+            o.r[(size_t)(j * N + i)] = a2 * stan::math::exp(-sq * inv2r2);
+          }
+        return o;
+      }
       using Vec = Eigen::Matrix<T, Eigen::Dynamic, 1>;
       std::vector<Vec> pts((size_t)N, Vec((Eigen::Index)D));
       for (int64_t n = 0; n < N; ++n)
         for (int64_t d = 0; d < D; ++d)
           pts[(size_t)n]((Eigen::Index)d) = x.r.at((size_t)(n + N * d));
       Eigen::Matrix<T, Eigen::Dynamic, Eigen::Dynamic> c;
-      if (*gp == kGpPeriodic)
-        c = stan::math::gp_periodic_cov(pts, sigma, length_scale,
+      if (*gp == kGpPeriodic) {
+        if (per_dimension)
+          fail(e.name + ": the length scale must be a scalar", e.raw);
+        c = stan::math::gp_periodic_cov(pts, sigma, rho.r.at(0),
                                         eval(e.args[3]).r.at(0));
-      else if (*gp == kGpMatern32)
-        c = stan::math::gp_matern32_cov(pts, sigma, length_scale);
-      else if (*gp == kGpMatern52)
-        c = stan::math::gp_matern52_cov(pts, sigma, length_scale);
-      else
-        c = stan::math::gp_exponential_cov(pts, sigma, length_scale);
-      Value o;
-      o.dims = {N, N};
-      o.r.resize((size_t)(N * N));
+      } else if (per_dimension) {
+        c = gp_family_cov(*gp, pts, sigma, rho.r);
+      } else {
+        c = gp_family_cov(*gp, pts, sigma, rho.r.at(0));
+      }
       for (int64_t j = 0; j < N; ++j)
         for (int64_t i = 0; i < N; ++i) o.r[(size_t)(j * N + i)] = c(i, j);
       return o;

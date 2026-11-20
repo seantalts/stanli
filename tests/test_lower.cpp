@@ -4706,6 +4706,55 @@ int main() {
     stan::math::recover_memory();
   }
 
+  // An array of length scales divides each input dimension by its own
+  // scale (Stan Math's std::vector overloads). The lowering used to read
+  // only the first entry. array[1] real with one dimension is still this
+  // form. The jitter loop on the Matern 3/2 matrix is the shape that
+  // fuse_gp_diagonal_updates folds into the covariance op.
+  {
+    CompiledModel lm =
+        compile_model(slurp("tests/fixtures/gpard.tmir.sexp"), DataMap());
+    check(lm.n_unconstrained == 14, "gpard 14 unconstrained");
+    Executor lex(std::move(lm.graph));
+    lm.bind(lex);
+    double q[14];
+    for (int k = 0; k < 14; ++k) q[k] = 0.4 * std::sin(1.7 * k + 0.3);
+    for (int k = 0; k < 14; ++k) lex.params_data()[k] = q[k];
+    double grad[14];
+    const double lp = lex.gradient(grad);
+
+    using stan::math::var;
+    Eigen::Matrix<var, -1, 1> qv(14);
+    for (int k = 0; k < 14; ++k) qv(k) = q[k];
+    var jac = 0.0;
+    std::vector<Eigen::Matrix<var, -1, 1>> x(3, Eigen::Matrix<var, -1, 1>(2));
+    std::vector<Eigen::Matrix<var, -1, 1>> z(3, Eigen::Matrix<var, -1, 1>(1));
+    for (int n = 0; n < 3; ++n) {
+      for (int d = 0; d < 2; ++d) x[n](d) = qv(n * 2 + d);
+      z[n](0) = qv(6 + n);
+    }
+    var alpha = stan::math::lb_constrain<true>(qv(9), 0.0, jac);
+    std::vector<var> l{stan::math::lb_constrain<true>(qv(10), 0.0, jac),
+                       stan::math::lb_constrain<true>(qv(11), 0.0, jac)};
+    std::vector<var> l1{stan::math::lb_constrain<true>(qv(12), 0.0, jac)};
+    var jitter = stan::math::lb_constrain<true>(qv(13), 0.0, jac);
+    Eigen::Matrix<var, -1, -1> kq = stan::math::gp_exp_quad_cov(x, alpha, l);
+    Eigen::Matrix<var, -1, -1> a = stan::math::gp_matern32_cov(x, alpha, l);
+    for (int i = 0; i < 3; ++i) a(i, i) += jitter;
+    Eigen::Matrix<var, -1, -1> b = stan::math::gp_matern52_cov(x, alpha, l);
+    Eigen::Matrix<var, -1, -1> c = stan::math::gp_exponential_cov(x, alpha, l);
+    Eigen::Matrix<var, -1, -1> d = stan::math::gp_exp_quad_cov(z, alpha, l1);
+    var acc = stan::math::sum(kq) + stan::math::sum(a) +
+              2 * stan::math::sum(b) + 3 * stan::math::sum(c) +
+              4 * stan::math::sum(d);
+    acc += kq(0, 1) * a(0, 1) * b(1, 2) * c(0, 2) * d(1, 2) + jac;
+    acc.grad();
+    expect_ulp("gpard lp", lp, acc.val());
+    for (int k = 0; k < 14; ++k)
+      expect_ulp("gpard g" + std::to_string(k), grad[k], qv(k).adj());
+    stan::math::recover_memory();
+  }
+
   // is_inf / is_nan on data-time scalars and the nullary math constants
   // (negative_infinity / positive_infinity / not_a_number, which stanc
   // will not fold) all reduce to integer constants: the finite reads give

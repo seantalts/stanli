@@ -1007,17 +1007,36 @@ inline std::optional<GpCov> gp_cov_family(std::string_view name) {
   return std::nullopt;
 }
 
-// OP_GP_COV's inputs are the locations, then this many scalar
-// hyperparameters (sigma, the length scale and, for the periodic kernel, the
-// period), then an optional scalar that adds to every diagonal entry.
-inline int gp_cov_hyperparameters(uint8_t variant) {
-  return variant == kGpPeriodic ? 3 : 2;
+// OP_GP_COV's variant byte: the covariance function, and whether the length
+// scale is an array with one entry per input dimension (Stan Math's
+// std::vector overloads, which divide each dimension by its own scale).
+// Only the exp-quad, Matern and exponential functions have that form.
+struct GpCovMode {
+  GpCov family = kGpExpQuad;
+  bool per_dimension = false;
+
+  static constexpr uint8_t kPerDimensionBit = 1u << 7;
+
+  constexpr uint8_t byte() const {
+    return (uint8_t)(family | (per_dimension ? kPerDimensionBit : 0u));
+  }
+  static constexpr GpCovMode of(uint8_t byte) {
+    return {(GpCov)(byte & ~kPerDimensionBit), (byte & kPerDimensionBit) != 0};
+  }
+};
+
+// OP_GP_COV's inputs are the locations, then this many hyperparameters
+// (sigma, the length scale and, for the periodic kernel, the period), then
+// an optional scalar that adds to every diagonal entry. Each hyperparameter
+// is one input; a per-dimension length scale is one input of D values.
+inline int gp_cov_hyperparameters(GpCov family) {
+  return family == kGpPeriodic ? 3 : 2;
 }
-inline int gp_cov_jitter_input(uint8_t variant) {
-  return 1 + gp_cov_hyperparameters(variant);
+inline int gp_cov_jitter_input(GpCov family) {
+  return 1 + gp_cov_hyperparameters(family);
 }
-inline bool gp_cov_has_jitter(uint8_t variant, int n_in) {
-  return n_in > gp_cov_jitter_input(variant);
+inline bool gp_cov_has_jitter(GpCov family, int n_in) {
+  return n_in > gp_cov_jitter_input(family);
 }
 
 struct Kernel {

@@ -2456,7 +2456,13 @@ std::optional<Lowering::Val> Lowering::lower_matrix_fn(const mir::Expr& e,
                              N * N, si, {(int)N, (int)D})
                 : emit_value(OP_GP_COV, {x, alpha, rho}, N * N, si,
                              {(int)N, (int)D});
-    g.ops.back().variant = static_cast<uint8_t>(*gp);
+    // The declared type picks the overload: array[1] real with D == 1 is
+    // still the per-dimension form, which rounds differently.
+    const bool per_dimension =
+        e.args[2].unsized.depth == 1 || g.slots[rho.slot].len != 1;
+    if (per_dimension && *gp == kGpPeriodic)
+      fail(e.name + ": the length scale must be a scalar", e.raw);
+    g.ops.back().variant = GpCovMode{*gp, per_dimension}.byte();
     return with_layout(v, owning_layout(si));
   }
   if (e.name == "quad_form_diag" && e.args.size() == 2) {

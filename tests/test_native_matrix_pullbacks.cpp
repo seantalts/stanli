@@ -43,7 +43,7 @@ static void gp(int n, int d, int active, uint8_t variant, bool repeated,
   for (int i = 0; i < n * n; ++i) seed[i] = std::cos(0.43 * i) * seed_scale;
   KernelCtx ctx;
   int dims[] = {n, d};
-  const int jitter_input = 1 + gp_cov_hyperparameters(variant);
+  const int jitter_input = 1 + gp_cov_hyperparameters((GpCov)variant);
   ctx.n_in = jitter_input + (diagonal_update ? 1 : 0);
   ctx.idata = dims;
   ctx.n_idata = 2;
@@ -139,7 +139,7 @@ static void gp(int n, int d, int active, uint8_t variant, bool repeated,
 
 static void gp_diagonal_fusion_proof(uint8_t variant) {
   using namespace stanli;
-  const bool periodic = variant == kGpPeriodic;
+  const bool periodic = GpCovMode::of(variant).family == kGpPeriodic;
   for (int refusal = 0; refusal < 5; ++refusal) {
     Graph g;
     const int n = 3;
@@ -175,10 +175,122 @@ static void gp_diagonal_fusion_proof(uint8_t variant) {
       check(g.ops[0].in[periodic ? 4 : 3], jitter, "GP fused jitter", true);
       if (periodic) check(g.ops[0].in[3], period, "GP fused period", true);
       check(g.ops[0].out, current, "GP output identity", true);
+      check(g.ops[0].variant, variant, "GP fused variant", true);
       check(g.slots[covariance].len, 0, "GP releases intermediate", true);
     }
   }
 }
+// Length scales given per dimension: Stan Math's std::vector overloads.
+// active bits: 1 x, 2 sigma, 4 length scales, 8 jitter.
+static void gp_per_dimension(int n, int d, int active, stanli::GpCov family,
+                             bool diagonal_update) {
+  using namespace stanli;
+  std::vector<double> x(n * d), xadj(n * d, 0.125), out(n * n), seed(n * n);
+  std::vector<double> rho(d), radj(d, 0.125);
+  double sigma = 1.3, sadj = 0.125, jitter = 0.3, jadj = 0.125;
+  for (int i = 0; i < n * d; ++i) x[i] = std::sin(0.31 * i + 0.2);
+  for (int i = 0; i < n * n; ++i) seed[i] = std::cos(0.43 * i) * 0.7;
+  for (int k = 0; k < d; ++k) rho[k] = 0.6 + 0.45 * k;
+  KernelCtx ctx;
+  int dims[] = {n, d};
+  const int jitter_input = gp_cov_jitter_input(family);
+  ctx.n_in = jitter_input + (diagonal_update ? 1 : 0);
+  ctx.idata = dims;
+  ctx.n_idata = 2;
+  ctx.variant = GpCovMode{family, true}.byte();
+  ctx.in[0] = {x.data(), n * d};
+  ctx.in[1] = {&sigma, 1};
+  ctx.in[2] = {rho.data(), d};
+  ctx.in[jitter_input] = {&jitter, 1};
+  ctx.in_adj[0] = {active & 1 ? xadj.data() : nullptr, n * d};
+  ctx.in_adj[1] = {active & 2 ? &sadj : nullptr, 1};
+  ctx.in_adj[2] = {active & 4 ? radj.data() : nullptr, d};
+  ctx.in_adj[jitter_input] = {active & 8 ? &jadj : nullptr, 1};
+  ctx.out = {out.data(), n * n};
+  ctx.out_adj_vec = {seed.data(), n * n};
+  const Kernel& k = *find_kernel(OP_GP_COV);
+  k.forward(ctx);
+  k.backward(ctx);
+  if (n == 0) return;
+
+  stan::math::nested_rev_autodiff scope;
+  std::vector<VarVec> points(n, VarVec(d));
+  std::vector<Vec> fixed(n, Vec(d));
+  for (int i = 0; i < n; ++i)
+    for (int j = 0; j < d; ++j) points[i][j] = fixed[i][j] = x[i * d + j];
+  Var a = sigma;
+  std::vector<Var> r(rho.begin(), rho.end());
+  const auto covariance = [&](const auto& locations) {
+    switch (family) {
+      case kGpMatern32:
+        return Eigen::Matrix<Var, -1, -1>(
+            stan::math::gp_matern32_cov(locations, a, r));
+      case kGpMatern52:
+        return Eigen::Matrix<Var, -1, -1>(
+            stan::math::gp_matern52_cov(locations, a, r));
+      case kGpExponential:
+        return Eigen::Matrix<Var, -1, -1>(
+            stan::math::gp_exponential_cov(locations, a, r));
+      default:
+        return Eigen::Matrix<Var, -1, -1>(
+            stan::math::gp_exp_quad_cov(locations, a, r));
+    }
+  };
+  Eigen::Matrix<Var, -1, -1> cov =
+      active & 1 ? covariance(points) : covariance(fixed);
+  Var j = jitter;
+  if (diagonal_update)
+    for (int i = 0; i < n; ++i) cov(i, i) += j;
+  Var objective = stan::math::sum(
+      stan::math::elt_multiply(cov, Eigen::Map<Mat>(seed.data(), n, n)));
+  stan::math::grad(objective.vi_);
+  const std::string context =
+      " family=" + std::to_string(family) + " n=" + std::to_string(n) +
+      " d=" + std::to_string(d) + " mask=" + std::to_string(active);
+  for (int i = 0; i < n * n; ++i)
+    check(out[i], cov.data()[i].val(), ("ARD value" + context).c_str(), true);
+  if (active & 1)
+    for (int i = 0; i < n; ++i)
+      for (int q = 0; q < d; ++q)
+        check(xadj[i * d + q], 0.125 + points[i][q].adj(),
+              ("ARD point" + context).c_str());
+  if (active & 2)
+    check(sadj, 0.125 + a.adj(), ("ARD sigma" + context).c_str(), true);
+  if (active & 4)
+    for (int q = 0; q < d; ++q)
+      check(radj[q], 0.125 + r[q].adj(), ("ARD rho" + context).c_str(), true);
+  if (diagonal_update && (active & 8))
+    check(jadj, 0.125 + j.adj(), ("ARD jitter" + context).c_str(), true);
+}
+
+// Stan Math rejects a length-scale count that differs from the dimension.
+static void gp_per_dimension_count(stanli::GpCov family) {
+  using namespace stanli;
+  const int n = 3, d = 2;
+  std::vector<double> x(n * d, 0.5), out(n * n), rho{0.7, 0.8, 0.9};
+  for (int i = 0; i < n * d; ++i) x[i] = 0.1 * i;
+  double sigma = 1.3;
+  KernelCtx ctx;
+  int dims[] = {n, d};
+  ctx.n_in = 3;
+  ctx.idata = dims;
+  ctx.n_idata = 2;
+  ctx.variant = GpCovMode{family, true}.byte();
+  ctx.in[0] = {x.data(), n * d};
+  ctx.in[1] = {&sigma, 1};
+  ctx.in[2] = {rho.data(), 3};
+  ctx.out = {out.data(), n * n};
+  std::string message;
+  try {
+    find_kernel(OP_GP_COV)->forward(ctx);
+  } catch (const std::invalid_argument& error) {
+    message = error.what();
+  }
+  expect_true("ARD length-scale count message " + message,
+              message.find("x dimension (2) and number of length scales (3) "
+                           "must match in size") != std::string::npos);
+}
+
 static void chol(int n) {
   using namespace stanli;
   Mat m(n, n), seed(n, n), out(n, n), adj = Mat::Constant(n, n, 0.125);
@@ -1079,6 +1191,15 @@ int main(int argc, char** argv) {
       }
   gp_diagonal_fusion_proof(stanli::kGpMatern32);
   gp_diagonal_fusion_proof(stanli::kGpPeriodic);
+  gp_diagonal_fusion_proof(stanli::GpCovMode{stanli::kGpMatern32, true}.byte());
+  for (auto family : {stanli::kGpExpQuad, stanli::kGpMatern32,
+                      stanli::kGpMatern52, stanli::kGpExponential}) {
+    for (int n : {0, 1, 5, 12})
+      for (int d : {1, 2, 3})
+        for (int active = 0; active < 16; ++active)
+          gp_per_dimension(n, d, active, family, (active & 8) != 0);
+    gp_per_dimension_count(family);
+  }
   for (auto variant : {stanli::kGpMatern32, stanli::kGpMatern52,
                        stanli::kGpExponential, stanli::kGpPeriodic})
     for (int n : {1, 7, 30})
