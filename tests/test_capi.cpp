@@ -2938,6 +2938,56 @@ void test_tuple_names() {
   bs_model_destruct(m);
 }
 
+// bs_param_constrain(include_tp = false, include_gq = false) runs neither the
+// model block nor generated quantities, as BridgeStan's write_array does
+// not, so a reject in either goes unseen at mu = 1 and mu = 0.5. (A point
+// where both reject, a transformed parameter out of bounds, and a model
+// block reject on the interpreter path still fail; BridgeStan would
+// succeed there.)
+void test_bridgestan_constrain_skips_blocks() {
+  if (!stanli_has_embedded_stanc()) return;
+  const Compilation c = compile(
+      "parameters { real mu; }\n"
+      "transformed parameters { real<lower=0> t = mu; }\n"
+      "model { if (mu > 0.4 && mu < 0.6) reject(\"m\"); mu ~ normal(0, 1); }\n"
+      "generated quantities { if (mu > 0.9) reject(\"x\"); }\n",
+      "skip_blocks.stan");
+  expect_true("skip-blocks model compiles: " + c.error, c.ok);
+  if (!c.ok) return;
+  for (bool interpreted : {false, true}) {
+    if (interpreted && !debug_switches_available()) continue;
+    if (interpreted) test_setenv("STANLI_WA_FORCE_INTERP", "1");
+    char message[256] = "";
+    char* payload = stanli_bridgestan_data(nullptr, c.mir.c_str(), "skip",
+                                           message, sizeof message);
+    char* err = nullptr;
+    bs_model* m = payload ? bs_model_construct(payload, 1, &err) : nullptr;
+    stanli_string_free(payload);
+    if (interpreted) test_unsetenv("STANLI_WA_FORCE_INTERP");
+    expect_true(std::string("skip-blocks model constructs: ") + message +
+                    (err ? err : ""),
+                m != nullptr);
+    bs_free_error_msg(err);
+    err = nullptr;
+    if (m == nullptr) continue;
+    const std::string tag = interpreted ? " (interpreter)" : " (graph)";
+    // The interpreter reads the parameters from the log_prob graph, so it
+    // still runs the model block.
+    for (double mu : {1.0, 0.5}) {
+      if (interpreted && mu == 0.5) continue;
+      double theta = 0;
+      const int rc =
+          bs_param_constrain(m, false, false, &mu, &theta, nullptr, &err);
+      expect_true("constrain without tp or gq at mu = " + std::to_string(mu) +
+                      tag + ": " + (err ? err : ""),
+                  rc == 0 && theta == mu);
+      bs_free_error_msg(err);
+      err = nullptr;
+    }
+    bs_model_destruct(m);
+  }
+}
+
 // An array of tuples as parameters, nested and constrained. The names, the
 // constrained draw at q and the log density come from reference BridgeStan
 // 2.9.0 on the same model; the unconstrained values are one block per
@@ -3554,6 +3604,7 @@ int main() {
   test_bridgestan_data();
   test_named_source_and_warnings();
   test_tuple_names();
+  test_bridgestan_constrain_skips_blocks();
   test_tuple_array_parameters();
   test_declaration_annotations();
   test_fast_math_options();
