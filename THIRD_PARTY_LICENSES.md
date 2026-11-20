@@ -105,3 +105,12 @@ license unless a directory says otherwise; the `BPA/` directory carries
 BSD-3-Clause, Copyright (c) 2016 Hiroki Itô, and `jupyter/sum-to-zero/` carries
 BSD-3-Clause for its code, Copyright (c) 2018-2022 Stan Development Team and
 their assignees. The license texts are in `tests/examplemodels/licenses/`.
+
+Also in the repository, not in the binary: `tests/stanguide/` holds six code
+blocks from the Stan User's Guide (stan-dev/docs at commit `b07b2a99`, whose
+`LICENSE` puts the code under BSD-3-Clause, Copyright (c) 2018-2026 Stan
+Development Team and their assignees, and the text under CC BY-ND 4.0). Only
+code is used. `tools/gen_stanguide_models.py` extracts it, with the edits listed
+in `tests/stanguide/README.md`. One data file is derived from the explosion
+dates in the R package boot (License "Unlimited"). The BSD text is in
+`tests/stanguide/licenses/`.

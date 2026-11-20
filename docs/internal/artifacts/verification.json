@@ -2197,6 +2197,48 @@
   "point": 0,
   "status": "VERIFIED"
  },
+ "stanguide_changepoint": {
+  "max_rel": 0.0,
+  "max_ulp": 0,
+  "n_values": 3,
+  "point": 0,
+  "status": "VERIFIED"
+ },
+ "stanguide_cjs_history": {
+  "max_rel": 8.368237616423393e-16,
+  "max_ulp": 4,
+  "n_values": 6,
+  "point": 0,
+  "status": "VERIFIED"
+ },
+ "stanguide_copula": {
+  "max_rel": 0.0,
+  "max_ulp": 0,
+  "n_values": 7,
+  "point": 0,
+  "status": "VERIFIED"
+ },
+ "stanguide_integrate_1d_normal": {
+  "max_rel": 0.0,
+  "max_ulp": 0,
+  "n_values": 4,
+  "point": 0,
+  "status": "VERIFIED"
+ },
+ "stanguide_map_rect_logistic": {
+  "max_rel": 0.0,
+  "max_ulp": 0,
+  "n_values": 3,
+  "point": 0,
+  "status": "VERIFIED"
+ },
+ "stanguide_ode_adjoint": {
+  "max_rel": 3.850581872133496e-06,
+  "max_ulp": 69365916338,
+  "n_values": 6,
+  "point": 0,
+  "status": "MISMATCH"
+ },
  "state_space_stochastic_level_stochastic_seasonal": {
   "max_rel": 5.767353626976527e-16,
   "max_ulp": 12,

@@ -17,7 +17,7 @@ REPO = Path(__file__).resolve().parents[1]
 CRAN_PACKAGES = ("oncobayes2", "rstanarm", "multinma", "epinow2", "mlumr",
                  "rbioacc", "beeguts", "hdbayes", "ecoensemble")
 LOCAL_COLLECTIONS = ("brms", "rethinking", "cogmod", "ctsem",
-                     "examplemodels") + CRAN_PACKAGES
+                     "examplemodels", "stanguide") + CRAN_PACKAGES
 GROUPS = {"teaching": {"educational", "rethinking", "brms"},
           "cran": set(CRAN_PACKAGES)}
 COLLECTIONS = ("all", "posteriordb", "educational", *LOCAL_COLLECTIONS,

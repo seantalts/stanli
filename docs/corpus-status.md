@@ -1,11 +1,11 @@
 # Corpus status
 
-Models that evaluate: 398/399
-Models with CmdStan reference values: 398/399, at 1194 evaluation points in total.
+Models that evaluate: 404/405
+Models with CmdStan reference values: 404/405, at 1212 evaluation points in total.
 
 The corpus includes models from posteriordb, generated brms and cogmod models, ctsem's state-space template, models from CRAN packages, imported teaching models, and language fixtures. The source collection column says where each model came from. `tools/verify_refs.py` checks all reference values the same way.
 
-For 383 verified models, the table below shows how far stanli was from CmdStan at the primary evaluation point. These numbers were measured when the reference was recorded. Imported references keep their original CmdStan answers and a record of how each one was made. No deviation was recorded for them, so their rows say "not recorded". Having a reference for a model does not mean that the current build matches it. The numerical replay checks the current build.
+For 388 verified models, the table below shows how far stanli was from CmdStan at the primary evaluation point. These numbers were measured when the reference was recorded. Imported references keep their original CmdStan answers and a record of how each one was made. No deviation was recorded for them, so their rows say "not recorded". Having a reference for a model does not mean that the current build matches it. The numerical replay checks the current build.
 
 A model passes only when tools/verify_sample.py finds that stanli's log_prob and full gradient match CmdStan's at a shared, fixed evaluation point. The accuracy columns show the worst deviation over lp and every gradient component, as a relative difference and in ULPs. 0 ULP means bitwise identical to CmdStan. The bitwise results are for information only. The replay requires a scaled error of at most 1e-9, with documented exceptions for ill-conditioned models. Models that evaluate but are not verified are listed in a separate section and do not count as passing.
 
@@ -335,6 +335,11 @@ A model passes only when tools/verify_sample.py finds that stanli's log_prob and
 | `seeds_stanified_model` | posteriordb | 27 | 0 (bitwise) | 0 |
 | `sesame_one_pred_a` | posteriordb | 4 | 0 (bitwise) | 0 |
 | `soil_incubation` | posteriordb | 7 | 1.6e-13 | 1241 |
+| `stanguide_changepoint` | stanguide | 3 | 0 (bitwise) | 0 |
+| `stanguide_cjs_history` | stanguide | 6 | 8.4e-16 | 4 |
+| `stanguide_copula` | stanguide | 7 | 0 (bitwise) | 0 |
+| `stanguide_integrate_1d_normal` | stanguide | 4 | 0 (bitwise) | 0 |
+| `stanguide_map_rect_logistic` | stanguide | 3 | 0 (bitwise) | 0 |
 | `state_space_stochastic_level_stochastic_seasonal` | posteriordb | 390 | 5.8e-16 | 12 |
 | `surgical_model` | posteriordb | 15 | 0 (bitwise) | 0 |
 | `sw_acat` | brms | 5 | 3.7e-14 | 196 |
@@ -742,6 +747,12 @@ The reference recorder also saves CmdStan's write_array output at the same point
 | `seeds_stanified_model` | 26 |
 | `sesame_one_pred_a` | 3 |
 | `soil_incubation` | 31 |
+| `stanguide_changepoint` | 114 |
+| `stanguide_cjs_history` | 8 |
+| `stanguide_copula` | 21 |
+| `stanguide_integrate_1d_normal` | 3 |
+| `stanguide_map_rect_logistic` | 2 |
+| `stanguide_ode_adjoint` | 5 |
 | `state_space_stochastic_level_stochastic_seasonal` | 581 |
 | `surgical_model` | 28 |
 | `sw_acat` | 9 |
@@ -826,6 +837,8 @@ CmdStan and stanli both reject every shared evaluation point for these models. T
 
 - `kronecker_gp`: max rel diff 6.3e-03
   - lp matches CmdStan to 1e-13 and 436/438 gradients match; the two that flow through eigenvectors_sym differ by 0.7%. The covariance at this data has 8 of 29 eigenvalue gaps below 1e-12 (smallest 6.5e-17), and eigenvector derivatives scale as 1/(lambda_i - lambda_j), so last-bit differences in the input are amplified by ~1e16. Every component op (eigen decomposition, transpose, matrix product, the whole chain with one operand held constant) matches CmdStan bitwise in isolation.
+- `stanguide_ode_adjoint`: max rel diff 3.9e-06
+  - With the guide's adjoint call and tolerances of 1e-6, stanli and CmdStan differ by 3.9e-6 and 3.3e-6 relative at the first two points and agree to 3.8e-14 at the third. With every tolerance at 1e-11 the two agree to 5e-11 and 9e-11 at the first two points. Against that tight-tolerance solution at the first point, the log density is off by 3.0e-6 in both engines, the first gradient entry by 4.0e-6 in stanli and 1.5e-5 in CmdStan, and the second by 4.0e-5 in stanli and 4.4e-5 in CmdStan (absolute differences).
 
 ## Failures
 
