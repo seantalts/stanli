@@ -535,6 +535,9 @@ void Lowering::configure_island_compiler(ProgramCompiler& c,
       prog->ins.push_back(IslandProg::LiveIn{r->reg, (int)len});
       reg->in_slots.push_back(slot);
     }
+    if (const auto dl = decls.find(name);
+        dl != decls.end() && dl->second.sized_by_region)
+      c.region_sized.insert(name);
     return true;
   };
 }
@@ -857,6 +860,7 @@ void Lowering::lower_runtime_ifelse(const mir::Stmt& s) {
       if (dl != decls.end() && dl->second.deferred_shape) {
         dl->second.si = region_view(k);
         dl->second.deferred_shape = false;
+        dl->second.sized_by_region = true;
       }
     }
     return;
@@ -901,6 +905,7 @@ void Lowering::lower_runtime_ifelse(const mir::Stmt& s) {
       if (dl != decls.end()) {
         dl->second.len = reg.out_views[k].len;
         dl->second.si = si;
+        dl->second.sized_by_region = true;
       }
     }
     // Runtime regions conservatively return parameter-dependent live-outs;

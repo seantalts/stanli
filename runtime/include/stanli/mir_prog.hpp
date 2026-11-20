@@ -164,6 +164,12 @@ struct ProgramCompiler {
   // sized declaration is not the same thing, so keep the protocol explicit
   // rather than inferring it from Range::len.
   std::map<std::string, mir::UnsizedView> deferred_shapes;
+  // Containers whose size a runtime-control region chose: an unsized or
+  // zero-size local that took the size of an assignment in this region or
+  // an earlier one. Another size for one of them is not an error that
+  // the program can raise at run time, because the size may belong to a
+  // branch that did not run.
+  std::set<std::string> region_sized;
   // Where each `ints` entry was declared: its branch depth, and how many
   // loops enclosed it. Folding an assignment records a value for every
   // later read of the name, so it is only sound where the assignment
@@ -4363,8 +4369,18 @@ struct ProgramCompiler {
 
   // Stan checks an assignment's sizes when the statement runs, and the
   // statement may sit in a branch that never runs, so a mismatch compiles
-  // to a run-time rejection rather than a refusal.
-  void emit_assign_size_reject(const std::string& message) {
+  // to a run-time rejection rather than a refusal. A destination whose size
+  // the region chose has no single size, so stanli refuses it instead.
+  void refuse_second_size(const std::string& name) {
+    if (region_sized.count(name))
+      bail(name +
+           " is given containers of different sizes under a condition that "
+           "depends on a parameter, which stanli does not support");
+  }
+
+  void emit_assign_size_reject(const std::string& name,
+                               const std::string& message) {
+    refuse_second_size(name);
     Program::Message m;
     m.spec.chunks = {message};
     m.spec.error = MessageError::InvalidArgument;
@@ -4522,6 +4538,7 @@ struct ProgramCompiler {
         ints.erase(s.decl_id);
         known_reals.erase(s.decl_id);
         deferred_shapes.erase(s.decl_id);
+        region_sized.erase(s.decl_id);
         known_int_arrays.erase(s.decl_id);
         known_int_array_dims.erase(s.decl_id);
         int_array_names.erase(s.decl_id);
@@ -4688,6 +4705,7 @@ struct ProgramCompiler {
             emit(Program::MOV, adopted.reg + k, v.reg + k);
           binding->second = adopted;
           deferred_shapes.erase(deferred);
+          region_sized.insert(s.lhs);
 
           if (int_array_names.count(s.lhs)) {
             std::vector<long> values;
@@ -4766,6 +4784,7 @@ struct ProgramCompiler {
                                         try_cints(s.rhs, &folded_ints) &&
                                         folded_ints.size() == (size_t)v.len;
           if (dst.len == 0 && (v.len != 0 || !same_view(v, dst))) {
+            refuse_second_size(s.lhs);
             // stan::model::assign gives a zero-size destination the
             // right-hand side's size, so adopt the assigned shape. That
             // includes an empty value of another shape, such as a 0x0
@@ -4785,6 +4804,7 @@ struct ProgramCompiler {
             for (int k = 0; k < v.len; ++k)
               emit(Program::MOV, nd.reg + k, v.reg + k);
             reals[s.lhs] = nd;
+            region_sized.insert(s.lhs);
             if (have_folded_ints) {
               known_int_arrays[s.lhs] = std::move(folded_ints);
               known_int_array_dims[s.lhs] = nd.dims;
@@ -4799,7 +4819,7 @@ struct ProgramCompiler {
                 whole_assign_size_message(s.lhs, dst, v);
             if (message.empty())
               bail("assignment logical view mismatch for " + s.lhs);
-            emit_assign_size_reject(message);
+            emit_assign_size_reject(s.lhs, message);
             return Path::Open;
           }
           for (int k = 0; k < v.len; ++k)
@@ -4825,7 +4845,7 @@ struct ProgramCompiler {
                 whole_assign_size_message(s.lhs, dst, v);
             if (message.empty())
               bail("full-span assignment logical view mismatch for " + s.lhs);
-            emit_assign_size_reject(message);
+            emit_assign_size_reject(s.lhs, message);
             return Path::Open;
           }
           for (int k = 0; k < v.len; ++k)
@@ -4876,10 +4896,10 @@ struct ProgramCompiler {
             bail("matrix assignment selection is too large");
           const size_t width = rows.size() * cols.size();
           if (v.len != static_cast<int>(width)) {
-            emit_assign_size_reject("matrix assignment width mismatch for " +
-                                    s.lhs + ": " + std::to_string(width) +
-                                    " selected, " + std::to_string(v.len) +
-                                    " assigned");
+            emit_assign_size_reject(
+                s.lhs, "matrix assignment width mismatch for " + s.lhs + ": " +
+                           std::to_string(width) + " selected, " +
+                           std::to_string(v.len) + " assigned");
             return Path::Open;
           }
           int at = 0;
@@ -4926,13 +4946,13 @@ struct ProgramCompiler {
                 s.lhs_idx[0].kind != mir::Expr::IndexSingle &&
                 (int64_t)positions[0].size() != got;
             emit_assign_size_reject(
-                leading_differs
-                    ? selected_assign_size_message(s.lhs, s.lhs_idx[0], true,
-                                                   (int64_t)positions[0].size(),
-                                                   got)
-                    : "array assignment width mismatch for " + s.lhs + ": " +
-                          std::to_string(width) + " selected, " +
-                          std::to_string(v.len) + " assigned");
+                s.lhs, leading_differs
+                           ? selected_assign_size_message(
+                                 s.lhs, s.lhs_idx[0], true,
+                                 (int64_t)positions[0].size(), got)
+                           : "array assignment width mismatch for " + s.lhs +
+                                 ": " + std::to_string(width) + " selected, " +
+                                 std::to_string(v.len) + " assigned");
             return Path::Open;
           }
           // The same shared index geometry the rvalue reads resolve
@@ -5008,9 +5028,10 @@ struct ProgramCompiler {
                                          : SelectorSite::Vector,
               true, true);
           if (v.len != static_cast<int>(positions.size())) {
-            emit_assign_size_reject(selected_assign_size_message(
-                s.lhs, s.lhs_idx[0], dst.kind == ViewKind::Flat,
-                (int64_t)positions.size(), v.len));
+            emit_assign_size_reject(
+                s.lhs, selected_assign_size_message(
+                           s.lhs, s.lhs_idx[0], dst.kind == ViewKind::Flat,
+                           (int64_t)positions.size(), v.len));
             return Path::Open;
           }
           for (size_t k = 0; k < positions.size(); ++k)
@@ -5327,6 +5348,7 @@ struct ProgramCompiler {
     auto saved_known_int_array_dims = known_int_array_dims;
     auto saved_int_array_names = int_array_names;
     auto saved_deferred_shapes = deferred_shapes;
+    auto saved_region_sized = region_sized;
     auto saved_int_decl_at = int_decl_at;
     auto saved_int_reset_at = int_reset_at;
     auto saved_extern_bound = extern_bound;
@@ -5343,6 +5365,7 @@ struct ProgramCompiler {
     known_int_array_dims.clear();
     int_array_names.clear();
     deferred_shapes.clear();
+    region_sized.clear();
     int_decl_at.clear();
     int_reset_at.clear();
     extern_bound.clear();
@@ -5394,6 +5417,7 @@ struct ProgramCompiler {
       known_int_array_dims = std::move(saved_known_int_array_dims);
       int_array_names = std::move(saved_int_array_names);
       deferred_shapes = std::move(saved_deferred_shapes);
+      region_sized = std::move(saved_region_sized);
       int_decl_at = std::move(saved_int_decl_at);
       int_reset_at = std::move(saved_int_reset_at);
       extern_bound = std::move(saved_extern_bound);
@@ -5413,6 +5437,7 @@ struct ProgramCompiler {
     known_int_array_dims = std::move(saved_known_int_array_dims);
     int_array_names = std::move(saved_int_array_names);
     deferred_shapes = std::move(saved_deferred_shapes);
+    region_sized = std::move(saved_region_sized);
     int_decl_at = std::move(saved_int_decl_at);
     int_reset_at = std::move(saved_int_reset_at);
     extern_bound = std::move(saved_extern_bound);

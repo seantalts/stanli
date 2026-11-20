@@ -493,6 +493,9 @@ struct DeclView {
   bool int_array = false;
   bool deferred_shape = false;
   std::vector<int> runtime_dims;
+  // A runtime-control region chose this local's size, which may come from
+  // a branch that did not run.
+  bool sized_by_region = false;
 };
 
 // A lifetime-bound view of the prepared facts handed from the completed
