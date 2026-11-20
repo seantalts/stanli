@@ -1082,8 +1082,10 @@ inline int64_t sum_in_lens(const Op& op, const Slot* slots) {
   return t;
 }
 
+// The table entry itself. Tests assign through it to swap a kernel.
 Kernel& kernel(uint16_t opcode);
-// Called from ensure_registered() in executor.cpp.
+// Called from ensure_registered() in executor.cpp. Throws std::logic_error
+// if the opcode already has a kernel.
 void register_kernel(uint16_t opcode, Kernel k);
 
 // The registered kernel for an opcode, or null. Registers the built-in

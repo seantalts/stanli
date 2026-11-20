@@ -59,7 +59,11 @@ const char* opcode_name(uint16_t opcode) {
 }
 
 void register_kernel(uint16_t opcode, Kernel k) {
-  assert(opcode < OP_COUNT_);
+  if (opcode >= OP_COUNT_)
+    throw std::logic_error("register_kernel: opcode out of range");
+  if (g_table[opcode].forward != nullptr)
+    throw std::logic_error(std::string("register_kernel: ") +
+                           opcode_name(opcode) + " is already registered");
   g_table[opcode] = k;
 }
 
@@ -272,31 +276,43 @@ void register_structured_loop_kernel();
 void register_reduce_sum_kernel();
 void register_whiten_kernel();
 
+static void register_all_kernels() {
+  register_elementwise_kernels();
+  register_density_kernels();
+  register_probability_fns_kernels();
+  register_legacy_kernels();
+  register_matrix_kernels();
+  register_library_kernels();
+  register_algebra_kernels();
+  register_quadrature_kernels();
+  register_ode_kernels();
+  register_dae_kernels();
+  register_ode_adjoint_kernels();
+  register_constrain_kernels();
+  register_message_kernels();
+  register_rng_kernel();
+  register_eltwise_kernels();
+  register_scalar_binary_kernels();
+  register_scalar_unary_ad_kernels();
+  register_mixture_kernels();
+  register_island_kernel();
+  register_region_map_kernel();
+  register_structured_loop_kernel();
+  register_reduce_sum_kernel();
+  register_whiten_kernel();
+}
+
+// A built-in opcode registered twice is a build defect. Stop here: a throw
+// would leave the table half filled and make the next call report the wrong
+// opcode.
 static void ensure_registered() {
   static const bool once = [] {
-    register_elementwise_kernels();
-    register_density_kernels();
-    register_probability_fns_kernels();
-    register_legacy_kernels();
-    register_matrix_kernels();
-    register_library_kernels();
-    register_algebra_kernels();
-    register_quadrature_kernels();
-    register_ode_kernels();
-    register_dae_kernels();
-    register_ode_adjoint_kernels();
-    register_constrain_kernels();
-    register_message_kernels();
-    register_rng_kernel();
-    register_eltwise_kernels();
-    register_scalar_binary_kernels();
-    register_scalar_unary_ad_kernels();
-    register_mixture_kernels();
-    register_island_kernel();
-    register_region_map_kernel();
-    register_structured_loop_kernel();
-    register_reduce_sum_kernel();
-    register_whiten_kernel();
+    try {
+      register_all_kernels();
+    } catch (const std::exception& e) {
+      std::fprintf(stderr, "stanli: %s\n", e.what());
+      std::abort();
+    }
     return true;
   }();
   (void)once;

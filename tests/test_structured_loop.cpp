@@ -1645,9 +1645,9 @@ struct ScopedKernelOverride {
 
   ScopedKernelOverride(uint16_t opcode, Kernel replacement)
       : opcode(opcode), saved(*find_kernel(opcode)) {
-    register_kernel(opcode, replacement);
+    kernel(opcode) = replacement;
   }
-  ~ScopedKernelOverride() { register_kernel(opcode, saved); }
+  ~ScopedKernelOverride() { kernel(opcode) = saved; }
 };
 
 static int inactive_workspace_calls = 0;

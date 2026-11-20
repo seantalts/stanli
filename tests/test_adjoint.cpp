@@ -384,8 +384,7 @@ static void test_call_primal_read_contract() {
   // Registry identity alone is insufficient: a replacement implementation
   // has no contract unless it explicitly registers one alongside itself.
   const Kernel saved_add = *find_kernel(OP_ADD);
-  register_kernel(OP_ADD,
-                  Kernel{saved_add.forward, test_call_backward, nullptr});
+  kernel(OP_ADD) = Kernel{saved_add.forward, test_call_backward, nullptr};
   IslandProg replaced;
   replaced.n_regs = 5;
   replaced.ins = p.ins;
@@ -404,7 +403,7 @@ static void test_call_primal_read_contract() {
     expect("replacement CALL defaults to output checkpoint",
            replaced.calls[0].bwd_value_out != 2);
   }
-  register_kernel(OP_ADD, saved_add);
+  kernel(OP_ADD) = saved_add;
 }
 
 // One case, both ways. `tol` is how many ulp of disagreement the case

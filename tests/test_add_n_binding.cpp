@@ -76,10 +76,10 @@ int main() {
   const auto saved = *kernel;
   auto custom = saved;
   custom.forward = [](stanli::KernelCtx& c) { c.out.data[0] = 42.; };
-  stanli::register_kernel(stanli::OP_ADD_N, custom);
+  stanli::kernel(stanli::OP_ADD_N) = custom;
   op.variant = 0;
   if (stanli::resolve_forward_fn(op) != custom.forward) ++errors;
-  stanli::register_kernel(stanli::OP_ADD_N, saved);
+  stanli::kernel(stanli::OP_ADD_N) = saved;
   std::printf("cases=%d errors=%d\n", cases, errors);
   return errors ? 1 : 0;
 }
