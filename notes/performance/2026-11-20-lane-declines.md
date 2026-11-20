@@ -61,9 +61,9 @@ What the table says:
   a bucket by slot addresses.
 - The global cap of 32 partition splits is reached in 18 models
   (covid19imperial_v2 and v3 drop 100 later buckets each). This did not
-  decide fusion: with the cap per bucket (later commit), or with no cap at
-  all, no corpus program changes, because the buckets that reached it
-  decline for other reasons once they get their splits.
+  decide fusion: with a cap per bucket, or with no cap at all, no corpus
+  program changes. Per bucket, the cap was still reached at 790 places in
+  17 models, so the global cap stays.
 - 15 models list one slot more than once in the target. The lane passes see
   those terms multiplied by their count (`scale_repeated_terms`), and no
   decline reason in the table is specific to them.
@@ -74,6 +74,12 @@ Splitting a bucket by slot changed three programs: `ch14_m14_7` (2,615 to
 58 ops), `examplemodels_cjs_cov_raneff` (75,299 to 74,120) and
 `hbayesdm_gng_m4` (80,277 to 80,146). Partition's "different non-constant
 slots" row went from 76 to 71 models; most of what remains are recurrences,
-where each lane reads the previous lane's value. The effect barrier, the
-per-bucket split budget and the bound on reroll's lane count changed no
-corpus program.
+where each lane reads the previous lane's value. The effect barrier and the
+bound on reroll's lane count changed no corpus program.
+
+Counting a position under its longest period instead of its shortest moves
+reroll's numbers little; the most common reasons and their order stay the
+same. The 15 models that list a slot more than once do so for lanes that
+lowering already shares (one op per distinct lane); no decline record names
+the op that scales such a term, but partition does not treat those lanes as
+lanes at all, so the report cannot rule out that they would fuse otherwise.

@@ -625,7 +625,8 @@ rather than declining.
 Ops only move earlier, so a print, a reject or an argument check between two
 lanes of a bucket would run after work that followed it in the source, and a
 reject could report a later density's error instead of its own message. A
-bucket splits at such an op. The densities that are effectful only because
+bucket splits at such an op, and at any op with a payload (a compiled region,
+a solver with a callback) unless it is a region proven free of effects. The densities that are effectful only because
 they check their arguments (`categorical`, the integer-outcome check) are not
 barriers: their errors reorder like those of every other fused density.
 
@@ -654,9 +655,10 @@ A bucket is rewritten in one of these forms:
 - A bucket holding more than one template splits at any mid-range writer
   and reconsiders both halves, so an interleaved model still gets the
   lanes on either side of the writer. Splits are capped rather than
-  retried to a fixed point. The cap of 32 (`kMaxSplits`) counts the splits of
-  one bucket and the pieces split from it, so one bucket cannot use up the
-  splits of a later one. On the corpus, removing the cap changes no program.
+  retried to a fixed point. The cap of 32 (`kMaxSplits`) counts every split in
+  the whole pass, across all buckets, and the lane report names it when it
+  ends a bucket. It is reached in 18 corpus models, but neither a budget per
+  bucket nor no cap at all changes any corpus program (2026-11-20).
 - One arm rewrites a chain instead of widening it. A lane that multiplies
   two scalars, subtracts a width-m vector, prepends a zero, cumulatively
   sums, and hands the result to a scalar-outcome categorical is one row
