@@ -32,6 +32,9 @@ struct RerollStats {
   // unlike a wall-clock reading, so the same graph gives the same answer
   // on every machine.
   int64_t list_steps = 0;
+  // Op pairs compared while counting a run's matching lanes, plus lanes
+  // times positions for every classification attempt.
+  int64_t lane_steps = 0;
   // Target-term entries read while swapping fused lanes' terms for their
   // region's one replacement.
   int64_t term_steps = 0;

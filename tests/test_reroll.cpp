@@ -1634,6 +1634,58 @@ static void test_many_regions_cost() {
   expect("many regions term work stays linear", big.steps < 3 * small.steps);
 }
 
+// `for (n in 1:N) for (k in 1:K) mu[n, k] = alpha[k] + x[n] * beta[k];` into
+// a column-major matrix: every lane matches, but the store's stride run
+// restarts after K lanes, so the run fuses in N blocks. Counting and
+// classifying the whole remaining run again at every block made the pass
+// quadratic in N.
+static int64_t column_fill_steps(int N) {
+  const int K = 10;
+  Graph g;
+  Fills fills;
+  const int alpha = g.add_slot(K, true);
+  const int beta = g.add_slot(K, true);
+  const int sigma = g.add_slot(1, true);
+  const int x = g.add_slot(N, false);
+  std::vector<double> xs((size_t)N);
+  for (int n = 0; n < N; ++n) xs[(size_t)n] = 0.001 * n;
+  fills.emplace_back(x, xs);
+  int mu = g.add_slot((int64_t)N * K, false);
+  fills.emplace_back(mu, std::vector<double>((size_t)N * K, 0.0));
+  for (int n = 0; n < N; ++n)
+    for (int k = 0; k < K; ++k) {
+      const int a = g.add_slot(1, false);
+      g.add_op(OP_INDEX, {alpha}, a, {k});
+      const int xn = g.add_slot(1, false);
+      g.add_op(OP_INDEX, {x}, xn, {n});
+      const int b = g.add_slot(1, false);
+      g.add_op(OP_INDEX, {beta}, b, {k});
+      const int prod = g.add_slot(1, false);
+      g.add_op(OP_MUL, {xn, b}, prod);
+      const int sum = g.add_slot(1, false);
+      g.add_op(OP_ADD, {a, prod}, sum);
+      g.add_op(OP_SET_INDEX_INPLACE, {mu, sum}, mu, {n + k * N});
+    }
+  const int y = g.add_slot((int64_t)N * K, false);
+  fills.emplace_back(y, std::vector<double>((size_t)N * K, 0.5));
+  const int lp = g.add_slot(1, false);
+  const int id =
+      stanli::testutil::add_density(g, OP_NORMAL_LPDF, {y, mu, sigma}, lp);
+  g.ops[id].variant = 0x06;
+  std::vector<int> terms{lp};
+  const RerollStats st = reroll(g, fills, terms, {});
+  expect("column fill fuses every row block", st.regions == N);
+  return st.lane_steps + st.list_steps;
+}
+
+static void test_column_fill_cost() {
+  const int64_t small = column_fill_steps(1000);
+  const int64_t big = column_fill_steps(2000);
+  std::printf("  column fill reroll: N=1000 %lld steps, N=2000 %lld (%.1fx)\n",
+              (long long)small, (long long)big, (double)big / (double)small);
+  expect("column fill work stays linear", big < 3 * small);
+}
+
 static void test_write_fusion() {
   using namespace writefuse;
   for (int start : {0, 1}) {
@@ -3603,6 +3655,7 @@ static void test_fast_prices_shared_density_duplicates() {
 }
 
 int main() {
+  test_column_fill_cost();
   test_reject_between_lanes_stays();
   test_fast_prices_shared_density_duplicates();
   test_fast_fuses_shared_parameter();

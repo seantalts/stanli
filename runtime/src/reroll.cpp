@@ -945,12 +945,42 @@ RerollStats reroll(Graph& g,
       if (repeats && !repeating) repeating = P;
       if (i < retry.retry_at || !repeats) continue;
 
+      // An element store whose index stops marching after a few lanes ends
+      // any region at that lane, so count no further. Without this bound a
+      // run that fuses in blocks (a column-major fill, one row per block) is
+      // counted and classified to its end again at every block.
+      int64_t store_run = std::numeric_limits<int64_t>::max();
+      for (int p = 0; p < P; ++p) {
+        const Op& s0 = g.ops[i + (size_t)p];
+        const size_t s1 = i + (size_t)p + (size_t)P;
+        if (!is_element_store(s0) || s1 >= g.ops.size() ||
+            !is_element_store(g.ops[s1]) || g.ops[s1].in[0] != s0.in[0])
+          continue;
+        const int64_t stride = g.ops[s1].idata[0] - s0.idata[0];
+        if (stride < 1) continue;
+        int64_t run = 2;
+        for (size_t u = s1 + (size_t)P; u < g.ops.size(); u += (size_t)P) {
+          ++st.lane_steps;
+          const Op& s = g.ops[u];
+          if (!is_element_store(s) || s.in[0] != s0.in[0] ||
+              s.idata[0] != s0.idata[0] + run * stride)
+            break;
+          ++run;
+        }
+        store_run = std::min(store_run, run);
+      }
+      const int64_t max_lanes = store_run >= kMinLanes
+                                    ? store_run
+                                    : std::numeric_limits<int64_t>::max();
+
       // Count template-matching lanes. A pair that fails fails at every start
       // that compares it, so the scan for P resumes after it.
       int64_t L = 1;
       size_t mismatch = npos;
-      while (mismatch == npos && i + ((size_t)L + 1) * P <= g.ops.size()) {
+      while (mismatch == npos && L < max_lanes &&
+             i + ((size_t)L + 1) * P <= g.ops.size()) {
         for (int p = 0; p < P; ++p) {
+          ++st.lane_steps;
           const size_t a = i + (size_t)p, b = a + (size_t)L * P;
           if (sig[a] != sig[b] || !ops_match(g, g.ops[a], g.ops[b], L)) {
             mismatch = a;
@@ -1000,6 +1030,7 @@ RerollStats reroll(Graph& g,
            !doomed && attempt < kMaxClassifyAttempts && Luse >= kMinLanes;
            ++attempt) {
         int64_t prefix = Luse;
+        st.lane_steps += (int64_t)P * Luse;
         pos.assign((size_t)P, Pos{});
         std::unordered_map<int, int> lane0_producer;
         bool ok = true;
