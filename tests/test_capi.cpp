@@ -1783,8 +1783,8 @@ void expect_interpreter_policy(const char* fixture,
     listed = listed || std::string(stanli_interpreter_fallback(model, i))
                                .find(expected_reason) != std::string::npos;
   expect_true(tag + " the reason is a listed fallback", listed);
-  expect_eq((tag + " out of range fallback").c_str(),
-            stanli_interpreter_fallback(model, -1), "");
+  expect_true(tag + " out of range fallback",
+              stanli_interpreter_fallback(model, -1) == nullptr);
   expect_true(tag + " warning names the build: " + text,
               text.find(stanli_build_id()) != std::string::npos);
   stanli_model_free(model);
@@ -3387,7 +3387,55 @@ void test_grad_messages() {
   stanli_model_free(m);
 }
 
+// Every indexed accessor answers an index out of range the same way: null
+// for a string, STANLI_COMPILER_MESSAGE_NONE for a message kind.
+void test_out_of_range_accessors() {
+  stanli_model* m = from_stan(
+      "parameters { real x; } model { x ~ normal(0, 1); }\n"
+      "generated quantities { real y = x; }\n");
+  if (m == nullptr) return;
+  const int64_t n_messages = stanli_model_n_compiler_messages(m);
+  for (int64_t i : {(int64_t)-1, n_messages}) {
+    expect_true("model message kind out of range",
+                stanli_model_compiler_message_kind(m, i) ==
+                    STANLI_COMPILER_MESSAGE_NONE);
+    expect_true("model message out of range",
+                stanli_model_compiler_message(m, i) == nullptr);
+  }
+  for (int64_t i : {(int64_t)-1, stanli_wa_n_columns(m)})
+    expect_true("write_array column name out of range",
+                stanli_wa_column_name(m, i) == nullptr);
+  for (int64_t i : {(int64_t)-1, stanli_n_constrained(m)})
+    expect_true("constrained name out of range",
+                stanli_constrained_name(m, i) == nullptr);
+  for (int64_t i : {(int64_t)-1, stanli_n_interpreter_fallbacks(m)})
+    expect_true("interpreter fallback out of range",
+                stanli_interpreter_fallback(m, i) == nullptr);
+  for (int64_t i : {(int64_t)-1, stanli_n_reduce_sum_fallbacks(m)})
+    expect_true("reduce_sum fallback out of range",
+                stanli_reduce_sum_fallback(m, i) == nullptr);
+  for (int i : {-1, STANLI_N_SAMPLER_COLS})
+    expect_true("sampler column name out of range",
+                stanli_sampler_column_name(i) == nullptr);
+  stanli_model_free(m);
+
+  stanli_compilation* c =
+      stanli_compile_stan("parameters { real x; } model { x ~ normal(0, 1); }",
+                          nullptr, nullptr, 0, 0);
+  expect_true("compilation", c != nullptr);
+  if (c == nullptr) return;
+  for (int64_t i : {(int64_t)-1, stanli_compilation_n_messages(c)}) {
+    expect_true(
+        "compilation message kind out of range",
+        stanli_compilation_message_kind(c, i) == STANLI_COMPILER_MESSAGE_NONE);
+    expect_true("compilation message out of range",
+                stanli_compilation_message(c, i) == nullptr);
+  }
+  stanli_compilation_free(c);
+}
+
 int main() {
+  test_out_of_range_accessors();
   test_grad_messages();
   test_shared_write_array_executor();
   test_sampled_write_array_rows_match_draws();

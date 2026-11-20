@@ -685,8 +685,16 @@ stanli_compilation* stanli_compile_stan(const char* stan_code,
     c->error = "this build does not embed stanc3";
 #endif
     return c.release();
-  } catch (const std::exception&) {
+  } catch (const std::bad_alloc&) {
     return nullptr;
+  } catch (const std::exception& e) {
+    try {
+      auto c = std::make_unique<stanli_compilation>();
+      c->error = e.what();
+      return c.release();
+    } catch (...) {
+      return nullptr;
+    }
   }
 }
 
@@ -704,6 +712,8 @@ int64_t stanli_compilation_n_messages(const stanli_compilation* c) {
 
 stanli_compiler_message_kind stanli_compilation_message_kind(
     const stanli_compilation* c, int64_t i) {
+  if (i < 0 || i >= (int64_t)c->messages.size())
+    return STANLI_COMPILER_MESSAGE_NONE;
   return c->messages[(size_t)i].kind;
 }
 
@@ -1285,7 +1295,7 @@ const char* stanli_sampler_column_name(int i) {
   static const char* kNames[STANLI_N_SAMPLER_COLS] = {
       "lp__",         "accept_stat__", "stepsize__", "treedepth__",
       "n_leapfrog__", "divergent__",   "energy__"};
-  if (i < 0 || i >= STANLI_N_SAMPLER_COLS) return "";
+  if (i < 0 || i >= STANLI_N_SAMPLER_COLS) return nullptr;
   return kNames[i];
 }
 
@@ -2011,6 +2021,8 @@ int64_t stanli_model_n_compiler_messages(const stanli_model* m) {
 
 stanli_compiler_message_kind stanli_model_compiler_message_kind(
     const stanli_model* m, int64_t i) {
+  if (i < 0 || i >= (int64_t)m->compiler_messages.size())
+    return STANLI_COMPILER_MESSAGE_NONE;
   return m->compiler_messages[(size_t)i].kind;
 }
 
@@ -2185,7 +2197,7 @@ int64_t stanli_n_interpreter_fallbacks(const stanli_model* m) {
 }
 
 const char* stanli_interpreter_fallback(const stanli_model* m, int64_t i) {
-  if (i < 0 || i >= (int64_t)m->cm.interpreter_fallbacks.size()) return "";
+  if (i < 0 || i >= (int64_t)m->cm.interpreter_fallbacks.size()) return nullptr;
   return m->cm.interpreter_fallbacks[(size_t)i].c_str();
 }
 
@@ -2194,7 +2206,7 @@ int64_t stanli_wa_n_generated_start(const stanli_model* m) {
 }
 
 const char* stanli_wa_column_name(const stanli_model* m, int64_t i) {
-  if (i < 0 || i >= (int64_t)m->wa_names.size()) return "";
+  if (i < 0 || i >= (int64_t)m->wa_names.size()) return nullptr;
   return m->wa_names[(size_t)i].c_str();
 }
 

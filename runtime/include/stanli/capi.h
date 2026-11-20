@@ -1,7 +1,11 @@
 /* stanli C ABI: the versioned boundary language bindings speak to.
  * Exception-free; every entry returns an error code or null on failure and
  * writes a message into the caller's buffer. One stanli_model per (model,
- * data) pair; not thread-safe per instance (use one per chain). */
+ * data) pair; not thread-safe per instance (use one per chain).
+ *
+ * Indexed accessors (name i of n, message i of n, ...) answer an index
+ * outside [0, n) with null for a string, 0 for a count or dimension, -1 for
+ * a size, and STANLI_COMPILER_MESSAGE_NONE for a message kind. */
 #ifndef STANLI_CAPI_H
 #define STANLI_CAPI_H
 
@@ -131,14 +135,16 @@ char* stanli_stan_to_mir_with_opts(const char* stan_code,
  * budget (the model then runs from O0 MIR; STANLI_NO_O1_FALLBACK=1 forces
  * O1). */
 typedef enum {
+  STANLI_COMPILER_MESSAGE_NONE = -1, /* the index was out of range */
   STANLI_COMPILER_WARNING = 0,
   STANLI_COMPILER_O1_FALLBACK = 1
 } stanli_compiler_message_kind;
 
 /* One compilation of Stan source, with the source file named in compiler
  * messages (null: the compiler's default label). The other arguments are
- * those of stanli_stan_to_mir_with_opts. Returns null only when out of
- * memory; free with stanli_compilation_free. */
+ * those of stanli_stan_to_mir_with_opts. A failure of any kind is reported
+ * through stanli_compilation_error; the result is null only when there is
+ * not memory to say so. Free with stanli_compilation_free. */
 typedef struct stanli_compilation stanli_compilation;
 stanli_compilation* stanli_compile_stan(const char* stan_code,
                                         const char* filename,
@@ -1013,8 +1019,7 @@ const stanli_field_layout* stanli_field_layouts(void);
  * otherwise. Generated-quantities draws do not count. */
 int stanli_transformed_data_rng(const stanli_model* m);
 /* The parts of the model stanli_warnings is about, one entry each: what
- * runs through the MIR interpreter and why. stanli_interpreter_fallback
- * returns "" for an index out of range. Owned by the model. */
+ * runs through the MIR interpreter and why. Owned by the model. */
 int64_t stanli_n_interpreter_fallbacks(const stanli_model* m);
 const char* stanli_interpreter_fallback(const stanli_model* m, int64_t i);
 
