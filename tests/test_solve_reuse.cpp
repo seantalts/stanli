@@ -226,6 +226,7 @@ int main() {
     for (int k : {1, 3})
       for (int rows : {0, 1, 33})
         for (bool frames : {false, true}) {
+          if (frames && !debug_switches_available()) continue;
           Kernel without = original;
           without.forward = recompute_forward;
           without.backward = recompute_backward;

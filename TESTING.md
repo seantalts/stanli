@@ -477,12 +477,15 @@ A test that sets a switch is listed in `STANLI_DEBUG_SWITCH_TESTS` in
 OFF build, a case that needs a switch skips itself: it starts with
 `SKIP_WITHOUT_DEBUG_SWITCHES()` or tests `debug_switches_available()`, both
 in [`tests/env_helpers.hpp`](tests/env_helpers.hpp), and prints a `SKIP` line,
-while the cases that need no switch run. A new case that sets a switch must
-do the same, or the OFF build fails it.
+while the cases that need no switch run. A case that sets a switch and does
+not skip still runs in an OFF build, where the switch is ignored, so it passes
+only if its checks hold without it. Some cases that compare a run with and
+without a switch are like that today: they pass by comparing the default with
+itself, and only an ON build tests them.
 
 Eight tests and the 22 cogmod runs of the cross-path matrix
-(`test_cross_path_cm_*`) have no case that runs without a switch, so an OFF
-build disables them. They are in `STANLI_DEBUG_SWITCH_ONLY_TESTS`, and CTest
+(`test_cross_path_cm_*`) are disabled in an OFF build, because almost every
+case in them needs a switch. They are in `STANLI_DEBUG_SWITCH_ONLY_TESTS`, and CTest
 reports `Not Run (Disabled)`: `test_cross_path`, `test_structured_loop`,
 `test_region_map`, `test_wa_parallel_switches`, `test_pass_dump_switches`,
 `test_prep_profile_reroll_dispositions`, `test_ctsem_engine` and

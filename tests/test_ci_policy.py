@@ -623,8 +623,6 @@ class MainStatusTest(unittest.TestCase):
         cls.jobs = workflow("wheels.yml")["jobs"]
         cls.job = cls.jobs["main-status"]
         cls.step = cls.job["steps"][0]
-        if not shutil.which("jq"):
-            raise unittest.SkipTest("jq is required to run the job's script")
 
     def test_runs_after_every_merge_to_main_and_nowhere_else(self):
         for event in ("push", "schedule", "workflow_dispatch"):
@@ -635,13 +633,17 @@ class MainStatusTest(unittest.TestCase):
         self.assertFalse(enabled(self.job, "push", ref="refs/tags/v1.0.0"))
 
     def test_waits_for_the_post_merge_jobs_and_only_writes_issues(self):
-        for name in ("build", "windows", "asan", "tsan", "wasm", "r-tests"):
+        for name in ("changes", "static_checks", "no-stdio", "build", "windows",
+                     "asan", "tsan", "wasm", "r-tests", "pages",
+                     "dev-runtime-release"):
             with self.subTest(need=name):
                 self.assertIn(name, self.job["needs"])
         self.assertEqual(self.job["permissions"], {"issues": "write"})
         self.assertTrue(all("uses" not in step for step in self.job["steps"]))
 
     def run_script(self, results, listing="[]"):
+        if not shutil.which("jq"):
+            self.skipTest("jq is required to run the job's script")
         with tempfile.TemporaryDirectory() as tmp:
             tmp = Path(tmp)
             bin_dir = tmp / "bin"

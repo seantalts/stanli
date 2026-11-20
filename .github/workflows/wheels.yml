@@ -612,9 +612,10 @@ jobs:
 
       # build-rel is the shipped configuration: no Stan Math kernels for the
       # fused densities and no developer switches, so ctest there skips the
-      # tests labeled debug_switches. This builds the same sources with both
-      # kept, to run the differential tests, the STANLI_NO_FUSED_DENSITY
-      # oracle and the switch tests. One platform is enough.
+      # cases that need a switch and disables the tests that have none left.
+      # This builds the same sources with both kept, to run the differential
+      # tests, the STANLI_NO_FUSED_DENSITY oracle and the switch tests. One
+      # platform is enough.
       - name: Differential tests against Stan Math
         if: matrix.plat == 'manylinux_2_28_x86_64'
         run: |
@@ -2195,9 +2196,9 @@ jobs:
   main-status:
     name: report main status
     if: always() && github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
-    needs: [static_checks, build, windows, asan, tsan, wasm, wasm-webr,
-            browser-compiler, r-tests, r-platform-tests, stanc-windows,
-            windows-compiler]
+    needs: [changes, static_checks, no-stdio, build, windows, asan, tsan, wasm,
+            wasm-webr, browser-compiler, r-tests, r-platform-tests,
+            stanc-windows, windows-compiler, pages, dev-runtime-release]
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
