@@ -1524,12 +1524,21 @@ int stanli_sample_multi_metric(stanli_model* m, const stanli_sample_opts* opts,
       }
     }
 
+    // Every stored draw goes straight into the caller's buffers, so no copy
+    // of the run is held beside them.
+    cfg.retain_draws = false;
     stanli::StoredDrawWriter writer;
-    if (values != nullptr)
+    if (draws != nullptr || stats != nullptr || values != nullptr)
       writer = [&](int c, int64_t row, const double* q, stanli::WaRng& rng,
-                   const stanli::SamplerRow&) {
+                   const stanli::SamplerRow& sampler_row) {
         if (row >= n_stored) return;
-        double* out = values + ((int64_t)c * n_stored + row) * width;
+        const int64_t at = (int64_t)c * n_stored + row;
+        if (draws != nullptr) copy_doubles(draws + at * n, q, n);
+        if (stats != nullptr)
+          std::memcpy(stats + at * STANLI_N_SAMPLER_COLS, sampler_row.data(),
+                      sizeof(double) * STANLI_N_SAMPLER_COLS);
+        if (values == nullptr) return;
+        double* out = values + at * width;
         std::unique_lock<std::mutex> turn(wa_turn, std::defer_lock);
         if (share_wa) turn.lock();
         try {
@@ -1574,25 +1583,9 @@ int stanli_sample_multi_metric(stanli_model* m, const stanli_sample_opts* opts,
                       r.report.inv_metric.data(),
                       sizeof(double) * (size_t)metric_len);
       }
-      if (!r.error.empty()) {
-        if (failed++ == 0)
-          first_error =
-              "chain " + std::to_string(cfg.chain_id + c) + ": " + r.error;
-        continue;
-      }
-      // A chain that stored fewer rows than asked would leave the tail of
-      // its block stale; it cannot happen (the loop is a fixed count) but
-      // the buffer is the caller's, so write only what exists.
-      const int64_t rows = std::min<int64_t>((int64_t)r.draws.size(), n_stored);
-      for (int64_t i = 0; i < rows; ++i) {
-        copy_doubles(draws + ((int64_t)c * n_stored + i) * n,
-                     r.draws[(size_t)i].data(), n);
-        if (stats != nullptr && i < (int64_t)r.stats.rows.size())
-          std::memcpy(
-              stats + ((int64_t)c * n_stored + i) * STANLI_N_SAMPLER_COLS,
-              r.stats.rows[(size_t)i].data(),
-              sizeof(double) * STANLI_N_SAMPLER_COLS);
-      }
+      if (!r.error.empty() && failed++ == 0)
+        first_error =
+            "chain " + std::to_string(cfg.chain_id + c) + ": " + r.error;
     }
     if (failed) put_err(err, err_len, first_error.c_str());
     return failed;

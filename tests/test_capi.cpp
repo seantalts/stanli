@@ -2738,6 +2738,19 @@ void test_sampled_write_array_rows_match_draws() {
               variance > 0.5 && variance < 1.7);
   expect_true("sampled write_array: crep averages near 1.5",
               std::abs(crep_sum / (double)rows - 1.5) < 0.4);
+
+  // A caller that wants only the output rows passes no draws buffer, and
+  // gets the same rows and sampler columns.
+  std::vector<double> stats((size_t)(rows * STANLI_N_SAMPLER_COLS)),
+      values_only((size_t)(rows * w)), stats_only(stats.size());
+  stanli_sample_multi_metric(
+      model, &opts, nullptr, 0, draws.data(), stats.data(), values.data(),
+      nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, err, sizeof err);
+  const int rc_only = stanli_sample_multi_metric(
+      model, &opts, nullptr, 0, nullptr, stats_only.data(), values_only.data(),
+      nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, err, sizeof err);
+  expect_true(std::string("sampling without a draws buffer: ") + err,
+              rc_only == 0 && values_only == values && stats_only == stats);
   stanli_model_free(model);
 }
 

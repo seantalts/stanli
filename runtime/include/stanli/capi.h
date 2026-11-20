@@ -493,17 +493,19 @@ typedef struct {
  * and the metric, no outputs. */
 void stanli_metric_opts_init(stanli_metric_opts* o);
 
-/* Run opts->chains chains. draws holds
+/* Run opts->chains chains. draws, when non-null, holds
  * chains * stanli_n_stored_draws(opts) * n_unconstrained doubles; stats,
  * when non-null, holds chains * stanli_n_stored_draws(opts) * 7 (the
- * CmdStan sampler columns, see stanli_sampler_column_name).
+ * CmdStan sampler columns, see stanli_sampler_column_name). Each stored
+ * draw is written into these buffers as the chain stores it; the library
+ * keeps no copy of the run.
  *
  * Returns 0 when every chain succeeded. Returns the NUMBER OF FAILED
  * CHAINS otherwise, with the first failure's message in err: a run where
- * three of four chains sampled is a partial result the caller may want,
- * and the failed chains' rows are left untouched. Returns -1 with a message
- * in err when the run could not start: bad options, metric or resume
- * records.
+ * three of four chains sampled is a partial result the caller may want.
+ * A failed chain's rows hold what it stored before it failed, and the rest
+ * of its rows are left untouched. Returns -1 with a message in err when the
+ * run could not start: bad options, metric or resume records.
  *
  * `refresh` follows CmdStan's convention: in each phase, report the first
  * transition, every refresh-th transition, and the phase's final transition.
