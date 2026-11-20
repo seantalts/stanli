@@ -152,16 +152,39 @@ second tree with one of these one-line changes instead:
 the same binary, so models that do not reach the code need no controls.
 
 **Commands.** Serial, one thread (`--parallel-wa=off`), fresh processes, five
-rounds with the arm order rotated each round. For each model and arm:
+rounds with the arm order rotated each round. Compile the MIR once:
 
 ```sh
 P=$(bash -c 'source tools/stanc_embed/provenance.sh && stanc_embed_dir')/stanli-vectorize-probe
 $P --vectorize-loops on --output OUT/ctsm.sexp tests/ctsem/ctsem_ctsm.stan
-# preparation, first gradient and peak memory: one process, one gradient
-env $ARM /usr/bin/time -l build-loops/bench_grad OUT/ctsm.sexp DATA.json --prep --parallel-wa=off
-# warm gradients: a second process, 200 ms warmup, then 20 gradients
-env $ARM build-loops/bench_grad OUT/ctsm.sexp DATA.json 20 --parallel-wa=off
 ```
+
+Then, for each model's `DATA.json`, run these two processes per arm. The
+first measures preparation, the first gradient and peak memory with exactly
+one gradient. The second measures warm gradients: 200 ms of warmup, then 20.
+
+```sh
+B=build-loops/bench_grad M=OUT/ctsm.sexp D=DATA.json
+# both on
+/usr/bin/time -l $B $M $D --prep --parallel-wa=off
+$B $M $D 20 --parallel-wa=off
+# memo off
+STANLI_NO_DATA_LOOP_MEMO=1 /usr/bin/time -l $B $M $D --prep --parallel-wa=off
+STANLI_NO_DATA_LOOP_MEMO=1 $B $M $D 20 --parallel-wa=off
+# frame instances off
+STANLI_NO_STRUCTURED_FRAME_INSTANCE=1 /usr/bin/time -l $B $M $D --prep --parallel-wa=off
+STANLI_NO_STRUCTURED_FRAME_INSTANCE=1 $B $M $D 20 --parallel-wa=off
+# both off
+STANLI_NO_DATA_LOOP_MEMO=1 STANLI_NO_STRUCTURED_FRAME_INSTANCE=1 \
+  /usr/bin/time -l $B $M $D --prep --parallel-wa=off
+STANLI_NO_DATA_LOOP_MEMO=1 STANLI_NO_STRUCTURED_FRAME_INSTANCE=1 \
+  $B $M $D 20 --parallel-wa=off
+```
+
+For `ctsem_ctsm_400`, put `STANLI_STRUCTURED_FRAMES=1` in front of every
+command. Write each switch as its own word: zsh does not split a variable
+that holds two assignments, so `env $ARM` with both switches in `ARM` turns
+off only the first.
 
 `--prep` prints preparation seconds, parameter count, peak RSS after
 preparation and first-gradient seconds. `/usr/bin/time -l` reports the peak
