@@ -33,6 +33,16 @@ inline MapA dx_a(KernelCtx& ctx, int i) {
 }
 inline bool scal(const KernelCtx& ctx, int i) { return ctx.in[i].len == 1; }
 
+// The backward of add, sub and mul runs once per scalar op, millions of
+// times per gradient in some models. Each handles a scalar output itself and
+// calls an out-of-line function for vectors, so that the scalar case needs
+// no stack frame for the vector case's sums.
+#if defined(_MSC_VER) && !defined(__clang__)
+#define STANLI_VECTOR_CASE __declspec(noinline)
+#else
+#define STANLI_VECTOR_CASE __attribute__((noinline))
+#endif
+
 // ---- binaries --------------------------------------------------------------
 void add_fwd(KernelCtx& ctx) {
   if (scal(ctx, 0) && scal(ctx, 1))
@@ -47,7 +57,13 @@ void add_fwd(KernelCtx& ctx) {
 // A broadcast scalar's adjoint adds the vector's adjoints with add_sum. When
 // a pass merges a loop into this op the sum has thousands of terms, and a
 // plain loop loses more accuracy than CmdStan's one call per element does.
+STANLI_VECTOR_CASE void add_bwd_vector(KernelCtx& ctx);
 void add_bwd(KernelCtx& ctx) {
+  if (ctx.out.len != 1 || ctx.variant) return add_bwd_vector(ctx);
+  for (int k = 0; k < 2; ++k)
+    if (ctx.in_adj[k].data) ctx.in_adj[k].data[0] += ctx.out_adj;
+}
+void add_bwd_vector(KernelCtx& ctx) {
   if (ctx.variant) {
     const int original = ctx.variant == kAddTransposeRight ? 0 : 1;
     if (!ctx.in_adj[original].data) return;
@@ -86,7 +102,13 @@ void sub_fwd(KernelCtx& ctx) {
   else
     out_a(ctx) = in_a(ctx, 0) - in_a(ctx, 1);
 }
+STANLI_VECTOR_CASE void sub_bwd_vector(KernelCtx& ctx);
 void sub_bwd(KernelCtx& ctx) {
+  if (ctx.out.len != 1) return sub_bwd_vector(ctx);
+  if (ctx.in_adj[0].data) ctx.in_adj[0].data[0] += ctx.out_adj;
+  if (ctx.in_adj[1].data) ctx.in_adj[1].data[0] -= ctx.out_adj;
+}
+void sub_bwd_vector(KernelCtx& ctx) {
   if (ctx.in_adj[0].data) {
     if (scal(ctx, 0)) {
       if (ctx.out.len == 1) {
@@ -153,15 +175,16 @@ void mul_fwd(KernelCtx& ctx) {
   else
     out_a(ctx) = in_a(ctx, 0) * in_a(ctx, 1);  // elt_multiply
 }
+STANLI_VECTOR_CASE void mul_bwd_vector(KernelCtx& ctx);
 void mul_bwd(KernelCtx& ctx) {
+  if (ctx.out.len != 1) return mul_bwd_vector(ctx);
+  if (ctx.in_adj[0].data)
+    ctx.in_adj[0].data[0] += ctx.out_adj * ctx.in[1].data[0];
+  if (ctx.in_adj[1].data)
+    ctx.in_adj[1].data[0] += ctx.out_adj * ctx.in[0].data[0];
+}
+void mul_bwd_vector(KernelCtx& ctx) {
   const bool s0 = scal(ctx, 0), s1 = scal(ctx, 1);
-  if (ctx.out.len == 1) {
-    if (ctx.in_adj[0].data)
-      ctx.in_adj[0].data[0] += ctx.out_adj * ctx.in[1].data[0];
-    if (ctx.in_adj[1].data)
-      ctx.in_adj[1].data[0] += ctx.out_adj * ctx.in[0].data[0];
-    return;
-  }
   if (ctx.in_adj[0].data) {
     if (s0) {
       add_sum(ctx.in_adj[0].data[0], ctx.out.len, [&](int64_t i) {
