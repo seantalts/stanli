@@ -62,9 +62,8 @@ constexpr int64_t kOpCost = kLaneOpCost;
 constexpr int64_t kPartitionMargin = kLanePartitionMargin;
 constexpr int64_t kDensityElem = kLaneDensityElem;
 // Splitting is bounded work, not a retry loop: each one costs a re-pass over
-// a bucket, and a bucket that presents thousands of interleaved writers must
-// not turn that into a quadratic term. The budget is per bucket, so the
-// pieces of one bucket cannot use up the splits of a later one.
+// a bucket, and a graph that presents thousands of interleaved writers must
+// not turn that into a quadratic term.
 constexpr int64_t kMaxSplits = 32;
 
 // OP_CATEGORICAL is admitted only as a lane delimiter. Its complete per-call
@@ -518,20 +517,12 @@ PartitionStats partition_lanes(Graph& g, Fills& fills,
 
   // A worklist rather than a loop: a bucket whose base is written between two
   // of its lanes splits at that op and both halves are reconsidered, so an
-  // interleaved model still gets the lanes on either side. Each piece keeps
-  // the split budget of the bucket it came from.
+  // interleaved model still gets the lanes on either side. Splits are capped
+  // for the reason the per-period arrays in reroll.cpp are.
   std::vector<std::vector<int>> work(buckets.begin(), buckets.end());
-  std::vector<size_t> origin(buckets.size());
-  for (size_t b = 0; b < buckets.size(); ++b) origin[b] = b;
-  std::vector<int64_t> splits_of(buckets.size(), 0);
-  const auto requeue = [&](std::vector<int> piece, size_t from) {
-    work.push_back(std::move(piece));
-    origin.push_back(from);
-  };
+  int64_t splits = 0;
   for (size_t bi = 0; bi < work.size(); ++bi) {
     const std::vector<int> ids = work[bi];
-    const size_t from = origin[bi];
-    int64_t& splits = splits_of[from];
     const int64_t L = (int64_t)ids.size();
     if (L < kMinLanes) continue;
     const Lane& lane0 = lanes[(size_t)ids[0]];
@@ -563,8 +554,8 @@ PartitionStats partition_lanes(Graph& g, Fills& fills,
       }
       if (lo.size() == ids.size() || hi.size() == ids.size()) return false;
       ++splits;
-      if ((int64_t)lo.size() >= kMinLanes) requeue(std::move(lo), from);
-      if ((int64_t)hi.size() >= kMinLanes) requeue(std::move(hi), from);
+      if ((int64_t)lo.size() >= kMinLanes) work.push_back(std::move(lo));
+      if ((int64_t)hi.size() >= kMinLanes) work.push_back(std::move(hi));
       return true;
     };
     // Lanes that read different slots at one position may still fuse in
@@ -589,7 +580,7 @@ PartitionStats partition_lanes(Graph& g, Fills& fills,
       bool any = false;
       for (std::vector<int>& grp : groups)
         if ((int64_t)grp.size() >= kMinLanes) {
-          requeue(std::move(grp), from);
+          work.push_back(std::move(grp));
           any = true;
         }
       splits += any;
