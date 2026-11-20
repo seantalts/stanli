@@ -52,6 +52,16 @@ EXPORTS
   stanli_sparse_factor_get
   stanli_sparse_factor_lowrank
   stanli_sparse_factor_free
+  stanli_laplace_whiten_opts_init
+  stanli_laplace_whiten
+  stanli_whitening_get_report
+  stanli_whitening_get_spec
+  stanli_whitening_get_theta
+  stanli_whitening_outer_message
+  stanli_whitening_n_warnings
+  stanli_whitening_warning
+  stanli_whitening_get_precision
+  stanli_whitening_free
   stanli_sample_stream_stats_init
   stanli_sample_walnuts_stream
   stanli_sample_walnuts_stats_init
