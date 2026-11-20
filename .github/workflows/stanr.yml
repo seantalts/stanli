@@ -3,10 +3,9 @@
 # incompatibilities that the standalone R package cannot see: stanr embeds
 # Stanli directly and adapts it to Stan's model_base interface.
 #
-# The release workflow calls this workflow before the v* publishers run.
-# stanr's vendoring script removes and patches stanli sources by name, so the
-# job reports but does not block. Keep workflow_dispatch as an on-demand
-# compatibility check.
+# This runs only on demand. Release tags used to run it too, but stanr's
+# vendoring script removes and patches stanli sources by name, and it has
+# failed on every release since 0.27.0 while stanr saw little upstream work.
 #
 # The Windows row exists because stanr compiles the runtime into its own
 # package DLL with Rtools (UCRT64 GCC), where thread_local objects live in
@@ -17,7 +16,6 @@
 name: stanr downstream
 
 on:
-  workflow_call:
   workflow_dispatch:
     inputs:
       stanr_ref:

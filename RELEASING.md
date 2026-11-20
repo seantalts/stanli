@@ -32,9 +32,9 @@ release the R package installs from. The publish jobs assert the tag
 matches each manifest, so a forgotten bump fails the release rather than
 shipping channels that disagree. Uploads go through PyPI and npm trusted
 publishing; no API token exists in the repo, and the `pypi` and `npm`
-deployment environments are restricted to release tags. Before any
-publisher runs, the `stanr` job rebuilds the downstream stanr package
-against the tagged runtime and runs its stanli-backend tests.
+deployment environments are restricted to release tags. The downstream
+stanr check (`stanr.yml`) does not run on tags; start it by hand with
+workflow_dispatch when needed.
 
 No sdist is published. Building from source needs a 30-minute OCaml
 toolchain step, so an sdist would only turn "no wheel for your platform"
