@@ -15,6 +15,10 @@ std::map<std::string, Val> region_cells;
 std::map<std::string, IntRange> region_analysis_ints;
 int region_control_depth = 0;
 bool region_control_active = false;
+// Set once the region retains a branch or while loop whose condition depends
+// on a parameter. Replay checks each such decision and records again when one
+// changes between executions.
+bool region_parameter_control = false;
 unsigned structured_outer_depth = 0;
 bool region_unreachable = false;
 std::set<std::string> region_unsized_unagreed;
@@ -795,29 +799,47 @@ std::optional<IntRange> region_range(const mir::Expr& e) {
   }
   const std::string& f = e.name;
   if (f == "Less__" || f == "Leq__" || f == "Greater__" || f == "Geq__" ||
-      f == "Equals__" || f == "NEquals__" || f == "PNot__")
-    return IntRange{0, 1};
+      f == "Equals__" || f == "NEquals__" || f == "PNot__") {
+    const auto fixed = [&](const mir::Expr& x) -> std::optional<int64_t> {
+      const auto r = region_range(x);
+      if (!r || r->lo != r->hi) return {};
+      return r->lo;
+    };
+    const auto a = e.args.empty() ? std::nullopt : fixed(e.args[0]);
+    const auto b = e.args.size() == 2 ? fixed(e.args[1]) : std::nullopt;
+    if (a && e.args.size() == 1) return bounded(*a == 0, *a == 0);
+    if (!a || !b) return IntRange{0, 1};
+    const bool v = f == "Less__"      ? *a < *b
+                   : f == "Leq__"     ? *a <= *b
+                   : f == "Greater__" ? *a > *b
+                   : f == "Geq__"     ? *a >= *b
+                   : f == "Equals__"  ? *a == *b
+                                      : *a != *b;
+    return bounded(v, v);
+  }
   if (f == "sum" && e.args.size() == 1 &&
       e.args[0].unsized.leaf == mir::UnsizedLeaf::Int) {
+    const auto total =
+        [&](const DataMap::Entry* observed) -> std::optional<IntRange> {
+      if (!observed || !observed->is_int || observed->i.empty()) return {};
+      int64_t sum = 0;
+      for (int element : observed->i) sum += element;
+      return bounded(sum, sum);
+    };
     if (e.args[0].kind == mir::Expr::Var) {
       const auto value = scope.find(e.args[0].name);
-      if (value != scope.end()) {
-        if (const auto* observed = observation(value->second)) {
-          if (observed->is_int && !observed->i.empty()) {
-            int64_t total = 0;
-            for (int element : observed->i) total += element;
-            return bounded(total, total);
-          }
-        }
-        const auto element = int_ranges.find(value->second.slot);
-        if (element != int_ranges.end()) {
-          const int64_t count = g.slots[value->second.slot].len;
-          const int64_t lo =
-              element->second.lo < 0 ? count * int64_t(element->second.lo) : 0;
-          const int64_t hi =
-              element->second.hi > 0 ? count * int64_t(element->second.hi) : 0;
-          return bounded(lo, hi);
-        }
+      // stanc's inliner passes a data array argument by name, so the body of
+      // an inlined function sums the data array itself.
+      if (value == scope.end()) return total(td.find(e.args[0].name));
+      if (auto known = total(observation(value->second))) return known;
+      const auto element = int_ranges.find(value->second.slot);
+      if (element != int_ranges.end()) {
+        const int64_t count = g.slots[value->second.slot].len;
+        const int64_t lo =
+            element->second.lo < 0 ? count * int64_t(element->second.lo) : 0;
+        const int64_t hi =
+            element->second.hi > 0 ? count * int64_t(element->second.hi) : 0;
+        return bounded(lo, hi);
       }
     }
     return {};
@@ -1517,6 +1539,8 @@ std::optional<Val> region_expr(const mir::Expr& e) {
     if (auto c = region_static_truth(e.args[0]))
       return lower_expr(e.args[*c ? 1 : 2]);
     Val condition = lower_expr(e.args[0]);
+    region_parameter_control |=
+        region_control_active || !condition.si.param_free;
     region_flush();
     RegionNode branch;
     branch.kind = RegionNode::If;
@@ -1658,7 +1682,8 @@ std::optional<Val> lower_runtime_scalar(const mir::Expr& e) {
     }
     g.ops.back().variant = static_cast<uint8_t>(comparison->second);
     v.autodiff = false;
-    set_int_range(v, 0, 1);
+    const auto range = region_range(e).value_or(IntRange{0, 1});
+    set_int_range(v, range.lo, range.hi);
     return v;
   }
   if (e.unsized.leaf == mir::UnsizedLeaf::Int && e.unsized.depth == 0) {
@@ -2123,6 +2148,7 @@ Flow lower_region_stmt(const mir::Stmt& s) {
       region_current = &loop.children[1];
       const bool saved_control = region_control_active;
       region_control_active |= !condition.si.param_free;
+      region_parameter_control |= region_control_active;
       ++region_control_depth;
       lower_region_body(s.body);
       --region_control_depth;
@@ -2188,6 +2214,7 @@ Flow lower_region_stmt(const mir::Stmt& s) {
         real_ranges = base_real_ranges;
         region_refine_condition(s.cond, arm == 0);
         region_control_active = base_control || !condition.si.param_free;
+        region_parameter_control |= region_control_active;
         region_current = &branch.children[arm];
         ++region_control_depth;
         region_unreachable = false;
@@ -2533,11 +2560,10 @@ static bool loop_carries_value(
     });
     if (s.kind == mir::Stmt::For) {
       const auto found = inner_answers->find(&s);
-      const bool carries =
-          found != inner_answers->end()
-              ? found->second
-              : (*inner_answers)[&s] =
-                    loop_carries_value(s, nullptr, inner_answers);
+      const bool carries = found != inner_answers->end()
+                               ? found->second
+                               : (*inner_answers)[&s] = loop_carries_value(
+                                     s, nullptr, inner_answers);
       inner = inner || carries;
     }
     for (const auto& child : s.body) collect(child);
@@ -2666,7 +2692,7 @@ static constexpr size_t kRetainWriteArrayLoopOps = size_t{1} << 16;
 bool write_array_loop_retained(const mir::Stmt& s, int64_t lo, int64_t hi) {
   return in_write_array && structured_policy == StructuredMode::Auto &&
          g.ops.size() >= kRetainWriteArrayLoopOps && hi - lo + 1 >= 32 &&
-         !stmt_effectful(s) && loop_carries_value(s);
+         (stmt_effects(s) & ~kRngEffect) == 0 && loop_carries_value(s);
 }
 // log_prob has the same problem on a much larger scale. Each unrolled
 // operation costs about 6 ns per gradient in a small graph and 15 ns once
@@ -2843,6 +2869,10 @@ bool try_lower_region(
     const std::set<std::string>* output_references = nullptr) {
   const StructuredMode mode = structured_policy;
   if (mode == StructuredMode::Off) return false;
+  if (in_write_array && !output_references &&
+      (write_array_unrolled_loops.count(&s) ||
+       (write_array_unroll_int_loops && loop_assigns_outer_int(s))))
+    return false;
   // Make the representation decision before constructing a trial graph.
   // In auto mode, incomplete cost information is evidence for nothing.
   if (!output_references && mode == StructuredMode::Auto &&
@@ -2892,6 +2922,7 @@ bool try_lower_region(
       Lowering trial = fork_region_trial(&mentioned);
       trial.in_write_array = in_write_array;
       trial.bounded_output = output_references != nullptr;
+      trial.region_parameter_control = false;
       auto p = std::make_shared<StructuredLoop>();
       p->cache_execution_path = !output_references;
       trial.region_current = &p->root;
@@ -2945,13 +2976,6 @@ bool try_lower_region(
       std::vector<int> candidate_inputs;
       std::vector<std::string> writes;
       assigned_names(s, &writes);
-      // Replay compares a data-only import with the value it recorded, so a
-      // loop that updates one records again on every draw.
-      if (retaining_write_array_loop)
-        for (const auto& name : writes)
-          if (const auto item = scope.find(name);
-              item != scope.end() && item->second.si.param_free)
-            trial.fail("write_array loop updates a data-only value");
       std::set<std::string> locals;
       collect_loop_locals(s, &locals);
       for (const auto& name : writes)
@@ -3036,9 +3060,18 @@ bool try_lower_region(
                       [](const Op& op) { return op.opcode == OP_ISLAND; }))
         fail("structured body requires register-program fallback");
       if (std::any_of(p->body.ops.begin(), p->body.ops.end(), [](const Op& op) {
-            return op.opcode == OP_RNG || op.opcode == OP_PRINT ||
-                   op.opcode == OP_REJECT;
+            return op.opcode == OP_PRINT || op.opcode == OP_REJECT;
           }))
+        fail(
+            "structured body requires the per-draw fallback for a stateful "
+            "call");
+      // A loop that draws runs its tree on every execution (LoopState), so
+      // the refusals below that protect a recorded path do not apply.
+      const bool draws =
+          std::any_of(p->body.ops.begin(), p->body.ops.end(),
+                      [](const Op& op) { return op.opcode == OP_RNG; });
+      if (draws && (output_references || (mode == StructuredMode::Auto &&
+                                          !retaining_write_array_loop)))
         fail(
             "structured body requires the per-draw fallback for a stateful "
             "call");
@@ -3052,8 +3085,9 @@ bool try_lower_region(
           return false;
         };
         const bool control = retains_control(retains_control, p->root);
-        if (retaining_write_array_loop && control)
-          fail("write_array loop retains runtime control");
+        if (retaining_write_array_loop && control &&
+            trial.region_parameter_control && !draws)
+          fail("write_array loop branches on a parameter");
         if (!retaining_write_array_loop && !control)
           fail("automatic candidate has no retained runtime control");
       }
@@ -3090,6 +3124,8 @@ bool try_lower_region(
   // No proof/refusal follows publication. Allocation failure aborts this
   // whole compilation; it never falls through into a partially changed graph.
   *shape_pool = std::move(*shapes);
+  if (in_write_array && !region_current && loop_assigns_outer_int(s))
+    write_array_int_loops.insert(&s);
   std::vector<int> inputs = parent_inputs;
   if (inputs.size() > 6) {
     const size_t count = inputs.size() - 5;

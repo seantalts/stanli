@@ -33,15 +33,19 @@ void add_n_bwd(KernelCtx& ctx) {
 
 // OP_MATVEC: out = X * beta, X data laid out COLUMN-major (Stan/Eigen
 // convention), idata = {rows, cols}. X as a parameter is out of scope.
+// Inside a retained loop the output may carry a live row count below the
+// capacity in idata, with X's live entries packed at the front.
 void matvec_fwd(KernelCtx& ctx) {
-  const int64_t rows = ctx.idata[0], cols = ctx.idata[1];
+  const int64_t rows = ctx.dyn_lengths ? ctx.out.len : ctx.idata[0];
+  const int64_t cols = live_product_cols(ctx, 2);
   Eigen::Map<const Eigen::MatrixXd> Xm(ctx.in[0].data, rows, cols);
   Eigen::Map<const Eigen::VectorXd> bm(ctx.in[1].data, cols);
   Eigen::Map<Eigen::VectorXd> outm(ctx.out.data, rows);
   outm.noalias() = Xm * bm;
 }
 void matvec_bwd(KernelCtx& ctx) {
-  const int64_t rows = ctx.idata[0], cols = ctx.idata[1];
+  const int64_t rows = ctx.dyn_lengths ? ctx.out_adj_vec.len : ctx.idata[0];
+  const int64_t cols = live_product_cols(ctx, 2);
   if (ctx.in_adj[1].data != nullptr) {
     Eigen::Map<const Eigen::MatrixXd> Xm(ctx.in[0].data, rows, cols);
     Eigen::Map<const Eigen::VectorXd> doutm(ctx.out_adj_vec.data, rows);

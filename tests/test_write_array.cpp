@@ -11,6 +11,7 @@
 //   * the whole pipeline on tests/fixtures/wanames.stan, whose expected
 //     header was taken verbatim from a CmdStan run of the same model.
 #include "env_helpers.hpp"
+#include "stdout_capture.hpp"
 
 #include <stanli/compile.hpp>
 #include <stanli/execution_report.hpp>
@@ -29,6 +30,7 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <cstddef>
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
@@ -1248,6 +1250,109 @@ void test_write_array_retained_loop() {
 // A loop that carries a value from one iteration to the next is retained in
 // write_array once the graph is already large, and unrolled otherwise. Both
 // forms produce the interpreter's rows.
+// write_array only runs forward, so its executor keeps no adjoint for any
+// slot, and a copy of it keeps none either. Asking it for a gradient is an
+// error rather than a read of storage it never allocated.
+void test_write_array_forward_only() {
+  using namespace stanli;
+  DataMap data;
+  data.set_int("N", 6);
+  data.set_int_array("y", {0, 3, 1, 7, 2, 4});
+  data.set_real_array("x", {0.1, -0.4, 0.8, 0.3, -1.2, 0.5});
+  CompiledModel cm =
+      compile_model(slurp("tests/fixtures/wa_scratch.tmir.sexp"), data);
+  if (!compiled_completely(cm, "forward-only write_array")) return;
+  Executor wex(cm.write_array->graph);
+  cm.write_array->bind(wex);
+  const Executor copy(wex);
+  if (wex.adjoint_storage_size() != 0 || copy.adjoint_storage_size() != 0) {
+    ++failures;
+    std::printf("FAIL forward-only write_array keeps %lld adjoints\n",
+                (long long)wex.adjoint_storage_size());
+  }
+  // Nothing runs backward to read an op's scratch after the op returns, so
+  // every op shares one region: as large as the largest op needs, plus up to
+  // 7 doubles that keep each op's own alignment.
+  int64_t largest = 0, total = 0;
+  for (const Op& op : wex.graph().ops) {
+    const Kernel* k = find_kernel(op.opcode);
+    const int64_t need = k && k->scratch_size
+                             ? k->scratch_size(op, wex.graph().slots.data())
+                             : 0;
+    largest = std::max(largest, need);
+    total += need;
+  }
+  const auto shared = [&](const Executor& ex) {
+    return ex.scratch_storage_size() >= largest &&
+           ex.scratch_storage_size() < largest + 8;
+  };
+  if (total <= largest + 8 || !shared(wex) || !shared(copy)) {
+    ++failures;
+    std::printf(
+        "FAIL forward-only write_array scratch %lld, largest op %lld, all ops "
+        "%lld\n",
+        (long long)wex.scratch_storage_size(), (long long)largest,
+        (long long)total);
+  }
+  // A small executor is cheap to copy, so each chain gets its own.
+  if (wex.storage_bytes() <= 0 || share_across_chains(wex, 4) ||
+      share_across_chains(wex, 1)) {
+    ++failures;
+    std::printf("FAIL small write_array executor (%lld bytes) is shared\n",
+                (long long)wex.storage_bytes());
+  }
+  bool threw = false;
+  try {
+    std::vector<double> g(static_cast<size_t>(wex.n_params()));
+    wex.gradient(g.data());
+  } catch (const std::logic_error&) {
+    threw = true;
+  }
+  if (!threw) {
+    ++failures;
+    std::printf("FAIL forward-only write_array ran a gradient\n");
+  }
+}
+
+// A forward-only executor runs its ops in one fixed order, so a slot that
+// no later op reads can give its storage to a slot written after it. Columns
+// stay where the caller reads them. Rows match an executor that gives every
+// slot its own storage.
+void test_write_array_reused_values() {
+  using namespace stanli;
+  DataMap data;
+  data.set_int("N", 64);
+  data.set_int("T", 8);
+  std::vector<double> x(64);
+  for (int i = 0; i < 64; ++i) x[(size_t)i] = 0.25 * (i % 5) - 0.5;
+  data.set_real_array("x", x);
+  CompiledModel cm = compile_model(
+      slurp("tests/fixtures/structured_wa_carried.tmir.sexp"), data);
+  if (!compiled_completely(cm, "reused write_array values")) return;
+  Graph separate = cm.write_array->graph;
+  separate.forward_only = false;
+  Executor reused(cm.write_array->graph), own(std::move(separate));
+  cm.write_array->bind(reused);
+  cm.write_array->bind(own);
+  if (reused.mutable_value_size() >= own.mutable_value_size()) {
+    ++failures;
+    std::printf("FAIL reused write_array values: %lld of %lld doubles\n",
+                (long long)reused.mutable_value_size(),
+                (long long)own.mutable_value_size());
+  }
+  for (const double mu : {0.4, -1.1, 2.0}) {
+    reused.params_data()[0] = own.params_data()[0] = mu;
+    WaRng a(3), b(3);
+    reused.run_forward_only(EvalState{&a});
+    own.run_forward_only(EvalState{&b});
+    if (!same_double_bytes(read_row(cm.write_array->columns, reused),
+                           read_row(cm.write_array->columns, own))) {
+      ++failures;
+      std::printf("FAIL reused write_array values: rows differ at mu=%g\n", mu);
+    }
+  }
+}
+
 void test_write_array_carried_loop() {
   using namespace stanli;
   const std::string text =
@@ -1370,6 +1475,217 @@ void test_write_array_vector_rng() {
   if (graph_rows[0] == graph_rows[1] || graph_rows[1] == graph_rows[2]) {
     ++failures;
     std::printf("FAIL gqrng_vector: draws did not vary\n");
+  }
+}
+
+size_t retained_rng_loops(const stanli::Graph& g) {
+  size_t loops = 0;
+  for (const auto& op : g.ops) {
+    if (op.opcode != stanli::OP_LOOP) continue;
+    const auto& body =
+        static_cast<const stanli::StructuredLoop*>(op.udata)->body.ops;
+    loops += std::any_of(body.begin(), body.end(), [](const stanli::Op& o) {
+      return o.opcode == stanli::OP_RNG;
+    });
+  }
+  return loops;
+}
+
+// A retained loop that draws must leave the stream exactly where the unrolled
+// loops leave it. One stream advances through every draw, so a draw that a
+// later execution repeated or skipped would shift every later value.
+void expect_rng_loop_parity(const std::string& label, int pad,
+                            const char* structured, size_t want_loops) {
+  using namespace stanli;
+  const int n = 40, k = 3;
+  DataMap data;
+  data.set_int("N", n);
+  data.set_int("K", k);
+  data.set_int("T", pad);
+  std::vector<double> x(n);
+  std::vector<int> len(n);
+  for (int i = 0; i < n; ++i) {
+    x[static_cast<size_t>(i)] = 0.3 * std::sin(1.3 * i);
+    len[static_cast<size_t>(i)] = 1 + (i * 7) % k;
+  }
+  data.set_real_array("x", x);
+  data.set_int_array("len", len);
+  const std::string text = slurp("tests/fixtures/wa_rng_loops.tmir.sexp");
+  if (structured)
+    test_setenv("STANLI_STRUCTURED_LOOPS", structured);
+  else
+    test_unsetenv("STANLI_STRUCTURED_LOOPS");
+  CompiledModel retained = compile_model(text, data);
+  test_setenv("STANLI_STRUCTURED_LOOPS", "0");
+  CompiledModel unrolled = compile_model(text, data);
+  test_unsetenv("STANLI_STRUCTURED_LOOPS");
+  if (!compiled_completely(retained, label) ||
+      !compiled_completely(unrolled, label + " unrolled"))
+    return;
+  const size_t loops = retained_rng_loops(retained.write_array->graph);
+  if (loops != want_loops) {
+    ++failures;
+    std::printf("FAIL %s: %zu retained loops draw, want %zu\n", label.c_str(),
+                loops, want_loops);
+  }
+  Executor rex(retained.write_array->graph), uex(unrolled.write_array->graph);
+  retained.write_array->bind(rex);
+  unrolled.write_array->bind(uex);
+  WaRng rrng(2026), urng(2026);
+  for (int draw = 0; draw < 200; ++draw) {
+    const double q[] = {0.8 * std::sin(0.37 * draw), 0.5 * std::cos(draw)};
+    for (Executor* ex : {&rex, &uex}) std::copy_n(q, 2, ex->params_data());
+    rex.run_forward_only(EvalState{&rrng});
+    uex.run_forward_only(EvalState{&urng});
+    const auto got = read_row(retained.write_array->columns, rex);
+    const auto want = read_row(unrolled.write_array->columns, uex);
+    if (!same_double_bytes(got, want)) {
+      ++failures;
+      std::printf("FAIL %s: draw %d differs from the unrolled loops\n",
+                  label.c_str(), draw);
+      return;
+    }
+  }
+}
+
+void test_write_array_rng_loops() {
+  expect_rng_loop_parity("wa_rng_loops prefer", 0, "1", 5);
+  expect_rng_loop_parity("wa_rng_loops auto", 20000, nullptr, 5);
+}
+
+// Retains `want` carried loops once 20,000 padding loops make write_array
+// large, none without them. Every draw matches the unrolled program, and
+// every draw after the first replays each retained loop instead of
+// recording it again.
+void expect_replayed_write_array_loops(const std::string& stem,
+                                       std::ptrdiff_t want) {
+  using namespace stanli;
+  const int n = 64;
+  const std::string text = slurp("tests/fixtures/" + stem + ".tmir.sexp");
+  for (const int t : {8, 20000}) {
+    const std::string label = stem + " T=" + std::to_string(t);
+    DataMap data;
+    data.set_int("N", n);
+    data.set_int("T", t);
+    std::vector<double> x(static_cast<size_t>(n));
+    for (int i = 0; i < n; ++i)
+      x[static_cast<size_t>(i)] = 0.25 * (i % 5) - 0.5;
+    data.set_real_array("x", x);
+    CompiledModel retained = compile_model(text, data);
+    test_setenv("STANLI_STRUCTURED_LOOPS", "0");
+    CompiledModel unrolled = compile_model(text, data);
+    test_unsetenv("STANLI_STRUCTURED_LOOPS");
+    if (!compiled_completely(retained, label) ||
+        !compiled_completely(unrolled, label + " unrolled"))
+      continue;
+    const auto& ops = retained.write_array->graph.ops;
+    const auto loops = std::count_if(ops.begin(), ops.end(), [](const Op& op) {
+      return op.opcode == OP_LOOP;
+    });
+    if (loops != (t > 8 ? want : 0)) {
+      ++failures;
+      std::printf("FAIL %s: %td retained loops\n", label.c_str(), loops);
+    }
+    test_setenv("STANLI_STRUCTURED_LOOP_DIAGNOSTICS", "1");
+    Executor rex(retained.write_array->graph);
+    test_unsetenv("STANLI_STRUCTURED_LOOP_DIAGNOSTICS");
+    Executor uex(unrolled.write_array->graph);
+    retained.write_array->bind(rex);
+    unrolled.write_array->bind(uex);
+    for (int draw = 0; draw < 4; ++draw) {
+      const double mu = 0.9 * std::sin(1.3 * draw + 0.2);
+      rex.params_data()[0] = uex.params_data()[0] = mu;
+      WaRng rrng(9), urng(9);
+      stanli_test::StdoutCapture captured(stderr);
+      rex.run_forward_only(EvalState{&rrng});
+      const std::string diagnostics = captured.finish();
+      uex.run_forward_only(EvalState{&urng});
+      if (!same_double_bytes(read_row(retained.write_array->columns, rex),
+                             read_row(unrolled.write_array->columns, uex))) {
+        ++failures;
+        std::printf("FAIL %s: draw %d differs from the unrolled loops\n",
+                    label.c_str(), draw);
+      }
+      size_t replays = 0;
+      for (size_t at = diagnostics.find("replay=1"); at != std::string::npos;
+           at = diagnostics.find("replay=1", at + 1))
+        ++replays;
+      if (draw > 0 && replays != static_cast<size_t>(loops)) {
+        ++failures;
+        std::printf("FAIL %s: draw %d replayed %zu of %td loops\n",
+                    label.c_str(), draw, replays, loops);
+      }
+    }
+  }
+}
+
+// Each carried loop starts from a value that depends only on data (an
+// accumulator set to zero, a copy of a data vector, an integer counter, a
+// vector with only its first element set) and updates it with a value that
+// depends on mu. The import holds the same bits on every draw.
+void test_write_array_data_start() {
+  expect_replayed_write_array_loops("structured_wa_data_start", 4);
+}
+
+// Two carried loops branch on data only: on the sign of x[n], and on the
+// inner index against the outer one. Their decisions are the same on every
+// draw. A third loop branches on mu * x[n] and stays unrolled.
+void test_write_array_data_branch() {
+  expect_replayed_write_array_loops("structured_wa_data_branch", 2);
+}
+
+// The first two carried loops count into integers that later declarations use
+// as sizes. Retained, a loop produces its counts only at run time, too late to
+// lay out those declarations, so write_array is lowered again with both loops
+// unrolled. The third loop carries only a real and stays retained.
+void test_write_array_counted_size() {
+  expect_replayed_write_array_loops("structured_wa_counted_size", 1);
+}
+
+// An inlined function declares a matrix whose row count multiplies a
+// comparison of two fixed integers by a data sum. Inside a retained loop the
+// comparison is a graph value, and its range has to be the one value it can
+// take for the declaration to have a fixed size.
+void test_write_array_compare_size() {
+  using namespace stanli;
+  DataMap data;
+  data.set_int("N", 40);
+  data.set_int("R", 3);
+  data.set_int_array("sizes", {2, 1, 3});
+  const std::string text =
+      slurp("tests/fixtures/structured_compare_size.tmir.sexp");
+  test_setenv("STANLI_STRUCTURED_LOOPS", "1");
+  CompiledModel retained = compile_model(text, data);
+  test_setenv("STANLI_STRUCTURED_LOOPS", "0");
+  CompiledModel unrolled = compile_model(text, data);
+  test_unsetenv("STANLI_STRUCTURED_LOOPS");
+  if (!compiled_completely(retained, "structured_compare_size") ||
+      !compiled_completely(unrolled, "structured_compare_size unrolled"))
+    return;
+  const auto& ops = retained.write_array->graph.ops;
+  const auto loops = std::count_if(ops.begin(), ops.end(), [](const Op& op) {
+    return op.opcode == OP_LOOP;
+  });
+  if (loops != 1) {
+    ++failures;
+    std::printf(
+        "FAIL structured_compare_size: %td retained loops, want the outer "
+        "one only\n",
+        loops);
+  }
+  Executor rex(retained.write_array->graph), uex(unrolled.write_array->graph);
+  retained.write_array->bind(rex);
+  unrolled.write_array->bind(uex);
+  for (const double mu : {-0.7, 0.2, 1.9}) {
+    rex.params_data()[0] = uex.params_data()[0] = mu;
+    WaRng rrng(5), urng(5);
+    rex.run_forward_only(EvalState{&rrng});
+    uex.run_forward_only(EvalState{&urng});
+    if (!same_double_bytes(read_row(retained.write_array->columns, rex),
+                           read_row(unrolled.write_array->columns, uex))) {
+      ++failures;
+      std::printf("FAIL structured_compare_size: rows differ at mu=%g\n", mu);
+    }
   }
 }
 
@@ -4651,9 +4967,16 @@ int main() {
   test_caller_owned_rng();
   test_transformed_parameter_checks();
   test_write_array_retained_loop();
+  test_write_array_forward_only();
+  test_write_array_reused_values();
   test_write_array_carried_loop();
   test_write_array_block_order();
   test_write_array_vector_rng();
+  test_write_array_rng_loops();
+  test_write_array_data_start();
+  test_write_array_data_branch();
+  test_write_array_counted_size();
+  test_write_array_compare_size();
   test_write_array_bounded_blocks();
   test_write_array_selected_loop_refused();
   test_write_array_selected_loop_overflow();

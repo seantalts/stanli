@@ -1059,14 +1059,21 @@ int64_t mnc_scratch(const Op& op, const Slot* slots) {
 
 // ---- general matrix product: out = A * B ----------------------------------
 // idata = {rows_a, cols_a, cols_b}; either side may carry adjoints.
+// A retained loop can give a matrix-vector product a live row count below
+// idata[0]; the left operand then holds its live entries packed at the front.
+int64_t gemm_rows(const KernelCtx& ctx, int64_t live) {
+  return ctx.dyn_lengths ? live : ctx.idata[0];
+}
 void gemm_fwd_dynamic(KernelCtx& ctx) {
-  const int64_t ra = ctx.idata[0], ca = ctx.idata[1], cb = ctx.idata[2];
+  const int64_t ra = gemm_rows(ctx, ctx.out.len),
+                ca = live_product_cols(ctx, 3), cb = ctx.idata[2];
   CMapM A(ctx.in[0].data, ra, ca);
   CMapM B(ctx.in[1].data, ca, cb);
   MapM(ctx.out.data, ra, cb) = A * B;
 }
 void gemm_bwd_dynamic(KernelCtx& ctx) {
-  const int64_t ra = ctx.idata[0], ca = ctx.idata[1], cb = ctx.idata[2];
+  const int64_t ra = gemm_rows(ctx, ctx.out_adj_vec.len),
+                ca = live_product_cols(ctx, 3), cb = ctx.idata[2];
   CMapM A(ctx.in[0].data, ra, ca);
   CMapM B(ctx.in[1].data, ca, cb);
   CMapM dO(ctx.out_adj_vec.data, ra, cb);
@@ -1116,8 +1123,8 @@ void gemm_bwd_2x2(KernelCtx& ctx) {
   }
 }
 bool gemm_is_2x2(const KernelCtx& ctx) {
-  return fixed_small_matrices() && ctx.idata[0] == 2 && ctx.idata[1] == 2 &&
-         (ctx.idata[2] == 1 || ctx.idata[2] == 2);
+  return fixed_small_matrices() && !ctx.dyn_lengths && ctx.idata[0] == 2 &&
+         ctx.idata[1] == 2 && (ctx.idata[2] == 1 || ctx.idata[2] == 2);
 }
 void gemm_fwd(KernelCtx& ctx) {
   if (!gemm_is_2x2(ctx)) return gemm_fwd_dynamic(ctx);

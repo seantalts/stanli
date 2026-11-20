@@ -32,6 +32,9 @@ struct Graph {
   // so the raw pointers in copied ops continue to name the shared objects.
   std::vector<std::shared_ptr<void>> udata_pool;
   int result_slot = -1;
+  // Set for a graph that only ever runs forward, such as write_array. Its
+  // executor allocates no adjoints and refuses a gradient.
+  bool forward_only = false;
 
   Graph() = default;
 
@@ -41,6 +44,7 @@ struct Graph {
         idata_pool(src.idata_pool),
         udata_pool(src.udata_pool),
         result_slot(src.result_slot),
+        forward_only(src.forward_only),
         compact_idata_(src.compact_idata_) {
     // Finalized graphs usually have no mutable pool: their raw idata views
     // remain valid through the shared immutable owner, with no rebinding.
@@ -149,6 +153,13 @@ struct BoundCheckSpec {
 // checks that the norm is positive and finite. The var overload does not.
 inline constexpr uint8_t kUnitVectorChecksNorm = 1;
 
+class Executor;
+// Whether `chains` chains should take turns with one forward-only executor
+// instead of each copying it. Copies run in parallel but each costs
+// storage_bytes(); chains share once the copies would take 1 GiB.
+// STANLI_SHARE_WRITE_ARRAY=1 or =0 overrides the choice.
+bool share_across_chains(const Executor& ex, int chains);
+
 class Executor {
  public:
   explicit Executor(Graph g);
@@ -176,6 +187,14 @@ class Executor {
   int64_t adjoint_storage_size() const {
     return static_cast<int64_t>(adjoints_.size());
   }
+  // Doubles of kernel scratch, for the same accounting.
+  int64_t scratch_storage_size() const {
+    return static_cast<int64_t>(scratch_.size());
+  }
+  // Bytes a copy of this executor allocates for itself: values, adjoints,
+  // scratch and kernel contexts. Kernel state, such as the recordings of
+  // retained loops, comes on top.
+  int64_t storage_bytes() const;
   // The bound graph, so a second executor over the same model can be
   // built without re-lowering. Multi-chain sampling needs one executor
   // per chain -- the arenas are mutable per-evaluation state -- and
@@ -243,6 +262,8 @@ class Executor {
       return const_cast<double*>(borrowed_[slot]);
     return const_cast<double*>(values_.data()) + graph_.slots[slot].offset;
   }
+  int64_t reuse_values_(const std::vector<char>& written,
+                        const std::vector<int>& primal_sources, int64_t end);
   KernelCtx make_ctx_(const Op& op, int64_t scratch_offset,
                       const std::vector<char>& written,
                       const std::vector<int64_t>& adjoint_offsets);

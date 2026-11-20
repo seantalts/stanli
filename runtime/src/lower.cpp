@@ -1197,6 +1197,11 @@ CompiledModel::WriteArray Lowering::run_write_array(const mir::Program& p) {
   // Nothing reads a result here, but forward() asserts a scalar result
   // slot, so point it at one.
   g.result_slot = const_slot(0.0);
+  g.forward_only = true;
+  // Callers read the columns after a run, and bind writes the fills once,
+  // so neither can share storage with another slot.
+  for (int slot : roots) g.slots[(size_t)slot].pinned = true;
+  for (const auto& fill : out.fills) g.slots[(size_t)fill.first].pinned = true;
   wa.n_unconstrained = out.n_unconstrained;
   prep.graph(prep_graph, "finalize", finalize_time, g, out.fills,
              target_terms.size(), out.views.size());
@@ -1393,11 +1398,9 @@ class WriteArrayLowering {
         policy_(policy) {}
 
   void begin(Lowering& log_prob) {
-    if (!should_run_alongside(log_prob)) {
-      for (const auto& e : log_prob.td.env()) bound_env_.push_back(e.first);
-      for (const auto& d : log_prob.decls) bound_decls_.push_back(d.first);
-      return;
-    }
+    for (const auto& e : log_prob.td.env()) bound_env_.push_back(e.first);
+    for (const auto& d : log_prob.decls) bound_decls_.push_back(d.first);
+    if (!should_run_alongside(log_prob)) return;
     wa_.emplace(data_, trace_, off_, "write_array",
                 log_prob.prepared_context());
     started_ = worker_.start([this] { result_ = wa_->run_write_array(prog_); });
@@ -1413,13 +1416,24 @@ class WriteArrayLowering {
       const bool lent = !wa_;
       if (lent) build_after_log_prob(log_prob);
       w = wa_->run_write_array(prog_);
-      if (lent) {
-        for (const std::string& name : bound_env_) {
-          const auto it = wa_->td.env().find(name);
-          if (it != wa_->td.env().end())
-            log_prob.td.env()[name] = std::move(it->second);
-        }
-      }
+      if (lent) return_environment(log_prob);
+    }
+    // A size that reads an integer a retained loop produced cannot be laid
+    // out. Lower write_array again with those loops unrolled, so the section
+    // stays in the graph instead of falling back to the interpreter. The
+    // second attempt lowers further and may retain another such loop past
+    // the point where the first stopped, so a third unrolls all of them.
+    for (int attempt = 1; attempt <= 2 && w.truncated; ++attempt) {
+      std::set<const mir::Stmt*> unrolled = wa_->write_array_unrolled_loops;
+      const size_t before = unrolled.size();
+      unrolled.insert(wa_->write_array_int_loops.begin(),
+                      wa_->write_array_int_loops.end());
+      if (unrolled.size() == before) break;
+      build_after_log_prob(log_prob);
+      wa_->write_array_unrolled_loops = std::move(unrolled);
+      wa_->write_array_unroll_int_loops = attempt == 2;
+      w = wa_->run_write_array(prog_);
+      return_environment(log_prob);
     }
     prep.append(std::move(trace_));
     return w;
@@ -1469,6 +1483,15 @@ class WriteArrayLowering {
       if (it != log_prob.decls.end()) wa_->decls.emplace(name, it->second);
     }
     trace_.plain("write_array", "env_select", select_time);
+  }
+
+  // Moves back the data environment that build_after_log_prob lent.
+  void return_environment(Lowering& log_prob) {
+    for (const std::string& name : bound_env_) {
+      const auto it = wa_->td.env().find(name);
+      if (it != wa_->td.env().end())
+        log_prob.td.env()[name] = std::move(it->second);
+    }
   }
 
   const DataMap& data_;

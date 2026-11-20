@@ -962,21 +962,21 @@ Lowering::Val Lowering::lower_program_expression(const mir::Expr& e) {
   return {out_slots[0], expression_autodiff(e), si};
 }
 bool Lowering::stmt_effectful(const mir::Stmt& s) {
-  if (message_action(mir::internal_name(s))) return true;
+  return stmt_effects(s) != 0;
+}
+unsigned Lowering::stmt_effects(const mir::Stmt& s) {
+  unsigned effects = 0;
+  if (message_action(mir::internal_name(s))) effects |= kMessageEffect;
   // A void function runs only for its effects.
-  if (s.fn_lib == mir::Expr::Lib::UserDefined) return true;
-  for (const auto& e : s.fn_args)
-    if (expr_effectful(e)) return true;
-  if (s.has_init && expr_effectful(s.init)) return true;
-  if (expr_effectful(s.rhs) || expr_effectful(s.target) ||
-      expr_effectful(s.lower) || expr_effectful(s.upper) ||
-      expr_effectful(s.cond))
-    return true;
-  for (const auto& e : s.lhs_idx)
-    if (expr_effectful(e)) return true;
-  for (const auto& k : s.body)
-    if (stmt_effectful(k)) return true;
-  return false;
+  if (s.fn_lib == mir::Expr::Lib::UserDefined) effects |= kStatefulEffect;
+  for (const auto& e : s.fn_args) effects |= expr_effects(e);
+  if (s.has_init) effects |= expr_effects(s.init);
+  effects |= expr_effects(s.rhs) | expr_effects(s.target) |
+             expr_effects(s.lower) | expr_effects(s.upper) |
+             expr_effects(s.cond);
+  for (const auto& e : s.lhs_idx) effects |= expr_effects(e);
+  for (const auto& k : s.body) effects |= stmt_effects(k);
+  return effects;
 }
 // Repeating an expression fewer times is observable for more than RNGs:
 // target() reads the accumulator, compiler-internal calls may validate or

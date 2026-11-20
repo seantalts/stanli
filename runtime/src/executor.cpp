@@ -1,3 +1,4 @@
+#include <stanli/debug_switch.hpp>
 #include <stanli/graph.hpp>
 #include <stanli/optable.hpp>
 #include <stanli/program.hpp>
@@ -12,6 +13,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <limits>
+#include <map>
 #include <stdexcept>
 #include <string>
 #include <utility>
@@ -423,6 +425,92 @@ Executor::Executor(const Executor& src)
       ctx_[i].state->clone_from(*src.ctx_[i].state);
 }
 
+// Doubles per 64 bytes, the widest vector alignment a kernel may reach.
+constexpr int64_t kScratchAlignment = 8;
+
+// A forward-only graph runs its ops once each, in order, so a written slot
+// needs storage only from the op that first writes it to the last op that
+// reads or writes it. Afterwards its storage goes to a later slot of the
+// same length that would have started at the same offset modulo 64 bytes,
+// so every kernel sees the alignment it had before. Parameters, pinned slots
+// and the slots that cached primals share keep their own storage. Returns
+// the new size of the value arena.
+int64_t Executor::reuse_values_(const std::vector<char>& written,
+                                const std::vector<int>& primal_sources,
+                                int64_t end) {
+  const size_t n = graph_.slots.size();
+  std::vector<char> fixed(n, 0);
+  for (size_t i = 0; i < n; ++i) {
+    const Slot& s = graph_.slots[i];
+    fixed[i] = !written[i] || s.is_param || s.pinned || s.len == 0 ||
+               (!borrowed_.empty() && borrowed_[i]) ||
+               (int)i == graph_.result_slot;
+  }
+  for (size_t i = 0; i < primal_sources.size(); ++i)
+    if (primal_sources[i] >= 0) fixed[i] = fixed[(size_t)primal_sources[i]] = 1;
+  std::vector<int64_t> last(n, -1);
+  std::vector<char> placed(n, 0);
+  const auto runs = [](const Op& op) {
+    return op.primal_source < 0 || op.primal_source == op.out;
+  };
+  for (size_t k = 0; k < graph_.ops.size(); ++k) {
+    const Op& op = graph_.ops[k];
+    if (!runs(op)) continue;
+    for (int j = 0; j < op.n_in; ++j) last[(size_t)op.in[j]] = (int64_t)k;
+    last[(size_t)op.out] = (int64_t)k;
+    if (op.out2 >= 0) last[(size_t)op.out2] = (int64_t)k;
+  }
+  int64_t top = n_params_;
+  const auto place_new = [&](Slot& s) {
+    const int64_t residue = s.offset % kScratchAlignment;
+    top += ((residue - top % kScratchAlignment) + kScratchAlignment) %
+           kScratchAlignment;
+    s.offset = top;
+    top += s.len;
+  };
+  // Fixed slots keep a region of their own, laid out first.
+  for (size_t i = 0; i < n; ++i)
+    if (written[i] && !graph_.slots[i].is_param && fixed[i] &&
+        (primal_sources.empty() || primal_sources[i] < 0) &&
+        (borrowed_.empty() || !borrowed_[i])) {
+      place_new(graph_.slots[i]);
+      placed[i] = 1;
+    }
+  std::map<std::pair<int64_t, int64_t>, std::vector<int64_t>> free_blocks;
+  const auto place = [&](int slot) {
+    if (slot < 0 || placed[(size_t)slot] || fixed[(size_t)slot]) return;
+    Slot& s = graph_.slots[(size_t)slot];
+    placed[(size_t)slot] = 1;
+    auto found = free_blocks.find({s.len, s.offset % kScratchAlignment});
+    if (found != free_blocks.end() && !found->second.empty()) {
+      s.offset = found->second.back();
+      found->second.pop_back();
+      return;
+    }
+    place_new(s);
+  };
+  const auto release = [&](int slot, int64_t k) {
+    if (slot < 0 || fixed[(size_t)slot] || last[(size_t)slot] != k) return;
+    const Slot& s = graph_.slots[(size_t)slot];
+    last[(size_t)slot] = -2;  // released once
+    free_blocks[{s.len, s.offset % kScratchAlignment}].push_back(s.offset);
+  };
+  for (size_t k = 0; k < graph_.ops.size(); ++k) {
+    const Op& op = graph_.ops[k];
+    if (!runs(op)) continue;
+    place(op.out);
+    place(op.out2);
+    for (int j = 0; j < op.n_in; ++j) release(op.in[j], (int64_t)k);
+    release(op.out, (int64_t)k);
+    release(op.out2, (int64_t)k);
+  }
+  // A written slot that no running op touches keeps a region of its own.
+  for (size_t i = 0; i < n; ++i)
+    if (written[i] && !placed[i] && !fixed[i]) place_new(graph_.slots[i]);
+  (void)end;
+  return top;
+}
+
 void Executor::bind_() {
   const auto checked_size = [](int64_t a, int64_t b) {
     const auto max = static_cast<uint64_t>(std::vector<double>{}.max_size());
@@ -479,6 +567,7 @@ void Executor::bind_() {
       data_size = checked_size(data_size, s.len);
     }
   }
+  if (graph_.forward_only) off = reuse_values_(written, primal_sources, off);
   if (has_shared_primals)
     for (size_t i = 0; i < graph_.slots.size(); ++i)
       if (primal_sources[i] >= 0)
@@ -496,15 +585,15 @@ void Executor::bind_() {
   // memset on dense graphs.
   std::vector<int64_t> adjoint_offsets(graph_.slots.size(), -1);
   int64_t adj_off = 0;
-  for (size_t i = 0; i < graph_.slots.size(); ++i) {
+  for (size_t i = 0; i < graph_.slots.size() && !graph_.forward_only; ++i) {
     const Slot& s = graph_.slots[i];
     if (s.is_param) {
       adjoint_offsets[i] = adj_off;
       adj_off = checked_size(adj_off, s.len);
     }
   }
-  assert(adj_off == n_params_);
-  for (size_t i = 0; i < graph_.slots.size(); ++i) {
+  assert(graph_.forward_only || adj_off == n_params_);
+  for (size_t i = 0; i < graph_.slots.size() && !graph_.forward_only; ++i) {
     const Slot& s = graph_.slots[i];
     if (!s.is_param && (written[i] || (int)i == graph_.result_slot)) {
       adjoint_offsets[i] = adj_off;
@@ -513,12 +602,12 @@ void Executor::bind_() {
   }
   adjoints_.assign(adj_off, 0.0);
   result_adjoint_offset_ = -1;
-  if (graph_.result_slot >= 0) {
+  if (graph_.result_slot >= 0 && !graph_.forward_only) {
     result_adjoint_offset_ = adjoint_offsets[graph_.result_slot];
     assert(result_adjoint_offset_ >= 0);
   }
 
-  int64_t scratch = 0;
+  int64_t scratch = 0, unshared = 0;
   // Scratch layout is binding state, not graph structure. Only the bound
   // context pointers survive this function; copies compute their own layout.
   std::vector<int64_t> scratch_offsets;
@@ -543,9 +632,22 @@ void Executor::bind_() {
     }
     if (op.primal_source == op.out)
       primal_sources[(size_t)op.out] = (int)scratch_offsets.size();
+    const int64_t need =
+        k.scratch_size ? k.scratch_size(op, graph_.slots.data()) : 0;
+    // An op's scratch outlives the op only for its own backward, or for a
+    // cached primal that reads it there. Without a backward, every op can
+    // use the same region. Each op keeps the alignment it would have had in
+    // its own region, because a vectorized reduction over scratch rounds
+    // differently at a different alignment.
+    if (graph_.forward_only) {
+      const int64_t offset = unshared % kScratchAlignment;
+      scratch_offsets.push_back(offset);
+      scratch = std::max(scratch, checked_size(offset, need));
+      unshared = checked_size(unshared, need);
+      continue;
+    }
     scratch_offsets.push_back(scratch);
-    scratch = checked_size(
-        scratch, k.scratch_size ? k.scratch_size(op, graph_.slots.data()) : 0);
+    scratch = checked_size(scratch, need);
   }
   scratch_.assign(scratch, 0.0);
 
@@ -615,7 +717,7 @@ void Executor::bind_() {
     }
     pending.clear();
   };
-  for (size_t i = graph_.ops.size(); i-- > 0;) {
+  for (size_t i = graph_.forward_only ? 0 : graph_.ops.size(); i-- > 0;) {
     const Op& op = graph_.ops[i];
     const Kernel& k = kernel(op.opcode);
     void (*b)(KernelCtx&) = k.backward;
@@ -673,6 +775,14 @@ KernelCtx Executor::make_ctx_(const Op& op, int64_t scratch_offset,
   ctx.udata = op.udata;
   ctx.eval_state = &eval_state_;
   ctx.n_idata = op.n_idata;
+  // A forward-only graph has no adjoints: every input reads as inactive and
+  // the output adjoint has no storage.
+  if (graph_.forward_only) {
+    for (int i = 0; i < op.n_in; ++i)
+      ctx.in_adj[i] = Desc{nullptr, graph_.slots[op.in[i]].len};
+    ctx.out_adj_vec = Desc{nullptr, so.len};
+    return ctx;
+  }
   for (int i = 0; i < op.n_in; ++i) {
     const int si = op.in[i];
     const Slot& s = graph_.slots[si];
@@ -778,6 +888,22 @@ std::string Executor::profile_report() const {
   return out;
 }
 
+int64_t Executor::storage_bytes() const {
+  const auto bytes = [](const auto& v) {
+    return static_cast<int64_t>(v.size() * sizeof(v[0]));
+  };
+  return bytes(values_) + bytes(adjoints_) + bytes(scratch_) + bytes(ctx_) +
+         bytes(fwd_fn_) + bytes(bwd_);
+}
+
+bool share_across_chains(const Executor& ex, int chains) {
+  if (const char* forced = debug_env("STANLI_SHARE_WRITE_ARRAY"))
+    return chains > 1 && forced[0] == '1';
+  constexpr int64_t kCopyBudget = int64_t{1} << 30;
+  return chains > 1 && ex.graph().forward_only &&
+         (chains - 1) * ex.storage_bytes() >= kCopyBudget;
+}
+
 void Executor::run_forward_only() {
   run_forward_only(EvalState{nullptr, reduce_context_});
 }
@@ -842,6 +968,8 @@ double Executor::forward() {
 }
 
 double Executor::gradient(double* grad_out) {
+  if (graph_.forward_only)
+    throw std::logic_error("a forward-only graph has no gradient");
   ++n_grad_evals_;
   const double v = forward();
   reverse(grad_out, 1.0);
@@ -900,6 +1028,8 @@ template <class Steps, class Runs>
 }  // namespace
 
 void Executor::reverse(double* grad_out, double seed) {
+  if (graph_.forward_only)
+    throw std::logic_error("a forward-only graph has no gradient");
   if (!reverse_ready_)
     throw std::logic_error("reverse requires a fresh forward");
   reverse_ready_ = false;

@@ -8,6 +8,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <stdexcept>
+#include <string>
 #include <vector>
 
 namespace stanli {
@@ -49,6 +50,10 @@ struct Slot {
   int64_t offset = 0;  // within its bound value buffer (filled at bind)
   int64_t len = 0;
   bool is_param = false;
+  // Read from outside the graph after a forward run, such as a write_array
+  // column, or filled once at bind. A forward-only executor never gives a
+  // pinned slot's storage to another slot.
+  bool pinned = false;
 };
 
 struct Op {
@@ -191,6 +196,24 @@ inline void apply_dynamic_length(KernelCtx& c) {
     c.out_adj_vec.len = live;
   }
   c.n_in = c.dyn_extent_in;
+}
+
+// A matrix-vector product in a retained loop may also have runtime columns,
+// flagged by idata[flag]. in[3] then holds the column count and in[4] the
+// vector's live length.
+inline int64_t live_product_cols(const KernelCtx& c, int64_t flag) {
+  if (!c.dyn_lengths || c.n_idata <= flag || !c.idata[flag]) return c.idata[1];
+  const double cols = c.in[3].data[0], rows = c.in[4].data[0];
+  const int64_t live = static_cast<int64_t>(cols);
+  if (!(cols >= 0) || cols > static_cast<double>(c.idata[1]) ||
+      static_cast<double>(live) != cols)
+    throw std::domain_error("logical extent exceeds graph capacity");
+  if (rows != cols)
+    throw std::invalid_argument("multiply: Columns of m1 (" +
+                                std::to_string(live) + ") and Rows of m2 (" +
+                                std::to_string(static_cast<int64_t>(rows)) +
+                                ") must match in size");
+  return live;
 }
 
 enum BwdMicroKind : uint8_t {

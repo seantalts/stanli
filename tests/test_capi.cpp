@@ -2565,6 +2565,48 @@ void test_fast_math_options() {
 // stanli_bridgestan_data builds the payload bs_model_construct reads, from
 // data as a structure: non-finite tokens survive, and a manifest already in
 // the data is replaced rather than duplicated.
+// Chains that share one write_array executor produce the same generated
+// quantities as chains that each have a copy. Output depends only on the
+// draw and the chain's RNG, not on which draws the executor ran before.
+void test_shared_write_array_executor() {
+  char err[4096]{};
+  const std::string mir = slurp("tests/fixtures/gqrng_vector.tmir.sexp");
+  stanli_model* model = stanli_model_new_with_opts(mir.c_str(), R"({"K":4})",
+                                                   nullptr, err, sizeof err);
+  expect_true("shared write_array: model builds", model != nullptr);
+  if (model == nullptr) return;
+  stanli_sample_opts opts;
+  stanli_sample_opts_init(&opts);
+  opts.seed = 11;
+  opts.chains = 4;
+  opts.warmup = 30;
+  opts.samples = 30;
+  opts.num_threads = stanli_thread_safe() ? 4 : 1;
+  const int64_t rows = stanli_n_stored_draws(&opts);
+  const int64_t n = stanli_n_unconstrained(model);
+  const int64_t w = stanli_wa_n_columns(model);
+  const auto run = [&](const char* share, std::vector<double>* draws,
+                       std::vector<double>* values) {
+    test_setenv("STANLI_SHARE_WRITE_ARRAY", share);
+    draws->assign((size_t)(opts.chains * rows * n), 0.0);
+    values->assign((size_t)(opts.chains * rows * w), 0.0);
+    const int rc = stanli_sample_multi_metric(
+        model, &opts, nullptr, 0, draws->data(), nullptr, values->data(),
+        nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, err, sizeof err);
+    test_unsetenv("STANLI_SHARE_WRITE_ARRAY");
+    return rc;
+  };
+  std::vector<double> copied_draws, copied_values, shared_draws, shared_values;
+  expect_true("shared write_array: copied run succeeds",
+              run("0", &copied_draws, &copied_values) == 0);
+  expect_true("shared write_array: shared run succeeds",
+              run("1", &shared_draws, &shared_values) == 0);
+  expect_true("shared write_array: draws match", shared_draws == copied_draws);
+  expect_true("shared write_array: generated quantities match",
+              shared_values == copied_values);
+  stanli_model_free(model);
+}
+
 void test_build_id_names_the_abi() {
   const std::string want = "abi" + std::to_string(STANLI_ABI_VERSION) + "-";
   const std::string id = stanli_build_id();
@@ -3174,6 +3216,7 @@ void test_sample_setup_error() {
 }
 
 int main() {
+  test_shared_write_array_executor();
   test_build_id_names_the_abi();
   test_o1_fallback_message();
   test_variables_and_layouts();

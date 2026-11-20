@@ -887,7 +887,7 @@ bool frames_forward(LoopState& s, KernelCtx& ctx) {
   for (const auto& in : s.frames->imports) {
     const double* src = ctx.in[in.input].data + in.offset;
     if (in.data_only) {
-      if (!std::equal(src, src + in.len, in.dst)) return false;
+      if (!same_import(src, in.dst, in.len)) return false;
     } else {
       std::copy_n(src, in.len, in.dst);
     }

@@ -1347,6 +1347,14 @@ struct FrozenImport {
   bool data_only = false;
 };
 
+// Replay checks that a data-only import still holds the value it recorded.
+// It compares bits rather than values: a Stan local that is declared but not
+// yet assigned holds NaN, and NaN never equals itself.
+bool same_import(const double* now, const double* recorded, int64_t len) {
+  return std::memcmp(now, recorded,
+                     static_cast<size_t>(len) * sizeof(double)) == 0;
+}
+
 // A read whose selector is constant: the position of every output element
 // is fixed for the life of the frozen stream, so replay is a plain gather
 // (forward) or scatter-add (backward), with no index validation at all.
@@ -1612,7 +1620,11 @@ struct LoopState : KernelState {
         ctx(plan.site_count),
         sites(plan.site_count, nullptr),
         observable(plan.site_count, 0) {
-    no_replay |= !plan.cache_execution_path;
+    // Replay would skip a draw it recorded as constant, and a guard that
+    // fails partway re-records after some draws have already been taken.
+    no_replay |= !plan.cache_execution_path ||
+                 std::any_of(plan.body.ops.begin(), plan.body.ops.end(),
+                             [](const Op& op) { return op.opcode == OP_RNG; });
     const char* frame_option = debug_env("STANLI_STRUCTURED_FRAMES");
     frame_mode = !no_replay && plan.outer_loop_index >= 0 && frame_option &&
                  frame_option[0] == '1';
@@ -3134,7 +3146,7 @@ bool replay_forward(LoopState& s, KernelCtx& ctx) {
   for (const auto& imp : st.imports) {
     const double* src = ctx.in[imp.input].data + imp.offset;
     if (imp.data_only) {
-      if (!std::equal(src, src + imp.len, imp.dst)) return false;
+      if (!same_import(src, imp.dst, imp.len)) return false;
     } else {
       std::copy_n(src, imp.len, imp.dst);
     }

@@ -90,7 +90,7 @@ unsigned Lowering::expr_effects(const mir::Expr& e) {
   unsigned effects = 0;
   if (mir::stateful_intrinsic_kind(e)) effects |= kStatefulEffect;
   if (e.kind == mir::Expr::FunApp && e.fn_suffix == mir::FnSuffix::Rng)
-    effects |= kStatefulEffect;
+    effects |= kRngEffect;
   if (e.kind == mir::Expr::FunApp && e.fn_lib == mir::Expr::Lib::UserDefined)
     effects |= fun_effects(mir::function_key(e));
   if (mir::is_reduce_sum(e) && reduce_sum_effectful(e))
@@ -131,7 +131,7 @@ unsigned Lowering::fun_effects(const std::string& name) {
     unsigned found = 0;
     if (mir::stateful_intrinsic_kind(e)) found |= kStatefulEffect;
     if (e.kind == mir::Expr::FunApp && e.fn_suffix == mir::FnSuffix::Rng)
-      found |= kStatefulEffect;
+      found |= kRngEffect;
     if (e.kind == mir::Expr::FunApp && e.fn_lib == mir::Expr::Lib::UserDefined)
       found |= visit_fun(mir::function_key(e));
     if (mir::is_reduce_sum(e)) {
@@ -766,6 +766,41 @@ Lowering::Val Lowering::lower_call_udf(const mir::Expr& e,
   ret.autodiff = e.unsized.leaf != mir::UnsizedLeaf::Int && udf_autodiff_ctx;
   ret.layout = owning_layout(ret.si);
   return ret;
+}
+// A matrix indexed by a runtime-length array inside a retained loop, as in
+// `x[rows] * beta`, keeps its capacity rows and stores its live rows packed
+// at the front. The product is stored the same way, and the kernels take
+// their live row count from the output extent. A slice such as
+// `L[g, :n, :n]` also has runtime columns. Their extent and the vector's are
+// often separate slots holding the same value, so the kernels compare them on
+// each execution, as Stan's multiply does.
+Lowering::Val Lowering::lower_runtime_rows_matvec(
+    const Val& a, const Val& b, const BuiltinProductMap& map) {
+  if (!is_matrix(a.si) || a.runtime_dims.size() != 2 || a.runtime_dims[0] < 0)
+    fail("OP_MATVEC/OP_GEMM: needs a runtime row extent");
+  const int extent = a.runtime_dims[0], cols = a.runtime_dims[1];
+  const int b_extent =
+      has_runtime_shape(b) ? one_runtime_extent(b, "multiply") : -1;
+  if ((cols >= 0) != (b_extent >= 0))
+    fail("OP_MATVEC/OP_GEMM: needs matching runtime inner extents");
+  const bool matvec = a.si.param_free && b.si.kind == ViewKind::Vector;
+  std::vector<int> idata{(int)map.m, (int)map.k};
+  if (!matvec) idata.push_back(1);
+  std::vector<int> inputs{a.slot, b.slot, extent};
+  if (cols >= 0) {
+    idata.push_back(1);
+    inputs.insert(inputs.end(), {cols, b_extent});
+  }
+  SlotInfo si = view_of(mir::UnsizedView{0, mir::UnsizedLeaf::Vector});
+  si.param_free = a.si.param_free && b.si.param_free;
+  Val result = emit_raw(matvec ? OP_MATVEC : OP_GEMM, std::move(inputs), map.m,
+                        si, std::move(idata), -1, a.autodiff || b.autodiff);
+  Op& op = g.ops.back();
+  op.dyn_capacity = map.m;
+  op.dyn_extent_in = 2;
+  op.dyn_lengths = kDynamicLengthOutput;
+  result.runtime_dims = {extent};
+  return with_layout(result, owning_layout(si));
 }
 // wiener_lpdf's five- and seven-parameter forms and the wiener cdfs, each with
 // an optional precision. The real arguments are all scalars or all vectors of
@@ -1625,6 +1660,8 @@ std::optional<Lowering::Val> Lowering::lower_eltwise_fn(
             elementwise_layout({a, b}));
       }
       case BuiltinProductMap::Kind::MatVec:
+        if (has_runtime_shape(a) || has_runtime_shape(b))
+          return lower_runtime_rows_matvec(a, b, map);
         if (a.si.param_free && b.si.kind == ViewKind::Vector)
           return with_layout(
               emit_value(OP_MATVEC, {a, b}, map.m,
