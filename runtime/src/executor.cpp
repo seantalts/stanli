@@ -423,6 +423,9 @@ Executor::Executor(const Executor& src)
       ctx_[i].state->clone_from(*src.ctx_[i].state);
 }
 
+// Doubles per 64 bytes, the widest vector alignment a kernel may reach.
+constexpr int64_t kScratchAlignment = 8;
+
 void Executor::bind_() {
   const auto checked_size = [](int64_t a, int64_t b) {
     const auto max = static_cast<uint64_t>(std::vector<double>{}.max_size());
@@ -518,7 +521,7 @@ void Executor::bind_() {
     assert(result_adjoint_offset_ >= 0);
   }
 
-  int64_t scratch = 0;
+  int64_t scratch = 0, unshared = 0;
   // Scratch layout is binding state, not graph structure. Only the bound
   // context pointers survive this function; copies compute their own layout.
   std::vector<int64_t> scratch_offsets;
@@ -543,9 +546,22 @@ void Executor::bind_() {
     }
     if (op.primal_source == op.out)
       primal_sources[(size_t)op.out] = (int)scratch_offsets.size();
+    const int64_t need =
+        k.scratch_size ? k.scratch_size(op, graph_.slots.data()) : 0;
+    // An op's scratch outlives the op only for its own backward, or for a
+    // cached primal that reads it there. Without a backward, every op can
+    // use the same region. Each op keeps the alignment it would have had in
+    // its own region, because a vectorized reduction over scratch rounds
+    // differently at a different alignment.
+    if (graph_.forward_only) {
+      const int64_t offset = unshared % kScratchAlignment;
+      scratch_offsets.push_back(offset);
+      scratch = std::max(scratch, checked_size(offset, need));
+      unshared = checked_size(unshared, need);
+      continue;
+    }
     scratch_offsets.push_back(scratch);
-    scratch = checked_size(
-        scratch, k.scratch_size ? k.scratch_size(op, graph_.slots.data()) : 0);
+    scratch = checked_size(scratch, need);
   }
   scratch_.assign(scratch, 0.0);
 

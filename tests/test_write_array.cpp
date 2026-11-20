@@ -1256,11 +1256,11 @@ void test_write_array_retained_loop() {
 void test_write_array_forward_only() {
   using namespace stanli;
   DataMap data;
-  data.set_int("N", 64);
-  data.set_int("T", 8);
-  data.set_real_array("x", std::vector<double>(64, 0.5));
-  CompiledModel cm = compile_model(
-      slurp("tests/fixtures/structured_wa_carried.tmir.sexp"), data);
+  data.set_int("N", 6);
+  data.set_int_array("y", {0, 3, 1, 7, 2, 4});
+  data.set_real_array("x", {0.1, -0.4, 0.8, 0.3, -1.2, 0.5});
+  CompiledModel cm =
+      compile_model(slurp("tests/fixtures/wa_scratch.tmir.sexp"), data);
   if (!compiled_completely(cm, "forward-only write_array")) return;
   Executor wex(cm.write_array->graph);
   cm.write_array->bind(wex);
@@ -1269,6 +1269,30 @@ void test_write_array_forward_only() {
     ++failures;
     std::printf("FAIL forward-only write_array keeps %lld adjoints\n",
                 (long long)wex.adjoint_storage_size());
+  }
+  // Nothing runs backward to read an op's scratch after the op returns, so
+  // every op shares one region: as large as the largest op needs, plus up to
+  // 7 doubles that keep each op's own alignment.
+  int64_t largest = 0, total = 0;
+  for (const Op& op : wex.graph().ops) {
+    const Kernel* k = find_kernel(op.opcode);
+    const int64_t need = k && k->scratch_size
+                             ? k->scratch_size(op, wex.graph().slots.data())
+                             : 0;
+    largest = std::max(largest, need);
+    total += need;
+  }
+  const auto shared = [&](const Executor& ex) {
+    return ex.scratch_storage_size() >= largest &&
+           ex.scratch_storage_size() < largest + 8;
+  };
+  if (total <= largest + 8 || !shared(wex) || !shared(copy)) {
+    ++failures;
+    std::printf(
+        "FAIL forward-only write_array scratch %lld, largest op %lld, all ops "
+        "%lld\n",
+        (long long)wex.scratch_storage_size(), (long long)largest,
+        (long long)total);
   }
   bool threw = false;
   try {
