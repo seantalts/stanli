@@ -36,6 +36,7 @@
 #include <stanli/debug_switch.hpp>
 #include <stanli/builtin_registry.hpp>
 #include <stanli/density_registry.hpp>
+#include <stanli/island.hpp>
 #include <stanli/optable.hpp>
 #include <stanli/message_sink.hpp>
 #include <stanli/partition.hpp>
@@ -310,16 +311,22 @@ PartitionStats partition_lanes(Graph& g, Fills& fills,
   }
 
   const std::unordered_map<int, double> const_val = scalar_constants(fills);
-  // Effects that a fused lane must not move ahead of. The effectful
-  // densities are left out: their argument errors reorder like those of
-  // any other density, which every fused bucket already moves.
+  // Effects that a fused lane must not move ahead of: effectful ops, and any
+  // op whose payload may hold one, unless it is a region proven free of
+  // effects. The effectful densities are left out: their argument errors
+  // reorder like those of any other density, which every fused bucket
+  // already moves.
+  const auto is_barrier = [](const Op& op) {
+    if (op.opcode == OP_CATEGORICAL || op.opcode == OP_ALL_INTEGER_DENSITY)
+      return false;
+    if (is_effectful_op(op.opcode)) return true;
+    if (op.udata == nullptr) return false;
+    return op.opcode != OP_ISLAND ||
+           island_has_effect(*static_cast<const IslandProg*>(op.udata));
+  };
   std::vector<size_t> effects;
-  for (size_t u = 0; u < n_ops; ++u) {
-    const uint16_t oc = g.ops[u].opcode;
-    if (is_effectful_op(oc) && oc != OP_CATEGORICAL &&
-        oc != OP_ALL_INTEGER_DENSITY)
-      effects.push_back(u);
-  }
+  for (size_t u = 0; u < n_ops; ++u)
+    if (is_barrier(g.ops[u])) effects.push_back(u);
 
   std::vector<char> dropped(n_ops, 0);
   std::vector<int> emit_at(n_ops, -1);
