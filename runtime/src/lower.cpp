@@ -3,6 +3,7 @@
 #include "build_id.hpp"
 #include "lower_work.hpp"
 #include "lower_worker.hpp"
+#include "pass_util.hpp"
 #include <stanli/debug_switch.hpp>
 #include <stanli/gp_cov_fusion.hpp>
 #include <stanli/target_sums.hpp>
@@ -1033,6 +1034,10 @@ void Lowering::run_passes(const std::vector<int>& roots, const PassPlan& plan) {
   // `target +=` can hand them over one by one, for reroll to vectorize.
   // First, so that every pass configuration sees the same terms.
   if (!in_write_array) split_target_sums(g, out.fills, target_terms, roots);
+  // A slot that `target +=` added k times becomes one term times k here,
+  // whichever passes run, so that switching a pass off does not change how
+  // the target is summed.
+  scale_repeated_terms(g, out.fills, target_terms);
   const std::vector<int> update_roots = roots_with_terms();
   fuse_gp_diagonal_updates(g, update_roots);
   const auto inplace_time = prep.start();

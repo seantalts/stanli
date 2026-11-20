@@ -621,6 +621,61 @@ static void test_elt_scalar_density_hoists() {
     expect_close(("elthoist v" + std::to_string(i)).c_str(), got[i], want[i]);
 }
 
+// Each `target +=` adds its term once, so a lane whose slot the term list
+// names k times counts k times. Lane l is normal_lpdf(y_l | mu[l], sigma);
+// the expected value and gradient are the closed-form log density.
+static void test_repeated_terms() {
+  const int L = 8;
+  struct Case {
+    const char* name;
+    int copies;       // copies of each lane's term, listed next to each other
+    bool last_again;  // the last lane's term listed once more at the end
+  };
+  const Case cases[] = {{"twice", 2, false},
+                        {"three times", 3, false},
+                        {"last lane again", 1, true}};
+  for (const Case& c : cases) {
+    Graph g;
+    Fills fills;
+    const int mu = g.add_slot(L, true);
+    const int sigma = g.add_slot(1, true);
+    std::vector<int> terms, lane_terms;
+    for (int l = 0; l < L; ++l) {
+      const int y = g.add_slot(1, false);
+      fills.emplace_back(y, std::vector<double>{0.2 * l - 0.5});
+      const int m = g.add_slot(1, false);
+      g.add_op(OP_INDEX, {mu}, m, {l});
+      const int lp = g.add_slot(1, false);
+      const int id =
+          stanli::testutil::add_density(g, OP_NORMAL_LPDF, {y, m, sigma}, lp);
+      g.ops[(size_t)id].variant = 0x06;
+      for (int k = 0; k < c.copies; ++k) terms.push_back(lp);
+      lane_terms.push_back(lp);
+    }
+    std::vector<int> listed(L, c.copies);
+    if (c.last_again) {
+      terms.push_back(lane_terms.back());
+      ++listed.back();
+    }
+    const double s = fill_at(L);
+    std::vector<double> want(2 + (size_t)L, 0.);
+    for (int l = 0; l < L; ++l) {
+      const double z = (0.2 * l - 0.5 - fill_at(l)) / s;
+      want[0] += listed[l] * (-0.5 * std::log(2 * std::acos(-1.0)) -
+                              std::log(s) - 0.5 * z * z);
+      want[1 + (size_t)l] = listed[l] * z / s;
+      want[1 + (size_t)L] += listed[l] * (z * z - 1) / s;
+    }
+    reroll(g, fills, terms, {});
+    reduce_into_result(g, terms);
+    const std::vector<double> got = run_grad(std::move(g), fills);
+    const std::string tag = std::string("repeated terms ") + c.name;
+    expect((tag + " sizes").c_str(), got.size() == want.size());
+    for (size_t i = 0; i < want.size() && i < got.size(); ++i)
+      expect_close((tag + " v" + std::to_string(i)).c_str(), got[i], want[i]);
+  }
+}
+
 // (b4) density out consumed by ANOTHER lane's op (cross-lane mixture
 // recursion): must still bail.
 static void test_bail_cross_lane_density() {
@@ -3515,6 +3570,7 @@ int main() {
   test_logistic_elt_shape();
   test_elt_lpmf_shape();
   test_elt_scalar_density_hoists();
+  test_repeated_terms();
   test_bail_cross_lane_density();
   test_bail_escaping_density();
   test_partial_range_slices();

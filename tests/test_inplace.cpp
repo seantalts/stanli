@@ -532,7 +532,17 @@ static void test_store_to_load_forwarding() {
 }
 
 // `p[i] = a + b; p[i] = inv_logit(p[i]);`
-enum class Between { kNothing, kOtherElement, kWholeVector };
+// What reads the vector between its two writes to one element. The copy
+// cases read it as the base of a copying store, and kStoreValue reads it as
+// the value that a slice store writes into a longer vector.
+enum class Between {
+  kNothing,
+  kOtherElement,
+  kWholeVector,
+  kCopyElement,
+  kCopySlice,
+  kStoreValue
+};
 
 static Graph build_double_store(int L, Between between, Fills& fills,
                                 std::vector<int>& terms) {
@@ -564,6 +574,23 @@ static Graph build_double_store(int L, Between between, Fills& fills,
       const int lse = g.add_slot(1, false);
       g.add_op(OP_LOG_SUM_EXP, {first}, lse);
       terms.push_back(lse);
+    } else if (between == Between::kCopyElement ||
+               between == Between::kCopySlice) {
+      const int copy = g.add_slot(L, false);
+      const uint16_t store =
+          between == Between::kCopyElement ? OP_SET_INDEX : OP_SET_SLICE;
+      g.add_op(store, {first, cslot(0.5)}, copy, {(n + 1) % L});
+      const int sum = g.add_slot(1, false);
+      g.add_op(OP_SUM_VEC, {copy}, sum);
+      terms.push_back(sum);
+    } else if (between == Between::kStoreValue) {
+      const int zeros = g.add_slot(L + 1, false);
+      fills.emplace_back(zeros, std::vector<double>((size_t)L + 1, 0.0));
+      const int wide = g.add_slot(L + 1, false);
+      g.add_op(OP_SET_SLICE, {zeros, first}, wide, {1});
+      const int sum = g.add_slot(1, false);
+      g.add_op(OP_SUM_VEC, {wide}, sum);
+      terms.push_back(sum);
     }
     const int e = g.add_slot(1, false);
     g.add_op(OP_EXPV, {rd}, e);
@@ -646,6 +673,9 @@ static void test_superseded_store_dropped() {
       {"superseded", Between::kNothing, L + 1},
       {"other element read keeps both", Between::kOtherElement, 2 * L},
       {"whole vector read keeps both", Between::kWholeVector, 2 * L},
+      {"element copy keeps both", Between::kCopyElement, 3 * L},
+      {"slice copy keeps both", Between::kCopySlice, 2 * L},
+      {"stored as a value keeps both", Between::kStoreValue, 2 * L},
   };
   for (const Case& c : cases) {
     const std::string tag = c.name;
@@ -655,6 +685,15 @@ static void test_superseded_store_dropped() {
     Graph ref = g;
     reduce_into_result(ref, terms);
     const std::vector<double> want = run_grad(std::move(ref), fills);
+
+    Graph inplace_only = g;
+    make_inplace_updates(inplace_only, {});
+    reduce_into_result(inplace_only, terms);
+    const std::vector<double> got_inplace =
+        run_grad_twice(std::move(inplace_only), fills);
+    for (size_t i = 0; i < want.size() && i < got_inplace.size(); ++i)
+      expect_close((tag + " in place only v" + std::to_string(i)).c_str(),
+                   got_inplace[i], want[i]);
 
     make_inplace_updates(g, {});
     forward_stores_to_loads(g, {});

@@ -414,6 +414,54 @@ static void test_refuse_identical_terms() {
   expect_same_grad("identical terms", std::move(g), f2, tt, want);
 }
 
+// Each `target +=` adds its term once, so a lane whose slot the term list
+// names k times counts k times. The lanes below are build_index_lanes'; the
+// expected value and gradient are the closed-form normal log density.
+static void expect_repeated_terms(const std::string& what, Graph g, Fills fills,
+                                  std::vector<int> terms,
+                                  const std::vector<int>& listed) {
+  const int L = (int)listed.size();
+  const double sigma = fill_at(L);
+  std::vector<double> want(2 + (size_t)L, 0.);
+  for (int l = 0; l < L; ++l) {
+    const double z = (0.2 * l - 0.5 - fill_at(l)) / sigma;
+    want[0] += listed[l] * (-0.5 * std::log(2 * std::acos(-1.0)) -
+                            std::log(sigma) - 0.5 * z * z);
+    want[1 + (size_t)l] = listed[l] * z / sigma;
+    want[1 + (size_t)L] += listed[l] * (z * z - 1) / sigma;
+  }
+  expect_same_grad(what, std::move(g), std::move(fills), std::move(terms),
+                   want);
+}
+
+static void test_repeated_terms() {
+  const int L = 8;
+  struct Case {
+    const char* name;
+    int copies;       // copies of each lane's term, listed next to each other
+    bool last_again;  // the last lane's term listed once more at the end
+  };
+  const Case cases[] = {{"twice", 2, false},
+                        {"three times", 3, false},
+                        {"last lane again", 1, true}};
+  for (const Case& c : cases) {
+    Lanes b = build_index_lanes(L);
+    std::vector<int> terms;
+    std::vector<int> listed(L, c.copies);
+    for (int lp : b.terms)
+      for (int k = 0; k < c.copies; ++k) terms.push_back(lp);
+    if (c.last_again) {
+      terms.push_back(b.terms.back());
+      ++listed.back();
+    }
+    std::vector<int> tt = terms;
+    Fills f2 = b.fills;
+    partition_lanes(b.g, f2, tt, {});
+    expect_repeated_terms(std::string("repeated terms ") + c.name,
+                          std::move(b.g), f2, tt, listed);
+  }
+}
+
 // The same shape with an integer outcome (multi_occupancy's detection terms):
 // here the lanes' immediates concatenate, so the one fused op does compute
 // L lps and the fusion is the right answer.
@@ -1550,6 +1598,7 @@ int main() {
   test_refuse_effectful();
   test_refuse_escaping_intermediate();
   test_refuse_identical_terms();
+  test_repeated_terms();
   test_idata_terms();
   test_duplicate_lanes_decline();
   test_binomial_idata_groups();

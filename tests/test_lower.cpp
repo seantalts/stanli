@@ -1353,6 +1353,78 @@ static void test_udf_lp_propto() {
   stan::math::recover_memory();
 }
 
+// Each `target += lp` adds lp, so a local added twice counts twice, also in
+// a loop that reroll or partition could fuse.
+static void test_repeated_target_terms() {
+  using namespace stanli;
+  using stan::math::var;
+  const DataMap data =
+      DataMap::from_json(slurp("tests/fixtures/repeated_target_terms.json"));
+  CompiledModel cm;
+  try {
+    cm = compile_model(slurp("tests/fixtures/repeated_target_terms.tmir.sexp"),
+                       data);
+  } catch (const std::exception& error) {
+    check(false, std::string("repeated target terms compile: ") + error.what());
+    return;
+  }
+  const std::vector<double>& y = data.at("y").r;
+  const double q[2] = {0.3, -0.2};
+  var mu = q[0], tau = q[1];
+  var lp = 0;
+  for (double yn : y) {
+    lp += 2 * stan::math::normal_lpdf(yn, mu, 1) +
+          3 * stan::math::normal_lpdf(yn, tau, 1);
+  }
+  Eigen::Map<const Eigen::VectorXd> yv(y.data(), (Eigen::Index)y.size());
+  lp += 2 * stan::math::normal_lpdf(yv, tau, 2);
+  lp.grad();
+  Executor ex(cm.graph);
+  cm.bind(ex);
+  ex.params_data()[0] = q[0];
+  ex.params_data()[1] = q[1];
+  double grad[2] = {0, 0};
+  expect_ulp("repeated target terms lp", ex.gradient(grad), lp.val(), 16);
+  expect_ulp("repeated target terms d/mu", grad[0], mu.adj(), 16);
+  expect_ulp("repeated target terms d/tau", grad[1], tau.adj(), 16);
+  stan::math::recover_memory();
+}
+
+// Each block copies a container, writes the copy and then writes the
+// original in place. The copy keeps the element that the original held when
+// it was copied: w = [y1, x, 1], b = [y2, 1, 2], u = [0, y3, x, 0],
+// m2 = [y4, x; 0, 1] and r2 = [y5, x, 1], while each original ends as
+// [z, x, 0...]. That puts x in 9 of the 33 elements and z in 5, and the
+// constants 1, 1, 2, 1, 1 in the others.
+static void test_inplace_copy_then_store() {
+  using namespace stanli;
+  CompiledModel cm;
+  try {
+    cm = compile_model(
+        slurp("tests/fixtures/inplace_copy_then_store.tmir.sexp"), DataMap{});
+  } catch (const std::exception& error) {
+    check(false, std::string("inplace copy compile: ") + error.what());
+    return;
+  }
+  const double q[7] = {0.3, 0.5, -0.7, 1.1, -1.3, 0.9, -0.4};
+  const double x = q[0], z = q[6];
+  double squares = 9 * x * x + 5 * z * z + 1 + 1 + 4 + 1 + 1;
+  for (int i = 1; i <= 5; ++i) squares += q[i] * q[i];
+  const double want_lp =
+      -33 * 0.5 * std::log(2 * stan::math::pi()) - 0.5 * squares;
+  double want_grad[7] = {-9 * x, 0, 0, 0, 0, 0, -5 * z};
+  for (int i = 1; i <= 5; ++i) want_grad[i] = -q[i];
+  Executor ex(cm.graph);
+  cm.bind(ex);
+  for (int i = 0; i < 7; ++i) ex.params_data()[i] = q[i];
+  double grad[7] = {};
+  expect_ulp("inplace copy lp", ex.gradient(grad), want_lp, 4);
+  const char* names[7] = {"x", "y1", "y2", "y3", "y4", "y5", "z"};
+  for (int i = 0; i < 7; ++i)
+    expect_ulp(std::string("inplace copy d/") + names[i], grad[i], want_grad[i],
+               2);
+}
+
 // An `_lpdf` call keeps the constants of the `_lupdf` calls in its body.
 // Lowering folds a call with data arguments in the MIR interpreter, which
 // has to use the call's normalization as the graph does. The branch in
@@ -9479,6 +9551,8 @@ int main() {
   test_region_constant_shadow();
   test_udf_guard_returns();
   test_udf_lp_propto();
+  test_repeated_target_terms();
+  test_inplace_copy_then_store();
   test_udf_lpdf_folded_normalized();
   test_udf_truncate();
   test_udf_lp_inlined_propto();
