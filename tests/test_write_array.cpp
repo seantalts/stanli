@@ -1250,6 +1250,39 @@ void test_write_array_retained_loop() {
 // A loop that carries a value from one iteration to the next is retained in
 // write_array once the graph is already large, and unrolled otherwise. Both
 // forms produce the interpreter's rows.
+// write_array only runs forward, so its executor keeps no adjoint for any
+// slot, and a copy of it keeps none either. Asking it for a gradient is an
+// error rather than a read of storage it never allocated.
+void test_write_array_forward_only() {
+  using namespace stanli;
+  DataMap data;
+  data.set_int("N", 64);
+  data.set_int("T", 8);
+  data.set_real_array("x", std::vector<double>(64, 0.5));
+  CompiledModel cm = compile_model(
+      slurp("tests/fixtures/structured_wa_carried.tmir.sexp"), data);
+  if (!compiled_completely(cm, "forward-only write_array")) return;
+  Executor wex(cm.write_array->graph);
+  cm.write_array->bind(wex);
+  const Executor copy(wex);
+  if (wex.adjoint_storage_size() != 0 || copy.adjoint_storage_size() != 0) {
+    ++failures;
+    std::printf("FAIL forward-only write_array keeps %lld adjoints\n",
+                (long long)wex.adjoint_storage_size());
+  }
+  bool threw = false;
+  try {
+    std::vector<double> g(static_cast<size_t>(wex.n_params()));
+    wex.gradient(g.data());
+  } catch (const std::logic_error&) {
+    threw = true;
+  }
+  if (!threw) {
+    ++failures;
+    std::printf("FAIL forward-only write_array ran a gradient\n");
+  }
+}
+
 void test_write_array_carried_loop() {
   using namespace stanli;
   const std::string text =
@@ -4864,6 +4897,7 @@ int main() {
   test_caller_owned_rng();
   test_transformed_parameter_checks();
   test_write_array_retained_loop();
+  test_write_array_forward_only();
   test_write_array_carried_loop();
   test_write_array_block_order();
   test_write_array_vector_rng();

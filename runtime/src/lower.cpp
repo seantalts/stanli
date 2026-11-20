@@ -1197,6 +1197,7 @@ CompiledModel::WriteArray Lowering::run_write_array(const mir::Program& p) {
   // Nothing reads a result here, but forward() asserts a scalar result
   // slot, so point it at one.
   g.result_slot = const_slot(0.0);
+  g.forward_only = true;
   wa.n_unconstrained = out.n_unconstrained;
   prep.graph(prep_graph, "finalize", finalize_time, g, out.fills,
              target_terms.size(), out.views.size());

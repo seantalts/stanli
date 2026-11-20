@@ -496,15 +496,15 @@ void Executor::bind_() {
   // memset on dense graphs.
   std::vector<int64_t> adjoint_offsets(graph_.slots.size(), -1);
   int64_t adj_off = 0;
-  for (size_t i = 0; i < graph_.slots.size(); ++i) {
+  for (size_t i = 0; i < graph_.slots.size() && !graph_.forward_only; ++i) {
     const Slot& s = graph_.slots[i];
     if (s.is_param) {
       adjoint_offsets[i] = adj_off;
       adj_off = checked_size(adj_off, s.len);
     }
   }
-  assert(adj_off == n_params_);
-  for (size_t i = 0; i < graph_.slots.size(); ++i) {
+  assert(graph_.forward_only || adj_off == n_params_);
+  for (size_t i = 0; i < graph_.slots.size() && !graph_.forward_only; ++i) {
     const Slot& s = graph_.slots[i];
     if (!s.is_param && (written[i] || (int)i == graph_.result_slot)) {
       adjoint_offsets[i] = adj_off;
@@ -513,7 +513,7 @@ void Executor::bind_() {
   }
   adjoints_.assign(adj_off, 0.0);
   result_adjoint_offset_ = -1;
-  if (graph_.result_slot >= 0) {
+  if (graph_.result_slot >= 0 && !graph_.forward_only) {
     result_adjoint_offset_ = adjoint_offsets[graph_.result_slot];
     assert(result_adjoint_offset_ >= 0);
   }
@@ -615,7 +615,7 @@ void Executor::bind_() {
     }
     pending.clear();
   };
-  for (size_t i = graph_.ops.size(); i-- > 0;) {
+  for (size_t i = graph_.forward_only ? 0 : graph_.ops.size(); i-- > 0;) {
     const Op& op = graph_.ops[i];
     const Kernel& k = kernel(op.opcode);
     void (*b)(KernelCtx&) = k.backward;
@@ -673,6 +673,14 @@ KernelCtx Executor::make_ctx_(const Op& op, int64_t scratch_offset,
   ctx.udata = op.udata;
   ctx.eval_state = &eval_state_;
   ctx.n_idata = op.n_idata;
+  // A forward-only graph has no adjoints: every input reads as inactive and
+  // the output adjoint has no storage.
+  if (graph_.forward_only) {
+    for (int i = 0; i < op.n_in; ++i)
+      ctx.in_adj[i] = Desc{nullptr, graph_.slots[op.in[i]].len};
+    ctx.out_adj_vec = Desc{nullptr, so.len};
+    return ctx;
+  }
   for (int i = 0; i < op.n_in; ++i) {
     const int si = op.in[i];
     const Slot& s = graph_.slots[si];
@@ -842,6 +850,8 @@ double Executor::forward() {
 }
 
 double Executor::gradient(double* grad_out) {
+  if (graph_.forward_only)
+    throw std::logic_error("a forward-only graph has no gradient");
   ++n_grad_evals_;
   const double v = forward();
   reverse(grad_out, 1.0);
@@ -900,6 +910,8 @@ template <class Steps, class Runs>
 }  // namespace
 
 void Executor::reverse(double* grad_out, double seed) {
+  if (graph_.forward_only)
+    throw std::logic_error("a forward-only graph has no gradient");
   if (!reverse_ready_)
     throw std::logic_error("reverse requires a fresh forward");
   reverse_ready_ = false;

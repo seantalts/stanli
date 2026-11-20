@@ -32,6 +32,9 @@ struct Graph {
   // so the raw pointers in copied ops continue to name the shared objects.
   std::vector<std::shared_ptr<void>> udata_pool;
   int result_slot = -1;
+  // Set for a graph that only ever runs forward, such as write_array. Its
+  // executor allocates no adjoints and refuses a gradient.
+  bool forward_only = false;
 
   Graph() = default;
 
@@ -41,6 +44,7 @@ struct Graph {
         idata_pool(src.idata_pool),
         udata_pool(src.udata_pool),
         result_slot(src.result_slot),
+        forward_only(src.forward_only),
         compact_idata_(src.compact_idata_) {
     // Finalized graphs usually have no mutable pool: their raw idata views
     // remain valid through the shared immutable owner, with no rebinding.
