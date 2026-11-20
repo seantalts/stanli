@@ -116,23 +116,25 @@ bool Lowering::while_sizes_from_loop_state(const mir::Stmt& s) {
 // where the guard stopped being decidable, leaving the rest of the loop to
 // the caller.
 std::optional<Lowering::Flow> Lowering::unroll_while(const mir::Stmt& s) {
-  for (long trip = 0; trip < kWhileUnrollLimit; ++trip) {
-    bool open = false;
-    if (auto evaluated = try_eval_pure(s.cond)) {
-      open = evaluated->r.at(0) != 0.0;
-    } else {
-      try {
-        open = eval_int(s.cond) != 0;
-      } catch (const CompileError&) {
-        return std::nullopt;
+  return unroll_or_region(s, [&]() -> std::optional<Flow> {
+    for (long trip = 0; trip < kWhileUnrollLimit; ++trip) {
+      bool open = false;
+      if (auto evaluated = try_eval_pure(s.cond)) {
+        open = evaluated->r.at(0) != 0.0;
+      } else {
+        try {
+          open = eval_int(s.cond) != 0;
+        } catch (const CompileError&) {
+          return std::nullopt;
+        }
       }
+      if (!open) return Flow::Next;
+      const Flow flow = lower_stmts(s.body);
+      if (flow == Flow::Break) return Flow::Next;
+      if (flow == Flow::Return) return flow;
     }
-    if (!open) return Flow::Next;
-    const Flow flow = lower_stmts(s.body);
-    if (flow == Flow::Break) return Flow::Next;
-    if (flow == Flow::Return) return flow;
-  }
-  return std::nullopt;
+    return std::nullopt;
+  });
 }
 // Both control scans run before the block is lowered, but loop bounds and
 // conditions later in the block can depend on scalar-int locals established
@@ -353,6 +355,29 @@ static bool has_loop_control(const mir::Stmt& s) {
   if (s.kind == mir::Stmt::Break || s.kind == mir::Stmt::Continue) return true;
   if (s.kind == mir::Stmt::For || s.kind == mir::Stmt::While) return false;
   return std::any_of(s.body.begin(), s.body.end(), has_loop_control);
+}
+// The scan before an unroll can find a branch decided where lowering finds
+// it undecided, for example when a local that the scan evaluates lives in
+// the graph. Lowering's own answer is the one that counts.
+std::optional<Lowering::Flow> Lowering::unroll_or_region(
+    const mir::Stmt& loop, const std::function<std::optional<Flow>()>& unroll) {
+  if (!std::any_of(loop.body.begin(), loop.body.end(), has_loop_control))
+    return unroll();
+  std::set<std::string> mentioned, written;
+  mir::collect_names(loop, &mentioned);
+  if (loop.kind == mir::Stmt::For) mentioned.insert(loop.loopvar);
+  std::vector<std::string> assigned;
+  assigned_names(loop, &assigned);
+  collect_loop_locals(loop, &written);
+  written.insert(assigned.begin(), assigned.end());
+  WaSnapshot before = wa_snapshot(mentioned, &written);
+  try {
+    return unroll();
+  } catch (const LoopControlInBranch&) {
+  }
+  wa_restore(before);
+  lower_runtime_ifelse(loop);
+  return Flow::Next;
 }
 // A Break/Continue selected by a runtime condition cannot be lowered as a
 // standalone conditional island: its jump target belongs to the enclosing
@@ -827,6 +852,8 @@ void Lowering::emit_island(const std::shared_ptr<IslandProg>& prog,
 // `if (<not known while building the graph>) ... else ...`
 void Lowering::lower_runtime_ifelse(const mir::Stmt& s) {
   if (structured_unroll_depth > 0) throw SpecializationRefused{};
+  if (s.kind == mir::Stmt::IfElse && has_loop_control(s))
+    throw LoopControlInBranch{};
   IslandRegion reg;
   std::shared_ptr<IslandProg> prog;
   Range ignored;
@@ -2205,7 +2232,7 @@ Lowering::Flow Lowering::lower_stmt_impl(const mir::Stmt& s) {
         before_unroll = wa_snapshot(mentioned, &written);
       }
       const size_t ops_before = g.ops.size();
-      if (const auto flow = unroll()) return *flow;
+      if (const auto flow = unroll_or_region(s, unroll)) return *flow;
       const size_t loop_ops = g.ops.size() - ops_before;
       if (diagnostics)
         emit_diagnostic("stanli_structured unrolled loop=" + s.loopvar +

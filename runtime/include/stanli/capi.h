@@ -232,10 +232,12 @@ int64_t stanli_n_unconstrained(const stanli_model* m);
  * free values the samplers and stanli_grad read.
  *
  * `inits_json` is a CmdStan-style JSON object naming every declared
- * parameter. Writes n_unconstrained doubles to `q`. Returns 0 on success, or
- * nonzero with a message in err: a missing, unknown, wrong-length, or
- * out-of-support value names the parameter, and a model whose MIR carries no
- * inverse parameter transforms says so.
+ * parameter, except that a zero-size one may be left out. Each value must
+ * have its declared dims, checked as CmdStan checks a starting value. Writes
+ * n_unconstrained doubles to `q`. Returns 0 on success, or nonzero with a
+ * message in err: a missing, unknown, wrongly shaped, or out-of-support value
+ * names the parameter, and a model whose MIR carries no inverse parameter
+ * transforms says so.
  *
  * The sampler entry points keep taking UNCONSTRAINED inits
  * (StanliSampleOpts::inits below). Unconstraining is a host-boundary step,

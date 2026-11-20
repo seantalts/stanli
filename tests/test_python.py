@@ -389,13 +389,30 @@ def test_unconstrain_round_trip():
     rc = stanli._lib.stanli_wa_row(m._m, stanli._dptr(q), stanli._dptr(row))
     assert rc == 0
 
-    values = {}
+    # Each variable in its declared shape, which CmdStan requires of a
+    # starting value. The columns list it first index fastest.
+    columns = {}
     for name, value in zip(names, row):
-        values.setdefault(name.split("[")[0], []).append(float(value))
-    values = {k: (v[0] if len(v) == 1 else v) for k, v in values.items()}
+        base, _, index = name.rstrip("]").partition("[")
+        columns.setdefault(base, []).append(
+            ([int(i) for i in index.split(",")] if index else [], value))
+    values = {}
+    for base, entries in columns.items():
+        dims = np.max([i for i, _ in entries], axis=0) if entries[0][0] else ()
+        flat = np.array([v for _, v in entries])
+        values[base] = flat.reshape(dims, order="F") if len(dims) else flat[0]
 
     back = m.unconstrain(values)
     assert np.allclose(back, q, atol=1e-9), (back, q)
+
+    # A flat list for an array of matrices is refused, as in CmdStan, rather
+    # than read in an order the caller did not mean.
+    try:
+        m.unconstrain({**values, "m": values["m"].ravel(order="F")})
+    except ValueError as e:
+        assert "variable name=m" in str(e), str(e)
+    else:
+        raise AssertionError("expected ValueError for a flat matrix value")
 
     values["not_a_parameter"] = 1.0
     try:

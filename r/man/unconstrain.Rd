@@ -41,9 +41,10 @@ A numeric vector of length `model$n_unconstrained`.
 Unless `partial = TRUE`, every declared parameter must appear, at its
 declared size. A missing,
 unknown, wrong-length, or out-of-support value is an error naming the
-parameter. Containers are listed in Stan's own serialization order (the
-first index fastest, the order a CSV column carries) and may be nested or
-flat -- the declaration owns the shape either way.
+parameter. Each value has its declared shape, as CmdStan requires of a
+starting value: a matrix as an R matrix, and a `vector[1]` as
+`array(x, 1)`. A flat vector for a matrix is an error. A zero-size
+parameter may be left out.
 }
 \details{
 The result is what `sample_model(init = )` and `optimize_model(init = )`

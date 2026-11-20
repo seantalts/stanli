@@ -1904,9 +1904,10 @@ class Model:
         declared size; a missing, unknown, wrong-length, or out-of-support
         value raises naming the parameter.
 
-        Containers are listed in Stan's own serialization order -- the first
-        index fastest, the order a CSV column carries -- and may be nested or
-        flat; the declaration owns the shape either way.
+        Each value has its declared shape, as CmdStan requires of a starting
+        value: a numpy array of that shape, or lists nested first index
+        outermost. A flat list for a matrix, or a transposed one, raises.
+        A zero-size parameter may be left out.
 
         The result is what `sample(inits=...)`, `optimize(init=...)`, and
         `log_prob_grad` all take, so unconstraining is a step you do once per

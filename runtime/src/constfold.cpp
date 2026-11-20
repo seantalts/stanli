@@ -24,10 +24,15 @@
 // see the wrong contents -- the destructive update chains write one slot end
 // to end, which makes that reachable rather than theoretical. Such slots are
 // refused, and the refusal cascades to everything downstream of them.
-#include <stanli/debug_switch.hpp>
+#include <stanli/algebra.hpp>
 #include <stanli/constfold.hpp>
+#include <stanli/dae.hpp>
+#include <stanli/debug_switch.hpp>
 #include <stanli/island.hpp>
+#include <stanli/ode.hpp>
+#include <stanli/ode_adjoint.hpp>
 #include <stanli/optable.hpp>
+#include <stanli/quadrature.hpp>
 
 #include <algorithm>
 #include <cstdlib>
@@ -37,9 +42,40 @@
 namespace stanli {
 namespace {
 
+// The user function a solver op calls back into, or null for other ops.
+const RetainedCallback* solver_callback(const Op& op) {
+  switch (op.opcode) {
+    case OP_ODE:
+      return static_cast<const OdeSpec*>(op.udata);
+    case OP_ODE_ADJOINT:
+      return static_cast<const OdeAdjointSpec*>(op.udata);
+    case OP_DAE:
+      return static_cast<const DaeSpec*>(op.udata);
+    case OP_ALGEBRA_SOLVER:
+      return static_cast<const AlgebraSpec*>(op.udata);
+    case OP_QUADRATURE:
+      return static_cast<const QuadratureSpec*>(op.udata);
+    default:
+      return nullptr;
+  }
+}
+
+// Whether the program that an op's payload carries can print or reject. A
+// callback that did not compile runs in the interpreter, whose effects are
+// not known here, so it counts as one that can.
+bool payload_has_effect(const Op& op) {
+  if (op.udata == nullptr) return false;
+  if (op.opcode == OP_ISLAND)
+    return island_has_effect(*static_cast<const IslandProg*>(op.udata));
+  if (const RetainedCallback* callback = solver_callback(op))
+    return !callback->prog.ok || island_has_effect(callback->prog);
+  return false;
+}
+
 // True for each op whose inputs are all data, constants, or the outputs of
-// earlier constant ops. Parallel to `g.ops`.
-std::vector<char> mark_constant_ops(const Graph& g) {
+// earlier constant ops, and that is not in `refused`. Parallel to `g.ops`.
+std::vector<char> mark_constant_ops(const Graph& g,
+                                    const std::vector<char>& refused) {
   std::vector<char> no_fold(g.slots.size(), 0);
   std::vector<char> is_const(g.ops.size(), 0);
 
@@ -58,18 +94,13 @@ std::vector<char> mark_constant_ops(const Graph& g) {
       // Effects are graph semantics, even when all their values are data.
       // Executing them in this compile-time pass would erase them from every
       // subsequent evaluation (and print/reject while compiling instead).
-      // A compiled region carries its effects inside its own program, so the
-      // opcode alone does not say: ask the payload. Such a region would
-      // refuse to run here anyway (no evaluation state), but the refusal is
-      // an exception that abandons this whole pass; excluding the region
-      // leaves the rest of the constant sub-graph foldable.
+      // A compiled region or a solver's callback carries its effects inside
+      // its own program, so the opcode alone does not say: ask the payload.
       // A region over literals alone, such as an inlined loop with constant
       // bounds, has no inputs and is constant all the same.
       bool c = (op.n_in > 0 || op.opcode == OP_ISLAND) &&
-               !is_effectful_op(op.opcode);
-      if (c && op.opcode == OP_ISLAND && op.udata != nullptr &&
-          island_has_effect(*static_cast<const IslandProg*>(op.udata)))
-        c = false;
+               !is_effectful_op(op.opcode) && !payload_has_effect(op) &&
+               !refused[i];
       for (int k = 0; k < op.n_in; ++k)
         if (op.in[k] >= 0 && live[(size_t)op.in[k]]) c = false;
       if (c && op.out >= 0 && no_fold[(size_t)op.out]) c = false;
@@ -186,86 +217,107 @@ ConstFoldStats const_fold(
   if (const char* e = debug_env("STANLI_NO_CONSTFOLD"))
     if (e[0] == '1') return st;
 
-  const std::vector<char> is_const = mark_constant_ops(g);
-  size_t n_const = 0;
-  for (char c : is_const) n_const += (size_t)c;
-  if (n_const == 0) return st;
-
-  // Slots the folded ops touch, remapped into a sub-graph so the temporary
-  // arena is proportional to the constant part rather than to the model.
-  std::unordered_map<int, int> remap;
-  Graph sub;
-  auto map_slot = [&](int s) {
-    auto it = remap.find(s);
-    if (it != remap.end()) return it->second;
-    const int ns = sub.add_slot(g.slots[(size_t)s].len, false);
-    remap.emplace(s, ns);
-    return ns;
-  };
   const std::vector<const std::vector<double>*> known_value =
       known_values(g, fills, known);
-  for (size_t i = 0; i < g.ops.size(); ++i) {
-    if (!is_const[i] || known_value[i]) continue;
-    const Op& op = g.ops[i];
-    Op sop = op;  // idata / udata point into g's pools, which outlive this
-    for (int k = 0; k < op.n_in; ++k)
-      if (op.in[k] >= 0) sop.in[k] = map_slot(op.in[k]);
-    if (op.out >= 0) sop.out = map_slot(op.out);
-    if (op.out2 >= 0) sop.out2 = map_slot(op.out2);
-    sub.ops.push_back(sop);
-  }
-  sub.result_slot = sub.slots.empty() ? -1 : 0;
-
-  // Const outputs anything still needs: a surviving op's input, or a root.
-  // The rest was scaffolding and is simply gone.
-  std::unordered_set<int> needed(roots.begin(), roots.end());
-  for (size_t i = 0; i < g.ops.size(); ++i) {
-    if (is_const[i]) continue;
-    const Op& op = g.ops[i];
-    for (int k = 0; k < op.n_in; ++k)
-      if (op.in[k] >= 0) needed.insert(op.in[k]);
-  }
-  if (g.result_slot >= 0) needed.insert(g.result_slot);
-
+  std::vector<char> refused(g.ops.size(), 0);
+  std::vector<char> is_const;
   std::vector<std::pair<int, std::vector<double>>> new_fills;
-  try {
-    Executor ex(std::move(sub));
-    for (const auto& f : fills) {
-      auto it = remap.find(f.first);
-      if (it == remap.end()) continue;
-      double* p = ex.value_ptr(it->second);
-      for (size_t j = 0; j < f.second.size(); ++j) p[j] = f.second[j];
-    }
+  // Each round folds the constant ops, or finds the first one that throws
+  // (a density rejecting its own data, an unregistered opcode). That op is
+  // not folded, which makes every op that reads it non-constant too, and
+  // the next round tries the rest. The normal sweep reports the error in
+  // context. Every round refuses one more op, so the loop ends.
+  for (;;) {
+    is_const = mark_constant_ops(g, refused);
+    std::vector<size_t> run;  // constant ops that have to be evaluated
+    size_t n_const = 0;
     for (size_t i = 0; i < g.ops.size(); ++i) {
-      if (!is_const[i] || !known_value[i]) continue;
-      auto it = remap.find(g.ops[i].out);
-      if (it == remap.end()) continue;
-      std::copy(known_value[i]->begin(), known_value[i]->end(),
-                ex.value_ptr(it->second));
+      n_const += (size_t)is_const[i];
+      if (is_const[i] && !known_value[i]) run.push_back(i);
     }
-    ex.run_forward_only();
-    std::unordered_set<int> emitted;
-    for (size_t i = 0; i < g.ops.size(); ++i) {
-      if (!is_const[i]) continue;
-      const Op& op = g.ops[i];
-      for (int out : {op.out, op.out2}) {
-        if (out < 0 || !needed.count(out) || !emitted.insert(out).second)
-          continue;
-        if (known_value[i]) {
-          new_fills.emplace_back(out, *known_value[i]);
-          continue;
-        }
-        const int64_t len = g.slots[(size_t)out].len;
-        const double* p = std::as_const(ex).value_ptr(remap.at(out));
-        new_fills.emplace_back(out, std::vector<double>(p, p + len));
+    if (n_const == 0) return st;
+    // Evaluates the first `count` ops of `run`, and with `collect` keeps
+    // the outputs that anything still needs: a surviving op's input, or a
+    // root. The rest was scaffolding and is simply gone.
+    const auto evaluate = [&](size_t count, bool collect) {
+      // Slots the folded ops touch, remapped into a sub-graph so the
+      // temporary arena is proportional to the constant part rather than
+      // to the model.
+      std::unordered_map<int, int> remap;
+      Graph sub;
+      auto map_slot = [&](int s) {
+        auto it = remap.find(s);
+        if (it != remap.end()) return it->second;
+        const int ns = sub.add_slot(g.slots[(size_t)s].len, false);
+        remap.emplace(s, ns);
+        return ns;
+      };
+      for (size_t k = 0; k < count; ++k) {
+        const Op& op = g.ops[run[k]];
+        Op sop = op;  // idata / udata point into g's pools, which outlive this
+        for (int j = 0; j < op.n_in; ++j)
+          if (op.in[j] >= 0) sop.in[j] = map_slot(op.in[j]);
+        if (op.out >= 0) sop.out = map_slot(op.out);
+        if (op.out2 >= 0) sop.out2 = map_slot(op.out2);
+        sub.ops.push_back(sop);
       }
+      sub.result_slot = sub.slots.empty() ? -1 : 0;
+      try {
+        Executor ex(std::move(sub));
+        for (const auto& f : fills) {
+          auto it = remap.find(f.first);
+          if (it == remap.end()) continue;
+          double* p = ex.value_ptr(it->second);
+          for (size_t j = 0; j < f.second.size(); ++j) p[j] = f.second[j];
+        }
+        for (size_t i = 0; i < g.ops.size(); ++i) {
+          if (!is_const[i] || !known_value[i]) continue;
+          auto it = remap.find(g.ops[i].out);
+          if (it == remap.end()) continue;
+          std::copy(known_value[i]->begin(), known_value[i]->end(),
+                    ex.value_ptr(it->second));
+        }
+        ex.run_forward_only();
+        if (!collect) return true;
+        std::unordered_set<int> needed(roots.begin(), roots.end());
+        for (size_t i = 0; i < g.ops.size(); ++i) {
+          if (is_const[i]) continue;
+          const Op& op = g.ops[i];
+          for (int j = 0; j < op.n_in; ++j)
+            if (op.in[j] >= 0) needed.insert(op.in[j]);
+        }
+        if (g.result_slot >= 0) needed.insert(g.result_slot);
+        std::unordered_set<int> emitted;
+        for (size_t i = 0; i < g.ops.size(); ++i) {
+          if (!is_const[i]) continue;
+          const Op& op = g.ops[i];
+          for (int out : {op.out, op.out2}) {
+            if (out < 0 || !needed.count(out) || !emitted.insert(out).second)
+              continue;
+            if (known_value[i]) {
+              new_fills.emplace_back(out, *known_value[i]);
+              continue;
+            }
+            const int64_t len = g.slots[(size_t)out].len;
+            const double* p = std::as_const(ex).value_ptr(remap.at(out));
+            new_fills.emplace_back(out, std::vector<double>(p, p + len));
+          }
+        }
+        st.slots_folded = (int)emitted.size();
+        return true;
+      } catch (const std::exception&) {
+        return false;
+      }
+    };
+    if (evaluate(run.size(), true)) break;
+    if (run.empty()) return st;
+    // The first op to throw is the first whose prefix of `run` throws.
+    size_t ok = 0, fails = run.size();
+    while (fails - ok > 1) {
+      const size_t mid = ok + (fails - ok) / 2;
+      (evaluate(mid, false) ? ok : fails) = mid;
     }
-    st.slots_folded = (int)emitted.size();
-  } catch (const std::exception&) {
-    // The constant part does not evaluate (a density rejecting its own data,
-    // an unregistered opcode). Leave the graph exactly as it was; the normal
-    // sweep will hit the same thing and report it in context.
-    return st;
+    refused[run[fails - 1]] = 1;
   }
 
   // A folded slot may already have a fill -- the zeroed vector a destructive
@@ -284,7 +336,7 @@ ConstFoldStats const_fold(
   }
 
   std::vector<Op> kept;
-  kept.reserve(g.ops.size() - n_const);
+  kept.reserve(g.ops.size());
   for (size_t i = 0; i < g.ops.size(); ++i)
     if (!is_const[i]) kept.push_back(g.ops[i]);
   st.ops_removed = (int)(g.ops.size() - kept.size());

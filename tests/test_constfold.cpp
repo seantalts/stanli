@@ -10,6 +10,7 @@
 //     op overwrites it -- is refused, since folding keeps only the final
 //     contents (the destructive update chains make this reachable),
 //   * STANLI_NO_CONSTFOLD=1 disables the pass.
+#include "density_ops.hpp"
 #include "env_helpers.hpp"
 #include "graph_helpers.hpp"
 #include <stanli/constfold.hpp>
@@ -214,6 +215,39 @@ static void test_known_outputs() {
   }
 }
 
+// sigma = -1 makes normal_lpdf throw, which must not stop the independent
+// a + b from folding. The density and the sum that reads it stay.
+static void test_one_throw_keeps_the_rest() {
+  Graph g;
+  Fills fills;
+  const int p = g.add_slot(1, true);
+  const int a = g.add_slot(1, false), b = g.add_slot(1, false);
+  const int bad_sigma = g.add_slot(1, false);
+  fills.emplace_back(a, std::vector<double>{2.0});
+  fills.emplace_back(b, std::vector<double>{3.0});
+  fills.emplace_back(bad_sigma, std::vector<double>{-1.0});
+  const int ab = g.add_slot(1, false);
+  g.add_op(OP_ADD, {a, b}, ab);
+  const int lp = g.add_slot(1, false);
+  testutil::add_density(g, OP_NORMAL_LPDF, {a, b, bad_sigma}, lp);
+  const int m = g.add_slot(1, false);
+  g.add_op(OP_MUL, {p, ab}, m);
+  const int r = g.add_slot(1, false);
+  g.add_op(OP_ADD, {m, lp}, r);
+  g.result_slot = r;
+
+  const ConstFoldStats st = const_fold(g, fills, {r});
+  expect("the sum folds past a throwing density", st.ops_removed == 1);
+  bool density_kept = false;
+  for (const Op& op : g.ops) density_kept |= op.opcode == OP_NORMAL_LPDF;
+  expect("the throwing density stays in the graph", density_kept);
+  bool have_fill = false;
+  for (const auto& f : fills)
+    if (f.first == ab && f.second.size() == 1 && f.second[0] == 5.0)
+      have_fill = true;
+  expect("the folded sum carries 2+3", have_fill);
+}
+
 int main() {
   {  // kernels register through the first Executor
     Graph g;
@@ -229,6 +263,7 @@ int main() {
   test_keeps_categorical_op();
   test_env_disable();
   test_known_outputs();
+  test_one_throw_keeps_the_rest();
   if (failures == 0) std::printf("test_constfold OK\n");
   return failures == 0 ? 0 : 1;
 }

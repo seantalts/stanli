@@ -1719,6 +1719,18 @@ struct Lowering {
                   const std::function<bool(const mir::Stmt&)>& stop);
   static bool while_sizes_from_loop_state(const mir::Stmt& s);
   std::optional<Flow> unroll_while(const mir::Stmt& s);
+  // Runs `unroll`, which lowers `loop` trip by trip. A branch that this
+  // finds to be decided at run time, and that holds a break or continue of
+  // `loop`, cannot be a region of its own, because the jump's target is
+  // outside it. Lowering then starts the loop again as one region.
+  struct LoopControlInBranch : CompileError {
+    LoopControlInBranch()
+        : CompileError(
+              "runtime-control region: break or continue outside a loop") {}
+  };
+  std::optional<Flow> unroll_or_region(
+      const mir::Stmt& loop,
+      const std::function<std::optional<Flow>()>& unroll);
   // A while inside a while being unrolled belongs to the same compile-time
   // execution: leaving it as a loop puts the outer counter in a register
   // and undoes the unroll around it.

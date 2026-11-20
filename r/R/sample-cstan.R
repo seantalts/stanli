@@ -85,7 +85,6 @@ sample_cstan <- function(model_code, data = list(), chains = 4, parallel_chains 
           anyDuplicated(names(values)))
         stop("init must supply a named list of parameters", call. = FALSE)
       values <- values[intersect(names(values), declared)]
-      values <- lapply(values, function(value) if (is.array(value)) as.vector(value) else value)
       # parameters left out start at random, as in CmdStan
       unconstrain(model, values, partial = TRUE, init_radius = init_radius,
                   seed = seed + chain)

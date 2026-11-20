@@ -23,6 +23,7 @@
 #include <stanli/adjoint_rules.hpp>
 #include <stanli/callable_transform.hpp>
 #include <stanli/extrema_grouping.hpp>
+#include <stanli/int_arith.hpp>
 #include <stanli/kernel_types.hpp>
 #include <stanli/message.hpp>
 #include <stanli/optable.hpp>
@@ -595,19 +596,22 @@ __attribute__((aligned(64))) void run_program_impl(const Program& p, T* reg,
       // use Stan's C++ integer type and have no derivative. As in stanc's
       // generated C++, signed overflow has no portable numerical contract.
       case Program::IADD:
-        d() = T(static_cast<int>(stan::math::value_of(ra())) +
-                static_cast<int>(stan::math::value_of(rb())));
+        d() = T(int_arith(IntOp::Add,
+                          static_cast<int>(stan::math::value_of(ra())),
+                          static_cast<int>(stan::math::value_of(rb()))));
         break;
       case Program::ISUB:
-        d() = T(static_cast<int>(stan::math::value_of(ra())) -
-                static_cast<int>(stan::math::value_of(rb())));
+        d() = T(int_arith(IntOp::Sub,
+                          static_cast<int>(stan::math::value_of(ra())),
+                          static_cast<int>(stan::math::value_of(rb()))));
         break;
       case Program::IMUL:
-        d() = T(static_cast<int>(stan::math::value_of(ra())) *
-                static_cast<int>(stan::math::value_of(rb())));
+        d() = T(int_arith(IntOp::Mul,
+                          static_cast<int>(stan::math::value_of(ra())),
+                          static_cast<int>(stan::math::value_of(rb()))));
         break;
       case Program::INEG:
-        d() = T(-static_cast<int>(stan::math::value_of(ra())));
+        d() = T(int_negate(static_cast<int>(stan::math::value_of(ra()))));
         break;
       case Program::IABS: {
         const int value = static_cast<int>(stan::math::value_of(ra()));
@@ -615,14 +619,14 @@ __attribute__((aligned(64))) void run_program_impl(const Program& p, T* reg,
         break;
       }
       case Program::IMOD:
-        d() = T(
-            stan::math::modulus(static_cast<int>(stan::math::value_of(ra())),
-                                static_cast<int>(stan::math::value_of(rb()))));
+        d() = T(int_arith(IntOp::Mod,
+                          static_cast<int>(stan::math::value_of(ra())),
+                          static_cast<int>(stan::math::value_of(rb()))));
         break;
       case Program::IDIV:
-        d() =
-            T(stan::math::divide(static_cast<int>(stan::math::value_of(ra())),
-                                 static_cast<int>(stan::math::value_of(rb()))));
+        d() = T(int_arith(IntOp::Div,
+                          static_cast<int>(stan::math::value_of(ra())),
+                          static_cast<int>(stan::math::value_of(rb()))));
         break;
       case Program::POW:
         d() = program_pow(static_cast<uint8_t>(I.len), ra(), rb());

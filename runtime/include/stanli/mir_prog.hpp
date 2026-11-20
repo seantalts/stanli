@@ -1117,20 +1117,19 @@ struct ProgramCompiler {
         if (e.args.size() == 2) {
           // Each operator with the named spelling beside it: on ints the
           // alias is the operator, down to `divide`'s truncation.
-          if (e.name == "Plus__" || e.name == "add")
-            return cint(e.args[0]) + cint(e.args[1]);
+          const auto arith = [&](IntOp op) -> long {
+            return int_arith(op, static_cast<int>(cint(e.args[0])),
+                             static_cast<int>(cint(e.args[1])));
+          };
+          if (e.name == "Plus__" || e.name == "add") return arith(IntOp::Add);
           if (e.name == "Minus__" || e.name == "subtract")
-            return cint(e.args[0]) - cint(e.args[1]);
+            return arith(IntOp::Sub);
           if (e.name == "Times__" || e.name == "multiply" ||
               e.name == "elt_multiply")
-            return cint(e.args[0]) * cint(e.args[1]);
+            return arith(IntOp::Mul);
           if (e.name == "IntDivide__" || e.name == "Divide__" ||
-              e.name == "divide" || e.name == "elt_divide") {
-            const long divisor = cint(e.args[1]);
-            if (divisor == 0)
-              throw std::domain_error("integer division by zero");
-            return cint(e.args[0]) / divisor;
-          }
+              e.name == "divide" || e.name == "elt_divide")
+            return arith(IntOp::Div);
           // The comparisons: on integers each is an integer in its own
           // right, and a `while` condition or an integer local written
           // with one -- `int found = (a[i] == k);` -- is as much a
@@ -1145,7 +1144,8 @@ struct ProgramCompiler {
               return evaluate_predicate_builtin(*pred, lhs, rhs);
           }
         }
-        if (e.args.size() == 1 && e.name == "PMinus__") return -cint(e.args[0]);
+        if (e.args.size() == 1 && e.name == "PMinus__")
+          return int_negate(static_cast<int>(cint(e.args[0])));
         if (e.args.size() == 1) {
           if (const BuiltinSpec* pred = shaped_builtin_spec(
                   e.name, 1, BuiltinShapePolicy::Predicate)) {

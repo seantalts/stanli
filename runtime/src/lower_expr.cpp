@@ -1,5 +1,7 @@
 #include "lower_internal.hpp"
 
+#include <stanli/int_arith.hpp>
+
 #include <numeric>
 
 namespace stanli {
@@ -255,6 +257,24 @@ long Lowering::eval_int(const mir::Expr& e) {
         if (offset >= stored) fail("integer index storage", e.raw);
         return en->is_int ? en->i[offset] : static_cast<long>(en->r[offset]);
       }
+      // An index outside a local array's declared extent is Stan's error
+      // whatever the array holds, so it needs no values.
+      if (const auto dl = e.args[0].kind == mir::Expr::Var
+                              ? decls.find(e.args[0].name)
+                              : decls.end();
+          !en && dl != decls.end() && is_array(dl->second.si)) {
+        const std::vector<int64_t>& dims = array_shape(dl->second.si).dims;
+        for (size_t d = 0; d < dims.size() && d + 1 < e.args.size() &&
+                           e.args[d + 1].kind == mir::Expr::IndexSingle;
+             ++d) {
+          const long index = eval_int(e.args[d + 1].args[0]);
+          if (index < 1 || index > dims[d])
+            reject(MessageError::OutOfRange,
+                   index_out_of_range_message("array[uni, ...] index", dims[d],
+                                              index),
+                   e.raw);
+        }
+      }
       // dims(x)[k] and friends: evaluate the base as a compile-time
       // sequence, then index it.
       {
@@ -311,8 +331,8 @@ long Lowering::eval_int(const mir::Expr& e) {
                                                      : std::min(a, b);
       }
       if (e.name == "sum" && e.args.size() == 1) {
-        long acc = 0;
-        for (int v : const_ints(e.args[0])) acc += v;
+        int acc = 0;
+        for (int v : const_ints(e.args[0])) acc = int_arith(IntOp::Add, acc, v);
         return acc;
       }
       // Stock stanc's --O1 folds an integer a * b + c into fma(a, b, c).
@@ -320,7 +340,11 @@ long Lowering::eval_int(const mir::Expr& e) {
           std::all_of(e.args.begin(), e.args.end(), [](const mir::Expr& a) {
             return mir::is_unsized(a, mir::UnsizedLeaf::Int);
           }))
-        return eval_int(e.args[0]) * eval_int(e.args[1]) + eval_int(e.args[2]);
+        return int_arith(
+            IntOp::Add,
+            int_arith(IntOp::Mul, static_cast<int>(eval_int(e.args[0])),
+                      static_cast<int>(eval_int(e.args[1]))),
+            static_cast<int>(eval_int(e.args[2])));
       if (const BuiltinSpec* pred =
               e.args.size() == 2 ? shaped_builtin_spec(
                                        e.name, 2, BuiltinShapePolicy::Predicate)
