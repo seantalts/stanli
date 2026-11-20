@@ -198,6 +198,7 @@ class Interp:
         self.theta = None
         self.pos = 0
         self.dyn = [True]
+        self.frames = [{}]
         self.cache = {}
         for fd in field(mir, "functions_block"):
             name = field(fd, "fdname")
@@ -352,11 +353,30 @@ class Interp:
             return rv
         raise Unsupported("expr " + k)
 
-    def args_ad(self, args):
-        return [self.ad(a) for a in args]
+    def ad(self, node):
+        """Whether `node` is an autodiff value at run time, as Stan's
+        template types decide it: inside a function, a formal is autodiff
+        only if its argument was, and any other variable only if some
+        argument was."""
+        if not ad_of(node):
+            return lambda: False
+        names = []
 
-    def ad(self, a):
-        return ad_of(a)
+        def walk(n):
+            if isinstance(n, list):
+                if len(n) == 2 and isinstance(n[0], list) and n[0][:1] == ["pattern"]:
+                    if not ad_of(n):
+                        return
+                    if n[0][1][0] == "Var":
+                        names.append(n[0][1][1])
+                walk(n[0])
+                for e in n[1:]:
+                    walk(e)
+        walk(node)
+        frames, dyn = self.frames, self.dyn
+        if not names:
+            return lambda: dyn[-1]
+        return lambda: any(frames[-1].get(nm, dyn[-1]) for nm in names)
 
     def funapp(self, node, p):
         fn = p[1]
@@ -375,10 +395,10 @@ class Interp:
         if name in ("reduce_sum", "reduce_sum_static") and pat(args[0])[0] == "Var":
             sl = ev[1]
             ev2 = [sl, lambda env: 1, lambda env: len(sl(env))] + ev[3:]
-            flags2 = [ad_of(args[1]), False, False] + [ad_of(a) for a in args[3:]]
+            flags2 = [self.ad(args[1]), lambda: False, lambda: False] + [self.ad(a) for a in args[3:]]
             return self.user_call(pat(args[0])[1], fn, None, ev2, flags2)
         suffix = fn[2]
-        flags = [ad_of(a) for a in args]
+        flags = [self.ad(a) for a in args]
         if isinstance(suffix, list) and suffix[0] in ("FnDist", "FnLpdf", "FnLpmf"):
             propto = (suffix[2] == "Unnormalized" if suffix[0] == "FnDist"
                       else suffix[1] == "true")
@@ -410,14 +430,9 @@ class Interp:
         if base not in mpdens.TERMS:
             if base in EXTRA_DENS:
                 g = EXTRA_DENS[base]
-                return lambda env: g([e(env) for e in ev], flags, propto)
+                return lambda env: g([e(env) for e in ev], [f() for f in flags], propto)
             raise Unsupported("density " + base)
-        dyn = self.dyn
-
-        def run(env):
-            fl = [f and dyn[-1] for f in flags]
-            return mpdens.lpdf(base, [e(env) for e in ev], fl, propto)
-        return run
+        return lambda env: mpdens.lpdf(base, [e(env) for e in ev], [f() for f in flags], propto)
 
     def operator(self, name, ev):
         if len(ev) == 1:
@@ -617,7 +632,7 @@ class Interp:
         fargs = field(fd, "fdargs")
         body = field(fd, "fdbody")
         if flags is None:
-            flags = [ad_of(a) for a in args]
+            flags = [self.ad(a) for a in args]
         names = [a[1] for a in fargs]
         fad = [a[0] == "AutoDiffable" for a in fargs]
         # Compiled on the first call and shared, so a recursive function
@@ -628,8 +643,9 @@ class Interp:
             if not compiled:
                 compiled.append([self.stmt(s) for s in body])
             local = {n: copy(e(env)) for n, e in zip(names, ev)}
-            dyn = any(f and a for f, a in zip(flags, fad))
-            self.dyn.append(dyn and self.dyn[-1])
+            frame = {n: a and f() for n, f, a in zip(names, flags, fad)}
+            self.dyn.append(any(frame.values()))
+            self.frames.append(frame)
             try:
                 for s in compiled[0]:
                     s(local)
@@ -637,6 +653,7 @@ class Interp:
                 return r.v
             finally:
                 self.dyn.pop()
+                self.frames.pop()
             return None
         return call
 

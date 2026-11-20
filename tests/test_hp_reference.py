@@ -358,26 +358,55 @@ model {
 """
 
 
+PROPTO_MODEL = """
+functions {
+  void prior_lp(real x, real s) { x ~ normal(0, s); }
+  void scaled_lp(real x, vector s) { x ~ normal(0, s[1] * 2); }
+}
+data { real s; vector[1] v; }
+parameters { real x; }
+model {
+  prior_lp(x, s);
+  scaled_lp(x, v);
+  prior_lp(x, x * x);
+}
+"""
+
+def interp(model, data):
+    import subprocess
+    import tempfile
+    from mpinterp import Interp
+    from sexp import parse
+    with tempfile.TemporaryDirectory() as tmp:
+        (pathlib.Path(tmp) / "model.stan").write_text(model)
+        out = subprocess.run([str(STANC), "--O0", "--debug-optimized-mir", "model.stan"],
+                             cwd=tmp, capture_output=True, text=True, check=True).stdout
+    return Interp(parse(out), data)
+
+
 @unittest.skipUnless(HAVE_MP and STANC.exists(), "needs mpmath and deps/stanc3/stanc")
 class Interpreter(unittest.TestCase):
     """A recursive function, an overloaded one and infinite bounds."""
 
     def test_log_density(self):
-        import subprocess
-        import tempfile
-        from mpinterp import Interp
-        from sexp import parse
-        with tempfile.TemporaryDirectory() as tmp:
-            (pathlib.Path(tmp) / "model.stan").write_text(INTERP_MODEL)
-            out = subprocess.run([str(STANC), "--O0", "--debug-optimized-mir", "model.stan"],
-                                 cwd=tmp, capture_output=True, text=True, check=True).stdout
         mp.dps = 50
-        it = Interp(parse(out), {})
+        it = interp(INTERP_MODEL, {})
         self.assertEqual(it.nparams(), 3)
         u = [mpf("0.5"), mpf("0.3"), mpf("-0.2")]
         # a = exp(u0) with log Jacobian u0; b1 = u1 is unbounded; b2 = 1 + exp(u2).
         want = 6 + 2 * mp.exp(u[0]) + u[1] + 1 + mp.exp(u[2]) + u[0] + u[2]
         self.assertLess(abs(it.logp(u) - want), mpf(10) ** -45)
+
+    def test_propto_follows_each_argument_of_a_function(self):
+        # Stan drops a term of `~` inside a function when the arguments
+        # that it depends on are data at the call: here -log(s) and the
+        # normal constant for the first two calls, but not -log(x * x).
+        mp.dps = 50
+        it = interp(PROPTO_MODEL, {"s": 0.25, "v": [1.5]})
+        x = mpf("0.7")
+        want = (-(x / mpf("0.25")) ** 2 / 2 - (x / 3) ** 2 / 2
+                - (1 / x) ** 2 / 2 - mp.log(x * x))
+        self.assertLess(abs(it.logp([x]) - want), mpf(10) ** -45)
 
 
 if __name__ == "__main__":
