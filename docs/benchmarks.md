@@ -836,9 +836,13 @@ model with each revision's own compiler, prepares it with each revision's
 runtime, and selects these models:
 
 - Every model whose prepared program differs: the MIR, the `dump_ops` op list
-  (which includes the ops inside each retained loop body) or the
-  `dump_islands` output.
-- Every model that runs an opcode named with `--opcodes`. Name each opcode
+  of the log-density graph or of the `write_array` graph (`dump_ops
+  --write-array`; each list includes the ops inside each retained loop body),
+  or the `dump_islands` output. Some models keep their retained loops only in
+  the `write_array` graph, for example `covid19imperial_v2`,
+  `covid19imperial_v3` and `iohmm_reg`.
+- Every model that runs an opcode named with `--opcodes` in either graph or
+  an island. Name each opcode
   whose kernel the change edits. A kernel change leaves the program as it
   was, and a tool cannot tell reliably which opcodes a source change touches.
   Opcodes match by exact name. A retained loop runs some ops under their

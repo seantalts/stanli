@@ -33,8 +33,8 @@ LOOP_OPS = """slots=7 ops=2 result=6
 """
 
 
-def program(ops=OPS, islands="graph: 3 ops, 9 slots\n", mir="aa"):
-    return dict(mir=mir, ops=ops, islands=islands)
+def program(ops=OPS, islands="graph: 3 ops, 9 slots\n", mir="aa", wa_ops=OPS):
+    return dict(mir=mir, ops=ops, wa_ops=wa_ops, islands=islands)
 
 
 class OpcodeTests(unittest.TestCase):
@@ -86,6 +86,28 @@ class ChangeTests(unittest.TestCase):
         moved = LOOP_OPS.replace("storage=retained", "storage=transient")
         self.assertEqual(select.program_change(program(LOOP_OPS), program(moved)),
                          "ops 4 -> 4: same opcodes, different operands")
+
+    def test_a_change_only_in_the_write_array_graph_is_a_program_change(self):
+        replaced = LOOP_OPS.replace("MATRIX_EXP", "QUAD_FORM_SYM")
+        self.assertEqual(select.program_change(program(wa_ops=LOOP_OPS),
+                                               program(wa_ops=replaced)),
+                         "write_array ops 4 -> 4: -MATRIX_EXP, +QUAD_FORM_SYM")
+        self.assertEqual(select.program_change(program(wa_ops=""), program()),
+                         "write_array ops 0 -> 3: +CONCAT2 x2, +TRANSPOSE")
+        both = select.program_change(program(), program(ops=NEW_OPS, wa_ops=NEW_OPS))
+        self.assertTrue(both.startswith("ops 3 -> 3: "), both)
+        self.assertIn("; write_array ops 3 -> 3: ", both)
+
+    def test_opcodes_used_only_by_the_write_array_count(self):
+        self.assertEqual(select.program_opcodes(program(wa_ops=LOOP_OPS),
+                                                ["OP_MATRIX_EXP", "OP_ADD"]),
+                         ["MATRIX_EXP"])
+
+    def test_a_model_without_a_write_array_graph_dumps_nothing(self):
+        self.assertEqual(select.write_array_ops(1, "", "model has no write_array graph\n"),
+                         ("", None))
+        self.assertEqual(select.write_array_ops(0, OPS, ""), (OPS, None))
+        self.assertEqual(select.write_array_ops(1, "", "boom\n"), (None, "exit 1"))
 
     def test_operand_and_island_and_mir_differences_are_reported(self):
         moved = OPS.replace("s1(l2),s2", "s2(l2),s1")
