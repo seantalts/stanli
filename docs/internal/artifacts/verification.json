@@ -146,6 +146,20 @@
   "point": 0,
   "status": "VERIFIED"
  },
+ "bayesdfa_dfa": {
+  "max_rel": 1.6983051162433826e-16,
+  "max_ulp": 1,
+  "n_values": 26,
+  "point": 0,
+  "status": "VERIFIED"
+ },
+ "bayesdfa_dfa_gp": {
+  "max_rel": null,
+  "max_ulp": 0,
+  "n_values": 14,
+  "point": 0,
+  "status": "CMDSTAN_ONLY"
+ },
  "beeguts_guts_sd": {
   "max_rel": 3.6302485480990956e-16,
   "max_ulp": 2,

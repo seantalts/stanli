@@ -1,11 +1,11 @@
 # Corpus status
 
-Models that evaluate: 412/413
-Models with CmdStan reference values: 412/413, at 1236 evaluation points in total.
+Models that evaluate: 413/415
+Models with CmdStan reference values: 414/415, at 1242 evaluation points in total.
 
 The corpus includes models from posteriordb, generated brms and cogmod models, ctsem's state-space template, models from CRAN packages, imported teaching models, and language fixtures. The source collection column says where each model came from. `tools/verify_refs.py` checks all reference values the same way.
 
-For 396 verified models, the table below shows how far stanli was from CmdStan at the primary evaluation point. These numbers were measured when the reference was recorded. Imported references keep their original CmdStan answers and a record of how each one was made. No deviation was recorded for them, so their rows say "not recorded". Having a reference for a model does not mean that the current build matches it. The numerical replay checks the current build.
+For 397 verified models, the table below shows how far stanli was from CmdStan at the primary evaluation point. These numbers were measured when the reference was recorded. Imported references keep their original CmdStan answers and a record of how each one was made. No deviation was recorded for them, so their rows say "not recorded". Having a reference for a model does not mean that the current build matches it. The numerical replay checks the current build.
 
 A model passes only when tools/verify_sample.py finds that stanli's log_prob and full gradient match CmdStan's at a shared, fixed evaluation point. The accuracy columns show the worst deviation over lp and every gradient component, as a relative difference and in ULPs. 0 ULP means bitwise identical to CmdStan. The bitwise results are for information only. The replay requires a scaled error of at most 1e-9, with documented exceptions for ill-conditioned models. Models that evaluate but are not verified are listed in a separate section and do not count as passing.
 
@@ -45,6 +45,7 @@ A model passes only when tools/verify_sample.py finds that stanli's log_prob and
 | `accel_splines` | posteriordb | 83 | 3.1e-16 | 2 |
 | `arK` | posteriordb | 8 | 9.6e-16 | 5 |
 | `arma11` | posteriordb | 5 | 0 (bitwise) | 0 |
+| `bayesdfa_dfa` | bayesdfa | 26 | 1.7e-16 | 1 |
 | `beeguts_guts_sd` | beeguts | 5 | 3.6e-16 | 2 |
 | `blr` | posteriordb | 7 | 1.8e-16 | 1 |
 | `bmgarch_bekk_arma` | bmgarch | 28 | 1.5e-15 | 8 |
@@ -467,6 +468,7 @@ The reference recorder also saves CmdStan's write_array output at the same point
 | `accel_splines` | 160 |
 | `arK` | 7 |
 | `arma11` | 4 |
+| `bayesdfa_dfa` | 416 |
 | `beeguts_guts_sd` | 540 |
 | `blr` | 6 |
 | `bones_model` | 13 |
@@ -856,4 +858,5 @@ CmdStan and stanli both reject every shared evaluation point for these models. T
 
 ## Failures
 
+- `bayesdfa_dfa_gp`: COMPILE_FAIL unsupported function gp_exp_quad_cov
 - `sir`: EVAL_FAIL y[6][4] is -1.82492e-07, but must be greater than or equal to 0.000000

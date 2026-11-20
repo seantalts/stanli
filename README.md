@@ -80,7 +80,7 @@ example in their language.
   and <!--gen:corpus_at_par-->346<!--/gen--> models are at least as fast.
   The [full benchmark](docs/benchmarks.md) also lists the runs that failed or
   were capped.
-- Model coverage. We compare <!--gen:corpus_reference_models-->412<!--/gen-->
+- Model coverage. We compare <!--gen:corpus_reference_models-->414<!--/gen-->
   models with CmdStan's recorded answers at three points each. In the
   posteriordb subset, <!--gen:corpus_verified-->118/120<!--/gen--> models
   match CmdStan's log density and full gradient.

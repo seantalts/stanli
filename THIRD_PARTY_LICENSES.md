@@ -119,3 +119,4 @@ dates in the R package boot (License "Unlimited"). The BSD text is in
 
 - `tests/bmgarch/`: bmgarch 2.1.0, GPL (>= 3), by Philippe Rast and Stephen Martin. The two models' `#include` lines are replaced by the text of the files they name; nothing else is edited.
 - `tests/walker/`: walker 1.0.10, GPL (>= 3), by Jouni Helske. The two models have no `#include` and are copied as published.
+- `tests/bayesdfa/`: bayesdfa 1.3.4, GPL (>= 3), by Eric J. Ward, Sean C. Anderson, Luis A. Damiano, Michael J. Malick and Philina A. English, with contributors. The model has no `#include` and is copied as published.
