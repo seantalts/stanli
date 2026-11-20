@@ -407,6 +407,82 @@
       "reason": "measured on Darwin arm64; cause not yet explained; the 80-digit value at point 1 is more than 1e6 scaled ULP from both engines, so it does not settle which is closer"
      }
     },
+    "examplemodels_cjs_cov_raneff": {
+     "grad[3]": {
+      "bound": 19,
+      "reason": "measured on Darwin arm64; 80-digit reference at point 1: stanli 2, CmdStan 21 scaled ULP from the true value; stanli is at least as close to it"
+     },
+     "lp": {
+      "bound": 14,
+      "reason": "measured on Darwin arm64; 80-digit reference at point 0: stanli 18, CmdStan 4 scaled ULP from the true value; stanli is farther from it than CmdStan; cause not yet explained"
+     }
+    },
+    "examplemodels_mr_ss": {
+     "grad[1]": {
+      "bound": 729,
+      "reason": "measured on Darwin arm64; 80-digit reference at point 0: stanli 58, CmdStan 787 scaled ULP from the true value; stanli is at least as close to it"
+     }
+    },
+    "examplemodels_ms": {
+     "grad[1]": {
+      "bound": 93,
+      "reason": "measured on Darwin arm64; 80-digit reference at point 0: stanli 32, CmdStan 61 scaled ULP from the true value; stanli is at least as close to it"
+     },
+     "grad[2]": {
+      "bound": 19,
+      "reason": "measured on Darwin arm64; 80-digit reference at point 1: stanli 3, CmdStan 22 scaled ULP from the true value; stanli is at least as close to it"
+     },
+     "grad[3]": {
+      "bound": 81,
+      "reason": "measured on Darwin arm64; 80-digit reference at point 0: stanli 1, CmdStan 80 scaled ULP from the true value; stanli is at least as close to it"
+     },
+     "grad[5]": {
+      "bound": 254,
+      "reason": "measured on Darwin arm64; 80-digit reference at point 1: stanli 36, CmdStan 218 scaled ULP from the true value; stanli is at least as close to it"
+     },
+     "grad[6]": {
+      "bound": 66,
+      "reason": "measured on Darwin arm64; 80-digit reference at point 2: stanli 0, CmdStan 65 scaled ULP from the true value; stanli is at least as close to it"
+     }
+    },
+    "examplemodels_ode_one_comp_mm": {
+     "grad[3]": {
+      "bound": 30,
+      "reason": "measured on Darwin arm64; cause not yet explained; the value comes from ode_bdf_tol at tolerances of 1e-8, which the 80-digit evaluator does not support"
+     },
+     "wa C_ppc.18": {
+      "bound": 11,
+      "reason": "measured on Darwin arm64; cause not yet explained; the value comes from ode_bdf_tol at tolerances of 1e-8; the 80-digit evaluator covers lp and gradient only"
+     },
+     "wa mu_C.10.1": {
+      "bound": 12,
+      "reason": "measured on Darwin arm64; cause not yet explained; the value comes from ode_bdf_tol at tolerances of 1e-8; the 80-digit evaluator covers lp and gradient only"
+     },
+     "wa mu_C.11.1": {
+      "bound": 13,
+      "reason": "measured on Darwin arm64; cause not yet explained; the value comes from ode_bdf_tol at tolerances of 1e-8; the 80-digit evaluator covers lp and gradient only"
+     },
+     "wa mu_C.15.1": {
+      "bound": 11,
+      "reason": "measured on Darwin arm64; cause not yet explained; the value comes from ode_bdf_tol at tolerances of 1e-8; the 80-digit evaluator covers lp and gradient only"
+     },
+     "wa mu_C.16.1": {
+      "bound": 13,
+      "reason": "measured on Darwin arm64; cause not yet explained; the value comes from ode_bdf_tol at tolerances of 1e-8; the 80-digit evaluator covers lp and gradient only"
+     },
+     "wa mu_C.18.1": {
+      "bound": 11,
+      "reason": "measured on Darwin arm64; cause not yet explained; the value comes from ode_bdf_tol at tolerances of 1e-8; the 80-digit evaluator covers lp and gradient only"
+     },
+     "wa mu_C.19.1": {
+      "bound": 11,
+      "reason": "measured on Darwin arm64; cause not yet explained; the value comes from ode_bdf_tol at tolerances of 1e-8; the 80-digit evaluator covers lp and gradient only"
+     },
+     "wa mu_C.20.1": {
+      "bound": 12,
+      "reason": "measured on Darwin arm64; cause not yet explained; the value comes from ode_bdf_tol at tolerances of 1e-8; the 80-digit evaluator covers lp and gradient only"
+     }
+    },
     "gpcm_latent_reg_irt": {
      "grad[14]": {
       "bound": 18,
@@ -665,6 +741,20 @@
      "lp": {
       "bound": 95,
       "reason": "measured on Darwin arm64; 80-digit reference at point 2: stanli 13, CmdStan 82 scaled ULP from the true value; stanli is at least as close to it"
+     }
+    },
+    "stanguide_ode_adjoint": {
+     "grad[1]": {
+      "bound": 20308934859,
+      "reason": "measured on Darwin arm64; one of the gradient entries in MISMATCH_OUTPUTS: the adjoint ODE solve at the guide's tolerances of 1e-6 puts both engines up to 4.4e-5 from the solution at 1e-11, where they agree to 1e-10 (NOTES in tools/corpus.py); also held to the MISMATCH gate of gate_for"
+     },
+     "grad[2]": {
+      "bound": 3739627192,
+      "reason": "measured on Darwin arm64; one of the gradient entries in MISMATCH_OUTPUTS: the adjoint ODE solve at the guide's tolerances of 1e-6 puts both engines up to 4.4e-5 from the solution at 1e-11, where they agree to 1e-10 (NOTES in tools/corpus.py); also held to the MISMATCH gate of gate_for"
+     },
+     "grad[5]": {
+      "bound": 1349586892,
+      "reason": "measured on Darwin arm64; one of the gradient entries in MISMATCH_OUTPUTS: the adjoint ODE solve at the guide's tolerances of 1e-6 puts both engines up to 4.4e-5 from the solution at 1e-11, where they agree to 1e-10 (NOTES in tools/corpus.py); also held to the MISMATCH gate of gate_for"
      }
     }
    },

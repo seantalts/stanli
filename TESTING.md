@@ -62,9 +62,13 @@ CI enforces:
   platforms that the ledger has measured (macOS arm64 today).
 - Limits from measured deviations for the ill-conditioned models
   (`ILL_CONDITIONED`: 1.5e-6 scaled error on gradient entries only) and for
-  the two `kronecker_gp` gradient entries in `MISMATCH_OUTPUTS` (the
-  `gate_for` floor, 3.3e-2 or more). Every other value of these models keeps
-  the 1e-9 gate.
+  the values that `MISMATCH_OUTPUTS` names at the points recorded as
+  MISMATCH (`gate_for`: 4 times the recorded deviation, and at least the
+  entry's own floor). These are two `kronecker_gp` gradient entries, with a
+  floor of 3.3e-2 from its measurements on x86-64, and three
+  `stanguide_ode_adjoint` gradient entries from an adjoint ODE solve at
+  tolerance 1e-6, with no floor (1.5e-5 and 1.3e-5). Every other value of
+  these models keeps the 1e-9 gate.
 - Matching rejection: stanli must reject a point that CmdStan rejects, and a
   non-finite value must match in kind.
 - 10 ULP by default in the generated conformance sweep, with reviewed
@@ -114,18 +118,33 @@ The bounds come only from a tool run:
     tools/verify_refs.py --corpus NAME [--stanc STANC] --update-ulp-ledger
 
 The run writes nothing unless every model passes every gate, including the
-ledger's current bounds. It creates entries for values over 10 that no entry
-covers, lowers an entry to the new measurement, and deletes an entry that is
-back within 10. It never raises a bound: a value over its bound fails the
-replay, and raising it means editing the entry by hand in a commit that says
-why. A generated entry's reason says only where it was measured; a person
-replaces it with the cause. A replay that measures half the bound or less
-prints a `ULP LEDGER` note asking for a rerun to tighten it.
+ledger's current bounds. It lowers an entry to the new measurement and
+deletes an entry that is back within 10. It never raises a bound: a value
+over its bound fails the replay, and raising it means editing the entry by
+hand in a commit that says why. On a platform or corpus with no section yet,
+the gate is off, and the run creates the section with an entry for every
+value over 10. Such a generated entry's reason says only where it was
+measured; a person replaces it with the cause. A replay that measures half
+the bound or less prints a `ULP LEDGER` note asking for a rerun to tighten it.
+
+Inside a section, a value over 10 that no entry covers fails the gate, so a
+model that is new to the corpus gets its first entries from a separate run:
+
+    tools/verify_refs.py deps/posteriordb MODEL... --add-ulp-entries REASONS.json
+
+`REASONS.json` maps each named model to `{label: reason}`. The run replays
+those models without their ULP gate, and every other model with it. It
+refuses a model that already has entries, because the ledger cannot tell a
+new model from an old one that has moved: only the person who names the
+model can. It writes nothing unless every model passes the other gates and
+every value over 10 has a reason, and no reason names a value within 10. A
+first run with an empty `{}` per model lists the values that need one.
+`--corpus NAME` takes the same flag.
 
 The reasons in the macOS arm64 section compare both engines with the 80-digit
 evaluator in [`tools/hp`](tools/hp/README.md) where it can score the value.
-Of the 134 main-corpus entries, it scores 81. stanli is at least as close to
-the true value as CmdStan in 54 of them, including 28 of the 30 lp entries.
+Of the 154 main-corpus entries, it scores 89. stanli is at least as close to
+the true value as CmdStan in 61 of them, including 28 of the 31 lp entries.
 Entries whose reason says
 "stanli is farther from it than CmdStan" are open findings under the budgets
 above. Linux and Windows have no section yet, so pull request CI does not run
@@ -258,10 +277,15 @@ changed inputs, and references recorded against an unpinned CmdStan, Stan or
 Stan Math. [`tools/toolchain.py`](tools/toolchain.py) makes the recording
 tools stop with an error on an unpinned CmdStan checkout. A model that stanli
 refuses, or whose `write_array` it cannot run, does not fail the run if it is
-listed in `KNOWN_GAPS`; the entry excuses the whole model, so the replay stops
-enforcing its log density and gradient too. It has two entries today,
-`cjs_mnl_ran` and `hmm_marginal`, whose generated quantities call
-`multinomial_rng` and `hmm_latent_rng`.
+listed in `KNOWN_GAPS`. Each entry says what it excuses. A `write_array` entry
+excuses only that section: the replay still compares the log density and
+gradient at every point, with every gate, and fails if anything but the
+`write_array` runs through the interpreter. Four entries are of this kind:
+`examplemodels_cjs_mnl_ran`, `examplemodels_hmm_marginal`, `bmgarch_ccc` and
+`bmgarch_bekk_arma`, whose generated quantities call `multinomial_rng`,
+`hmm_latent_rng` and `multi_student_t_rng`. A whole-model entry excuses any
+failure except a crash. The one entry of this kind is `bayesdfa_dfa_gp`, which
+stanli refuses because it lacks `gp_exp_quad_cov` in the form the model calls.
 Once stanli supports the model, the run fails until you delete the entry.
 
 [`tools/check_corpus_sampling.py`](tools/check_corpus_sampling.py) runs the

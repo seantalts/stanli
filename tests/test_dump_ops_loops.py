@@ -53,7 +53,7 @@ class LoopBodyTests(unittest.TestCase):
 
     def test_a_change_inside_the_body_is_a_program_change(self):
         changed = self.text.replace(" MATRIX_EXP ", " MATRIX_EXP_DYNAMIC ", 1)
-        base = dict(mir="aa", ops=self.text, islands="graph: 3 ops, 7 slots\n")
+        base = dict(mir="aa", ops=self.text, wa_ops="", islands="graph: 3 ops, 7 slots\n")
         new = dict(base, ops=changed)
         self.assertRegex(select.program_change(base, new), r"-MATRIX_EXP.*\+MATRIX_EXP_DYNAMIC")
 
