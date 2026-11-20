@@ -11,6 +11,7 @@ import pathlib
 import sys
 import tempfile
 import unittest
+import warnings
 from unittest import mock
 
 REPO = pathlib.Path(__file__).resolve().parent.parent
@@ -101,6 +102,20 @@ class FileTests(unittest.TestCase):
             bp.entry_for(doc, "m", digest("other"), digest("d"))
         with self.assertRaisesRegex(ValueError, "data changed"):
             bp.entry_for(doc, "f", digest("s"), digest("other"))
+
+    def test_an_entry_from_another_build_or_abi_is_used_without_complaint(self):
+        old = dict(reference(), stanli_build_id="abi1-0123456789ab-old", stanli_abi_version=1)
+        old_fixed = dict(fixed(), stanli_build_id="abi1-0123456789ab-old", stanli_abi_version=1)
+        self.write(document({"m": old, "f": old_fixed}))
+        doc = bp.load(self.path)
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err), warnings.catch_warnings():
+            warnings.simplefilter("error")
+            entry = bp.entry_for(doc, "m", digest("s"), digest("d"))
+            self.assertEqual(bp.points_of(entry), [[0.5, -1.0], [2.0, 3.0]])
+            self.assertEqual(bp.gradient_count(entry), 100)
+            self.assertEqual(bp.entry_for(doc, "f", digest("s"), digest("d"))["source"], "fixed")
+        self.assertEqual(err.getvalue(), "")
 
     def test_a_model_without_an_entry_is_an_error(self):
         self.write(document())

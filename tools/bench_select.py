@@ -29,8 +29,10 @@ REPO = pathlib.Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO / "tools"))
 from corpus_inventory import corpus_cases, materialize_data
 
-CONTROLS = ("i319_pois_re", "arma11", "eight_schools_noncentered", "hmm_example",
-            "one_comp_mm_elim_abs", "gpcm_latent_reg_irt")
+CONTROLS = ("i319_pois_re", "sw_ar", "eight_schools_noncentered", "hmm_example",
+            "one_comp_mm_elim_abs", "gpcm_latent_reg_irt", "cm_lba2",
+            "mlumr_survival_mspline_relaxed", "hierarchical_gp", "kronecker_gp",
+            "oncobayes2_blrm_exnex_combo3")
 ARMS = ("base", "candidate")
 ALL_OPS = "1000000000"
 THREAD_ENV = {k: "1" for k in ("STAN_NUM_THREADS", "OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS",
