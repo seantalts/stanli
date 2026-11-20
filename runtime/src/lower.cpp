@@ -1157,6 +1157,13 @@ CompiledModel::WriteArray Lowering::run_write_array(const mir::Program& p) {
   // did not recognize still folds away with both pinned on.
   int_env["emit_transformed_parameters__"] = 1;
   int_env["emit_generated_quantities__"] = 1;
+  const std::function<void(const mir::Stmt&)> sizes = [&](const mir::Stmt& s) {
+    if (s.kind == mir::Stmt::Decl)
+      for (const mir::Expr& d : s.decl_type.dims)
+        mir::collect_names(d, &write_array_size_names);
+    for (const mir::Stmt& child : s.body) sizes(child);
+  };
+  for (const mir::Stmt& s : p.generate_quantities) sizes(s);
   CompiledModel::WriteArray wa;
   DumpOnThrow guard{*this};
   const auto lower_time = prep.start();

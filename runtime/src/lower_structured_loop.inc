@@ -2810,12 +2810,15 @@ static constexpr size_t kRetainLoopOps = size_t{1} << 14;
 static constexpr size_t kRetainLoopOpsPerTrip = 32;
 // A retained loop's integers exist only at run time, too late for a later
 // declaration that a count kept by the loop sizes.
-static bool loop_assigns_outer_int(const mir::Stmt& loop) {
+// With `among`, only an integer in that set counts.
+static bool loop_assigns_outer_int(
+    const mir::Stmt& loop, const std::set<std::string>* among = nullptr) {
   std::set<std::string> locals;
   for (const auto& child : loop.body) collect_loop_locals(child, &locals);
   std::function<bool(const mir::Stmt&)> assigns = [&](const mir::Stmt& s) {
     if (s.kind == mir::Stmt::Assignment && !locals.count(s.lhs) &&
-        s.rhs.unsized.leaf == mir::UnsizedLeaf::Int)
+        s.rhs.unsized.leaf == mir::UnsizedLeaf::Int &&
+        (!among || among->count(s.lhs)))
       return true;
     for (const auto& child : s.body)
       if (assigns(child)) return true;
@@ -2979,6 +2982,7 @@ bool try_lower_region(
   if (mode == StructuredMode::Off) return false;
   if (in_write_array && !output_references &&
       (write_array_unrolled_loops.count(&s) ||
+       loop_assigns_outer_int(s, &write_array_size_names) ||
        (write_array_unroll_int_loops && loop_assigns_outer_int(s))))
     return false;
   // Make the representation decision before constructing a trial graph.

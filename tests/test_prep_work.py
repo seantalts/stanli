@@ -34,9 +34,11 @@ def work(bench, stanc, directory, name, source, data):
     run = subprocess.run([bench, str(sexp), str(data_path), "--prep",
                           "--parallel-wa=off"],
                          check=True, capture_output=True, text=True, env=env)
-    rows = {}
+    rows, lowerings = {}, {}
     for graph, statements, copied in WORK.findall(run.stdout + run.stderr):
         rows[graph] = (int(statements), int(copied))
+        lowerings[graph] = lowerings.get(graph, 0) + 1
+    rows["lowerings"] = lowerings
     if "log_prob" not in rows:
         raise RuntimeError(f"{name}: no lower_work row in\n{run.stderr}")
     return rows
@@ -216,8 +218,43 @@ def check_refused_retention(measure):
     return []
 
 
+def count_sizes_later_declaration():
+    """generated quantities with a carried loop that counts into k after
+    70,000 draws, and a declaration that k sizes after it. A retained loop
+    gives k only at run time, too late for the declaration."""
+    source = """data { int N; int T; }
+parameters { real theta; }
+model { theta ~ normal(0, 1); }
+generated quantities {
+  vector[N] yrep;
+  real s;
+  for (n in 1:N) yrep[n] = normal_rng(theta, 1);
+  {
+    int k = 0;
+    real acc = 0;
+    for (t in 1:T) {
+      acc = 0.5 * acc + theta + t;
+      if (t % 3 == 0) k += 1;
+    }
+    vector[k] v = rep_vector(1, k);
+    s = sum(v) + acc;
+  }
+}
+"""
+    return source, {"N": 70000, "T": 50}
+
+
+def check_write_array_lowered_once(measure):
+    rows = measure("wa_sizes", *count_sizes_later_declaration())
+    times = rows["lowerings"].get("write_array", 0)
+    print(f"write_array with a size read from a loop: lowered {times} times")
+    if times != 1:
+        return [f"write_array was lowered {times} times"]
+    return []
+
+
 CASES = [check_ifs_in_retained_loop, check_calls_in_retained_loop,
-         check_refused_retention]
+         check_refused_retention, check_write_array_lowered_once]
 RUN_CASES = [check_reduce_sum_beside_data]
 
 

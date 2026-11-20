@@ -1008,6 +1008,9 @@ struct Lowering {
   std::set<const mir::Stmt*> write_array_int_loops;
   std::set<const mir::Stmt*> write_array_unrolled_loops;
   bool write_array_unroll_int_loops = false;
+  // The names that a declared size in write_array reads. A loop that
+  // assigns one of them is unrolled on the first attempt.
+  std::set<std::string> write_array_size_names;
   // Which output variable each FnWriteParam writes, and which section of
   // write_array the statement being lowered belongs to.
   mir::OutputCursor output_cursor;
