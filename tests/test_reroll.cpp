@@ -814,6 +814,7 @@ static void test_cost_model_declines_small_gather() {
 
 // (d) STANLI_NO_REROLL disables the pass.
 static void test_env_disable() {
+  SKIP_WITHOUT_DEBUG_SWITCHES();
   test_setenv("STANLI_NO_REROLL", "1", 1);
   const int L = 6;
   Graph g;
@@ -2905,6 +2906,7 @@ static std::vector<double> e2e_grad(const char* sexp, const char* json,
 }
 
 static void test_e2e_fixtures() {
+  SKIP_WITHOUT_DEBUG_SWITCHES();
   const char* rdata =
       "{\"N\":16,\"x\":[0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8,0.9,1.0,1.1,1.2,"
       "1.3,1.4,1.5,1.6],"
@@ -3011,6 +3013,7 @@ static std::string ordered_logistic_json(int N) {
 }
 
 static void test_read_modify_write_models() {
+  SKIP_WITHOUT_DEBUG_SWITCHES();
   struct Case {
     const char* sexp;
     std::string (*json)(int);

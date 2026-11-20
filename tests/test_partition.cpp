@@ -1010,6 +1010,7 @@ static void test_cross_bucket_read_after_write() {
 }
 
 static void test_kill_switch() {
+  SKIP_WITHOUT_DEBUG_SWITCHES();
   Lanes b = build_index_lanes(8);
   const size_t before = b.g.ops.size();
   std::vector<int> tt = b.terms;

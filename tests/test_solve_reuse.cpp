@@ -256,11 +256,11 @@ int main() {
               identical(evaluate(actual, n, k, 4), evaluate(expected, n, k, 4)),
               "copy leaves the original factor storage independent");
           const auto diagnostics = captured.finish();
-          if (frames && rows == 33)
+          if (frames && rows == 33 && debug_switches_available())
             check(diagnostics.find("stanli_structured frames:") !=
                       std::string::npos,
                   "factor lifetime check reaches numerical frames");
-          if (rows > 0) {
+          if (rows > 0 && debug_switches_available()) {
             // Frames return before the stream's respecialized counter is
             // printed. Count their completed recordings instead: the first
             // recording plus the two parameter-controlled branch changes.

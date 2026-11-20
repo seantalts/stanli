@@ -1006,6 +1006,7 @@ static std::pair<double, double> anchor_gradient(const std::string& mir,
 }
 
 static void test_bounded_specialization() {
+  SKIP_WITHOUT_DEBUG_SWITCHES();
   using namespace stanli;
   const auto mir = slurp("tests/fixtures/bounded_control.tmir.sexp");
   for (int mode : {0, 1})
@@ -1091,6 +1092,7 @@ static void test_bounded_specialization() {
 // per call, and each region reads one element, so its register file must not
 // grow with the length of the data vector.
 static void test_udf_tail_branch() {
+  SKIP_WITHOUT_DEBUG_SWITCHES();
   using namespace stanli;
   const DataMap data =
       DataMap::from_json(slurp("tests/fixtures/udf_tail_branch.json"));
@@ -1147,6 +1149,7 @@ static void test_udf_tail_branch() {
 // ones. Each region reads one element of each transformed vector, so the
 // packed input must not grow with the vector.
 static void test_udf_packed_branch() {
+  SKIP_WITHOUT_DEBUG_SWITCHES();
   using namespace stanli;
   const DataMap data =
       DataMap::from_json(slurp("tests/fixtures/udf_packed_branch.json"));
@@ -1252,6 +1255,7 @@ static void test_region_dynamic_index() {
 // parameter-dependent region. The region folds it, so the unused arm and its
 // kernel call are not compiled.
 static void test_udf_constant_branch() {
+  SKIP_WITHOUT_DEBUG_SWITCHES();
   using namespace stanli;
   const DataMap data =
       DataMap::from_json(slurp("tests/fixtures/udf_constant_branch.json"));
@@ -1387,6 +1391,7 @@ static void test_udf_lpdf_folded_normalized() {
   const std::vector<double> want = {q, t, t,
                                     stan::math::normal_lpdf(0.75, 0.5, 0.5)};
   for (bool interp : {false, true}) {
+    if (interp && !debug_switches_available()) continue;
     const std::string path = interp ? "interpreted" : "compiled";
     const std::vector<double> row = write_array_row(mir, data, {q}, interp);
     check(row.size() == want.size(), "udf lpdf folded write_array " + path);
@@ -1933,6 +1938,7 @@ static void test_udf_void_statements() {
   const std::vector<double> want = {q[0], q[1],        q[2],
                                     q[3], q[3] * q[3], q[3] * q[3] + 1};
   for (bool interp : {false, true}) {
+    if (interp && !debug_switches_available()) continue;
     const std::vector<double> row = write_array_row(mir, data, q, interp);
     check(row.size() == want.size(),
           std::string("udf void statements write_array ") +
@@ -1953,6 +1959,7 @@ static void test_write_array_shadowed_size() {
   const std::vector<double> q{0.25};
   const std::vector<double> want{0.25, 0.5, 0.5, 0.5};
   for (bool interp : {false, true}) {
+    if (interp && !debug_switches_available()) continue;
     const std::string what = std::string("shadowed size write_array ") +
                              (interp ? "interpreted" : "compiled");
     try {
@@ -1967,6 +1974,7 @@ static void test_write_array_shadowed_size() {
 // and assigns it in each arm. The structured loop sizes it from those
 // assignments instead of refusing the loop.
 static void test_structured_vector_return() {
+  SKIP_WITHOUT_DEBUG_SWITCHES();
   using namespace stanli;
   const DataMap data =
       DataMap::from_json(slurp("tests/fixtures/structured_vector_return.json"));
@@ -2003,6 +2011,7 @@ static void test_structured_vector_return() {
 // Statements after an unconditional break are unreachable, so the
 // structured loop does not lower them.
 static void test_structured_dead_after_break() {
+  SKIP_WITHOUT_DEBUG_SWITCHES();
   using namespace stanli;
   const DataMap data = DataMap::from_json(
       slurp("tests/fixtures/structured_dead_after_break.json"));
@@ -2546,7 +2555,7 @@ int main() {
   // the bounded graph must come directly from lowering, before CSE or
   // re-rolling could hide an unroll. The nested form accumulates N*M into
   // the same one multiply rather than leaving a chain of scalar scales.
-  {
+  if (debug_switches_available()) {
     const std::string mir =
         slurp("tests/fixtures/invariant_target_loop.tmir.sexp");
     const auto compile_loop = [&](int mode, int N, int M = 1) {
@@ -2937,12 +2946,14 @@ int main() {
         compile_model(slurp("tests/fixtures/whileloop.tmir.sexp"), long_d);
     check(count_whiles(long_loop) == 3,
           "long while lowers without a compile-time iteration cap");
-    test_setenv("STANLI_STRUCTURED_LOOPS", "0", 1);
-    CompiledModel islands =
-        compile_model(slurp("tests/fixtures/whileloop.tmir.sexp"), d);
-    test_unsetenv("STANLI_STRUCTURED_LOOPS");
-    check(count_opcode(islands, OP_ISLAND) == 3,
-          "while loops lower as three control islands on the legacy path");
+    if (debug_switches_available()) {
+      test_setenv("STANLI_STRUCTURED_LOOPS", "0", 1);
+      CompiledModel islands =
+          compile_model(slurp("tests/fixtures/whileloop.tmir.sexp"), d);
+      test_unsetenv("STANLI_STRUCTURED_LOOPS");
+      check(count_opcode(islands, OP_ISLAND) == 3,
+            "while loops lower as three control islands on the legacy path");
+    }
   }
 
   // The matrix vocabulary used by ctsem remains inside a genuinely runtime
@@ -4150,7 +4161,7 @@ int main() {
   // forced interpreter keeps this interpreter-specific oracle on WaInterp;
   // Stan's empty-outcome logit overload returns zero without indexing either
   // the outcomes or the empty vector.
-  {
+  if (debug_switches_available()) {
     const std::string fn = "categorical_logit_lpmf";
     std::string mir =
         categorical_write_array_mir(slurp("tests/fixtures/cat.tmir.sexp"), fn,
@@ -4489,8 +4500,9 @@ int main() {
     want_row.push_back(q[1]);
     check(write_array_row(mir, d, q, false) == want_row,
           "to_array_2d write_array graph");
-    check(write_array_row(mir, d, q, true) == want_row,
-          "to_array_2d write_array interp");
+    if (debug_switches_available())
+      check(write_array_row(mir, d, q, true) == want_row,
+            "to_array_2d write_array interp");
   }
 
   // A density of an empty integer outcome is 0, as in Stan Math, also when
@@ -4502,6 +4514,7 @@ int main() {
     const std::vector<double> q{0.75};
     const std::vector<double> want_row{0.75, 0, 0};
     for (bool interp : {false, true}) {
+      if (interp && !debug_switches_available()) continue;
       const std::string what = std::string("empty int outcome write_array ") +
                                (interp ? "interp" : "graph");
       try {
@@ -4533,8 +4546,9 @@ int main() {
     const std::vector<double> want_row{0.75, 2.25, 1, 3, -2, 0, 1, 3, 2, 4, 3};
     check(write_array_row(mir, d, q, false) == want_row,
           "to_int write_array graph");
-    check(write_array_row(mir, d, q, true) == want_row,
-          "to_int write_array interp");
+    if (debug_switches_available())
+      check(write_array_row(mir, d, q, true) == want_row,
+            "to_int write_array interp");
   }
 
   // Compare acceptance against Stan Math independently of the flat gather
@@ -5095,7 +5109,7 @@ int main() {
   // The same, with a parameter feeding one container argument (`mu`, via
   // `rep_row_vector`): the density CALL has to run correctly as var replay too,
   // not just reproduce a data-only lp.
-  {
+  if (debug_switches_available()) {
     DataMap d = DataMap::from_json(slurp("tests/fixtures/densityvecgrad.json"));
     test_setenv("STANLI_STRUCTURED_LOOPS", "0", 1);
     CompiledModel lm =
@@ -5213,7 +5227,7 @@ int main() {
 
   // The same call inside a while loop: the region compiles to the register
   // machine, which reaches the kernel through one CALL re-executed under var.
-  {
+  if (debug_switches_available()) {
     DataMap d = DataMap::from_json(slurp("tests/fixtures/mltgrad.json"));
     test_setenv("STANLI_STRUCTURED_LOOPS", "0", 1);
     CompiledModel lm =
@@ -9207,7 +9221,7 @@ int main() {
   // graph kernels. Both new functions must exist there as well. The test-only
   // hook attaches the same interpreter used by ordinary late-truncation
   // recovery beside this fixture's complete write_array graph.
-  {
+  if (debug_switches_available()) {
     DataMap d = DataMap::from_json(R"({"a":[7],"m":[[0,0],[0,0]]})");
     check(test_setenv("STANLI_WA_FORCE_INTERP", "1", 1) == 0,
           "enable new-functions write_array interpreter");

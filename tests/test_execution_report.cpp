@@ -165,6 +165,8 @@ int main() {
   // One registry entry supplies ordinary graph calls, retained-loop calls,
   // and register CALL instructions without a model-level MIR fallback.
   for (int mode : {0, 1, 2, 3, 4}) {
+    if ((mode == 1 || mode == 2 || mode == 4) && !debug_switches_available())
+      continue;
     auto inputs =
         DataMap::from_json(slurp("tests/fixtures/hypergeometric_1f0.json"));
     if (mode == 0) {
@@ -254,7 +256,8 @@ int main() {
   compile_model(source, data);
   test_unsetenv("STANLI_EXECUTION_REPORT");
   set_diagnostic_sink(nullptr);
-  check(!diagnostics.empty(), "environment opt-in emits a manifest");
+  if (debug_switches_available())
+    check(!diagnostics.empty(), "environment opt-in emits a manifest");
   check(execution_report(observed) == execution_report(model),
         "diagnostics preserve structure");
   Executor a(std::move(model.graph)), b(std::move(observed.graph));
