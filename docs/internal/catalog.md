@@ -80,6 +80,7 @@ paths and hashes in raw records unchanged.
 | [Models from rethinking](../../tests/rethinking/README.md) | Fixture scope, provenance or test workflow. |
 | [stanc3 test models against CmdStan](../../tests/stanc3_good/README.md) | Fixture scope, provenance or test workflow. |
 | [Lowering regressions](../../tests/regressions/README.md) | Fixture scope, provenance or test workflow. |
+| [2026-11-20 · Build options that no CI job builds](../../notes/validation/audit-2026-11-20-unbuilt-options.md) | AVX2 kernels, `STANLI_ISA`, UBSan and native no-thread builds: definition, users and what to do. |
 
 ## Execution research
 
