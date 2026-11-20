@@ -194,6 +194,7 @@ paths and hashes in raw records unchanged.
 | [2026-09-20 · Remaining ctsem architecture results](../../notes/performance/2026-09-20-ctsem-remaining-architecture.md) | Dated results, proof limits and linked evidence. |
 | [2026-09-20 · ctsem solve-kernel results after PR392](../../notes/performance/2026-09-20-ctsem-solve-kernels.md) | Dated results, proof limits and linked evidence. |
 | [2026-10-25 · ctsem data-loop memo results](../../notes/performance/2026-10-25-ctsem-data-loop-memo.md) | Dated results, proof limits and linked evidence. |
+| [2026-11-20 · Data-loop memo and frame instances: which models reach them](../../notes/performance/audit-2026-11-20-loop-memo-instances.md) | Corpus reach and instruction counts for both mechanisms; the prepared timing experiment that would decide whether they stay. |
 
 ## Compiler and preparation
 

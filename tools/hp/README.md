@@ -16,11 +16,11 @@ speed, `gmpy2`; point `PYTHONPATH` at a directory holding them.
     PYTHONPATH=... tools/hp/hp_eval.py gp_pois_regr --dps-check --timeout 600
 
 For each of the three recorded points it prints, per arm (`cmds` CmdStan
-reference values, `defa` `build-rel/stanli_check`, `fast` the same with
-`--fast-math`), the log-density and gradient error. Build `stanli_check`
-first. `--dps-check` repeats point 0 at twice the precision to show that the
-reference has converged. `--no-grad` skips gradients, `--skip-stanli` skips
-the two stanli arms.
+reference values, `defa` `build-rel/stanli_check` or the binary that
+`--check` names, `fast` the same with `--fast-math`), the log-density and
+gradient error. Build `stanli_check` first. `--dps-check` repeats point 0
+at twice the precision to show that the reference has converged.
+`--no-grad` skips gradients, `--skip-stanli` skips the two stanli arms.
 
 Gradients: up to `--full-grad-max` (300) unconstrained parameters the
 reference is a central finite difference per coordinate at step
@@ -30,6 +30,20 @@ difference with two evaluations. The seeds are in the output JSON.
 `--grad-index 1,387` adds, above that size, a central difference along each
 listed coordinate (1-based, as the ULP ledger names gradient entries), stored
 as `grad_coord` in the point's entry.
+
+Transformed parameters and generated quantities:
+
+    PYTHONPATH=... tools/hp/hp_eval.py epinow2_estimate_infections --wa infections.56
+    PYTHONPATH=... tools/hp/hp_eval.py MODEL --wa mu sigma.2
+
+`--wa` also runs the model's `generate_quantities` MIR at each point and
+stores the whole write_array row, with CmdStan's column names, under `wa` in
+the point's entry. A variable whose value depends on an `_rng` call is left
+out and listed under `wa_refused` with the function. For each named column,
+or every column of a named variable, it prints the 80-digit value and each
+arm's distance from it in ULPs of the variable's largest CmdStan value, the
+scale that the replay gate uses for write_array. With no names it only
+stores the row, which `ledger_accuracy.py` reads.
 
 Errors, in `metrics.py`: log density `|a-b| / max(|a|,|b|,1)`; full gradient
 `max|g-r| / max(1, max|g|, max|r|)` (the fast gate in
@@ -60,10 +74,10 @@ mirror image.
     PYTHONPATH=... tools/hp/ledger_accuracy.py HP_DIR --census --only ch12_m12_5 --switch NO_REROLL
 
 Scores each `main` entry of `tests/ulp_ledger.json` against the 80-digit
-values in `HP_DIR`: at the point and index where stanli is farthest from
-CmdStan, it prints how many ULPs of the scale each engine is from the true
-value, and whether stanli is `FARTHER` than CmdStan. `--switch` repeats the
-stanli run with `STANLI_<NAME>` set and scores it at the same point and
+values in `HP_DIR` (write_array entries need a run with `--wa`): at the
+point and index where stanli is farthest from CmdStan, it prints how many
+ULPs of the scale each engine is from the true value, and whether stanli is
+`FARTHER` than CmdStan. `--switch` repeats the stanli run with `STANLI_<NAME>` set and scores it at the same point and
 index. `--census` scores every value of the listed models instead of the
 ledger's entries, and counts how often stanli is the closer one.
 

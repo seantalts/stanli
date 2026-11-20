@@ -175,8 +175,7 @@ struct RecordingProgram {
     lower(root, outer);
     patch(outer.breaks, exit_break);
     patch(outer.continues, exit_continue);
-    const char* option = debug_env("STANLI_STRUCTURED_DATA_RECORDING");
-    if (!option || option[0] != '0') compile_data(s);
+    compile_data(s);
     if (const char* work = debug_env("STANLI_DATA_LOOP_MEMO_MIN_WORK"))
       memo_min_work = std::strtoull(work, nullptr, 10);
     if (const char* ratio = debug_env("STANLI_DATA_LOOP_MEMO_MIN_RATIO"))
@@ -227,37 +226,31 @@ void RecordingProgram::compile_data(LoopState& s) {
     changed = false;
     propagate(propagate, p.root);
   }
-  const char* index_option = debug_env("STANLI_STRUCTURED_PREPARED_INDEX");
-  const bool prepare_indices = !index_option || index_option[0] != '0';
-  const char* iterator_option =
-      debug_env("STANLI_STRUCTURED_PREPARED_ITERATOR");
-  if (!iterator_option || iterator_option[0] != '0') {
-    // A stable iterator binding requires one For writer in the whole region.
-    // The original ForEnter publishes it; later iterations only change its
-    // workspace value. Data-valued bounds remain guarded by enclosing control.
-    std::vector<int> writer(p.body.slots.size(), -1);
-    const auto mark_writer = [&](int slot, int loop) {
-      if (slot >= 0) writer[slot] = writer[slot] == -1 ? loop : -2;
-    };
-    const auto inspect_writers = [&](const auto& self, const Node& n) -> void {
-      if (n.kind == Node::For) mark_writer(n.iterator, n.loop_index);
-      if (n.kind == Node::Alias) mark_writer(n.dst, -2);
-      if (n.kind == Node::KernelCall) {
-        const auto& op = p.body.ops[n.op];
-        mark_writer(op.out, -2);
-        mark_writer(op.out2, -2);
-        if (n.storage == Node::InPlace) mark_writer(op.in[0], -2);
-      }
-      for (const auto& child : n.children) self(self, child);
-    };
-    inspect_writers(inspect_writers, p.root);
-    for (auto& instruction : code) {
-      if (instruction.kind != ForNext) continue;
-      const auto& n = *instruction.node;
-      if (n.storage == Node::Transient && writer[n.iterator] == n.loop_index &&
-          !varying[n.lower] && !varying[n.upper])
-        instruction.kind = DataForNext;
+  // A stable iterator binding requires one For writer in the whole region.
+  // The original ForEnter publishes it; later iterations only change its
+  // workspace value. Data-valued bounds remain guarded by enclosing control.
+  std::vector<int> writer(p.body.slots.size(), -1);
+  const auto mark_writer = [&](int slot, int loop) {
+    if (slot >= 0) writer[slot] = writer[slot] == -1 ? loop : -2;
+  };
+  const auto inspect_writers = [&](const auto& self, const Node& n) -> void {
+    if (n.kind == Node::For) mark_writer(n.iterator, n.loop_index);
+    if (n.kind == Node::Alias) mark_writer(n.dst, -2);
+    if (n.kind == Node::KernelCall) {
+      const auto& op = p.body.ops[n.op];
+      mark_writer(op.out, -2);
+      mark_writer(op.out2, -2);
+      if (n.storage == Node::InPlace) mark_writer(op.in[0], -2);
     }
+    for (const auto& child : n.children) self(self, child);
+  };
+  inspect_writers(inspect_writers, p.root);
+  for (auto& instruction : code) {
+    if (instruction.kind != ForNext) continue;
+    const auto& n = *instruction.node;
+    if (n.storage == Node::Transient && writer[n.iterator] == n.loop_index &&
+        !varying[n.lower] && !varying[n.upper])
+      instruction.kind = DataForNext;
   }
   size_t kernels = 0;
   for (auto& instruction : code) {
@@ -280,7 +273,7 @@ void RecordingProgram::compile_data(LoopState& s) {
     // A point-read instruction caches proof of fixed geometry, not values or
     // addresses. Eligibility is nonthrowing; the first executed call still
     // runs the original kernel, including every descriptor check.
-    if (prepare_indices && n.forward == index_forward && op.udata &&
+    if (n.forward == index_forward && op.udata &&
         p.body.slots[op.out].len == 1 &&
         single_selection(*static_cast<const DynamicIndexSpec*>(op.udata)))
       instruction.kind = DataIndex;

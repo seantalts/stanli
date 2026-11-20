@@ -9,11 +9,11 @@
  * compilation at a time by itself). One handle is NOT safe for concurrent
  * use. A call that evaluates the model (stanli_grad, stanli_grad_err,
  * stanli_hessian*, stanli_constrain, stanli_wa_row, stanli_wa_seed*,
- * stanli_unconstrain_inits, the samplers, optimize and the other
- * algorithms) uses the handle's own executors and its stanli_wa_seed
- * stream, so at most one such call may run on a handle at a time, and none
- * while stanli_model_free runs. Calls that only read what construction
- * fixed (counts, names, variables, layouts, warnings, messages,
+ * stanli_unconstrain_inits, the samplers, optimize, stanli_laplace_whiten
+ * and the other algorithms) uses the handle's own executors and its
+ * stanli_wa_seed stream, so at most one such call may run on a handle at a
+ * time, and none while stanli_model_free runs. Calls that only read what
+ * construction fixed (counts, names, variables, layouts, warnings, messages,
  * stanli_resume_size) may run at any time while the handle lives. A call's
  * callbacks (progress, poll, log) run on the calling thread during the call
  * and must not evaluate the same handle. A sampling call runs its chains on
@@ -374,6 +374,112 @@ int stanli_sparse_factor_lowrank(const stanli_sparse_factor* f, int64_t k,
                                  const double* u, double* c, double* b,
                                  double* w, char* err, size_t err_len);
 void stanli_sparse_factor_free(stanli_sparse_factor* f);
+
+/* EXPERIMENTAL. The Laplace whitening builder: everything that
+ * stanli_model_whiten_lowrank needs to whiten a model with random effects u
+ * (the `latent` block of the unconstrained vector) and hyperparameters theta
+ * (the rest).
+ *
+ * 1. From q_start, the sparsity pattern of the Hessian block over u: entries
+ *    above pattern_tolerance relative to sqrt(|H_ii| |H_jj|). By default it
+ *    comes from gradient differences along random groups of coordinates,
+ *    checked against three random central differences; if the check fails
+ *    the builder warns and uses the dense Hessian (stanli_hessian), which is
+ *    also what dense_pattern asks for.
+ * 2. The theta that maximizes log p(theta, u_hat(theta)) - log det(-H_uu) / 2,
+ *    with u_hat from an inner L-BFGS (inner_iter iterations), H_uu from
+ *    central differences along a colouring of the pattern, and theta from an
+ *    outer L-BFGS (max_outer iterations) on forward differences.
+ * 3. Q, the negative Hessian there (coloured, or dense with dense_hessian),
+ *    without the entries below threshold relative to sqrt(Q_ii Q_jj).
+ * 4. A sparse LDL^T of Q under an approximate minimum degree order. When Q
+ *    is not positive definite: REPAIR_ABS replaces each eigenvalue below clip
+ *    times the largest absolute eigenvalue by its absolute value, floored at
+ *    that level, as a low-rank correction found by a Lanczos search;
+ *    REPAIR_ABS_DENSE does the same densely; REPAIR_CLIP raises each
+ *    eigenvalue below clip times the largest to that level, densely. Either
+ *    way the result carries a warning.
+ *
+ * The random numbers of step 1 come from `seed`. */
+typedef enum {
+  STANLI_WHITEN_REPAIR_ABS = 0,
+  STANLI_WHITEN_REPAIR_ABS_DENSE = 1,
+  STANLI_WHITEN_REPAIR_CLIP = 2
+} stanli_whiten_repair;
+typedef struct {
+  uint32_t seed;
+  int max_outer;
+  int inner_iter;
+  double pattern_tolerance;
+  double threshold;
+  int repair; /* a stanli_whiten_repair */
+  double clip;
+  int dense_pattern;
+  int dense_hessian;
+  int keep_precision; /* keep Q (repaired) for stanli_whitening_get_precision */
+} stanli_laplace_whiten_opts;
+/* seed 1, max_outer 60, inner_iter 2000, tolerances 1e-6, REPAIR_ABS, clip
+ * 1e-8 (the conventional clip for REPAIR_CLIP is 1e-3), the rest 0. */
+void stanli_laplace_whiten_opts_init(stanli_laplace_whiten_opts* o);
+
+/* Runs the builder from the unconstrained q_start[n], with latent[n_latent]
+ * the increasing 0-based index of u. A null opts means the defaults.
+ * Returns null with a message in `err` on invalid input or failure, and null
+ * with *interrupted set to 1 when `poll` (asked as stanli_hessian_with_poll
+ * asks it) stopped the call. `poll` and `interrupted` may be null. Free the
+ * result with stanli_whitening_free. */
+typedef struct stanli_whitening stanli_laplace;
+stanli_whitening* stanli_laplace_whiten(stanli_model* m, const double* q_start,
+                                        int64_t n_latent, const int64_t* latent,
+                                        const stanli_laplace_whiten_opts* opts,
+                                        stanli_sample_poll_cb poll,
+                                        void* poll_user, int* interrupted,
+                                        char* err, size_t err_len);
+
+typedef struct {
+  int64_t n;
+  int64_t n_latent;
+  int64_t n_theta;
+  int64_t nnz;  /* entries of L */
+  int64_t rank; /* columns of the low-rank correction; 0 for none */
+  int64_t n_clipped;
+  /* min_eigenvalue and max_eigenvalue hold the extreme eigenvalues of Q when
+   * it was not positive definite, and are 0 otherwise. */
+  int has_spectrum;
+  double min_eigenvalue;
+  double max_eigenvalue;
+  int64_t n_colors; /* of the final Hessian's colouring; n when dense */
+  int64_t pattern_gradients;
+  int64_t marginal_gradients;
+  int64_t final_gradients;
+  int64_t outer_iterations;
+  int64_t outer_evaluations;
+  int pattern_fallback; /* the probe failed; the pattern is the dense one */
+  int has_precision;
+} stanli_whitening_report;
+void stanli_whitening_get_report(const stanli_whitening* r,
+                                 stanli_whitening_report* out);
+/* The arguments of stanli_model_whiten_lowrank: q_hat[n], perm[n],
+ * col_ptr[n + 1], row_idx[nnz], values[nnz], and c[n], b[n * rank] and
+ * w[n * rank] (row-major). When rank is 0, c, b and w are not written and
+ * may be null, and the whitening is stanli_model_whiten's. */
+void stanli_whitening_get_spec(const stanli_whitening* r, double* q_hat,
+                               int64_t* perm, int64_t* col_ptr,
+                               int64_t* row_idx, double* values, double* c,
+                               double* b, double* w);
+/* theta_start[n_theta] and theta_hat[n_theta]. */
+void stanli_whitening_get_theta(const stanli_whitening* r, double* theta_start,
+                                double* theta_hat);
+/* How the outer L-BFGS stopped; empty when there is no theta. */
+const char* stanli_whitening_outer_message(const stanli_whitening* r);
+/* Warnings for the caller to show: the probe fell back, or eigenvalues were
+ * repaired. */
+int64_t stanli_whitening_n_warnings(const stanli_whitening* r);
+const char* stanli_whitening_warning(const stanli_whitening* r, int64_t i);
+/* The repaired Q as n * n doubles, when keep_precision was set. Returns
+ * nonzero, writing nothing, otherwise. */
+int stanli_whitening_get_precision(const stanli_whitening* r, double* out);
+void stanli_whitening_free(stanli_whitening* r);
 
 /* ---- multi-chain sampling ------------------------------------------------
  *
@@ -788,7 +894,7 @@ int stanli_sample_walnuts_stream(stanli_model* m, uint32_t seed, int warmup,
                                  size_t err_len);
 
 /* WALNUTS with the chain's stream and start chosen as for NUTS: the sampler
- * and the starting point use (seed, chain_id), chain_id >= 1, and `init`,
+ * and the starting point use (seed, chain_id), chain_id >= 0, and `init`,
  * when non-null, is one n_unconstrained start on the unconstrained scale;
  * otherwise the start is drawn uniformly in (-init_radius, init_radius).
  * stanli_sample_walnuts_stream is this call with chain_id 1, init_radius 2,

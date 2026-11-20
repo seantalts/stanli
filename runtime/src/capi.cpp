@@ -14,6 +14,7 @@
 #include <stanli/rejection.hpp>
 #include <stanli/walnuts.hpp>
 #include <stanli/wa_interp.hpp>
+#include <stanli/laplace.hpp>
 #include <stanli/sparse_factor.hpp>
 #include <stanli/whiten.hpp>
 
@@ -1015,6 +1016,187 @@ int stanli_sparse_factor_lowrank(const stanli_sparse_factor* f, int64_t k,
 }
 
 void stanli_sparse_factor_free(stanli_sparse_factor* f) { delete f; }
+
+struct stanli_whitening {
+  stanli::laplace::Result r;
+  int64_t n_latent = 0;
+};
+
+void stanli_laplace_whiten_opts_init(stanli_laplace_whiten_opts* o) {
+  const stanli::laplace::Options d;
+  o->seed = d.seed;
+  o->max_outer = d.max_outer;
+  o->inner_iter = d.inner_iter;
+  o->pattern_tolerance = d.pattern_tolerance;
+  o->threshold = d.threshold;
+  o->repair = STANLI_WHITEN_REPAIR_ABS;
+  o->clip = d.clip;
+  o->dense_pattern = 0;
+  o->dense_hessian = 0;
+  o->keep_precision = 0;
+}
+
+stanli_whitening* stanli_laplace_whiten(stanli_model* m, const double* q_start,
+                                        int64_t n_latent, const int64_t* latent,
+                                        const stanli_laplace_whiten_opts* opts,
+                                        stanli_sample_poll_cb poll,
+                                        void* poll_user, int* interrupted,
+                                        char* err, size_t err_len) {
+  if (interrupted != nullptr) *interrupted = 0;
+  try {
+    if (m == nullptr || q_start == nullptr || latent == nullptr)
+      throw std::invalid_argument(
+          "stanli_laplace_whiten needs a model, a starting point and a latent "
+          "index");
+    stanli_laplace_whiten_opts o;
+    stanli_laplace_whiten_opts_init(&o);
+    if (opts != nullptr) o = *opts;
+    Rules rules;
+    rules.at_least("max_outer", o.max_outer, 0);
+    rules.at_least("inner_iter", o.inner_iter, 1);
+    rules.require(o.pattern_tolerance >= 0 && o.threshold >= 0 && o.clip >= 0,
+                  "pattern_tolerance, threshold and clip must be >= 0");
+    rules.require(o.repair >= STANLI_WHITEN_REPAIR_ABS &&
+                      o.repair <= STANLI_WHITEN_REPAIR_CLIP,
+                  "repair must be a stanli_whiten_repair");
+    rules.require(n_latent >= 1, "the latent index needs at least one entry");
+    if (!rules.ok()) throw std::invalid_argument(rules.problem());
+    const int64_t n = m->ex->n_params();
+    std::vector<int> iu;
+    for (int64_t k = 0; k < n_latent; ++k) {
+      if (latent[k] < 0 || latent[k] >= n)
+        throw std::invalid_argument("latent index " +
+                                    std::to_string(latent[k]) +
+                                    " is outside the unconstrained vector");
+      iu.push_back((int)latent[k]);
+    }
+    stanli::laplace::Options lo;
+    lo.seed = o.seed;
+    lo.max_outer = o.max_outer;
+    lo.inner_iter = o.inner_iter;
+    lo.pattern_tolerance = o.pattern_tolerance;
+    lo.threshold = o.threshold;
+    lo.repair = o.repair == STANLI_WHITEN_REPAIR_ABS
+                    ? stanli::laplace::Repair::abs
+                : o.repair == STANLI_WHITEN_REPAIR_ABS_DENSE
+                    ? stanli::laplace::Repair::abs_dense
+                    : stanli::laplace::Repair::clip;
+    lo.clip = o.clip;
+    lo.dense_pattern = o.dense_pattern != 0;
+    lo.dense_hessian = o.dense_hessian != 0;
+    lo.keep_precision = o.keep_precision != 0;
+
+    std::function<bool()> ask;
+    if (poll != nullptr)
+      ask = [poll, poll_user] { return poll(poll_user) != 0; };
+    stanli::detail::ThrottledPoll throttle(&ask);
+    throttle.check();
+    stanli::laplace::Gradient grad(
+        [&](const Eigen::VectorXd& q, Eigen::VectorXd& g) {
+          throttle.check();
+          g.resize(n);
+          double lp;
+          char why[1024] = "";
+          if (stanli_grad_err(m, q.data(), &lp, g.data(), why, sizeof why) !=
+              STANLI_EVAL_OK)
+            throw stanli::laplace::EvalError(why);
+          return lp;
+        });
+    const auto hessian = [&](const Eigen::VectorXd& q) {
+      Eigen::MatrixXd h(n, n);
+      double lp;
+      int stopped = 0;
+      char why[4096] = "";
+      if (stanli_hessian_with_poll(m, q.data(), &lp, nullptr, h.data(), poll,
+                                   poll_user, &stopped, why, sizeof why) != 0)
+        throw std::runtime_error(std::string("Hessian evaluation failed: ") +
+                                 why);
+      if (stopped) throw stanli::detail::Interrupted{};
+      return h;
+    };
+    auto out = std::make_unique<stanli_whitening>();
+    out->r = stanli::laplace::whiten(
+        grad, hessian, Eigen::Map<const Eigen::VectorXd>(q_start, n), iu, lo);
+    out->n_latent = n_latent;
+    return out.release();
+  } catch (const stanli::detail::Interrupted&) {
+    if (interrupted != nullptr) *interrupted = 1;
+    return nullptr;
+  } catch (const std::exception& e) {
+    put_err(err, err_len, e.what());
+    return nullptr;
+  }
+}
+
+void stanli_whitening_get_report(const stanli_whitening* r,
+                                 stanli_whitening_report* out) {
+  const auto& x = r->r;
+  *out = stanli_whitening_report{};
+  out->n = x.n;
+  out->n_latent = r->n_latent;
+  out->n_theta = x.n - r->n_latent;
+  out->nnz = (int64_t)x.values.size();
+  out->rank = x.rank;
+  out->n_clipped = x.n_clipped;
+  out->has_spectrum = x.has_spectrum;
+  out->min_eigenvalue = x.min_eigenvalue;
+  out->max_eigenvalue = x.max_eigenvalue;
+  out->n_colors = x.n_colours;
+  out->pattern_gradients = x.pattern_gradients;
+  out->marginal_gradients = x.marginal_gradients;
+  out->final_gradients = x.final_gradients;
+  out->outer_iterations = x.outer_iterations;
+  out->outer_evaluations = x.outer_evaluations;
+  out->pattern_fallback = x.pattern_fallback;
+  out->has_precision = x.precision.size() > 0;
+}
+
+void stanli_whitening_get_spec(const stanli_whitening* r, double* q_hat,
+                               int64_t* perm, int64_t* col_ptr,
+                               int64_t* row_idx, double* values, double* c,
+                               double* b, double* w) {
+  const auto& x = r->r;
+  std::copy(x.q_hat.data(), x.q_hat.data() + x.n, q_hat);
+  std::copy(x.perm.begin(), x.perm.end(), perm);
+  std::copy(x.col_ptr.begin(), x.col_ptr.end(), col_ptr);
+  std::copy(x.row_idx.begin(), x.row_idx.end(), row_idx);
+  std::copy(x.values.begin(), x.values.end(), values);
+  if (x.rank == 0) return;
+  std::copy(x.c.begin(), x.c.end(), c);
+  std::copy(x.b.begin(), x.b.end(), b);
+  std::copy(x.w.begin(), x.w.end(), w);
+}
+
+void stanli_whitening_get_theta(const stanli_whitening* r, double* theta_start,
+                                double* theta_hat) {
+  const auto& x = r->r;
+  std::copy(x.theta_start.data(), x.theta_start.data() + x.theta_start.size(),
+            theta_start);
+  std::copy(x.theta_hat.data(), x.theta_hat.data() + x.theta_hat.size(),
+            theta_hat);
+}
+
+const char* stanli_whitening_outer_message(const stanli_whitening* r) {
+  return r->r.outer_message.c_str();
+}
+
+int64_t stanli_whitening_n_warnings(const stanli_whitening* r) {
+  return (int64_t)r->r.warnings.size();
+}
+
+const char* stanli_whitening_warning(const stanli_whitening* r, int64_t i) {
+  if (i < 0 || i >= (int64_t)r->r.warnings.size()) return nullptr;
+  return r->r.warnings[(size_t)i].c_str();
+}
+
+int stanli_whitening_get_precision(const stanli_whitening* r, double* out) {
+  const auto& p = r->r.precision;
+  if (p.size() == 0) return 1;
+  std::copy(p.data(), p.data() + p.size(), out);
+  return 0;
+}
+
+void stanli_whitening_free(stanli_whitening* r) { delete r; }
 
 int stanli_grad_err(stanli_model* m, const double* q, double* lp, double* grad,
                     char* err, size_t err_len) {

@@ -584,6 +584,7 @@ int fuse_log_sum_exp_rows(Graph& g, std::vector<int>& target_terms,
 
     Op sum;
     sum.opcode = OP_SUM_VEC;
+    sum.variant = (uint8_t)SumGrouping::Pairwise;
     sum.n_in = 1;
     sum.in[0] = lse.out;
     sum.out = g.add_slot(1, false);

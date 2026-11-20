@@ -378,9 +378,8 @@ void classify(StructuredLoop& p) {
       // own adjoint and reverse call, preserving the order of contributions
       // to shared inputs. Stateful/scratch-bearing kernels keep full calls.
       const Kernel* k = find_kernel(op.opcode);
-      if (debug_env("STANLI_NO_STRUCTURED_INVARIANT_PRIMALS") || op.out2 >= 0 ||
-          op.dyn_lengths || n.kernel_scratch || !k || k->make_state ||
-          n.forward != k->forward || n.backward != k->backward)
+      if (op.out2 >= 0 || op.dyn_lengths || n.kernel_scratch || !k ||
+          k->make_state || n.forward != k->forward || n.backward != k->backward)
         return;
     }
     for (int loop : enclosing) {
@@ -1590,8 +1589,6 @@ struct LoopState : KernelState {
   std::unique_ptr<FrameTape> frames;
   bool frame_mode = false;
   bool frame_auto = false;
-  bool frame_layout = debug_env("STANLI_NO_STRUCTURED_FRAME_LAYOUT") == nullptr;
-  bool frame_clone = debug_env("STANLI_NO_STRUCTURED_FRAME_CLONE") == nullptr;
   bool frame_instance =
       debug_env("STANLI_NO_STRUCTURED_FRAME_INSTANCE") == nullptr;
   const double* initial = nullptr;

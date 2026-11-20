@@ -6,16 +6,16 @@
    "container_flow": {
     "container_flow_rt_fn_amm": {
      "lp": {
-      "bound": 16,
-      "reason": "measured on Darwin arm64; cause not yet explained"
+      "bound": 17,
+      "reason": "measured on Darwin arm64; 80-digit reference at point 1 (exact arithmetic on the model's constants): stanli 1, CmdStan 16 scaled ULP from the true value; stanli is at least as close to it; the merged loop's sums are pairwise in stanli, while CmdStan adds one term at a time"
      }
     }
    },
    "container_flow --stanc": {
     "container_flow_rt_fn_amm": {
      "lp": {
-      "bound": 16,
-      "reason": "measured on Darwin arm64; cause not yet explained"
+      "bound": 17,
+      "reason": "measured on Darwin arm64; 80-digit reference at point 1 (exact arithmetic on the model's constants): stanli 1, CmdStan 16 scaled ULP from the true value; stanli is at least as close to it; the merged loop's sums are pairwise in stanli, while CmdStan adds one term at a time"
      }
     }
    },
@@ -72,11 +72,11 @@
     "Mh_model": {
      "grad[1]": {
       "bound": 43,
-      "reason": "measured on Darwin arm64; cause not yet explained; the 80-digit run gives only directional derivatives for this model"
+      "reason": "measured on Darwin arm64; 80-digit reference at point 0: stanli 5, CmdStan 48 scaled ULP from the true value; stanli is at least as close to it; the merged loop's sums are pairwise or compensated in stanli, while CmdStan adds one call at a time"
      },
      "lp": {
-      "bound": 39,
-      "reason": "measured on Darwin arm64; 80-digit reference at point 2: stanli 10, CmdStan 49 scaled ULP from the true value; stanli is at least as close to it"
+      "bound": 51,
+      "reason": "measured on Darwin arm64; 80-digit reference at point 2: stanli 2, CmdStan 49 scaled ULP from the true value; stanli is at least as close to it; the merged loop's sums are pairwise or compensated in stanli, while CmdStan adds one call at a time"
      }
     },
     "Mt_model": {
@@ -198,97 +198,137 @@
      }
     },
     "ch12_m12_5": {
-     "grad[10]": {
-      "bound": 34,
-      "reason": "measured on Darwin arm64; 80-digit reference at point 2: stanli 46, CmdStan 12 scaled ULP from the true value; stanli is farther from it than CmdStan; cause not yet explained"
-     },
-     "grad[11]": {
-      "bound": 13,
-      "reason": "measured on Darwin arm64; 80-digit reference at point 2: stanli 15, CmdStan 28 scaled ULP from the true value; stanli is at least as close to it"
-     },
-     "grad[4]": {
-      "bound": 11,
-      "reason": "measured on Darwin arm64; 80-digit reference at point 1: stanli 40, CmdStan 29 scaled ULP from the true value; stanli is farther from it than CmdStan; cause not yet explained"
-     },
-     "grad[5]": {
-      "bound": 11,
-      "reason": "measured on Darwin arm64; 80-digit reference at point 1: stanli 122, CmdStan 111 scaled ULP from the true value; stanli is farther from it than CmdStan; cause not yet explained"
-     },
-     "grad[6]": {
-      "bound": 63,
-      "reason": "measured on Darwin arm64; 80-digit reference at point 2: stanli 219, CmdStan 156 scaled ULP from the true value; stanli is farther from it than CmdStan; cause not yet explained"
-     },
-     "grad[7]": {
-      "bound": 63,
-      "reason": "measured on Darwin arm64; 80-digit reference at point 2: stanli 220, CmdStan 157 scaled ULP from the true value; stanli is farther from it than CmdStan; cause not yet explained"
-     },
-     "grad[8]": {
-      "bound": 66,
-      "reason": "measured on Darwin arm64; 80-digit reference at point 2: stanli 204, CmdStan 138 scaled ULP from the true value; stanli is farther from it than CmdStan; cause not yet explained"
-     },
-     "grad[9]": {
-      "bound": 69,
-      "reason": "measured on Darwin arm64; 80-digit reference at point 2: stanli 119, CmdStan 50 scaled ULP from the true value; stanli is farther from it than CmdStan; cause not yet explained"
+     "grad": {
+      "bound": 157,
+      "reason": "measured on Darwin arm64; 80-digit reference at point 2 (grad[7]): stanli 0, CmdStan 157 scaled ULP from the true value; stanli is at least as close to it; the merged loop's sums are pairwise or compensated in stanli, while CmdStan adds one call at a time; 9 grad values over 10"
      }
     },
     "ch12_m12_6": {
      "grad[1]": {
-      "bound": 63,
-      "reason": "measured on Darwin arm64; 80-digit reference at point 2: stanli 219, CmdStan 156 scaled ULP from the true value; stanli is farther from it than CmdStan; cause not yet explained"
+      "bound": 156,
+      "reason": "measured on Darwin arm64; 80-digit reference at point 2: stanli 0, CmdStan 156 scaled ULP from the true value; stanli is at least as close to it; the merged loop's sums are pairwise or compensated in stanli, while CmdStan adds one call at a time"
      },
      "grad[2]": {
-      "bound": 63,
-      "reason": "measured on Darwin arm64; 80-digit reference at point 2: stanli 220, CmdStan 157 scaled ULP from the true value; stanli is farther from it than CmdStan; cause not yet explained"
+      "bound": 157,
+      "reason": "measured on Darwin arm64; 80-digit reference at point 2: stanli 0, CmdStan 157 scaled ULP from the true value; stanli is at least as close to it; the merged loop's sums are pairwise or compensated in stanli, while CmdStan adds one call at a time"
      },
      "grad[3]": {
-      "bound": 66,
-      "reason": "measured on Darwin arm64; 80-digit reference at point 2: stanli 204, CmdStan 138 scaled ULP from the true value; stanli is farther from it than CmdStan; cause not yet explained"
+      "bound": 138,
+      "reason": "measured on Darwin arm64; 80-digit reference at point 2: stanli 0, CmdStan 138 scaled ULP from the true value; stanli is at least as close to it; the merged loop's sums are pairwise or compensated in stanli, while CmdStan adds one call at a time"
      },
      "grad[4]": {
-      "bound": 69,
-      "reason": "measured on Darwin arm64; 80-digit reference at point 2: stanli 119, CmdStan 50 scaled ULP from the true value; stanli is farther from it than CmdStan; cause not yet explained"
+      "bound": 50,
+      "reason": "measured on Darwin arm64; 80-digit reference at point 2: stanli 1, CmdStan 50 scaled ULP from the true value; stanli is at least as close to it; the merged loop's sums are pairwise or compensated in stanli, while CmdStan adds one call at a time"
      },
      "grad[5]": {
-      "bound": 34,
-      "reason": "measured on Darwin arm64; 80-digit reference at point 2: stanli 46, CmdStan 12 scaled ULP from the true value; stanli is farther from it than CmdStan; cause not yet explained"
+      "bound": 16,
+      "reason": "measured on Darwin arm64; 80-digit reference at point 0: stanli 0, CmdStan 15 scaled ULP from the true value; stanli is at least as close to it; the merged loop's sums are pairwise or compensated in stanli, while CmdStan adds one call at a time"
      },
      "grad[6]": {
-      "bound": 13,
-      "reason": "measured on Darwin arm64; 80-digit reference at point 2: stanli 15, CmdStan 28 scaled ULP from the true value; stanli is at least as close to it"
+      "bound": 29,
+      "reason": "measured on Darwin arm64; 80-digit reference at point 2: stanli 0, CmdStan 28 scaled ULP from the true value; stanli is at least as close to it; the merged loop's sums are pairwise or compensated in stanli, while CmdStan adds one call at a time"
      }
     },
     "ch12_m12_7": {
-     "grad[10]": {
-      "bound": 13,
-      "reason": "measured on Darwin arm64; 80-digit reference at point 2: stanli 15, CmdStan 28 scaled ULP from the true value; stanli is at least as close to it"
-     },
+     "grad": {
+      "bound": 157,
+      "reason": "measured on Darwin arm64; 80-digit reference at point 2 (grad[6]): stanli 0, CmdStan 157 scaled ULP from the true value; stanli is at least as close to it; the merged loop's sums are pairwise or compensated in stanli, while CmdStan adds one call at a time; 9 grad values over 10"
+     }
+    },
+    "ch14_m14_7": {
      "grad[1]": {
-      "bound": 79,
-      "reason": "measured on Darwin arm64; 80-digit reference at point 2: stanli 106, CmdStan 27 scaled ULP from the true value; stanli is farther from it than CmdStan; cause not yet explained"
-     },
-     "grad[3]": {
       "bound": 13,
-      "reason": "measured on Darwin arm64; 80-digit reference at point 1: stanli 29, CmdStan 17 scaled ULP from the true value; stanli is farther from it than CmdStan; cause not yet explained"
-     },
+      "reason": "measured on Darwin arm64; 80-digit reference at point 1: stanli 0, CmdStan 13 scaled ULP from the true value; stanli is at least as close to it; the merged loop's sums are pairwise or compensated in stanli, while CmdStan adds one call at a time"
+     }
+    },
+    "ch15_m15_3": {
+     "grad[1]": {
+      "bound": 83,
+      "reason": "measured on Darwin arm64; 80-digit reference at point 0: stanli 0, CmdStan 83 scaled ULP from the true value; stanli is at least as close to it; the merged loop's sums are pairwise or compensated in stanli, while CmdStan adds one call at a time"
+     }
+    },
+    "ch15_m15_4": {
+     "grad[1]": {
+      "bound": 81,
+      "reason": "measured on Darwin arm64; 80-digit reference at point 0: stanli 0, CmdStan 81 scaled ULP from the true value; stanli is at least as close to it; the merged loop's sums are pairwise or compensated in stanli, while CmdStan adds one call at a time"
+     }
+    },
+    "ch15_m15_9": {
+     "grad[1]": {
+      "bound": 11,
+      "reason": "measured on Darwin arm64; 80-digit reference at point 1: stanli 0, CmdStan 11 scaled ULP from the true value; stanli is at least as close to it; the merged loop's sums are pairwise or compensated in stanli, while CmdStan adds one call at a time"
+     }
+    },
+    "cm_bisa": {
      "grad[5]": {
-      "bound": 63,
-      "reason": "measured on Darwin arm64; 80-digit reference at point 2: stanli 219, CmdStan 156 scaled ULP from the true value; stanli is farther from it than CmdStan; cause not yet explained"
-     },
-     "grad[6]": {
-      "bound": 63,
-      "reason": "measured on Darwin arm64; 80-digit reference at point 2: stanli 220, CmdStan 157 scaled ULP from the true value; stanli is farther from it than CmdStan; cause not yet explained"
-     },
-     "grad[7]": {
-      "bound": 66,
-      "reason": "measured on Darwin arm64; 80-digit reference at point 2: stanli 204, CmdStan 138 scaled ULP from the true value; stanli is farther from it than CmdStan; cause not yet explained"
-     },
-     "grad[8]": {
-      "bound": 69,
-      "reason": "measured on Darwin arm64; 80-digit reference at point 2: stanli 119, CmdStan 50 scaled ULP from the true value; stanli is farther from it than CmdStan; cause not yet explained"
-     },
+      "bound": 18,
+      "reason": "measured on Darwin arm64; 80-digit reference at point 0: stanli 0, CmdStan 18 scaled ULP from the true value; stanli is at least as close to it; the merged loop's sums are pairwise or compensated in stanli, while CmdStan adds one call at a time"
+     }
+    },
+    "cm_choco": {
      "grad[9]": {
-      "bound": 34,
-      "reason": "measured on Darwin arm64; 80-digit reference at point 2: stanli 46, CmdStan 12 scaled ULP from the true value; stanli is farther from it than CmdStan; cause not yet explained"
+      "bound": 18,
+      "reason": "measured on Darwin arm64; 80-digit reference at point 0: stanli 1, CmdStan 19 scaled ULP from the true value; stanli is at least as close to it; the merged loop's sums are pairwise or compensated in stanli, while CmdStan adds one call at a time"
+     }
+    },
+    "cm_ddm": {
+     "grad[9]": {
+      "bound": 19,
+      "reason": "measured on Darwin arm64; the 80-digit evaluator does not support the wiener density, so there is no reference"
+     }
+    },
+    "cm_exwald": {
+     "grad[6]": {
+      "bound": 30,
+      "reason": "measured on Darwin arm64; 80-digit reference at point 0: stanli 0, CmdStan 30 scaled ULP from the true value; stanli is at least as close to it; the merged loop's sums are pairwise or compensated in stanli, while CmdStan adds one call at a time"
+     }
+    },
+    "cm_gamma": {
+     "grad[5]": {
+      "bound": 16,
+      "reason": "measured on Darwin arm64; 80-digit reference at point 0: stanli 0, CmdStan 16 scaled ULP from the true value; stanli is at least as close to it; the merged loop's sums are pairwise or compensated in stanli, while CmdStan adds one call at a time"
+     }
+    },
+    "cm_invgaussian": {
+     "grad[7]": {
+      "bound": 16,
+      "reason": "measured on Darwin arm64; 80-digit reference at point 1: stanli 3, CmdStan 19 scaled ULP from the true value; stanli is at least as close to it; the merged loop's sums are pairwise or compensated in stanli, while CmdStan adds one call at a time"
+     }
+    },
+    "cm_lba1": {
+     "grad[7]": {
+      "bound": 17,
+      "reason": "measured on Darwin arm64; 80-digit reference at point 1: stanli 1, CmdStan 18 scaled ULP from the true value; stanli is at least as close to it; the merged loop's sums are pairwise or compensated in stanli, while CmdStan adds one call at a time"
+     }
+    },
+    "cm_lba2": {
+     "grad[9]": {
+      "bound": 19,
+      "reason": "measured on Darwin arm64; 80-digit reference at point 0: stanli 2, CmdStan 21 scaled ULP from the true value; stanli is at least as close to it; the merged loop's sums are pairwise or compensated in stanli, while CmdStan adds one call at a time"
+     }
+    },
+    "cm_lnr": {
+     "grad[8]": {
+      "bound": 32,
+      "reason": "measured on Darwin arm64; 80-digit reference at point 0: stanli 1, CmdStan 31 scaled ULP from the true value; stanli is at least as close to it; the merged loop's sums are pairwise or compensated in stanli, while CmdStan adds one call at a time"
+     }
+    },
+    "cm_logstudent": {
+     "grad[6]": {
+      "bound": 28,
+      "reason": "measured on Darwin arm64; 80-digit reference at point 0: stanli 0, CmdStan 28 scaled ULP from the true value; stanli is at least as close to it; the merged loop's sums are pairwise or compensated in stanli, while CmdStan adds one call at a time"
+     }
+    },
+    "cm_rdm": {
+     "grad[7]": {
+      "bound": 18,
+      "reason": "measured on Darwin arm64; 80-digit reference at point 1: stanli 3, CmdStan 21 scaled ULP from the true value; stanli is at least as close to it; the merged loop's sums are pairwise or compensated in stanli, while CmdStan adds one call at a time"
+     }
+    },
+    "cm_weibull": {
+     "grad[5]": {
+      "bound": 17,
+      "reason": "measured on Darwin arm64; 80-digit reference at point 0: stanli 0, CmdStan 17 scaled ULP from the true value; stanli is at least as close to it; the merged loop's sums are pairwise or compensated in stanli, while CmdStan adds one call at a time"
      }
     },
     "ctsem_ctsm_post4_100": {
@@ -329,8 +369,8 @@
     },
     "dogs_nonhierarchical": {
      "lp": {
-      "bound": 13,
-      "reason": "measured on Darwin arm64; 80-digit reference at point 2: stanli 4, CmdStan 17 scaled ULP from the true value; stanli is at least as close to it"
+      "bound": 15,
+      "reason": "measured on Darwin arm64; 80-digit reference at point 2: stanli 2, CmdStan 17 scaled ULP from the true value; stanli is at least as close to it; the merged loop's sums are pairwise or compensated in stanli, while CmdStan adds one call at a time"
      }
     },
     "ecoensemble_hierarchical_withdrivers": {
@@ -348,31 +388,35 @@
     "election88_full": {
      "grad[1]": {
       "bound": 11,
-      "reason": "measured on Darwin arm64; cause not yet explained; the 80-digit run gives only directional derivatives for this model"
+      "reason": "measured on Darwin arm64; 80-digit reference at point 1: stanli 2, CmdStan 9 scaled ULP from the true value; stanli is at least as close to it; the merged loop's sums are pairwise or compensated in stanli, while CmdStan adds one call at a time"
      },
      "grad[2]": {
       "bound": 16,
-      "reason": "measured on Darwin arm64; cause not yet explained; the 80-digit run gives only directional derivatives for this model"
+      "reason": "measured on Darwin arm64; 80-digit reference at point 1: stanli 7, CmdStan 9 scaled ULP from the true value; stanli is at least as close to it; the merged loop's sums are pairwise or compensated in stanli, while CmdStan adds one call at a time"
      },
      "grad[6]": {
       "bound": 15,
-      "reason": "measured on Darwin arm64; cause not yet explained; the 80-digit run gives only directional derivatives for this model"
+      "reason": "measured on Darwin arm64; 80-digit reference at point 1: stanli 6, CmdStan 21 scaled ULP from the true value; stanli is at least as close to it; the merged loop's sums are pairwise or compensated in stanli, while CmdStan adds one call at a time"
      },
      "grad[7]": {
       "bound": 16,
-      "reason": "measured on Darwin arm64; cause not yet explained; the 80-digit run gives only directional derivatives for this model"
+      "reason": "measured on Darwin arm64; 80-digit reference at point 1: stanli 1, CmdStan 15 scaled ULP from the true value; stanli is at least as close to it; the merged loop's sums are pairwise or compensated in stanli, while CmdStan adds one call at a time"
      },
      "grad[81]": {
-      "bound": 40,
-      "reason": "measured on Darwin arm64; cause not yet explained; the 80-digit run gives only directional derivatives for this model"
+      "bound": 91,
+      "reason": "measured on Darwin arm64; 80-digit reference at point 1: stanli 1, CmdStan 90 scaled ULP from the true value; stanli is at least as close to it; the merged loop's sums are pairwise or compensated in stanli, while CmdStan adds one call at a time"
+     },
+     "grad[82]": {
+      "bound": 11,
+      "reason": "measured on Darwin arm64; no 80-digit value for this entry; the merged loop's sums are pairwise or compensated in stanli, while CmdStan adds one call at a time"
      },
      "grad[83]": {
-      "bound": 14,
-      "reason": "measured on Darwin arm64; cause not yet explained; the 80-digit run gives only directional derivatives for this model"
+      "bound": 43,
+      "reason": "measured on Darwin arm64; 80-digit reference at point 1: stanli 0, CmdStan 43 scaled ULP from the true value; stanli is at least as close to it; the merged loop's sums are pairwise or compensated in stanli, while CmdStan adds one call at a time"
      },
      "grad[84]": {
-      "bound": 41,
-      "reason": "measured on Darwin arm64; cause not yet explained; the 80-digit run gives only directional derivatives for this model"
+      "bound": 65,
+      "reason": "measured on Darwin arm64; 80-digit reference at point 0: stanli 0, CmdStan 64 scaled ULP from the true value; stanli is at least as close to it; the merged loop's sums are pairwise or compensated in stanli, while CmdStan adds one call at a time"
      }
     },
     "epinow2_estimate_infections": {
@@ -393,8 +437,8 @@
       "reason": "measured on Darwin arm64; the 14-day generation-time PMF tail loses 7 digits in double (FAST_HP_CHECKED in tools/verify_refs.py); both engines are 2.0e+07 (stanli) and 2.0e+07 (CmdStan) scaled ULP from the 80-digit gradient at point 0"
      },
      "wa": {
-      "bound": 24,
-      "reason": "measured on Darwin arm64; cause not yet explained; the 80-digit evaluator covers lp and gradient only"
+      "bound": 95,
+      "reason": "measured on Darwin arm64; measured on Darwin arm64; the 14-day generation-time PMF tail loses 7 digits in double and the renewal recursion carries the error to infections; at point 0 infections.56 is 61660893 (stanli) and 61660798 (CmdStan) scaled ULP from the 80-digit value, so stanli is 95 farther; the well-conditioned R is at most 4.4 (stanli) and 3.1 (CmdStan) scaled ULP from the 80-digit value; the value moved when mean began to group its terms as sum does; 9 wa values over 10"
      }
     },
     "epinow2_estimate_secondary": {
@@ -410,11 +454,7 @@
     "examplemodels_cjs_cov_raneff": {
      "grad[3]": {
       "bound": 19,
-      "reason": "measured on Darwin arm64; 80-digit reference at point 1: stanli 2, CmdStan 21 scaled ULP from the true value; stanli is at least as close to it"
-     },
-     "lp": {
-      "bound": 14,
-      "reason": "measured on Darwin arm64; 80-digit reference at point 0: stanli 18, CmdStan 4 scaled ULP from the true value; stanli is farther from it than CmdStan; cause not yet explained"
+      "reason": "measured on Darwin arm64; 80-digit reference at point 1: stanli 2, CmdStan 21 scaled ULP from the true value; stanli is at least as close to it; the merged loop's sums are pairwise or compensated in stanli, while CmdStan adds one call at a time"
      }
     },
     "examplemodels_mr_ss": {
@@ -523,20 +563,36 @@
       "reason": "measured on Darwin arm64; 80-digit reference at point 2: stanli 8, CmdStan 485 scaled ULP from the true value; stanli is at least as close to it"
      }
     },
+    "i320_pois_trunc_both": {
+     "grad[4]": {
+      "bound": 16,
+      "reason": "measured on Darwin arm64; 80-digit reference at point 0: stanli 0, CmdStan 16 scaled ULP from the true value; stanli is at least as close to it; the merged loop's sums are pairwise or compensated in stanli, while CmdStan adds one call at a time"
+     }
+    },
+    "i320_pois_trunc_ub": {
+     "grad[4]": {
+      "bound": 16,
+      "reason": "measured on Darwin arm64; 80-digit reference at point 0: stanli 0, CmdStan 16 scaled ULP from the true value; stanli is at least as close to it; the merged loop's sums are pairwise or compensated in stanli, while CmdStan adds one call at a time"
+     }
+    },
     "kronecker_gp": {
+     "grad[1]": {
+      "bound": 2637852908725,
+      "reason": "measured on Darwin arm64; no usable reference: the value flows through eigenvectors_sym of a covariance with eigenvalue gaps down to 6.5e-17, which amplifies last-bit differences by about 1e16 (tools/corpus.py NOTES); it moved when the merged sums became pairwise"
+     },
      "grad[2]": {
-      "bound": 454970328735,
-      "reason": "measured on Darwin arm64; flows through eigenvectors_sym of a covariance with eigenvalue gaps down to 6.5e-17, which amplifies last-bit differences by about 1e16 (tools/corpus.py NOTES); also held to the MISMATCH floor of gate_for"
+      "bound": 480599384064,
+      "reason": "measured on Darwin arm64; no usable reference: the value flows through eigenvectors_sym of a covariance with eigenvalue gaps down to 6.5e-17, which amplifies last-bit differences by about 1e16 (tools/corpus.py NOTES); it moved when the merged sums became pairwise"
      }
     },
     "ldaK2": {
      "grad[1]": {
       "bound": 153,
-      "reason": "measured on Darwin arm64; 80-digit reference at point 1: stanli 352, CmdStan 505 scaled ULP from the true value; stanli is at least as close to it"
+      "reason": "measured on Darwin arm64; 80-digit reference at point 1: stanli 352, CmdStan 505 scaled ULP from the true value; stanli is at least as close to it; the merged loop's sums are pairwise or compensated in stanli, while CmdStan adds one call at a time"
      },
      "grad[4]": {
       "bound": 51,
-      "reason": "measured on Darwin arm64; 80-digit reference at point 1: stanli 58, CmdStan 109 scaled ULP from the true value; stanli is at least as close to it"
+      "reason": "measured on Darwin arm64; 80-digit reference at point 1: stanli 58, CmdStan 109 scaled ULP from the true value; stanli is at least as close to it; the merged loop's sums are pairwise or compensated in stanli, while CmdStan adds one call at a time"
      },
      "grad[5]": {
       "bound": 30,
@@ -544,21 +600,71 @@
      },
      "grad[6]": {
       "bound": 204,
-      "reason": "measured on Darwin arm64; 80-digit reference at point 1: stanli 34, CmdStan 238 scaled ULP from the true value; stanli is at least as close to it"
+      "reason": "measured on Darwin arm64; 80-digit reference at point 1: stanli 34, CmdStan 238 scaled ULP from the true value; stanli is at least as close to it; the merged loop's sums are pairwise or compensated in stanli, while CmdStan adds one call at a time"
      },
      "grad[7]": {
       "bound": 125,
       "reason": "measured on Darwin arm64; 80-digit reference at point 1: stanli 301, CmdStan 177 scaled ULP from the true value; stanli is farther from it than CmdStan; cause not yet explained"
+     },
+     "lp": {
+      "bound": 171,
+      "reason": "measured on Darwin arm64; 80-digit reference at point 2: stanli 0, CmdStan 171 scaled ULP from the true value; stanli is at least as close to it; the merged loop's sums are pairwise or compensated in stanli, while CmdStan adds one call at a time"
      }
     },
     "ldaK5": {
      "grad": {
       "bound": 38,
-      "reason": "measured on Darwin arm64; cause not yet explained; the 80-digit run gives only directional derivatives for this model"
+      "reason": "measured on Darwin arm64; 80-digit reference at point 0 (grad[7115]): stanli 14, CmdStan 24 scaled ULP from the true value; stanli is at least as close to it; the merged loop's sums are pairwise or compensated in stanli, while CmdStan adds one call at a time; 26 grad values over 10"
      },
      "lp": {
-      "bound": 61,
-      "reason": "measured on Darwin arm64; 80-digit reference at point 0: stanli 77, CmdStan 16 scaled ULP from the true value; stanli is farther from it than CmdStan; cause not yet explained"
+      "bound": 815,
+      "reason": "measured on Darwin arm64; 80-digit reference at point 2: stanli 4, CmdStan 819 scaled ULP from the true value; stanli is at least as close to it; the merged loop's sums are pairwise or compensated in stanli, while CmdStan adds one call at a time"
+     }
+    },
+    "log10earn_height": {
+     "grad[2]": {
+      "bound": 20,
+      "reason": "measured on Darwin arm64; 80-digit reference at point 1: stanli 0, CmdStan 20 scaled ULP from the true value; stanli is at least as close to it; the merged loop's sums are pairwise or compensated in stanli, while CmdStan adds one call at a time"
+     }
+    },
+    "logearn_height": {
+     "grad[2]": {
+      "bound": 15,
+      "reason": "measured on Darwin arm64; 80-digit reference at point 1: stanli 1, CmdStan 14 scaled ULP from the true value; stanli is at least as close to it; the merged loop's sums are pairwise or compensated in stanli, while CmdStan adds one call at a time"
+     }
+    },
+    "logearn_interaction": {
+     "grad[2]": {
+      "bound": 15,
+      "reason": "measured on Darwin arm64; 80-digit reference at point 1: stanli 1, CmdStan 16 scaled ULP from the true value; stanli is at least as close to it; the merged loop's sums are pairwise or compensated in stanli, while CmdStan adds one call at a time"
+     },
+     "grad[4]": {
+      "bound": 13,
+      "reason": "measured on Darwin arm64; 80-digit reference at point 0: stanli 1, CmdStan 12 scaled ULP from the true value; stanli is at least as close to it; the merged loop's sums are pairwise or compensated in stanli, while CmdStan adds one call at a time"
+     }
+    },
+    "low_dim_gauss_mix": {
+     "grad[4]": {
+      "bound": 14,
+      "reason": "measured on Darwin arm64; 80-digit reference at point 0: stanli 3, CmdStan 11 scaled ULP from the true value; stanli is at least as close to it; the merged loop's sums are pairwise or compensated in stanli, while CmdStan adds one call at a time"
+     },
+     "lp": {
+      "bound": 14,
+      "reason": "measured on Darwin arm64; 80-digit reference at point 1: stanli 0, CmdStan 14 scaled ULP from the true value; stanli is at least as close to it; the merged loop's sums are pairwise or compensated in stanli, while CmdStan adds one call at a time"
+     }
+    },
+    "lsat_model": {
+     "grad[1]": {
+      "bound": 70,
+      "reason": "measured on Darwin arm64; 80-digit reference at point 1: stanli 1, CmdStan 71 scaled ULP from the true value; stanli is at least as close to it; the merged loop's sums are pairwise or compensated in stanli, while CmdStan adds one call at a time"
+     },
+     "grad[4]": {
+      "bound": 26,
+      "reason": "measured on Darwin arm64; no 80-digit value for this entry; the merged loop's sums are pairwise or compensated in stanli, while CmdStan adds one call at a time"
+     },
+     "grad[5]": {
+      "bound": 65,
+      "reason": "measured on Darwin arm64; no 80-digit value for this entry; the merged loop's sums are pairwise or compensated in stanli, while CmdStan adds one call at a time"
      }
     },
     "mlumr_survival_mspline_relaxed": {
@@ -593,16 +699,16 @@
     },
     "radon_county_intercept": {
      "grad[387]": {
-      "bound": 11,
-      "reason": "measured on Darwin arm64; cause not yet explained; the 80-digit run gives only directional derivatives for this model"
+      "bound": 16,
+      "reason": "measured on Darwin arm64; 80-digit reference at point 0: stanli 1, CmdStan 17 scaled ULP from the true value; stanli is at least as close to it; the merged loop's sums are pairwise or compensated in stanli, while CmdStan adds one call at a time"
      },
      "grad[388]": {
       "bound": 213,
-      "reason": "measured on Darwin arm64; cause not yet explained; the 80-digit run gives only directional derivatives for this model"
+      "reason": "measured on Darwin arm64; 80-digit reference at point 2: stanli 29, CmdStan 184 scaled ULP from the true value; stanli is at least as close to it; the merged loop's sums are pairwise or compensated in stanli, while CmdStan adds one call at a time"
      },
      "lp": {
       "bound": 95,
-      "reason": "measured on Darwin arm64; 80-digit reference at point 2: stanli 13, CmdStan 82 scaled ULP from the true value; stanli is at least as close to it"
+      "reason": "measured on Darwin arm64; 80-digit reference at point 2: stanli 13, CmdStan 82 scaled ULP from the true value; stanli is at least as close to it; the merged loop's sums are pairwise or compensated in stanli, while CmdStan adds one call at a time"
      }
     },
     "radon_hierarchical_intercept_centered": {
@@ -621,20 +727,20 @@
     },
     "radon_hierarchical_intercept_noncentered": {
      "grad[387]": {
-      "bound": 48,
-      "reason": "measured on Darwin arm64; cause not yet explained; the 80-digit run gives only directional derivatives for this model"
+      "bound": 49,
+      "reason": "measured on Darwin arm64; 80-digit reference at point 0: stanli 1, CmdStan 47 scaled ULP from the true value; stanli is at least as close to it; the merged loop's sums are pairwise or compensated in stanli, while CmdStan adds one call at a time"
      },
      "grad[388]": {
-      "bound": 17,
-      "reason": "measured on Darwin arm64; cause not yet explained; the 80-digit run gives only directional derivatives for this model"
+      "bound": 16,
+      "reason": "measured on Darwin arm64; 80-digit reference at point 1: stanli 0, CmdStan 16 scaled ULP from the true value; stanli is at least as close to it; the merged loop's sums are pairwise or compensated in stanli, while CmdStan adds one call at a time"
      },
      "grad[391]": {
       "bound": 213,
-      "reason": "measured on Darwin arm64; cause not yet explained; the 80-digit run gives only directional derivatives for this model"
+      "reason": "measured on Darwin arm64; 80-digit reference at point 2: stanli 29, CmdStan 184 scaled ULP from the true value; stanli is at least as close to it; the merged loop's sums are pairwise or compensated in stanli, while CmdStan adds one call at a time"
      },
      "lp": {
       "bound": 95,
-      "reason": "measured on Darwin arm64; 80-digit reference at point 2: stanli 13, CmdStan 82 scaled ULP from the true value; stanli is at least as close to it"
+      "reason": "measured on Darwin arm64; 80-digit reference at point 2: stanli 13, CmdStan 82 scaled ULP from the true value; stanli is at least as close to it; the merged loop's sums are pairwise or compensated in stanli, while CmdStan adds one call at a time"
      }
     },
     "radon_partially_pooled_centered": {
@@ -658,41 +764,45 @@
      }
     },
     "radon_pooled": {
+     "grad[1]": {
+      "bound": 103,
+      "reason": "measured on Darwin arm64; 80-digit reference at point 0: stanli 1, CmdStan 102 scaled ULP from the true value; stanli is at least as close to it; the merged loop's sums are pairwise or compensated in stanli, while CmdStan adds one call at a time"
+     },
      "grad[3]": {
       "bound": 213,
-      "reason": "measured on Darwin arm64; 80-digit reference at point 2: stanli 29, CmdStan 184 scaled ULP from the true value; stanli is at least as close to it"
+      "reason": "measured on Darwin arm64; 80-digit reference at point 2: stanli 29, CmdStan 184 scaled ULP from the true value; stanli is at least as close to it; the merged loop's sums are pairwise or compensated in stanli, while CmdStan adds one call at a time"
      },
      "lp": {
       "bound": 196,
-      "reason": "measured on Darwin arm64; 80-digit reference at point 1: stanli 5, CmdStan 191 scaled ULP from the true value; stanli is at least as close to it"
+      "reason": "measured on Darwin arm64; 80-digit reference at point 1: stanli 5, CmdStan 191 scaled ULP from the true value; stanli is at least as close to it; the merged loop's sums are pairwise or compensated in stanli, while CmdStan adds one call at a time"
      }
     },
     "radon_variable_intercept_centered": {
      "grad[387]": {
-      "bound": 22,
-      "reason": "measured on Darwin arm64; cause not yet explained; the 80-digit run gives only directional derivatives for this model"
+      "bound": 36,
+      "reason": "measured on Darwin arm64; 80-digit reference at point 0: stanli 0, CmdStan 36 scaled ULP from the true value; stanli is at least as close to it; the merged loop's sums are pairwise or compensated in stanli, while CmdStan adds one call at a time"
      },
      "grad[390]": {
       "bound": 213,
-      "reason": "measured on Darwin arm64; cause not yet explained; the 80-digit run gives only directional derivatives for this model"
+      "reason": "measured on Darwin arm64; 80-digit reference at point 2: stanli 29, CmdStan 184 scaled ULP from the true value; stanli is at least as close to it; the merged loop's sums are pairwise or compensated in stanli, while CmdStan adds one call at a time"
      },
      "lp": {
       "bound": 95,
-      "reason": "measured on Darwin arm64; 80-digit reference at point 2: stanli 13, CmdStan 82 scaled ULP from the true value; stanli is at least as close to it"
+      "reason": "measured on Darwin arm64; 80-digit reference at point 2: stanli 13, CmdStan 82 scaled ULP from the true value; stanli is at least as close to it; the merged loop's sums are pairwise or compensated in stanli, while CmdStan adds one call at a time"
      }
     },
     "radon_variable_intercept_noncentered": {
      "grad[387]": {
-      "bound": 25,
-      "reason": "measured on Darwin arm64; cause not yet explained; the 80-digit run gives only directional derivatives for this model"
+      "bound": 37,
+      "reason": "measured on Darwin arm64; 80-digit reference at point 0: stanli 0, CmdStan 37 scaled ULP from the true value; stanli is at least as close to it; the merged loop's sums are pairwise or compensated in stanli, while CmdStan adds one call at a time"
      },
      "grad[390]": {
       "bound": 213,
-      "reason": "measured on Darwin arm64; cause not yet explained; the 80-digit run gives only directional derivatives for this model"
+      "reason": "measured on Darwin arm64; 80-digit reference at point 2: stanli 29, CmdStan 184 scaled ULP from the true value; stanli is at least as close to it; the merged loop's sums are pairwise or compensated in stanli, while CmdStan adds one call at a time"
      },
      "lp": {
       "bound": 95,
-      "reason": "measured on Darwin arm64; 80-digit reference at point 2: stanli 13, CmdStan 82 scaled ULP from the true value; stanli is at least as close to it"
+      "reason": "measured on Darwin arm64; 80-digit reference at point 2: stanli 13, CmdStan 82 scaled ULP from the true value; stanli is at least as close to it; the merged loop's sums are pairwise or compensated in stanli, while CmdStan adds one call at a time"
      }
     },
     "radon_variable_intercept_slope_centered": {
@@ -717,30 +827,40 @@
     },
     "radon_variable_slope_centered": {
      "grad[1]": {
-      "bound": 84,
-      "reason": "measured on Darwin arm64; cause not yet explained; the 80-digit run gives only directional derivatives for this model"
+      "bound": 120,
+      "reason": "measured on Darwin arm64; 80-digit reference at point 1: stanli 0, CmdStan 120 scaled ULP from the true value; stanli is at least as close to it; the merged loop's sums are pairwise or compensated in stanli, while CmdStan adds one call at a time"
      },
      "grad[390]": {
       "bound": 213,
-      "reason": "measured on Darwin arm64; cause not yet explained; the 80-digit run gives only directional derivatives for this model"
+      "reason": "measured on Darwin arm64; 80-digit reference at point 2: stanli 29, CmdStan 184 scaled ULP from the true value; stanli is at least as close to it; the merged loop's sums are pairwise or compensated in stanli, while CmdStan adds one call at a time"
      },
      "lp": {
       "bound": 103,
-      "reason": "measured on Darwin arm64; 80-digit reference at point 0: stanli 11, CmdStan 92 scaled ULP from the true value; stanli is at least as close to it"
+      "reason": "measured on Darwin arm64; 80-digit reference at point 0: stanli 11, CmdStan 92 scaled ULP from the true value; stanli is at least as close to it; the merged loop's sums are pairwise or compensated in stanli, while CmdStan adds one call at a time"
      }
     },
     "radon_variable_slope_noncentered": {
      "grad[1]": {
-      "bound": 89,
-      "reason": "measured on Darwin arm64; cause not yet explained; the 80-digit run gives only directional derivatives for this model"
+      "bound": 112,
+      "reason": "measured on Darwin arm64; 80-digit reference at point 1: stanli 0, CmdStan 112 scaled ULP from the true value; stanli is at least as close to it; the merged loop's sums are pairwise or compensated in stanli, while CmdStan adds one call at a time"
      },
      "grad[390]": {
       "bound": 213,
-      "reason": "measured on Darwin arm64; cause not yet explained; the 80-digit run gives only directional derivatives for this model"
+      "reason": "measured on Darwin arm64; 80-digit reference at point 2: stanli 29, CmdStan 184 scaled ULP from the true value; stanli is at least as close to it; the merged loop's sums are pairwise or compensated in stanli, while CmdStan adds one call at a time"
      },
      "lp": {
       "bound": 95,
-      "reason": "measured on Darwin arm64; 80-digit reference at point 2: stanli 13, CmdStan 82 scaled ULP from the true value; stanli is at least as close to it"
+      "reason": "measured on Darwin arm64; 80-digit reference at point 2: stanli 13, CmdStan 82 scaled ULP from the true value; stanli is at least as close to it; the merged loop's sums are pairwise or compensated in stanli, while CmdStan adds one call at a time"
+     }
+    },
+    "sesame_one_pred_a": {
+     "grad[1]": {
+      "bound": 36,
+      "reason": "measured on Darwin arm64; 80-digit reference at point 0: stanli 2, CmdStan 34 scaled ULP from the true value; stanli is at least as close to it; the merged loop's sums are pairwise or compensated in stanli, while CmdStan adds one call at a time"
+     },
+     "grad[2]": {
+      "bound": 16,
+      "reason": "measured on Darwin arm64; 80-digit reference at point 0: stanli 1, CmdStan 15 scaled ULP from the true value; stanli is at least as close to it; the merged loop's sums are pairwise or compensated in stanli, while CmdStan adds one call at a time"
      }
     },
     "stanguide_ode_adjoint": {
@@ -755,6 +875,16 @@
      "grad[5]": {
       "bound": 1349586892,
       "reason": "measured on Darwin arm64; one of the gradient entries in MISMATCH_OUTPUTS: the adjoint ODE solve at the guide's tolerances of 1e-6 puts both engines up to 4.4e-5 from the solution at 1e-11, where they agree to 1e-10 (NOTES in tools/corpus.py); also held to the MISMATCH gate of gate_for"
+     }
+    },
+    "wells_dist": {
+     "grad[1]": {
+      "bound": 65,
+      "reason": "measured on Darwin arm64; 80-digit reference at point 0: stanli 0, CmdStan 65 scaled ULP from the true value; stanli is at least as close to it; the merged loop's sums are pairwise or compensated in stanli, while CmdStan adds one call at a time"
+     },
+     "grad[2]": {
+      "bound": 118,
+      "reason": "measured on Darwin arm64; 80-digit reference at point 0: stanli 9, CmdStan 127 scaled ULP from the true value; stanli is at least as close to it; the merged loop's sums are pairwise or compensated in stanli, while CmdStan adds one call at a time"
      }
     }
    },

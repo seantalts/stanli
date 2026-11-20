@@ -125,6 +125,33 @@ static void test_logistic_direct_terms() {
   expect_same_grad("logistic terms", std::move(b.g), f2, tt, want);
 }
 
+// Lanes whose terms are a widened op: the pass sums the lane terms with one
+// OP_SUM_VEC, and that sum is pairwise.
+static void test_widened_terms_sum_pairwise() {
+  const int L = 8;
+  Graph g;
+  const int base = g.add_slot(L, true);
+  std::vector<int> terms;
+  for (int l = 0; l < L; ++l) {
+    const int idx = g.add_slot(1, false);
+    g.add_op(OP_INDEX, {base}, idx, {l});
+    const int e = g.add_slot(1, false);
+    g.add_op(OP_EXPV, {idx}, e);
+    terms.push_back(e);
+  }
+  Fills fills;
+  const std::vector<double> want = reference(g, fills, terms);
+  std::vector<int> tt = terms;
+  const PartitionStats st = partition_lanes(g, fills, tt, {});
+  expect("widened terms one group", st.groups == 1 && tt.size() == 1);
+  int pairwise = 0;
+  for (const Op& op : g.ops)
+    pairwise +=
+        op.opcode == OP_SUM_VEC && op.variant == (uint8_t)SumGrouping::Pairwise;
+  expect("widened terms summed pairwise", pairwise == 1);
+  expect_same_grad("widened terms", std::move(g), fills, tt, want);
+}
+
 static void test_contiguous_bucket() {
   Lanes b = build_index_lanes(8);
   const std::vector<double> want = reference(b.g, b.fills, b.terms);
@@ -1647,6 +1674,7 @@ static void test_fast_fuses_shared_parameter() {
 
 int main() {
   test_fast_fuses_shared_parameter();
+  test_widened_terms_sum_pairwise();
   {  // kernels register through the first Executor
     Graph g;
     const int a = g.add_slot(1, true), o = g.add_slot(1, false);

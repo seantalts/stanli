@@ -580,8 +580,51 @@ Outcome run_ordered_logistic(const std::vector<int>& y,
   return o;
 }
 
+// A cut point's partial is a sum over the observations in the categories
+// on either side of it. The fused kernel adds a long sum with Neumaier's
+// compensation, and Stan Math in one running sum, so with more than a few
+// terms the two differ in the last bits. A running sum of m terms is within
+// (m - 1) * u * sum|t| of the exact sum (Higham, Accuracy and Stability of
+// Numerical Algorithms, 2002, eq. 4.4), and the compensated sum is within a
+// few ULPs of sum|t|, so the fused partial must lie within m * u * sum|t|
+// plus 2 ULPs of sum|t| of Stan Math's. The magnitudes come from Stan Math's
+// call on each observation alone. A case with a nonfinite term is left to
+// the bitwise comparison.
+bool cut_points_within_sum_bound(const std::vector<int>& y,
+                                 const std::vector<double>& lambda,
+                                 const std::vector<double>& cuts,
+                                 unsigned variant, const Outcome& stan,
+                                 const Outcome& fused) {
+  const size_t first = lambda.size();
+  std::vector<double> magnitude(cuts.size(), 0.0);
+  std::vector<int> terms(cuts.size(), 0);
+  for (size_t i = 0; i < y.size(); ++i) {
+    const Outcome one =
+        run_ordered_logistic({y[i]}, {lambda[i]}, cuts, variant, false);
+    if (one.threw) return false;
+    for (size_t j = 0; j < cuts.size(); ++j) {
+      const double t = one.scratch[1 + j];
+      if (!std::isfinite(t)) return false;
+      magnitude[j] += std::abs(t);
+      terms[j] +=
+          y[i] == static_cast<int>(j) + 1 || y[i] == static_cast<int>(j) + 2;
+    }
+  }
+  constexpr double u = std::numeric_limits<double>::epsilon() / 2;
+  for (size_t j = 0; j < cuts.size(); ++j) {
+    const double scale = std::max(magnitude[j], 1e-300);
+    const double spacing = std::nextafter(scale, kInf) - scale;
+    const double bound = terms[j] * u * scale + 2 * spacing;
+    if (!(std::abs(fused.scratch[first + j] - stan.scratch[first + j]) <=
+          bound))
+      return false;
+  }
+  return true;
+}
+
 // A shared cutpoint vector with scalar and vector locations, cutpoint counts
-// from 0 to 10, both propto settings, edge values and rejections. Bitwise.
+// from 0 to 10, both propto settings, edge values and rejections. Bitwise,
+// except for cut-point partials within the bound of a running sum (above).
 void ordered_logistic_cases(Tally& tally) {
   std::mt19937_64 rng(20251005);
   std::uniform_real_distribution<double> u(0, 1);
@@ -591,12 +634,23 @@ void ordered_logistic_cases(Tally& tally) {
   auto one_case = [&](const std::vector<int>& y,
                       const std::vector<double>& lambda,
                       const std::vector<double>& cuts, unsigned variant) {
-    const Outcome s = run_ordered_logistic(y, lambda, cuts, variant, false);
+    Outcome s = run_ordered_logistic(y, lambda, cuts, variant, false);
     const Outcome f = run_ordered_logistic(y, lambda, cuts, variant, true);
-    compare("ordered_logistic_lpmf", tally, variant & 1u, s, f, 0, [&] {
+    const auto describe = [&] {
       std::printf("n=%zu cuts=%zu variant=0x%x", y.size(), cuts.size(),
                   variant);
-    });
+    };
+    if (!s.threw && !f.threw && y.size() == lambda.size() &&
+        cut_points_within_sum_bound(y, lambda, cuts, variant, s, f)) {
+      // The cut-point partials are within the bound; hold the rest to
+      // Stan Math bit for bit.
+      const size_t first = lambda.size();
+      std::copy(
+          f.scratch.begin() + static_cast<std::ptrdiff_t>(first),
+          f.scratch.begin() + static_cast<std::ptrdiff_t>(first + cuts.size()),
+          s.scratch.begin() + static_cast<std::ptrdiff_t>(first));
+    }
+    compare("ordered_logistic_lpmf", tally, variant & 1u, s, f, 0, describe);
   };
 
   for (int kc : cut_counts) {
