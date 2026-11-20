@@ -87,6 +87,7 @@ void test_active_duplicates_merge() {
 // The fusion on its own: the observation collapse would go on to replace
 // the fused density, so it is switched off here.
 void test_shared_parameter_fuses() {
+  SKIP_WITHOUT_DEBUG_SWITCHES();
   CompileOptions off, on;
   on.fast_math = true;
   const Run base = run("fast_math_shared", CompileOptions{});

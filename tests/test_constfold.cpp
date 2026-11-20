@@ -158,6 +158,7 @@ static void test_folds_region_without_inputs() {
 }
 
 static void test_env_disable() {
+  SKIP_WITHOUT_DEBUG_SWITCHES();
   test_setenv("STANLI_NO_CONSTFOLD", "1", 1);
   Graph g;
   Fills fills;

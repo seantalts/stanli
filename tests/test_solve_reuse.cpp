@@ -226,6 +226,7 @@ int main() {
     for (int k : {1, 3})
       for (int rows : {0, 1, 33})
         for (bool frames : {false, true}) {
+          if (frames && !debug_switches_available()) continue;
           Kernel without = original;
           without.forward = recompute_forward;
           without.backward = recompute_backward;
@@ -256,11 +257,11 @@ int main() {
               identical(evaluate(actual, n, k, 4), evaluate(expected, n, k, 4)),
               "copy leaves the original factor storage independent");
           const auto diagnostics = captured.finish();
-          if (frames && rows == 33)
+          if (frames && rows == 33 && debug_switches_available())
             check(diagnostics.find("stanli_structured frames:") !=
                       std::string::npos,
                   "factor lifetime check reaches numerical frames");
-          if (rows > 0) {
+          if (rows > 0 && debug_switches_available()) {
             // Frames return before the stream's respecialized counter is
             // printed. Count their completed recordings instead: the first
             // recording plus the two parameter-controlled branch changes.

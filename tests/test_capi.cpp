@@ -2592,6 +2592,7 @@ void test_fast_math_options() {
 // quantities as chains that each have a copy. Output depends only on the
 // draw and the chain's RNG, not on which draws the executor ran before.
 void test_shared_write_array_executor() {
+  SKIP_WITHOUT_DEBUG_SWITCHES();
   char err[4096]{};
   const std::string mir = slurp("tests/fixtures/gqrng_vector.tmir.sexp");
   stanli_model* model = stanli_model_new_with_opts(mir.c_str(), R"({"K":4})",
@@ -2627,6 +2628,66 @@ void test_shared_write_array_executor() {
   expect_true("shared write_array: draws match", shared_draws == copied_draws);
   expect_true("shared write_array: generated quantities match",
               shared_values == copied_values);
+  stanli_model_free(model);
+}
+
+// Every stored row that sampling writes through write_array agrees with its
+// own draw, in every build: sigma is the draw's constrained value, the
+// deterministic columns have their known values, and the normal_rng column
+// is standard normal in units of sigma. A row computed from another draw's
+// executor state shows up as a wrong sigma.
+void test_sampled_write_array_rows_match_draws() {
+  char err[4096]{};
+  const std::string mir = slurp("tests/fixtures/gqrng.tmir.sexp");
+  stanli_model* model = stanli_model_new_with_opts(mir.c_str(), R"({"N":3})",
+                                                   nullptr, err, sizeof err);
+  expect_true("sampled write_array: model builds", model != nullptr);
+  if (model == nullptr) return;
+  stanli_sample_opts opts;
+  stanli_sample_opts_init(&opts);
+  opts.seed = 11;
+  opts.chains = 4;
+  opts.warmup = 100;
+  opts.samples = 100;
+  opts.num_threads = stanli_thread_safe() ? 4 : 1;
+  const int64_t rows = opts.chains * stanli_n_stored_draws(&opts);
+  const int64_t n = stanli_n_unconstrained(model);
+  const int64_t w = stanli_wa_n_columns(model);
+  expect_true("sampled write_array: sigma, yrep, crep, branchy and p",
+              n == 1 && w == 5);
+  if (n != 1 || w != 5) {
+    stanli_model_free(model);
+    return;
+  }
+  std::vector<double> draws((size_t)(rows * n)), values((size_t)(rows * w));
+  const int rc = stanli_sample_multi_metric(
+      model, &opts, nullptr, 0, draws.data(), nullptr, values.data(), nullptr,
+      nullptr, nullptr, nullptr, nullptr, nullptr, err, sizeof err);
+  expect_true(std::string("sampled write_array: sampling succeeds: ") + err,
+              rc == 0);
+  double z_sum = 0, z_sum_sq = 0, crep_sum = 0;
+  for (int64_t r = 0; r < rows; ++r) {
+    const double sigma = std::exp(draws[(size_t)r]);
+    const double* row = &values[(size_t)(r * w)];
+    expect_near("sampled write_array: sigma is exp of the draw", row[0], sigma);
+    const double z = row[1] / sigma;
+    z_sum += z;
+    z_sum_sq += z * z;
+    expect_true("sampled write_array: crep is a binomial count",
+                row[2] == std::floor(row[2]) && row[2] >= 0 && row[2] <= 3);
+    crep_sum += row[2];
+    expect_true("sampled write_array: branchy follows sigma",
+                row[3] == (row[0] > 1 ? 1.0 : 0.0));
+    expect_true("sampled write_array: p is 6", row[4] == 6.0);
+  }
+  const double mean = z_sum / (double)rows;
+  const double variance = z_sum_sq / (double)rows - mean * mean;
+  expect_true("sampled write_array: yrep over sigma has mean near 0",
+              std::abs(mean) < 0.5);
+  expect_true("sampled write_array: yrep over sigma has variance near 1",
+              variance > 0.5 && variance < 1.7);
+  expect_true("sampled write_array: crep averages near 1.5",
+              std::abs(crep_sum / (double)rows - 1.5) < 0.4);
   stanli_model_free(model);
 }
 
@@ -3240,6 +3301,7 @@ void test_sample_setup_error() {
 
 int main() {
   test_shared_write_array_executor();
+  test_sampled_write_array_rows_match_draws();
   test_build_id_names_the_abi();
   test_o1_fallback_message();
   test_variables_and_layouts();

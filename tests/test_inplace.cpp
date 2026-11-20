@@ -814,6 +814,7 @@ static void test_dead_slots_freed() {
 // oracle comparing the optimized graph against itself, green, with no ctest
 // to catch it.
 static void test_env_disable() {
+  SKIP_WITHOUT_DEBUG_SWITCHES();
   const int L = 8;
   Fills fills;
   std::vector<int> terms;
@@ -942,6 +943,7 @@ static void test_root_destination_kept() {
 }
 
 static void test_elide_env_disable() {
+  SKIP_WITHOUT_DEBUG_SWITCHES();
   const int L = 3, K = 5;
   Fills fills;
   std::vector<int> terms;
@@ -983,6 +985,7 @@ static void test_copying_full_store_elided() {
 // other reader: its reverse accumulation then still starts from zero.
 static void test_identity_slices() {
   for (int mode = 0; mode < 7; ++mode) {
+    if (mode == 6 && !debug_switches_available()) continue;
     Graph g;
     const int p = g.add_slot(4, true);
     const int source = g.add_slot(4, false);

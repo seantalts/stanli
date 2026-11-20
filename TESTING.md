@@ -123,6 +123,7 @@ branch, use `gh workflow run wheels.yml --ref BRANCH`. The jobs are in
 | WebAssembly replay | log density and gradient of the corpus through the wasm build | the same references and limits | by hand | `write_array`; `nn_rbm1bJ100`, whose compile does not fit in 4 GB |
 | Safari 17 bundle check | the js_of_ocaml bundles | no line ending in `static` | PR | |
 | docs and formatting | stamped numbers, C/C++ formatting | their artifacts ([`tools/gen_docs.py --check`](tools/gen_docs.py)), the pinned formatter | every PR | |
+| red-main issue | whether any post-merge job of `wheels.yml` failed | none: it opens, updates or closes one GitHub issue, "main is red: wheels" | after each push to `main` and each nightly run | a run in which a job is cancelled |
 
 Release tags also check the version strings, the runtime tarballs and the PyPI
 description. Three checks fail on time and compare no numbers: the MIR wire
@@ -234,6 +235,15 @@ builds the call that CmdStan's generated C++ would make with
 use. A regression test must first fail against the pre-fix source, for the
 expected reason.
 
+A check that compares a run with itself, because the switch it sets is
+ignored in an OFF build, is not a check. The shared write_array test in
+`test_capi` therefore compares sampled rows with their own draws in every
+build, and compares the shared and copied executors only when switches are
+available. `tests/test_hp_reference.py` skips its 80-digit reference classes
+when `mpmath` is missing; CI installs `mpmath` and sets
+`STANLI_REQUIRE_MPMATH=1` for the matrix legs, which turns the skip into a
+failure.
+
 [`tests/expect.hpp`](tests/expect.hpp) provides the assertions. `expect_eq` is
 bitwise, so `+0` and `-0` differ and a NaN never matches.
 `expect_eq_or_both_nan` also accepts two NaNs. `expect_ulp` and `expect_ulp_of`
@@ -280,12 +290,21 @@ stochastic columns, which the CmdStan replay covers.
 
 The check is bitwise. A divergence fails unless
 [`tests/cross_path_ledger.json`](tests/cross_path_ledger.json) lists it with a
-cause and a bound in ULP (-1 allows any distance). The ledger lists three
-operations that only the `write_array` graph supports, and summation
+cause and a bound in ULP (-1 allows any distance). The ledger lists summation
 regroupings of 1 to 10 ULP by the region map and the lane passes. It also
 lists one open bug: one gradient entry each of `higher_order_all_contexts` and
-`ode_adjoint_region` was far off in one Windows run, and the cause is not yet
-known.
+`ode_adjoint_region` was far off in Windows x86-64 runs, and the cause is not
+yet known. Those entries, and the `cm_rdm` entries for a Windows x86-64
+rounding difference, name `"platform": "windows-x86_64"`, so they excuse
+nothing on other platforms. A platform is `windows`, `macos` or `linux`,
+optionally followed by `-x86_64` or `-arm64`; an entry without one applies
+everywhere. Every entry needs a non-empty `cause`.
+
+A full run of a model fails when an entry for that model that applies on the
+running platform excused no comparison. The divergence it names has gone, and
+the entry would excuse the next one, so delete it. `test_cross_path` also
+fails for an entry that names a model no harness runs. An entry for another
+platform is not checked on this one.
 
 [`tests/test_cross_path.cpp`](tests/test_cross_path.cpp) runs the matrix over
 every fixture. When a fixture has no data file, the test generates unit data
@@ -351,7 +370,9 @@ stanc3's integration tests cover syntax and type combinations that posteriordb
 and the generators miss. [`tools/check_stanc3_good.py`](tools/check_stanc3_good.py)
 runs the `test/integration/good` models and compares log density, gradient and
 `write_array` row with recorded CmdStan answers. Where CmdStan throws, stanli
-must throw the same message.
+must throw the same message. A CmdStan message that is empty after the file
+location and numbers are removed agrees only with an empty stanli message, so
+CmdStan returning NaN does not agree with stanli throwing.
 [`tools/check_stanc3_bad.py`](tools/check_stanc3_bad.py) compares the error
 text of the `test/integration/bad` models with stanc3's expected output. A
 model fails if it does better or worse than its ledger entry
@@ -452,10 +473,29 @@ the wheels, the R runtime and the browser builds ship.
 
 A test that sets a switch is listed in `STANLI_DEBUG_SWITCH_TESTS` in
 [`CMakeLists.txt`](CMakeLists.txt) and carries the CTest label
-`debug_switches`. In an OFF build, CTest reports it as `Not Run (Disabled)`
-and the run still passes. CI runs CTest that way in the shipped `build-rel/`.
-The manylinux job's differential step builds ON and runs
-`ctest -L debug_switches`. Locally:
+`debug_switches`. Such a test builds and runs in every configuration. In an
+OFF build, a case that needs a switch skips itself: it starts with
+`SKIP_WITHOUT_DEBUG_SWITCHES()` or tests `debug_switches_available()`, both
+in [`tests/env_helpers.hpp`](tests/env_helpers.hpp), and prints a `SKIP` line,
+while the cases that need no switch run. A case that sets a switch and does
+not skip still runs in an OFF build, where the switch is ignored, so it passes
+only if its checks hold without it. Some cases that compare a run with and
+without a switch are like that today: they pass by comparing the default with
+itself, and only an ON build tests them.
+
+Eight tests and the 22 cogmod runs of the cross-path matrix
+(`test_cross_path_cm_*`) are disabled in an OFF build, because almost every
+case in them needs a switch. They are in `STANLI_DEBUG_SWITCH_ONLY_TESTS`, and CTest
+reports `Not Run (Disabled)`: `test_cross_path`, `test_structured_loop`,
+`test_region_map`, `test_wa_parallel_switches`, `test_pass_dump_switches`,
+`test_prep_profile_reroll_dispositions`, `test_ctsem_engine` and
+`test_data_loop_memo`. An OFF build registers 578 tests and runs 548 of them.
+
+CI runs CTest in the shipped OFF `build-rel/` on every platform, so the
+switch-free cases of the pass, lowering, write_array and sampler-parity tests
+run on macOS, Linux aarch64 and Windows x64 as well. The manylinux job's
+differential step builds ON and runs `ctest -L debug_switches`, which is
+where the skipped cases and the eight disabled tests run. Locally:
 
 ```sh
 cmake -B build -DSTANLI_DEBUG_SWITCHES=ON

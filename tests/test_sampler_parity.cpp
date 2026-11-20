@@ -594,9 +594,11 @@ int main() {
       if (!compare_metric(schools, k, index++)) ++failures;
     }
   if (!check_invalid_inputs()) ++failures;
-  for (bool interpreted : {false, true})
+  for (bool interpreted : {false, true}) {
+    if (interpreted && !debug_switches_available()) continue;
     for (int mode = 0; mode < 3; ++mode)
       for (int scenario = 0; scenario < 4; ++scenario)
         if (!compare_rng(interpreted, mode, scenario)) ++failures;
+  }
   return failures != 0;
 }

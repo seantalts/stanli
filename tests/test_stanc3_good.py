@@ -160,6 +160,21 @@ class ClassifyTest(unittest.TestCase):
         self.assertFalse(g.messages_agree(
             "Exception: foo<double> is bad", "foo<long double> is bad"))
 
+    def test_empty_cmdstan_message_agrees_only_with_an_empty_one(self):
+        self.assertTrue(g.messages_agree("", ""))
+        self.assertTrue(g.messages_agree(None, None))
+        self.assertFalse(g.messages_agree("", "normal_lpdf: bad"))
+        self.assertFalse(g.messages_agree(None, "normal_lpdf: bad"))
+        self.assertFalse(g.messages_agree(
+            "Exception: (in 'm.stan', line 4, column 2)", "bad"))
+
+    def test_nan_row_does_not_agree_with_a_throw(self):
+        ref = ref_ok(lp_grad=("nan", "nan"))
+        points = all_points("OK nan nan")
+        points[2] = ("EVAL_FAIL stanli threw here", [])
+        self.assertEqual(g.classify(ref, stanli(points))[1],
+                         {"2": "message_mismatch"})
+
     def test_all_nan_rows_agree(self):
         ref = ref_ok(lp_grad=("nan", "nan"))
         self.assertEqual(g.classify(ref, stanli(all_points("OK nan nan")))[0],

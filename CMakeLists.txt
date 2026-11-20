@@ -169,9 +169,11 @@ endif()
 # tuning limits or print diagnostics (runtime/include/stanli/debug_switch.hpp).
 # Tests and investigations use them. OFF, the default and what packaging
 # builds use, compiles them out, so the runtime's behavior cannot change
-# through the environment. The tests that need them carry the debug_switches
-# label and are disabled in an OFF build (STANLI_DEBUG_SWITCH_TESTS below);
-# tools/dev_setup.sh configures ON. STANLI_NO_INTERPRETER, STANLI_ISA,
+# through the environment. The tests that use them carry the debug_switches
+# label (STANLI_DEBUG_SWITCH_TESTS below). In an OFF build a case that needs a
+# switch skips itself (tests/env_helpers.hpp), and a test whose every case
+# needs one is disabled (STANLI_DEBUG_SWITCH_ONLY_TESTS); tools/dev_setup.sh
+# configures ON. STANLI_NO_INTERPRETER, STANLI_ISA,
 # STANLI_NO_FUSED_DENSITY and STANLI_NO_O1_FALLBACK are not developer
 # switches.
 option(STANLI_DEBUG_SWITCHES
@@ -180,6 +182,7 @@ if(NOT STANLI_DEBUG_SWITCHES)
   target_compile_definitions(stanmath INTERFACE STANLI_NO_DEBUG_SWITCHES=1)
 endif()
 set(STANLI_DEBUG_SWITCH_TESTS)
+set(STANLI_DEBUG_SWITCH_ONLY_TESTS)
 
 # Chains in threads. stan-math's autodiff stack is a plain static unless
 # STAN_THREADS is defined, in which case it is thread_local (__thread on
@@ -1034,6 +1037,7 @@ foreach(_stanli_cogmod_source IN LISTS STANLI_COGMOD_SOURCES)
     PASS_REGULAR_EXPRESSION "CROSS OK "
     FAIL_REGULAR_EXPRESSION "CROSS (FAIL|SKIP)")
   list(APPEND STANLI_DEBUG_SWITCH_TESTS test_cross_path_${_stanli_cogmod})
+  list(APPEND STANLI_DEBUG_SWITCH_ONLY_TESTS test_cross_path_${_stanli_cogmod})
 endforeach()
 add_executable(bench_grad tools/bench_grad.cpp
   $<TARGET_OBJECTS:stanli_tbb_stub>)
@@ -1793,9 +1797,10 @@ if(Python3_Interpreter_FOUND)
 endif()
 
 # Tests that set developer switches, to turn a pass off for a differential
-# check, force an engine, or read a diagnostic. An OFF build ignores the
-# switches, so these would fail or check nothing there: they carry the
-# debug_switches label (ctest -L debug_switches) and are disabled.
+# check, force an engine, or read a diagnostic. They carry the debug_switches
+# label (ctest -L debug_switches). An OFF build ignores the switches, so a
+# case that needs one skips itself there; the tests listed as switch-only
+# have no case left to run and are disabled in an OFF build.
 list(APPEND STANLI_DEBUG_SWITCH_TESTS
   test_execution_report test_sampler_parity test_lower test_region_map
   test_reroll test_inplace test_pass_safety test_structured_checks
@@ -1807,13 +1812,22 @@ list(APPEND STANLI_DEBUG_SWITCH_TESTS
   hypergeometric_1f0_register_reference
   hypergeometric_1f0_structured_reference callback_geometry
   test_run_rng test_ctsem_engine test_data_loop_memo)
+list(APPEND STANLI_DEBUG_SWITCH_ONLY_TESTS
+  test_region_map test_structured_loop test_cross_path
+  test_wa_parallel_switches test_pass_dump_switches
+  test_prep_profile_reroll_dispositions test_ctsem_engine
+  test_data_loop_memo)
 foreach(_stanli_switch_test IN LISTS STANLI_DEBUG_SWITCH_TESTS)
   if(TEST ${_stanli_switch_test})
     set_property(TEST ${_stanli_switch_test} APPEND PROPERTY
                  LABELS debug_switches)
-    if(NOT STANLI_DEBUG_SWITCHES)
-      set_property(TEST ${_stanli_switch_test} PROPERTY DISABLED TRUE)
-    endif()
   endif()
 endforeach()
+if(NOT STANLI_DEBUG_SWITCHES)
+  foreach(_stanli_switch_test IN LISTS STANLI_DEBUG_SWITCH_ONLY_TESTS)
+    if(TEST ${_stanli_switch_test})
+      set_property(TEST ${_stanli_switch_test} PROPERTY DISABLED TRUE)
+    endif()
+  endforeach()
+endif()
 endif()  # NOT EMSCRIPTEN

@@ -812,9 +812,10 @@ tool variables such as `STANLI_JOBS` and `STANLI_PROFILE` are not. CMake's
 `STANLI_DEBUG_SWITCHES` compiles them in. It defaults to OFF, which is what
 the wheels, the R runtime and the browser builds ship: there a set switch is
 ignored, with a one-time notice. `tools/dev_setup.sh` configures both of its
-builds ON. Tests that set a switch carry the CTest label `debug_switches` and
-are disabled in an OFF build; `ctest -L debug_switches` runs them in an ON
-build. `STANLI_NO_INTERPRETER`, `STANLI_ISA`, `STANLI_NO_FUSED_DENSITY` and
+builds ON. Tests that set a switch carry the CTest label `debug_switches`. In
+an OFF build a case that needs a switch skips itself and the rest of the test
+runs; tests where no case can run are disabled. `ctest -L debug_switches` runs
+them all in an ON build. See [TESTING.md](../TESTING.md#developer-switches). `STANLI_NO_INTERPRETER`, `STANLI_ISA`, `STANLI_NO_FUSED_DENSITY` and
 `STANLI_NO_O1_FALLBACK` are not developer switches and work in every build.
 
 `tools/build_jobs.sh` caps parallelism by CPU count and usable RAM: 4 GiB

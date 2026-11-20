@@ -114,6 +114,7 @@ static void test_branch_bound_live_out() {
 // distinct live-outs. The old extraction path is a bitwise oracle; the simple
 // piecewise polynomial also gives independent values and derivatives.
 static void test_region_direct_output() {
+  SKIP_WITHOUT_DEBUG_SWITCHES();
   const std::string mir =
       slurp("tests/fixtures/region_direct_output.tmir.sexp");
   for (int n : {0, 1, 5}) {
@@ -317,6 +318,7 @@ static Graph fill_sink_graph(const Program& program) {
 }
 
 static void test_fill_sink() {
+  SKIP_WITHOUT_DEBUG_SWITCHES();
   Program original = fill_sink_program(), optimized = original;
   expect("fill sinks across unused branch", sink_program_fills(optimized));
   expect("fill moved after branch", optimized.code[6].code == Program::FILL);
@@ -538,6 +540,7 @@ static void test_compact_range_copy() {
 // destination is an interior boundary; destination forwarding can instead
 // make the producers write the contiguous range directly.
 static void test_compact_forwards_producers_into_range() {
+  SKIP_WITHOUT_DEBUG_SWITCHES();
   auto make = [] {
     Program p;
     p.n_regs = 13;
@@ -691,6 +694,7 @@ static size_t hmm_island_instrs(const char* what) {
 }
 
 static void test_compact_env_disable() {
+  SKIP_WITHOUT_DEBUG_SWITCHES();
   test_setenv("STANLI_NO_ISLAND_COMPACT", "1", 1);
   const size_t off = hmm_island_instrs("compaction off");
   test_unsetenv("STANLI_NO_ISLAND_COMPACT");
@@ -724,6 +728,7 @@ static void test_hmm_parity() {
 // rename here would leave that oracle comparing the optimized graph against
 // itself, green, with no ctest to catch it.
 static void test_env_disable() {
+  SKIP_WITHOUT_DEBUG_SWITCHES();
   HmmGraph h = build_hmm(8);
   const size_t before = h.g.ops.size();
 
@@ -921,6 +926,7 @@ static void check_vector_op_joins(const std::string& tag, VectorBinaryGraph ref,
 }
 
 static void test_vector_op_joins_runs() {
+  SKIP_WITHOUT_DEBUG_SWITCHES();
   for (const VectorOpSpec& spec : kVectorOps) {
     for (int vec = 1; vec < (1 << spec.n_in); ++vec) {
       // Every operand a vector, then each single operand a vector with the
@@ -1141,6 +1147,7 @@ static VectorBinaryGraph build_join_guard_fires() {
 }
 
 static void test_join_guard_skips_a_joined_compile_split_would_lose() {
+  SKIP_WITHOUT_DEBUG_SWITCHES();
   bool skipped = false;
   for (const std::string& l : capture_island_debug([] {
          VectorBinaryGraph h = build_join_guard_fires();
@@ -1206,6 +1213,7 @@ static VectorBinaryGraph build_two_piece_split_loses() {
 }
 
 static void test_split_skip_avoids_compiling_split_pieces() {
+  SKIP_WITHOUT_DEBUG_SWITCHES();
   bool skipped = false;
   int piece_estimate_lines = 0;
   for (const std::string& l : capture_island_debug([] {
@@ -1265,6 +1273,7 @@ static void test_split_skip_off_by_guard() {
 // the single-run path (join_cost_floor); build_two_piece_split_loses hits
 // the multi-piece path (split_cost_floor and split_has_multiple_pieces).
 static void test_join_and_split_floor_values_pinned() {
+  SKIP_WITHOUT_DEBUG_SWITCHES();
   std::string join_line;
   for (const std::string& l : capture_island_debug([] {
          VectorBinaryGraph h = build_join_guard_fires();
@@ -1341,6 +1350,7 @@ static VectorBinaryGraph build_wide_then_narrow(int width, int n_updates,
 // to a scalar is available: no accepted (graph >= island) liveness piece
 // may be shorter than the wide chain while starting inside it.
 static void test_liveness_prefers_the_cheap_cut_over_the_expensive_one() {
+  SKIP_WITHOUT_DEBUG_SWITCHES();
   const int width = 40, n_updates = 36, chain_len = 40;
   const int64_t wide_ops = 2 + n_updates;  // the two marker ops, then the
                                            // slice-update chain
@@ -1451,6 +1461,7 @@ static void test_liveness_cut_coincides_with_strict_cut() {
 // gets carved here, since nothing else can recover the accepted island
 // splitting would have found.
 static void test_no_island_liveness_disables_splitting() {
+  SKIP_WITHOUT_DEBUG_SWITCHES();
   VectorBinaryGraph with_split = build_join_guard_fires();
   const int carved_with_split =
       carve_islands(with_split.g, with_split.fills, with_split.terms, {});
@@ -1474,6 +1485,7 @@ static void test_no_island_liveness_disables_splitting() {
 // vocabulary and prices that instead, at a lower cost than the two-piece
 // floor test_join_and_split_floor_values_pinned pins (433).
 static void test_liveness_finds_a_cheaper_split_than_strict() {
+  SKIP_WITHOUT_DEBUG_SWITCHES();
   int64_t joined_cost = -1;
   int matches = 0;
   int carved = 0;
@@ -1523,6 +1535,7 @@ static void test_liveness_cached_matches_uncached() {
 }
 
 static void test_liveness_search_budget() {
+  SKIP_WITHOUT_DEBUG_SWITCHES();
   // Many overlapping cuts exceed the work allowance. The budget changes
   // which proven partitions are considered, never the graph's semantics.
   const auto build = [] { return build_wide_then_narrow(40, 1200, 1200); };
@@ -1610,6 +1623,7 @@ static std::string capture_estimate_line(const std::function<void()>& fn) {
 // element correction) and the island side (touches_width), so doubling it
 // should move both, not just one.
 static void test_dot_width_estimate_moves_together() {
+  SKIP_WITHOUT_DEBUG_SWITCHES();
   test_setenv("STANLI_NO_ISLAND_JOIN_GUARD", "1", 1);
   const std::string at40 = capture_estimate_line([] {
     VectorBinaryGraph h = build_dot_heavy(40);
@@ -1664,6 +1678,7 @@ static VectorBinaryGraph build_const_chain(int n, int k_distinct) {
 // live-in or a computed value costs: it may only cost each constant's own
 // materializing instruction, forward and backward.
 static void test_const_count_does_not_grow_island_cost() {
+  SKIP_WITHOUT_DEBUG_SWITCHES();
   constexpr int kSteps = 40;
   const std::string one_const = capture_estimate_line([] {
     VectorBinaryGraph h = build_const_chain(kSteps, 1);
@@ -1717,6 +1732,7 @@ static Graph build_wide_state(Fills& fills, std::vector<int>& terms) {
 }
 
 static void test_wide_state_refused() {
+  SKIP_WITHOUT_DEBUG_SWITCHES();
   Fills fills;
   std::vector<int> terms;
   Graph g = build_wide_state(fills, terms);
@@ -1740,6 +1756,7 @@ static void test_wide_state_refused() {
 // state vector copied per step is `iohmm_reg`: the ops move far more
 // than the register file does, and the island is the cheaper form.
 static void test_vector_copies_carved() {
+  SKIP_WITHOUT_DEBUG_SWITCHES();
   HmmGraph ref = build_hmm(8, 128);
   const std::vector<double> want = run_grad(std::move(ref.g), ref.fills);
 
@@ -1798,6 +1815,7 @@ static HmmGraph build_softmax_island() {
 
 // Group metadata must survive island carving, including one-element leaves.
 static void test_grouped_softmax_island_refusal() {
+  SKIP_WITHOUT_DEBUG_SWITCHES();
   for (int width : {1, 3}) {
     HmmGraph h;
     const int logits = h.g.add_slot(2 * width, true);
@@ -1877,6 +1895,7 @@ static HmmGraph build_compact_cost_boundary() {
 // compaction off: with it on the copies never reach gen_adjoint, and the
 // region clears the estimate by a margin instead of sitting on it.
 static void test_compact_adjoint_cost_boundary() {
+  SKIP_WITHOUT_DEBUG_SWITCHES();
   test_setenv("STANLI_NO_ISLAND_COMPACT", "1", 1);
   HmmGraph forced = build_compact_cost_boundary();
   const int64_t graph_cost = 6 * (int64_t)forced.body_ops;
@@ -2318,6 +2337,7 @@ static void test_incoming_gradient_aliases() {
 // is the arbiter, not the var replay (which cannot execute a CALL and
 // never meets one).
 static void test_kernel_call_ops_carved(bool compact) {
+  SKIP_WITHOUT_DEBUG_SWITCHES();
   if (!compact) test_setenv("STANLI_NO_ISLAND_COMPACT", "1", 1);
   Graph g;
   Fills fills;
@@ -2810,6 +2830,7 @@ static void test_density_mask_data_argument() {
 // STANLI_NO_DENSITY_MASK restores the all-active binding. ab_corpus.py's A
 // side is built out of switches like this one.
 static void test_density_mask_env_disable() {
+  SKIP_WITHOUT_DEBUG_SWITCHES();
   test_setenv("STANLI_NO_DENSITY_MASK", "1", 1);
   HmmGraph h = build_hmm(8);
   const std::vector<uint8_t> masks = hmm_density_masks(h.g, h.fills, h.terms);
@@ -2844,6 +2865,7 @@ static void test_density_mask_gradient_identical() {
 // against the same terms written outside one, where the flat path unrolls a
 // data-bounded for. The trip count is 2 below zero and 3 above it.
 static void test_while_lpmf_region_matches_flat() {
+  SKIP_WITHOUT_DEBUG_SWITCHES();
   const auto observations = [] {
     DataMap data;
     data.set_int("N", 3);

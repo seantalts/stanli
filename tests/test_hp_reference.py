@@ -6,6 +6,7 @@ against values known in closed form. No stanc, build or corpus is needed."""
 from __future__ import annotations
 
 import math
+import os
 import pathlib
 import sys
 import unittest
@@ -25,6 +26,16 @@ try:
     HAVE_MP = True
 except ImportError:
     HAVE_MP = False
+
+
+class MpmathPresent(unittest.TestCase):
+    """CI sets STANLI_REQUIRE_MPMATH so that a missing mpmath fails here
+    instead of silently skipping the classes that need it."""
+
+    def test_mpmath_is_importable_when_required(self):
+        if os.environ.get("STANLI_REQUIRE_MPMATH") != "1":
+            self.skipTest("STANLI_REQUIRE_MPMATH is not set")
+        self.assertTrue(HAVE_MP, "mpmath or the tools/hp modules do not import")
 
 
 class LpError(unittest.TestCase):

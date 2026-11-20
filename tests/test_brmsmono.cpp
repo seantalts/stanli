@@ -50,8 +50,9 @@ int main() {
   CompiledModel unforwarded = compile_model(mir, data);
   test_unsetenv("STANLI_NO_PROGRAM_DEST_FORWARD");
   test_unsetenv("STANLI_ISLAND_ALWAYS");
-  expect_true("marginal island remains available when forced",
-              island_count(forced.graph) == 1);
+  if (debug_switches_available())
+    expect_true("marginal island remains available when forced",
+                island_count(forced.graph) == 1);
   auto island_instructions = [](const Graph& g) {
     size_t n = 0;
     for (const Op& op : g.ops)
@@ -59,9 +60,10 @@ int main() {
         n += static_cast<const IslandProg*>(op.udata)->code.size();
     return n;
   };
-  expect_true("forced island still receives destination forwarding",
-              island_instructions(forced.graph) <
-                  island_instructions(unforwarded.graph));
+  if (debug_switches_available())
+    expect_true("forced island still receives destination forwarding",
+                island_instructions(forced.graph) <
+                    island_instructions(unforwarded.graph));
   Executor ex(std::move(cm.graph));
   cm.bind(ex);
 

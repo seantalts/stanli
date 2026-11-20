@@ -338,6 +338,7 @@ static void test_keeps_roots() {
 }
 
 static void test_env_disable() {
+  SKIP_WITHOUT_DEBUG_SWITCHES();
   test_setenv("STANLI_NO_CSE", "1", 1);
   Graph g;
   Fills fills;
