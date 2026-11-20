@@ -1,43 +1,10 @@
-// Included inside Lowering: isolated structured candidates reuse expression
-// lowering, typed views and the ordinary kernel vocabulary.
-using RegionNode = StructuredLoop::Node;
-RegionNode* region_current = nullptr;
-// Puts region_current back when a scope ends. A refused candidate throws out
-// of a child node that is a local of the frame being unwound, and lowering
-// can catch the refusal and go on.
-struct RegionRestore {
-  RegionNode*& current;
-  RegionNode* const saved = current;
-  ~RegionRestore() { current = saved; }
-};
-size_t region_emitted = 0;
-std::map<std::string, Val> region_cells;
-std::map<std::string, IntRange> region_analysis_ints;
-int region_control_depth = 0;
-bool region_control_active = false;
-// Set once the region retains a branch or while loop whose condition depends
-// on a parameter. Replay checks each such decision and records again when one
-// changes between executions.
-bool region_parameter_control = false;
-unsigned structured_outer_depth = 0;
-bool region_unreachable = false;
-std::set<std::string> region_unsized_unagreed;
-std::map<std::pair<const mir::Expr*, std::string>, std::optional<RealRange>>
-    region_enumerated_cache;
+#include "lower_internal.hpp"
 
-// These limits govern only newly admitted output blocks. Existing retained
-// loops keep their selection policy. Weighted elements/visits bound work and
-// recording proxies; they are not a promise about total process RSS.
-bool bounded_output = false;
-uint64_t bounded_output_elements = 0, bounded_output_weighted_elements = 0;
-uint64_t bounded_output_visits = 0, bounded_output_multiplier = 1;
-bool bounded_output_dynamic = false;
+namespace stanli {
+namespace lower_detail {
 
-// A deliberately small, closed grammar: dynamic containers never escape or
-// reach a consumer whose logical-length behavior has not been audited here.
-// This scan mutates no lowering state and invokes no interpreter probes.
-bool bounded_output_candidate(const mir::Stmt& root,
-                              std::set<std::string>* references) {
+bool Lowering::bounded_output_candidate(const mir::Stmt& root,
+                                        std::set<std::string>* references) {
   if (!in_write_array ||
       wa_section != mir::OutputVar::Block::GeneratedQuantities ||
       root.kind != mir::Stmt::Block || structured_policy == StructuredMode::Off)
@@ -221,11 +188,7 @@ bool bounded_output_candidate(const mir::Stmt& root,
   return dynamic && !dynamic_inner;
 }
 
-// A refusal-only check for a nested container's unavoidable update slot.
-// Follow straight-line integer definitions and declaration-time shapes, then
-// the same maximum trip counts used by bounded lowering. Unknown control or
-// ranges defer to the ordinary isolated trial; this never admits a program.
-bool bounded_nested_update_over_budget(const mir::Stmt& root) {
+bool Lowering::bounded_nested_update_over_budget(const mir::Stmt& root) {
   const auto nested = [&](const auto& self, const mir::Stmt& s) -> bool {
     if (s.kind == mir::Stmt::Decl && s.decl_type.base == "SArray" &&
         s.decl_type.dims.size() > 1)
@@ -358,14 +321,13 @@ bool bounded_nested_update_over_budget(const mir::Stmt& root) {
   return visit(visit, root, 1, true);
 }
 
-// Matches ostream's default floating-point formatting.
-static std::string fmt_g(double v) {
+std::string Lowering::fmt_g(double v) {
   char buf[32];
   std::snprintf(buf, sizeof(buf), "%g", v);
   return buf;
 }
 
-void region_flush() {
+void Lowering::region_flush() {
   while (region_emitted < g.ops.size()) {
     RegionNode n;
     n.kind = RegionNode::KernelCall;
@@ -373,16 +335,14 @@ void region_flush() {
     region_current->children.push_back(std::move(n));
   }
 }
-void region_append(RegionNode node) {
+
+void Lowering::region_append(RegionNode node) {
   region_flush();
   region_current->children.push_back(std::move(node));
 }
 
-// A small data-only UDF can determine a shape exactly even though the
-// retained numerical region cannot fold the surrounding control. Probe it
-// under a hard statement budget so shape discovery cannot turn a compact
-// loop into an unbounded preparation-time replay.
-std::optional<DataMap::Entry> region_bounded_data_value(const mir::Expr& e) {
+std::optional<DataMap::Entry> Lowering::region_bounded_data_value(
+    const mir::Expr& e) {
   if (!e.data_only || expr_effectful(e)) return {};
   std::function<bool(const mir::Expr&)> calls_user =
       [&](const mir::Expr& value) {
@@ -422,14 +382,15 @@ std::optional<DataMap::Entry> region_bounded_data_value(const mir::Expr& e) {
   }
 }
 
-std::optional<int64_t> region_bounded_data_integer(const mir::Expr& e) {
+std::optional<int64_t> Lowering::region_bounded_data_integer(
+    const mir::Expr& e) {
   auto value = region_bounded_data_value(e);
   if (!value || !value->is_int || value->i.size() != 1 || value->r.size() != 1)
     return {};
   return value->i[0];
 }
 
-void region_alias(int dst, int src) {
+void Lowering::region_alias(int dst, int src) {
   if (dst == src) return;
   RegionNode n;
   n.kind = RegionNode::Alias;
@@ -438,10 +399,8 @@ void region_alias(int dst, int src) {
   region_append(std::move(n));
 }
 
-// Evaluate a data-only scalar over the finite integer ranges currently in
-// scope.  This keeps reusable loop analysis compact: it visits the data
-// points, but never emits or unrolls the numerical loop body.
-std::optional<RealRange> region_enumerated_data_range(const mir::Expr& e) {
+std::optional<RealRange> Lowering::region_enumerated_data_range(
+    const mir::Expr& e) {
   if (!e.data_only || expr_effectful(e)) return {};
   std::function<bool(const mir::Expr&)> calls_user =
       [&](const mir::Expr& value) {
@@ -608,7 +567,7 @@ std::optional<RealRange> region_enumerated_data_range(const mir::Expr& e) {
   return outcome;
 }
 
-std::optional<RealRange> region_real_range(const mir::Expr& e) {
+std::optional<RealRange> Lowering::region_real_range(const mir::Expr& e) {
   // Real ranges prove while-loop termination. The closed output-block grammar
   // admits only counted loops, so enumerating real values cannot help it.
   if (bounded_output) return {};
@@ -708,10 +667,7 @@ std::optional<RealRange> region_real_range(const mir::Expr& e) {
   return result;
 }
 
-// Number of scalar elements per outer entry for the bounded, rectangular
-// real-array contract. Inner extents are fixed; no padding occurs within an
-// entry. The outer logical extent remains distinct from total element count.
-std::optional<int64_t> bounded_outer_width(const Val& value) {
+std::optional<int64_t> Lowering::bounded_outer_width(const Val& value) {
   if (!bounded_output || value.runtime_dims.empty() ||
       value.runtime_dims[0] < 0)
     return {};
@@ -728,7 +684,7 @@ std::optional<int64_t> bounded_outer_width(const Val& value) {
                          "bounded inner array");
 }
 
-std::optional<IntRange> region_range(const mir::Expr& e) {
+std::optional<IntRange> Lowering::region_range(const mir::Expr& e) {
   const auto bounded = [](int64_t a, int64_t b) -> std::optional<IntRange> {
     if (a < INT32_MIN || b > INT32_MAX || a > b) return {};
     return IntRange{static_cast<int32_t>(a), static_cast<int32_t>(b)};
@@ -868,12 +824,14 @@ std::optional<IntRange> region_range(const mir::Expr& e) {
   }
   return {};
 }
-void region_forget(const std::string& name) {
+
+void Lowering::region_forget(const std::string& name) {
   int_env.erase(name);
   int_locals.erase(name);
   td_erase(name);
 }
-Val region_cell(const std::string& name) {
+
+Lowering::Val Lowering::region_cell(const std::string& name) {
   auto cell = region_cells.find(name);
   if (cell != region_cells.end()) return cell->second;
   Val source;
@@ -914,7 +872,8 @@ Val region_cell(const std::string& name) {
   region_forget(name);
   return binding;
 }
-void region_prepare_cells(const mir::Stmt& s) {
+
+void Lowering::region_prepare_cells(const mir::Stmt& s) {
   std::vector<std::string> assigned;
   assigned_names(s, &assigned);
   for (const auto& name : assigned) {
@@ -927,10 +886,8 @@ void region_prepare_cells(const mir::Stmt& s) {
       (void)region_cell(name);
   }
 }
-// A zero-size or unsized local takes its shape from its first whole
-// assignment; branch arms that assign it share one cell, sized from the
-// static shape they agree on.
-bool deferred_unsized(const std::string& name) const {
+
+bool Lowering::deferred_unsized(const std::string& name) const {
   if (int_env.count(name) || int_locals.count(name)) return false;
   const auto declaration = decls.find(name);
   if (declaration == decls.end() || !declaration->second.runtime_dims.empty() ||
@@ -941,7 +898,9 @@ bool deferred_unsized(const std::string& name) const {
   const auto bound = scope.find(name);
   return bound == scope.end() || g.slots[bound->second.slot].len == 0;
 }
-bool region_size_deferred(const std::string& name, const mir::Stmt& s) {
+
+bool Lowering::region_size_deferred(const std::string& name,
+                                    const mir::Stmt& s) {
   const auto declaration = decls.find(name);
   std::optional<StaticView> shape;
   bool agree = true, assigned = false;
@@ -974,10 +933,9 @@ bool region_size_deferred(const std::string& name, const mir::Stmt& s) {
   scope[name] = value;
   return true;
 }
-// A reusable body must account for every iteration, not just the incoming
-// values. Compute a conservative fixed point over source dependencies before
-// selecting kernels, and discard first-iteration integer observations.
-bool region_depends(const mir::Expr& e, const std::set<std::string>& active) {
+
+bool Lowering::region_depends(const mir::Expr& e,
+                              const std::set<std::string>& active) {
   if (e.kind == mir::Expr::Var) return active.count(e.name) != 0;
   if (is_shape_query(e) &&
       try_static_shape_query(e).state == StaticProbeState::Known)
@@ -986,7 +944,8 @@ bool region_depends(const mir::Expr& e, const std::set<std::string>& active) {
     if (region_depends(a, active)) return true;
   return false;
 }
-std::set<std::string> region_dependencies(const mir::Stmt& s) {
+
+std::set<std::string> Lowering::region_dependencies(const mir::Stmt& s) {
   std::set<std::string> active;
   for (const auto& item : scope)
     if (!item.second.si.param_free) active.insert(item.first);
@@ -1035,13 +994,10 @@ std::set<std::string> region_dependencies(const mir::Stmt& s) {
   } while (active.size() != previous);
   return active;
 }
-// A carried integer that a counted loop only ever increments, by amounts
-// that do not depend on anything the loop writes, stays within its range
-// on entry widened by the trip count times the largest steps. Each
-// increment counts as optional, which covers branches, break and continue.
-// Sets the range and returns true when that proof applies.
-bool region_counted_range(const mir::Stmt& loop, const std::string& name,
-                          const std::vector<std::string>& writes) {
+
+bool Lowering::region_counted_range(const mir::Stmt& loop,
+                                    const std::string& name,
+                                    const std::vector<std::string>& writes) {
   const auto value = scope.find(name);
   if (value == scope.end() || g.slots[value->second.slot].len != 1 ||
       value->second.si.kind != ViewKind::Flat)
@@ -1095,8 +1051,9 @@ bool region_counted_range(const mir::Stmt& loop, const std::string& name,
   real_ranges[value->second.slot] = real;
   return true;
 }
-void region_widen_carried(const mir::Stmt& s,
-                          const std::set<std::string>& active) {
+
+void Lowering::region_widen_carried(const mir::Stmt& s,
+                                    const std::set<std::string>& active) {
   const auto saved_analysis = region_analysis_ints;
   region_analysis_ints.clear();
   std::set<std::string> carried_names;
@@ -1267,9 +1224,10 @@ void region_widen_carried(const mir::Stmt& s,
   }
   region_analysis_ints = saved_analysis;
 }
-void region_assign(const std::string& name, Val value,
-                   std::optional<IntRange> range = {},
-                   std::optional<RealRange> real_range = {}) {
+
+void Lowering::region_assign(const std::string& name, Val value,
+                             std::optional<IntRange> range,
+                             std::optional<RealRange> real_range) {
   Val binding = region_cell(name);
   const DataMap::Entry* observed = observation(value);
   if (!same_view(binding.si, g.slots[binding.slot].len, value.si,
@@ -1304,7 +1262,7 @@ void region_assign(const std::string& name, Val value,
     real_ranges.erase(binding.slot);
 }
 
-void region_refine_condition(const mir::Expr& e, bool truth) {
+void Lowering::region_refine_condition(const mir::Expr& e, bool truth) {
   if (truth && e.kind == mir::Expr::EAnd) {
     for (const auto& arg : e.args) region_refine_condition(arg, true);
     return;
@@ -1367,9 +1325,10 @@ void region_refine_condition(const mir::Expr& e, bool truth) {
   if (lo <= hi) set_int_range(value->second, lo, hi);
 }
 
-// Compile a fixed-shape indexed access; values of selectors stay runtime.
-Val region_index(const Val& base, const std::vector<mir::Expr>& selectors,
-                 mir::UnsizedView result_view, const Val* rhs = nullptr) {
+Lowering::Val Lowering::region_index(const Val& base,
+                                     const std::vector<mir::Expr>& selectors,
+                                     mir::UnsizedView result_view,
+                                     const Val* rhs) {
   auto spec = std::make_shared<DynamicIndexSpec>();
   std::vector<int64_t> dims;
   ViewKind leaf = base.si.kind;
@@ -1593,7 +1552,8 @@ Val region_index(const Val& base, const std::vector<mir::Expr>& selectors,
   g.udata_pool.push_back(spec);
   return result;
 }
-static bool region_nested_return(const mir::Stmt& s, bool control = false) {
+
+bool Lowering::region_nested_return(const mir::Stmt& s, bool control) {
   if (s.kind == mir::Stmt::Return) return control;
   control |= s.kind == mir::Stmt::IfElse || s.kind == mir::Stmt::For ||
              s.kind == mir::Stmt::While;
@@ -1601,11 +1561,8 @@ static bool region_nested_return(const mir::Stmt& s, bool control = false) {
     if (region_nested_return(c, control)) return true;
   return false;
 }
-// Resolve a pure boolean from any observed data subexpression.  The MIR
-// interpreter can only evaluate the complete expression, so an unknown
-// loop counter in `counter > 0 && disabled == 0` otherwise hides the
-// constant-false RHS and makes us compile an unreachable arm.
-std::optional<bool> region_static_truth(const mir::Expr& e) {
+
+std::optional<bool> Lowering::region_static_truth(const mir::Expr& e) {
   if (expr_effectful(e)) return {};
   if (auto value = try_eval_pure(e)) {
     if (value->r.size() == 1) return value->r[0] != 0.0;
@@ -1625,7 +1582,7 @@ std::optional<bool> region_static_truth(const mir::Expr& e) {
   return {};
 }
 
-std::optional<Val> region_expr(const mir::Expr& e) {
+std::optional<Lowering::Val> Lowering::region_expr(const mir::Expr& e) {
   if (e.kind == mir::Expr::Indexed) {
     if (e.args.size() == 1) return lower_expr(e.args[0]);
     Val base = lower_expr(e.args[0]);
@@ -1700,20 +1657,22 @@ std::optional<Val> region_expr(const mir::Expr& e) {
   return lower_runtime_scalar(e);
 }
 
-static const std::map<std::string, int>& runtime_comparisons() {
+const std::map<std::string, int>& Lowering::runtime_comparisons() {
   static const std::map<std::string, int> table = {
       {"Less__", 0}, {"Leq__", 1},    {"Greater__", 2},
       {"Geq__", 3},  {"Equals__", 4}, {"NEquals__", 5},
       {"PNot__", 6}, {"is_nan", 7},   {"is_inf", 8}};
   return table;
 }
-static const std::map<std::string, int>& runtime_int_arithmetic() {
+
+const std::map<std::string, int>& Lowering::runtime_int_arithmetic() {
   static const std::map<std::string, int> table = {
       {"Plus__", 0},      {"Minus__", 1},  {"Times__", 2}, {"Divide__", 3},
       {"IntDivide__", 3}, {"Modulo__", 4}, {"PMinus__", 5}};
   return table;
 }
-static bool runtime_scalar_form(const mir::Expr& e) {
+
+bool Lowering::runtime_scalar_form(const mir::Expr& e) {
   if (e.kind != mir::Expr::FunApp || e.fn_lib != mir::Expr::Lib::StanLib)
     return false;
   if (runtime_comparisons().count(e.name)) return true;
@@ -1721,14 +1680,16 @@ static bool runtime_scalar_form(const mir::Expr& e) {
          runtime_int_arithmetic().count(e.name);
 }
 
-bool write_array_unregioned() const {
+bool Lowering::write_array_unregioned() const {
   return in_write_array && !region_current;
 }
-bool runtime_only(const mir::Expr& e) {
+
+bool Lowering::runtime_only(const mir::Expr& e) {
   return !write_array_unregioned() && needs_runtime_value(e) &&
          !try_eval_pure(e);
 }
-bool runtime_int_expression(const mir::Expr& e) {
+
+bool Lowering::runtime_int_expression(const mir::Expr& e) {
   if (write_array_unregioned() || !runtime_scalar_form(e)) return false;
   bool found = false;
   const auto integer_reads = [&](const auto& self, const mir::Expr& x) -> bool {
@@ -1743,7 +1704,8 @@ bool runtime_int_expression(const mir::Expr& e) {
   };
   return integer_reads(integer_reads, e) && found && !try_eval_pure(e);
 }
-bool runtime_selector(const mir::Expr& index) {
+
+bool Lowering::runtime_selector(const mir::Expr& index) {
   for (const auto& argument : index.args) {
     if (runtime_only(argument)) return true;
     // write_array keeps parameter-dependent values out of runtime_only, but
@@ -1756,7 +1718,8 @@ bool runtime_selector(const mir::Expr& index) {
   }
   return false;
 }
-std::optional<long> static_int(const mir::Expr& e) {
+
+std::optional<long> Lowering::static_int(const mir::Expr& e) {
   try {
     return eval_int(e);
   } catch (const CompileError&) {
@@ -1764,8 +1727,9 @@ std::optional<long> static_int(const mir::Expr& e) {
     return std::nullopt;
   }
 }
-void bind_runtime_int(const std::string& name, const mir::Expr& e,
-                      const std::string& raw) {
+
+void Lowering::bind_runtime_int(const std::string& name, const mir::Expr& e,
+                                const std::string& raw) {
   Val v = lower_expr(e);
   SlotInfo expected;
   expected.param_free = v.si.param_free;
@@ -1780,9 +1744,8 @@ void bind_runtime_int(const std::string& name, const mir::Expr& e,
   td_erase(name);
 }
 
-// These kernels also serve consumers outside a retained region. Integer
-// identity and dependence do not imply that a value is known at prepare.
-std::optional<Val> lower_runtime_scalar(const mir::Expr& e) {
+std::optional<Lowering::Val> Lowering::lower_runtime_scalar(
+    const mir::Expr& e) {
   if (e.kind != mir::Expr::FunApp || e.fn_lib != mir::Expr::Lib::StanLib)
     return {};
   const auto& comparisons = runtime_comparisons();
@@ -1826,11 +1789,8 @@ std::optional<Val> lower_runtime_scalar(const mir::Expr& e) {
   return {};
 }
 
-// An integer guard supplies an upper bound only when every non-exiting
-// iteration has an unconditional positive update and the endpoint is
-// invariant.
-std::optional<int64_t> region_while_capacity(const mir::Stmt& s,
-                                             std::string* proven_counter) {
+std::optional<int64_t> Lowering::region_while_capacity(
+    const mir::Stmt& s, std::string* proven_counter) {
   const mir::Expr* guard = nullptr;
   std::function<void(const mir::Expr&)> find = [&](const mir::Expr& e) {
     if (e.kind == mir::Expr::EAnd) {
@@ -1989,11 +1949,9 @@ std::optional<int64_t> region_while_capacity(const mir::Stmt& s,
   *proven_counter = counter;
   return count;
 }
-// A complete iteration must write a[i] on every path. Other writes may
-// overwrite those elements, but cannot escape the union of all written ranges.
-// This proves initialization of the live extent, without executing the body
-// during preparation or changing its runtime control/evaluation order.
-void region_prove_bounded_int_fill(const mir::Stmt& loop, int64_t capacity) {
+
+void Lowering::region_prove_bounded_int_fill(const mir::Stmt& loop,
+                                             int64_t capacity) {
   const auto& upper = loop.upper;
   if (upper.kind != mir::Expr::FunApp ||
       upper.fn_lib != mir::Expr::Lib::StanLib ||
@@ -2054,13 +2012,11 @@ void region_prove_bounded_int_fill(const mir::Stmt& loop, int64_t capacity) {
   if (range) set_int_range(value->second, range->lo, range->hi);
 }
 
-// A retained loop or branch stays open while its body lowers, so a return
-// has no way out through it.
-void lower_region_body(const std::vector<mir::Stmt>& body) {
+void Lowering::lower_region_body(const std::vector<mir::Stmt>& body) {
   if (lower_stmts(body) != Flow::Next) fail("unbound function return");
 }
 
-Flow lower_region_stmt(const mir::Stmt& s) {
+Lowering::Flow Lowering::lower_region_stmt(const mir::Stmt& s) {
   if (bounded_output) {
     bounded_output_visits += bounded_output_multiplier;
     if (bounded_output_visits > 4096)
@@ -2574,7 +2530,8 @@ Flow lower_region_stmt(const mir::Stmt& s) {
       fail("unsupported structured statement");
   }
 }
-static bool region_condition_data(const mir::Expr& e) {
+
+bool Lowering::region_condition_data(const mir::Expr& e) {
   if (e.data_only) return true;
   if (e.kind != mir::Expr::FunApp && e.kind != mir::Expr::EAnd &&
       e.kind != mir::Expr::EOr)
@@ -2586,7 +2543,8 @@ static bool region_condition_data(const mir::Expr& e) {
     if (!region_condition_data(a)) return false;
   return true;
 }
-bool region_runtime_control(const mir::Stmt& root) const {
+
+bool Lowering::region_runtime_control(const mir::Stmt& root) const {
   std::set<std::string> visited;
   std::function<bool(const mir::Stmt&, unsigned)> statement;
   std::function<bool(const mir::Expr&, unsigned)> expression =
@@ -2631,7 +2589,7 @@ bool region_runtime_control(const mir::Stmt& root) const {
   return statement(root, 0);
 }
 
-static bool same_mir_expr(const mir::Expr& a, const mir::Expr& b) {
+bool Lowering::same_mir_expr(const mir::Expr& a, const mir::Expr& b) {
   if (a.kind != b.kind || a.name != b.name || a.lit_i != b.lit_i ||
       a.lit != b.lit || a.args.size() != b.args.size())
     return false;
@@ -2639,16 +2597,10 @@ static bool same_mir_expr(const mir::Expr& a, const mir::Expr& b) {
     if (!same_mir_expr(a.args[i], b.args[i])) return false;
   return true;
 }
-// Whether an iteration of `loop`, or of a loop inside it, can read what an
-// earlier iteration wrote: a name from outside the loop is assigned in the
-// body and read other than at an index, shared with every write of it,
-// that depends on the loop variable. Names in `scratch` count as local to
-// `loop` itself but not to the loops inside it. `inner_answers` holds what
-// was found for the loops inside, so a deep nest is not asked again at
-// every level.
-static bool loop_carries_value(
-    const mir::Stmt& loop, const std::set<std::string>* scratch = nullptr,
-    std::map<const mir::Stmt*, bool>* inner_answers = nullptr) {
+
+bool Lowering::loop_carries_value(
+    const mir::Stmt& loop, const std::set<std::string>* scratch,
+    std::map<const mir::Stmt*, bool>* inner_answers) {
   std::map<const mir::Stmt*, bool> answers;
   if (!inner_answers) inner_answers = &answers;
   std::set<std::string> locals;
@@ -2725,12 +2677,8 @@ static bool loop_carries_value(
     for (const auto& child : loop.body) statement(child);
   return carried;
 }
-// Names from outside `loop` that each iteration overwrites in full before it
-// reads them, so none holds a value from one iteration to the next. A full
-// write is a whole assignment, or a loop over 1..n whose only statement
-// assigns x[k] where x has n elements, as in a mixture's
-// `for (k in 1:K) ps[k] = ...; target += log_sum_exp(ps);`.
-std::set<std::string> loop_scratch_names(const mir::Stmt& loop) {
+
+std::set<std::string> Lowering::loop_scratch_names(const mir::Stmt& loop) {
   const auto flatten = [](const std::vector<mir::Stmt>& body) {
     std::vector<const mir::Stmt*> stmts;
     std::function<void(const mir::Stmt&)> visit = [&](const mir::Stmt& st) {
@@ -2780,39 +2728,22 @@ std::set<std::string> loop_scratch_names(const mir::Stmt& loop) {
   }
   return scratch;
 }
-// loop_carries_value, except that scratch arrays carry nothing.
-bool loop_carries_dependence(const mir::Stmt& loop) {
+
+bool Lowering::loop_carries_dependence(const mir::Stmt& loop) {
   if (!loop_carries_value(loop)) return false;
   const std::set<std::string> scratch = loop_scratch_names(loop);
   return scratch.empty() || loop_carries_value(loop, &scratch);
 }
-// Unrolling pays when later passes fold the copies of the body into fewer,
-// wider operations. A value carried between iterations leaves a serial
-// chain they cannot fold, and once the write_array graph is this large each
-// unrolled operation costs several times more per draw than it does in a
-// small graph, while a retained loop replays at a flat cost per iteration.
-// covid19imperial's generated quantities unroll to 587k operations; with
-// them retained a draw is 2.6x faster.
-static constexpr size_t kRetainWriteArrayLoopOps = size_t{1} << 16;
-bool write_array_loop_retained(const mir::Stmt& s, int64_t lo, int64_t hi) {
+
+bool Lowering::write_array_loop_retained(const mir::Stmt& s, int64_t lo,
+                                         int64_t hi) {
   return in_write_array && structured_policy == StructuredMode::Auto &&
          g.ops.size() >= kRetainWriteArrayLoopOps && hi - lo + 1 >= 32 &&
          (stmt_effects(s) & ~kRngEffect) == 0 && loop_carries_value(s);
 }
-// log_prob has the same problem on a much larger scale. Each unrolled
-// operation costs about 6 ns per gradient in a small graph and 15 ns once
-// the graph passes 1M operations, from cache pressure on the 336-byte
-// KernelCtx that each one carries, while a retained loop replays at about
-// 10 ns per instruction. The two break even between 384k and 576k raw
-// operations, and a loop is kept only when it is itself large.
-static constexpr size_t kRetainLoopGraphOps = size_t{1} << 19;
-static constexpr size_t kRetainLoopOps = size_t{1} << 14;
-static constexpr size_t kRetainLoopOpsPerTrip = 32;
-// A retained loop's integers exist only at run time, too late for a later
-// declaration that a count kept by the loop sizes.
-// With `among`, only an integer in that set counts.
-static bool loop_assigns_outer_int(
-    const mir::Stmt& loop, const std::set<std::string>* among = nullptr) {
+
+bool Lowering::loop_assigns_outer_int(const mir::Stmt& loop,
+                                      const std::set<std::string>* among) {
   std::set<std::string> locals;
   for (const auto& child : loop.body) collect_loop_locals(child, &locals);
   std::function<bool(const mir::Stmt&)> assigns = [&](const mir::Stmt& s) {
@@ -2828,16 +2759,19 @@ static bool loop_assigns_outer_int(
     if (assigns(child)) return true;
   return false;
 }
-bool log_prob_loop_may_retain(const mir::Stmt& s, int64_t trips) {
+
+bool Lowering::log_prob_loop_may_retain(const mir::Stmt& s, int64_t trips) {
   return !in_write_array && structured_policy == StructuredMode::Auto &&
          !bounded_specialization && trips >= 32 && !stmt_effectful(s) &&
          !loop_assigns_outer_int(s) && loop_carries_dependence(s);
 }
-bool log_prob_loop_retained(size_t loop_ops, int64_t trips) const {
+
+bool Lowering::log_prob_loop_retained(size_t loop_ops, int64_t trips) const {
   return g.ops.size() >= kRetainLoopGraphOps && loop_ops >= kRetainLoopOps &&
          loop_ops / static_cast<size_t>(trips) >= kRetainLoopOpsPerTrip;
 }
-bool region_auto_profitable(
+
+bool Lowering::region_auto_profitable(
     const mir::Stmt& s,
     std::optional<std::pair<int64_t, int64_t>> exact_bounds) const {
   if (structured_outer_depth != 1) return false;
@@ -2849,11 +2783,8 @@ bool region_auto_profitable(
   }
   return region_runtime_control(s);
 }
-// Positive, deliberately narrow profitability evidence. Tiny scalar runs
-// avoid region dispatch/version bookkeeping and expose the existing scalar
-// fusion path, while duplicating only a bounded amount of compiler work.
-// Merely fitting the expansion limit is NOT evidence for unrolling.
-static bool region_scalar_expression(const mir::Expr& e) {
+
+bool Lowering::region_scalar_expression(const mir::Expr& e) {
   if (!mir::is_unsized(e, mir::UnsizedLeaf::Real) &&
       !mir::is_unsized(e, mir::UnsizedLeaf::Int))
     return false;
@@ -2880,7 +2811,8 @@ static bool region_scalar_expression(const mir::Expr& e) {
       return false;
   }
 }
-static bool region_scalar_body(const mir::Stmt& s) {
+
+bool Lowering::region_scalar_body(const mir::Stmt& s) {
   switch (s.kind) {
     case mir::Stmt::Block:
     case mir::Stmt::SList:
@@ -2901,7 +2833,8 @@ static bool region_scalar_body(const mir::Stmt& s) {
       return false;
   }
 }
-bool region_unroll_profitable(const mir::Stmt& s) {
+
+bool Lowering::region_unroll_profitable(const mir::Stmt& s) {
   if (s.kind != mir::Stmt::For) return false;
   const auto lo = region_range(s.lower), hi = region_range(s.upper);
   if (!lo || !hi || lo->lo != lo->hi || hi->lo != hi->hi) return false;
@@ -2915,7 +2848,9 @@ bool region_unroll_profitable(const mir::Stmt& s) {
   const uint64_t limit = 128;
   return region_cost(s, limit + 1) <= limit;
 }
-uint64_t region_cost(const mir::Stmt& s, uint64_t limit, unsigned depth = 0) {
+
+uint64_t Lowering::region_cost(const mir::Stmt& s, uint64_t limit,
+                               unsigned depth) {
   if (depth > 32) return limit;
   uint64_t body = 1;
   const auto plus = [&](uint64_t a, uint64_t b) {
@@ -2971,13 +2906,10 @@ uint64_t region_cost(const mir::Stmt& s, uint64_t limit, unsigned depth = 0) {
   return std::min(body, limit);
 }
 
-// `before_publish` runs once the candidate has passed every refusal, just
-// before the loop is added to the graph.
-bool try_lower_region(
-    const mir::Stmt& s,
-    std::optional<std::pair<int64_t, int64_t>> exact_bounds = std::nullopt,
-    const std::set<std::string>* output_references = nullptr,
-    const std::function<void()>& before_publish = {}) {
+bool Lowering::try_lower_region(
+    const mir::Stmt& s, std::optional<std::pair<int64_t, int64_t>> exact_bounds,
+    const std::set<std::string>* output_references,
+    const std::function<void()>& before_publish) {
   const StructuredMode mode = structured_policy;
   if (mode == StructuredMode::Off) return false;
   if (in_write_array && !output_references &&
@@ -3312,3 +3244,6 @@ bool try_lower_region(
         " kernels=" + std::to_string(plan->body.ops.size()));
   return true;
 }
+
+}  // namespace lower_detail
+}  // namespace stanli
