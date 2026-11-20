@@ -2,6 +2,35 @@
 
 ## Unreleased
 
+## 0.30.1
+
+R users can install the development version from main with a runtime built
+from the same commit. Each release now includes the compiler that turns Stan
+source into the portable format this release's runtime reads.
+
+### Features
+
+- `stanli_install("dev")` downloads a runtime built from the same commit as
+  an R package installed from main with `remotes::install_github()`. CI
+  publishes one for each main commit and keeps the newest 10 (#616).
+- Each GitHub release includes `stanli-compiler.js`, the JavaScript build of
+  stanli's Stan compiler, and a `.stamp` file that records the stanc3 commit
+  it was built from. A build system can use it to compile `.stan` files for
+  the runtime from the same release without OCaml (#624, #625).
+
+### Fixes
+
+- Sampling a model with no parameters copied zero bytes from a null pointer.
+  That is undefined behavior in C, and UBSan on Linux reported it. Those
+  copies are now skipped (#621, #625).
+
+### Internal
+
+- The vendored headers moved from `runtime/third_party` to `runtime/ext`
+  (#622, #625).
+- `LICENSE` now includes the MIT notice for the vendored walnutpie sampler
+  (#623, #625).
+
 ## 0.30.0
 
 Large ragged models use much less memory while writing draws, and R can
