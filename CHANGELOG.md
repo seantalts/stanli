@@ -2,6 +2,46 @@
 
 ## Unreleased
 
+## 0.30.0
+
+Large ragged models use much less memory while writing draws, and R can
+sample with WALNUTS. The thread count is now set only when a model is built.
+
+### Performance
+
+- A user's large occupancy model used about 7 GB per chain, against 130 MB in
+  CmdStan, mostly for the program that writes each draw. Four chains now peak
+  at 4.6 GB instead of 27.6 GB. More loops in generated quantities stay loops
+  (6.1M ops become 1.7M), that program stores no gradients and reuses memory
+  between values, and chains share one copy of it when copies would take
+  1 GiB or more. Preparing it takes 5.6 s instead of 11.7 s, and the draws
+  are unchanged. iohmm_reg writes draws 1.40x faster (#608, #614).
+
+### Features
+
+- `sample_walnuts()` in R runs the WALNUTS sampler and returns a
+  `stanli_fit`. Chain c uses the same seed stream and starting point as NUTS
+  chain c. Chains run one after another, and WALNUTS reports no divergences,
+  tree depth or metric (#612).
+- `gp_periodic_cov` is supported (#609, #612).
+
+### Fixes
+
+- `stanli_model(threads_per_chain = 4)` followed by `sample_model(m)` sampled
+  on one thread, and Python's `Model.sample()` did the same. Every method now
+  uses the count that the model was built with. `threads_per_chain` on
+  `sample_model()`, `sample_more()` and Python's `sample()` is deprecated:
+  when it differs from the model's count, it warns and rebuilds for that run
+  (#612).
+- Generated quantities with a local sized by an integer that an earlier loop
+  counts ran in the slow per-draw interpreter. They now compile (#614).
+
+### Internal
+
+- A benchmark publish can replace the models that were timed while the host
+  was busy with a rerun of exactly those models (#610). The corpus benchmark
+  is republished at 0.29.0 (#611).
+
 ## 0.29.0
 
 brms categorical, multinomial, hurdle and `threading()` models are much
