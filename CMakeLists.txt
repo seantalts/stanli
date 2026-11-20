@@ -29,7 +29,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 # contained to that translation unit.
 set_source_files_properties(runtime/src/walnuts.cpp PROPERTIES
   COMPILE_OPTIONS "-std=c++20"
-  INCLUDE_DIRECTORIES ${CMAKE_CURRENT_SOURCE_DIR}/runtime/third_party)
+  INCLUDE_DIRECTORIES ${CMAKE_CURRENT_SOURCE_DIR}/runtime/ext)
 if(NOT CMAKE_BUILD_TYPE)
   set(CMAKE_BUILD_TYPE RelWithDebInfo)
 endif()
@@ -937,7 +937,7 @@ endfunction()
 # language whose reference implementation compiles C++ per model.
 add_library(stanli_stanc_process STATIC tools/stanc_process.cpp)
 target_include_directories(stanli_stanc_process PUBLIC runtime/include
-                           PRIVATE runtime/third_party)
+                           PRIVATE runtime/ext)
 if(NOT EMSCRIPTEN)
   target_link_libraries(stanli_stanc_process PRIVATE Threads::Threads)
 endif()

@@ -4,7 +4,7 @@
 // scalars are bare, containers are indexed even at length one, and matrices
 // carry row/column indices in column-major order. This test is intentionally
 // at the ABI boundary so a second flattening policy in capi.cpp cannot drift.
-#include "../runtime/third_party/bridgestan.h"
+#include "../runtime/ext/bridgestan.h"
 #include "categorical_check_mir.hpp"
 #include "env_helpers.hpp"
 
@@ -240,6 +240,43 @@ void expect_parameterless_unconstrain() {
     ++failures;
     std::printf("FAIL parameterless unconstrain: %s\n", err);
   }
+  stanli_model_free(model);
+}
+
+// A model with no parameters has empty draw rows, so every row copy in the
+// samplers has a null source. UBSan traps memcpy from null even at size 0.
+void expect_parameterless_sampling() {
+  const std::string mir = slurp("tests/fixtures/view_gq_data_matrix.tmir.sexp");
+  char err[8192]{};
+  stanli_model* model = stanli_model_new_with_opts(
+      mir.c_str(), R"({"M":[[1,2,3],[4,5,6]]})", nullptr, err, sizeof err);
+  if (model == nullptr) {
+    ++failures;
+    std::printf("FAIL parameterless sampling model: %s\n", err);
+    return;
+  }
+  double lp = 1.0;
+  expect_true("parameterless grad",
+              stanli_grad(model, nullptr, &lp, nullptr) == 0 && lp == 0.0);
+  stanli_sample_opts opts;
+  stanli_sample_opts_init(&opts);
+  opts.seed = 621;
+  opts.chains = 2;
+  opts.warmup = 5;
+  opts.samples = 5;
+  expect_true(
+      "parameterless multi-chain sampling",
+      stanli_sample_multi_metric(model, &opts, nullptr, 0, nullptr, nullptr,
+                                 nullptr, nullptr, nullptr, nullptr, nullptr,
+                                 nullptr, nullptr, err, sizeof err) == 0);
+  expect_true("parameterless NUTS stream",
+              stanli_sample_stream_stats_init(model, 621, 5, 5, 0.8, nullptr,
+                                              nullptr, nullptr, nullptr,
+                                              nullptr, err, sizeof err) == 0);
+  expect_true("parameterless WALNUTS stream",
+              stanli_sample_walnuts_stats_init(
+                  model, 621, 1, 5, 5, 0.0, 2.0, nullptr, nullptr, nullptr,
+                  nullptr, nullptr, err, sizeof err) == 0);
   stanli_model_free(model);
 }
 
@@ -3325,6 +3362,7 @@ int main() {
   test_interpreter_probe_failure();
   expect_unconstrain_inits_round_trip();
   expect_parameterless_unconstrain();
+  expect_parameterless_sampling();
 
   expect_names("tests/fixtures/wanames.tmir.sexp", "{}",
                {

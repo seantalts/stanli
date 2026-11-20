@@ -5,5 +5,5 @@ set -e
 cd "$(dirname "$0")/.."
 mode=-i
 [ "$1" = "--check" ] && mode="--dry-run -Werror"
-git ls-files '*.cpp' '*.hpp' '*.h' '*.c' ':!deps/*' ':!runtime/third_party/*' |
+git ls-files '*.cpp' '*.hpp' '*.h' '*.c' ':!deps/*' ':!runtime/ext/*' |
   xargs clang-format $mode

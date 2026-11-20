@@ -2398,7 +2398,7 @@ jobs:
   # source R-universe follows.
   runtime-release:
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: [static_checks, build, windows, wasm-webr, stanr, r-tests, r-platform-tests]
+    needs: [static_checks, build, windows, wasm-webr, browser-compiler, stanr, r-tests, r-platform-tests]
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
@@ -2411,6 +2411,13 @@ jobs:
           path: runtime
           pattern: runtime-*
           merge-multiple: true
+
+      # The portable compiler from the same commit, for importers that
+      # compile .stan to portable MIR without OCaml (#624).
+      - uses: actions/download-artifact@v4
+        with:
+          name: browser-compilers
+          path: browser-compilers
 
       # The R package pins the release it was built against rather than
       # tracking "latest", so the two have to be bumped together. Caught
@@ -2450,7 +2457,9 @@ jobs:
             gh release create "$GITHUB_REF_NAME" --draft \
               --title "stanli ${GITHUB_REF_NAME#v}" --generate-notes
           gh release upload "$GITHUB_REF_NAME" \
-            runtime/*.tar.gz stanli_*.tar.gz --clobber
+            runtime/*.tar.gz stanli_*.tar.gz \
+            browser-compilers/stanli-compiler.js \
+            browser-compilers/stanli-compiler.js.stamp --clobber
           gh release edit "$GITHUB_REF_NAME" --draft=false
 
   # The runtime for each main commit, so an R package installed from that

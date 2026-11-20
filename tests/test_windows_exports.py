@@ -9,7 +9,7 @@ ROOT = pathlib.Path(__file__).resolve().parents[1]
 HEADERS = (
     "runtime/include/stanli/capi.h",
     "runtime/include/stanli/function.hpp",
-    "runtime/third_party/bridgestan.h",
+    "runtime/ext/bridgestan.h",
 )
 
 

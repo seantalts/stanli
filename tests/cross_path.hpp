@@ -38,7 +38,7 @@
 #define STANLI_TESTS_CROSS_PATH_HPP
 
 #include "env_helpers.hpp"
-#include "../runtime/third_party/nlohmann_json.hpp"
+#include "../runtime/ext/nlohmann_json.hpp"
 
 #include <stanli/compile.hpp>
 #include <stanli/data.hpp>
