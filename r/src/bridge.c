@@ -652,9 +652,15 @@ static const char* file_label(SEXP file) {
  * drains the queue as soon as the native call returns, before any error()
  * can unwind, and the sampler callbacks drain it as they run so the text
  * keeps its order. */
+static int messages_shown = 1;
+
 static void flush_messages(void) {
   char* text = p_take_messages();
   if (text == NULL) return;
+  if (!messages_shown) {
+    p_string_free(text);
+    return;
+  }
   const void* vmax = vmaxget();
   const size_t len = strlen(text);
   char* copy = R_alloc(len + 1, 1);
@@ -1377,7 +1383,7 @@ SEXP stanli_r_check_sample_options(SEXP optlist) {
 /* `resume` is NULL for a fresh run, else a list of one raw resume record per
  * chain, as an earlier run returned them. */
 SEXP stanli_r_sample(SEXP m, SEXP optlist, SEXP inits, SEXP refresh,
-                     SEXP metric_list, SEXP resume) {
+                     SEXP metric_list, SEXP resume, SEXP show_messages) {
   require_loaded();
   void* mm = model_ptr(m);
   stanli_sample_opts o;
@@ -1440,11 +1446,13 @@ SEXP stanli_r_sample(SEXP m, SEXP optlist, SEXP inits, SEXP refresh,
   mo.adapted_step_size = REAL(adapted_step);
   mo.adapted_inv_metric = metric_len > 0 ? REAL(adapted_inv) : NULL;
   int interrupted = 0;
+  messages_shown = asLogical(show_messages) == TRUE;
   const int failed = p_sample_multi_metric(
       mm, &o, &mo, refresh_rate, REAL(raw), REAL(stats), REAL(vals),
       refresh_rate > 0 ? sample_progress : NULL, &o.max_depth, sample_poll,
       NULL, &interrupted, reports, err, sizeof err);
   flush_messages();
+  messages_shown = 1;
   if (failed < 0) {
     UNPROTECT(5);
     error("%s", err[0] ? err : "stanli: sampling could not start");

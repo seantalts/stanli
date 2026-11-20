@@ -24,6 +24,8 @@
 #' @param thin Retain every thin-th iteration, separately in warmup and sampling.
 #' @param save_warmup Retain warmup draws.
 #' @param refresh Progress interval; zero suppresses progress.
+#' @param show_messages `FALSE` drops the sampler's notices and the model's own
+#'   output during sampling; see [sample_model()].
 #' @param init_radius Radius for random initialization on the unconstrained scale.
 #' @param pathfinder_init Optional Pathfinder settings passed to [sample_model()].
 #' @param metric,inv_metric,step_size,adapt_engaged,adapt_metric Metric kind
@@ -48,7 +50,8 @@ sample_cstan <- function(model_code, data = list(), chains = 4, parallel_chains 
                          threads_per_chain = 1, include_paths = NULL,
                          metric = c("diag_e", "dense_e", "unit_e"),
                          inv_metric = NULL, step_size = NULL,
-                         adapt_engaged = TRUE, adapt_metric = TRUE, ...) {
+                         adapt_engaged = NULL, adapt_metric = TRUE,
+                         show_messages = TRUE, ...) {
   if (length(list(...))) stop("unsupported sample_cstan arguments: ",
                              paste(names(list(...)), collapse = ", "), call. = FALSE)
   for (name in c("chains", "parallel_chains", "threads_per_chain", "iter_sampling", "max_treedepth", "thin"))
@@ -96,5 +99,6 @@ sample_cstan <- function(model_code, data = list(), chains = 4, parallel_chains 
     refresh = refresh, init_radius = init_radius, pathfinder_init = pathfinder_init,
     metric = metric,
     inv_metric = inv_metric, step_size = step_size,
-    adapt_engaged = adapt_engaged, adapt_metric = adapt_metric))
+    adapt_engaged = adapt_engaged, adapt_metric = adapt_metric,
+    show_messages = show_messages))
 }

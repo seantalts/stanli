@@ -533,10 +533,18 @@ def test_sample_progress_output_and_refresh_zero():
     assert "seconds (Sampling)" in text
     assert "seconds (Total)" in text
 
+    no_progress = io.StringIO()
+    with contextlib.redirect_stdout(no_progress):
+        _normal().sample(chains=1, warmup=4, samples=3,
+                         parallel_chains=1, refresh=0)
+    assert "Iteration:" not in no_progress.getvalue()
+    assert "Elapsed Time" not in no_progress.getvalue()
+    assert "Chain [1] WARNING" in no_progress.getvalue()
+
     quiet = io.StringIO()
     with contextlib.redirect_stdout(quiet):
         _normal().sample(chains=1, warmup=4, samples=3,
-                         parallel_chains=1, refresh=0)
+                         parallel_chains=1, refresh=0, show_messages=False)
     assert quiet.getvalue() == ""
 
 
@@ -797,15 +805,39 @@ def test_function_print_goes_through_sys_stdout():
 
 def test_sampling_reports_rejected_proposals_with_the_chain():
     m = stanli.Model(stan_code=REJECTING)
-    _, quiet = _capture_stdout(
-        lambda: m.sample(chains=2, warmup=100, samples=100, seed=3,
-                         refresh=0))
-    assert quiet == "", quiet
     _, text = _capture_stdout(
         lambda: m.sample(chains=2, warmup=100, samples=100, seed=3,
                          refresh=50))
     assert "Chain [1] Informational Message" in text, text
     assert "Chain [2] Informational Message" in text, text
+    _, no_progress = _capture_stdout(
+        lambda: m.sample(chains=2, warmup=100, samples=100, seed=3,
+                         refresh=0))
+    assert "Chain [1] Informational Message" in no_progress, no_progress
+    assert "Iteration:" not in no_progress, no_progress
+    _, quiet = _capture_stdout(
+        lambda: m.sample(chains=2, warmup=100, samples=100, seed=3,
+                         refresh=50, show_messages=False))
+    assert "Informational" not in quiet, quiet
+    assert "Iteration:" in quiet, quiet
+
+
+def test_show_messages_false_silences_notices_and_changes_no_draws():
+    m = stanli.Model(stan_code=REJECTING)
+    kw = dict(chains=2, warmup=100, samples=100, seed=3, refresh=0)
+    loud_fit, loud = _capture_stdout(lambda: m.sample(**kw))
+    quiet_fit, quiet = _capture_stdout(
+        lambda: m.sample(show_messages=False, **kw))
+    assert "Informational Message" in loud, loud
+    assert quiet == "", quiet
+    assert np.array_equal(loud_fit.draws(), quiet_fit.draws())
+    for bad in ("no", 0, None):
+        try:
+            m.sample(show_messages=bad, **kw)
+        except TypeError as e:
+            assert str(e) == "show_messages must be a bool", str(e)
+        else:
+            raise AssertionError(f"no TypeError for show_messages={bad!r}")
 
 
 def test_sampling_warnings_are_automatic_and_shared():
@@ -826,9 +858,14 @@ def test_sampling_warnings_are_automatic_and_shared():
     assert re.search(r"Warning: \d+ of 100 \(\d+\.\d%\) transitions hit the "
                      r"maximum treedepth limit of 3\.\n"
                      + re.escape(SEE_WARNINGS), treedepth), treedepth
-    _, quiet = _capture_stdout(
+    _, no_progress = _capture_stdout(
         lambda: m.sample(chains=1, warmup=100, samples=500, seed=42,
                          refresh=0))
+    assert "transitions ended with a divergence" not in no_progress, no_progress
+    assert "Elapsed Time" not in no_progress, no_progress
+    _, quiet = _capture_stdout(
+        lambda: m.sample(chains=1, warmup=100, samples=500, seed=42,
+                         refresh=0, show_messages=False))
     assert quiet == "", quiet
     _, healthy = _capture_stdout(
         lambda: _normal().sample(chains=2, warmup=200, samples=100, seed=1,
@@ -2227,6 +2264,21 @@ def test_sample_rejects_bad_seed_and_wrong_types():
 def test_sample_still_accepts_zero_warmup_and_integral_floats():
     fit = _metric_fit(chains=2, warmup=0, samples=0 + 10, thin=1.0)
     assert fit.n_chains == 2 and fit.n_draws == 10
+
+
+def test_zero_warmup_runs_at_the_given_step_size_unless_adaptation_is_asked_for():
+    fit = _metric_fit(chains=2, warmup=0, samples=10, step_size=0.25)
+    assert np.all(fit.sampler_stats[:, :, 2] == 0.25)
+    for engaged in (True, np.True_):
+        try:
+            _metric_fit(chains=2, warmup=0, samples=10, adapt_engaged=engaged)
+        except RuntimeError as e:
+            assert "warmup must be an integer >= 1 when adaptation is " \
+                   "engaged" in str(e), str(e)
+        else:
+            raise AssertionError("adapt_engaged=True with warmup=0 must fail")
+    _bad_sample_argument(TypeError, "adapt_engaged must be a bool or None",
+                         adapt_engaged="yes")
 
 
 def test_optimize_rejects_bad_arguments():
