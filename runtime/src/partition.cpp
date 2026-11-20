@@ -172,6 +172,7 @@ PartitionStats partition_lanes(Graph& g, Fills& fills,
                                bool fuse_shared_params) {
   PartitionStats st;
   if (debug_env("STANLI_NO_PARTITION")) return st;
+  scale_repeated_terms(g, fills, target_terms);
   const size_t n_ops = g.ops.size();
   if (n_ops < 2 * (size_t)kMinLanes) return st;
 

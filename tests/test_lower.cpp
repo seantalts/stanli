@@ -1353,6 +1353,43 @@ static void test_udf_lp_propto() {
   stan::math::recover_memory();
 }
 
+// Each `target += lp` adds lp, so a local added twice counts twice, also in
+// a loop that reroll or partition could fuse.
+static void test_repeated_target_terms() {
+  using namespace stanli;
+  using stan::math::var;
+  const DataMap data =
+      DataMap::from_json(slurp("tests/fixtures/repeated_target_terms.json"));
+  CompiledModel cm;
+  try {
+    cm = compile_model(slurp("tests/fixtures/repeated_target_terms.tmir.sexp"),
+                       data);
+  } catch (const std::exception& error) {
+    check(false, std::string("repeated target terms compile: ") + error.what());
+    return;
+  }
+  const std::vector<double>& y = data.at("y").r;
+  const double q[2] = {0.3, -0.2};
+  var mu = q[0], tau = q[1];
+  var lp = 0;
+  for (double yn : y) {
+    lp += 2 * stan::math::normal_lpdf(yn, mu, 1) +
+          3 * stan::math::normal_lpdf(yn, tau, 1);
+  }
+  Eigen::Map<const Eigen::VectorXd> yv(y.data(), (Eigen::Index)y.size());
+  lp += 2 * stan::math::normal_lpdf(yv, tau, 2);
+  lp.grad();
+  Executor ex(cm.graph);
+  cm.bind(ex);
+  ex.params_data()[0] = q[0];
+  ex.params_data()[1] = q[1];
+  double grad[2] = {0, 0};
+  expect_ulp("repeated target terms lp", ex.gradient(grad), lp.val(), 16);
+  expect_ulp("repeated target terms d/mu", grad[0], mu.adj(), 16);
+  expect_ulp("repeated target terms d/tau", grad[1], tau.adj(), 16);
+  stan::math::recover_memory();
+}
+
 // An `_lpdf` call keeps the constants of the `_lupdf` calls in its body.
 // Lowering folds a call with data arguments in the MIR interpreter, which
 // has to use the call's normalization as the graph does. The branch in
@@ -9479,6 +9516,7 @@ int main() {
   test_region_constant_shadow();
   test_udf_guard_returns();
   test_udf_lp_propto();
+  test_repeated_target_terms();
   test_udf_lpdf_folded_normalized();
   test_udf_truncate();
   test_udf_lp_inlined_propto();

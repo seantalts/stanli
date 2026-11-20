@@ -111,29 +111,6 @@ std::vector<char> whole_seeds(const Graph& g,
   return whole;
 }
 
-// Replaces each run of k copies of one term with a single term times k, at
-// the position of its first copy.
-void scale_repeated_terms(Graph& g, Fills& fills,
-                          std::vector<int>& target_terms) {
-  std::unordered_map<int, int> copies;
-  for (int t : target_terms) ++copies[t];
-  if (copies.size() == target_terms.size()) return;
-  std::vector<int> scaled;
-  scaled.reserve(copies.size());
-  for (int t : target_terms) {
-    int& k = copies[t];
-    if (k == 1) scaled.push_back(t);
-    if (k <= 1) continue;
-    const int count = g.add_slot(1, false);
-    fills.emplace_back(count, std::vector<double>{(double)k});
-    const int term = g.add_slot(1, false);
-    g.add_op(OP_MUL, {t, count}, term);
-    scaled.push_back(term);
-    k = 0;
-  }
-  target_terms = std::move(scaled);
-}
-
 // Drops the ops droppable_if_unread allows whose value no op, root or term
 // reads, newest first so an op that only fed a dropped one goes too.
 int drop_unread(Graph& g, const std::vector<int>& target_terms,

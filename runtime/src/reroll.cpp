@@ -745,6 +745,7 @@ RerollStats reroll(Graph& g,
   RerollStats st;
   if (debug_env("STANLI_NO_REROLL")) return st;
 
+  scale_repeated_terms(g, fills, target_terms);
   const int packed_rows =
       fuse_log_sum_exp_rows(g, target_terms, extra_roots, st.row_steps);
   st.regions += packed_rows;

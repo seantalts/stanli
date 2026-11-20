@@ -81,10 +81,36 @@ inline bool any_at_or_after(const std::vector<size_t>& v, size_t x,
   return first_at_or_after(v, x, steps) != v.end();
 }
 
+// Replaces each slot that the term list names k > 1 times with one term,
+// the slot times k, at the position of its first copy. The lane passes call
+// this first: they fuse a lane's term once, so a slot named twice would
+// lose its second copy.
+inline void scale_repeated_terms(Graph& g, Fills& fills,
+                                 std::vector<int>& target_terms) {
+  std::unordered_map<int, int> copies;
+  for (int t : target_terms) ++copies[t];
+  if (copies.size() == target_terms.size()) return;
+  std::vector<int> scaled;
+  scaled.reserve(copies.size());
+  for (int t : target_terms) {
+    int& k = copies[t];
+    if (k == 1) scaled.push_back(t);
+    if (k <= 1) continue;
+    const int count = g.add_slot(1, false);
+    fills.emplace_back(count, std::vector<double>{(double)k});
+    const int term = g.add_slot(1, false);
+    g.add_op(OP_MUL, {t, count}, term);
+    scaled.push_back(term);
+    k = 0;
+  }
+  target_terms = std::move(scaled);
+}
+
 // A fused region's lanes leave the target list for its one replacement, which
 // takes the first dead entry's position; the rest of the list closes up around
 // it. Regions are recorded as they are emitted and the list is rewritten once
-// by apply, while `term_set` stays current for membership questions.
+// by apply, while `term_set` stays current for membership questions. Each
+// slot must appear in the list at most once (scale_repeated_terms).
 class TermRetirement {
  public:
   int64_t steps = 0;  // dead slots recorded plus list entries rewritten
