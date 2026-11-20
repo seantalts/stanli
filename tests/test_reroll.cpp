@@ -874,6 +874,46 @@ static void test_cost_model_declines_small_gather() {
              st.declines[0].lanes == L);
 }
 
+// A reject between two lanes stays between them: reroll fuses only
+// contiguous lanes, and an effect never matches a template, so no lane after
+// the reject moves ahead of it.
+static void test_reject_between_lanes_stays() {
+  const int L = 40, at = 5;
+  Graph g;
+  Fills fills;
+  const int mu = g.add_slot(1, true);
+  const int sigma = g.add_slot(1, true);
+  std::vector<int> terms;
+  for (int l = 0; l < L; ++l) {
+    if (l == at) {
+      const int msg = g.add_slot(1, false);
+      fills.emplace_back(msg, std::vector<double>{0.0});
+      const int dead = g.add_slot(1, false);
+      g.add_op(OP_REJECT, {msg}, dead);
+    }
+    const int y = g.add_slot(1, false);
+    fills.emplace_back(y, std::vector<double>{0.05 * l + 0.3});
+    const int lp = g.add_slot(1, false);
+    const int id =
+        stanli::testutil::add_density(g, OP_NORMAL_LPDF, {y, mu, sigma}, lp);
+    g.ops[id].variant = 0x06;
+    terms.push_back(lp);
+  }
+  std::vector<int> tt = terms;
+  Fills f2 = fills;
+  const RerollStats st = reroll(g, f2, tt, {});
+  size_t reject = g.ops.size();
+  int64_t lanes_before = 0;
+  for (size_t u = 0; u < g.ops.size(); ++u) {
+    const Op& op = g.ops[u];
+    if (op.opcode == OP_REJECT) reject = u;
+    if (op.opcode == OP_NORMAL_LPDF && reject == g.ops.size())
+      lanes_before += g.slots[op.in[0]].len;
+  }
+  expect("reject keeps its place", st.regions >= 1 && reject < g.ops.size());
+  expect("no lane moves ahead of the reject", lanes_before == at);
+}
+
 // (d) STANLI_NO_REROLL disables the pass.
 static void test_env_disable() {
   SKIP_WITHOUT_DEBUG_SWITCHES();
@@ -3563,6 +3603,7 @@ static void test_fast_prices_shared_density_duplicates() {
 }
 
 int main() {
+  test_reject_between_lanes_stays();
   test_fast_prices_shared_density_duplicates();
   test_fast_fuses_shared_parameter();
   test_shared_gradient_source_order();

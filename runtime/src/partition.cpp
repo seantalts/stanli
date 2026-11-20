@@ -309,6 +309,16 @@ PartitionStats partition_lanes(Graph& g, Fills& fills,
   }
 
   const std::unordered_map<int, double> const_val = scalar_constants(fills);
+  // Effects that a fused lane must not move ahead of. The effectful
+  // densities are left out: their argument errors reorder like those of
+  // any other density, which every fused bucket already moves.
+  std::vector<size_t> effects;
+  for (size_t u = 0; u < n_ops; ++u) {
+    const uint16_t oc = g.ops[u].opcode;
+    if (is_effectful_op(oc) && oc != OP_CATEGORICAL &&
+        oc != OP_ALL_INTEGER_DENSITY)
+      effects.push_back(u);
+  }
 
   std::vector<char> dropped(n_ops, 0);
   std::vector<int> emit_at(n_ops, -1);
@@ -589,6 +599,26 @@ PartitionStats partition_lanes(Graph& g, Fills& fills,
     if (store_delim)
       for (int64_t l = 0; l < L; ++l)
         delim_at.insert(lanes[(size_t)ids[(size_t)l]].end - 1);
+
+    // The fused ops run at the first lane's position, so an effect between
+    // the lanes (a print, a reject, an argument check) would run after work
+    // that used to follow it. Split there.
+    bool effect_between = false;
+    size_t lane_at = 0;
+    for (auto it = first_at_or_after(effects, first_begin, st.list_steps);
+         it != effects.end() && *it < last_end; ++it) {
+      ++st.list_steps;
+      while (lanes[(size_t)ids[lane_at]].end <= *it) ++lane_at;
+      if (lanes[(size_t)ids[lane_at]].begin <= *it) continue;  // in a lane
+      split_at = *it;
+      decline(LaneDecline::kEffectBetween, g.ops[*it].opcode);
+      effect_between = true;
+      break;
+    }
+    if (effect_between) {
+      if (!split_here()) st.declines.push_back(*why);
+      continue;
+    }
 
     pos_of.clear();
     for (int p = 0; p < k; ++p) pos_of[op_at(p, 0).out] = p;

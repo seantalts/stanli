@@ -15,6 +15,7 @@ namespace stanli {
   X(kRigidInputs, "a plain op reads different slots in the first lanes")   \
   X(kEscapes, "a lane value is read outside its lane")                     \
   X(kWrittenBetween, "a slot the lanes read is written between them")      \
+  X(kEffectBetween, "a print, reject or check sits between the lanes")     \
   X(kMixedTerms, "some lanes are target terms and some are not")           \
   X(kTermAlsoInput, "a target term is also an op input")                   \
   X(kIdenticalLanes, "every lane computes the same term")                  \
