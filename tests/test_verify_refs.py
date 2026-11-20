@@ -651,6 +651,60 @@ class UlpLedgerTest(unittest.TestCase):
                           section["ran"]["grad[1]"]["reason"])
             self.assertNotIn("clean", section)
 
+    def test_first_entries_need_a_reason_for_every_value(self):
+        measured = {"lp": 518, "grad[1]": 11, "grad[3]": 10}
+        reasons = {"lp": "lp why", "grad[1]": "grad why"}
+        entries, problems = verify_refs.first_entries(measured, reasons, "P")
+        self.assertEqual(problems, [])
+        self.assertEqual(entries, {
+            "lp": {"bound": 518, "reason": "measured on P; lp why"},
+            "grad[1]": {"bound": 11, "reason": "measured on P; grad why"}})
+        _, problems = verify_refs.first_entries(measured, {"lp": "why"}, "P")
+        self.assertEqual(problems, ["grad[1] measured 11 needs a reason"])
+        _, problems = verify_refs.first_entries(
+            measured, {**reasons, "grad[3]": "why"}, "P")
+        self.assertEqual(problems, ["grad[3] has a reason but is within 10"])
+        many = {f"grad[{i}]": 20 + i for i in range(1, 11)}
+        entries, problems = verify_refs.first_entries(many, {"grad": "why"}, "P")
+        self.assertEqual(problems, [])
+        self.assertEqual(entries["grad"], {
+            "bound": 30, "reason": "measured on P; why; 10 grad values over 10"})
+
+    def test_first_entries_are_only_for_models_with_none(self):
+        section = {"old": {"lp": {"bound": 20, "reason": "why"}}}
+        check = verify_refs.first_entry_models
+        self.assertEqual(check({"new": {}}, section, ["new", "old"]), [])
+        self.assertEqual(check({"old": {"lp": "why"}}, section, ["old"]),
+                         ["old already has ledger entries; only "
+                          "--update-ulp-ledger may change them"])
+        self.assertEqual(check({"new": {}}, section, ["old"]),
+                         ["new is not in this replay"])
+        self.assertEqual(check({"new": {}}, None, ["new"]),
+                         ["the ledger has no section here; record it with "
+                          "--update-ulp-ledger"])
+
+    def test_adding_first_entries_writes_only_the_named_models(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = pathlib.Path(tmp) / "ledger.json"
+            ledger = {"schema": 1, "platforms": {"P": {"main": {
+                "old": {"lp": {"bound": 99, "reason": "why"}}}}}}
+            problems = verify_refs.add_first_entries(
+                ledger, "P", "main",
+                {"old": {"lp": 50}, "new": {"lp": 30, "grad[1]": 3},
+                 "clean": {}},
+                {"new": {"lp": "new why"}, "clean": {}}, path)
+            self.assertEqual(problems, [])
+            section = verify_refs.ulp_section(verify_refs.load_ulp_ledger(path),
+                                              "P", "main")
+            self.assertEqual(section, {
+                "new": {"lp": {"bound": 30, "reason": "measured on P; new why"}},
+                "old": {"lp": {"bound": 99, "reason": "why"}}})
+            path.unlink()
+            problems = verify_refs.add_first_entries(
+                ledger, "P", "main", {"new": {"lp": 30}}, {"new": {}}, path)
+            self.assertEqual(problems, ["new: lp measured 30 needs a reason"])
+            self.assertFalse(path.exists())
+
     def test_the_checked_in_ledger_loads(self):
         ledger = verify_refs.load_ulp_ledger()
         self.assertIsNotNone(ledger["platforms"])
