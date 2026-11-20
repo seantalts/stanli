@@ -3539,7 +3539,8 @@ static void test_lane_plan_boundary() {
       expect("lane emitter keeps operation order",
              emitted.size() == 3 && emitted[0].opcode == OP_FMA &&
                  emitted[1].opcode == OP_EXPV &&
-                 emitted[2].opcode == OP_SUM_VEC);
+                 emitted[2].opcode == OP_SUM_VEC &&
+                 emitted[2].variant == (uint8_t)SumGrouping::Pairwise);
       expect("lane emitter preserves target boundaries",
              terms == std::vector<int>({prefix, emitted[2].out, suffix}));
       expect("lane emitter keeps source stable", graphs_equal(g, before));

@@ -565,6 +565,7 @@ inline void SelectedPlan::emit(Graph& g, Fills& fills, TermRetirement& retired,
         result.push_back(op);
         Op sum;
         sum.opcode = OP_SUM_VEC;
+        sum.variant = (uint8_t)SumGrouping::Pairwise;
         sum.n_in = 1;
         sum.in[0] = op.out;
         sum.out = g.add_slot(1, false);

@@ -4,6 +4,8 @@
 #define STANLI_EXTREMA_GROUPING_HPP
 
 #include <stanli/expression_layout.hpp>
+#include <stanli/kernel_types.hpp>
+#include <stanli/pairwise_sum.hpp>
 
 #include <stan/math/prim.hpp>
 
@@ -88,13 +90,6 @@ inline double prod_phased(const double* data, int64_t len, int64_t offset) {
                        Eigen::internal::scalar_product_op<double, double>());
 }
 
-// How OP_SUM_VEC and OP_MEAN add their terms; the op's variant holds it.
-// InOrder is how Matrix<var>, std::vector and strided Eigen views reduce.
-// Packet is Eigen's packet grouping for a container whose first element is
-// aligned; Phased is the same for a view that starts `offset` elements into
-// one. None of them depends on the address of the slot.
-enum class SumGrouping : uint8_t { InOrder = 0, Packet = 1, Phased = 2 };
-
 // The grouping of Eigen's sum over an operand with this source layout, and
 // the phase offset. A layout that is not known to allow packets adds in
 // order.
@@ -120,6 +115,8 @@ inline double sum_grouped(const double* data, int64_t len, SumGrouping grouping,
       return input.unaryExpr(Eigen::internal::core_cast_op<double, double>())
           .sum();
     }
+    case SumGrouping::Pairwise:
+      return pairwise_sum(data, len);
     case SumGrouping::InOrder:
       break;
   }

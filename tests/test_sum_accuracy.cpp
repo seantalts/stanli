@@ -7,6 +7,7 @@
 #include "density_ops.hpp"
 #include "expect.hpp"
 
+#include <stanli/extrema_grouping.hpp>
 #include <stanli/graph.hpp>
 #include <stanli/kernel_types.hpp>
 #include <stanli/optable.hpp>
@@ -203,6 +204,23 @@ void test_gather_adjoint() {
   expect_ulp("gather adjoint 1", grad[1], want[1].value(), kUlp);
 }
 
+// The SUM_VEC that re-roll and partition build over the merged target terms.
+void test_merged_term_sum() {
+  const std::vector<double> x = terms(kN, -0.9, 91);
+  ExactSum want;
+  for (double v : x) want.add(v);
+  Graph g;
+  const int xs = g.add_slot(kN, true), lp = g.add_slot(1, false);
+  g.add_op(OP_SUM_VEC, {xs}, lp);
+  g.ops.back().variant = (uint8_t)SumGrouping::Pairwise;
+  g.result_slot = lp;
+  Executor ex(std::move(g));
+  for (int64_t i = 0; i < kN; ++i) ex.param_ptr(xs)[i] = x[(size_t)i];
+  std::vector<double> grad((size_t)kN);
+  const double value = ex.gradient(grad.data());
+  expect_ulp("pairwise SUM_VEC value", value, want.value(), kUlp);
+}
+
 }  // namespace
 
 int main() {
@@ -210,5 +228,6 @@ int main() {
   test_elementwise_density_scalar_adjoint();
   test_ordered_logistic_cutpoints();
   test_gather_adjoint();
+  test_merged_term_sum();
   return finish("test_sum_accuracy");
 }
