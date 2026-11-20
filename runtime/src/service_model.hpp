@@ -44,6 +44,31 @@ namespace detail {
 // std::exception: the services catch those and turn them into error codes.
 struct Interrupted {};
 
+// Asks the host's poll at most every 100 ms; the first call asks at once, so
+// a run that ends within one period still sees a stop that is already
+// pending.
+class ThrottledPoll {
+ public:
+  explicit ThrottledPoll(const std::function<bool()>* poll) : poll_(poll) {}
+  bool stop_requested() {
+    if (poll_ == nullptr || !*poll_) return false;
+    const auto now = std::chrono::steady_clock::now();
+    if (asked_ && now - last_ < std::chrono::milliseconds(100)) return false;
+    asked_ = true;
+    last_ = now;
+    return (*poll_)();
+  }
+  // Throws Interrupted when the host asked to stop.
+  void check() {
+    if (stop_requested()) throw Interrupted{};
+  }
+
+ private:
+  const std::function<bool()>* poll_;
+  bool asked_ = false;
+  std::chrono::steady_clock::time_point last_{};
+};
+
 // What a run needs from its host besides the executor.
 struct ServiceHooks {
   // The CSV columns and the row that fills them, drawing from `rng`. With no
@@ -57,15 +82,9 @@ struct ServiceHooks {
 class ServiceModel : public ExecutorModel {
  public:
   ServiceModel(Executor& ex, const ServiceHooks& hooks)
-      : ExecutorModel(ex), hooks_(&hooks) {}
+      : ExecutorModel(ex), hooks_(&hooks), poll_(&hooks.poll) {}
 
-  void check_interrupt() const {
-    if (!hooks_->poll) return;
-    const auto now = std::chrono::steady_clock::now();
-    if (now - last_poll_ < std::chrono::milliseconds(100)) return;
-    last_poll_ = now;
-    if (hooks_->poll()) throw Interrupted{};
-  }
+  void check_interrupt() const { poll_.check(); }
 
   double value(const double* q) const {
     check_interrupt();
@@ -202,7 +221,7 @@ class ServiceModel : public ExecutorModel {
 
   const ServiceHooks* hooks_;
   mutable WaRng scratch_{0};
-  mutable std::chrono::steady_clock::time_point last_poll_{};
+  mutable ThrottledPoll poll_;
 };
 
 // Stan's interrupt, asked between iterations by the services that have one.

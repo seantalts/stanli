@@ -984,6 +984,15 @@ int stanli_grad(stanli_model* m, const double* q, double* lp, double* grad) {
 
 int stanli_hessian(stanli_model* m, const double* q, double* lp, double* grad,
                    double* hessian, char* err, size_t err_len) {
+  return stanli_hessian_with_poll(m, q, lp, grad, hessian, nullptr, nullptr,
+                                  nullptr, err, err_len);
+}
+
+int stanli_hessian_with_poll(stanli_model* m, const double* q, double* lp,
+                             double* grad, double* hessian,
+                             stanli_sample_poll_cb poll, void* poll_user,
+                             int* interrupted, char* err, size_t err_len) {
+  if (interrupted != nullptr) *interrupted = 0;
   try {
     if (m == nullptr || q == nullptr || lp == nullptr || hessian == nullptr)
       throw std::invalid_argument(
@@ -991,8 +1000,11 @@ int stanli_hessian(stanli_model* m, const double* q, double* lp, double* grad,
     const int64_t n = m->ex->n_params();
     std::optional<stan::math::ChainableStack> tape;
     if (stan::math::ChainableStack::instance_ == nullptr) tape.emplace();
-    const stanli::detail::ServiceHooks hooks;
+    stanli::detail::ServiceHooks hooks;
+    if (poll != nullptr)
+      hooks.poll = [poll, poll_user] { return poll(poll_user) != 0; };
     const stanli::detail::ServiceModel model(*m->ex, hooks);
+    model.check_interrupt();
     const auto density = [&](auto&& theta) {
       return model.template log_prob<true, true, stan::math::var>(theta,
                                                                   nullptr);
@@ -1006,6 +1018,10 @@ int stanli_hessian(stanli_model* m, const double* q, double* lp, double* grad,
     if (grad != nullptr) Eigen::Map<Eigen::VectorXd>(grad, n) = g;
     Eigen::Map<Eigen::Matrix<double, -1, -1, Eigen::RowMajor>>(hessian, n, n) =
         h;
+    return 0;
+  } catch (const stanli::detail::Interrupted&) {
+    if (stan::math::empty_nested()) stan::math::recover_memory();
+    if (interrupted != nullptr) *interrupted = 1;
     return 0;
   } catch (const std::exception& e) {
     put_err(err, err_len, e.what());
@@ -1152,6 +1168,20 @@ int stanli_pathfinder_inits(stanli_model* m, uint32_t seed, int chain_id,
                             int history_size, double init_radius, double* inits,
                             stanli_path_cb cb, void* user, char* err,
                             size_t err_len) {
+  return stanli_pathfinder_inits_with_poll(
+      m, seed, chain_id, chains, num_iterations, num_elbo_draws, history_size,
+      init_radius, inits, cb, user, nullptr, nullptr, nullptr, err, err_len);
+}
+
+int stanli_pathfinder_inits_with_poll(stanli_model* m, uint32_t seed,
+                                      int chain_id, int chains,
+                                      int num_iterations, int num_elbo_draws,
+                                      int history_size, double init_radius,
+                                      double* inits, stanli_path_cb cb,
+                                      void* user, stanli_sample_poll_cb poll,
+                                      void* poll_user, int* interrupted,
+                                      char* err, size_t err_len) {
+  if (interrupted != nullptr) *interrupted = 0;
   try {
     if (chains <= 0) throw std::invalid_argument("chains must be positive");
     if (num_iterations <= 0)
@@ -1171,6 +1201,8 @@ int stanli_pathfinder_inits(stanli_model* m, uint32_t seed, int chain_id,
     cfg.num_elbo_draws = num_elbo_draws;
     cfg.history_size = history_size;
     cfg.init_radius = init_radius;
+    if (poll != nullptr)
+      cfg.poll = [poll, poll_user] { return poll(poll_user) != 0; };
     stanli::PathObserver observe;
     if (cb) {
       observe = [&](const stanli::PathIterate& it) {
@@ -1178,6 +1210,10 @@ int stanli_pathfinder_inits(stanli_model* m, uint32_t seed, int chain_id,
       };
     }
     stanli::PathfinderResult r = stanli::run_pathfinder(*m->ex, cfg, observe);
+    if (r.interrupted) {
+      if (interrupted != nullptr) *interrupted = 1;
+      return 0;
+    }
     if (r.return_code != 0) {
       put_err(err, err_len,
               r.message.empty() ? "pathfinder failed" : r.message.c_str());
@@ -1690,6 +1726,15 @@ void stanli_optimize_opts_init(stanli_optimize_opts* o) {
 int stanli_optimize(stanli_model* m, const stanli_optimize_opts* opts,
                     double* unconstrained, double* values, double* lp,
                     char* err, size_t err_len) {
+  return stanli_optimize_with_poll(m, opts, unconstrained, values, lp, nullptr,
+                                   nullptr, nullptr, err, err_len);
+}
+
+int stanli_optimize_with_poll(stanli_model* m, const stanli_optimize_opts* opts,
+                              double* unconstrained, double* values, double* lp,
+                              stanli_sample_poll_cb poll, void* poll_user,
+                              int* interrupted, char* err, size_t err_len) {
+  if (interrupted != nullptr) *interrupted = 0;
   try {
     if (opts == nullptr) {
       put_err(err, err_len, "null options");
@@ -1719,8 +1764,12 @@ int stanli_optimize(stanli_model* m, const stanli_optimize_opts* opts,
     cfg.init = opts->init;
 
     const stanli::AlgorithmHost host =
-        algorithm_host(m, nullptr, nullptr, nullptr, nullptr);
+        algorithm_host(m, nullptr, nullptr, poll, poll_user);
     const stanli::OptimizeResult r = stanli::run_optimize(*m->ex, host, cfg);
+    if (r.interrupted) {
+      if (interrupted != nullptr) *interrupted = 1;
+      return 0;
+    }
     for (size_t i = 0; i < r.unconstrained.size(); ++i)
       unconstrained[i] = r.unconstrained[i];
     if (values != nullptr)

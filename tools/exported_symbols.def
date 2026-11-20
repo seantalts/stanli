@@ -43,6 +43,7 @@ EXPORTS
   stanli_grad
   stanli_grad_err
   stanli_hessian
+  stanli_hessian_with_poll
   stanli_model_whiten
   stanli_model_whiten_lowrank
   stanli_sparse_factor_new
@@ -56,6 +57,7 @@ EXPORTS
   stanli_sample_walnuts_stats_init
   stanli_run_pathfinder
   stanli_pathfinder_inits
+  stanli_pathfinder_inits_with_poll
   stanli_n_constrained
   stanli_constrained_name
   stanli_n_param_blocks
@@ -100,6 +102,7 @@ EXPORTS
   stanli_diagnose_counts
   stanli_optimize_opts_init
   stanli_optimize
+  stanli_optimize_with_poll
   stanli_fixed_param_opts_init
   stanli_fixed_param_n_draws
   stanli_fixed_param

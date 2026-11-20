@@ -3,6 +3,7 @@
 #include <stanli/wa_interp.hpp>
 
 #include "initialize.hpp"
+#include "service_model.hpp"
 
 #include <stan/optimization/bfgs.hpp>
 
@@ -15,7 +16,8 @@ namespace {
 // run_optimize refuses the Jacobian-free form before it gets here, so only
 // the Jacobian form is ever instantiated.
 int run_lbfgs(ExecutorModel& model, std::vector<double>& cont,
-              const OptimizeConfig& cfg, double* lp_out, std::string* msg) {
+              const OptimizeConfig& cfg, detail::ThrottledPoll& poll,
+              double* lp_out, std::string* msg) {
   using Optimizer =
       stan::optimization::BFGSLineSearch<ExecutorModel,
                                          stan::optimization::LBFGSUpdate<>,
@@ -34,6 +36,7 @@ int run_lbfgs(ExecutorModel& model, std::vector<double>& cont,
 
   int ret = 0;
   while (ret == 0) {
+    poll.check();
     ret = opt.step();
     // The optimizer's own message stream carries the line-search
     // diagnostics; keep the last of them for a failure report.
@@ -72,7 +75,14 @@ OptimizeResult run_optimize(Executor& ex, const AlgorithmHost& host,
   initialize_point(ex, rng.gen(), cfg.init_radius, cfg.init, cont.data(),
                    FixedInitPolicy::SkipValidation);
 
-  out.return_code = run_lbfgs(model, cont, cfg, &out.lp, &out.message);
+  detail::ThrottledPoll poll(&host.poll);
+  try {
+    poll.check();
+    out.return_code = run_lbfgs(model, cont, cfg, poll, &out.lp, &out.message);
+  } catch (const detail::Interrupted&) {
+    out.interrupted = true;
+    return out;
+  }
   out.unconstrained = cont;
   if (host.row) {
     out.names = host.names;

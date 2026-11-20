@@ -13,12 +13,14 @@
 // each is stated where it is used.
 #include <stanli/capi.h>
 
+#include <chrono>
 #include <cmath>
 #include <cstdio>
 #include <cstring>
 #include <fstream>
 #include <sstream>
 #include <string>
+#include <thread>
 #include <vector>
 
 namespace {
@@ -385,6 +387,84 @@ void test_optimize_generated_quantities_stream() {
   double q = 0.3, row[2];
   stanli_wa_row(m, &q, row);
   expect("optimize ignores the model's own stream", y_at_mode(5, 1) == y5);
+  stanli_model_free(m);
+}
+
+// A poll that asks to stop on its (k + 1)-th call. Each call takes longer
+// than the 100 ms between polls, so a run that keeps going is asked again at
+// its next opportunity.
+struct StopAfter {
+  int k = 0;
+  int calls = 0;
+};
+
+int stop_after(void* user) {
+  auto* s = static_cast<StopAfter*>(user);
+  std::this_thread::sleep_for(std::chrono::milliseconds(110));
+  return s->calls++ >= s->k ? 1 : 0;
+}
+
+int never_stop(void* user) {
+  ++static_cast<StopAfter*>(user)->calls;
+  return 0;
+}
+
+// Optimize, Pathfinder inits and the Hessian stop when the poll says so.
+void test_interruptible_estimates() {
+  // A long narrow valley: L-BFGS needs many iterations and the Hessian many
+  // gradients, so neither finishes between two polls.
+  stanli_model* m = from_stan(
+      "parameters { vector[200] x; }\n"
+      "model { for (i in 2:200) target += -100 * square(x[i] - square(x[i - "
+      "1])) - square(1 - x[i - 1]); }\n");
+  if (m == nullptr) return;
+  const int64_t n = 200;
+  std::vector<double> q((size_t)n), hess((size_t)(n * n)), values((size_t)n),
+      inits((size_t)(4 * n));
+  double lp = 0;
+  char err[4096]{};
+  stanli_optimize_opts o;
+  stanli_optimize_opts_init(&o);
+  o.tol_obj = o.tol_rel_obj = o.tol_grad = o.tol_rel_grad = o.tol_param =
+      1e-300;
+  o.iter = 100000;
+  for (int k : {0, 2}) {
+    StopAfter stop{k};
+    int interrupted = 0;
+    const int rc = stanli_optimize_with_poll(m, &o, q.data(), values.data(),
+                                             &lp, stop_after, &stop,
+                                             &interrupted, err, sizeof err);
+    expect("optimize stops on request after " + std::to_string(k) + " polls",
+           rc == 0 && interrupted == 1 && stop.calls == k + 1);
+    stop = StopAfter{k};
+    interrupted = 0;
+    const int prc = stanli_pathfinder_inits_with_poll(
+        m, 1, 1, 4, 1000, 25, 5, 2.0, inits.data(), nullptr, nullptr,
+        stop_after, &stop, &interrupted, err, sizeof err);
+    expect("pathfinder inits stop on request after " + std::to_string(k) +
+               " polls",
+           prc == 0 && interrupted == 1 && stop.calls == k + 1);
+    stop = StopAfter{k};
+    interrupted = 0;
+    const int hrc = stanli_hessian_with_poll(m, q.data(), &lp, nullptr,
+                                             hess.data(), stop_after, &stop,
+                                             &interrupted, err, sizeof err);
+    expect("hessian stops on request after " + std::to_string(k) + " polls",
+           hrc == 0 && interrupted == 1 && stop.calls == k + 1);
+  }
+  // A poll that never asks to stop changes nothing.
+  o.iter = 50;
+  std::vector<double> plain((size_t)n), polled((size_t)n);
+  double lp_plain = 0, lp_polled = 0;
+  StopAfter count;
+  int interrupted = 1;
+  stanli_optimize(m, &o, plain.data(), values.data(), &lp_plain, err,
+                  sizeof err);
+  stanli_optimize_with_poll(m, &o, polled.data(), values.data(), &lp_polled,
+                            never_stop, &count, &interrupted, err, sizeof err);
+  expect("a poll that never stops leaves optimize alone",
+         plain == polled && lp_plain == lp_polled && interrupted == 0 &&
+             count.calls >= 1);
   stanli_model_free(m);
 }
 
@@ -851,6 +931,7 @@ int main() {
   test_noparam();
   test_optimize_rejected_mode();
   test_optimize_generated_quantities_stream();
+  test_interruptible_estimates();
   if (failures) {
     std::printf("%d failures\n", failures);
     return 1;

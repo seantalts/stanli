@@ -57,12 +57,15 @@ struct OptimizeResult {
   std::vector<double> values;         // every CSV column at that point
   std::vector<std::string> names;
   int return_code = 0;  // 0 = converged
+  // host.poll asked to stop; nothing else in the result is set.
+  bool interrupted = false;
   std::string message;
 };
 
 // L-BFGS, the same one CmdStan's `optimize` runs. The start and the row at
 // the mode draw from one stream, create_rng(seed, chain_id), as CmdStan's
-// do; host.names and host.row give that row.
+// do; host.names and host.row give that row. host.poll is asked between
+// iterations.
 OptimizeResult run_optimize(Executor& ex, const AlgorithmHost& host,
                             const OptimizeConfig& cfg);
 
@@ -91,6 +94,9 @@ struct PathfinderConfig {
   double tol_param = 1e-8;
   double init_radius = 2.0;
   const double* init = nullptr;  // unconstrained, or null for random
+  // Asked between L-BFGS iterations about every 100 ms; true abandons the
+  // run, which then reports `interrupted`.
+  std::function<bool()> poll;
 };
 
 // One point on the L-BFGS path. `iter` 0 is the starting point.
@@ -117,6 +123,7 @@ struct PathfinderResult {
   double khat = 0;
   double elapsed_ms = 0;
   int return_code = 0;  // 0 = success
+  bool interrupted = false;
   std::string message;
 };
 

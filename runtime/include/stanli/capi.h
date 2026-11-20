@@ -90,7 +90,8 @@ void stanli_model_opts_init(stanli_model_opts* o);
  * `stanc --O1 --debug-optimized-mir`) against JSON data (CmdStan conventions).
  * The unoptimized --debug-transformed-mir S-expression is also accepted.
  * Returns null on failure with a message in err. A null opts means the
- * defaults. */
+ * defaults. Construction cannot be interrupted: it takes no poll callback,
+ * and a large model can take seconds or more to prepare. */
 stanli_model* stanli_model_new_with_opts(const char* mir_text,
                                          const char* data_json,
                                          const stanli_model_opts* opts,
@@ -264,6 +265,21 @@ int stanli_grad_err(stanli_model* m, const double* q, double* lp, double* grad,
 int stanli_hessian(stanli_model* m, const double* q, double* lp, double* grad,
                    double* hessian, char* err, size_t err_len);
 
+/* How a long call learns that its caller wants it to stop (Ctrl-C, say).
+ * Asked on the calling thread; a nonzero answer stops the call. Sampling
+ * asks about every 100 ms while chains run and stops every chain after its
+ * current transition. */
+typedef int (*stanli_sample_poll_cb)(void* user);
+
+/* stanli_hessian, asking `poll` on the calling thread about every 100 ms, and
+ * once before the first gradient. A nonzero answer abandons the call, which
+ * returns 0 with *interrupted set to 1 and nothing usable in the outputs.
+ * `poll` and `interrupted` may be null. */
+int stanli_hessian_with_poll(stanli_model* m, const double* q, double* lp,
+                             double* grad, double* hessian,
+                             stanli_sample_poll_cb poll, void* poll_user,
+                             int* interrupted, char* err, size_t err_len);
+
 /* EXPERIMENTAL. A new model over whitened coordinates z, with
  *     q = q_hat + P^T L^{-T} z,   (P v)[i] = v[perm[i]],
  * where q is `inner`'s unconstrained vector and L is a lower triangular
@@ -435,10 +451,6 @@ typedef void (*stanli_sample_progress_cb)(int32_t chain_id, int64_t iteration,
                                           int64_t total, int32_t warmup,
                                           int64_t n_divergent,
                                           int64_t n_max_treedepth, void* user);
-
-/* Asked on the calling thread about every 100 ms while chains run. A nonzero
- * answer stops every chain after its current transition. */
-typedef int (*stanli_sample_poll_cb)(void* user);
 
 /* Metric kinds for stanli_metric_opts::metric, as CmdStan's unit_e, diag_e and
  * dense_e. */
@@ -678,6 +690,15 @@ int stanli_optimize(stanli_model* m, const stanli_optimize_opts* opts,
                     double* unconstrained, double* values, double* lp,
                     char* err, size_t err_len);
 
+/* stanli_optimize, asking `poll` on the calling thread between iterations,
+ * about every 100 ms and once before the first. A nonzero answer abandons the
+ * run, which returns 0 with *interrupted set to 1 and nothing usable in the
+ * outputs. `poll` and `interrupted` may be null. */
+int stanli_optimize_with_poll(stanli_model* m, const stanli_optimize_opts* opts,
+                              double* unconstrained, double* values, double* lp,
+                              stanli_sample_poll_cb poll, void* poll_user,
+                              int* interrupted, char* err, size_t err_len);
+
 /* Constrained view: flattened parameter values for one unconstrained q.
  * n_constrained gives the output length; names are "mu", "theta.1", ... */
 int64_t stanli_n_constrained(const stanli_model* m);
@@ -777,6 +798,16 @@ int stanli_pathfinder_inits(stanli_model* m, uint32_t seed, int chain_id,
                             int history_size, double init_radius, double* inits,
                             stanli_path_cb cb, void* user, char* err,
                             size_t err_len);
+
+/* stanli_pathfinder_inits, asking `poll` as stanli_optimize_with_poll does. */
+int stanli_pathfinder_inits_with_poll(stanli_model* m, uint32_t seed,
+                                      int chain_id, int chains,
+                                      int num_iterations, int num_elbo_draws,
+                                      int history_size, double init_radius,
+                                      double* inits, stanli_path_cb cb,
+                                      void* user, stanli_sample_poll_cb poll,
+                                      void* poll_user, int* interrupted,
+                                      char* err, size_t err_len);
 
 /* ---- fixed_param, Laplace, Pathfinder, ADVI -------------------------------
  *
