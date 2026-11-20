@@ -2251,8 +2251,11 @@ std::optional<Lowering::Val> Lowering::lower_eltwise_fn(
       g.ops.back().variant = static_cast<uint8_t>(sum);
       return with_layout(result, ExpressionLayout::scalar());
     }
-    return with_layout(emit_value(reduction->opcode, {a}, 1),
-                       ExpressionLayout::scalar());
+    Val result = emit_value(reduction->opcode, {a}, 1);
+    if (reduction->opcode == OP_VARIANCE && e.args[0].unsized.depth == 1 &&
+        a.autodiff && !in_write_array)
+      g.ops.back().variant = kVarianceOfVarArray;
+    return with_layout(result, ExpressionLayout::scalar());
   }
 
   if (builtin != nullptr && builtin->arity == 1 &&
@@ -2304,6 +2307,19 @@ std::optional<Lowering::Val> Lowering::lower_eltwise_fn(
     // re-deriving its provenance from MIR syntax.
     if (e.args.size() == 1 || e.args.size() == 2)
       if (auto v = fold_const(e)) return *v;
+    // Stan Math rejects an empty int array when the call runs, so a model
+    // that never reaches the call still loads.
+    if (e.args.size() == 1 && e.args[0].unsized.leaf == mir::UnsizedLeaf::Int &&
+        e.args[0].unsized.depth == 1 &&
+        g.slots[actuals.at(0).value().slot].len == 0) {
+      try {
+        (void)(e.name == "min" ? stan::math::min(std::vector<int>{})
+                               : stan::math::max(std::vector<int>{}));
+      } catch (const std::invalid_argument& error) {
+        emit_error(MessageError::InvalidArgument, error.what());
+      }
+      return constant(0.0);
+    }
     const mir::ExtremaCall call = mir::extrema_call(e);
     if (call.kind == mir::ExtremaKind::Legacy)
       fail("min/max expression surface stays on WaInterp", e.raw);

@@ -603,7 +603,10 @@ void mean_bwd(KernelCtx& ctx) {
 template <bool StdDev>
 void dispersion_fwd(KernelCtx& ctx) {
   const int64_t n = ctx.in[0].len;
-  stan::math::check_nonzero_size(StdDev ? "sd" : "variance", StdDev ? "x" : "m",
+  stan::math::check_nonzero_size(StdDev ? "sd" : "variance",
+                                 StdDev                              ? "x"
+                                 : ctx.variant & kVarianceOfVarArray ? "v"
+                                                                     : "m",
                                  in_a(ctx, 0));
   if (n == 1) {
     ctx.out.data[0] = 0.0;

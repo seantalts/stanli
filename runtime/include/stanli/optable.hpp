@@ -992,6 +992,11 @@ constexpr bool is_effectful_op(uint16_t opcode) {
 // tooling only; never on a hot path.
 const char* opcode_name(uint16_t opcode);
 
+// OP_VARIANCE's variant: the argument is a std::vector<var> in CmdStan (an
+// autodiff array), for which Stan Math names the empty argument "v" where
+// its Eigen overloads say "m".
+inline constexpr uint8_t kVarianceOfVarArray = 1;
+
 // OP_GP_COV's variant selects the covariance function.
 enum GpCov : uint8_t {
   kGpExpQuad,

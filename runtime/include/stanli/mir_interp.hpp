@@ -721,9 +721,26 @@ class MirInterp {
               static_cast<int>(as_int(st.fn_args[2])));
           return;
         }
-        if (mir::internal_name(st) == "FnValidateSizePositive" ||
-            mir::library_name(st) == "check_greater_or_equal")
+        if (mir::internal_name(st) == "FnValidateSizePositive") {
+          if (st.fn_args.size() != 3 ||
+              st.fn_args[0].kind != mir::Expr::LitStr ||
+              st.fn_args[1].kind != mir::Expr::LitStr)
+            fail("malformed FnValidateSizePositive", st.raw);
+          stan::math::validate_positive_index(
+              st.fn_args[0].lit_s.c_str(), st.fn_args[1].lit_s.c_str(),
+              static_cast<int>(as_int(st.fn_args[2])));
           return;
+        }
+        if (mir::library_name(st) == "check_greater_or_equal") {
+          if (st.fn_args.size() != 4 ||
+              st.fn_args[0].kind != mir::Expr::LitStr ||
+              st.fn_args[1].kind != mir::Expr::LitStr)
+            fail("malformed check_greater_or_equal", st.raw);
+          stan::math::check_greater_or_equal(
+              st.fn_args[0].lit_s.c_str(), st.fn_args[1].lit_s.c_str(),
+              as_int(st.fn_args[2]), as_int(st.fn_args[3]));
+          return;
+        }
         if (mir::internal_name(st) == "FnValidateSizeUnitVector") {
           if (st.fn_args.size() != 3 ||
               st.fn_args[0].kind != mir::Expr::LitStr ||
@@ -1133,10 +1150,13 @@ class MirInterp {
       }
     }
     activity &= spec.activity_mask;
-    const uint8_t variant =
+    uint8_t variant =
         spec.opcode == OP_POW
             ? mir::pow_zero_base_law(e.args[0], e.args[1], !e.args[1].data_only)
             : 0;
+    if (!std::is_same_v<T, double> && spec.opcode == OP_VARIANCE &&
+        e.args[0].unsized.depth == 1 && !e.args[0].data_only)
+      variant = kVarianceOfVarArray;
     Value o;
     std::vector<int> idata;
     if (layout.groups >= 0)

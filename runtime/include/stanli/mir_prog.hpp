@@ -3538,9 +3538,14 @@ struct ProgramCompiler {
         if (grouping.first == SumGrouping::Phased)
           idata.push_back(static_cast<int>(grouping.second));
         Range out{0, 1};
-        return kernel_call(
-            reduction->opcode, args, out, static_cast<uint8_t>(grouping.first),
-            reduction->activity_mask, std::move(idata), {}, e.name);
+        const bool var_array = reduction->opcode == OP_VARIANCE &&
+                               e.args[0].unsized.depth == 1 &&
+                               !in_write_array && !e.args[0].data_only;
+        return kernel_call(reduction->opcode, args, out,
+                           var_array ? kVarianceOfVarArray
+                                     : static_cast<uint8_t>(grouping.first),
+                           reduction->activity_mask, std::move(idata), {},
+                           e.name);
       }
     }
     // Matrix right-division is a solve, not the scalar/elementwise DIV in the
