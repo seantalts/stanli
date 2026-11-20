@@ -107,7 +107,7 @@ void ledger_rule_tests() {
   };
   cross::Options opt;
   opt.model = name;
-  opt.points = 1;
+  opt.points = cross::kDefaultPoints;
 
   const cross::Ledger here = load("[" + entry("") + "]");
   expect(here.error.empty(), "ledger without a platform loads");
