@@ -17,8 +17,9 @@ using Fills = std::vector<std::pair<int, std::vector<double>>>;
 
 // The lane-fusing passes' shared currencies (island.cpp's dispatch cost
 // against its per-element cost): ~5 ns per graph op eliminated, against
-// ~1 ns per element a slice or gather copies or scatters, and ~6 op
-// dispatches to evaluate one density element. A fused region must beat
+// ~1 ns per element a slice or gather copies or scatters, and 6 of those
+// element units (a little more than one op dispatch) to evaluate one
+// density element. A fused region must beat
 // its unpacked cost by more than a rounding error, or it churns the graph
 // for nothing; kPartitionMargin is that margin.
 constexpr int64_t kLaneOpCost = 5;

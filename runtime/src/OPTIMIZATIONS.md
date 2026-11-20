@@ -661,8 +661,8 @@ emitted, in the currencies of `pass_util.hpp` (`kLaneOpCost`,
 own region pricing uses). The island carver has its own constants in
 `island.cpp`. The currencies are about 5 ns per graph op against about 1 ns per
 element moved, and a density element is charged `kLaneDensityElem = 6`
-element units. The comment on that constant calls this six op dispatches, which
-is 30 units, so the code and the comment disagree; the question is open in
+element units, a little more than one op dispatch. The reasons for that reading
+are in
 [`notes/performance/audit-2026-11-20-open-questions.md`](../../notes/performance/audit-2026-11-20-open-questions.md).
 Two measured pessimizations live in that model rather
 than in the shipped graph. Lanes identical down to their immediates and
