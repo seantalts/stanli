@@ -265,8 +265,9 @@ static char* (*p_bridgestan_data)(const char*, const char*, const char*, char*,
                                   size_t);
 static int64_t (*p_n_unconstrained)(const void*);
 static int (*p_grad_err)(void*, const double*, double*, double*, char*, size_t);
-static int (*p_hessian)(void*, const double*, double*, double*, double*, char*,
-                        size_t);
+static int (*p_hessian_with_poll)(void*, const double*, double*, double*,
+                                  double*, stanli_sample_poll_cb, void*, int*,
+                                  char*, size_t);
 
 /* Experimental Laplace whitening. Bound when the runtime has them; a runtime
  * from before they existed still loads and these calls say so. */
@@ -306,9 +307,10 @@ static int (*p_sample_walnuts_stats_init)(void*, uint32_t, int, int, int,
                                           double, double, const double*,
                                           double*, double*, stanli_draw_cb,
                                           void*, char*, size_t);
-static int (*p_pathfinder_inits)(void*, uint32_t, int, int, int, int, int,
-                                 double, double*, stanli_path_cb, void*, char*,
-                                 size_t);
+static int (*p_pathfinder_inits_with_poll)(void*, uint32_t, int, int, int, int,
+                                           int, double, double*, stanli_path_cb,
+                                           void*, stanli_sample_poll_cb, void*,
+                                           int*, char*, size_t);
 static const char* (*p_sampler_column_name)(int);
 static int (*p_summary_stats)(const double*, int64_t, int64_t, int64_t,
                               double*);
@@ -325,8 +327,9 @@ static int (*p_wa_row)(void*, const double*, double*);
 static const char* (*p_warnings)(const void*);
 static int (*p_transformed_data_rng)(const void*);
 static void (*p_optimize_opts_init)(stanli_optimize_opts*);
-static int (*p_optimize)(void*, const stanli_optimize_opts*, double*, double*,
-                         double*, char*, size_t);
+static int (*p_optimize_with_poll)(void*, const stanli_optimize_opts*, double*,
+                                   double*, double*, stanli_sample_poll_cb,
+                                   void*, int*, char*, size_t);
 
 static void (*p_fixed_param_opts_init)(stanli_fixed_param_opts*);
 static int (*p_fixed_param_opts_check)(const stanli_fixed_param_opts*, char*,
@@ -559,7 +562,7 @@ SEXP stanli_bridge_load(SEXP path) {
   BIND("stanli_bridgestan_data", p_bridgestan_data);
   BIND("stanli_n_unconstrained", p_n_unconstrained);
   BIND("stanli_grad_err", p_grad_err);
-  BIND("stanli_hessian", p_hessian);
+  BIND("stanli_hessian_with_poll", p_hessian_with_poll);
   BIND_OPTIONAL("stanli_model_whiten_lowrank", p_model_whiten_lowrank);
   BIND_OPTIONAL("stanli_sparse_factor_new", p_sparse_factor_new);
   BIND_OPTIONAL("stanli_sparse_factor_nnz", p_sparse_factor_nnz);
@@ -582,7 +585,7 @@ SEXP stanli_bridge_load(SEXP path) {
   BIND("stanli_sample_multi_metric", p_sample_multi_metric);
   BIND_OPTIONAL("stanli_sample_walnuts_stats_init",
                 p_sample_walnuts_stats_init);
-  BIND("stanli_pathfinder_inits", p_pathfinder_inits);
+  BIND("stanli_pathfinder_inits_with_poll", p_pathfinder_inits_with_poll);
   BIND("stanli_sampler_column_name", p_sampler_column_name);
   BIND("stanli_summary_stats", p_summary_stats);
   BIND("stanli_diagnose_text", p_diagnose_text);
@@ -594,7 +597,7 @@ SEXP stanli_bridge_load(SEXP path) {
   BIND("stanli_warnings", p_warnings);
   BIND("stanli_transformed_data_rng", p_transformed_data_rng);
   BIND("stanli_optimize_opts_init", p_optimize_opts_init);
-  BIND("stanli_optimize", p_optimize);
+  BIND("stanli_optimize_with_poll", p_optimize_with_poll);
   BIND("stanli_fixed_param_opts_init", p_fixed_param_opts_init);
   BIND("stanli_fixed_param_opts_check", p_fixed_param_opts_check);
   BIND("stanli_fixed_param_n_draws", p_fixed_param_n_draws);
@@ -961,6 +964,30 @@ SEXP stanli_r_grad(SEXP m, SEXP q) {
   return out;
 }
 
+static void check_interrupt(void* unused) {
+  (void)unused;
+  R_CheckUserInterrupt();
+}
+
+/* A pending interrupt would longjmp straight through the runtime's C++
+ * frames. R_ToplevelExec catches it instead and answers FALSE, which the
+ * runtime turns into a stop; the R side raises the interrupt again once the
+ * sampler has returned. */
+static int sample_poll(void* user) {
+  (void)user;
+  R_ToplevelExec(flush_messages_cb, NULL);
+  return R_ToplevelExec(check_interrupt, NULL) ? 0 : 1;
+}
+
+/* What a stopped call returns; algorithm_interrupt() in R raises it. */
+static SEXP interrupted_result(void) {
+  const char* names[] = {"interrupted", ""};
+  SEXP out = PROTECT(mkNamed(VECSXP, names));
+  SET_VECTOR_ELT(out, 0, ScalarLogical(1));
+  UNPROTECT(1);
+  return out;
+}
+
 SEXP stanli_r_hessian(SEXP m, SEXP q) {
   require_loaded();
   void* mm = model_ptr(m);
@@ -973,12 +1000,18 @@ SEXP stanli_r_hessian(SEXP m, SEXP q) {
   double lp = 0;
   char err[4096];
   err[0] = '\0';
+  int interrupted = 0;
   const int rc =
-      p_hessian(mm, REAL(q), &lp, REAL(grad), REAL(hess), err, sizeof err);
+      p_hessian_with_poll(mm, REAL(q), &lp, REAL(grad), REAL(hess), sample_poll,
+                          NULL, &interrupted, err, sizeof err);
   flush_messages();
   if (rc != 0) {
     UNPROTECT(2);
     error("Hessian evaluation failed at this point: %s", err);
+  }
+  if (interrupted) {
+    UNPROTECT(2);
+    return interrupted_result();
   }
   SEXP out = PROTECT(allocVector(VECSXP, 3));
   SET_VECTOR_ELT(out, 0, ScalarReal(lp));
@@ -1272,21 +1305,6 @@ static void sample_progress(int32_t chain_id, int64_t iteration, int64_t total,
   R_FlushConsole();
 }
 
-static void check_interrupt(void* unused) {
-  (void)unused;
-  R_CheckUserInterrupt();
-}
-
-/* A pending interrupt would longjmp straight through the runtime's C++
- * frames. R_ToplevelExec catches it instead and answers FALSE, which the
- * runtime turns into a stop; the R side raises the interrupt again once the
- * sampler has returned. */
-static int sample_poll(void* user) {
-  (void)user;
-  R_ToplevelExec(flush_messages_cb, NULL);
-  return R_ToplevelExec(check_interrupt, NULL) ? 0 : 1;
-}
-
 static void print_sample_reports(const stanli_sample_opts* o, int64_t nchain,
                                  const stanli_sample_report* reports,
                                  const double* stats) {
@@ -1319,15 +1337,17 @@ SEXP stanli_r_pathfinder_inits(SEXP m, SEXP seed, SEXP chains, SEXP options,
   double* raw = (double*)R_alloc((size_t)nchain * (size_t)n, sizeof(double));
   char err[4096];
   err[0] = '\0';
-  const int rc = p_pathfinder_inits(
+  int interrupted = 0;
+  const int rc = p_pathfinder_inits_with_poll(
       mm, (uint32_t)asInteger(seed), asInteger(chain_id), nchain,
       asInteger(VECTOR_ELT(options, 0)), asInteger(VECTOR_ELT(options, 1)),
       asInteger(VECTOR_ELT(options, 2)), asReal(VECTOR_ELT(options, 3)), raw,
-      NULL, NULL, err, sizeof err);
+      NULL, NULL, sample_poll, NULL, &interrupted, err, sizeof err);
   flush_messages();
   if (rc != 0)
     error("Pathfinder initialization failed: %s",
           err[0] ? err : "unknown error");
+  if (interrupted) return interrupted_result();
 
   /* Return an ordinary chains-by-parameters R matrix. R owns columns, while
    * the C ABI owns chain-major rows, so transpose the memory layout here. */
@@ -1435,11 +1455,8 @@ SEXP stanli_r_sample(SEXP m, SEXP optlist, SEXP inits, SEXP refresh,
           err[0] ? err : "(no message)");
   }
   if (interrupted) {
-    const char* names[] = {"interrupted", ""};
-    SEXP out = PROTECT(mkNamed(VECSXP, names));
-    SET_VECTOR_ELT(out, 0, ScalarLogical(1));
-    UNPROTECT(6);
-    return out;
+    UNPROTECT(5);
+    return interrupted_result();
   }
   if (refresh_rate > 0) print_sample_reports(&o, nchain, reports, REAL(stats));
 
@@ -1562,11 +1579,18 @@ SEXP stanli_r_optimize(SEXP m, SEXP optlist, SEXP init) {
   double lp = 0;
   char err[4096];
   err[0] = '\0';
-  const int rc = p_optimize(mm, &o, REAL(q), REAL(vals), &lp, err, sizeof err);
+  int interrupted = 0;
+  const int rc =
+      p_optimize_with_poll(mm, &o, REAL(q), REAL(vals), &lp, sample_poll, NULL,
+                           &interrupted, err, sizeof err);
   flush_messages();
   if (rc != 0) {
     UNPROTECT(2);
     error("optimize failed: %s", err[0] ? err : "(no message)");
+  }
+  if (interrupted) {
+    UNPROTECT(2);
+    return interrupted_result();
   }
   SEXP out = PROTECT(allocVector(VECSXP, 3));
   SET_VECTOR_ELT(out, 0, vals);
@@ -1635,14 +1659,6 @@ static SEXP named_list(int n, const char** names, SEXP* values) {
  * options size any buffer. */
 static void check_opts(int failed, const char* err) {
   if (failed) error("%s", err[0] ? err : "invalid options");
-}
-
-static SEXP interrupted_result(void) {
-  const char* names[] = {"interrupted", ""};
-  SEXP out = PROTECT(mkNamed(VECSXP, names));
-  SET_VECTOR_ELT(out, 0, ScalarLogical(1));
-  UNPROTECT(1);
-  return out;
 }
 
 /* optlist: seed, chains, samples, thin, init_radius, refresh, chain_id. */

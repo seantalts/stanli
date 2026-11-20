@@ -48,9 +48,9 @@ algorithm_inits <- function(model, init, count) {
   as.double(t(m))
 }
 
-# A stopped run returns no fit: raise the interrupt the user sent.
+# A stopped run returns no result: raise the interrupt the user sent.
 algorithm_interrupt <- function(res, what) {
-  if (!isTRUE(res$interrupted)) return(invisible(NULL))
+  if (!is.list(res) || !isTRUE(res$interrupted)) return(invisible(NULL))
   signalCondition(structure(class = c("interrupt", "condition"),
                             list(message = paste(what, "interrupted"),
                                  call = NULL)))

@@ -1025,6 +1025,28 @@ def test_ctrl_c_stops_sampling():
         "the SIGINT handler was not restored"
 
 
+def test_ctrl_c_stops_optimize_pathfinder_inits_and_the_hessian():
+    # A poll that always answers "stop" stands for a Ctrl-C that is already
+    # pending: each call asks it once before its first gradient.
+    m = _es()
+    calls = (
+        lambda: m.optimize(seed=1),
+        lambda: m.sample(chains=1, seed=1, warmup=10, samples=10, refresh=0,
+                         pathfinder_init={}),
+        lambda: m.log_prob_hessian(np.zeros(m.n_unconstrained)),
+    )
+    with mock.patch.object(stanli._InterruptWatch, "_poll",
+                           lambda self, user: 1):
+        for call in calls:
+            try:
+                call()
+            except KeyboardInterrupt:
+                continue
+            raise AssertionError("the call ran through a pending interrupt")
+    assert signal.getsignal(signal.SIGINT) is signal.default_int_handler, \
+        "the SIGINT handler was not restored"
+
+
 def test_sampling_off_the_main_thread_still_works():
     m = _es()
     with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:

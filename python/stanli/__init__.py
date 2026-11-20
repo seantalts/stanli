@@ -231,13 +231,12 @@ def _load_lib():
                                     ctypes.POINTER(ctypes.c_double),
                                     ctypes.POINTER(ctypes.c_double),
                                     ctypes.c_char_p, ctypes.c_size_t]
-    lib.stanli_hessian.restype = ctypes.c_int
-    lib.stanli_hessian.argtypes = [ctypes.c_void_p,
-                                   ctypes.POINTER(ctypes.c_double),
-                                   ctypes.POINTER(ctypes.c_double),
-                                   ctypes.POINTER(ctypes.c_double),
-                                   ctypes.POINTER(ctypes.c_double),
-                                   ctypes.c_char_p, ctypes.c_size_t]
+    lib.stanli_hessian_with_poll.restype = ctypes.c_int
+    lib.stanli_hessian_with_poll.argtypes = [
+        ctypes.c_void_p, ctypes.POINTER(ctypes.c_double),
+        ctypes.POINTER(ctypes.c_double), ctypes.POINTER(ctypes.c_double),
+        ctypes.POINTER(ctypes.c_double), _SamplePollCallback, ctypes.c_void_p,
+        ctypes.POINTER(ctypes.c_int), ctypes.c_char_p, ctypes.c_size_t]
     lib.stanli_model_whiten.restype = ctypes.c_void_p
     lib.stanli_model_whiten.argtypes = [
         ctypes.c_void_p, ctypes.POINTER(ctypes.c_double), ctypes.c_int64,
@@ -354,11 +353,12 @@ def _load_lib():
         _SampleProgressCallback, ctypes.c_void_p, _SamplePollCallback,
         ctypes.c_void_p, ctypes.POINTER(ctypes.c_int),
         ctypes.POINTER(_SampleReport), ctypes.c_char_p, ctypes.c_size_t]
-    lib.stanli_pathfinder_inits.restype = ctypes.c_int
-    lib.stanli_pathfinder_inits.argtypes = [
+    lib.stanli_pathfinder_inits_with_poll.restype = ctypes.c_int
+    lib.stanli_pathfinder_inits_with_poll.argtypes = [
         ctypes.c_void_p, ctypes.c_uint32, ctypes.c_int, ctypes.c_int,
         ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_double,
         ctypes.POINTER(ctypes.c_double), ctypes.c_void_p, ctypes.c_void_p,
+        _SamplePollCallback, ctypes.c_void_p, ctypes.POINTER(ctypes.c_int),
         ctypes.c_char_p, ctypes.c_size_t]
     lib.stanli_summary_stats.restype = ctypes.c_int
     lib.stanli_summary_stats.argtypes = [ctypes.POINTER(ctypes.c_double),
@@ -369,13 +369,12 @@ def _load_lib():
     lib.stanli_optimize_opts_check.restype = ctypes.c_int
     lib.stanli_optimize_opts_check.argtypes = [ctypes.POINTER(_OptimizeOpts),
                                                ctypes.c_char_p, ctypes.c_size_t]
-    lib.stanli_optimize.restype = ctypes.c_int
-    lib.stanli_optimize.argtypes = [ctypes.c_void_p,
-                                    ctypes.POINTER(_OptimizeOpts),
-                                    ctypes.POINTER(ctypes.c_double),
-                                    ctypes.POINTER(ctypes.c_double),
-                                    ctypes.POINTER(ctypes.c_double),
-                                    ctypes.c_char_p, ctypes.c_size_t]
+    lib.stanli_optimize_with_poll.restype = ctypes.c_int
+    lib.stanli_optimize_with_poll.argtypes = [
+        ctypes.c_void_p, ctypes.POINTER(_OptimizeOpts),
+        ctypes.POINTER(ctypes.c_double), ctypes.POINTER(ctypes.c_double),
+        ctypes.POINTER(ctypes.c_double), _SamplePollCallback, ctypes.c_void_p,
+        ctypes.POINTER(ctypes.c_int), ctypes.c_char_p, ctypes.c_size_t]
     lib.stanli_diagnose_text.restype = ctypes.c_int64
     lib.stanli_diagnose_text.argtypes = [ctypes.POINTER(ctypes.c_double),
                                          ctypes.c_int64, ctypes.c_int64,
@@ -637,6 +636,23 @@ class _InterruptWatch:
         if callable(previous) and previous is not signal.default_int_handler:
             previous(signal.SIGINT, None)
         raise KeyboardInterrupt
+
+
+def _interruptible(call):
+    """call(poll, interrupted) for a native entry point that takes a poll.
+
+    Raises KeyboardInterrupt when Ctrl-C stopped the call, else returns
+    what the call returned.
+    """
+    interrupted = ctypes.c_int(0)
+    watch = _InterruptWatch()
+    with watch, _native_output():
+        rc = call(watch.poll, ctypes.byref(interrupted))
+    if interrupted.value:
+        watch.raise_interrupt()
+    if watch.flush_error is not None:
+        raise watch.flush_error
+    return rc
 
 
 _PATHFINDER_INIT_DEFAULTS = {
@@ -1893,9 +1909,10 @@ class Model:
         grad = np.empty(n)
         hess = np.empty((n, n))
         err = ctypes.create_string_buffer(4096)
-        with _native_output():
-            rc = _lib.stanli_hessian(self._handle, _dptr(q), ctypes.byref(lp),
-                                     _dptr(grad), _dptr(hess), err, len(err))
+        rc = _interruptible(lambda poll, interrupted: (
+            _lib.stanli_hessian_with_poll(
+                self._handle, _dptr(q), ctypes.byref(lp), _dptr(grad),
+                _dptr(hess), poll, None, interrupted, err, len(err))))
         if rc != 0:
             raise RuntimeError("Hessian evaluation failed at this point: "
                                + err.value.decode(errors="replace"))
@@ -2027,10 +2044,10 @@ class Model:
         q = np.empty(self.n_unconstrained)
         vals = np.empty(len(names))
         lp = ctypes.c_double()
-        with _native_output():
-            rc = _lib.stanli_optimize(self._handle, ctypes.byref(opts),
-                                      _dptr(q), _dptr(vals), ctypes.byref(lp),
-                                      err, len(err))
+        rc = _interruptible(lambda poll, interrupted: (
+            _lib.stanli_optimize_with_poll(
+                self._handle, ctypes.byref(opts), _dptr(q), _dptr(vals),
+                ctypes.byref(lp), poll, None, interrupted, err, len(err))))
         del init_arr
         if rc != 0:
             raise RuntimeError(f"optimize failed: {err.value.decode()}")
@@ -2212,12 +2229,12 @@ class Model:
             pf = _pathfinder_init_options(pathfinder_init)
             init_arr = np.empty((opts.chains, self.n_unconstrained))
             err = ctypes.create_string_buffer(4096)
-            with _native_output():
-                rc = _lib.stanli_pathfinder_inits(
+            rc = _interruptible(lambda poll, interrupted: (
+                _lib.stanli_pathfinder_inits_with_poll(
                     self._handle, opts.seed, opts.chain_id, opts.chains,
                     pf["num_iterations"], pf["num_elbo_draws"],
                     pf["history_size"], pf["init_radius"], _dptr(init_arr),
-                    None, None, err, len(err))
+                    None, None, poll, None, interrupted, err, len(err))))
             if rc != 0:
                 raise RuntimeError(
                     f"Pathfinder initialization failed: {err.value.decode()}")
