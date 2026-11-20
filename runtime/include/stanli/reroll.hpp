@@ -6,6 +6,7 @@
 #define STANLI_REROLL_HPP
 
 #include <stanli/graph.hpp>
+#include <stanli/lane_decline.hpp>
 
 #include <cstdint>
 #include <utility>
@@ -31,6 +32,9 @@ struct RerollStats {
   // unlike a wall-clock reading, so the same graph gives the same answer
   // on every machine.
   int64_t list_steps = 0;
+  // Op pairs compared while counting a run's matching lanes, plus lanes
+  // times positions for every classification attempt.
+  int64_t lane_steps = 0;
   // Target-term entries read while swapping fused lanes' terms for their
   // region's one replacement.
   int64_t term_steps = 0;
@@ -40,6 +44,8 @@ struct RerollStats {
   int64_t element_density = 0;
   int64_t term_widen = 0;
   int64_t element_store = 0;
+  // One entry per group of matching lanes left unfused.
+  std::vector<LaneDeclineRecord> declines;
 };
 
 // In place. `fills` gains entries for materialized constant vectors.

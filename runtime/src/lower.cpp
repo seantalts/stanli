@@ -1073,6 +1073,8 @@ void Lowering::run_passes(const std::vector<int>& roots, const PassPlan& plan) {
         rerolled.regions, rerolled.list_steps, false, 0,
         rerolled.candidate_steps, rerolled.row_steps, &rerolled,
         rerolled.term_steps);
+  const bool lane_report = debug_env("STANLI_LANE_REPORT") != nullptr;
+  if (lane_report) print_lane_declines(rerolled.declines, "reroll", prep_graph);
   // Re-roll can replace many element writes with copying slice stores, and
   // may have replaced target terms with vector reductions: rebuild the
   // implicit-root set before giving those new ops the same last-use proof
@@ -1107,6 +1109,8 @@ void Lowering::run_passes(const std::vector<int>& roots, const PassPlan& plan) {
     trace("partition", partition_time, roots, PrepTrace::Extra::Partition,
           parted.groups, parted.lanes, false, 0, parted.declined,
           parted.list_steps, nullptr, parted.term_steps);
+    if (lane_report)
+      print_lane_declines(parted.declines, "partition", prep_graph);
     // Same proof the slice stores re-roll makes get: rebuilt from the
     // terms partition just replaced.
     const std::vector<int> post_partition_roots = roots_with_terms();

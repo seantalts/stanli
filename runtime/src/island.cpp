@@ -28,6 +28,8 @@
 #include <stanli/optable.hpp>
 #include <stanli/program_density.hpp>
 
+#include "pass_util.hpp"
+
 #include <boost/unordered/unordered_flat_map.hpp>
 #include <boost/unordered/unordered_flat_set.hpp>
 
@@ -65,7 +67,7 @@ constexpr int kValueRegWeight = 2;
 // -- 1,797 scalar ops whose elements moved barely outnumber them -- read
 // as a wash to an estimate that could only see elements, and measured
 // 1.28x once they were compiled.
-constexpr int kOpCost = 5;
+constexpr int kOpCost = kLaneOpCost;
 
 // What a graph op costs on top of the elements it moves. The executor's
 // per-op profile puts a scalar op at the dispatch alone, a scalar density

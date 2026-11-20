@@ -272,6 +272,10 @@ static void test_bail_recurrence() {
   RerollStats st = reroll(g, fills, tt, {});
   expect("recurrence not rerolled", st.regions == 0);
   expect("recurrence ops unchanged", g.ops.size() == before);
+  expect("recurrence names the varying slot",
+         !st.declines.empty() &&
+             st.declines[0].why == LaneDecline::kVaryingSlot &&
+             st.declines[0].period == 2 && st.declines[0].op == 0);
 }
 
 // (b) density outs consumed inside their own lanes (gauss_mix shape): the
@@ -865,6 +869,49 @@ static void test_cost_model_declines_small_gather() {
   const RerollStats st = reroll(g, f2, tt, {});
   expect("small gather declines",
          st.regions == 0 && g.ops.size() == before && tt.size() == (size_t)L);
+  expect("small gather names the cost model",
+         st.declines.size() == 1 && st.declines[0].why == LaneDecline::kCost &&
+             st.declines[0].lanes == L);
+}
+
+// A reject between two lanes stays between them: reroll fuses only
+// contiguous lanes, and an effect never matches a template, so no lane after
+// the reject moves ahead of it.
+static void test_reject_between_lanes_stays() {
+  const int L = 40, at = 5;
+  Graph g;
+  Fills fills;
+  const int mu = g.add_slot(1, true);
+  const int sigma = g.add_slot(1, true);
+  std::vector<int> terms;
+  for (int l = 0; l < L; ++l) {
+    if (l == at) {
+      const int msg = g.add_slot(1, false);
+      fills.emplace_back(msg, std::vector<double>{0.0});
+      const int dead = g.add_slot(1, false);
+      g.add_op(OP_REJECT, {msg}, dead);
+    }
+    const int y = g.add_slot(1, false);
+    fills.emplace_back(y, std::vector<double>{0.05 * l + 0.3});
+    const int lp = g.add_slot(1, false);
+    const int id =
+        stanli::testutil::add_density(g, OP_NORMAL_LPDF, {y, mu, sigma}, lp);
+    g.ops[id].variant = 0x06;
+    terms.push_back(lp);
+  }
+  std::vector<int> tt = terms;
+  Fills f2 = fills;
+  const RerollStats st = reroll(g, f2, tt, {});
+  size_t reject = g.ops.size();
+  int64_t lanes_before = 0;
+  for (size_t u = 0; u < g.ops.size(); ++u) {
+    const Op& op = g.ops[u];
+    if (op.opcode == OP_REJECT) reject = u;
+    if (op.opcode == OP_NORMAL_LPDF && reject == g.ops.size())
+      lanes_before += g.slots[op.in[0]].len;
+  }
+  expect("reject keeps its place", st.regions >= 1 && reject < g.ops.size());
+  expect("no lane moves ahead of the reject", lanes_before == at);
 }
 
 // (d) STANLI_NO_REROLL disables the pass.
@@ -1585,6 +1632,58 @@ static void test_many_regions_cost() {
   expect("many regions small: one region per group", small.regions == 2000);
   expect("many regions big: one region per group", big.regions == 4000);
   expect("many regions term work stays linear", big.steps < 3 * small.steps);
+}
+
+// `for (n in 1:N) for (k in 1:K) mu[n, k] = alpha[k] + x[n] * beta[k];` into
+// a column-major matrix: every lane matches, but the store's stride run
+// restarts after K lanes, so the run fuses in N blocks. Counting and
+// classifying the whole remaining run again at every block made the pass
+// quadratic in N.
+static int64_t column_fill_steps(int N) {
+  const int K = 10;
+  Graph g;
+  Fills fills;
+  const int alpha = g.add_slot(K, true);
+  const int beta = g.add_slot(K, true);
+  const int sigma = g.add_slot(1, true);
+  const int x = g.add_slot(N, false);
+  std::vector<double> xs((size_t)N);
+  for (int n = 0; n < N; ++n) xs[(size_t)n] = 0.001 * n;
+  fills.emplace_back(x, xs);
+  int mu = g.add_slot((int64_t)N * K, false);
+  fills.emplace_back(mu, std::vector<double>((size_t)N * K, 0.0));
+  for (int n = 0; n < N; ++n)
+    for (int k = 0; k < K; ++k) {
+      const int a = g.add_slot(1, false);
+      g.add_op(OP_INDEX, {alpha}, a, {k});
+      const int xn = g.add_slot(1, false);
+      g.add_op(OP_INDEX, {x}, xn, {n});
+      const int b = g.add_slot(1, false);
+      g.add_op(OP_INDEX, {beta}, b, {k});
+      const int prod = g.add_slot(1, false);
+      g.add_op(OP_MUL, {xn, b}, prod);
+      const int sum = g.add_slot(1, false);
+      g.add_op(OP_ADD, {a, prod}, sum);
+      g.add_op(OP_SET_INDEX_INPLACE, {mu, sum}, mu, {n + k * N});
+    }
+  const int y = g.add_slot((int64_t)N * K, false);
+  fills.emplace_back(y, std::vector<double>((size_t)N * K, 0.5));
+  const int lp = g.add_slot(1, false);
+  const int id =
+      stanli::testutil::add_density(g, OP_NORMAL_LPDF, {y, mu, sigma}, lp);
+  g.ops[id].variant = 0x06;
+  std::vector<int> terms{lp};
+  const RerollStats st = reroll(g, fills, terms, {});
+  expect("column fill fuses every row block", st.regions == N);
+  return st.lane_steps + st.list_steps;
+}
+
+static void test_column_fill_cost() {
+  const int64_t small = column_fill_steps(1000);
+  const int64_t big = column_fill_steps(2000);
+  std::printf("  column fill reroll: N=1000 %lld steps, N=2000 %lld (%.1fx)\n",
+              (long long)small, (long long)big, (double)big / (double)small);
+  expect("column fill work stays linear", big < 3 * small);
 }
 
 static void test_write_fusion() {
@@ -3556,6 +3655,8 @@ static void test_fast_prices_shared_density_duplicates() {
 }
 
 int main() {
+  test_column_fill_cost();
+  test_reject_between_lanes_stays();
   test_fast_prices_shared_density_duplicates();
   test_fast_fuses_shared_parameter();
   test_shared_gradient_source_order();

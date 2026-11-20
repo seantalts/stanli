@@ -2,10 +2,13 @@
 #ifndef STANLI_PASS_UTIL_HPP
 #define STANLI_PASS_UTIL_HPP
 
+#include <stanli/debug_switch.hpp>
 #include <stanli/graph.hpp>
+#include <stanli/message_sink.hpp>
 #include <stanli/optable.hpp>
 
 #include <cstdint>
+#include <string>
 #include <unordered_map>
 #include <unordered_set>
 #include <utility>
@@ -15,8 +18,8 @@ namespace stanli {
 
 using Fills = std::vector<std::pair<int, std::vector<double>>>;
 
-// The lane-fusing passes' shared currencies (island.cpp's dispatch cost
-// against its per-element cost): ~5 ns per graph op eliminated, against
+// The lane-fusing passes' shared currencies, whose dispatch cost the island
+// carver also uses: ~5 ns per graph op eliminated, against
 // ~1 ns per element a slice or gather copies or scatters, and ~6 op
 // dispatches to evaluate one density element. A fused region must beat
 // its unpacked cost by more than a rounding error, or it churns the graph
@@ -90,6 +93,9 @@ inline void scale_repeated_terms(Graph& g, Fills& fills,
   std::unordered_map<int, int> copies;
   for (int t : target_terms) ++copies[t];
   if (copies.size() == target_terms.size()) return;
+  if (debug_env("STANLI_LANE_REPORT"))
+    emit_diagnostic("LANES {\"pass\":\"terms\",\"repeated\":" +
+                    std::to_string(target_terms.size() - copies.size()) + "}");
   std::vector<int> scaled;
   scaled.reserve(copies.size());
   for (int t : target_terms) {

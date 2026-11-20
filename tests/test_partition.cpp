@@ -511,6 +511,8 @@ static void test_duplicate_lanes_decline() {
   Fills f2 = fills;
   const PartitionStats st = partition_lanes(g, f2, tt, {});
   expect("duplicate lanes decline", st.groups == 0 && st.declined == 1);
+  expect("duplicate lanes name the cost model",
+         st.declines.size() == 1 && st.declines[0].why == LaneDecline::kCost);
   expect("duplicate graph unchanged", g.ops.size() == before && tt == terms);
 }
 
@@ -1057,6 +1059,66 @@ static void test_cross_bucket_read_after_write() {
   expect_same_grad("cross-bucket", std::move(g), f2, tt, want);
 }
 
+// Distance in representable doubles between a result and a long double
+// reference.
+static int64_t ulps(double got, long double want) {
+  const double w = (double)want;
+  if (got == w) return 0;
+  const double step = std::nextafter(w, got) - w;
+  return (int64_t)std::ceil(std::abs((long double)got - want) /
+                            std::abs((long double)step));
+}
+
+// `if (g[n] == 1) y[n] ~ normal(mu1, s); else y[n] ~ normal(mu2, s);` with g
+// alternating: one bucket whose lanes read mu1 or mu2. It fuses as two
+// groups, one per slot, each a summed density that names its mean once.
+static void test_lanes_split_by_slot() {
+  const int L = 40;
+  Graph g;
+  Fills fills;
+  const int mu[2] = {g.add_slot(1, true), g.add_slot(1, true)};
+  const int sigma = g.add_slot(1, true);
+  std::vector<int> terms;
+  std::vector<double> ys;
+  for (int l = 0; l < L; ++l) {
+    const int y = g.add_slot(1, false);
+    ys.push_back(0.37 * l - 2.1);
+    fills.emplace_back(y, std::vector<double>{ys.back()});
+    const int lp = g.add_slot(1, false);
+    const int id = stanli::testutil::add_density(g, OP_NORMAL_LPDF,
+                                                 {y, mu[l % 2], sigma}, lp);
+    g.ops[(size_t)id].variant = 0x06;
+    terms.push_back(lp);
+  }
+  const std::vector<double> want = reference(g, fills, terms);
+
+  std::vector<int> tt = terms;
+  Fills f2 = fills;
+  const PartitionStats st = partition_lanes(g, f2, tt, {});
+  expect("split by slot fuses two groups",
+         st.groups == 2 && st.lanes == L && st.declines.empty());
+  expect("split by slot two densities",
+         count_opcode(g, OP_NORMAL_LPDF) == 2 && tt.size() == 2);
+  reduce_into_result(g, tt);
+  const std::vector<double> got = run_grad(g, f2);
+
+  // d/dmu_k = sum (y - mu_k) / s^2 over lane k's group; d/ds = sum over all
+  // lanes of ((y - mu)^2 / s^2 - 1) / s. Parameters are fill_at(0..2).
+  long double dmu[2] = {0, 0}, ds = 0;
+  const long double s = fill_at(2);
+  for (int l = 0; l < L; ++l) {
+    const long double z = ((long double)ys[(size_t)l] - fill_at(l % 2)) / s;
+    dmu[l % 2] += z / s;
+    ds += (z * z - 1) / s;
+  }
+  const int64_t worst =
+      std::max({ulps(got[1], dmu[0]), ulps(got[2], dmu[1]), ulps(got[3], ds)});
+  std::printf("  split by slot: gradient within %lld ulp of long double\n",
+              (long long)worst);
+  expect("split by slot gradient within 4 ulp", worst <= 4);
+  expect_close("split by slot value", got[0], want[0]);
+}
+
 static void test_kill_switch() {
   SKIP_WITHOUT_DEBUG_SWITCHES();
   Lanes b = build_index_lanes(8);
@@ -1158,6 +1220,9 @@ static void test_cost_declines() {
   Fills f2 = fills;
   const PartitionStats st = partition_lanes(g, f2, tt, {});
   expect("wide lanes decline", st.groups == 0 && st.declined == 1);
+  expect("wide lanes name the cost model",
+         st.declines.size() == 1 && st.declines[0].why == LaneDecline::kCost &&
+             st.declines[0].lanes == L);
   expect("declined graph unchanged", g.ops.size() == before && tt == terms);
 }
 
@@ -1613,6 +1678,7 @@ int main() {
   test_hoisted_shared_scalar_reads();
   test_mid_bucket_writer_split();
   test_cross_bucket_read_after_write();
+  test_lanes_split_by_slot();
   test_kill_switch();
   test_state_space_shape();
   test_irt_glm_synthesis();
