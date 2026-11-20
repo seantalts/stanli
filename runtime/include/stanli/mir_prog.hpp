@@ -22,6 +22,7 @@
 #ifndef STANLI_MIR_PROG_HPP
 #define STANLI_MIR_PROG_HPP
 
+#include <stanli/assign_size.hpp>
 #include <stanli/debug_switch.hpp>
 #include <stanli/builtin_registry.hpp>
 #include <stanli/mir_message.hpp>
@@ -44,6 +45,7 @@
 #include <map>
 #include <optional>
 #include <set>
+#include <stdexcept>
 #include <string>
 #include <utility>
 #include <vector>
@@ -1111,8 +1113,12 @@ struct ProgramCompiler {
               e.name == "elt_multiply")
             return cint(e.args[0]) * cint(e.args[1]);
           if (e.name == "IntDivide__" || e.name == "Divide__" ||
-              e.name == "divide" || e.name == "elt_divide")
-            return cint(e.args[0]) / cint(e.args[1]);
+              e.name == "divide" || e.name == "elt_divide") {
+            const long divisor = cint(e.args[1]);
+            if (divisor == 0)
+              throw std::domain_error("integer division by zero");
+            return cint(e.args[0]) / divisor;
+          }
           // The comparisons: on integers each is an integer in its own
           // right, and a `while` condition or an integer local written
           // with one -- `int found = (a[i] == k);` -- is as much a
@@ -1249,6 +1255,10 @@ struct ProgramCompiler {
       *out = cint(e);
       return true;
     } catch (Bail&) {
+      return false;
+    } catch (const std::domain_error&) {
+      // A fold that raises a math error is left to the run-time op, which
+      // raises it only if the expression runs.
       return false;
     }
   }
@@ -1398,6 +1408,8 @@ struct ProgramCompiler {
       *out = cints(e);
       return true;
     } catch (Bail&) {
+      return false;
+    } catch (const std::domain_error&) {
       return false;
     }
   }
@@ -4280,6 +4292,75 @@ struct ProgramCompiler {
     return copy;
   }
 
+  // Stan checks an assignment's sizes when the statement runs, and the
+  // statement may sit in a branch that never runs, so a mismatch compiles
+  // to a run-time rejection rather than a refusal.
+  void emit_assign_size_reject(const std::string& message) {
+    Program::Message m;
+    m.spec.chunks = {message};
+    m.spec.error = MessageError::InvalidArgument;
+    p.messages.push_back(std::move(m));
+    emit(Program::REJECT, 0, (int)p.messages.size() - 1);
+  }
+
+  static std::vector<int64_t> assign_dims(const Range& r) {
+    switch (r.kind) {
+      case ViewKind::Array:
+        return r.dims.empty() ? std::vector<int64_t>{r.len} : r.dims;
+      case ViewKind::Matrix:
+        return {r.rows, r.cols};
+      case ViewKind::Vector:
+      case ViewKind::RowVector:
+        return {r.len};
+      case ViewKind::Flat:
+        break;
+    }
+    return {};
+  }
+
+  // stan::model::assign's message for a whole-variable assignment whose
+  // sizes differ, or "" when the two views are not comparable.
+  static std::string whole_assign_size_message(const std::string& name,
+                                               const Range& dst,
+                                               const Range& v) {
+    const ViewKind leaf = dst.kind == ViewKind::Array ? dst.leaf : dst.kind;
+    const AssignLeaf assign_leaf =
+        leaf == ViewKind::Matrix      ? AssignLeaf::Matrix
+        : leaf == ViewKind::Vector    ? AssignLeaf::Vector
+        : leaf == ViewKind::RowVector ? AssignLeaf::RowVector
+                                      : AssignLeaf::Scalar;
+    const size_t rank = leaf_rank(leaf);
+    const std::vector<int64_t> dst_dims = assign_dims(dst);
+    if (dst_dims.size() < rank) return "";
+    return assign_size_mismatch(name, assign_leaf, dst_dims.size() - rank,
+                                dst_dims, assign_dims(v));
+  }
+
+  // Stan Math's message for a one-index assignment whose selection and
+  // right-hand side differ in size. `array` selects the std::vector rules.
+  static std::string selected_assign_size_message(const std::string& name,
+                                                  const mir::Expr& index,
+                                                  bool array, int64_t want,
+                                                  int64_t got) {
+    const bool empty_range = index.kind == mir::Expr::IndexBetween && want == 0;
+    std::string label;
+    if (array)
+      label = empty_range ? "array[negative_min_max, ...] assign"
+                          : "array[multi, ...] assign";
+    else if (index.kind == mir::Expr::IndexBetween)
+      label = empty_range ? "vector[negative_min_max] assign"
+                          : "vector[min_max] assign";
+    else if (index.kind == mir::Expr::IndexUpfrom)
+      label = "vector[min] assign";
+    else
+      label = "vector[multi] assign";
+    const bool size_word = array && !empty_range;
+    return label + ": assigning variable " + name + " (" +
+           std::to_string(want) + ") and right hand side" +
+           (size_word ? " size" : "") + " (" + std::to_string(got) +
+           ") must match in size";
+  }
+
   // The statements a call returning several values needs, kept out of
   // compile_stmt: a register-program refusal unwinds through every
   // compile_stmt frame, and each statement compiled inline there makes every
@@ -4344,7 +4425,23 @@ struct ProgramCompiler {
     return Path::Open;
   }
 
+  // A statement whose compile-time integer raises a math error, such as a
+  // division by zero, raises it when the statement runs. The statement may
+  // sit in a branch that never runs, so it compiles to a run-time rejection.
   Path compile_stmt(const mir::Stmt& s) {
+    try {
+      return compile_stmt_folded(s);
+    } catch (const std::domain_error& error) {
+      Program::Message m;
+      m.spec.chunks = {error.what()};
+      m.spec.error = MessageError::Domain;
+      p.messages.push_back(std::move(m));
+      emit(Program::REJECT, 0, (int)p.messages.size() - 1);
+      return Path::Open;
+    }
+  }
+
+  Path compile_stmt_folded(const mir::Stmt& s) {
     switch (s.kind) {
       case mir::Stmt::Decl: {
         // A declaration shadows every compile-time fact retained for an
@@ -4626,9 +4723,14 @@ struct ProgramCompiler {
             }
             return Path::Open;
           }
-          if (v.len != dst.len) bail("assignment width mismatch for " + s.lhs);
-          if (!same_view(v, dst))
-            bail("assignment logical view mismatch for " + s.lhs);
+          if (v.len != dst.len || !same_view(v, dst)) {
+            const std::string message =
+                whole_assign_size_message(s.lhs, dst, v);
+            if (message.empty())
+              bail("assignment logical view mismatch for " + s.lhs);
+            emit_assign_size_reject(message);
+            return Path::Open;
+          }
           for (int k = 0; k < v.len; ++k)
             emit(Program::MOV, dst.reg + k, v.reg + k);
           if (have_folded_ints) {
@@ -4647,10 +4749,14 @@ struct ProgramCompiler {
         if (s.lhs_idx.size() == 1 && s.lhs_idx[0].kind == mir::Expr::IndexAll) {
           if (dst.kind == ViewKind::Flat)
             bail("full-span assignment needs a container for " + s.lhs);
-          if (v.len != dst.len)
-            bail("full-span assignment width mismatch for " + s.lhs);
-          if (!same_view(v, dst))
-            bail("full-span assignment logical view mismatch for " + s.lhs);
+          if (v.len != dst.len || !same_view(v, dst)) {
+            const std::string message =
+                whole_assign_size_message(s.lhs, dst, v);
+            if (message.empty())
+              bail("full-span assignment logical view mismatch for " + s.lhs);
+            emit_assign_size_reject(message);
+            return Path::Open;
+          }
           for (int k = 0; k < v.len; ++k)
             emit(Program::MOV, dst.reg + k, v.reg + k);
           if (int_array_names.count(s.lhs)) {
@@ -4696,8 +4802,13 @@ struct ProgramCompiler {
           if (!rows.empty() && cols.size() > (size_t)kMaxRegs / rows.size())
             bail("matrix assignment selection is too large");
           const size_t width = rows.size() * cols.size();
-          if (v.len != static_cast<int>(width))
-            bail("matrix assignment width mismatch for " + s.lhs);
+          if (v.len != static_cast<int>(width)) {
+            emit_assign_size_reject("matrix assignment width mismatch for " +
+                                    s.lhs + ": " + std::to_string(width) +
+                                    " selected, " + std::to_string(v.len) +
+                                    " assigned");
+            return Path::Open;
+          }
           int at = 0;
           for (int64_t j : cols)
             for (int64_t i : rows)
@@ -4731,8 +4842,23 @@ struct ProgramCompiler {
               bail("array assignment selection is too large");
             width *= axis.size();
           }
-          if (v.len != (int)width)
-            bail("array assignment width mismatch for " + s.lhs);
+          if (v.len != (int)width) {
+            const int64_t got = v.kind == ViewKind::Array && !v.dims.empty()
+                                    ? v.dims[0]
+                                    : v.len;
+            const bool leading_differs =
+                s.lhs_idx[0].kind != mir::Expr::IndexSingle &&
+                (int64_t)positions[0].size() != got;
+            emit_assign_size_reject(
+                leading_differs
+                    ? selected_assign_size_message(s.lhs, s.lhs_idx[0], true,
+                                                   (int64_t)positions[0].size(),
+                                                   got)
+                    : "array assignment width mismatch for " + s.lhs + ": " +
+                          std::to_string(width) + " selected, " +
+                          std::to_string(v.len) + " assigned");
+            return Path::Open;
+          }
           // The same shared index geometry the rvalue reads resolve
           // through; destination cells and the assigned run pair up in the
           // identical outer-major enumeration.
@@ -4802,8 +4928,12 @@ struct ProgramCompiler {
           }
           const std::vector<int64_t> positions =
               matrix_positions(s.lhs_idx[0], dst.len, "assignment vector");
-          if (v.len != static_cast<int>(positions.size()))
-            bail("vector assignment width mismatch for " + s.lhs);
+          if (v.len != static_cast<int>(positions.size())) {
+            emit_assign_size_reject(selected_assign_size_message(
+                s.lhs, s.lhs_idx[0], dst.kind == ViewKind::Flat,
+                (int64_t)positions.size(), v.len));
+            return Path::Open;
+          }
           for (size_t k = 0; k < positions.size(); ++k)
             emit(Program::MOV, dst.reg + (int)positions[k], v.reg + (int)k);
           return Path::Open;

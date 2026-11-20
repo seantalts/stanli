@@ -1,8 +1,8 @@
-// STANLI-LIT: XFAIL
-// STANLI-LIT-EXPECT: COMPILE_FAIL segment: i is 0, but must be greater than 0
+// STANLI-LIT: PASS
+// STANLI-LIT-EXPECT: OK
 // STANLI-LIT-DATA: {"ts": [1, 2, 3]}
 // CmdStan only runs the segment call when p > 10, so it returns values at
-// every point the test uses. stanli evaluates it while lowering.
+// every point the test uses.
 data {
   array[3] real ts;
 }

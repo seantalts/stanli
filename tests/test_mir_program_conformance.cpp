@@ -980,10 +980,10 @@ void test_guarded_constructor_error() {
                     return_value(make_array({var("t", kReal)}))});
   run_case("untaken invalid constructor",
            "compilation cannot reject an untaken return", {entry}, -1, {-1},
-           "checked\n", "linspaced_vector");
+           "checked\n");
   run_domain_error_case("executed invalid constructor",
-                        "fallback rejects after printing once", {entry}, 1, {},
-                        "checked\n", "linspaced_vector");
+                        "the program rejects after printing once", {entry}, 1,
+                        {}, "checked\n");
 }
 
 void test_to_int() {
