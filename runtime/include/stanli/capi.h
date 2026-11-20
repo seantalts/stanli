@@ -203,9 +203,6 @@ void stanli_model_free(stanli_model* m);
 
 int64_t stanli_n_unconstrained(const stanli_model* m);
 
-/* log_prob (propto=false, jacobian included) and its gradient at
- * unconstrained q[n]. grad may be null for value-only. Returns 0 on success,
- * 1 on a rejected evaluation (domain error; *lp set to -inf). */
 /* Starting values on the CONSTRAINED scale, turned into the n_unconstrained
  * free values the samplers and stanli_grad read.
  *
@@ -222,6 +219,9 @@ int64_t stanli_n_unconstrained(const stanli_model* m);
 int stanli_unconstrain_inits(stanli_model* m, const char* inits_json, double* q,
                              char* err, size_t err_len);
 
+/* log_prob (propto=true, jacobian included) and its gradient at
+ * unconstrained q[n]. grad may be null for value-only. Returns 0 on success,
+ * 1 on a rejected evaluation (domain error; *lp set to -inf). */
 int stanli_grad(stanli_model* m, const double* q, double* lp, double* grad);
 
 /* The log density of stanli_grad, its gradient, and the n_unconstrained by
