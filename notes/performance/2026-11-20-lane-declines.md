@@ -60,8 +60,20 @@ What the table says:
   the two branches of a data condition do. This is the case that splitting
   a bucket by slot addresses.
 - The global cap of 32 partition splits is reached in 18 models
-  (covid19imperial_v2 and v3 drop 100 later buckets each), so the cap
-  decides fusion in real models.
+  (covid19imperial_v2 and v3 drop 100 later buckets each). This did not
+  decide fusion: with the cap per bucket (later commit), or with no cap at
+  all, no corpus program changes, because the buckets that reached it
+  decline for other reasons once they get their splits.
 - 15 models list one slot more than once in the target. The lane passes see
   those terms multiplied by their count (`scale_repeated_terms`), and no
   decline reason in the table is specific to them.
+
+## After the lane changes of 2026-11-20
+
+Splitting a bucket by slot changed three programs: `ch14_m14_7` (2,615 to
+58 ops), `examplemodels_cjs_cov_raneff` (75,299 to 74,120) and
+`hbayesdm_gng_m4` (80,277 to 80,146). Partition's "different non-constant
+slots" row went from 76 to 71 models; most of what remains are recurrences,
+where each lane reads the previous lane's value. The effect barrier, the
+per-bucket split budget and the bound on reroll's lane count changed no
+corpus program.

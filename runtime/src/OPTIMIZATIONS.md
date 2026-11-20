@@ -352,7 +352,13 @@ reasons: a lane reads a result computed by the previous lane (a
 recurrence involving parameters), a lane's intermediate is used outside
 the loop, or an op it has no rule for. When a pattern only partly
 qualifies, the pass rewrites the longest qualifying prefix of lanes and
-tries again on the rest, which handles data that comes in blocks.
+tries again on the rest, which handles data that comes in blocks. A lane
+count stops where an element store's index stops marching (a column-major
+matrix filled row by row fuses one row at a time), because counting and
+classifying the rest of the run again at every block made preparation
+quadratic in the rows. The reasons a run stays scalar are reported as
+described under
+[why a group of lanes stays unfused](#why-a-group-of-lanes-stays-unfused).
 
 Scale: `radon_pooled` drops from 27,670 ops to 8, `radon_county` from
 25,152 to 10, `election88_full` from 289,165 to 65, `dogs` from 12,751
@@ -601,8 +607,10 @@ base, share a bucket. That includes the two branches of a data-dependent
 condition when they differ in that way. After bucketing, every operand must
 be the same slot in every lane, a constant per lane, or an indexed read of
 one base. A bucket in which an operand is a different non-constant slot in
-different lanes (two branches that use different parameters) fails that
-check, and the bucket stays scalar unless a writer lets it split.
+different lanes (two branches that use different parameters) splits into one
+bucket per slot at that operand, with all constants in one bucket, and each
+piece goes through the same checks. Lanes that each read their own slot, as
+a recurrence does, leave pieces shorter than four lanes, which decline.
 
 What a bucket's ops read is proven rather than assumed: no slot the fused
 ops read from outside may be written while the run is in flight. That one
@@ -613,6 +621,13 @@ between the first lane's position and the last lane's end. Ops only ever
 move earlier, so an in-place store already proven safe against a later
 reader stays safe, and a bucket that trips the rule splits at the writer
 rather than declining.
+
+Ops only move earlier, so a print, a reject or an argument check between two
+lanes of a bucket would run after work that followed it in the source, and a
+reject could report a later density's error instead of its own message. A
+bucket splits at such an op. The densities that are effectful only because
+they check their arguments (`categorical`, the integer-outcome check) are not
+barriers: their errors reorder like those of every other fused density.
 
 In the default mode a bucket also declines when several of its operations read
 one active scalar. Grouping those contributions by opcode can lose many ULP
@@ -639,8 +654,9 @@ A bucket is rewritten in one of these forms:
 - A bucket holding more than one template splits at any mid-range writer
   and reconsiders both halves, so an interleaved model still gets the
   lanes on either side of the writer. Splits are capped rather than
-  retried to a fixed point. The cap of 32 (`kMaxSplits`) counts every split in
-  the whole pass, across all buckets.
+  retried to a fixed point. The cap of 32 (`kMaxSplits`) counts the splits of
+  one bucket and the pieces split from it, so one bucket cannot use up the
+  splits of a later one. On the corpus, removing the cap changes no program.
 - One arm rewrites a chain instead of widening it. A lane that multiplies
   two scalars, subtracts a width-m vector, prepends a zero, cumulatively
   sums, and hands the result to a scalar-outcome categorical is one row
@@ -658,8 +674,8 @@ A bucket is rewritten in one of these forms:
 Fusing is not always a win, so each bucket is costed before it is
 emitted, in the currencies of `pass_util.hpp` (`kLaneOpCost`,
 `kLaneDensityElem`, `kLanePartitionMargin`, the same ones that reroll.cpp's
-own region pricing uses). The island carver has its own constants in
-`island.cpp`. The currencies are about 5 ns per graph op against about 1 ns per
+own region pricing uses). The island carver uses the same per-op cost
+(`kLaneOpCost`) with its own element weights in `island.cpp`. The currencies are about 5 ns per graph op against about 1 ns per
 element moved, and a density element is charged `kLaneDensityElem = 6`
 element units. The comment on that constant calls this six op dispatches, which
 is 30 units, so the code and the comment disagree; the question is open in
@@ -681,7 +697,23 @@ which would merge ops shared between lanes and leave no lane whole.
 to 19 (2.29x per gradient), `Mth_model` 1,563 to 35 (1.63x), `Mh_model`
 1,542 to 18 (1.53x), `Mtbh_model` 1.43x, `Survey_model` 1,427 to 9,
 and the two IRT models that reach the GLM arm, `gpcm_latent_reg_irt`
-34,634 to 91 (6.5x) and `grsm_latent_reg_irt` (6.3x).
+34,634 to 91 (6.5x) and `grsm_latent_reg_irt` (6.3x). The general rules do
+not cover the GLM arm's shape (a scalar minus a vector per lane, then
+`CONCAT2` and `CUMSUM`): with the arm turned off, those two models prepare to
+50,611 and 28,005 ops instead of 101 and 81 (2026-11-20).
+
+### Why a group of lanes stays unfused
+
+Re-rolling and partitioning record one reason for every group of matching
+lanes that they leave unfused (`runtime/include/stanli/lane_decline.hpp`).
+`STANLI_LANE_REPORT=1` prints them as `LANES {...}` lines with the graph, the
+op, the lane count, the period (re-rolling) and the opcode, plus a line with
+the number of target terms listed more than once. Re-rolling tries several
+periods at one position and reports each attempt that counted enough lanes.
+`tools/lane_declines.py` prepares every corpus model under the switch and
+ranks the reasons by models and collections;
+[`notes/performance/2026-11-20-lane-declines.md`](../../notes/performance/2026-11-20-lane-declines.md)
+has the table.
 
 ## Eliding full-extent stores (`inplace.cpp`, disable: `STANLI_NO_INPLACE=1`)
 
@@ -1728,6 +1760,7 @@ Graph passes:
 | `STANLI_NO_COLLAPSE` | turn off observation collapse in fast mode | `collapse.cpp` |
 | `STANLI_COLLAPSE_REPORT` | print each term that collapse examined, with its observations, rows, groups and the form chosen or the reason for refusal | `lower.cpp` |
 | `STANLI_NO_PARTITION` | turn off lane partitioning | `partition.cpp` |
+| `STANLI_LANE_REPORT` | print why re-rolling and partitioning left each group of matching lanes unfused, and how many target terms were listed twice | `lower.cpp`, `pass_util.hpp` |
 | `STANLI_NO_CSE` | turn off common-subexpression elimination | `cse.cpp` |
 | `STANLI_NO_DENSITY_MASK` | bind every density argument in a generated backward as a recorder scalar again, instead of by its activity mask | `adjoint.cpp` |
 | `STANLI_NO_FUSED_DENSITY` | use Stan Math's kernels instead of the fused kernels for the seven fused densities; acts when the value is set, nonempty and not `0`; ignored, with a notice, in a build with CMake option `STANLI_STAN_DENSITY_ORACLE=OFF` | `density_fused.cpp` |
