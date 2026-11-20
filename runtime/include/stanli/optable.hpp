@@ -253,8 +253,10 @@ namespace stanli {
 // The last field is the instantiation tier, two independent bits over
 // what CmdStan gets for free by instantiating only the one combination
 // your model uses. A density instantiates stan-math's template once per
-// activity mask, twice for propto, and again for the elementwise form --
-// 4 * 2^N, about 630 KB of object for a 3-argument density.
+// activity mask and per scalar-or-vector shape of its arguments, for propto
+// and again for the full form, then once per mask for each of those in the
+// elementwise form: about 2 * 4^N + 2 * 2^N copies for N arguments, and about
+// 630 KB of object for a 3-argument density.
 //
 //   bit 1 (2): instantiate the propto family. Term-dropping is keyed on
 //              the argument TYPES, so propto only means anything with the
@@ -270,21 +272,21 @@ namespace stanli {
 //
 // So: 3 is the whole ladder, for the densities models lean on; 2 keeps
 // exact propto lp and pays the collapse only on an explicit
-// `target += foo_lpdf(...)`; 1 is fast but constant-shifted lp; 0 is two
-// instantiations, about 40 KB, and is how the long tail gets to exist at
-// all.
+// `target += foo_lpdf(...)`; 1 is fast but constant-shifted lp; 0 binds every
+// argument as autodiff for the full form only, 2^N shapes plus one
+// elementwise copy, and is how the long tail gets to exist at all.
 #define STANLI_DENSITY_FULL_MASKS 1
 #define STANLI_DENSITY_PROPTO 2
 // The sub-lists are the shard boundaries. Each one is a translation unit
 // (densities_*.cpp), because the instantiations are what make this
-// expensive to compile: the tier-3 distributions below expand to 4 * 2^N
-// copies of a stan-math template each, and one file holding all of them
+// expensive to compile: the tier-3 distributions below expand to about
+// 2 * 4^N copies of a stan-math template each, and one file holding all of them
 // peaked at 7.6 GB of compiler memory. Splitting is the only lever, since
 // the instantiations themselves are the product.
 //
 // Balance them by COST, not by count. A tier-3 four-argument density is
-// worth about eight tier-2 two-argument ones, which is why COMMON_A holds
-// six entries and REST_A holds seven.
+// worth about eight tier-2 two-argument ones, which is why the lists differ
+// in length.
 #define STANLI_SCALAR_DENSITY_LIST_COMMON_A(X) \
   X(OP_NORMAL_LPDF, normal_lpdf, 3, 3)         \
   X(OP_CAUCHY_LPDF, cauchy_lpdf, 3, 3)         \
@@ -619,12 +621,13 @@ inline void div_partials(double u, double b, double out, double* da,
 // seed formulas can round differently. The final field owns topology.
 //
 // These are cheap in a way densities are not. A density instantiates
-// stan-math's template once per activity mask, twice for propto and again
-// for the elementwise form -- 4 * 2^N per distribution, about 630 KB of
-// object each. An entry here costs about 5 KB, because the pullback delta is
-// written out rather than obtained by instantiating an autodiff template.
-// fn_sweep.py checks every one against CmdStan, which is what makes
-// hand-written derivatives safe to write at this rate.
+// stan-math's template once per activity mask and argument shape, for propto
+// and for the full form, and again for the elementwise form: about
+// 2 * 4^N + 2 * 2^N per distribution, about 630 KB of object each. An entry
+// here costs about 5 KB, because the pullback delta is written out rather than
+// obtained by instantiating an autodiff template. fn_sweep.py checks every one
+// against CmdStan, which is what makes hand-written derivatives safe to write
+// at this rate.
 #define STANLI_SCALAR_UNARY_LIST(X)                                            \
   X(OP_LGAMMA, lgamma, stan::math::lgamma(x), seed* stan::math::digamma(x),    \
     UnaryTopology::Chained)                                                    \

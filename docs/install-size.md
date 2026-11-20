@@ -7,9 +7,11 @@ artifact.
 ## What takes the space
 
 Most of the space goes to the densities. A distribution is instantiated
-once per activity mask (which arguments are autodiff), twice for propto,
-and again for the elementwise form. That is `4 * 2^N` templates per
-distribution, about 630 KB of object each. This is the cost of shipping
+once per activity mask (which arguments are autodiff) and once per
+combination of scalar and vector arguments, for propto and again for the full
+form, and the elementwise form adds a smaller set. For N arguments that is
+about `2 * 4^N + 2 * 2^N` templates per distribution, about 630 KB of object
+each. This is the cost of shipping
 precompiled math. CmdStan instantiates only the combination that your
 model uses, but it compiles each model separately.
 
