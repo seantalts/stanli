@@ -605,7 +605,8 @@ def test_sample_refresh_validation():
                        (True, TypeError), (np.bool_(False), TypeError),
                        (None, TypeError), (2 ** 31, OverflowError)]:
         try:
-            m.sample(chains=1, warmup=0, samples=1, refresh=bad)
+            m.sample(chains=1, warmup=0, samples=1, refresh=bad,
+                     adapt_engaged=False)
         except error:
             pass
         else:
@@ -614,7 +615,7 @@ def test_sample_refresh_validation():
     # numpy integer scalars are useful in programmatic configurations and
     # satisfy Python's integer-index protocol.
     with contextlib.redirect_stdout(io.StringIO()):
-        fit = m.sample(chains=1, warmup=0, samples=1,
+        fit = m.sample(chains=1, warmup=0, samples=1, adapt_engaged=False,
                        refresh=np.int64(0))
     assert fit.n_draws == 1
 
@@ -715,7 +716,7 @@ def test_model_print_goes_through_sys_stdout():
     assert text == "model mu=0.5\n", text
 
     _, text = _assert_no_leak_to_fd1(
-        lambda: m.sample(chains=1, warmup=3, samples=2, refresh=0, seed=1))
+        lambda: m.sample(chains=1, warmup=150, samples=2, refresh=0, seed=1))
     lines = text.splitlines()
     assert any(line.startswith("model mu=") for line in lines), text
     assert sum(line.startswith("gq mu=") for line in lines) == 2, text
@@ -728,7 +729,7 @@ def test_model_print_goes_through_sys_stdout():
 def test_model_print_from_parallel_chains_arrives_whole():
     m = stanli.Model(stan_code=PRINTING)
     _, text = _assert_no_leak_to_fd1(
-        lambda: m.sample(chains=4, warmup=50, samples=50, refresh=0, seed=3,
+        lambda: m.sample(chains=4, warmup=150, samples=50, refresh=0, seed=3,
                          parallel_chains=4))
     lines = text.splitlines()
     assert len(lines) > 400, len(lines)
