@@ -41,6 +41,7 @@
 #include <stanli/message_sink.hpp>
 #include <stanli/nuts.hpp>
 #include <stanli/optable.hpp>
+#include <stanli/rejection.hpp>
 #include <stanli/wa_interp.hpp>
 #include <stanli/whiten.hpp>
 
@@ -217,6 +218,19 @@ class bs_model {
       for (int64_t i = 0; i < c.len; ++i) row.push_back(v[c.storage_index(i)]);
     }
     return row;
+  }
+
+  // The constrained parameters alone, from the log_prob graph, which runs
+  // the model block and checks the transformed parameters' bounds but runs
+  // no generated quantities.
+  void params_row(const double* theta_unc, double* out) const {
+    auto lease = pool->acquire();
+    stanli::copy_doubles(lease->params_data(), theta_unc, lease->n_params());
+    lease->run_forward_only();
+    for (const auto& v : cm.views) {
+      const double* p = std::as_const(*lease).value_ptr(v.slot);
+      for (int64_t i = 0; i < v.len; ++i) *out++ = p[v.storage_index(i)];
+    }
   }
 
   // forward(), or forward + reverse when grad is non-null.
@@ -633,6 +647,20 @@ int bs_param_constrain(const bs_model* m, bool include_tp, bool include_gq,
       return refuse(error_msg,
                     "bs_param_constrain needs a bs_rng when include_gq is "
                     "true: generated quantities may draw from it");
+    // Neither block asked for: the log_prob graph gives the parameters
+    // without running generated quantities, and the write_array row gives
+    // them without running the model block. Either serves; the second is
+    // tried when the first is rejected.
+    if (!include_tp && !include_gq) {
+      try {
+        m->params_row(theta_unc, theta);
+        return 0;
+      } catch (const std::exception& e) {
+        if (stanli::is_internal_error(e)) throw;
+      }
+    }
+    // The write_array graph has no prefix that stops before generated
+    // quantities, so asking for transformed parameters runs them too.
     const std::vector<double> row =
         m->full_row(theta_unc, rng == nullptr ? nullptr : &rng->rng);
     // Column index -> offset into the row, so a slice can be copied out.

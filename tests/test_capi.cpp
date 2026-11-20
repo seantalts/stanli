@@ -61,6 +61,19 @@ void expect_near(const std::string& what, double got, double want) {
   std::printf("FAIL %s: got %.17g want %.17g\n", what.c_str(), got, want);
 }
 
+// A model from Stan source, or null when this build has no embedded stanc.
+stanli_model* from_stan(const char* code, const char* data = "{}") {
+  if (!stanli_has_embedded_stanc()) return nullptr;
+  char err[8192]{};
+  stanli_model* m = stanli_model_new_from_stan_with_opts(code, data, nullptr,
+                                                         err, sizeof err);
+  if (m == nullptr) {
+    ++failures;
+    std::printf("FAIL compiling a test model: %s\n", err);
+  }
+  return m;
+}
+
 void expect_names(const char* fixture, const std::string& data,
                   const std::vector<std::string>& expected,
                   const std::vector<double>& q = {},
@@ -1080,11 +1093,16 @@ void expect_sampling_messages() {
   int rc = 1;
   collect_message(quiet, [&] { rc = run(0); });
   expect_true("quiet run succeeds", rc == 0);
-  expect_true("refresh 0 prints no sampler messages", quiet.messages.empty());
+  // As in CmdStan, refresh controls only the progress lines: rejection
+  // notices and adaptation warnings are printed either way.
+  expect_true("refresh 0 still reports rejected proposals",
+              !quiet.messages.empty());
   const std::vector<double> quiet_draws = draws;
 
   MessageCapture loud;
   collect_message(loud, [&] { rc = run(100); });
+  expect_true("refresh changes no sampler message",
+              loud.messages == quiet.messages);
   expect_true("refresh run succeeds", rc == 0);
   expect_true("messages leave the draws bitwise unchanged",
               draws == quiet_draws);
@@ -1231,9 +1249,14 @@ void expect_captured_messages() {
   expect_true("capture: threaded sample succeeds", rc == 0);
   const std::string sampled = seen_during_poll + take_messages();
   const size_t lines = count_substring(sampled, "\n");
-  expect_true(
-      "every chain's prints arrive whole",
-      lines > 0 && count_substring(sampled, "drawing at x = ") == lines);
+  // Each line is one whole print or one line of a sampler notice.
+  bool whole = count_substring(sampled, "drawing at x = ") > 0;
+  std::istringstream sampled_lines(sampled);
+  for (std::string line; std::getline(sampled_lines, line);)
+    whole = whole && (line.empty() || line.rfind("Chain [", 0) == 0 ||
+                      (line.rfind("drawing at x = ", 0) == 0 &&
+                       count_substring(line, "drawing") == 1));
+  expect_true("every chain's prints arrive whole", lines > 0 && whole);
   expect_true("held text ends on a line boundary",
               !sampled.empty() && sampled.back() == '\n');
   stanli_model_free(printer);
@@ -1434,10 +1457,11 @@ void expect_walnuts_chain_and_stats() {
                                                fixed_stats.data(), nullptr,
                                                nullptr, err, sizeof err) == 0);
   expect_true("explicit init changes the chain", fixed != one);
-  expect_true("walnuts rejects chain_id 0",
+  expect_true("walnuts rejects chain_id -1",
               stanli_sample_walnuts_stats_init(
-                  model, 31, 0, warmup, samples, 0, 2, nullptr, one.data(),
-                  nullptr, nullptr, nullptr, err, sizeof err) != 0);
+                  model, 31, -1, warmup, samples, 0, 2, nullptr, one.data(),
+                  nullptr, nullptr, nullptr, err, sizeof err) != 0 &&
+                  std::string(err) == "chain_id must be an integer >= 0");
   stanli_model_free(model);
 }
 
@@ -1469,16 +1493,18 @@ void expect_sample_options_validated() {
       {"max_depth = 0", [](stanli_sample_opts& o) { o.max_depth = 0; },
        "max_depth must be an integer >= 1"},
       {"delta = 0", [](stanli_sample_opts& o) { o.delta = 0.0; },
-       "delta must be between 0 and 1"},
+       "delta must be a number >= 0.1 and < 1"},
+      {"delta = 0.05", [](stanli_sample_opts& o) { o.delta = 0.05; },
+       "delta must be a number >= 0.1 and < 1"},
       {"delta = 1", [](stanli_sample_opts& o) { o.delta = 1.0; },
-       "delta must be between 0 and 1"},
+       "delta must be a number >= 0.1 and < 1"},
       {"delta = 1.5", [](stanli_sample_opts& o) { o.delta = 1.5; },
-       "delta must be between 0 and 1"},
+       "delta must be a number >= 0.1 and < 1"},
       {"delta = NaN",
        [](stanli_sample_opts& o) {
          o.delta = std::numeric_limits<double>::quiet_NaN();
        },
-       "delta must be between 0 and 1"},
+       "delta must be a number >= 0.1 and < 1"},
       {"init_radius < 0", [](stanli_sample_opts& o) { o.init_radius = -1.0; },
        "init_radius must be a finite number >= 0"},
       {"init_radius = Inf",
@@ -1486,8 +1512,8 @@ void expect_sample_options_validated() {
          o.init_radius = std::numeric_limits<double>::infinity();
        },
        "init_radius must be a finite number >= 0"},
-      {"chain_id = 0", [](stanli_sample_opts& o) { o.chain_id = 0; },
-       "chain_id must be an integer >= 1"},
+      {"chain_id < 0", [](stanli_sample_opts& o) { o.chain_id = -1; },
+       "chain_id must be an integer >= 0"},
   };
   for (const Case& c : cases) {
     stanli_sample_opts opts;
@@ -1519,10 +1545,52 @@ void expect_sample_options_validated() {
   err[0] = '\0';
   expect_true("default options pass the check",
               stanli_sample_opts_check(&ok, err, sizeof err) == 0);
+  ok.chain_id = 0;
+  ok.delta = 0.1;
+  expect_true("chain id 0 and delta 0.1 pass the check, as in CmdStan",
+              stanli_sample_opts_check(&ok, err, sizeof err) == 0);
   ok.warmup = 0;
   ok.samples = 0;
   expect_true("zero warmup and zero samples pass the check",
               stanli_sample_opts_check(&ok, err, sizeof err) == 0);
+
+  // CmdStan refuses num_warmup=0 while adaptation is engaged.
+  ok.chains = 1;
+  ok.samples = 5;
+  stanli_metric_opts metric;
+  stanli_metric_opts_init(&metric);
+  err[0] = '\0';
+  const char* no_warmup =
+      "warmup must be an integer >= 1 when adaptation is engaged; set "
+      "adapt_engaged to 0 to sample without warmup";
+  expect_true("sample check refuses warmup 0 with adaptation",
+              stanli_sample_check(&ok, &metric, err, sizeof err) != 0 &&
+                  std::string(err) == no_warmup);
+  expect_true("sample check refuses warmup 0 with default adaptation",
+              stanli_sample_check(&ok, nullptr, err, sizeof err) != 0);
+  std::vector<double> draws((size_t)(5 * stanli_n_unconstrained(model)));
+  err[0] = '\0';
+  expect_true(
+      "sampling refuses warmup 0 with adaptation",
+      stanli_sample_multi_metric(model, &ok, &metric, 0, draws.data(), nullptr,
+                                 nullptr, nullptr, nullptr, nullptr, nullptr,
+                                 nullptr, nullptr, err, sizeof err) == -1 &&
+          std::string(err) == no_warmup);
+  metric.adapt_engaged = 0;
+  expect_true("warmup 0 without adaptation passes",
+              stanli_sample_check(&ok, &metric, err, sizeof err) == 0 &&
+                  stanli_sample_multi_metric(
+                      model, &ok, &metric, 0, draws.data(), nullptr, nullptr,
+                      nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, err,
+                      sizeof err) == 0);
+  metric.adapt_engaged = 1;
+  metric.metric = 7;
+  expect_true("sample check refuses an unknown metric",
+              stanli_sample_check(&ok, &metric, err, sizeof err) != 0 &&
+                  std::string(err) ==
+                      "metric must be STANLI_METRIC_UNIT, "
+                      "STANLI_METRIC_DIAG or "
+                      "STANLI_METRIC_DENSE");
   stanli_model_free(model);
 }
 
@@ -1770,8 +1838,8 @@ void expect_interpreter_policy(const char* fixture,
     listed = listed || std::string(stanli_interpreter_fallback(model, i))
                                .find(expected_reason) != std::string::npos;
   expect_true(tag + " the reason is a listed fallback", listed);
-  expect_eq((tag + " out of range fallback").c_str(),
-            stanli_interpreter_fallback(model, -1), "");
+  expect_true(tag + " out of range fallback",
+              stanli_interpreter_fallback(model, -1) == nullptr);
   expect_true(tag + " warning names the build: " + text,
               text.find(stanli_build_id()) != std::string::npos);
   stanli_model_free(model);
@@ -2725,6 +2793,19 @@ void test_sampled_write_array_rows_match_draws() {
               variance > 0.5 && variance < 1.7);
   expect_true("sampled write_array: crep averages near 1.5",
               std::abs(crep_sum / (double)rows - 1.5) < 0.4);
+
+  // A caller that wants only the output rows passes no draws buffer, and
+  // gets the same rows and sampler columns.
+  std::vector<double> stats((size_t)(rows * STANLI_N_SAMPLER_COLS)),
+      values_only((size_t)(rows * w)), stats_only(stats.size());
+  stanli_sample_multi_metric(
+      model, &opts, nullptr, 0, draws.data(), stats.data(), values.data(),
+      nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, err, sizeof err);
+  const int rc_only = stanli_sample_multi_metric(
+      model, &opts, nullptr, 0, nullptr, stats_only.data(), values_only.data(),
+      nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, err, sizeof err);
+  expect_true(std::string("sampling without a draws buffer: ") + err,
+              rc_only == 0 && values_only == values && stats_only == stats);
   stanli_model_free(model);
 }
 
@@ -2855,6 +2936,56 @@ void test_tuple_names() {
     expect_near("tuple unconstrain q[" + std::to_string(i) + "]", back[i],
                 q[i]);
   bs_model_destruct(m);
+}
+
+// bs_param_constrain(include_tp = false, include_gq = false) runs neither the
+// model block nor generated quantities, as BridgeStan's write_array does
+// not, so a reject in either goes unseen at mu = 1 and mu = 0.5. (A point
+// where both reject, a transformed parameter out of bounds, and a model
+// block reject on the interpreter path still fail; BridgeStan would
+// succeed there.)
+void test_bridgestan_constrain_skips_blocks() {
+  if (!stanli_has_embedded_stanc()) return;
+  const Compilation c = compile(
+      "parameters { real mu; }\n"
+      "transformed parameters { real<lower=0> t = mu; }\n"
+      "model { if (mu > 0.4 && mu < 0.6) reject(\"m\"); mu ~ normal(0, 1); }\n"
+      "generated quantities { if (mu > 0.9) reject(\"x\"); }\n",
+      "skip_blocks.stan");
+  expect_true("skip-blocks model compiles: " + c.error, c.ok);
+  if (!c.ok) return;
+  for (bool interpreted : {false, true}) {
+    if (interpreted && !debug_switches_available()) continue;
+    if (interpreted) test_setenv("STANLI_WA_FORCE_INTERP", "1");
+    char message[256] = "";
+    char* payload = stanli_bridgestan_data(nullptr, c.mir.c_str(), "skip",
+                                           message, sizeof message);
+    char* err = nullptr;
+    bs_model* m = payload ? bs_model_construct(payload, 1, &err) : nullptr;
+    stanli_string_free(payload);
+    if (interpreted) test_unsetenv("STANLI_WA_FORCE_INTERP");
+    expect_true(std::string("skip-blocks model constructs: ") + message +
+                    (err ? err : ""),
+                m != nullptr);
+    bs_free_error_msg(err);
+    err = nullptr;
+    if (m == nullptr) continue;
+    const std::string tag = interpreted ? " (interpreter)" : " (graph)";
+    // The interpreter reads the parameters from the log_prob graph, so it
+    // still runs the model block.
+    for (double mu : {1.0, 0.5}) {
+      if (interpreted && mu == 0.5) continue;
+      double theta = 0;
+      const int rc =
+          bs_param_constrain(m, false, false, &mu, &theta, nullptr, &err);
+      expect_true("constrain without tp or gq at mu = " + std::to_string(mu) +
+                      tag + ": " + (err ? err : ""),
+                  rc == 0 && theta == mu);
+      bs_free_error_msg(err);
+      err = nullptr;
+    }
+    bs_model_destruct(m);
+  }
 }
 
 // An array of tuples as parameters, nested and constrained. The names, the
@@ -3336,7 +3467,290 @@ void test_sample_setup_error() {
   stanli_model_free(m);
 }
 
+// stanli_grad_err says why an evaluation failed: Stan's own message, and
+// whether the model rejected the point or could not be evaluated there.
+void test_grad_messages() {
+  stanli_model* m = from_stan(
+      "parameters { real x; }\n"
+      "model {\n"
+      "  array[2] real a = {1.0, 2.0};\n"
+      "  int i = 1;\n"
+      "  if (x < -1) i = 3;\n"
+      "  if (x > 1) reject(\"x is too big: \", x);\n"
+      "  target += a[i];\n"
+      "  x ~ normal(0, 1);\n"
+      "}\n");
+  if (m == nullptr) return;
+  double lp = 0, grad = 0;
+  char err[512] = "untouched";
+  double x = 0.5;
+  expect_true(
+      "grad_err succeeds inside the support",
+      stanli_grad_err(m, &x, &lp, &grad, err, sizeof err) == STANLI_EVAL_OK &&
+          std::string(err) == "untouched" && grad == -0.5);
+  x = 2.0;
+  int rc = stanli_grad_err(m, &x, &lp, nullptr, err, sizeof err);
+  expect_true(
+      std::string("grad_err reports a reject: ") + err,
+      rc == STANLI_EVAL_REJECTED &&
+          std::string(err).find("x is too big: 2") != std::string::npos &&
+          lp == -std::numeric_limits<double>::infinity());
+  x = -2.0;
+  rc = stanli_grad_err(m, &x, &lp, &grad, err, sizeof err);
+  expect_true(std::string("grad_err reports an index out of range: ") + err,
+              rc == STANLI_EVAL_FAILED &&
+                  std::string(err).find("index") != std::string::npos);
+  expect_true("stanli_grad keeps its return codes",
+              stanli_grad(m, &x, &lp, &grad) == 1);
+  stanli_model_free(m);
+
+  // Initialization retries only REJECTED points, so the checks that guard
+  // a model's support must all be domain errors, as in Stan.
+  const char* support[] = {
+      "parameters { real x; }\n"
+      "transformed parameters { real<lower=0> t = x; }\n"
+      "model { x ~ normal(0, 1); }\n",
+      "parameters { real x; } model { 1 ~ normal(0, x); }\n",
+      "parameters { real x; }\n"
+      "model { matrix[2, 2] S = [[1, x], [x, 1]];\n"
+      "  target += multi_normal_lpdf([0, 0]' | [0, 0]', S); }\n",
+      "parameters { real x; }\n"
+      "model { matrix[2, 2] S = [[1, x], [x, 1]];\n"
+      "  target += sum(cholesky_decompose(S)); }\n",
+      "parameters { real x; } model { target += lgamma(x) + log(x); }\n"};
+  for (const char* code : support) {
+    stanli_model* s = from_stan(code);
+    if (s == nullptr) continue;
+    x = -2.0;
+    const int status = stanli_grad_err(s, &x, &lp, &grad, err, sizeof err);
+    expect_true(
+        std::string("a support check is a rejection: ") + err + "\n" + code,
+        status == STANLI_EVAL_REJECTED ||
+            (status == STANLI_EVAL_OK && !std::isfinite(lp)));
+    stanli_model_free(s);
+  }
+}
+
+// Every indexed accessor answers an index out of range the same way: null
+// for a string, STANLI_COMPILER_MESSAGE_NONE for a message kind.
+void test_out_of_range_accessors() {
+  stanli_model* m = from_stan(
+      "parameters { real x; } model { x ~ normal(0, 1); }\n"
+      "generated quantities { real y = x; }\n");
+  if (m == nullptr) return;
+  const int64_t n_messages = stanli_model_n_compiler_messages(m);
+  for (int64_t i : {(int64_t)-1, n_messages}) {
+    expect_true("model message kind out of range",
+                stanli_model_compiler_message_kind(m, i) ==
+                    STANLI_COMPILER_MESSAGE_NONE);
+    expect_true("model message out of range",
+                stanli_model_compiler_message(m, i) == nullptr);
+  }
+  for (int64_t i : {(int64_t)-1, stanli_wa_n_columns(m)})
+    expect_true("write_array column name out of range",
+                stanli_wa_column_name(m, i) == nullptr);
+  for (int64_t i : {(int64_t)-1, stanli_n_constrained(m)})
+    expect_true("constrained name out of range",
+                stanli_constrained_name(m, i) == nullptr);
+  for (int64_t i : {(int64_t)-1, stanli_n_interpreter_fallbacks(m)})
+    expect_true("interpreter fallback out of range",
+                stanli_interpreter_fallback(m, i) == nullptr);
+  for (int64_t i : {(int64_t)-1, stanli_n_reduce_sum_fallbacks(m)})
+    expect_true("reduce_sum fallback out of range",
+                stanli_reduce_sum_fallback(m, i) == nullptr);
+  for (int i : {-1, STANLI_N_SAMPLER_COLS})
+    expect_true("sampler column name out of range",
+                stanli_sampler_column_name(i) == nullptr);
+  stanli_model_free(m);
+
+  stanli_compilation* c =
+      stanli_compile_stan("parameters { real x; } model { x ~ normal(0, 1); }",
+                          nullptr, nullptr, 0, 0);
+  expect_true("compilation", c != nullptr);
+  if (c == nullptr) return;
+  for (int64_t i : {(int64_t)-1, stanli_compilation_n_messages(c)}) {
+    expect_true(
+        "compilation message kind out of range",
+        stanli_compilation_message_kind(c, i) == STANLI_COMPILER_MESSAGE_NONE);
+    expect_true("compilation message out of range",
+                stanli_compilation_message(c, i) == nullptr);
+  }
+  stanli_compilation_free(c);
+}
+
+// CmdStan's initialize retries a random start only when the model rejects
+// it with a domain error; any other error stops it at once.
+void test_init_retries_only_rejections() {
+  const char* msg =
+      "Unrecoverable error evaluating the log probability at "
+      "the initial value: ";
+  stanli_model* bad_index = from_stan(
+      "parameters { real x; }\n"
+      "model { array[2] real a = {1.0, 2.0}; int i = 3;\n"
+      "  if (x > 1e10) i = 1; target += a[i]; }\n");
+  stanli_model* rejects =
+      from_stan("parameters { real x; } model { reject(\"always\"); }\n");
+  if (bad_index == nullptr || rejects == nullptr) return;
+  stanli_sample_opts o;
+  stanli_sample_opts_init(&o);
+  o.chains = 1;
+  o.warmup = 10;
+  o.samples = 10;
+  std::vector<double> draws(10);
+  char err[4096]{};
+  int rc = stanli_sample_multi_metric(
+      bad_index, &o, nullptr, 0, draws.data(), nullptr, nullptr, nullptr,
+      nullptr, nullptr, nullptr, nullptr, nullptr, err, sizeof err);
+  expect_true(
+      std::string("an index error stops initialization at once: ") + err,
+      rc == 1 && std::string(err).find(msg) != std::string::npos &&
+          std::string(err).find("index") != std::string::npos);
+  rc = stanli_sample_multi_metric(rejects, &o, nullptr, 0, draws.data(),
+                                  nullptr, nullptr, nullptr, nullptr, nullptr,
+                                  nullptr, nullptr, nullptr, err, sizeof err);
+  expect_true(std::string("a reject is retried 100 times: ") + err,
+              rc == 1 &&
+                  std::string(err).find("no draw in 100 attempts") !=
+                      std::string::npos &&
+                  std::string(err).find("always") != std::string::npos);
+  stanli_model_free(bad_index);
+  stanli_model_free(rejects);
+}
+
+// capi.h: different models may be built and used on different threads at
+// once. Two threads each build, evaluate and sample their own model, and
+// get what a serial run gets. Run under ThreadSanitizer, this also checks
+// the library's shared state (lowering, the message sink, chain threads).
+void test_models_on_separate_threads() {
+  struct Job {
+    const char* mir;
+    const char* data;
+    std::vector<double> lp, values;
+  };
+  const auto run = [](Job& job) {
+    const std::string mir = slurp(job.mir);
+    char err[4096]{};
+    stanli_model* m = stanli_model_new_with_opts(mir.c_str(), job.data, nullptr,
+                                                 err, sizeof err);
+    if (m == nullptr) return;
+    const int64_t n = stanli_n_unconstrained(m);
+    std::vector<double> q((size_t)n), grad((size_t)n);
+    for (int k = 0; k < 50; ++k) {
+      for (int64_t i = 0; i < n; ++i) q[(size_t)i] = 0.01 * (double)(k + i);
+      double lp = 0;
+      stanli_grad(m, q.data(), &lp, grad.data());
+      job.lp.push_back(lp);
+    }
+    stanli_sample_opts o;
+    stanli_sample_opts_init(&o);
+    o.chains = 2;
+    o.warmup = 30;
+    o.samples = 30;
+    o.num_threads = stanli_thread_safe() ? 2 : 1;
+    const int64_t width = stanli_wa_n_columns(m) > 0 ? stanli_wa_n_columns(m)
+                                                     : stanli_n_constrained(m);
+    job.values.assign((size_t)(o.chains * stanli_n_stored_draws(&o) * width),
+                      0.0);
+    stanli_sample_multi_metric(m, &o, nullptr, 0, nullptr, nullptr,
+                               job.values.data(), nullptr, nullptr, nullptr,
+                               nullptr, nullptr, nullptr, err, sizeof err);
+    stanli_model_free(m);
+  };
+  Job serial[2] = {{"tests/fixtures/gqrng.tmir.sexp", R"({"N":3})", {}, {}},
+                   {"tests/fixtures/es.tmir.sexp", nullptr, {}, {}}};
+  const std::string es_data = slurp("tests/fixtures/es.json");
+  serial[1].data = es_data.c_str();
+  Job parallel[2] = {serial[0], serial[1]};
+  for (Job& job : serial) run(job);
+  std::thread a(run, std::ref(parallel[0])), b(run, std::ref(parallel[1]));
+  a.join();
+  b.join();
+  for (int j = 0; j < 2; ++j)
+    expect_true(
+        std::string("a model on its own thread matches a serial run: ") +
+            serial[j].mir,
+        !serial[j].lp.empty() && parallel[j].lp == serial[j].lp &&
+            !serial[j].values.empty() &&
+            same_bits(parallel[j].values, serial[j].values));
+}
+
+// The single-chain entry points check their arguments by the same rules.
+void test_single_chain_arguments() {
+  const std::string mir = slurp("tests/fixtures/es.tmir.sexp");
+  const std::string data = slurp("tests/fixtures/es.json");
+  char err[4096]{};
+  stanli_model* m = stanli_model_new_with_opts(mir.c_str(), data.c_str(),
+                                               nullptr, err, sizeof err);
+  if (m == nullptr) return;
+  std::vector<double> draws((size_t)(10 * stanli_n_unconstrained(m)));
+  expect_true("stream sampling checks delta",
+              stanli_sample_stream_stats_init(m, 1, 10, 10, 0.05, nullptr,
+                                              draws.data(), nullptr, nullptr,
+                                              nullptr, err, sizeof err) != 0 &&
+                  std::string(err) == "delta must be a number >= 0.1 and < 1");
+  expect_true("stream sampling checks samples",
+              stanli_sample_stream_stats_init(m, 1, 10, -1, 0.8, nullptr,
+                                              draws.data(), nullptr, nullptr,
+                                              nullptr, err, sizeof err) != 0 &&
+                  std::string(err) == "samples must be an integer >= 0");
+  expect_true(
+      "pathfinder checks the chain id",
+      stanli_run_pathfinder(m, 1, -1, 10, draws.data(), nullptr, nullptr,
+                            nullptr, nullptr, nullptr, err, sizeof err) != 0 &&
+          std::string(err) == "chain_id must be an integer >= 0");
+  expect_true(
+      "pathfinder checks num_draws",
+      stanli_run_pathfinder(m, 1, 1, 0, draws.data(), nullptr, nullptr, nullptr,
+                            nullptr, nullptr, err, sizeof err) != 0 &&
+          std::string(err) == "num_draws must be an integer >= 1");
+  stanli_model_free(m);
+}
+
+// The row every entry point writes has one definition in the C layer: the
+// write_array columns when the model has them, the constrained parameters
+// otherwise. Bindings read it from stanli_*output* instead of choosing.
+void test_output_columns() {
+  stanli_model* with_gq = from_stan(
+      "parameters { vector[2] b; } model { b ~ normal(0, 1); }\n"
+      "generated quantities { matrix[0, 2] w; real y = b[1]; }\n");
+  stanli_model* without =
+      from_stan("parameters { vector[2] b; } model { b ~ normal(0, 1); }\n");
+  if (with_gq == nullptr || without == nullptr) return;
+  for (stanli_model* m : {with_gq, without}) {
+    const bool wa = stanli_wa_n_columns(m) > 0;
+    const int64_t n = stanli_n_output_columns(m);
+    expect_true("output width is the row width",
+                n == (wa ? stanli_wa_n_columns(m) : stanli_n_constrained(m)));
+    for (int64_t i = 0; i < n; ++i)
+      expect_eq(
+          "output column name", stanli_output_column_name(m, i),
+          wa ? stanli_wa_column_name(m, i) : stanli_constrained_name(m, i));
+    expect_true("output column name out of range",
+                stanli_output_column_name(m, n) == nullptr);
+    const int set =
+        wa ? STANLI_WRITE_ARRAY_COLUMNS : STANLI_CONSTRAINED_COLUMNS;
+    expect_true("output variables are the row's variables",
+                stanli_n_variables(m, STANLI_OUTPUT_COLUMNS) ==
+                    stanli_n_variables(m, set));
+    for (int64_t v = 0; v < stanli_n_variables(m, set); ++v)
+      expect_eq("output variable name",
+                stanli_variable_name(m, STANLI_OUTPUT_COLUMNS, v),
+                stanli_variable_name(m, set, v));
+  }
+  expect_true("the model with generated quantities has its columns",
+              stanli_n_output_columns(with_gq) == 3 &&
+                  std::string(stanli_output_column_name(with_gq, 2)) == "y");
+  stanli_model_free(with_gq);
+  stanli_model_free(without);
+}
+
 int main() {
+  test_output_columns();
+  test_single_chain_arguments();
+  test_models_on_separate_threads();
+  test_init_retries_only_rejections();
+  test_out_of_range_accessors();
+  test_grad_messages();
   test_shared_write_array_executor();
   test_sampled_write_array_rows_match_draws();
   test_build_id_names_the_abi();
@@ -3346,6 +3760,7 @@ int main() {
   test_bridgestan_data();
   test_named_source_and_warnings();
   test_tuple_names();
+  test_bridgestan_constrain_skips_blocks();
   test_tuple_array_parameters();
   test_declaration_annotations();
   test_fast_math_options();

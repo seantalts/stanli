@@ -41,7 +41,9 @@ EXPORTS
   stanli_n_unconstrained
   stanli_unconstrain_inits
   stanli_grad
+  stanli_grad_err
   stanli_hessian
+  stanli_hessian_with_poll
   stanli_model_whiten
   stanli_model_whiten_lowrank
   stanli_sparse_factor_new
@@ -55,6 +57,7 @@ EXPORTS
   stanli_sample_walnuts_stats_init
   stanli_run_pathfinder
   stanli_pathfinder_inits
+  stanli_pathfinder_inits_with_poll
   stanli_n_constrained
   stanli_constrained_name
   stanli_n_param_blocks
@@ -62,6 +65,8 @@ EXPORTS
   stanli_param_block_size
   stanli_constrain
   stanli_wa_n_columns
+  stanli_n_output_columns
+  stanli_output_column_name
   stanli_wa_n_generated_start
   stanli_wa_column_name
   stanli_wa_seed
@@ -85,6 +90,7 @@ EXPORTS
   stanli_sample_opts_init
   stanli_n_stored_draws
   stanli_sample_opts_check
+  stanli_sample_check
   stanli_thread_safe
   stanli_resume_size
   stanli_metric_opts_init
@@ -98,16 +104,22 @@ EXPORTS
   stanli_sampling_warnings
   stanli_diagnose_counts
   stanli_optimize_opts_init
+  stanli_optimize_opts_check
   stanli_optimize
+  stanli_optimize_with_poll
   stanli_fixed_param_opts_init
+  stanli_fixed_param_opts_check
   stanli_fixed_param_n_draws
   stanli_fixed_param
   stanli_laplace_opts_init
+  stanli_laplace_opts_check
   stanli_laplace_sample
   stanli_pathfinder_opts_init
+  stanli_pathfinder_opts_check
   stanli_pathfinder_max_draws
   stanli_pathfinder
   stanli_variational_opts_init
+  stanli_variational_opts_check
   stanli_variational
   bs_major_version DATA
   bs_minor_version DATA

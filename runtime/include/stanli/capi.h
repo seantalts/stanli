@@ -1,7 +1,29 @@
 /* stanli C ABI: the versioned boundary language bindings speak to.
  * Exception-free; every entry returns an error code or null on failure and
  * writes a message into the caller's buffer. One stanli_model per (model,
- * data) pair; not thread-safe per instance (use one per chain). */
+ * data) pair.
+ *
+ * Threads. Different stanli_model handles are independent: calls on
+ * different handles may run at the same time on different threads,
+ * construction and compilation included (the embedded compiler runs one
+ * compilation at a time by itself). One handle is NOT safe for concurrent
+ * use. A call that evaluates the model (stanli_grad, stanli_grad_err,
+ * stanli_hessian*, stanli_constrain, stanli_wa_row, stanli_wa_seed*,
+ * stanli_unconstrain_inits, the samplers, optimize and the other
+ * algorithms) uses the handle's own executors and its stanli_wa_seed
+ * stream, so at most one such call may run on a handle at a time, and none
+ * while stanli_model_free runs. Calls that only read what construction
+ * fixed (counts, names, variables, layouts, warnings, messages,
+ * stanli_resume_size) may run at any time while the handle lives. A call's
+ * callbacks (progress, poll, log) run on the calling thread during the call
+ * and must not evaluate the same handle. A sampling call runs its chains on
+ * threads of its own; that is internal to the call. To evaluate one model
+ * on several threads at once, build one handle per thread, or use the
+ * BridgeStan facade, whose handles lend each call an executor of its own.
+ *
+ * Indexed accessors (name i of n, message i of n, ...) answer an index
+ * outside [0, n) with null for a string, 0 for a count or dimension, -1 for
+ * a size, and STANLI_COMPILER_MESSAGE_NONE for a message kind. */
 #ifndef STANLI_CAPI_H
 #define STANLI_CAPI_H
 
@@ -86,7 +108,8 @@ void stanli_model_opts_init(stanli_model_opts* o);
  * `stanc --O1 --debug-optimized-mir`) against JSON data (CmdStan conventions).
  * The unoptimized --debug-transformed-mir S-expression is also accepted.
  * Returns null on failure with a message in err. A null opts means the
- * defaults. */
+ * defaults. Construction cannot be interrupted: it takes no poll callback,
+ * and a large model can take seconds or more to prepare. */
 stanli_model* stanli_model_new_with_opts(const char* mir_text,
                                          const char* data_json,
                                          const stanli_model_opts* opts,
@@ -131,14 +154,16 @@ char* stanli_stan_to_mir_with_opts(const char* stan_code,
  * budget (the model then runs from O0 MIR; STANLI_NO_O1_FALLBACK=1 forces
  * O1). */
 typedef enum {
+  STANLI_COMPILER_MESSAGE_NONE = -1, /* the index was out of range */
   STANLI_COMPILER_WARNING = 0,
   STANLI_COMPILER_O1_FALLBACK = 1
 } stanli_compiler_message_kind;
 
 /* One compilation of Stan source, with the source file named in compiler
  * messages (null: the compiler's default label). The other arguments are
- * those of stanli_stan_to_mir_with_opts. Returns null only when out of
- * memory; free with stanli_compilation_free. */
+ * those of stanli_stan_to_mir_with_opts. A failure of any kind is reported
+ * through stanli_compilation_error; the result is null only when there is
+ * not memory to say so. Free with stanli_compilation_free. */
 typedef struct stanli_compilation stanli_compilation;
 stanli_compilation* stanli_compile_stan(const char* stan_code,
                                         const char* filename,
@@ -224,6 +249,25 @@ int stanli_unconstrain_inits(stanli_model* m, const char* inits_json, double* q,
  * 1 on a rejected evaluation (domain error; *lp set to -inf). */
 int stanli_grad(stanli_model* m, const double* q, double* lp, double* grad);
 
+/* Why an evaluation failed. REJECTED is a std::domain_error, which is how
+ * Stan's reject() and its argument checks refuse a point: CmdStan's samplers
+ * reject the proposal and its initialization tries another point. FAILED is
+ * any other error in evaluating the model, such as an index out of range;
+ * CmdStan stops initialization at once on these. INTERNAL_ERROR is a failed
+ * check inside stanli itself, which is a bug worth reporting. */
+typedef enum {
+  STANLI_EVAL_OK = 0,
+  STANLI_EVAL_REJECTED = 1,
+  STANLI_EVAL_FAILED = 2,
+  STANLI_EVAL_INTERNAL_ERROR = 3
+} stanli_eval_status;
+
+/* stanli_grad with the reason for a failure: returns a stanli_eval_status
+ * and, unless it is STANLI_EVAL_OK, writes the evaluation's message into err
+ * and sets *lp to -inf. err is not touched on success. */
+int stanli_grad_err(stanli_model* m, const double* q, double* lp, double* grad,
+                    char* err, size_t err_len);
+
 /* The log density of stanli_grad, its gradient, and the n_unconstrained by
  * n_unconstrained Hessian at unconstrained q[n]. The Hessian is symmetric, so
  * row- and column-major agree. `grad` may be null.
@@ -238,6 +282,21 @@ int stanli_grad(stanli_model* m, const double* q, double* lp, double* grad);
  * then unspecified. */
 int stanli_hessian(stanli_model* m, const double* q, double* lp, double* grad,
                    double* hessian, char* err, size_t err_len);
+
+/* How a long call learns that its caller wants it to stop (Ctrl-C, say).
+ * Asked on the calling thread; a nonzero answer stops the call. Sampling
+ * asks about every 100 ms while chains run and stops every chain after its
+ * current transition. */
+typedef int (*stanli_sample_poll_cb)(void* user);
+
+/* stanli_hessian, asking `poll` on the calling thread about every 100 ms, and
+ * once before the first gradient. A nonzero answer abandons the call, which
+ * returns 0 with *interrupted set to 1 and nothing usable in the outputs.
+ * `poll` and `interrupted` may be null. */
+int stanli_hessian_with_poll(stanli_model* m, const double* q, double* lp,
+                             double* grad, double* hessian,
+                             stanli_sample_poll_cb poll, void* poll_user,
+                             int* interrupted, char* err, size_t err_len);
 
 /* EXPERIMENTAL. A new model over whitened coordinates z, with
  *     q = q_hat + P^T L^{-T} z,   (P v)[i] = v[perm[i]],
@@ -364,13 +423,23 @@ typedef struct {
  * the wrong starting point rather than fail. */
 void stanli_sample_opts_init(stanli_sample_opts* o);
 
-/* 0 when `o` is a request the sampler can run; else 1, with a message naming
- * the first bad field in err: chains >= 1, warmup >= 0, samples >= 0,
- * thin >= 1, delta strictly between 0 and 1, max_depth >= 1, init_radius
- * finite and >= 0, chain_id >= 1 with chain_id + chains - 1 representable.
- * stanli_sample_multi_metric applies it first and fails the
- * same way, so a binding that sizes buffers from the options should call
- * this before allocating them. */
+/* ARGUMENT CHECKS. Each options struct has a _check function, and its entry
+ * point applies it first and fails with the same message, so a binding that
+ * sizes buffers from the options can call the check before allocating and
+ * need not repeat the rules. The rules are CmdStan's: chain_id >= 0 (CmdStan
+ * accepts id 0), counts that CmdStan requires to be positive >= 1, its
+ * tolerances and step sizes finite and > 0. CmdStan accepts a negative init
+ * radius and then hangs drawing from it; stanli requires a finite radius
+ * >= 0. A check returns 0 when every rule holds, else 1 with one message
+ * naming the first field that breaks one, in one of these forms:
+ *   "<field> must be an integer >= <n>"
+ *   "<field> must be a finite number > 0"
+ *   "init_radius must be a finite number >= 0"
+ *   "chain_id + chains - 1 must not exceed 2147483647"
+ * or a sentence for a rule of its own (delta's range, an enum's values).
+ *
+ * stanli_sample_opts_check: chains >= 1, warmup >= 0, samples >= 0,
+ * thin >= 1, delta >= 0.1 and < 1, max_depth >= 1, init_radius, chain_id. */
 int stanli_sample_opts_check(const stanli_sample_opts* o, char* err,
                              size_t err_len);
 
@@ -410,10 +479,6 @@ typedef void (*stanli_sample_progress_cb)(int32_t chain_id, int64_t iteration,
                                           int64_t total, int32_t warmup,
                                           int64_t n_divergent,
                                           int64_t n_max_treedepth, void* user);
-
-/* Asked on the calling thread about every 100 ms while chains run. A nonzero
- * answer stops every chain after its current transition. */
-typedef int (*stanli_sample_poll_cb)(void* user);
 
 /* Metric kinds for stanli_metric_opts::metric, as CmdStan's unit_e, diag_e and
  * dense_e. */
@@ -456,28 +521,41 @@ typedef struct {
  * and the metric, no outputs. */
 void stanli_metric_opts_init(stanli_metric_opts* o);
 
-/* Run opts->chains chains. draws holds
+/* Everything stanli_sample_multi_metric checks before it starts, apart from
+ * the values in the inverse metric and resume records:
+ * stanli_sample_opts_check, a known metric kind, and, as in CmdStan, warmup >=
+ * 1 whenever adaptation is engaged on a run that does not continue from resume
+ * records. A null metric means the defaults. */
+int stanli_sample_check(const stanli_sample_opts* o,
+                        const stanli_metric_opts* metric, char* err,
+                        size_t err_len);
+
+/* Run opts->chains chains. draws, when non-null, holds
  * chains * stanli_n_stored_draws(opts) * n_unconstrained doubles; stats,
  * when non-null, holds chains * stanli_n_stored_draws(opts) * 7 (the
- * CmdStan sampler columns, see stanli_sampler_column_name).
+ * CmdStan sampler columns, see stanli_sampler_column_name). Each stored
+ * draw is written into these buffers as the chain stores it; the library
+ * keeps no copy of the run.
  *
  * Returns 0 when every chain succeeded. Returns the NUMBER OF FAILED
  * CHAINS otherwise, with the first failure's message in err: a run where
- * three of four chains sampled is a partial result the caller may want,
- * and the failed chains' rows are left untouched. Returns -1 with a message
- * in err when the run could not start: bad options, metric or resume
- * records.
+ * three of four chains sampled is a partial result the caller may want.
+ * A failed chain's rows hold what it stored before it failed, and the rest
+ * of its rows are left untouched. Returns -1 with a message in err when the
+ * run could not start: bad options, metric or resume records.
  *
  * `refresh` follows CmdStan's convention: in each phase, report the first
  * transition, every refresh-th transition, and the phase's final transition.
  * Zero disables callbacks; negative values are rejected. `reports`, when
  * non-null, holds opts->chains entries.
  *
- * A positive `refresh` also lets the run send its own notices to the message
- * sink (the one print() uses), each line prefixed "Chain [id]": a proposal
- * rejected because the model threw, the adaptation-window warnings, and a
- * note when threads_per_chain exceeds 1 on a model that runs no reduce_sum
- * call in parallel, with the reasons from stanli_reduce_sum_fallback.
+ * The run sends its own notices to the message sink (the one print() uses),
+ * each line prefixed "Chain [id]": a proposal rejected because the model
+ * threw, and the adaptation-window warnings. As in CmdStan they do not
+ * depend on `refresh`, which controls only the progress callbacks. A
+ * positive `refresh` also adds a note when threads_per_chain exceeds 1 on a
+ * model that runs no reduce_sum call in parallel, with the reasons from
+ * stanli_reduce_sum_fallback.
  *
  * `poll` is asked on the calling thread about every 100 ms. A stopped run
  * returns 0 with `*interrupted` set to 1 and only the rows stored before the
@@ -488,12 +566,11 @@ void stanli_metric_opts_init(stanli_metric_opts* o);
  * thread as they are stored, so the work runs in parallel across chains,
  * inside the sampling progress. `values` receives
  * chains * stanli_n_stored_draws(opts) rows of W doubles, chain-major exactly
- * like `draws`, where W is stanli_wa_n_columns(m) when that is positive and
- * stanli_n_constrained(m) otherwise. Generated quantities advance the live
- * sampler RNG between stored transitions, as in CmdStan. Thus RNG-bearing
- * models have different seeded trajectories when `values` is null, since
- * generated quantities then do not run. The model's own stanli_wa_seed stream
- * is untouched.
+ * like `draws`, where W is stanli_n_output_columns(m). Generated quantities
+ * advance the live sampler RNG between stored transitions, as in CmdStan. Thus
+ * RNG-bearing models have different seeded trajectories when `values` is null,
+ * since generated quantities then do not run. The model's own stanli_wa_seed
+ * stream is untouched.
  *
  * A domain error while producing a row fills that output row with NaNs and
  * sampling continues, retaining any consumed randomness. Other exceptions
@@ -638,11 +715,17 @@ typedef struct {
 /* CmdStan's defaults. Call before setting fields, for the same reason
  * stanli_sample_opts_init exists. */
 void stanli_optimize_opts_init(stanli_optimize_opts* o);
+/* chain_id, iter >= 1, history_size >= 1, init_alpha and the five tolerances
+ * > 0, init_radius. jacobian = 0 passes the check and is refused by the run,
+ * because stanli cannot compute it. */
+int stanli_optimize_opts_check(const stanli_optimize_opts* o, char* err,
+                               size_t err_len);
 
 /* Writes the mode to `unconstrained` (n_unconstrained doubles) and, when
- * `values` is non-null, every CSV column there (stanli_wa_n_columns, or
- * n_constrained when the model has no generated quantities). *lp receives
- * the log density at the mode.
+ * `values` is non-null, every CSV column there (stanli_n_output_columns). *lp
+ * receives the log density at the mode. The start and the generated quantities
+ * at the mode draw from the stream of (seed, chain_id), in that order, as in
+ * CmdStan; the model's stanli_wa_seed stream is not touched.
  *
  * Returns 0 when the optimizer converged, nonzero otherwise with a
  * message in err -- and in that case the buffers still hold the last
@@ -650,6 +733,15 @@ void stanli_optimize_opts_init(stanli_optimize_opts* o);
 int stanli_optimize(stanli_model* m, const stanli_optimize_opts* opts,
                     double* unconstrained, double* values, double* lp,
                     char* err, size_t err_len);
+
+/* stanli_optimize, asking `poll` on the calling thread between iterations,
+ * about every 100 ms and once before the first. A nonzero answer abandons the
+ * run, which returns 0 with *interrupted set to 1 and nothing usable in the
+ * outputs. `poll` and `interrupted` may be null. */
+int stanli_optimize_with_poll(stanli_model* m, const stanli_optimize_opts* opts,
+                              double* unconstrained, double* values, double* lp,
+                              stanli_sample_poll_cb poll, void* poll_user,
+                              int* interrupted, char* err, size_t err_len);
 
 /* Constrained view: flattened parameter values for one unconstrained q.
  * n_constrained gives the output length; names are "mu", "theta.1", ... */
@@ -751,15 +843,24 @@ int stanli_pathfinder_inits(stanli_model* m, uint32_t seed, int chain_id,
                             stanli_path_cb cb, void* user, char* err,
                             size_t err_len);
 
+/* stanli_pathfinder_inits, asking `poll` as stanli_optimize_with_poll does. */
+int stanli_pathfinder_inits_with_poll(stanli_model* m, uint32_t seed,
+                                      int chain_id, int chains,
+                                      int num_iterations, int num_elbo_draws,
+                                      int history_size, double init_radius,
+                                      double* inits, stanli_path_cb cb,
+                                      void* user, stanli_sample_poll_cb poll,
+                                      void* poll_user, int* interrupted,
+                                      char* err, size_t err_len);
+
 /* ---- fixed_param, Laplace, Pathfinder, ADVI -------------------------------
  *
  * Stan's own services for its other inference algorithms. They share a
  * contract that differs from the entry points above in one way that matters:
  *
  * DRAWS COME BACK CONSTRAINED. Each row is every CSV column of the model, in
- * CmdStan's order: stanli_wa_n_columns(m) doubles when that is positive,
- * stanli_n_constrained(m) otherwise, named by stanli_wa_column_name or
- * stanli_constrained_name. The services draw generated quantities from their
+ * CmdStan's order: stanli_n_output_columns(m) doubles, named by
+ * stanli_output_column_name. The services draw generated quantities from their
  * own generator between their other draws, so the rows are written as the
  * run goes; that is what makes a seed name the run it names in CmdStan. The
  * model's stanli_wa_seed stream is not touched.
@@ -796,6 +897,10 @@ typedef struct {
 
 /* seed 1, 4 chains from id 1, 1000 samples, thin 1, radius 2, no progress. */
 void stanli_fixed_param_opts_init(stanli_fixed_param_opts* o);
+/* chains >= 1, chain_id, samples >= 0, thin >= 1, init_radius,
+ * refresh >= 0. */
+int stanli_fixed_param_opts_check(const stanli_fixed_param_opts* o, char* err,
+                                  size_t err_len);
 /* Stored rows per chain under these options. */
 int64_t stanli_fixed_param_n_draws(const stanli_fixed_param_opts* o);
 /* `values` holds chains * stanli_fixed_param_n_draws(opts) rows, chain-major.
@@ -820,6 +925,9 @@ typedef struct {
 
 /* seed 1, 1000 draws, jacobian 1, calculate_lp 1, no progress. */
 void stanli_laplace_opts_init(stanli_laplace_opts* o);
+/* draws >= 1, refresh >= 0. */
+int stanli_laplace_opts_check(const stanli_laplace_opts* o, char* err,
+                              size_t err_len);
 /* `mode` is n_unconstrained doubles, normally stanli_optimize's
  * `unconstrained` from a run with jacobian = 1. `values` holds opts->draws
  * rows. `lp` and `lp_approx`, each opts->draws doubles or null, receive the
@@ -868,6 +976,11 @@ typedef struct {
  * iterations, history 5, L-BFGS tolerances as in stanli_optimize_opts,
  * radius 2, lp on. */
 void stanli_pathfinder_opts_init(stanli_pathfinder_opts* o);
+/* chain_id, num_paths, num_draws, num_elbo_draws, max_lbfgs_iters and
+ * history_size >= 1, init_alpha and the tolerances > 0, init_radius,
+ * refresh >= 0. num_paths other than 1 passes and is refused by the run. */
+int stanli_pathfinder_opts_check(const stanli_pathfinder_opts* o, char* err,
+                                 size_t err_len);
 /* The rows a run under these options returns: num_draws, or 0 for options
  * the run would refuse. */
 int64_t stanli_pathfinder_max_draws(const stanli_pathfinder_opts* o);
@@ -906,6 +1019,10 @@ typedef struct {
  * iterations, tol_rel_obj 0.01, ELBO every 100 iterations, 1000 output
  * samples, radius 2. */
 void stanli_variational_opts_init(stanli_variational_opts* o);
+/* chain_id, a known algorithm, iter, grad_samples, elbo_samples, adapt_iter,
+ * eval_elbo and output_samples >= 1, eta and tol_rel_obj > 0, init_radius. */
+int stanli_variational_opts_check(const stanli_variational_opts* o, char* err,
+                                  size_t err_len);
 /* `mean`, one row or null, receives the columns at the mean of the
  * approximation, which is the row Stan writes ahead of the draws. `values`
  * holds opts->output_samples rows. `lp` and `lp_approx`, each
@@ -928,6 +1045,12 @@ int stanli_variational(stanli_model* m, const stanli_variational_opts* opts,
  * evaluates at unconstrained q and writes n_columns doubles; returns 0 on
  * success. */
 int64_t stanli_wa_n_columns(const stanli_model* m);
+/* The row every entry point writes (`values` of the samplers and optimize,
+ * the rows of fixed_param, Laplace, Pathfinder and ADVI): the write_array
+ * columns when stanli_wa_n_columns is positive, the constrained parameters
+ * otherwise. Use these instead of choosing between the two. */
+int64_t stanli_n_output_columns(const stanli_model* m);
+const char* stanli_output_column_name(const stanli_model* m, int64_t i);
 /* Index of the first generated-quantity column in the write_array output.
  * It equals n_columns when there are no generated quantities in that output.
  * Returns 0 when write_array is unavailable. */
@@ -952,11 +1075,13 @@ const char* stanli_model_compiler_message(const stanli_model* m, int64_t i);
 /* The declared variables behind a set of output columns, in column order.
  * Variable i covers the product of its dims consecutive columns, first index
  * fastest (CmdStan's order); a scalar has no dims and one column. `set` is
- * STANLI_CONSTRAINED_COLUMNS (stanli_constrained_name) or
- * STANLI_WRITE_ARRAY_COLUMNS (stanli_wa_column_name). Strings are owned by
- * the model; out-of-range indices return 0 or null. */
+ * STANLI_CONSTRAINED_COLUMNS (stanli_constrained_name),
+ * STANLI_WRITE_ARRAY_COLUMNS (stanli_wa_column_name) or STANLI_OUTPUT_COLUMNS
+ * (stanli_output_column_name). Strings are owned by the model; out-of-range
+ * indices return 0 or null. */
 #define STANLI_CONSTRAINED_COLUMNS 0
 #define STANLI_WRITE_ARRAY_COLUMNS 1
+#define STANLI_OUTPUT_COLUMNS 2
 int64_t stanli_n_variables(const stanli_model* m, int set);
 const char* stanli_variable_name(const stanli_model* m, int set, int64_t i);
 int64_t stanli_variable_n_dims(const stanli_model* m, int set, int64_t i);
@@ -992,8 +1117,7 @@ const stanli_field_layout* stanli_field_layouts(void);
  * otherwise. Generated-quantities draws do not count. */
 int stanli_transformed_data_rng(const stanli_model* m);
 /* The parts of the model stanli_warnings is about, one entry each: what
- * runs through the MIR interpreter and why. stanli_interpreter_fallback
- * returns "" for an index out of range. Owned by the model. */
+ * runs through the MIR interpreter and why. Owned by the model. */
 int64_t stanli_n_interpreter_fallbacks(const stanli_model* m);
 const char* stanli_interpreter_fallback(const stanli_model* m, int64_t i);
 

@@ -17,7 +17,6 @@
 #include <stan/model/gradient.hpp>
 #include <stan/model/log_prob_propto.hpp>
 
-#include <functional>
 #include <limits>
 #include <ostream>
 #include <stdexcept>
@@ -26,25 +25,9 @@
 
 namespace stanli {
 
-// The CSV side of the model concept, supplied by whoever built the
-// write_array graph (or its interpreter fallback). The samplers never
-// need this; the optimizers and Pathfinder do, because they report a
-// point rather than a stream of draws and have to name and constrain it.
-//
-// Kept as a callback rather than a second Executor inside the adapter so
-// that the two write_array paths -- compiled graph and per-draw
-// interpreter -- stay where they already are, in compile.hpp and capi.
-struct WriteArray {
-  std::vector<std::string> names;  // flattened, CmdStan's column order
-  // q holds num_params_r() unconstrained values; out receives
-  // names.size() doubles.
-  std::function<void(const double* q, double* out)> row;
-};
-
 class ExecutorModel {
  public:
-  explicit ExecutorModel(Executor& ex, const WriteArray* wa = nullptr)
-      : ex_(&ex), wa_(wa) {}
+  explicit ExecutorModel(Executor& ex) : ex_(&ex) {}
 
   size_t num_params_r() const { return static_cast<size_t>(ex_->n_params()); }
   Executor& executor() const { return *ex_; }
@@ -97,23 +80,16 @@ class ExecutorModel {
     return log_prob<propto, jacobian, T>(q, msgs);
   }
 
-  // ---- the CSV side, for the point-estimate services -------------------
-  // include_tp / include_gq are ignored: the write_array graph is built
-  // once, whole, and there is no cheaper prefix of it to serve. That
-  // matches what these callers want (both pass true, true) and it is
-  // stated rather than silently assumed.
+  // ---- the CSV side ---------------------------------------------------
+  // This adapter has no write_array: its columns are the unconstrained
+  // parameters, which is what Pathfinder's unconstrained draws want.
+  // ServiceModel (service_model.hpp) supplies the real columns.
   // APPENDS. Pathfinder pushes lp_approx__ and lp__ first and then calls
   // this to add the model's own columns, so assigning here would wipe
   // them and leave every row two values wider than its header.
   void constrained_param_names(std::vector<std::string>& names,
                                bool /*include_tp*/ = true,
                                bool /*include_gq*/ = true) const {
-    if (wa_ != nullptr) {
-      names.insert(names.end(), wa_->names.begin(), wa_->names.end());
-      return;
-    }
-    // No write_array graph: the unconstrained parameters are all there is
-    // to name, and they are what write_array returns in that case too.
     std::vector<std::string> q;
     unconstrained_param_names(q);
     names.insert(names.end(), q.begin(), q.end());
@@ -130,12 +106,7 @@ class ExecutorModel {
                    std::vector<int>& /*params_i*/, std::vector<double>& values,
                    bool /*include_tp*/ = true, bool /*include_gq*/ = true,
                    std::ostream* /*msgs*/ = nullptr) const {
-    if (wa_ == nullptr) {
-      values.assign(params_r.begin(), params_r.end());
-      return;
-    }
-    values.assign(wa_->names.size(), 0.0);
-    wa_->row(params_r.data(), values.data());
+    values.assign(params_r.begin(), params_r.end());
   }
 
   // Pathfinder's Eigen form of the same call.
@@ -144,12 +115,7 @@ class ExecutorModel {
                    Eigen::Matrix<double, -1, 1>& values,
                    bool /*include_tp*/ = true, bool /*include_gq*/ = true,
                    std::ostream* /*msgs*/ = nullptr) const {
-    if (wa_ == nullptr) {
-      values = params_r;
-      return;
-    }
-    values.setZero((Eigen::Index)wa_->names.size());
-    wa_->row(params_r.data(), values.data());
+    values = params_r;
   }
 
   // Every unconstrained parameter is a scalar as far as a random init is
@@ -190,7 +156,6 @@ class ExecutorModel {
 
  private:
   Executor* ex_;
-  const WriteArray* wa_ = nullptr;
 };
 
 }  // namespace stanli

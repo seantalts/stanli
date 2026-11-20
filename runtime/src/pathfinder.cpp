@@ -2,6 +2,7 @@
 #include <stanli/estimate.hpp>
 
 #include "initialize.hpp"
+#include "service_model.hpp"
 
 #include <stan/callbacks/interrupt.hpp>
 #include <stan/callbacks/logger.hpp>
@@ -211,7 +212,12 @@ PathfinderResult run_pathfinder(Executor& ex, const PathfinderConfig& cfg,
   DrawCollector draws;
   PathLogger logger;
   stan::callbacks::writer init_writer;
-  stan::callbacks::interrupt interrupt;
+  detail::ThrottledPoll poll(&cfg.poll);
+  struct Interrupt : stan::callbacks::interrupt {
+    detail::ThrottledPoll* poll;
+    explicit Interrupt(detail::ThrottledPoll* p) : poll(p) {}
+    void operator()() override { poll->check(); }
+  } interrupt(&poll);
 
   // An empty context leaves initialization to the service's own uniform
   // draw, which is byte for byte the one cmdstan_init_point makes for the
@@ -241,6 +247,10 @@ PathfinderResult run_pathfinder(Executor& ex, const PathfinderConfig& cfg,
         cfg.num_elbo_draws, std::max(cfg.num_draws, cfg.num_elbo_draws),
         /*save_iterations=*/true, /*refresh=*/0, interrupt, logger, init_writer,
         draws, path);
+  } catch (const detail::Interrupted&) {
+    if (stan::math::empty_nested()) stan::math::recover_memory();
+    out.interrupted = true;
+    return out;
   } catch (const std::exception& e) {
     out.return_code = 1;
     out.message = e.what();
