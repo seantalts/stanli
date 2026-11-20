@@ -404,6 +404,224 @@ class CheckModelPointsTest(unittest.TestCase):
         self.assertIn("signal 11", detail)
 
 
+class PairDevTest(unittest.TestCase):
+    """What the scaled-error gate accepts, and what the ULP gate adds."""
+
+    def test_values_below_one_are_held_to_an_absolute_error(self):
+        rel, ulp = verify_refs.pair_dev(1e-4, 1e-4 + 9e-10)
+        self.assertAlmostEqual(rel, 9e-10, delta=1e-20)
+        self.assertGreater(ulp, 6e10)
+        self.assertLess(rel, 1e-9)  # so the scaled-error gate passes it
+        rel, _ = verify_refs.pair_dev(1e-12, -1e-12)
+        self.assertLess(rel, 1e-9)  # a sign error passes it too
+
+    def test_large_values_are_relative(self):
+        self.assertEqual(verify_refs.pair_dev(1e4, 1e4 * (1 + 1e-8))[0] > 1e-9,
+                         True)
+
+    def test_nonfinite_values(self):
+        nan, inf = float("nan"), float("inf")
+        self.assertEqual(verify_refs.pair_dev(nan, nan), (0.0, 0))
+        self.assertEqual(verify_refs.pair_dev(inf, inf), (0.0, 0))
+        self.assertEqual(verify_refs.pair_dev(inf, 1.0)[0], math.inf)
+        self.assertEqual(verify_refs.pair_dev(nan, 1.0)[0], math.inf)
+
+
+class ScaledUlpTest(unittest.TestCase):
+
+    def test_the_audit_cases_fail(self):
+        self.assertGreater(verify_refs.scaled_ulp(1e-4, 1e-4 + 9e-10, 1e-4),
+                           6e10)
+        self.assertEqual(verify_refs.scaled_ulp(1e-12, -1e-12, 1.0),
+                         math.ceil(2e-12 / math.ulp(1.0)))
+        self.assertGreater(verify_refs.scaled_ulp(1e-12, -1e-12, 1.0),
+                           verify_refs.DEFAULT_ULP_BOUND)
+
+    def test_a_cancelled_entry_is_counted_in_ulps_of_the_scale(self):
+        # A gradient entry that CmdStan cancels to 0 and stanli to one
+        # rounding of a term of size 0.005.
+        self.assertGreater(verify_refs.ulp_distance(0.0, 1.1102230246251566e-18),
+                           1e18)
+        self.assertEqual(verify_refs.scaled_ulp(0.0, 1.1102230246251566e-18,
+                                                0.005), 2)
+
+    def test_the_element_distance_is_used_when_it_is_smaller(self):
+        a = 1e-3
+        b = math.nextafter(math.nextafter(a, 1), 1)
+        self.assertEqual(verify_refs.scaled_ulp(a, b, 0.0), 2)
+        self.assertEqual(verify_refs.scaled_ulp(a, b, 1e-3), 2)
+
+    def test_nonfinite_values(self):
+        nan, inf = float("nan"), float("inf")
+        self.assertEqual(verify_refs.scaled_ulp(nan, nan, 1.0), 0)
+        self.assertEqual(verify_refs.scaled_ulp(-inf, -inf, 1.0), 0)
+        self.assertEqual(verify_refs.scaled_ulp(inf, 1.0, 1.0), math.inf)
+        self.assertEqual(verify_refs.scaled_ulp(nan, 1.0, 1.0), math.inf)
+
+    def test_the_gradient_scale_comes_from_cmdstan(self):
+        # stanli cannot widen its own floor with a wrong large value.
+        ulps = verify_refs.density_ulps([-3.5, 1e-4, 1e-3], [-3.5, 1e-4, 1e3])
+        self.assertGreater(ulps["grad[2]"], 1e10)
+        ulps = verify_refs.density_ulps([-3.5, 1000.0, 0.0],
+                                        [-3.5, 1000.0, 5 * math.ulp(1000.0)])
+        self.assertEqual(ulps, {"grad[2]": 5})
+
+    def test_lp_is_scored_on_its_own_magnitude(self):
+        lp = 1e-6
+        ulps = verify_refs.density_ulps([lp, 1e6], [lp * (1 + 1e-12), 1e6])
+        self.assertGreater(ulps["lp"], 1000)
+
+    def test_write_array_columns_are_scored_within_their_variable(self):
+        names = ["mu", "theta.1", "theta.2", "z.1"]
+        ref = [100.0, 1.0, 0.0, 0.0]
+        got = [100.0, 1.0, 2 * math.ulp(1.0), 2 * math.ulp(1.0)]
+        ulps = verify_refs.write_array_ulps(names, ref, got)
+        self.assertEqual(ulps["wa theta.2"], 2)
+        # z has no other entry, so its zero gets no floor.
+        self.assertGreater(ulps["wa z.1"], 1e18)
+        self.assertNotIn("wa mu", ulps)
+
+
+class UlpLedgerTest(unittest.TestCase):
+    """The per-model exceptions to the ULP gate, and how they move."""
+
+    ENTRIES = {"lp": {"bound": 40, "reason": "lp test"},
+               "grad": {"bound": 30, "reason": "kind test"},
+               "grad[2]": {"bound": 500, "reason": "value test"}}
+
+    def test_a_value_takes_its_own_entry_then_its_kind_then_the_default(self):
+        bound = verify_refs.ulp_bound
+        self.assertEqual(bound(self.ENTRIES, "grad[2]"), (500, "value test"))
+        self.assertEqual(bound(self.ENTRIES, "grad[7]"), (30, "kind test"))
+        self.assertEqual(bound(self.ENTRIES, "lp"), (40, "lp test"))
+        self.assertEqual(bound(self.ENTRIES, "wa mu"),
+                         (verify_refs.DEFAULT_ULP_BOUND, "default"))
+        self.assertEqual(bound({}, "grad[1]")[0], verify_refs.DEFAULT_ULP_BOUND)
+
+    def test_the_gate_names_the_value_and_the_reason(self):
+        failed = verify_refs.ulp_gate(self.ENTRIES, {"grad[7]": 31}, 1,
+                                      {"grad[7]": (1.0, 1.5)})
+        self.assertEqual(failed[0], "ULP_GATE")
+        self.assertIn("point 1: grad[7] (stanli 1.5, CmdStan 1.0) is 31", failed[1])
+        self.assertIn("allowed 30 (kind test)", failed[1])
+        self.assertIsNone(verify_refs.ulp_gate(self.ENTRIES, {"grad[2]": 500}, 0))
+        self.assertIsNone(verify_refs.ulp_gate({}, {"grad[2]": 10}, 0))
+        self.assertEqual(verify_refs.ulp_gate({}, {"grad[2]": 11}, 0)[0],
+                         "ULP_GATE")
+
+    def test_entries_only_go_down(self):
+        new = verify_refs.updated_entries(
+            self.ENTRIES, {"lp": 12, "grad[2]": 9, "grad[5]": 25}, "new")
+        self.assertEqual(new, {"lp": {"bound": 12, "reason": "lp test"},
+                               "grad": {"bound": 25, "reason": "kind test"}})
+        with self.assertRaises(ValueError):
+            verify_refs.updated_entries(self.ENTRIES, {"lp": 41}, "new")
+
+    def test_new_values_get_generated_entries(self):
+        measured = {"lp": 518, "grad[1]": 11, "grad[3]": 10, "wa mu": 12}
+        new = verify_refs.updated_entries({}, measured, "measured here")
+        self.assertEqual(new, {
+            "lp": {"bound": 518, "reason": "measured here"},
+            "grad[1]": {"bound": 11, "reason": "measured here"},
+            "wa mu": {"bound": 12, "reason": "measured here"}})
+        many = {f"grad[{i}]": 20 + i for i in range(1, 11)}
+        new = verify_refs.updated_entries({}, many, "measured here")
+        self.assertEqual(list(new), ["grad"])
+        self.assertEqual(new["grad"]["bound"], 30)
+        self.assertIn("10 grad values over 10", new["grad"]["reason"])
+
+    def test_a_wide_margin_is_reported(self):
+        notes = verify_refs.ledger_notes("m", self.ENTRIES,
+                                         {"lp": 39, "grad[2]": 250, "grad[4]": 3})
+        self.assertEqual(len(notes), 2)
+        self.assertIn("ULP LEDGER m grad: measured 3, recorded bound 30", notes[0])
+        self.assertIn("ULP LEDGER m grad[2]: measured 250", notes[1])
+
+    def test_the_ledger_file_is_validated(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = pathlib.Path(tmp) / "ledger.json"
+            for entry in ({"bound": 10, "reason": "x"}, {"bound": 11},
+                          {"bound": 11.5, "reason": "x"}):
+                path.write_text(json.dumps({"schema": 1, "platforms": {
+                    "P": {"main": {"m": {"lp": entry}}}}}))
+                with self.subTest(entry=entry), self.assertRaises(SystemExit):
+                    verify_refs.load_ulp_ledger(path)
+            path.unlink()
+            empty = verify_refs.load_ulp_ledger(path)
+            self.assertIsNone(verify_refs.ulp_section(empty, "P", "main"))
+
+    def test_writing_a_section_ratchets_only_the_models_that_ran(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = pathlib.Path(tmp) / "ledger.json"
+            ledger = {"schema": 1, "platforms": {"P": {"main": {
+                "kept": {"lp": {"bound": 99, "reason": "not run"}},
+                "ran": {"lp": {"bound": 99, "reason": "why"}}}}}}
+            verify_refs.write_ulp_ledger(
+                ledger, "P", "main", {"ran": {"lp": 50, "grad[1]": 20},
+                                      "clean": {"lp": 3}},
+                ["ran", "clean"], {"ran": "Q"}, path)
+            written = verify_refs.load_ulp_ledger(path)
+            section = verify_refs.ulp_section(written, "P", "main")
+            self.assertEqual(section["kept"]["lp"]["bound"], 99)
+            self.assertEqual(section["ran"]["lp"], {"bound": 50, "reason": "why"})
+            self.assertIn("against a reference recorded on Q",
+                          section["ran"]["grad[1]"]["reason"])
+            self.assertNotIn("clean", section)
+
+    def test_the_checked_in_ledger_loads(self):
+        ledger = verify_refs.load_ulp_ledger()
+        self.assertIsNotNone(ledger["platforms"])
+
+
+class UlpGateReplayTest(unittest.TestCase):
+    """check_model with a ULP ledger section, as the replays run it."""
+
+    PT = {"values": ["-3.5", "1e-4", "2"], "status": "VERIFIED", "max_rel": 0.0}
+    REF = {"primary": 0, "points": dict.fromkeys(map(str, POINTS), PT)}
+
+    def run_check(self, body, entries, measured=None):
+        with tempfile.TemporaryDirectory() as tmp:
+            return check_model(MODEL, self.REF, REPO / "nonexistent-pdb",
+                               stub(tmp, body), pathlib.Path(tmp), 60, 1e-9,
+                               ulp_entries=entries, measured=measured)
+
+    def test_an_absolute_error_below_1e9_fails_the_ulp_gate(self):
+        body = f'echo "OK -3.5 {1e-4 + 9e-10!r} 2"'
+        self.assertEqual(self.run_check(body, None)[1], "OK")
+        result = self.run_check(body, {})
+        self.assertEqual(result[1], "ULP_GATE")
+        self.assertIn("grad[1]", result[5])
+        self.assertIn("allowed 10 (default)", result[5])
+
+    def test_a_ledger_entry_allows_its_measured_bound(self):
+        near = 2 + 40 * math.ulp(2.0)
+        body = f'echo "OK -3.5 1e-4 {near!r}"'
+        self.assertEqual(self.run_check(body, {})[1], "ULP_GATE")
+        measured = {}
+        result = self.run_check(body, {"grad[2]": {"bound": 40, "reason": "r"}},
+                                measured)
+        self.assertEqual(result[1], "OK")
+        self.assertEqual(measured, {"grad[2]": 40})
+        result = self.run_check('echo "OK -3.5 1e-4 2"',
+                                {"grad[2]": {"bound": 40, "reason": "r"}})
+        self.assertEqual(result[1], "OK")
+        self.assertIn("ULP LEDGER while_counter_size grad[2]: measured 0",
+                      " ".join(result[6]))
+
+    def test_write_array_values_are_gated(self):
+        body = ('echo "OK -3.5 1e-4 2"\n'
+                'if [ -n "$wa" ]; then echo "WANAMES a"; '
+                f'echo "WAVALS {1e-4 + 1e-12!r}"; fi')
+        ref = {"primary": 0, "points": {str(p): {
+            **self.PT, "wa": {"names": "a", "values": ["1e-4"]}} for p in POINTS}}
+        with tempfile.TemporaryDirectory() as tmp:
+            result = check_model(MODEL, ref, REPO / "nonexistent-pdb",
+                                 stub(tmp, body, wa=False), pathlib.Path(tmp),
+                                 60, 1e-9, ulp_entries={})
+        self.assertEqual(result[1], "ULP_GATE")
+        self.assertIn("wa a", result[5])
+
+
 class FastModeGateTest(unittest.TestCase):
     """--fast-math: lp and the gradient as a vector, not per coordinate."""
 

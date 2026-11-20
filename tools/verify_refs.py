@@ -357,6 +357,220 @@ def gradient_ulp(rv, gv):
     return math.ceil(diff / math.ulp(scale)) if diff else 0
 
 
+# The ULP gate (TESTING.md, "Numerical policy"). Every value is held to
+# DEFAULT_ULP_BOUND, counted by scaled_ulp, unless the ledger lists a
+# larger bound measured for that model, output and platform. It is an
+# extra condition: the scaled-error gate and the per-element ULP_LIMITS
+# still apply.
+ULP_LEDGER_PATH = REPO / "tests" / "ulp_ledger.json"
+ULP_LEDGER_SCHEMA = 1
+DEFAULT_ULP_BOUND = 10
+# A replay that measures no more than this fraction of a ledger bound says
+# that the bound can be tightened.
+ULP_TIGHTEN_FRACTION = 0.5
+# --update-ulp-ledger lists values over the default one by one, unless one
+# output kind of a model has more of them than this; then one entry covers
+# the kind.
+LEDGER_VALUE_ENTRIES_MAX = 8
+
+
+def scaled_ulp(a, b, scale):
+    """ULPs between a and b, or |a-b| in ULPs of scale if that is fewer.
+
+    scale is the largest CmdStan magnitude among the values computed
+    together with a (the whole gradient, or one write_array variable).
+    A gradient entry that cancels to nearly zero is then judged against
+    the size of the terms it came from, and not only against its own
+    magnitude, where one rounding of a term can be 1e18 ULP. Both NaN or
+    the same infinity is 0; a nonfinite value on one side only is inf.
+    """
+    if (a != a and b != b) or a == b:
+        return 0
+    if not (math.isfinite(a) and math.isfinite(b)):
+        return math.inf
+    ulps = ulp_distance(a, b)
+    if scale > 0 and math.isfinite(scale):
+        ulps = min(ulps, math.ceil(abs(a - b) / math.ulp(scale)))
+    return ulps
+
+
+# A ledger entry is one value's label ("lp", "grad[3]", "wa mu.2") or an
+# output kind that covers every value of that kind with no entry of its own.
+KIND_ENTRIES = ("grad", "wa")
+
+
+def output_kind(label):
+    if label == "lp":
+        return "lp"
+    return "grad" if label.startswith("grad[") else "wa"
+
+
+def entry_measured(label, entries, measured):
+    """The worst measurement that the ledger entry `label` covers."""
+    if label in KIND_ENTRIES:
+        return max([u for name, u in measured.items()
+                    if output_kind(name) == label and name not in entries]
+                   or [0])
+    return measured.get(label, 0)
+
+
+def density_ulps(rv, gv):
+    """{label: scaled ULP} for one point's lp and gradient.
+
+    lp is scored on its own magnitude, every gradient entry against the
+    largest finite CmdStan gradient entry.
+    """
+    scale = max([abs(x) for x in rv[1:] if math.isfinite(x)] or [0.0])
+    out = {}
+    for i, (a, b) in enumerate(zip(rv, gv)):
+        ulps = scaled_ulp(a, b, abs(a) if i == 0 else scale)
+        if ulps:
+            out["lp" if i == 0 else f"grad[{i}]"] = ulps
+    return out
+
+
+def write_array_ulps(names, wref, wgot):
+    """{"wa COLUMN": scaled ULP} for one write_array row, each column scored
+    against the largest finite CmdStan value of its own variable."""
+    variable = [re.split(r"[.:]", name, maxsplit=1)[0] for name in names]
+    scale = collections.defaultdict(float)
+    for var, a in zip(variable, wref):
+        if math.isfinite(a):
+            scale[var] = max(scale[var], abs(a))
+    out = {}
+    for name, var, a, b in zip(names, variable, wref, wgot):
+        ulps = scaled_ulp(a, b, scale[var])
+        if ulps:
+            out[f"wa {name}"] = ulps
+    return out
+
+
+def ulp_bound(entries, label):
+    """(bound, reason) for one value: its own ledger entry, else its
+    output kind's, else the default."""
+    entry = entries.get(label)
+    if entry is None and output_kind(label) in KIND_ENTRIES:
+        entry = entries.get(output_kind(label))
+    if entry is None:
+        return DEFAULT_ULP_BOUND, "default"
+    return entry["bound"], entry["reason"]
+
+
+def ulp_gate(entries, ulps, point, values=None):
+    """A ("ULP_GATE", detail) failure for the first value over its bound,
+    or None."""
+    for label, ulps_here in ulps.items():
+        bound, reason = ulp_bound(entries, label)
+        if ulps_here > bound:
+            shown = ""
+            if values and label in values:
+                shown = f" (stanli {values[label][1]!r}, CmdStan {values[label][0]!r})"
+            return ("ULP_GATE", f"point {point}: {label}{shown} is {ulps_here} "
+                                f"scaled ULP from CmdStan, allowed {bound} "
+                                f"({reason})")
+    return None
+
+
+def load_ulp_ledger(path=ULP_LEDGER_PATH):
+    if not path.exists():
+        return {"schema": ULP_LEDGER_SCHEMA, "platforms": {}}
+    ledger = json.loads(path.read_text())
+    if ledger.get("schema") != ULP_LEDGER_SCHEMA:
+        raise SystemExit(f"{path} is schema {ledger.get('schema')!r}, "
+                         f"these tools read {ULP_LEDGER_SCHEMA}")
+    for platform_name, corpora in ledger["platforms"].items():
+        for corpus, models in corpora.items():
+            for model, entries in models.items():
+                for label, entry in entries.items():
+                    if not (isinstance(entry.get("bound"), int)
+                            and entry["bound"] > DEFAULT_ULP_BOUND
+                            and entry.get("reason")):
+                        raise SystemExit(
+                            f"{path}: {platform_name} {corpus} {model} {label} "
+                            f"needs an integer bound over {DEFAULT_ULP_BOUND} "
+                            f"and a reason")
+    return ledger
+
+
+def ulp_section(ledger, target_platform, corpus):
+    """{model: entries} for this platform and corpus, or None when the
+    ledger has never been measured there and the ULP gate is off."""
+    return ledger["platforms"].get(target_platform, {}).get(corpus)
+
+
+def ledger_notes(model, entries, measured):
+    """Notes for ledger entries that this replay beats by a wide margin."""
+    notes = []
+    for label, entry in sorted(entries.items()):
+        got = entry_measured(label, entries, measured)
+        if got <= entry["bound"] * ULP_TIGHTEN_FRACTION:
+            notes.append(f"ULP LEDGER {model} {label}: measured {got}, "
+                         f"recorded bound {entry['bound']}; rerun with "
+                         f"--update-ulp-ledger to tighten it")
+    return notes
+
+
+def updated_entries(old, measured, reason):
+    """The ledger entries for one model after a replay that passed.
+
+    Existing entries keep their reason and can only go down: to the new
+    measurement, or away once it is within the default. A value over the
+    default that no entry covers gets a new entry with `reason`. A value
+    over its bound is an error: the gate fails it before this runs.
+    """
+    new = {}
+    for label, entry in old.items():
+        got = entry_measured(label, old, measured)
+        if got > entry["bound"]:
+            raise ValueError(f"{label} measured {got} over bound {entry['bound']}")
+        if got > DEFAULT_ULP_BOUND:
+            new[label] = {"bound": int(got), "reason": entry["reason"]}
+    over = collections.defaultdict(dict)
+    for label, got in measured.items():
+        if got > DEFAULT_ULP_BOUND and label not in old \
+                and output_kind(label) not in old:
+            over[output_kind(label)][label] = got
+    for kind, values in over.items():
+        if len(values) > LEDGER_VALUE_ENTRIES_MAX:
+            new[kind] = {"bound": int(max(values.values())),
+                         "reason": f"{reason}; {len(values)} {kind} values "
+                                   f"over {DEFAULT_ULP_BOUND}"}
+        else:
+            for label, got in values.items():
+                new[label] = {"bound": int(got), "reason": reason}
+    return new
+
+
+def write_ulp_ledger(ledger, target_platform, corpus, measured, ran,
+                     provenance, path=ULP_LEDGER_PATH):
+    """Ratchet this platform's section for the models that ran.
+
+    measured is {model: {label: worst scaled ULP over the points}}.
+    """
+    section = ledger["platforms"].setdefault(target_platform, {}).setdefault(
+        corpus, {})
+    for model in ran:
+        old = section.get(model, {})
+        recorded_on = provenance.get(model)
+        reason = (f"measured on {target_platform}"
+                  + (f" against a reference recorded on {recorded_on}"
+                     if recorded_on and recorded_on != target_platform else "")
+                  + "; cause not yet explained")
+        entries = updated_entries(old, measured.get(model, {}), reason)
+        if entries:
+            section[model] = dict(sorted(entries.items()))
+        else:
+            section.pop(model, None)
+    ledger["platforms"][target_platform][corpus] = dict(sorted(section.items()))
+    path.write_text(json.dumps(ledger, indent=1, sort_keys=True) + "\n")
+
+
+def record_ulps(measured, ulps):
+    if measured is not None:
+        for label, got in ulps.items():
+            measured[label] = max(measured.get(label, 0), got)
+
+
 def run_check(cmd, timeout=None):
     """(process, CheckStatus) for one stanli_check run.
 
@@ -651,8 +865,13 @@ def fast_dev(rv, gv):
 
 
 def check_point(model, stan, dj, check_bin, point, pt, timeout, no_wa,
-                strict=False, fast_math=False, opts=None, off_platform=False):
+                strict=False, fast_math=False, opts=None, off_platform=False,
+                ulp_entries=None, measured=None):
     """Replay one recorded point. (status, worst, worst_ulp, n, detail).
+
+    ulp_entries, when not None, are the model's ULP ledger entries, and
+    every value is held to its bound (ulp_gate). measured, when given,
+    collects each value's scaled ULP distance, keeping the worst seen.
 
     A point whose entry has no `values` is one CmdStan itself refuses (it
     threw, or answered with a row of nan, which is how a unit_vector at
@@ -723,6 +942,14 @@ def check_point(model, stan, dj, check_bin, point, pt, timeout, no_wa,
         return ("NONFINITE", 0.0, 0, 0, f"point {point}: lp/gradient is nonfinite")
     floor = opts.scale_floor if opts else 1.0
     own = opts.value_limits if opts else {}
+    ulps = density_ulps(rv, gv)
+    record_ulps(measured, ulps)
+    if ulp_entries is not None:
+        labels = {("lp" if i == 0 else f"grad[{i}]"): (a, b)
+                  for i, (a, b) in enumerate(zip(rv, gv))}
+        failed = ulp_gate(ulp_entries, ulps, point, labels)
+        if failed:
+            return (failed[0], 0.0, max(ulps.values()), len(rv), failed[1])
     if fast_math:
         worst, worst_ulp = fast_dev(rv, gv)
     else:
@@ -784,6 +1011,14 @@ def check_point(model, stan, dj, check_bin, point, pt, timeout, no_wa,
                     f"point {point}: write_array is nonfinite")
         wworst, wulp = worst_pair(wref, wgot, floor)
         n += len(wref)
+        columns = names.split(",")
+        wulps = write_array_ulps(columns, wref, wgot)
+        record_ulps(measured, wulps)
+        if ulp_entries is not None:
+            labels = {f"wa {c}": (a, b) for c, a, b in zip(columns, wref, wgot)}
+            failed = ulp_gate(ulp_entries, wulps, point, labels)
+            if failed:
+                return (failed[0], worst, max(wulps.values()), n, failed[1])
         if fast_math:
             # These outputs keep the default gate, so they are judged here
             # and kept out of the deviation the fast gate reads.
@@ -792,7 +1027,6 @@ def check_point(model, stan, dj, check_bin, point, pt, timeout, no_wa,
                         f"point {point}: write_array {wworst:.2e}, "
                         f"allowed {WA_MAX_REL:.1e}")
         else:
-            columns = names.split(",")
             wwhere = worst_values(wref, wgot, floor, {},
                                   lambda i: column_label(columns[i], opts))
             where = tuple(b if dev > a_dev else a for a, b, a_dev, dev in
@@ -829,10 +1063,11 @@ def worst_values(rv, gv, floor, skip, label):
 
 def check_model(model, ref, pdb, check_bin, tmp, timeout, max_rel,
                 no_wa=False, target_platform=None,
-                fast_math=False, opts=None):
+                fast_math=False, opts=None, ulp_entries=None, measured=None):
     """Replay one model, under whatever KNOWN_GAPS says about it."""
     result = replay_model(model, ref, pdb, check_bin, tmp, timeout, max_rel,
-                          no_wa, target_platform, fast_math, opts)
+                          no_wa, target_platform, fast_math, opts,
+                          ulp_entries, measured)
     if model not in KNOWN_GAPS:
         return result
     _, status, rel, ulp, total, _, notes = result
@@ -848,8 +1083,10 @@ def check_model(model, ref, pdb, check_bin, tmp, timeout, max_rel,
 
 def replay_model(model, ref, pdb, check_bin, tmp, timeout, max_rel,
                  no_wa=False, target_platform=None,
-                 fast_math=False, opts=None):
+                 fast_math=False, opts=None, ulp_entries=None, measured=None):
     """Replay every point of one model.
+
+    ulp_entries and measured are as in check_point, over all points.
 
     Returns (model, status, max_rel, max_ulp, n_values, detail, notes).
     The deviation reported is the worst over the points held to the clean
@@ -895,13 +1132,18 @@ def replay_model(model, ref, pdb, check_bin, tmp, timeout, max_rel,
                 return (model, "REFERENCE_INCOMPLETE", 0.0, 0, 0,
                         "lp/gradient and write_array references are required", [])
     worst, worst_ulp, total, notes = 0.0, 0, 0, []
+    if measured is None:
+        measured = {}
     done = {}
     if opts:
+        # One dict per point: the workers would race on a shared one.
+        point_measured = {point: {} for point in POINTS}
         with concurrent.futures.ThreadPoolExecutor(len(POINTS)) as pool:
             done = {point: pool.submit(
                         check_point, model, stan, dj, check_bin, point,
                         ref["points"][str(point)], timeout, no_wa, strict,
-                        fast_math, opts, off_platform)
+                        fast_math, opts, off_platform, ulp_entries,
+                        point_measured[point])
                     for point in POINTS if str(point) in ref["points"]
                     and (model, point) not in QUARANTINED}
     for point in POINTS:
@@ -929,10 +1171,15 @@ def replay_model(model, ref, pdb, check_bin, tmp, timeout, max_rel,
             notes.append(f"UNREFERENCED {model} point {point}: ran clean, "
                          f"but nothing compared it against CmdStan")
             continue
-        status, rel, ulp, n, detail = (
-            done[point].result() if point in done else check_point(
+        if point in done:
+            status, rel, ulp, n, detail = done[point].result()
+            for label, got in point_measured[point].items():
+                measured[label] = max(measured.get(label, 0), got)
+        else:
+            status, rel, ulp, n, detail = check_point(
                 model, stan, dj, check_bin, point, pt, timeout, no_wa, strict,
-                fast_math, off_platform=off_platform))
+                fast_math, off_platform=off_platform, ulp_entries=ulp_entries,
+                measured=measured)
         total += n
         if status != "OK":
             return (model, status, worst, worst_ulp, total, detail, notes)
@@ -956,6 +1203,8 @@ def replay_model(model, ref, pdb, check_bin, tmp, timeout, max_rel,
                          f"{ILL_CONDITIONED[model]} ({rel:.2e})")
         if pt.get("status") != "MISMATCH" and model not in ILL_CONDITIONED:
             worst, worst_ulp = max(worst, rel), max(worst_ulp, ulp)
+    if ulp_entries:
+        notes += ledger_notes(model, ulp_entries, measured)
     return (model, "OK", worst, worst_ulp, total, "", notes)
 
 
@@ -1277,10 +1526,15 @@ def pin_drift(recorded, required=("cmdstan", "stan", "math")):
 
 
 def replay_corpus(name, selected, check_bin, stanc, jobs, timeout,
-                  target_platform=None):
+                  target_platform=None, update_ledger=False):
     """Replay a local corpus against its archive. Exit status."""
     corpus = CORPORA[name]
     refs, _ = load_corpus_refs(corpus)
+    target_platform = target_platform or native_platform()
+    ledger_key = name + (" --stanc" if stanc else "")
+    ledger = load_ulp_ledger()
+    section = ulp_section(ledger, target_platform, ledger_key)
+    measured = collections.defaultdict(dict)
     with tempfile.TemporaryDirectory(prefix=f"stanli_{name}_") as tmp:
         work = pathlib.Path(tmp)
         models = (corpus.models(work) if corpus.models
@@ -1300,6 +1554,11 @@ def replay_corpus(name, selected, check_bin, stanc, jobs, timeout,
         if stanc and corpus.mir:
             print(f"the {name} corpus replays its build-generated MIR")
             return 2
+        if section is not None and set(section) - set(models):
+            print("ULP ledger entries for models the corpus no longer has: "
+                  + " ".join(sorted(set(section) - set(models))))
+            return 2
+        print(ulp_gate_banner(section, target_platform, ledger_key))
         failures, values = [], 0
 
         def one(model):
@@ -1337,7 +1596,10 @@ def replay_corpus(name, selected, check_bin, stanc, jobs, timeout,
                           labels, columns, VALUE_ULP_LIMITS.get(model, {}))
             return check_model(model, ref, None, check_bin, work, timeout,
                                1e-9, target_platform=target_platform,
-                               opts=opts)
+                               opts=opts,
+                               ulp_entries=(None if section is None
+                                            else section.get(model, {})),
+                               measured=measured[model])
 
         leg = " through stock stanc" if stanc else ""
         with concurrent.futures.ThreadPoolExecutor(jobs) as pool:
@@ -1357,8 +1619,25 @@ def replay_corpus(name, selected, check_bin, stanc, jobs, timeout,
           f"CmdStan references{leg} ({values} values compared)")
     if failures:
         print(f"{len(failures)} FAILED: " + " ".join(failures))
+        if update_ledger:
+            print("ULP ledger not updated: every model must pass first")
         return 1
+    if update_ledger:
+        write_ulp_ledger(ledger, target_platform, ledger_key, measured,
+                         selected or sorted(models),
+                         {m: refs[m]["recorded"].get("platform") for m in refs})
+        print(f"updated {ULP_LEDGER_PATH.relative_to(REPO)} for "
+              f"{target_platform}, {ledger_key}")
     return 0
+
+
+def ulp_gate_banner(section, target_platform, corpus):
+    if section is None:
+        return (f"ULP gate off: {ULP_LEDGER_PATH.name} has no {corpus} section "
+                f"for {target_platform}")
+    return (f"ULP gate: every value within {DEFAULT_ULP_BOUND} scaled ULP of "
+            f"CmdStan, {len(section)} models with measured exceptions on "
+            f"{target_platform}")
 
 
 def main():
@@ -1402,13 +1681,22 @@ def main():
                     help="print each model's worst deviation and ULP")
     ap.add_argument("--filter", default="", metavar="SUBSTR",
                     help="with --wa-report, select model names containing this")
+    ap.add_argument("--update-ulp-ledger", action="store_true",
+                    help="after a passing replay, write the measured ULP "
+                         "exceptions for this platform into "
+                         f"{ULP_LEDGER_PATH.relative_to(REPO)}; existing "
+                         "bounds only go down")
     args = ap.parse_intermixed_args()
+    if args.update_ulp_ledger and (args.fast_math or args.no_wa):
+        ap.error("--update-ulp-ledger measures the default build with "
+                 "write_array")
     if args.corpus:
         if args.pdb or args.models:
             ap.error("--corpus takes models with --model")
         return replay_corpus(args.corpus, args.model, args.check.resolve(),
                              args.stanc and args.stanc.resolve(), args.jobs,
-                             args.timeout, args.target_platform)
+                             args.timeout, args.target_platform,
+                             args.update_ulp_ledger)
     if args.pdb is None:
         ap.error("the posteriordb checkout is required without --corpus")
     if args.max_rel is None:
@@ -1475,13 +1763,27 @@ def main():
               "scaled-error and structural checks")
     if compiler:
         print(f"runtime compiler: {compiler}; references selected before evaluation")
+    # Fast mode has its own gate, and the wasm driver has no write_array.
+    ledger = load_ulp_ledger()
+    section = (None if args.fast_math or args.no_wa
+               else ulp_section(ledger, args.target_platform, "main"))
+    if section is not None and not args.models and set(section) - set(refs):
+        print("ULP ledger entries for models with no reference: "
+              + " ".join(sorted(set(section) - set(refs))))
+        return 2
+    print("ULP gate off: fast mode and --no-wa replays keep their own gates"
+          if args.fast_math or args.no_wa
+          else ulp_gate_banner(section, args.target_platform, "main"))
+    measured = {m: {} for m in models}
     tmp = pathlib.Path(tempfile.mkdtemp(prefix="stanli_refs_"))
     failures, values = [], 0
     worst_overall = ("", 0.0, 0)
     with concurrent.futures.ThreadPoolExecutor(args.jobs) as pool:
         futs = [pool.submit(check_model, m, refs[m], pdb, check_bin, tmp,
                             args.timeout, args.max_rel, args.no_wa,
-                            args.target_platform, args.fast_math)
+                            args.target_platform, args.fast_math, None,
+                            None if section is None else section.get(m, {}),
+                            measured[m])
                 for m in models]
         for fut in concurrent.futures.as_completed(futs):
             model, status, rel, ulp, n, detail, notes = fut.result()
@@ -1506,7 +1808,14 @@ def main():
     if failures:
         print(f"{len(failures)} FAILED: "
               + " ".join(m for m, _, _ in failures))
+        if args.update_ulp_ledger:
+            print("ULP ledger not updated: every model must pass first")
         return 1
+    if args.update_ulp_ledger:
+        write_ulp_ledger(ledger, args.target_platform, "main", measured, models,
+                         {m: refs[m]["recorded"].get("platform") for m in models})
+        print(f"updated {ULP_LEDGER_PATH.relative_to(REPO)} for "
+              f"{args.target_platform}, main")
     return 0
 
 
