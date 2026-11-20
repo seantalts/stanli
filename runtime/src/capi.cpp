@@ -53,6 +53,19 @@ void put_err(char* err, size_t err_len, const char* what) {
   err[err_len - 1] = '\0';
 }
 
+// An autodiff stack for the calling thread while a call runs, when that
+// thread has none: a binding may call from a thread of its own, and Stan's
+// services and its Hessian evaluate var expressions on the calling thread.
+class CallerTape {
+ public:
+  CallerTape() {
+    if (stan::math::ChainableStack::instance_ == nullptr) tape_.emplace();
+  }
+
+ private:
+  std::optional<stan::math::ChainableStack> tape_;
+};
+
 // Argument rules for every entry point, with one wording. The first broken
 // rule wins.
 class Rules {
@@ -1046,8 +1059,7 @@ int stanli_hessian_with_poll(stanli_model* m, const double* q, double* lp,
       throw std::invalid_argument(
           "stanli_hessian needs a model, a point, lp and a Hessian buffer");
     const int64_t n = m->ex->n_params();
-    std::optional<stan::math::ChainableStack> tape;
-    if (stan::math::ChainableStack::instance_ == nullptr) tape.emplace();
+    const CallerTape tape;
     stanli::detail::ServiceHooks hooks;
     if (poll != nullptr)
       hooks.poll = [poll, poll_user] { return poll(poll_user) != 0; };
@@ -1185,6 +1197,7 @@ int stanli_run_pathfinder(stanli_model* m, uint32_t seed, int chain_id,
                           double* lp_approx, double* summary, stanli_path_cb cb,
                           void* user, char* err, size_t err_len) {
   try {
+    const CallerTape tape;
     Rules rules;
     rules.chain_ids(chain_id, 1);
     rules.at_least("num_draws", num_draws, 1);
@@ -1244,6 +1257,7 @@ int stanli_pathfinder_inits_with_poll(stanli_model* m, uint32_t seed,
                                       char* err, size_t err_len) {
   if (interrupted != nullptr) *interrupted = 0;
   try {
+    const CallerTape tape;
     Rules rules;
     rules.at_least("chains", chains, 1);
     rules.chain_ids(chain_id, 1);
@@ -1887,6 +1901,7 @@ int stanli_optimize_with_poll(stanli_model* m, const stanli_optimize_opts* opts,
                               int* interrupted, char* err, size_t err_len) {
   if (interrupted != nullptr) *interrupted = 0;
   try {
+    const CallerTape tape;
     if (stanli_optimize_opts_check(opts, err, err_len) != 0) return 1;
     stanli::OptimizeConfig cfg;
     cfg.seed = opts->seed;
@@ -1952,6 +1967,7 @@ int stanli_fixed_param(stanli_model* m, const stanli_fixed_param_opts* opts,
                        void* poll_user, int* interrupted, char* err,
                        size_t err_len) {
   try {
+    const CallerTape tape;
     if (interrupted != nullptr) *interrupted = 0;
     if (stanli_fixed_param_opts_check(opts, err, err_len) != 0) return 1;
     const stanli::AlgorithmHost host =
@@ -2016,6 +2032,7 @@ int stanli_laplace_sample(stanli_model* m, const stanli_laplace_opts* opts,
                           stanli_sample_poll_cb poll, void* poll_user,
                           int* interrupted, char* err, size_t err_len) {
   try {
+    const CallerTape tape;
     if (interrupted != nullptr) *interrupted = 0;
     if (stanli_laplace_opts_check(opts, err, err_len) != 0) return 1;
     const stanli::AlgorithmHost host =
@@ -2080,6 +2097,7 @@ int stanli_pathfinder(stanli_model* m, const stanli_pathfinder_opts* opts,
                       void* poll_user, int* interrupted, char* err,
                       size_t err_len) {
   try {
+    const CallerTape tape;
     if (interrupted != nullptr) *interrupted = 0;
     if (n_draws != nullptr) *n_draws = 0;
     if (stanli_pathfinder_opts_check(opts, err, err_len) != 0) return 1;
@@ -2131,6 +2149,7 @@ int stanli_variational(stanli_model* m, const stanli_variational_opts* opts,
                        stanli_sample_poll_cb poll, void* poll_user,
                        int* interrupted, char* err, size_t err_len) {
   try {
+    const CallerTape tape;
     if (interrupted != nullptr) *interrupted = 0;
     if (stanli_variational_opts_check(opts, err, err_len) != 0) return 1;
     const stanli::AlgorithmHost host =
