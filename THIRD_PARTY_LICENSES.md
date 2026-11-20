@@ -114,3 +114,5 @@ code is used. `tools/gen_stanguide_models.py` extracts it, with the edits listed
 in `tests/stanguide/README.md`. One data file is derived from the explosion
 dates in the R package boot (License "Unlimited"). The BSD text is in
 `tests/stanguide/licenses/`.
+
+- `tests/hbayesdm/`: hBayesDM 2.0.1, GPL-3, by Woo-Young Ahn, Nate Haines and Lei Zhang with contributions from Jinwoo Jeong, Harhim Park, Jaeyeong Yang and Jethro Lee. The four models have no `#include` and are copied as published.

@@ -15,7 +15,7 @@ REPO = Path(__file__).resolve().parents[1]
 # Models from CRAN packages, one directory per package under tests/, named
 # for the package in lower case. A new package is one more name here.
 CRAN_PACKAGES = ("oncobayes2", "rstanarm", "multinma", "epinow2", "mlumr",
-                 "rbioacc", "beeguts", "hdbayes", "ecoensemble")
+                 "rbioacc", "beeguts", "hdbayes", "ecoensemble", "hbayesdm")
 LOCAL_COLLECTIONS = ("brms", "rethinking", "cogmod", "ctsem",
                      "examplemodels", "stanguide") + CRAN_PACKAGES
 GROUPS = {"teaching": {"educational", "rethinking", "brms"},

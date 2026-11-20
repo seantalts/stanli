@@ -1,11 +1,11 @@
 # Corpus status
 
-Models that evaluate: 404/405
-Models with CmdStan reference values: 404/405, at 1212 evaluation points in total.
+Models that evaluate: 408/409
+Models with CmdStan reference values: 408/409, at 1224 evaluation points in total.
 
 The corpus includes models from posteriordb, generated brms and cogmod models, ctsem's state-space template, models from CRAN packages, imported teaching models, and language fixtures. The source collection column says where each model came from. `tools/verify_refs.py` checks all reference values the same way.
 
-For 388 verified models, the table below shows how far stanli was from CmdStan at the primary evaluation point. These numbers were measured when the reference was recorded. Imported references keep their original CmdStan answers and a record of how each one was made. No deviation was recorded for them, so their rows say "not recorded". Having a reference for a model does not mean that the current build matches it. The numerical replay checks the current build.
+For 392 verified models, the table below shows how far stanli was from CmdStan at the primary evaluation point. These numbers were measured when the reference was recorded. Imported references keep their original CmdStan answers and a record of how each one was made. No deviation was recorded for them, so their rows say "not recorded". Having a reference for a model does not mean that the current build matches it. The numerical replay checks the current build.
 
 A model passes only when tools/verify_sample.py finds that stanli's log_prob and full gradient match CmdStan's at a shared, fixed evaluation point. The accuracy columns show the worst deviation over lp and every gradient component, as a relative difference and in ULPs. 0 ULP means bitwise identical to CmdStan. The bitwise results are for information only. The replay requires a scaled error of at most 1e-9, with documented exceptions for ill-conditioned models. Models that evaluate but are not verified are listed in a separate section and do not count as passing.
 
@@ -181,6 +181,10 @@ A model passes only when tools/verify_sample.py finds that stanli's log_prob and
 | `gp_regr` | posteriordb | 4 | 0 (bitwise) | 0 |
 | `gpcm_latent_reg_irt` | posteriordb | 531 | 2.6e-13 | 4608 |
 | `grsm_latent_reg_irt` | posteriordb | 409 | 1.2e-14 | 81 |
+| `hbayesdm_dd_hyperbolic` | hbayesdm | 45 | 8.4e-16 | 7 |
+| `hbayesdm_gng_m4` | hbayesdm | 73 | 5.6e-16 | 5 |
+| `hbayesdm_igt_pvl_delta` | hbayesdm | 25 | 4.2e-16 | 2 |
+| `hbayesdm_prl_rp` | hbayesdm | 67 | 8.6e-16 | 5 |
 | `hdbayes_lm_npp` | hdbayes | 7 | 7.1e-16 | 4 |
 | `hdbayes_pwe_npp` | hdbayes | 9 | 7.5e-16 | 4 |
 | `hier_2pl` | posteriordb | 670 | 0 (bitwise) | 0 |
@@ -593,6 +597,10 @@ The reference recorder also saves CmdStan's write_array output at the same point
 | `gp_regr` | 3 |
 | `gpcm_latent_reg_irt` | 550 |
 | `grsm_latent_reg_irt` | 418 |
+| `hbayesdm_dd_hyperbolic` | 2266 |
+| `hbayesdm_gng_m4` | 14548 |
+| `hbayesdm_igt_pvl_delta` | 448 |
+| `hbayesdm_prl_rp` | 8149 |
 | `hdbayes_lm_npp` | 6 |
 | `hdbayes_pwe_npp` | 64 |
 | `hier_2pl` | 804 |

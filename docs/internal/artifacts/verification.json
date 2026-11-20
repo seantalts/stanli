@@ -1098,6 +1098,34 @@
   "point": 0,
   "status": "VERIFIED"
  },
+ "hbayesdm_dd_hyperbolic": {
+  "max_rel": 8.373881509240447e-16,
+  "max_ulp": 7,
+  "n_values": 45,
+  "point": 0,
+  "status": "VERIFIED"
+ },
+ "hbayesdm_gng_m4": {
+  "max_rel": 5.551115123125783e-16,
+  "max_ulp": 5,
+  "n_values": 73,
+  "point": 0,
+  "status": "VERIFIED"
+ },
+ "hbayesdm_igt_pvl_delta": {
+  "max_rel": 4.243273181495311e-16,
+  "max_ulp": 2,
+  "n_values": 25,
+  "point": 0,
+  "status": "VERIFIED"
+ },
+ "hbayesdm_prl_rp": {
+  "max_rel": 8.586801259102456e-16,
+  "max_ulp": 5,
+  "n_values": 67,
+  "point": 0,
+  "status": "VERIFIED"
+ },
  "hdbayes_lm_npp": {
   "max_rel": 7.122167652447329e-16,
   "max_ulp": 4,

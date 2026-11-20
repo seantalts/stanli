@@ -70,6 +70,7 @@ paths and hashes in raw records unchanged.
 | [Model from BeeGUTS](../../tests/beeguts/README.md) | Fixture scope, provenance or test workflow. |
 | [Models from hdbayes](../../tests/hdbayes/README.md) | Fixture scope, provenance or test workflow. |
 | [Model from EcoEnsemble](../../tests/ecoensemble/README.md) | Fixture scope, provenance or test workflow. |
+| [Models from hBayesDM](../../tests/hbayesdm/README.md) | Fixture scope, provenance or test workflow. |
 | [Models from stan-dev/example-models](../../tests/examplemodels/README.md) | Fixture scope, provenance or test workflow. |
 | [Programs from the Stan User's Guide](../../tests/stanguide/README.md) | Fixture scope, provenance or test workflow. |
 | [Compiler producer fixtures](../../tests/compiler/README.md) | Fixture scope, provenance or test workflow. |
