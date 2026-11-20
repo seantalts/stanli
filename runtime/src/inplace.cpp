@@ -246,6 +246,14 @@ int forward_stores_to_loads(Graph& g, const std::vector<int>& roots) {
     return it == rename.end() ? s : it->second;
   };
 
+  // A store reads its value, and a copying store also reads its base; an
+  // in-place store's base is the vector it writes, not a reader of it.
+  const auto observe_store_inputs = [&](const Op& op) {
+    for (int j = 0; j < op.n_in; ++j)
+      if (op.in[j] >= 0 && op.in[j] != op.out)
+        last_store[(size_t)op.in[j]].observed = true;
+  };
+
   std::vector<char> drop(g.ops.size(), 0);
   int removed = 0;
   for (size_t i = 0; i < g.ops.size(); ++i) {
@@ -253,6 +261,7 @@ int forward_stores_to_loads(Graph& g, const std::vector<int>& roots) {
     for (int j = 0; j < op.n_in; ++j) op.in[j] = resolve(op.in[j]);
 
     if (op.opcode == OP_SET_INDEX || op.opcode == OP_SET_INDEX_INPLACE) {
+      observe_store_inputs(op);
       // The written vector is op.out (both forms), and the element written
       // is idata[0]. A later write to the same vector supersedes this one.
       Store& prev = last_store[(size_t)op.out];
@@ -272,6 +281,7 @@ int forward_stores_to_loads(Graph& g, const std::vector<int>& roots) {
       // have a distinct output and therefore erase nothing in ordinary SSA
       // graphs, but spelling all four contracts keeps this correct for a
       // hand-built graph too.
+      observe_store_inputs(op);
       last_store[(size_t)op.out] = Store{};
       continue;
     }
