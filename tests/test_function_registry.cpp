@@ -3,6 +3,7 @@
 #include <stanli/builtin_registry.hpp>
 #include <stanli/density_registry.hpp>
 #include <stanli/function_registry.hpp>
+#include <stanli/int_arith.hpp>
 #include <stanli/mir.hpp>
 #include <stanli/optable.hpp>
 
@@ -674,6 +675,39 @@ int main() {
   if (!refused) {
     std::printf("FAIL integer division by zero was not refused\n");
     return 1;
+  }
+  // Stan's int arithmetic, as every evaluator computes it: two's-complement
+  // wrapping, division truncated toward zero, and Stan Math's errors for a
+  // zero divisor.
+  {
+    constexpr int kMax = std::numeric_limits<int>::max();
+    constexpr int kMin = std::numeric_limits<int>::min();
+    const auto message = [](auto&& evaluate) {
+      try {
+        (void)evaluate();
+      } catch (const std::domain_error& e) {
+        return std::string(e.what());
+      }
+      return std::string("no error");
+    };
+    const bool ok =
+        evaluate_integer_binary_builtin(OP_ADD, kMax, 1) == kMin &&
+        evaluate_integer_binary_builtin(OP_SUB, kMin, 1) == kMax &&
+        evaluate_integer_binary_builtin(OP_MUL, kMax, 2) == -2 &&
+        evaluate_integer_binary_builtin(OP_DIV, -7, 2) == -3 &&
+        evaluate_integer_binary_builtin(OP_DIV, 7, -2) == -3 &&
+        evaluate_integer_binary_builtin(OP_DIV, kMin, -1) == kMin &&
+        int_arith(IntOp::Mod, -7, 2) == -1 &&
+        int_arith(IntOp::Mod, 7, -2) == 1 &&
+        int_arith(IntOp::Mod, kMin, -1) == 0 && int_negate(kMin) == kMin &&
+        message([] { return evaluate_integer_binary_builtin(OP_DIV, 1, 0); }) ==
+            "divide: denominator is 0" &&
+        message([] { return int_arith(IntOp::Mod, 1, 0); }) ==
+            "modulus: divisor is 0";
+    if (!ok) {
+      std::printf("FAIL Stan integer arithmetic\n");
+      return 1;
+    }
   }
   const FunctionSpec* head_ints =
       function_spec("head", 2, uint64_t{3}, FunctionArgumentKind::Integer);

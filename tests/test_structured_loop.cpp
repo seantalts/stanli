@@ -1915,7 +1915,8 @@ static void integer_result_tests() {
             [&] {
               (void)evaluate(
                   retry,
-                  static_cast<double>(std::numeric_limits<int32_t>::max()), 1);
+                  static_cast<double>(std::numeric_limits<int32_t>::max()) + 1,
+                  1);
             },
             "integer arithmetic exceeds Stan integer range"),
         "integer arithmetic exception is preserved");
@@ -1925,7 +1926,7 @@ static void integer_result_tests() {
 
   Executor division_retry(outer(imported_integer_output_plan(3)));
   check(throws<std::domain_error>([&] { (void)evaluate(division_retry, 4, 0); },
-                                  "integer division by zero"),
+                                  "divide: denominator is 0"),
         "integer division exception is preserved");
   close(evaluate(division_retry, 4, 2).value, 2,
         "integer division retry value");

@@ -1,5 +1,7 @@
 #include "lower_internal.hpp"
 
+#include <stanli/int_arith.hpp>
+
 #include <numeric>
 
 namespace stanli {
@@ -329,8 +331,8 @@ long Lowering::eval_int(const mir::Expr& e) {
                                                      : std::min(a, b);
       }
       if (e.name == "sum" && e.args.size() == 1) {
-        long acc = 0;
-        for (int v : const_ints(e.args[0])) acc += v;
+        int acc = 0;
+        for (int v : const_ints(e.args[0])) acc = int_arith(IntOp::Add, acc, v);
         return acc;
       }
       // Stock stanc's --O1 folds an integer a * b + c into fma(a, b, c).
@@ -338,7 +340,11 @@ long Lowering::eval_int(const mir::Expr& e) {
           std::all_of(e.args.begin(), e.args.end(), [](const mir::Expr& a) {
             return mir::is_unsized(a, mir::UnsizedLeaf::Int);
           }))
-        return eval_int(e.args[0]) * eval_int(e.args[1]) + eval_int(e.args[2]);
+        return int_arith(
+            IntOp::Add,
+            int_arith(IntOp::Mul, static_cast<int>(eval_int(e.args[0])),
+                      static_cast<int>(eval_int(e.args[1]))),
+            static_cast<int>(eval_int(e.args[2])));
       if (const BuiltinSpec* pred =
               e.args.size() == 2 ? shaped_builtin_spec(
                                        e.name, 2, BuiltinShapePolicy::Predicate)
