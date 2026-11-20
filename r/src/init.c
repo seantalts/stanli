@@ -26,9 +26,7 @@ extern SEXP stanli_r_model_whiten(SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP,
                                   SEXP, SEXP);
 extern SEXP stanli_r_param_blocks(SEXP);
 extern SEXP stanli_r_parameter_annotations(SEXP);
-extern SEXP stanli_r_sparse_factor_new(SEXP, SEXP, SEXP, SEXP, SEXP);
-extern SEXP stanli_r_sparse_factor_get(SEXP, SEXP);
-extern SEXP stanli_r_sparse_factor_lowrank(SEXP, SEXP, SEXP);
+extern SEXP stanli_r_laplace_whiten(SEXP, SEXP, SEXP, SEXP);
 extern SEXP stanli_r_unconstrain_inits(SEXP, SEXP);
 extern SEXP stanli_r_pathfinder_inits(SEXP, SEXP, SEXP, SEXP, SEXP);
 extern SEXP stanli_r_check_sample_options(SEXP);
@@ -72,10 +70,7 @@ static const R_CallMethodDef CallEntries[] = {
     {"stanli_r_param_blocks", (DL_FUNC)&stanli_r_param_blocks, 1},
     {"stanli_r_parameter_annotations", (DL_FUNC)&stanli_r_parameter_annotations,
      1},
-    {"stanli_r_sparse_factor_new", (DL_FUNC)&stanli_r_sparse_factor_new, 5},
-    {"stanli_r_sparse_factor_get", (DL_FUNC)&stanli_r_sparse_factor_get, 2},
-    {"stanli_r_sparse_factor_lowrank", (DL_FUNC)&stanli_r_sparse_factor_lowrank,
-     3},
+    {"stanli_r_laplace_whiten", (DL_FUNC)&stanli_r_laplace_whiten, 4},
     {"stanli_r_unconstrain_inits", (DL_FUNC)&stanli_r_unconstrain_inits, 2},
     {"stanli_r_pathfinder_inits", (DL_FUNC)&stanli_r_pathfinder_inits, 5},
     {"stanli_r_check_sample_options", (DL_FUNC)&stanli_r_check_sample_options,

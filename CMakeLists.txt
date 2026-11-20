@@ -401,6 +401,7 @@ set(STANLI_RUNTIME_SOURCES
   runtime/src/structured_loop.cpp
   runtime/src/whiten.cpp
   runtime/src/sparse_factor.cpp
+  runtime/src/laplace.cpp
   runtime/src/reduce_sum.cpp
   runtime/src/init_interp.cpp
   runtime/src/unconstrain.cpp
@@ -1404,7 +1405,8 @@ set(STANLI_TESTS
   test_odevariadic test_callback_values test_algebra test_brmsmono
   test_reduce_sum
   test_structured_arrays test_pathfinder test_algorithms test_unconstrain
-  test_init_interp test_constrain_structured test_csr_times_vector)
+  test_init_interp test_constrain_structured test_csr_times_vector
+  test_laplace)
 foreach(STANLI_TEST IN LISTS STANLI_TESTS)
   stanli_add_test(${STANLI_TEST})
 endforeach()
@@ -1434,6 +1436,15 @@ if(STANLI_FAST_TEST_TUS)
   target_compile_options(test_capi PRIVATE -O0)
 endif()
 add_test(NAME test_capi COMMAND test_capi
+         WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
+
+# The Laplace whitening builder, through the same boundary.
+add_executable(test_laplace_capi tests/test_laplace_capi.cpp)
+target_link_libraries(test_laplace_capi PRIVATE stanli_shared)
+if(STANLI_FAST_TEST_TUS)
+  target_compile_options(test_laplace_capi PRIVATE -O0)
+endif()
+add_test(NAME test_laplace_capi COMMAND test_laplace_capi
          WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
 
 # write_array lowered beside log_prob, through the same boundary.

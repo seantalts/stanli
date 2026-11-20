@@ -26,7 +26,7 @@ laplace_whiten(
 
 \item{init}{An unconstrained starting point that replaces Pathfinder.}
 
-\item{seed}{Seed for Pathfinder and for the model.}
+\item{seed}{Seed for Pathfinder, for the model and for the pattern probes.}
 
 \item{max_outer, inner_iter}{L-BFGS iteration limits for `theta` and `u`.}
 
@@ -60,9 +60,10 @@ and a model with none is an error. A `latent` argument wins when both are
 present.
 }
 \details{
-The steps, with the defaults the Python builder and its benchmark use: start
-at the Pathfinder mean (or `init`) and find the sparsity pattern of the
-Hessian there; maximize over `theta` the marginal
+The runtime's builder, which Python's `laplace_whiten` also calls, does the
+work. The steps, with the defaults its benchmark used: start at the
+Pathfinder mean (or `init`) and find the sparsity pattern of the Hessian
+there; maximize over `theta` the marginal
 `log p(theta, u_hat(theta)) - log det(-H_uu) / 2` by L-BFGS, with `H_uu`
 from central differences of the gradient along the pattern; at the result
 take `Q = -H`, drop entries below `threshold` relative to
