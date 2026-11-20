@@ -2440,15 +2440,18 @@ static void test_kernel_call_ops_carved(bool compact) {
   if (!compact) test_unsetenv("STANLI_NO_ISLAND_COMPACT");
 }
 
-static void test_too_many_live_ins() {
+// More live-ins than Op::in holds: the carver packs the leading ones with a
+// CONCAT2 chain, as necessity islands do, and the gradient matches the ops.
+static void test_packed_live_ins_carve(int n) {
+  const std::string what = "livein" + std::to_string(n);
   Graph g;
   Fills fills;
   std::vector<int> ps;
-  for (int k = 0; k < 7; ++k) ps.push_back(g.add_slot(1, true));
+  for (int k = 0; k < n; ++k) ps.push_back(g.add_slot(1, true));
   int acc = ps[0];
-  for (int k = 1; k < 7; ++k) {
+  for (int k = 1; k < n; ++k) {
     const int s = g.add_slot(1, false);
-    g.add_op(OP_ADD, {acc, ps[k]}, s);
+    g.add_op(k % 2 ? OP_ADD : OP_MUL, {acc, ps[k]}, s);
     acc = s;
   }
   for (int k = 0; k < 40; ++k) {
@@ -2460,10 +2463,21 @@ static void test_too_many_live_ins() {
   g.add_op(OP_SQUARE, {acc}, lp);
   g.result_slot = lp;
   std::vector<int> terms{lp};
-  const size_t before = g.ops.size();
+  Graph ref = g;
+  const std::vector<double> want = run_grad(std::move(ref), fills);
   const int carved = carve_islands(g, fills, terms, {});
-  expect("livein7 none carved", carved == 0);
-  expect("livein7 ops unchanged", g.ops.size() == before);
+  expect((what + " carved==1").c_str(), carved == 1);
+  int concats = 0, island_inputs = -1;
+  for (const Op& op : g.ops) {
+    concats += op.opcode == OP_CONCAT2;
+    if (op.opcode == OP_ISLAND) island_inputs = op.n_in;
+  }
+  expect((what + " packs the leading live-ins").c_str(), concats == n - 6);
+  expect((what + " island reads six inputs").c_str(), island_inputs == 6);
+  const std::vector<double> got = run_grad(std::move(g), fills);
+  expect((what + " gradient size").c_str(), got.size() == want.size());
+  for (size_t i = 0; i < want.size() && i < got.size(); ++i)
+    expect_close(what + " v" + std::to_string(i), got[i], want[i]);
 }
 
 static void test_six_live_ins_ok() {
@@ -3228,7 +3242,8 @@ int main() {
   test_unsupported_op_splits();
   test_vector_op_joins_runs();
   test_wide_vector_op_joins_runs();
-  test_too_many_live_ins();
+  test_packed_live_ins_carve(7);
+  test_packed_live_ins_carve(12);
   test_six_live_ins_ok();
   test_packed_live_ins();
   test_input_windows();

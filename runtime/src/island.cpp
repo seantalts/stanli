@@ -46,7 +46,6 @@ namespace stanli {
 namespace {
 
 constexpr int64_t kMinIslandOps = 32;
-constexpr int kMaxLiveIns = 6;
 // What one value register costs against one element of graph traffic. The
 // value file is written by the forward and read by the backward. The compact
 // adjoint file is charged separately below: copied registers share a cell,
@@ -258,7 +257,6 @@ struct Compiler {
   // register is not counted here: it can end up aliased into a SET_INDEX
   // or SET_SLICE output and stop being just a constant.
   int64_t n_const_regs = 0;
-  bool ok = true;
 
   // A copy-then-modify op (SET_INDEX/SET_SLICE writing a slot distinct
   // from its base) can reuse the base's registers when nothing reads the
@@ -304,10 +302,6 @@ struct Compiler {
       // where it stops holding just the constant.
       if (len == 1) n_const_regs += 1;
       return r;
-    }
-    if ((int)live_in_slots.size() >= kMaxLiveIns) {
-      ok = false;
-      return 0;
     }
     const int r = alloc(len);
     live_in_slots.push_back(slot);
@@ -384,7 +378,7 @@ struct Compiler {
     n_call_scratch += call.scratch_len;
     prog.calls.push_back(std::move(call));
     emit(Program::CALL, 0, (int)prog.calls.size() - 1);
-    return ok;
+    return true;
   }
 
   // The scalar instruction, or one ranged instruction with its length-1
@@ -400,19 +394,19 @@ struct Compiler {
     const int d = write_reg(op.out);
     if (out_len == 1) {
       prog.code.push_back(Program::Instr(c, d, r[0], r[1], r[2], law));
-      return ok;
+      return true;
     }
     if (c == Program::LOG || c == Program::EXP) {
       emit(c == Program::LOG ? Program::LOG_RANGE : Program::EXP_RANGE, d, r[0],
            0, 0, (int)out_len);
-      return ok;
+      return true;
     }
     Program::Instr I(Program::RANGE, d, r[0], r[1], r[2], (int32_t)out_len);
     I.sub = static_cast<uint8_t>(c);
     I.bcast = bcast;
     I.law = static_cast<uint8_t>(law);
     prog.code.push_back(I);
-    return ok;
+    return true;
   }
 
   bool compile(const Op& op) {
@@ -448,12 +442,12 @@ struct Compiler {
         const int d = write_reg(op.out);
         if (op.n_in == 1) {
           emit(Program::MOV, d, a0);
-          return ok;
+          return true;
         }
         emit(Program::ADD, d, a0, read_reg(op.in[1]));
         for (int j = 2; j < op.n_in; ++j)
           emit(Program::ADD, d, d, read_reg(op.in[j]));
-        return ok;
+        return true;
       }
 #define X(opc, code) case opc:
         STANLI_ISLAND_UNARY_LIST(X)
@@ -464,14 +458,14 @@ struct Compiler {
         if (idx < 0 || idx >= g.slots[op.in[0]].len) return false;
         const int a = read_reg(op.in[0]);
         emit(Program::MOV, write_reg(op.out), a + idx);
-        return ok;
+        return true;
       }
       case OP_SLICE: {
         const int start = op.idata[0];
         if (start < 0 || start + out_len > g.slots[op.in[0]].len) return false;
         const int a = read_reg(op.in[0]);
         emit(Program::MOVR, write_reg(op.out), a + start, 0, 0, (int)out_len);
-        return ok;
+        return true;
       }
       case OP_SET_INDEX:
       case OP_SET_INDEX_INPLACE: {
@@ -484,7 +478,7 @@ struct Compiler {
         const int d = write_reg(op.out);
         if (d != base) emit(Program::MOVR, d, base, 0, 0, (int)out_len);
         emit(Program::MOV, d + idx, val);
-        return ok;
+        return true;
       }
       case OP_SET_SLICE:
       case OP_SET_SLICE_INPLACE: {
@@ -500,26 +494,26 @@ struct Compiler {
         const int d = write_reg(op.out);
         if (d != base) emit(Program::MOVR, d, base, 0, 0, (int)out_len);
         emit(Program::MOVR, d + start, val, 0, 0, (int)vlen);
-        return ok;
+        return true;
       }
       case OP_DOT: {
         if (op.variant) return compile_call(op);
         const int a = read_reg(op.in[0]), b = read_reg(op.in[1]);
         emit(Program::DOT, write_reg(op.out), a, b, 0,
              (int)g.slots[op.in[0]].len);
-        return ok;
+        return true;
       }
       case OP_LOG_SUM_EXP: {
         const int a = read_reg(op.in[0]);
         emit(Program::LSE_RANGE, write_reg(op.out), a, 0, 0,
              (int)g.slots[op.in[0]].len);
-        return ok;
+        return true;
       }
       case OP_SOFTMAX: {
         if (op.n_idata != 0 || out_len != g.slots[op.in[0]].len) return false;
         const int a = read_reg(op.in[0]);
         emit(Program::SOFTMAX, write_reg(op.out), a, 0, 0, (int)out_len);
-        return ok;
+        return true;
       }
       case OP_LSE2:
         return compile_elementwise(op, Program::LSE2, 0);
@@ -552,7 +546,7 @@ struct Compiler {
           emit(Program::DENSITY, write_reg(op.out), argv[0],
                op.n_in > 1 ? argv[1] : 0, op.n_in > 2 ? argv[2] : 0, dc);
         }
-        return ok;
+        return true;
       }
     }
   }
@@ -706,16 +700,69 @@ struct Carver {
     return cost;
   }
 
+  // An op reads at most kOpInputs slots, so live-ins beyond that are packed
+  // the way necessity islands pack theirs (pack_island_inputs): a CONCAT2
+  // chain joins the leading ones into one slot and leaves kOpInputs - 1
+  // ordinary inputs. Each link copies its prefix forward and its adjoint
+  // back, and is one more graph op.
+  static constexpr size_t kOpInputs = sizeof(Op::in) / sizeof(Op::in[0]);
+
+  static size_t packed_live_ins(size_t n) {
+    return n > kOpInputs ? n - (kOpInputs - 1) : 0;
+  }
+
+  int64_t packing_cost(const std::vector<int>& live_ins) const {
+    int64_t cost = 0, len = 0;
+    for (size_t k = 0; k < packed_live_ins(live_ins.size()); ++k) {
+      len += g.slots[(size_t)live_ins[k]].len;
+      if (k > 0) cost += kOpCost + 2 * len;
+    }
+    return cost;
+  }
+
+  // Emits the CONCAT2 chain and points the program's live-ins into it.
+  // Returns the island's input slots.
+  std::vector<int> pack_live_ins(IslandProg& prog,
+                                 const std::vector<int>& live_ins) {
+    const size_t packed = packed_live_ins(live_ins.size());
+    if (packed == 0) return live_ins;
+    int slot = live_ins[0];
+    int64_t len = 0;
+    for (size_t k = 0; k < packed; ++k) {
+      prog.ins[k].input = 0;
+      prog.ins[k].offset = (int)len;
+      len += g.slots[(size_t)live_ins[k]].len;
+      if (k == 0) continue;
+      Op cat;
+      cat.opcode = OP_CONCAT2;
+      cat.n_in = 2;
+      cat.in[0] = slot;
+      cat.in[1] = live_ins[k];
+      cat.out = g.add_slot(len, false);
+      slot_active.resize(g.slots.size(), 0);
+      slot_active[(size_t)cat.out] =
+          slot_active[(size_t)slot] || slot_active[(size_t)live_ins[k]];
+      result.push_back(cat);
+      slot = cat.out;
+    }
+    std::vector<int> inputs{slot};
+    for (size_t k = packed; k < live_ins.size(); ++k) {
+      prog.ins[k].input = (int)inputs.size();
+      inputs.push_back(live_ins[k]);
+    }
+    return inputs;
+  }
+
   // Compile and price [i, j) without touching the graph. label tags the
   // debug line so a liveness-piece compile does not read as the whole
   // span's own join-vs-leave estimate to a caller counting those lines.
   Candidate evaluate(size_t i, size_t j, const char* label = "island") {
     Candidate c{i, j};
-    Compiler cc{g, const_slots, last_use, pinned, {}, {}, {}, 0, 0, 0, true};
+    Compiler cc{g, const_slots, last_use, pinned, {}, {}, {}, 0, 0, 0};
     bool compiled = true;
     for (size_t u = i; u < j && compiled; ++u) {
       cc.op_index = u;
-      compiled = cc.compile(g.ops[u]) && cc.ok;
+      compiled = cc.compile(g.ops[u]);
     }
     // Live-outs: written in the region and visible after it, in first-write
     // order for a deterministic packing. Settled before compaction, because
@@ -820,7 +867,8 @@ struct Carver {
       instrs += touches_width(I.code) ? I.len : 1;
     c.island_cost = kValueRegWeight * ((int64_t)c.prog.n_regs -
                                        cc.n_call_scratch - cc.n_const_regs) +
-                    adj_regs + instrs + (kOpCost - 1) * 2 * n_calls;
+                    adj_regs + instrs + (kOpCost - 1) * 2 * n_calls +
+                    packing_cost(c.live_in_slots);
     for (const auto& li : c.prog.ins) c.boundary += 2 * li.len;
     for (int o : c.live_outs) c.boundary += kOpCost + 3 * g.slots[o].len;
     if (debug_env("STANLI_ISLAND_ALWAYS")) {
@@ -1192,8 +1240,9 @@ struct Carver {
     Op is;
     is.opcode = OP_ISLAND;
     is.variant = c.prog.calls.empty() ? 0 : kIslandCallVariant;
-    is.n_in = (int)c.live_in_slots.size();
-    for (int k = 0; k < is.n_in; ++k) is.in[k] = c.live_in_slots[k];
+    const std::vector<int> inputs = pack_live_ins(c.prog, c.live_in_slots);
+    is.n_in = (int)inputs.size();
+    for (int k = 0; k < is.n_in; ++k) is.in[k] = inputs[(size_t)k];
     is.out = g.add_slot(packed, false);
     slot_active.resize(g.slots.size(), 1);
     auto prog = std::make_shared<IslandProg>(std::move(c.prog));

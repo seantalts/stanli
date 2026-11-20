@@ -1255,9 +1255,14 @@ width, with length-1 operands broadcast, and a run that holds them is priced
 both whole and split at them. A call must have a single-number result, so any
 other op with a vector result still ends a run.
 
-The pass still refuses outright: short runs (under 32 ops), regions with
-more than six distinct inputs, densities in the dropped-constants form
-(see the refusal above), and regions producing target entries. The generated
+A region with more distinct inputs than an op's six descriptors packs the
+leading ones with an `OP_CONCAT2` chain, as necessity lowering does, and
+the estimate charges each link as one op plus the elements it copies forward
+and back.
+
+The pass still refuses outright: short runs (under 32 ops), densities in the
+dropped-constants form (see the refusal above), and regions producing target
+entries. The generated
 backward supports forward-only branches by recording which basic blocks ran
 and reversing only those blocks. Back edges, malformed jump targets,
 unsupported derivatives, and paths that can read an uninitialized register
