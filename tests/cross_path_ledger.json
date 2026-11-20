@@ -1,35 +1,12 @@
 [
   {
-    "model": "brmsmono",
-    "quantity": "write_array",
-    "pair": "graph/wa_interp",
-    "bound_ulp": -1,
-    "cause": "the write_array graph lowers dirichlet_lpdf and the interpreter does not (wa_interp: 'unsupported function dirichlet_lpdf'), so this section has one implementation rather than two and no cross-check. Retire by teaching mir_interp.hpp the density, not by removing the fixture.",
-    "since": "2026-08-23"
-  },
-  {
-    "model": "odevariadic",
-    "quantity": "write_array",
-    "pair": "graph/wa_interp",
-    "bound_ulp": -1,
-    "cause": "the write_array graph lowers ode_rk45 and the interpreter refuses it ('unsupported function ode_rk45'); WaInterp reaches the integrator only through the ODE kernel's own fallback, never as a generated-quantities call.",
-    "since": "2026-08-23"
-  },
-  {
-    "model": "viewalias",
-    "quantity": "write_array",
-    "pair": "graph/wa_interp",
-    "bound_ulp": -1,
-    "cause": "the write_array graph lowers to_matrix and the interpreter refuses it ('unsupported function to_matrix'). One of the three vocabulary tables is missing an entry the other two have -- the class of gap this axis exists to find.",
-    "since": "2026-08-23"
-  },
-  {
     "model": "higher_order_all_contexts",
     "quantity": "grad[5]",
     "pair": "default/no_island",
     "bound_ulp": -1,
     "cause": "OPEN BUG, not yet root-caused. This fixture and default/island_always were riding a run_adjoint reentrancy bug fixed 2026-09-03 (a static thread_local KernelCtx aliased outer and recursively-nested Program::CALL frames -- see runtime/src/adjoint.cpp). That fix eliminated the thousands-to-tens-of-thousands-ULP swings the reentrancy caused, but this pair is still unbounded on Windows (win_amd64, mingw-w64/UCRT64) after the fix: one run agreed to 6 ULP, another to 84,225,866 ULP, a third agreed exactly. No known-clean bound exists yet. Suspected mechanism: no_island runs far more of this fixture's 35 higher-order calls through one flat, ungrouped run_adjoint sequence than default does (which carves most of them into separate islands), so a kernel backward that reads a KernelCtx slot beyond its own call's n_in -- a bug independent of the reentrancy one, since it needs no recursion -- would pick up a stale Desc left by whichever unrelated call ran immediately before it in that flat sequence, with a magnitude bounded only by what garbage that stale pointer happens to reach. Not investigated past this hypothesis. Bitwise on Linux (glibc) and macOS (Apple libm) every run so far.",
-    "since": "2026-09-03"
+    "since": "2026-09-03",
+    "platform": "windows-x86_64"
   },
   {
     "model": "higher_order_all_contexts",
@@ -37,7 +14,8 @@
     "pair": "default/island_always",
     "bound_ulp": -1,
     "cause": "OPEN BUG, not yet root-caused -- see default/no_island on this same fixture and quantity for the full account. Only observed once, at 6 ULP, which is not enough runs to trust as a stable bound given no_island's demonstrated swing on the identical mechanism. Bitwise on Linux (glibc) and macOS (Apple libm).",
-    "since": "2026-09-03"
+    "since": "2026-09-03",
+    "platform": "windows-x86_64"
   },
   {
     "model": "higher_order_all_contexts",
@@ -45,7 +23,8 @@
     "pair": "default/no_native_adj",
     "bound_ulp": -1,
     "cause": "OPEN BUG, not yet root-caused -- see default/no_island on this same fixture and quantity for the full account. All five non-default pairs have now each been individually observed to diverge on this fixture and quantity, which is why this open bug is ledgered per pair (the matcher has no pair wildcard) rather than left to keep surfacing one CI run at a time.",
-    "since": "2026-09-03"
+    "since": "2026-09-03",
+    "platform": "windows-x86_64"
   },
   {
     "model": "higher_order_all_contexts",
@@ -53,7 +32,8 @@
     "pair": "default/no_ode_direct_rk",
     "bound_ulp": -1,
     "cause": "OPEN BUG, not yet root-caused -- see default/no_island on this same fixture and quantity for the full account.",
-    "since": "2026-09-03"
+    "since": "2026-09-03",
+    "platform": "windows-x86_64"
   },
   {
     "model": "higher_order_all_contexts",
@@ -69,7 +49,8 @@
     "pair": "default/no_ode_direct_rk",
     "bound_ulp": -1,
     "cause": "OPEN BUG, not yet root-caused -- see higher_order_all_contexts default/no_island for the fuller account of the still-open issue this fixture's grad[4] was also riding the now-fixed reentrancy bug alongside. Only observed once post-fix, at 101 ULP; downgraded from a numeric bound to OPEN BUG because that single observation is not enough evidence to trust as stable, given the same fixture's default/island_always pair (also below) showed 1 ULP once. Bitwise on Linux (glibc) and macOS (Apple libm).",
-    "since": "2026-09-03"
+    "since": "2026-09-03",
+    "platform": "windows-x86_64"
   },
   {
     "model": "ode_adjoint_region",
@@ -77,7 +58,8 @@
     "pair": "default/island_always",
     "bound_ulp": -1,
     "cause": "OPEN BUG, not yet root-caused -- see default/no_ode_direct_rk on this same fixture and quantity. Only observed once, at 1 ULP. Bitwise on Linux (glibc) and macOS (Apple libm).",
-    "since": "2026-09-03"
+    "since": "2026-09-03",
+    "platform": "windows-x86_64"
   },
   {
     "model": "ode_adjoint_region",
@@ -85,7 +67,8 @@
     "pair": "default/no_island",
     "bound_ulp": -1,
     "cause": "OPEN BUG, not yet root-caused -- see default/no_ode_direct_rk on this same fixture and quantity, and higher_order_all_contexts default/no_island for the fuller account. Every one of this fixture's five non-default pairs is ledgered together since higher_order_all_contexts's identical mechanism was independently observed to affect all five of its own pairs, and this fixture rides the same open bug.",
-    "since": "2026-09-03"
+    "since": "2026-09-03",
+    "platform": "windows-x86_64"
   },
   {
     "model": "ode_adjoint_region",
@@ -93,7 +76,8 @@
     "pair": "default/no_native_adj",
     "bound_ulp": -1,
     "cause": "OPEN BUG, not yet root-caused -- see default/no_ode_direct_rk on this same fixture and quantity.",
-    "since": "2026-09-03"
+    "since": "2026-09-03",
+    "platform": "windows-x86_64"
   },
   {
     "model": "ode_adjoint_region",
@@ -101,7 +85,8 @@
     "pair": "default/passes_off",
     "bound_ulp": -1,
     "cause": "OPEN BUG, not yet root-caused -- see default/no_ode_direct_rk on this same fixture and quantity.",
-    "since": "2026-09-03"
+    "since": "2026-09-03",
+    "platform": "windows-x86_64"
   },
   {
     "model": "region_map_data_control",
@@ -132,8 +117,9 @@
     "quantity": "lp",
     "pair": "default/no_partition",
     "bound_ulp": 1,
-    "cause": "partition_lanes regroups this loop's per-iteration terms into lane SUM_VEC ops (76 ops with the pass, 110 with STANLI_NO_PARTITION, which turns them back into INDEX/ADD_N chains), so the 64 target terms sum in a different grouping. It is the only fixture on which the pass changes the graph.",
-    "since": "2026-11-12"
+    "cause": "partition_lanes regroups this loop's per-iteration terms into lane SUM_VEC ops (76 ops with the pass, 110 with STANLI_NO_PARTITION, which turns them back into INDEX/ADD_N chains), so the 64 target terms sum in a different grouping. It is the only fixture on which the pass changes the graph. Unused on macOS arm64 (2026-11-20, bitwise there); kept for linux-x86_64, where it was recorded, until it can be rechecked.",
+    "since": "2026-11-12",
+    "platform": "linux-x86_64"
   },
   {
     "model": "region_map_density",
@@ -204,16 +190,18 @@
     "quantity": "lp",
     "pair": "default/no_partition",
     "bound_ulp": 4,
-    "cause": "partition_lanes groups the 200 per-row terms into lane sums; no_partition and passes_off give the same bits at every point, so no other pass contributes. Against a 50-digit mpmath reference at point 8 (beta_lcdf through regularized incomplete beta) the default path is 10 ULP off and the ungrouped sum 6 ULP, the shared remainder being per-row beta_lcdf error.",
-    "since": "2026-11-12"
+    "cause": "partition_lanes groups the 200 per-row terms into lane sums; no_partition and passes_off give the same bits at every point, so no other pass contributes. Against a 50-digit mpmath reference at point 8 (beta_lcdf through regularized incomplete beta) the default path is 10 ULP off and the ungrouped sum 6 ULP, the shared remainder being per-row beta_lcdf error. Unused on macOS arm64 (2026-11-20, bitwise there); kept for linux-x86_64, where it was recorded, until it can be rechecked.",
+    "since": "2026-11-12",
+    "platform": "linux-x86_64"
   },
   {
     "model": "cm_betadiscrete",
     "quantity": "lp",
     "pair": "default/passes_off",
     "bound_ulp": 4,
-    "cause": "the partition_lanes regrouping of default/no_partition on this model; passes_off gives the same bits at every point.",
-    "since": "2026-11-12"
+    "cause": "the partition_lanes regrouping of default/no_partition on this model; passes_off gives the same bits at every point. Unused on macOS arm64 (2026-11-20, bitwise there); kept for linux-x86_64, where it was recorded, until it can be rechecked.",
+    "since": "2026-11-12",
+    "platform": "linux-x86_64"
   },
   {
     "model": "region_map_acc_init",
@@ -269,7 +257,8 @@
     "pair": "default/no_region_map",
     "bound_ulp": 2526,
     "cause": "Windows x86_64 only: at point 2 the region map's grad[0] is -5.0571779386431782e-06 and the map-refused loop's is -5.0571779386410386e-06, an absolute gap of 2.1e-18. That is below one ULP of grad[1] (0.13, ULP 2.8e-17), so the 2526 ULP is cancellation in a near-zero component; grad[1] differs by 1 ULP. The two paths are bitwise on Linux and macOS at the same point, so one of the model's libm calls rounds differently between the paths under the Windows CRT; which call has not been isolated without a Windows machine.",
-    "since": "2026-11-12"
+    "since": "2026-11-12",
+    "platform": "windows-x86_64"
   },
   {
     "model": "cm_rdm",
@@ -277,7 +266,8 @@
     "pair": "default/no_region_map",
     "bound_ulp": 1,
     "cause": "Windows x86_64 only: at point 2 the region map's grad[0] is -5.0571779386431782e-06 and the map-refused loop's is -5.0571779386410386e-06, an absolute gap of 2.1e-18. That is below one ULP of grad[1] (0.13, ULP 2.8e-17), so the 2526 ULP is cancellation in a near-zero component; grad[1] differs by 1 ULP. The two paths are bitwise on Linux and macOS at the same point, so one of the model's libm calls rounds differently between the paths under the Windows CRT; which call has not been isolated without a Windows machine.",
-    "since": "2026-11-12"
+    "since": "2026-11-12",
+    "platform": "windows-x86_64"
   },
   {
     "model": "cm_rdm",
@@ -285,7 +275,8 @@
     "pair": "default/no_native_adj",
     "bound_ulp": 2526,
     "cause": "STANLI_NO_NATIVE_ADJ refuses the region map, so it gives the same bits as default/no_region_map. See default/no_region_map.",
-    "since": "2026-11-12"
+    "since": "2026-11-12",
+    "platform": "windows-x86_64"
   },
   {
     "model": "cm_rdm",
@@ -293,7 +284,8 @@
     "pair": "default/no_native_adj",
     "bound_ulp": 1,
     "cause": "STANLI_NO_NATIVE_ADJ refuses the region map, so it gives the same bits as default/no_region_map. See default/no_region_map.",
-    "since": "2026-11-12"
+    "since": "2026-11-12",
+    "platform": "windows-x86_64"
   },
   {
     "model": "fast_math_cse",

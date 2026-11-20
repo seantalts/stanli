@@ -25,6 +25,7 @@
 #include <filesystem>
 #include <fstream>
 #include <map>
+#include <set>
 #include <sstream>
 #include <string>
 #include <vector>
@@ -79,6 +80,70 @@ std::string unit_data(const std::string& sexp) {
   return j.dump();
 }
 
+// The ledger's own rules, on a ledger written for the test: an entry for
+// another platform neither applies nor counts as stale, an entry for this
+// platform that excuses nothing fails the run that covers its model, and an
+// unknown platform is refused.
+void ledger_rule_tests() {
+  using namespace stanli;
+  namespace fs = std::filesystem;
+  const std::string dir = "tests/fixtures";
+  const std::string name = "ar1";
+  const std::string sexp = slurp(dir + "/" + name + ".tmir.sexp");
+  DataMap data = DataMap::from_json(slurp(dir + "/" + name + ".json"));
+  const fs::path file = fs::temp_directory_path() / "stanli_ledger_rules.json";
+  const auto load = [&](const std::string& body) {
+    std::ofstream(file) << body;
+    return cross::Ledger::load(file.string());
+  };
+  const std::string other =
+      cross::LedgerEntry::here().rfind("linux", 0) == 0 ? "windows" : "linux";
+  const std::string os = cross::LedgerEntry::here().substr(
+      0, cross::LedgerEntry::here().find('-'));
+  const auto entry = [&](const std::string& platform) {
+    return std::string(R"({"model":"ar1","quantity":"lp","pair":)"
+                       R"("default/no_cse","bound_ulp":-1,"cause":"test")") +
+           (platform.empty() ? "" : R"(,"platform":")" + platform + "\"") + "}";
+  };
+  cross::Options opt;
+  opt.model = name;
+  opt.points = 1;
+
+  const cross::Ledger here = load("[" + entry("") + "]");
+  expect(here.error.empty(), "ledger without a platform loads");
+  cross::Result r = cross::run_matrix(sexp, data, opt, here);
+  expect(!r.ok && r.report.find("stale ledger entry lp default/no_cse") !=
+                      std::string::npos,
+         "an entry that excuses nothing fails its model's run");
+
+  const cross::Ledger elsewhere = load("[" + entry(other) + "]");
+  expect(elsewhere.error.empty(), "ledger with a platform loads");
+  expect(!elsewhere.entries[0].applies_here(),
+         "an entry for another platform does not apply here");
+  expect(elsewhere.find(name, "lp", "default/no_cse") == nullptr,
+         "an entry for another platform is not found");
+  r = cross::run_matrix(sexp, data, opt, elsewhere);
+  expect(r.ok, "an entry for another platform is not stale here");
+
+  const cross::Ledger own_os = load("[" + entry(os) + "]");
+  expect(own_os.error.empty() && own_os.entries[0].applies_here(),
+         "an entry for this operating system applies here");
+  const cross::Ledger own = load("[" + entry(cross::LedgerEntry::here()) + "]");
+  expect(own.error.empty() && own.entries[0].applies_here(),
+         "an entry for this operating system and architecture applies here");
+  const std::string arch =
+      cross::LedgerEntry::here().find("arm64") != std::string::npos ? "x86_64"
+                                                                    : "arm64";
+  const cross::Ledger other_arch = load("[" + entry(os + "-" + arch) + "]");
+  expect(other_arch.error.empty() && !other_arch.entries[0].applies_here(),
+         "an entry for another architecture does not apply here");
+  const cross::Ledger unknown = load("[" + entry("plan9") + "]");
+  expect(!unknown.error.empty(), "an unknown platform is refused");
+  expect(!load("[" + entry("linux-sparc") + "]").error.empty(),
+         "an unknown architecture is refused");
+  fs::remove(file);
+}
+
 }  // namespace
 
 int main() {
@@ -91,6 +156,8 @@ int main() {
     std::printf("FAIL ledger %s\n", led.error.c_str());
     return 1;
   }
+
+  ledger_rule_tests();
 
   // Sorted, because directory order is unspecified and a report whose lines
   // move between runs is a report nobody can diff.
@@ -112,6 +179,7 @@ int main() {
   int with_ode_direct_rk = 0, with_ode_interp = 0;
   int wa_columns_compared = 0, wa_rng_excluded = 0;
   std::vector<std::string> skips;
+  std::set<std::string> skipped_names;
   std::map<std::string, int> changed, ran;
   int unit_data_fixtures = 0, unit_data_driven = 0;
 
@@ -142,6 +210,7 @@ int main() {
       std::printf("  DATA.json for %s: %s\n", name.c_str(), generated.c_str());
     if (!r.skipped.empty()) {
       ++skipped;
+      skipped_names.insert(name);
       skips.push_back(name + ": " + r.skipped);
       continue;
     }
@@ -179,6 +248,22 @@ int main() {
       ++ran[cfg];
       if (did) ++changed[cfg];
     }
+  }
+
+  // A model's own run reports its entries that excused nothing. An entry
+  // for a model that is skipped here, or that no harness runs, is never
+  // looked at there, so it is checked by name. The cogmod models run through
+  // stanli_check --cross instead of this loop.
+  for (const cross::LedgerEntry& e : led.entries) {
+    if (!e.applies_here()) continue;
+    const bool fixture =
+        std::find(names.begin(), names.end(), e.model) != names.end();
+    expect(fixture || fs::exists("tests/cogmod/" + e.model + ".stan"),
+           "ledger entry " + e.model + " " + e.quantity + " " + e.pair +
+               " names a model that no harness runs");
+    expect(!skipped_names.count(e.model),
+           "ledger entry " + e.model + " " + e.quantity + " " + e.pair +
+               " is for a fixture that is skipped, so it excuses nothing");
   }
 
   std::printf(

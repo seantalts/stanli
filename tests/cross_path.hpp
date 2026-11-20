@@ -615,6 +615,40 @@ struct LedgerEntry {
   int64_t bound_ulp = 0;
   std::string cause;
   std::string since;
+  // "windows", "macos" or "linux", optionally with an architecture
+  // ("windows-x86_64", "linux-arm64"): the entry applies only there. Empty
+  // applies everywhere.
+  std::string platform;
+
+  bool applies_here() const {
+    const std::string now = here();
+    return platform.empty() || platform == now ||
+           now.compare(0, platform.size() + 1, platform + "-") == 0;
+  }
+
+  static bool known_platform(const std::string& p) {
+    const size_t dash = p.find('-');
+    const std::string os = p.substr(0, dash);
+    const std::string arch =
+        dash == std::string::npos ? std::string() : p.substr(dash + 1);
+    return (os == "windows" || os == "macos" || os == "linux") &&
+           (dash == std::string::npos || arch == "x86_64" || arch == "arm64");
+  }
+
+  static std::string here() {
+#if defined(_WIN32)
+    std::string os = "windows";
+#elif defined(__APPLE__)
+    std::string os = "macos";
+#else
+    std::string os = "linux";
+#endif
+#if defined(__aarch64__) || defined(_M_ARM64)
+    return os + "-arm64";
+#else
+    return os + "-x86_64";
+#endif
+  }
 
   bool excuses(bool comparable, int64_t distance) const {
     if (bound_ulp < 0) return true;
@@ -641,7 +675,8 @@ struct Ledger {
                           const std::string& pair) const {
     const std::string q = quantity.substr(0, quantity.find('@'));
     for (const LedgerEntry& e : entries)
-      if (e.model == model && e.pair == pair && matches(e.quantity, q))
+      if (e.applies_here() && e.model == model && e.pair == pair &&
+          matches(e.quantity, q))
         return &e;
     return nullptr;
   }
@@ -675,6 +710,14 @@ struct Ledger {
       e.bound_ulp = item.value("bound_ulp", (int64_t)0);
       e.cause = item.value("cause", std::string());
       e.since = item.value("since", std::string());
+      e.platform = item.value("platform", std::string());
+      if (!e.platform.empty() && !LedgerEntry::known_platform(e.platform)) {
+        led.error = path + ": entry " + e.model + " " + e.quantity + " " +
+                    e.pair + " has platform '" + e.platform +
+                    "'; use windows, macos or linux, optionally followed by "
+                    "-x86_64 or -arm64";
+        return led;
+      }
       if (e.model.empty() || e.quantity.empty() || e.pair.empty()) {
         led.error = path + ": entry needs model, quantity and pair";
         return led;
@@ -814,6 +857,7 @@ class Matrix {
       if (!baseline.empty()) compare_run(base, runs[i]);
     }
     if (want("wa")) compare_write_array(runs[0]);
+    if (opt_.only.empty() && opt_.variant < 0) report_unused_entries();
     res_.ok = res_.failures == 0;
     return std::move(res_);
   }
@@ -901,7 +945,8 @@ class Matrix {
       // does not, so the section has one implementation rather than two and
       // no cross-check at all. Declarable, like any other divergence, but
       // never silent.
-      if (led_.find(opt_.model, "write_array", pair)) {
+      if (const LedgerEntry* e = led_.find(opt_.model, "write_array", pair)) {
+        used_.insert(e);
         ++res_.declared;
         return;
       }
@@ -971,6 +1016,7 @@ class Matrix {
     const int64_t dist = comparable ? ulp_distance(x, y) : -1;
     const LedgerEntry* e = led_.find(opt_.model, quantity, pair);
     if (e && e->excuses(comparable, dist)) {
+      used_.insert(e);
       ++res_.declared;
       return;
     }
@@ -983,6 +1029,21 @@ class Matrix {
         comparable ? "   " + std::to_string(dist) + " ulp" : "   not finite";
     emit_pair(pair, quantity, name_a, fmt_value(x), name_b,
               fmt_value(y) + suffix, paths);
+  }
+
+  // An entry for this model that excused no comparison in a full run is
+  // stale: the divergence it names is gone, and the entry would hide the
+  // next one. An entry for another platform has nothing to excuse here.
+  void report_unused_entries() {
+    for (const LedgerEntry& e : led_.entries) {
+      if (e.model != opt_.model || !e.applies_here() || used_.count(&e))
+        continue;
+      ++res_.failures;
+      line("CROSS FAIL " + opt_.model + " stale ledger entry " + e.quantity +
+           " " + e.pair +
+           " excused no comparison; delete it from "
+           "tests/cross_path_ledger.json");
+    }
   }
 
   void fail_outcome(const Run& a, const Run& b, const std::string& pair) {
@@ -1057,6 +1118,7 @@ class Matrix {
   Options opt_;
   const Ledger& led_;
   Result res_;
+  std::set<const LedgerEntry*> used_;
 };
 
 inline Result run_matrix(const std::string& mir_text, const DataMap& data,
