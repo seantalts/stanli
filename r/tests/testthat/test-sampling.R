@@ -131,6 +131,28 @@ test_that("parameter_names lists declared parameters, not outputs", {
   expect_identical(parameter_names(none), character(0))
 })
 
+test_that("partial starting values keep each parameter's shape", {
+  skip_without_runtime()
+  m <- stanli_model(code = "
+    parameters { real s; matrix[2, 3] P; vector[1] v1; matrix[0, 3] Z;
+      array[2] tuple(real, vector[2]) atp; }
+    model { s ~ normal(0, 1); to_vector(P) ~ normal(0, 1); v1 ~ normal(0, 1);
+      for (k in 1:2) { atp[k].1 ~ normal(0, 1); atp[k].2 ~ normal(0, 1); } }")
+  # The parameters a list leaves out start at the drawn point, so filling
+  # in s alone gives that point back with s replaced.
+  point <- local({ set.seed(4); stats::runif(m$n_unconstrained, -2, 2) })
+  got <- unconstrain(m, list(s = 0.3), partial = TRUE, seed = 4)
+  expect_equal(got, c(0.3, point[-1]))
+  P <- matrix(1:6, 2, 3)
+  expect_equal(unconstrain(m, list(P = P), partial = TRUE, seed = 4)[2:7],
+               as.double(1:6))
+  # CmdStan refuses a flat or transposed matrix rather than reorder it.
+  expect_error(unconstrain(m, list(P = as.vector(P)), partial = TRUE),
+               "number dimensions declared and found")
+  expect_error(unconstrain(m, list(P = t(P)), partial = TRUE),
+               "dims declared=\\(2,3\\); dims found=\\(3,2\\)")
+})
+
 test_that("unconstrain can drop names that are not parameters", {
   skip_without_runtime()
   m <- stanli_model(code = "

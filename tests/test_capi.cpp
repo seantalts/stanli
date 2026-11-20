@@ -114,6 +114,49 @@ void expect_names(const char* fixture, const std::string& data,
   stanli_model_free(model);
 }
 
+// A JSON document of CmdStan's shape for the columns `names` (`m.2.1`) and
+// their values, in CSV order: each variable nested with its first index
+// outermost, as CmdStan's JSON reader requires of a starting value.
+std::string nested_json(const std::vector<std::string>& names,
+                        const std::vector<double>& values) {
+  struct Var {
+    std::vector<int64_t> dims;
+    std::vector<double> values;
+  };
+  std::vector<std::string> order;
+  std::map<std::string, Var> vars;
+  for (size_t i = 0; i < names.size(); ++i) {
+    std::stringstream parts(names[i]);
+    std::string base, index;
+    std::getline(parts, base, '.');
+    if (!vars.count(base)) order.push_back(base);
+    Var& v = vars[base];
+    for (size_t d = 0; std::getline(parts, index, '.'); ++d) {
+      if (v.dims.size() <= d) v.dims.push_back(0);
+      v.dims[d] = std::max<int64_t>(v.dims[d], std::stoll(index));
+    }
+    v.values.push_back(values[i]);
+  }
+  const std::function<std::string(const Var&, size_t, int64_t, int64_t)> nest =
+      [&](const Var& v, size_t d, int64_t at, int64_t stride) {
+        char buf[32];
+        if (d == v.dims.size()) {
+          std::snprintf(buf, sizeof buf, "%.17g", v.values[(size_t)at]);
+          return std::string(buf);
+        }
+        std::string out = "[";
+        for (int64_t k = 0; k < v.dims[d]; ++k)
+          out += (k ? ", " : "") +
+                 nest(v, d + 1, at + k * stride, stride * v.dims[d]);
+        return out + "]";
+      };
+  std::string json = "{";
+  for (size_t i = 0; i < order.size(); ++i)
+    json +=
+        (i ? ", \"" : "\"") + order[i] + "\": " + nest(vars[order[i]], 0, 0, 1);
+  return json + "}";
+}
+
 // stanli_unconstrain_inits, checked by round trip against the model's own
 // forward direction: constrain a free point through stanli_wa_row, feed the
 // constrained values back as JSON, and require the original free point.
@@ -146,34 +189,11 @@ void expect_unconstrain_inits_round_trip() {
 
   // Rebuild the document from the CSV names, which carry each parameter's
   // shape in their indices.
-  std::vector<std::string> flat;
+  std::vector<std::string> names;
   for (int64_t i = 0; i < n_cols; ++i)
-    flat.emplace_back(stanli_wa_column_name(model, i));
-  std::map<std::string, std::vector<double>> by_name;
-  std::vector<std::string> order;
-  for (size_t i = 0; i < flat.size() && i < row.size(); ++i) {
-    const std::string base = flat[i].substr(0, flat[i].find('.'));
-    if (by_name.find(base) == by_name.end()) order.push_back(base);
-    by_name[base].push_back(row[i]);
-  }
-  std::string json = "{";
-  for (size_t i = 0; i < order.size(); ++i) {
-    const std::vector<double>& v = by_name[order[i]];
-    char buf[32];
-    json += (i ? ", " : "") + ("\"" + order[i] + "\": ");
-    if (v.size() == 1) {
-      std::snprintf(buf, sizeof buf, "%.17g", v[0]);
-      json += buf;
-    } else {
-      json += "[";
-      for (size_t k = 0; k < v.size(); ++k) {
-        std::snprintf(buf, sizeof buf, "%.17g", v[k]);
-        json += (k ? ", " : "") + std::string(buf);
-      }
-      json += "]";
-    }
-  }
-  json += "}";
+    names.emplace_back(stanli_wa_column_name(model, i));
+  names.resize(std::min(names.size(), row.size()));
+  const std::string json = nested_json(names, row);
 
   std::vector<double> back((size_t)n, 0.0);
   if (stanli_unconstrain_inits(model, json.c_str(), back.data(), err,
@@ -2799,6 +2819,123 @@ Compilation compile(const std::string& code, const char* filename) {
   return out;
 }
 
+// A starting value's shape follows CmdStan's rule for inits, which differs
+// from its rule for data: the dims must match exactly, and an empty value
+// does not stand in for a zero-size parameter of another rank. A zero-size
+// parameter may be left out. Each expected message is the one CmdStan 2.38
+// printed for the same document.
+void expect_init_shapes_follow_cmdstan() {
+  if (!stanli_has_embedded_stanc()) return;
+  const Compilation c = compile(
+      "parameters { real s; matrix[2, 3] P; array[2] vector[3] av;"
+      "  tuple(real, vector[2]) tp; array[2] tuple(real, vector[2]) atp;"
+      "  vector[0] z; matrix[0, 3] Z; array[0] vector[3] a0;"
+      "  array[2] vector[0] a20; }\n"
+      "model { s ~ normal(0, 1); to_vector(P) ~ normal(0, 1); }\n",
+      "init_shapes.stan");
+  char err[8192]{};
+  stanli_model* model = c.ok
+                            ? stanli_model_new_with_opts(
+                                  c.mir.c_str(), "{}", nullptr, err, sizeof err)
+                            : nullptr;
+  if (model == nullptr) {
+    ++failures;
+    std::printf("FAIL init shape model: %s %s\n", c.error.c_str(), err);
+    return;
+  }
+  const std::map<std::string, std::string> base = {
+      {"s", "0.5"},
+      {"P", "[[1, 2, 3], [4, 5, 6]]"},
+      {"av", "[[1, 2, 3], [4, 5, 6]]"},
+      {"tp", R"({"1": 0.1, "2": [0.2, 0.3]})"},
+      {"atp", R"([{"1": 0.1, "2": [0.2, 0.3]}, {"1": 0.4, "2": [0.5, 0.6]}])"}};
+  const std::string stage = "processing stage=parameter initialization; ";
+  const std::string ndims =
+      "mismatch in number dimensions declared and found in context; " + stage;
+  const std::string dim =
+      "mismatch in dimension declared and found in context; " + stage;
+  struct Case {
+    const char* name;
+    std::map<std::string, std::string> change;
+    std::string want;  // empty: accepted
+  };
+  const std::vector<Case> cases = {
+      {"ok", {}, ""},
+      {"an int for a real", {{"s", "1"}, {"P", "[[1, 2, 3], [4, 5, 6]]"}}, ""},
+      {"a flat matrix",
+       {{"P", "[1, 2, 3, 4, 5, 6]"}},
+       ndims + "variable name=P; dims declared=(2,3); dims found=(6)"},
+      {"a transposed matrix",
+       {{"P", "[[1, 2], [3, 4], [5, 6]]"}},
+       dim + "variable name=P; position=0; dims declared=(2,3); dims "
+             "found=(3,2)"},
+      {"a short matrix",
+       {{"P", "[[1, 2, 3]]"}},
+       dim + "variable name=P; position=0; dims declared=(2,3); dims "
+             "found=(1,3)"},
+      {"a scalar as a list",
+       {{"s", "[0.5]"}},
+       ndims + "variable name=s; dims declared=(); dims found=(1)"},
+      {"a flat array of vectors",
+       {{"av", "[1, 2, 3, 4, 5, 6]"}},
+       ndims + "variable name=av; dims declared=(2,3); dims found=(6)"},
+      {"a transposed array of vectors",
+       {{"av", "[[1, 2], [3, 4], [5, 6]]"}},
+       dim + "variable name=av; position=0; dims declared=(2,3); dims "
+             "found=(3,2)"},
+      {"a scalar tuple slot for a vector",
+       {{"tp", R"({"1": 0.1, "2": 0.2})"}},
+       ndims + "variable name=tp.2; dims declared=(2); dims found=()"},
+      {"a list tuple slot for a scalar",
+       {{"tp", R"({"1": [0.1], "2": [0.2, 0.3]})"}},
+       ndims + "variable name=tp.1; dims declared=(); dims found=(1)"},
+      {"a short slot in an array of tuples",
+       {{"atp", R"([{"1": 0.1, "2": [0.2]}, {"1": 0.4, "2": [0.5]}])"}},
+       dim + "variable name=atp.2; position=1; dims declared=(2,2); dims "
+             "found=(2,1)"},
+      {"an empty vector[0]", {{"z", "[]"}}, ""},
+      {"a scalar for vector[0]",
+       {{"z", "1.0"}},
+       ndims + "variable name=z; dims declared=(0); dims found=()"},
+      {"an empty matrix[0, 3]",
+       {{"Z", "[]"}},
+       ndims + "variable name=Z; dims declared=(0,3); dims found=(0)"},
+      {"rows for matrix[0, 3]",
+       {{"Z", "[[], [], []]"}},
+       dim + "variable name=Z; position=0; dims declared=(0,3); dims "
+             "found=(3,0)"},
+      {"an empty array[0] vector[3]",
+       {{"a0", "[]"}},
+       ndims + "variable name=a0; dims declared=(0,3); dims found=(0)"},
+      {"an empty array[2] vector[0]",
+       {{"a20", "[]"}},
+       ndims + "variable name=a20; dims declared=(2,0); dims found=(0)"},
+      {"array[2] vector[0] nested", {{"a20", "[[], []]"}}, ""},
+  };
+  std::vector<double> q((size_t)stanli_n_unconstrained(model));
+  for (const Case& k : cases) {
+    std::map<std::string, std::string> doc = base;
+    for (const auto& [name, value] : k.change) doc[name] = value;
+    std::string json = "{";
+    for (const auto& [name, value] : doc)
+      json += (json.size() > 1 ? ", \"" : "\"") + name + "\": " + value;
+    json += "}";
+    err[0] = '\0';
+    const bool accepted =
+        stanli_unconstrain_inits(model, json.c_str(), q.data(), err,
+                                 sizeof err) == 0;
+    if (k.want.empty()
+            ? !accepted
+            : accepted || std::string(err).find(k.want) == std::string::npos) {
+      ++failures;
+      std::printf("FAIL init shape, %s: %s\n  got: %s\n  want: %s\n", k.name,
+                  accepted ? "accepted" : "refused", err,
+                  k.want.empty() ? "accepted" : k.want.c_str());
+    }
+  }
+  stanli_model_free(model);
+}
+
 // Tuple names as CmdStan's generated constrained_param_names and
 // unconstrained_param_names spell them: ':' before a slot, '.' before an
 // index, a simplex's free values one fewer.
@@ -3361,6 +3498,7 @@ int main() {
                             "the ODE right-hand side rhs");
   test_interpreter_probe_failure();
   expect_unconstrain_inits_round_trip();
+  expect_init_shapes_follow_cmdstan();
   expect_parameterless_unconstrain();
   expect_parameterless_sampling();
 

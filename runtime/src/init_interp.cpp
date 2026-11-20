@@ -99,14 +99,22 @@ std::vector<double> InitInterp::eval(
   // unnoticed, its extra values silently dropped by the sequential read.
   int64_t total_free = 0;
   for (const InitParam& p : params_) {
+    total_free += p.free_len;
     const auto it = inits.find(p.key);
-    if (it == inits.end()) refuse("no starting value for parameter " + p.key);
+    if (it == inits.end()) {
+      // CmdStan draws a parameter that the inits leave out. A zero-size one
+      // has nothing to draw, and absence is the only way to give one of rank
+      // 2 or more, because the check below rejects [] for it, as CmdStan does.
+      if (p.constrained_len == 0) continue;
+      refuse("no starting value for parameter " + p.key);
+    }
+    check_declared_dims(VarStage::ParameterInit, p.key, p.dims, it->second,
+                        false);
     const int64_t got =
         (int64_t)std::max(it->second.r.size(), it->second.i.size());
     if (got != p.constrained_len)
       refuse(p.key + " needs " + std::to_string(p.constrained_len) +
              " starting values, got " + std::to_string(got));
-    total_free += p.free_len;
   }
   for (const auto& supplied : inits) {
     const std::string& key = supplied.first;
@@ -116,17 +124,13 @@ std::vector<double> InitInterp::eval(
     if (!declared) refuse(key + " is not a parameter of this model");
   }
 
-  // Give every value its declared shape before the section runs. A caller
-  // supplies values in serial order and may or may not have nested them --
-  // a JSON document usually flattens an array of matrices to one list --
-  // and the interpreter reaches a bare parameter declaration through the
-  // same lookup as an FnReadData, so an unshaped entry would land in the
-  // environment and make the section's own indexed writes fail.
-  // A leaf of an array of tuples arrives as CmdStan's reader lays it out,
-  // element by element, and goes into the leaf variable's own order.
+  // The values as the section reads them: reals, in serial order. A leaf of
+  // an array of tuples arrives as CmdStan's reader lays it out, element by
+  // element, and goes into the leaf variable's own order.
   std::map<std::string, DataMap::Entry> shaped;
   for (const InitParam& p : params_) {
-    DataMap::Entry e = inits.at(p.key);
+    const auto given = inits.find(p.key);
+    DataMap::Entry e = given == inits.end() ? DataMap::Entry{} : given->second;
     if (e.r.empty() && !e.i.empty()) e.r.assign(e.i.begin(), e.i.end());
     if (const mir::detail::TupleLeaf* leaf =
             mir::detail::tuple_leaf(*prog_, p.name)) {

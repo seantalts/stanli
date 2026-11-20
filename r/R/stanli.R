@@ -441,9 +441,10 @@ parameter_names <- function(model, scalars = FALSE) {
 #' Unless `partial = TRUE`, every declared parameter must appear, at its
 #' declared size. A missing,
 #' unknown, wrong-length, or out-of-support value is an error naming the
-#' parameter. Containers are listed in Stan's own serialization order (the
-#' first index fastest, the order a CSV column carries) and may be nested or
-#' flat -- the declaration owns the shape either way.
+#' parameter. Each value has its declared shape, as CmdStan requires of a
+#' starting value: a matrix as an R matrix, and a `vector[1]` as
+#' `array(x, 1)`. A flat vector for a matrix is an error. A zero-size
+#' parameter may be left out.
 #'
 #' The result is what `sample_model(init = )` and `optimize_model(init = )`
 #' take, so unconstraining is a step per starting point rather than a second
@@ -509,6 +510,26 @@ preserve_random_seed <- function(expr) {
   expr
 }
 
+# A tuple's slots, named as the runtime names them (`g.2:1.3`), as CmdStan's
+# JSON nests one value: an array of tuples is a list of its elements, first
+# index outermost, and each tuple a list keyed "1", "2", ....
+tuple_init_value <- function(slots) {
+  steps <- lapply(names(slots), function(name) unlist(lapply(tuple_steps(name),
+    function(step) if (startsWith(step, "["))
+      paste0("[", strsplit(gsub("\\[|\\]", "", step), ",")[[1L]], "]")
+    else step)))
+  build <- function(entries, depth) {
+    if (length(entries) == 1L && length(steps[[entries]]) < depth)
+      return(slots[[entries]])
+    keys <- vapply(entries, function(i) steps[[i]][depth], "")
+    unique_keys <- unique(keys)
+    unique_keys <- unique_keys[order(as.integer(gsub("\\[|\\]", "", unique_keys)))]
+    out <- lapply(unique_keys, function(k) build(entries[keys == k], depth + 1L))
+    if (startsWith(unique_keys[1L], "[")) out else stats::setNames(out, unique_keys)
+  }
+  build(seq_along(slots), 1L)
+}
+
 complete_partial_inits <- function(model, values, init_radius, seed) {
   check_start_names(values)
   if (length(init_radius) != 1L || !is.numeric(init_radius) ||
@@ -516,7 +537,6 @@ complete_partial_inits <- function(model, values, init_radius, seed) {
     stop("init_radius must be finite and nonnegative", call. = FALSE)
   variables <- runtime_variables(model$ptr, parameters = TRUE)
   columns <- variable_columns(variables)
-  values <- lapply(values, function(value) if (is.array(value)) as.vector(value) else value)
   if (all(variable_base(names(variables)) %in% names(values))) return(values)
   if (!identical(columns, utils::head(model$columns, length(columns))))
     stop("this model's outputs do not begin with its parameters; partial ",
@@ -533,10 +553,18 @@ complete_partial_inits <- function(model, values, init_radius, seed) {
                        length(columns))
   declared <- column_variables(variables)
   filled <- split(drawn, factor(declared, levels = names(variables)))
+  # Each drawn value in its declared shape, which CmdStan requires of a
+  # starting value. A zero-size parameter is left out: [] cannot give the
+  # shape of one with two or more dimensions.
+  filled <- Map(function(value, dims) {
+    if (length(dims) && prod(dims) == 0) NULL
+    else if (length(dims)) array(value, dim = dims) else value
+  }, filled, variables)
+  filled <- filled[!vapply(filled, is.null, logical(1))]
   bases <- variable_base(names(filled))
   filled <- lapply(stats::setNames(nm = unique(bases)), function(base) {
     slots <- filled[bases == base]
-    if (identical(names(slots), base)) slots[[1L]] else nest_tuple_slots(slots)
+    if (identical(names(slots), base)) slots[[1L]] else tuple_init_value(slots)
   })
   filled[intersect(names(values), names(filled))] <-
     values[intersect(names(values), names(filled))]
