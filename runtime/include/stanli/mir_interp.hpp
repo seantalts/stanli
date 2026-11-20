@@ -2841,7 +2841,7 @@ class MirInterp {
       return o;
     }
     if (const std::optional<GpCov> gp = gp_cov_family(e.name);
-        gp && e.args.size() == 3) {
+        gp && (int)e.args.size() == 1 + gp_cov_hyperparameters(*gp)) {
       Value x = eval(e.args[0]);
       const T sigma = eval(e.args[1]).r.at(0);
       const T length_scale = eval(e.args[2]).r.at(0);
@@ -2853,7 +2853,10 @@ class MirInterp {
         for (int64_t d = 0; d < D; ++d)
           pts[(size_t)n]((Eigen::Index)d) = x.r.at((size_t)(n + N * d));
       Eigen::Matrix<T, Eigen::Dynamic, Eigen::Dynamic> c;
-      if (*gp == kGpMatern32)
+      if (*gp == kGpPeriodic)
+        c = stan::math::gp_periodic_cov(pts, sigma, length_scale,
+                                        eval(e.args[3]).r.at(0));
+      else if (*gp == kGpMatern32)
         c = stan::math::gp_matern32_cov(pts, sigma, length_scale);
       else if (*gp == kGpMatern52)
         c = stan::math::gp_matern52_cov(pts, sigma, length_scale);

@@ -54,11 +54,12 @@ using CMapV = Eigen::Map<const VecD>;
 using VarV = Eigen::Matrix<stan::math::var, -1, 1>;
 using VarM = Eigen::Matrix<stan::math::var, -1, -1>;
 
-// ---- gp_*_cov(x, alpha, rho) ----------------------------------------------
-// in = {x (data, N*D), alpha, rho}; idata = {N, D}; out = N*N column-major.
-// x as array[N] real is D == 1; array[N] vector[D] flattens array-major.
-// The variant selects the covariance function. An optional fourth scalar
-// input adds to each diagonal in increasing source order, on this same tape.
+// ---- gp_*_cov(x, alpha, rho[, period]) ------------------------------------
+// in = {x (data, N*D), alpha, rho, then the period for kGpPeriodic};
+// idata = {N, D}; out = N*N column-major. x as array[N] real is D == 1;
+// array[N] vector[D] flattens array-major. The variant selects the
+// covariance function. An optional scalar input after the hyperparameters
+// adds to each diagonal in increasing source order, on this same tape.
 std::vector<VecD> gp_points(const KernelCtx& ctx) {
   const int64_t N = ctx.idata[0], D = ctx.idata[1];
   std::vector<VecD> pts(N, VecD(D));
@@ -80,27 +81,59 @@ auto gp_cov_call(uint8_t variant, const P& pts, const S& sigma,
       return stan::math::gp_exp_quad_cov(pts, sigma, length_scale);
   }
 }
+// Stan Math uses its periodic matrix callback only when both the length scale
+// and the period are var. CmdStan passes a data argument as double, so pass
+// an inactive one as double here too and run the overload CmdStan runs.
+VarM gp_periodic_fixed(const KernelCtx& ctx, const std::vector<VecD>& pts,
+                       const stan::math::var& sigma,
+                       const stan::math::var& length_scale,
+                       const stan::math::var& period) {
+  const bool length_active = ctx.in_adj[2].data,
+             period_active = ctx.in_adj[3].data;
+  if (length_active && period_active)
+    return stan::math::gp_periodic_cov(pts, sigma, length_scale, period);
+  if (length_active)
+    return stan::math::gp_periodic_cov(pts, sigma, length_scale,
+                                       ctx.in[3].data[0]);
+  if (period_active)
+    return stan::math::gp_periodic_cov(pts, sigma, ctx.in[2].data[0], period);
+  return stan::math::gp_periodic_cov(pts, sigma, ctx.in[2].data[0],
+                                     ctx.in[3].data[0]);
+}
 void gp_cov_fwd(KernelCtx& ctx) {
   const int64_t N = ctx.idata[0];
   auto pts = gp_points(ctx);
-  MatD c = gp_cov_call(ctx.variant, pts, ctx.in[1].data[0], ctx.in[2].data[0]);
-  if (ctx.n_in == 4)
-    for (int64_t i = 0; i < N; ++i) c(i, i) += ctx.in[3].data[0];
+  MatD c =
+      ctx.variant == kGpPeriodic
+          ? MatD(stan::math::gp_periodic_cov(
+                pts, ctx.in[1].data[0], ctx.in[2].data[0], ctx.in[3].data[0]))
+          : gp_cov_call(ctx.variant, pts, ctx.in[1].data[0], ctx.in[2].data[0]);
+  if (gp_cov_has_jitter(ctx.variant, ctx.n_in)) {
+    const double jitter = ctx.in[gp_cov_jitter_input(ctx.variant)].data[0];
+    for (int64_t i = 0; i < N; ++i) c(i, i) += jitter;
+  }
   MapM(ctx.out.data, N, N) = c;
 }
 void gp_cov_replay_bwd(KernelCtx& ctx) {
+  const bool periodic = ctx.variant == kGpPeriodic;
+  const bool has_jitter = gp_cov_has_jitter(ctx.variant, ctx.n_in);
+  const int jitter_input = gp_cov_jitter_input(ctx.variant);
   if (!ctx.in_adj[0].data) {
     // Fixed locations need no distance derivatives. Keep the hyperparameters
     // and the weighted matrix reduction on the same Stan Math tape; only the
     // inactive geometry stays double. Active locations retain the full path.
     stan::math::nested_rev_autodiff nested;
     stan::math::var sigma = ctx.in[1].data[0], rho = ctx.in[2].data[0];
-    auto covariance = gp_cov_call(ctx.variant, gp_points(ctx), sigma, rho);
+    stan::math::var period;
+    if (periodic) period = ctx.in[3].data[0];
+    VarM covariance =
+        periodic ? gp_periodic_fixed(ctx, gp_points(ctx), sigma, rho, period)
+                 : VarM(gp_cov_call(ctx.variant, gp_points(ctx), sigma, rho));
     const int64_t n = ctx.idata[0];
     if (n == 0) return;
     stan::math::var jitter;
-    if (ctx.n_in == 4) {
-      jitter = ctx.in[3].data[0];
+    if (has_jitter) {
+      jitter = ctx.in[jitter_input].data[0];
       for (int64_t i = 0; i < n; ++i) covariance(i, i) += jitter;
     }
     const stan::math::var objective = stan::math::sum(stan::math::elt_multiply(
@@ -108,8 +141,9 @@ void gp_cov_replay_bwd(KernelCtx& ctx) {
     stan::math::grad(objective.vi_);
     if (ctx.in_adj[1].data) ctx.in_adj[1].data[0] += sigma.adj();
     if (ctx.in_adj[2].data) ctx.in_adj[2].data[0] += rho.adj();
-    if (ctx.n_in == 4 && ctx.in_adj[3].data)
-      ctx.in_adj[3].data[0] += jitter.adj();
+    if (periodic && ctx.in_adj[3].data) ctx.in_adj[3].data[0] += period.adj();
+    if (has_jitter && ctx.in_adj[jitter_input].data)
+      ctx.in_adj[jitter_input].data[0] += jitter.adj();
     return;
   }
   // x may be a parameter: rebuild the points from the promoted xs[0] so its
@@ -121,9 +155,12 @@ void gp_cov_replay_bwd(KernelCtx& ctx) {
     std::vector<VarV> pts(N, VarV(D));
     for (int64_t n = 0; n < N; ++n)
       for (int64_t d = 0; d < D; ++d) pts[n](d) = xs[0](n * D + d);
-    auto covariance = gp_cov_call(variant, pts, xs[1](0), xs[2](0));
-    if (ctx.n_in == 4)
-      for (int64_t i = 0; i < N; ++i) covariance(i, i) += xs[3](0);
+    VarM covariance = periodic
+                          ? VarM(stan::math::gp_periodic_cov(
+                                pts, xs[1](0), xs[2](0), xs[3](0)))
+                          : VarM(gp_cov_call(variant, pts, xs[1](0), xs[2](0)));
+    if (has_jitter)
+      for (int64_t i = 0; i < N; ++i) covariance(i, i) += xs[jitter_input](0);
     return covariance;
   });
 }
@@ -134,8 +171,9 @@ void gp_cov_replay_bwd(KernelCtx& ctx) {
 // See stan/math/rev/fun/gp_exp_quad_cov.hpp for the reference callback.
 void gp_cov_bwd(KernelCtx& ctx) {
   const double sigma = ctx.in[1].data[0], rho = ctx.in[2].data[0];
-  if (ctx.n_in == 4 || ctx.variant != kGpExpQuad || ctx.in_adj[0].data ||
-      !std::isnormal(sigma * sigma) || !std::isnormal(rho * rho * rho)) {
+  if (ctx.variant != kGpExpQuad || gp_cov_has_jitter(ctx.variant, ctx.n_in) ||
+      ctx.in_adj[0].data || !std::isnormal(sigma * sigma) ||
+      !std::isnormal(rho * rho * rho)) {
     gp_cov_replay_bwd(ctx);
     return;
   }
