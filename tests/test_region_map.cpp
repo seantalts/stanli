@@ -22,6 +22,7 @@
 #include <fstream>
 #include <functional>
 #include <map>
+#include <random>
 #include <set>
 #include <sstream>
 #include <string>
@@ -1964,6 +1965,41 @@ void test_lane_cogmod() {
   }
 }
 
+std::string mir_of_source(const std::string& name, const std::string& source) {
+  const std::string path = std::filesystem::temp_directory_path().string() +
+                           "/" + name + "_" +
+                           std::to_string(std::random_device{}()) + ".stan";
+  std::ofstream(path) << source;
+  const std::string mir =
+      stanli::tooling::run_stanc_process(STANLI_TEST_STANC, path);
+  std::remove(path.c_str());
+  return mir;
+}
+
+// A loop bound or a branch that reads only an extent of a parameter (rows,
+// size, ...) depends on the data alone. Such a loop is not mapped, so the
+// vector passes still see its iterations.
+void test_extent_bound_is_data_control() {
+  const std::string mir = mir_of_source(
+      "region_map_extent_bound",
+      "data { int N; vector[N] y; }\n"
+      "parameters { real mu; real<lower=0> sigma; }\n"
+      "model {\n"
+      "  vector[N] r = y - mu;\n"
+      "  for (n in 1:rows(r)) target += normal_lpdf(r[n] | 0, sigma);\n"
+      "  for (n in 1:size(r)) if (num_elements(r) > 2) target += -r[n];\n"
+      "}\n");
+  const DataMap data = make_data(64);
+  CompiledModel cm = stanli::compile_model(mir, data);
+  test_setenv("STANLI_REGION_MAP", "0", 1);
+  CompiledModel off = stanli::compile_model(mir, data);
+  test_unsetenv("STANLI_REGION_MAP");
+  check(count_opcode(cm, OP_REGION_MAP) == 0,
+        "loops bounded and branched by extents are not mapped");
+  check(histogram(cm) == histogram(off),
+        "extent-controlled loops keep the unmapped graph");
+}
+
 // Input points for each unary in STANLI_PROGRAM_UNARY_LIST. The last point
 // of each row lies near an edge of the function's domain or range.
 std::vector<double> unary_points(const std::string& fn) {
@@ -1996,26 +2032,20 @@ void test_every_unary_in_lanes() {
 #undef STANLI_TEST_UNARY
   };
   const int n = 33;
-  const std::string dir = std::filesystem::temp_directory_path().string();
   for (const Unary& u : unaries) {
     const std::string stan_fn = u.fn == "fabs" ? "abs" : u.fn;
-    const std::string path = dir + "/region_map_unary_" + u.fn + ".stan";
-    {
-      std::ofstream out(path);
-      out << "data { int N; vector[N] u; }\n"
-             "parameters { real a; real b; }\n"
-             "model {\n"
-             "  for (n in 1:N) {\n"
-             "    if (a < b) target += "
-          << stan_fn
-          << "(u[n] + a);\n"
-             "    else target += -square(u[n] - a);\n"
-             "  }\n"
-             "}\n";
-    }
     const std::string mir =
-        stanli::tooling::run_stanc_process(STANLI_TEST_STANC, path);
-    std::remove(path.c_str());
+        mir_of_source("region_map_unary_" + u.fn,
+                      "data { int N; vector[N] u; }\n"
+                      "parameters { real a; real b; }\n"
+                      "model {\n"
+                      "  for (n in 1:N) {\n"
+                      "    if (a < b) target += " +
+                          stan_fn +
+                          "(u[n] + a);\n"
+                          "    else target += -square(u[n] - a);\n"
+                          "  }\n"
+                          "}\n");
     const std::vector<double> xs = unary_points(u.fn);
     check(!xs.empty(), u.fn + ": the test has input points for this unary");
     for (double x : xs) {
@@ -2393,6 +2423,7 @@ int main() {
 #ifdef STANLI_TEST_STANC
   test_lane_cogmod();
   test_every_unary_in_lanes();
+  test_extent_bound_is_data_control();
 #endif
   test_mode_policy();
   test_recompute_visits_taken_blocks();
