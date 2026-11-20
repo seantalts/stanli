@@ -435,16 +435,16 @@ void beta_binomial_fwd(KernelCtx& ctx) {
 // two integer groups and so live beside the unpacker rather than with the
 // other cdfs. No propto form and no elementwise one, exactly as the
 // one-group int cdfs in densities_cdf_b.cpp: cdf_fwd is what says so.
-#define STANLI_DEFINE_TWO_INT_CDF_FWD(code, fn, nreal, tier)               \
-  void fn##_fwd_gen(KernelCtx& ctx) {                                      \
-    const IntGroups groups = binomial_groups(ctx);                         \
-    with_int_group(groups.group[0], [&](const auto& n) {                   \
-      with_int_group(groups.group[1], [&](const auto& N) {                 \
-        cdf_fwd<nreal, tier & STANLI_DENSITY_FULL_MASKS>(                  \
-            ctx,                                                           \
-            [&](const auto&... a) { return stan::math::fn(n, N, a...); }); \
-      });                                                                  \
-    });                                                                    \
+#define STANLI_DEFINE_TWO_INT_CDF_FWD(code, fn, nreal)     \
+  void fn##_fwd_gen(KernelCtx& ctx) {                      \
+    const IntGroups groups = binomial_groups(ctx);         \
+    with_int_group(groups.group[0], [&](const auto& n) {   \
+      with_int_group(groups.group[1], [&](const auto& N) { \
+        cdf_fwd<nreal>(ctx, [&](const auto&... a) {        \
+          return stan::math::fn(n, N, a...);               \
+        });                                                \
+      });                                                  \
+    });                                                    \
   }
 STANLI_TWO_INT_CDF_LIST(STANLI_DEFINE_TWO_INT_CDF_FWD)
 #undef STANLI_DEFINE_TWO_INT_CDF_FWD

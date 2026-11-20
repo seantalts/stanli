@@ -409,14 +409,14 @@ static void probe_density_sizes(const char* name, F&& f) {
 
 static void check_density_size_names() {
   using namespace stanli;
-#define STANLI_PROBE(code, fn, n, tier) \
-  probe_density_sizes<0, n>(            \
+#define STANLI_PROBE(code, fn, n, ...) \
+  probe_density_sizes<0, n>(           \
       #fn, [](const auto&... a) { return stan::math::fn(a...); });
-#define STANLI_PROBE_INT(code, fn, nreal, tier) \
-  probe_density_sizes<1, nreal>(                \
+#define STANLI_PROBE_INT(code, fn, nreal, ...) \
+  probe_density_sizes<1, nreal>(               \
       #fn, [](const auto&... a) { return stan::math::fn(a...); });
-#define STANLI_PROBE_TWO_INT(code, fn, nreal, tier) \
-  probe_density_sizes<2, nreal>(                    \
+#define STANLI_PROBE_TWO_INT(code, fn, nreal, ...) \
+  probe_density_sizes<2, nreal>(                   \
       #fn, [](const auto&... a) { return stan::math::fn(a...); });
   STANLI_SCALAR_DENSITY_LIST(STANLI_PROBE)
   STANLI_SCALAR_CDF_LIST(STANLI_PROBE)

@@ -842,28 +842,28 @@ const std::vector<FunctionSpec>& function_specs() {
     density("discrete_range_lccdf",
             all_integer_spec(3, AllIntegerDensity::DiscreteRangeLccdf));
 
-#define STANLI_DENSITY_ENTRY(code, fn, n, tier) density(#fn, {code, n, 0});
+#define STANLI_DENSITY_ENTRY(code, fn, n, ...) density(#fn, {code, n, 0});
     STANLI_SCALAR_DENSITY_LIST(STANLI_DENSITY_ENTRY)
     STANLI_SCALAR_CDF_LIST(STANLI_DENSITY_ENTRY)
 #undef STANLI_DENSITY_ENTRY
 
-#define STANLI_INT_DENSITY_ENTRY(code, fn, nreal, tier) \
+#define STANLI_INT_DENSITY_ENTRY(code, fn, nreal, ...) \
   density(#fn, {code, nreal + 1, 1, false, DensityShape::Plain, -1, true});
     STANLI_INT_DENSITY_LIST(STANLI_INT_DENSITY_ENTRY)
     STANLI_INT_CDF_LIST(STANLI_INT_DENSITY_ENTRY)
 #undef STANLI_INT_DENSITY_ENTRY
 
-#define STANLI_TWO_INT_CDF_ENTRY(code, fn, nreal, tier) \
+#define STANLI_TWO_INT_CDF_ENTRY(code, fn, nreal) \
   density(#fn, {code, nreal + 2, 2});
     STANLI_TWO_INT_CDF_LIST(STANLI_TWO_INT_CDF_ENTRY)
 #undef STANLI_TWO_INT_CDF_ENTRY
 
-#define STANLI_TAIL_CDF_ENTRY(code, fn, n, tier) \
+#define STANLI_TAIL_CDF_ENTRY(code, fn, n) \
   density(#fn, {code, n, 0, false, DensityShape::Plain, (1 << n) - 1});
     STANLI_TAIL_CDF_LIST(STANLI_TAIL_CDF_ENTRY)
 #undef STANLI_TAIL_CDF_ENTRY
 
-#define STANLI_TAIL_INT_CDF_ENTRY(code, fn, nreal, tier)        \
+#define STANLI_TAIL_INT_CDF_ENTRY(code, fn, nreal)              \
   density(#fn, {code, nreal + 1, 1, false, DensityShape::Plain, \
                 (1 << nreal) - 1, true});
     STANLI_TAIL_INT_CDF_LIST(STANLI_TAIL_INT_CDF_ENTRY)

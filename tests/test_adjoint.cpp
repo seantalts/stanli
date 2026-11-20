@@ -1425,7 +1425,7 @@ static void test_extremum_instantiations() {
 
 static void test_density_opcode_lookup() {
   std::vector<int> expected(65536, -1);
-#define STANLI_EXPECT_DENSITY_OPCODE(opc, fn, arity, tier) \
+#define STANLI_EXPECT_DENSITY_OPCODE(opc, fn, ...) \
   expected[opc] = program_density_id_by_name(#fn);
   STANLI_SCALAR_DENSITY_LIST(STANLI_EXPECT_DENSITY_OPCODE)
   STANLI_SCALAR_CDF_LIST(STANLI_EXPECT_DENSITY_OPCODE)

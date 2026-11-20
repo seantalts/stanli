@@ -2594,7 +2594,7 @@ double tail_visit(KernelCtx& ctx, F&& f, const A&... a) {
   return value;
 }
 
-#define STANLI_TAIL_CDF_KERNEL(code, fn, nreal, tier)                        \
+#define STANLI_TAIL_CDF_KERNEL(code, fn, nreal)                              \
   template <bool Grad>                                                       \
   double fn##_eval(KernelCtx& ctx) {                                         \
     stan::math::nested_rev_autodiff nested;                                  \
@@ -2612,7 +2612,7 @@ STANLI_TAIL_CDF_LIST(STANLI_TAIL_CDF_KERNEL)
 // The integer outcome rides in idata as one whole group, the way the
 // other integer-outcome cdfs read theirs; the lowering has already
 // replicated a language-level scalar to the lane count.
-#define STANLI_TAIL_INT_CDF_KERNEL(code, fn, nreal, tier)                    \
+#define STANLI_TAIL_INT_CDF_KERNEL(code, fn, nreal)                          \
   template <bool Grad>                                                       \
   double fn##_eval(KernelCtx& ctx) {                                         \
     stan::math::nested_rev_autodiff nested;                                  \
@@ -2662,7 +2662,7 @@ void register_matrix_kernels() {
   register_kernel(
       OP_WIENER_PACKED_LPDF,
       Kernel{wiener_packed_fwd, wiener_packed_bwd, wiener_packed_scratch});
-#define STANLI_REGISTER_TAIL_CDF(code, fn, nreal, tier) \
+#define STANLI_REGISTER_TAIL_CDF(code, fn, nreal) \
   register_kernel(code, Kernel{fn##_fwd, fn##_bwd, nullptr});
   STANLI_TAIL_CDF_LIST(STANLI_REGISTER_TAIL_CDF)
   STANLI_TAIL_INT_CDF_LIST(STANLI_REGISTER_TAIL_CDF)

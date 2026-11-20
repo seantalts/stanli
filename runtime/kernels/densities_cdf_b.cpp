@@ -22,7 +22,7 @@ void reflected_cdf(KernelCtx& ctx, F&& f) {
       values[k].push_back(-ctx.in[k].data[i]);
     reflected.in[k].data = values[k].data();
   }
-  cdf_fwd<NArgs, 0>(reflected, std::forward<F>(f));
+  cdf_fwd<NArgs>(reflected, std::forward<F>(f));
   int64_t offset = 0;
   for (int k = 0; k < Reflected; ++k)
     for (int64_t i = 0; i < ctx.in[k].len; ++i, ++offset)
