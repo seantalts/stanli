@@ -1596,9 +1596,9 @@ have the proofs and ctsem measurements.
 | `STANLI_DATA_LOOP_MEMO_MIN_WORK=n` | minimum executed steps before a data-loop memo is kept (default 256) | `structured_recording.inc` |
 | `STANLI_DATA_LOOP_MEMO_MIN_RATIO=n` | minimum executed steps per recorded event for a kept memo (default 8) | `structured_recording.inc` |
 | `STANLI_STRUCTURED_CHECK_REMAP=1` | check that no recorded pointer still refers to a released arena block | `structured_loop.cpp` |
-| `STANLI_STRUCTURED_LOOP_DIAGNOSTICS=1` | print selection, recording and frame diagnostics to stderr (also enables the remap check) | `structured_loop.cpp`, `lower_structured_loop.inc`, `lower_stmt.cpp` |
-| `STANLI_NO_REGION_RANGE_CACHE=1` | do not cache the range of an integer index expression over its loop-variable grid | `lower_structured_loop.inc` |
-| `STANLI_NO_STRUCTURED_DIRECT_INDEX_INPUTS=1` | pass indexed region inputs through the packed layout instead of directly | `lower_structured_loop.inc` |
+| `STANLI_STRUCTURED_LOOP_DIAGNOSTICS=1` | print selection, recording and frame diagnostics to stderr (also enables the remap check) | `structured_loop.cpp`, `lower_structured_loop.cpp`, `lower_stmt.cpp` |
+| `STANLI_NO_REGION_RANGE_CACHE=1` | do not cache the range of an integer index expression over its loop-variable grid | `lower_structured_loop.cpp` |
+| `STANLI_NO_STRUCTURED_DIRECT_INDEX_INPUTS=1` | pass indexed region inputs through the packed layout instead of directly | `lower_structured_loop.cpp` |
 
 ## Executor details (`executor.cpp`)
 
@@ -1833,7 +1833,7 @@ Reports and dumps:
 | --- | --- | --- |
 | `STANLI_DUMP_PASSES` | write one graph dump per lowering stage, to a directory or, with `-`, to stdout; `CompileOptions::dump_passes` does this in every build | `lower.cpp` |
 | `STANLI_DUMP_STAGES` | choose the stages to dump, by name or as `graph:stage`; `CompileOptions::dump_stages` does this in every build | `lower.cpp` |
-| `STANLI_PROFILE_PREP` | print preparation time for each stage; acts when the first character is not `0` | `lower.cpp`, `lower_structured_loop.inc` |
+| `STANLI_PROFILE_PREP` | print preparation time for each stage; acts when the first character is not `0` | `lower.cpp`, `lower_structured_loop.cpp` |
 | `STANLI_EXECUTION_REPORT` | print which engine each part of the model runs on; acts when the value is nonempty and not `0`; `CompileOptions::execution_report` does this in every build | `execution_report.cpp` |
 
 ## Historical targeted measurements
