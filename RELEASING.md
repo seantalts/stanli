@@ -44,8 +44,12 @@ into a confusing build failure.
 
 The `runtime-release` job attaches six runtime tarballs
 (`stanli-runtime-<os>-<arch>.tar.gz`, what `stanli_install()` downloads,
-including `emscripten-wasm32` for webR) and the R source package to the
-GitHub Release. It attaches them while the release is still a draft,
+including `emscripten-wasm32` for webR), the R source package, and the
+portable compiler `stanli-compiler.js` with its `.stamp` provenance file
+to the GitHub Release. The compiler is the js_of_ocaml build of the pinned
+stanc3 fork; it turns `.stan` source into the portable MIR that this
+release's runtime accepts. The same bytes are committed as
+`r/inst/js/stanc.js`. It attaches them while the release is still a draft,
 because a published release is immutable. R-universe's registry
 tracks `*release`, so a new release advances the package automatically,
 after R-universe's own platform builds finish.

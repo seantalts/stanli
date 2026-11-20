@@ -4,7 +4,7 @@
 // across Graph, compiled/direct-interpreted write_array, and BridgeStan.
 #include "structured_array_oracles.hpp"
 
-#include "../runtime/third_party/bridgestan.h"
+#include "../runtime/ext/bridgestan.h"
 
 #include <stanli/bridgestan_internal.hpp>
 #include <stanli/compile.hpp>

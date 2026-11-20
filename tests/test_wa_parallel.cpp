@@ -10,7 +10,7 @@
 #include "../runtime/src/lower_work.hpp"
 #include "../runtime/src/lower_worker.hpp"
 #include "../runtime/src/x87_control.hpp"
-#include "../runtime/third_party/bridgestan.h"
+#include "../runtime/ext/bridgestan.h"
 
 #include <stanli/bridgestan_internal.hpp>
 #include <stanli/compile.hpp>
