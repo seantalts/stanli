@@ -59,6 +59,7 @@ Lowering::Lowering(const DataMap& d, PrepTrace& p, PassDumper& dump_to,
                std::make_shared<ShapeInterner>(*prepared_context.shapes)) {
   const auto env_copy_time = prep.start();
   copy_named(td.env(), prepared_context.environment, &prepared_context.names);
+  count_data_copy(td.env());
   zero_size_data = prepared_context.zero_size_data;
   int_env = prepared_context.integers;
   copy_named(decls, prepared_context.declarations, &prepared_context.names);
@@ -75,6 +76,7 @@ Lowering::Lowering(Lowering& parent, RegionTrialTag,
   fun_defs = parent.fun_defs;
   copy_named(decls, parent.decls, names);
   copy_named(td.env(), parent.td.env(), names);
+  count_data_copy(td.env());
   copy_named(int_env, parent.int_env, names);
   if (!names)
     int_locals = parent.int_locals;
@@ -1155,6 +1157,13 @@ CompiledModel::WriteArray Lowering::run_write_array(const mir::Program& p) {
   // did not recognize still folds away with both pinned on.
   int_env["emit_transformed_parameters__"] = 1;
   int_env["emit_generated_quantities__"] = 1;
+  const std::function<void(const mir::Stmt&)> sizes = [&](const mir::Stmt& s) {
+    if (s.kind == mir::Stmt::Decl)
+      for (const mir::Expr& d : s.decl_type.dims)
+        mir::collect_names(d, &write_array_size_names);
+    for (const mir::Stmt& child : s.body) sizes(child);
+  };
+  for (const mir::Stmt& s : p.generate_quantities) sizes(s);
   CompiledModel::WriteArray wa;
   DumpOnThrow guard{*this};
   const auto lower_time = prep.start();
@@ -1195,6 +1204,7 @@ CompiledModel::WriteArray Lowering::run_write_array(const mir::Program& p) {
   prep.graph(prep_graph, "lower", lower_time, g, out.fills, target_terms.size(),
              out.views.size(), PrepTrace::Extra::Truncated,
              wa.truncated.has_value());
+  prep.work(prep_graph);
   dump("lower", roots);
 
   run_passes(roots, kWriteArrayPasses);
@@ -1256,6 +1266,7 @@ CompiledModel Lowering::run(const mir::Program& p) {
   }
   prep.graph(prep_graph, "lower", lower_time, g, out.fills, target_terms.size(),
              out.views.size());
+  prep.work(prep_graph);
   dump("lower", {});
   // Jacobian terms and constrained-parameter views are read straight out
   // of the arena, so no op consumes them and the pass cannot infer them.

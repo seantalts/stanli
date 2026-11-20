@@ -5339,36 +5339,26 @@ struct ProgramCompiler {
       --inline_depth;
       bail("function inlining too deep");
     }
-    // Callee scope: save the caller's bindings, install the parameters, and
-    // restore afterwards. Registers are never reused, so nothing aliases.
-    auto saved_reals = reals;
-    auto saved_ints = ints;
-    auto saved_known_reals = known_reals;
-    auto saved_known_int_arrays = known_int_arrays;
-    auto saved_known_int_array_dims = known_int_array_dims;
-    auto saved_int_array_names = int_array_names;
-    auto saved_deferred_shapes = deferred_shapes;
-    auto saved_region_sized = region_sized;
-    auto saved_int_decl_at = int_decl_at;
-    auto saved_int_reset_at = int_reset_at;
-    auto saved_extern_bound = extern_bound;
+    // Callee scope: move the caller's bindings aside, install the
+    // parameters, and move them back afterwards. Registers are never
+    // reused, so nothing aliases.
+    auto saved_reals = std::exchange(reals, {});
+    auto saved_ints = std::exchange(ints, {});
+    auto saved_known_reals = std::exchange(known_reals, {});
+    auto saved_known_int_arrays = std::exchange(known_int_arrays, {});
+    auto saved_known_int_array_dims = std::exchange(known_int_array_dims, {});
+    auto saved_int_array_names = std::exchange(int_array_names, {});
+    auto saved_deferred_shapes = std::exchange(deferred_shapes, {});
+    auto saved_region_sized = std::exchange(region_sized, {});
+    auto saved_int_decl_at = std::exchange(int_decl_at, {});
+    auto saved_int_reset_at = std::exchange(int_reset_at, {});
+    auto saved_extern_bound = std::exchange(extern_bound, {});
     auto saved_call_types = call_types;
     const bool saved_propto_ctx = propto_ctx;
     const int saved_branch_depth = branch_depth;
     const int saved_return_while_base = return_while_base;
     const size_t saved_loop_count = loops.size();
     return_while_base = structured_while_depth;
-    reals.clear();
-    ints.clear();
-    known_reals.clear();
-    known_int_arrays.clear();
-    known_int_array_dims.clear();
-    int_array_names.clear();
-    deferred_shapes.clear();
-    region_sized.clear();
-    int_decl_at.clear();
-    int_reset_at.clear();
-    extern_bound.clear();
     call_types = CallTypes{};
     call_types->locals = false;
     for (size_t k = 0; k < args.size(); ++k) {

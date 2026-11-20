@@ -413,7 +413,7 @@ std::optional<DataMap::Entry> region_bounded_data_value(const mir::Expr& e) {
   try {
     record_interpreter_event("lowering", "bounded_admission_probe");
     MirInterp<double> probe(fun_defs, "structured data probe", hooks);
-    probe.env() = td.env();
+    probe.set_parent_env(&td.env());
     probe.set_propto_context(td.propto_context());
     probe.refuse_propto_densities();
     return probe.eval(e);
@@ -1035,6 +1035,66 @@ std::set<std::string> region_dependencies(const mir::Stmt& s) {
   } while (active.size() != previous);
   return active;
 }
+// A carried integer that a counted loop only ever increments, by amounts
+// that do not depend on anything the loop writes, stays within its range
+// on entry widened by the trip count times the largest steps. Each
+// increment counts as optional, which covers branches, break and continue.
+// Sets the range and returns true when that proof applies.
+bool region_counted_range(const mir::Stmt& loop, const std::string& name,
+                          const std::vector<std::string>& writes) {
+  const auto value = scope.find(name);
+  if (value == scope.end() || g.slots[value->second.slot].len != 1 ||
+      value->second.si.kind != ViewKind::Flat)
+    return false;
+  const auto entry = int_ranges.find(value->second.slot);
+  const auto first = region_range(loop.lower);
+  const auto last = region_range(loop.upper);
+  if (entry == int_ranges.end() || !first || !last) return false;
+  std::set<std::string> locals;
+  collect_loop_locals(loop, &locals);
+  int64_t down = 0, up = 0;
+  bool counts = false, valid = true;
+  std::function<void(const mir::Stmt&, bool)> walk = [&](const mir::Stmt& st,
+                                                         bool nested) {
+    if (!valid) return;
+    if (st.kind == mir::Stmt::Assignment && st.lhs == name) {
+      const mir::Expr& e = st.rhs;
+      if (nested || !st.lhs_idx.empty() || e.kind != mir::Expr::FunApp ||
+          e.name != "Plus__" || e.args.size() != 2 ||
+          e.args[0].kind != mir::Expr::Var || e.args[0].name != name) {
+        valid = false;
+        return;
+      }
+      for (const auto& other : writes)
+        if (expr_references(e.args[1], other)) valid = false;
+      for (const auto& local : locals)
+        if (expr_references(e.args[1], local)) valid = false;
+      const auto step = valid ? region_range(e.args[1]) : std::nullopt;
+      if (!step) {
+        valid = false;
+        return;
+      }
+      down += std::min<int64_t>(0, step->lo);
+      up += std::max<int64_t>(0, step->hi);
+      counts = true;
+    }
+    for (const auto& child : st.body)
+      walk(child, nested || child.kind == mir::Stmt::For ||
+                      child.kind == mir::Stmt::While);
+  };
+  for (const auto& child : loop.body)
+    walk(child, child.kind == mir::Stmt::For || child.kind == mir::Stmt::While);
+  if (!valid || !counts) return false;
+  const int64_t trips = std::max<int64_t>(0, int64_t(last->hi) - first->lo + 1);
+  const int64_t lo = int64_t(entry->second.lo) + trips * down;
+  const int64_t hi = int64_t(entry->second.hi) + trips * up;
+  if (lo < INT32_MIN || hi > INT32_MAX) return false;
+  set_int_range(value->second, lo, hi);
+  RealRange real{static_cast<double>(lo), static_cast<double>(hi)};
+  if (lo <= 0 && hi >= 1) real.positive_lo = 1;
+  real_ranges[value->second.slot] = real;
+  return true;
+}
 void region_widen_carried(const mir::Stmt& s,
                           const std::set<std::string>& active) {
   const auto saved_analysis = region_analysis_ints;
@@ -1049,10 +1109,12 @@ void region_widen_carried(const mir::Stmt& s,
   for (const auto& item : int_env)
     region_analysis_ints[item.first] = {static_cast<int32_t>(item.second),
                                         static_cast<int32_t>(item.second)};
-  // Establish bounded integer locals before asking for carried real ranges.
-  // A few fixed-point passes cover the ordinary chains emitted by stanc
-  // without executing the loop or duplicating its graph body.
-  for (int pass = 0; pass < 4; ++pass) {
+  // Establish bounded integer locals before asking for carried real ranges,
+  // by passes over the body until they reach a fixed point.
+  constexpr int kWidenRounds = 8;
+  std::vector<std::string> writes;
+  assigned_names(s, &writes);
+  for (int pass = 0;; ++pass) {
     bool changed = false;
     std::function<void(const mir::Stmt&)> infer = [&](const mir::Stmt& st) {
       if (st.kind == mir::Stmt::For) {
@@ -1089,13 +1151,31 @@ void region_widen_carried(const mir::Stmt& s,
     };
     infer(s);
     if (!changed) break;
+    if (pass == kWidenRounds) {
+      // Not a fixed point, so none of these is proved.
+      for (const auto& name : writes) region_analysis_ints.erase(name);
+      break;
+    }
   }
-  std::vector<std::string> writes;
-  assigned_names(s, &writes);
-  for (const auto& name : writes) {
+  // Each round merges every carried name's range with the range of the
+  // values assigned to it, computed from the other names' current ranges.
+  // A range is a proof only once a round changes nothing. A name that loses
+  // its range keeps none, and a name still growing after kWidenRounds
+  // rounds loses its range, so the rounds always end. A counter in a loop
+  // with a known number of trips gets its range in closed form instead.
+  std::set<std::string> no_int_range, no_real_range, closed_form;
+  if (s.kind == mir::Stmt::For)
+    for (const auto& name : writes)
+      if (region_counted_range(s, name, writes)) closed_form.insert(name);
+  const auto widen_name = [&](const std::string& name, bool give_up) {
     auto v = scope.find(name);
-    if (v == scope.end()) continue;
+    if (v == scope.end()) return false;
     if (active.count(name)) v->second.si.param_free = false;
+    if (closed_form.count(name)) {
+      region_cells[name] = v->second;
+      region_forget(name);
+      return false;
+    }
     const bool scalar =
         g.slots[v->second.slot].len == 1 && v->second.si.kind == ViewKind::Flat;
     std::optional<IntRange> integer;
@@ -1105,7 +1185,10 @@ void region_widen_carried(const mir::Stmt& s,
     if (auto found = real_ranges.find(v->second.slot);
         found != real_ranges.end())
       real = found->second;
-    bool integer_unknown = false, real_unknown = false;
+    const std::optional<IntRange> integer_before = integer;
+    const std::optional<RealRange> real_before = real;
+    bool integer_unknown = no_int_range.count(name) > 0;
+    bool real_unknown = no_real_range.count(name) > 0;
     std::function<void(const mir::Stmt&)> widen = [&](const mir::Stmt& st) {
       // A range from an earlier full fill cannot describe a partially
       // updated array on subsequent iterations. Re-establish it only after
@@ -1140,16 +1223,47 @@ void region_widen_carried(const mir::Stmt& s,
       for (const auto& child : st.body) widen(child);
     };
     widen(s);
+    const auto same_int = [](const std::optional<IntRange>& a,
+                             const std::optional<IntRange>& b) {
+      return a.has_value() == b.has_value() &&
+             (!a || (a->lo == b->lo && a->hi == b->hi));
+    };
+    const auto same_real = [](const std::optional<RealRange>& a,
+                              const std::optional<RealRange>& b) {
+      return a.has_value() == b.has_value() &&
+             (!a || (a->lo == b->lo && a->hi == b->hi &&
+                     a->positive_lo == b->positive_lo));
+    };
+    if (give_up && !same_int(integer, integer_before)) integer_unknown = true;
+    if (give_up && !same_real(real, real_before)) real_unknown = true;
+    if (integer_unknown) {
+      no_int_range.insert(name);
+      region_analysis_ints.erase(name);
+      integer.reset();
+    }
+    if (!scalar || real_unknown) {
+      no_real_range.insert(name);
+      real.reset();
+    }
+    const bool changed =
+        !same_int(integer, integer_before) || !same_real(real, real_before);
     region_cells[name] = v->second;
-    if (integer && !integer_unknown)
+    if (integer)
       set_int_range(v->second, integer->lo, integer->hi);
     else
       int_ranges.erase(v->second.slot);
-    if (scalar && real && !real_unknown)
+    if (real)
       real_ranges[v->second.slot] = *real;
     else
       real_ranges.erase(v->second.slot);
     region_forget(name);
+    return changed;
+  };
+  for (int round = 0;; ++round) {
+    bool changed = false;
+    for (const auto& name : writes)
+      changed = widen_name(name, round >= kWidenRounds) || changed;
+    if (!changed) break;
   }
   region_analysis_ints = saved_analysis;
 }
@@ -2077,9 +2191,6 @@ Flow lower_region_stmt(const mir::Stmt& s) {
       region_forget(s.loopvar);
       if (known) set_int_range(iterator, lo->lo, hi->hi);
       region_widen_carried(s, dependencies);
-      // One additional pass resolves loop-carried bounds whose update uses
-      // another carried integer (ctsem's time[rowi] - time[prevrow]).
-      region_widen_carried(s, dependencies);
       RegionNode loop;
       loop.kind = RegionNode::For;
       loop.lower = lower.slot;
@@ -2160,6 +2271,8 @@ Flow lower_region_stmt(const mir::Stmt& s) {
       region_append(std::move(loop));
       region_control_active = saved_control;
       region_widen_carried(s, dependencies);
+      if (counter_range) int_ranges[counter_slot] = *counter_range;
+      if (counter_real_range) real_ranges[counter_slot] = *counter_real_range;
       return Flow::Next;
     }
     case mir::Stmt::IfElse: {
@@ -2179,7 +2292,12 @@ Flow lower_region_stmt(const mir::Stmt& s) {
       const auto base_ints = int_env;
       const auto base_locals = int_locals;
       const auto base_decls = decls;
-      const auto base_env = td.env();
+      // Data is never assigned, so only the names this `if` binds need
+      // their data values put back; copying the whole environment cost
+      // the size of every data array the loop reads, per `if`.
+      std::set<std::string> bound;
+      bound_names(s, &bound);
+      const auto base_env = save_named(td.env(), bound);
       const auto base_ranges = int_ranges;
       const auto base_real_ranges = real_ranges;
       const bool base_control = region_control_active;
@@ -2194,7 +2312,8 @@ Flow lower_region_stmt(const mir::Stmt& s) {
         int_env = base_ints;
         int_locals = base_locals;
         decls = base_decls;
-        td.env() = base_env;
+        auto arm_env = base_env;
+        restore_named(td.env(), arm_env);
         int_ranges = base_ranges;
         real_ranges = base_real_ranges;
         region_refine_condition(s.cond, arm == 0);
@@ -2217,7 +2336,8 @@ Flow lower_region_stmt(const mir::Stmt& s) {
       int_env = base_ints;
       int_locals = base_locals;
       decls = base_decls;
-      td.env() = base_env;
+      auto after_env = base_env;
+      restore_named(td.env(), after_env);
       int_ranges = base_ranges;
       real_ranges = base_real_ranges;
       region_control_active = base_control;
@@ -2690,12 +2810,15 @@ static constexpr size_t kRetainLoopOps = size_t{1} << 14;
 static constexpr size_t kRetainLoopOpsPerTrip = 32;
 // A retained loop's integers exist only at run time, too late for a later
 // declaration that a count kept by the loop sizes.
-static bool loop_assigns_outer_int(const mir::Stmt& loop) {
+// With `among`, only an integer in that set counts.
+static bool loop_assigns_outer_int(
+    const mir::Stmt& loop, const std::set<std::string>* among = nullptr) {
   std::set<std::string> locals;
   for (const auto& child : loop.body) collect_loop_locals(child, &locals);
   std::function<bool(const mir::Stmt&)> assigns = [&](const mir::Stmt& s) {
     if (s.kind == mir::Stmt::Assignment && !locals.count(s.lhs) &&
-        s.rhs.unsized.leaf == mir::UnsizedLeaf::Int)
+        s.rhs.unsized.leaf == mir::UnsizedLeaf::Int &&
+        (!among || among->count(s.lhs)))
       return true;
     for (const auto& child : s.body)
       if (assigns(child)) return true;
@@ -2848,14 +2971,18 @@ uint64_t region_cost(const mir::Stmt& s, uint64_t limit, unsigned depth = 0) {
   return std::min(body, limit);
 }
 
+// `before_publish` runs once the candidate has passed every refusal, just
+// before the loop is added to the graph.
 bool try_lower_region(
     const mir::Stmt& s,
     std::optional<std::pair<int64_t, int64_t>> exact_bounds = std::nullopt,
-    const std::set<std::string>* output_references = nullptr) {
+    const std::set<std::string>* output_references = nullptr,
+    const std::function<void()>& before_publish = {}) {
   const StructuredMode mode = structured_policy;
   if (mode == StructuredMode::Off) return false;
   if (in_write_array && !output_references &&
       (write_array_unrolled_loops.count(&s) ||
+       loop_assigns_outer_int(s, &write_array_size_names) ||
        (write_array_unroll_int_loops && loop_assigns_outer_int(s))))
     return false;
   // Make the representation decision before constructing a trial graph.
@@ -3106,6 +3233,7 @@ bool try_lower_region(
   if (!plan) {
     return refuse("native: " + native_refusal);
   }
+  if (before_publish) before_publish();
   // No proof/refusal follows publication. Allocation failure aborts this
   // whole compilation; it never falls through into a partially changed graph.
   *shape_pool = std::move(*shapes);
