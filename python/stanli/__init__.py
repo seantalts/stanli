@@ -366,6 +366,9 @@ def _load_lib():
                                          ctypes.c_int64,
                                          ctypes.POINTER(ctypes.c_double)]
     lib.stanli_optimize_opts_init.argtypes = [ctypes.POINTER(_OptimizeOpts)]
+    lib.stanli_optimize_opts_check.restype = ctypes.c_int
+    lib.stanli_optimize_opts_check.argtypes = [ctypes.POINTER(_OptimizeOpts),
+                                               ctypes.c_char_p, ctypes.c_size_t]
     lib.stanli_optimize.restype = ctypes.c_int
     lib.stanli_optimize.argtypes = [ctypes.c_void_p,
                                     ctypes.POINTER(_OptimizeOpts),
@@ -1992,28 +1995,24 @@ class Model:
         returning the other quantity -- the two differ for any
         constrained parameter, which is most models.
         """
-        seed = _seed_arg(seed)
-        iter = _int_arg("iter", iter)
-        init_radius = _real_arg("init_radius", init_radius)
-        if iter < 1:
-            raise ValueError("iter must be an integer >= 1")
-        if not (math.isfinite(init_radius) and init_radius >= 0):
-            raise ValueError("init_radius must be a finite number >= 0")
+        opts = _OptimizeOpts()
+        _lib.stanli_optimize_opts_init(ctypes.byref(opts))
+        opts.seed = _seed_arg(seed)
+        opts.iter = _int_arg("iter", iter)
+        opts.jacobian = 1
+        opts.init_radius = _real_arg("init_radius", init_radius)
+        err = ctypes.create_string_buffer(4096)
+        if _lib.stanli_optimize_opts_check(ctypes.byref(opts), err, len(err)):
+            raise ValueError(err.value.decode())
         if init is not None:
             _reject_named_start("init", init)
-        self._prepare_run(seed)
+        self._prepare_run(opts.seed)
         if not jacobian:
             raise NotImplementedError(
                 "stanli folds the Jacobian into the graph at lowering "
                 "time, so the penalized maximum likelihood (CmdStan's "
                 "jacobian=0) is not available; optimize() returns the "
                 "posterior mode")
-        opts = _OptimizeOpts()
-        _lib.stanli_optimize_opts_init(ctypes.byref(opts))
-        opts.seed = seed
-        opts.iter = iter
-        opts.jacobian = 1
-        opts.init_radius = init_radius
         init_arr = None
         if init is not None:
             init_arr = np.ascontiguousarray(init, dtype=np.float64)
@@ -2028,7 +2027,6 @@ class Model:
         q = np.empty(self.n_unconstrained)
         vals = np.empty(len(names))
         lp = ctypes.c_double()
-        err = ctypes.create_string_buffer(4096)
         with _native_output():
             rc = _lib.stanli_optimize(self._handle, ctypes.byref(opts),
                                       _dptr(q), _dptr(vals), ctypes.byref(lp),

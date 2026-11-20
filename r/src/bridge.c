@@ -329,22 +329,29 @@ static int (*p_optimize)(void*, const stanli_optimize_opts*, double*, double*,
                          double*, char*, size_t);
 
 static void (*p_fixed_param_opts_init)(stanli_fixed_param_opts*);
+static int (*p_fixed_param_opts_check)(const stanli_fixed_param_opts*, char*,
+                                       size_t);
 static int64_t (*p_fixed_param_n_draws)(const stanli_fixed_param_opts*);
 static int (*p_fixed_param)(void*, const stanli_fixed_param_opts*, double*,
                             double*, stanli_log_cb, void*,
                             stanli_sample_poll_cb, void*, int*, char*, size_t);
 static void (*p_laplace_opts_init)(stanli_laplace_opts*);
+static int (*p_laplace_opts_check)(const stanli_laplace_opts*, char*, size_t);
 static int (*p_laplace_sample)(void*, const stanli_laplace_opts*, const double*,
                                double*, double*, double*, stanli_log_cb, void*,
                                stanli_sample_poll_cb, void*, int*, char*,
                                size_t);
 static void (*p_pathfinder_opts_init)(stanli_pathfinder_opts*);
+static int (*p_pathfinder_opts_check)(const stanli_pathfinder_opts*, char*,
+                                      size_t);
 static int64_t (*p_pathfinder_max_draws)(const stanli_pathfinder_opts*);
 static int (*p_pathfinder)(void*, const stanli_pathfinder_opts*, double*,
                            double*, double*, double*, int64_t*, stanli_log_cb,
                            void*, stanli_sample_poll_cb, void*, int*, char*,
                            size_t);
 static void (*p_variational_opts_init)(stanli_variational_opts*);
+static int (*p_variational_opts_check)(const stanli_variational_opts*, char*,
+                                       size_t);
 static int (*p_variational)(void*, const stanli_variational_opts*, double*,
                             double*, double*, double*, stanli_log_cb, void*,
                             stanli_sample_poll_cb, void*, int*, char*, size_t);
@@ -589,14 +596,18 @@ SEXP stanli_bridge_load(SEXP path) {
   BIND("stanli_optimize_opts_init", p_optimize_opts_init);
   BIND("stanli_optimize", p_optimize);
   BIND("stanli_fixed_param_opts_init", p_fixed_param_opts_init);
+  BIND("stanli_fixed_param_opts_check", p_fixed_param_opts_check);
   BIND("stanli_fixed_param_n_draws", p_fixed_param_n_draws);
   BIND("stanli_fixed_param", p_fixed_param);
   BIND("stanli_laplace_opts_init", p_laplace_opts_init);
+  BIND("stanli_laplace_opts_check", p_laplace_opts_check);
   BIND("stanli_laplace_sample", p_laplace_sample);
   BIND("stanli_pathfinder_opts_init", p_pathfinder_opts_init);
+  BIND("stanli_pathfinder_opts_check", p_pathfinder_opts_check);
   BIND("stanli_pathfinder_max_draws", p_pathfinder_max_draws);
   BIND("stanli_pathfinder", p_pathfinder);
   BIND("stanli_variational_opts_init", p_variational_opts_init);
+  BIND("stanli_variational_opts_check", p_variational_opts_check);
   BIND("stanli_variational", p_variational);
   p_capture_messages(1);
   return mkString("");
@@ -1620,6 +1631,12 @@ static SEXP named_list(int n, const char** names, SEXP* values) {
   return out;
 }
 
+/* Raises the message of an options check that failed. Called before the
+ * options size any buffer. */
+static void check_opts(int failed, const char* err) {
+  if (failed) error("%s", err[0] ? err : "invalid options");
+}
+
 static SEXP interrupted_result(void) {
   const char* names[] = {"interrupted", ""};
   SEXP out = PROTECT(mkNamed(VECSXP, names));
@@ -1642,7 +1659,9 @@ SEXP stanli_r_fixed_param(SEXP m, SEXP optlist, SEXP inits) {
   o.refresh = asInteger(VECTOR_ELT(optlist, 5));
   o.chain_id = asInteger(VECTOR_ELT(optlist, 6));
   if (XLENGTH(inits) > 0) o.inits = REAL(inits);
-  if (o.chains < 1) error("chains must be positive");
+  char err[4096];
+  err[0] = '\0';
+  check_opts(p_fixed_param_opts_check(&o, err, sizeof err), err);
 
   const int64_t rows = p_fixed_param_n_draws(&o);
   const int64_t width = p_n_output_columns(mm);
@@ -1650,8 +1669,6 @@ SEXP stanli_r_fixed_param(SEXP m, SEXP optlist, SEXP inits) {
       PROTECT(allocVector(REALSXP, (R_xlen_t)(o.chains * rows * width)));
   run_log log;
   run_log_init(&log, o.refresh > 0);
-  char err[4096];
-  err[0] = '\0';
   int interrupted = 0;
   SEXP seconds = PROTECT(allocVector(REALSXP, (R_xlen_t)o.chains));
   const int rc =
@@ -1788,7 +1805,9 @@ SEXP stanli_r_laplace(SEXP m, SEXP optlist, SEXP mode) {
   o.jacobian = asLogical(VECTOR_ELT(optlist, 2));
   o.calculate_lp = asLogical(VECTOR_ELT(optlist, 3));
   o.refresh = asInteger(VECTOR_ELT(optlist, 4));
-  if (o.draws < 1) error("draws must be positive");
+  char err[4096];
+  err[0] = '\0';
+  check_opts(p_laplace_opts_check(&o, err, sizeof err), err);
   if (XLENGTH(mode) != (R_xlen_t)p_n_unconstrained(mm))
     error("mode must hold %lld unconstrained values",
           (long long)p_n_unconstrained(mm));
@@ -1800,8 +1819,6 @@ SEXP stanli_r_laplace(SEXP m, SEXP optlist, SEXP mode) {
   values[2] = PROTECT(allocVector(REALSXP, (R_xlen_t)o.draws));
   run_log log;
   run_log_init(&log, o.refresh > 0);
-  char err[4096];
-  err[0] = '\0';
   int interrupted = 0;
   const int rc = p_laplace_sample(
       mm, &o, REAL(mode), REAL(values[0]), REAL(values[1]), REAL(values[2]),
@@ -1849,10 +1866,13 @@ SEXP stanli_r_pathfinder(SEXP m, SEXP optlist, SEXP inits) {
   o.calculate_lp = asLogical(VECTOR_ELT(optlist, 15));
   o.refresh = asInteger(VECTOR_ELT(optlist, 16));
   if (XLENGTH(inits) > 0) o.inits = REAL(inits);
+  char err[4096];
+  err[0] = '\0';
+  check_opts(p_pathfinder_opts_check(&o, err, sizeof err), err);
 
-  /* Zero for options the runtime refuses, more than one path among them. */
+  /* Zero for the options that pass the check and that the run refuses. */
   const int64_t cap = p_pathfinder_max_draws(&o);
-  if (cap < 1) error("num_paths must be 1 and draws positive");
+  if (cap < 1) error("num_paths must be 1");
   const int64_t width = p_n_output_columns(mm);
   double* raw = (double*)R_alloc((size_t)(cap * width), sizeof(double));
   double* lp = (double*)R_alloc((size_t)cap, sizeof(double));
@@ -1860,8 +1880,6 @@ SEXP stanli_r_pathfinder(SEXP m, SEXP optlist, SEXP inits) {
   double* path = (double*)R_alloc((size_t)cap, sizeof(double));
   run_log log;
   run_log_init(&log, o.refresh > 0);
-  char err[4096];
-  err[0] = '\0';
   int interrupted = 0;
   int64_t rows = 0;
   const int rc =
@@ -1912,7 +1930,9 @@ SEXP stanli_r_variational(SEXP m, SEXP optlist, SEXP init) {
   o.init_radius = asReal(VECTOR_ELT(optlist, 11));
   const int refresh = asInteger(VECTOR_ELT(optlist, 12));
   if (XLENGTH(init) > 0) o.init = REAL(init);
-  if (o.output_samples < 1) error("draws must be positive");
+  char err[4096];
+  err[0] = '\0';
+  check_opts(p_variational_opts_check(&o, err, sizeof err), err);
 
   const int64_t width = p_n_output_columns(mm);
   SEXP values[5];
@@ -1923,8 +1943,6 @@ SEXP stanli_r_variational(SEXP m, SEXP optlist, SEXP init) {
   values[3] = PROTECT(allocVector(REALSXP, (R_xlen_t)o.output_samples));
   run_log log;
   run_log_init(&log, refresh > 0);
-  char err[4096];
-  err[0] = '\0';
   int interrupted = 0;
   const int rc =
       p_variational(mm, &o, REAL(values[0]), REAL(values[1]), REAL(values[2]),
