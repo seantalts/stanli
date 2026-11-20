@@ -1181,15 +1181,18 @@ static void test_udf_packed_branch() {
     else
       lp += -stan::math::square(yn - m4) * m5 + m6;
   }
-  lp.grad();
   Executor ex(cm.graph);
   cm.bind(ex);
   ex.params_data()[0] = a0;
   ex.params_data()[1] = b0;
   double grad[2] = {};
   expect_ulp("udf packed branch lp", ex.gradient(grad), lp.val());
-  expect_ulp("udf packed branch grad a", grad[0], a.adj());
-  expect_ulp("udf packed branch grad b", grad[1], b.adj(), 10);
+  // The gradient sums 64 terms per parameter, which stanli adds pairwise and
+  // the var loop in observation order, so it is held to the true value: a
+  // 60-digit mpmath evaluation of the same lp and its derivatives at
+  // (a0, b0) on this fixture. The var loop is 14.8 and 9.4 ULP from it.
+  expect_ulp("udf packed branch grad a", grad[0], 351.17603325812319);
+  expect_ulp("udf packed branch grad b", grad[1], 50.908421919336608, 10);
   stan::math::recover_memory();
 }
 
