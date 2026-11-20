@@ -488,7 +488,7 @@ void seal_frame(LoopState& s) {
   frame->adjoint_base = tape.adjoint_base;
   frame->old = std::move(st.inplace_old);
   FrameEncoder<false> encoder{s, *frame, snapshot};
-  if (s.frame_layout && !scratch.layouts.empty()) {
+  if (!scratch.layouts.empty()) {
     ++tape.layout_attempts;
     for (const auto& layout : scratch.layouts) {
       if (layout.instructions != st.program.size()) continue;
@@ -525,18 +525,16 @@ void seal_frame(LoopState& s) {
       bucket.push_back(frame->code);
     }
   }
-  if (s.frame_layout) {
-    auto& layouts = scratch.layouts;
-    const auto found = std::find_if(layouts.begin(), layouts.end(),
-                                   [&](const auto& layout) {
-                                     return layout.code == frame->code;
-                                   });
-    if (found != layouts.end()) layouts.erase(found);
-    // A bounded cache controls comparison cost. Every cache entry still
-    // requires the full certificate; eviction only selects the slow fallback.
-    if (layouts.size() == 4) layouts.pop_back();
-    layouts.insert(layouts.begin(), {frame->code, st.program.size()});
-  }
+  auto& layouts = scratch.layouts;
+  const auto found = std::find_if(layouts.begin(), layouts.end(),
+                                 [&](const auto& layout) {
+                                   return layout.code == frame->code;
+                                 });
+  if (found != layouts.end()) layouts.erase(found);
+  // A bounded cache controls comparison cost. Every cache entry still
+  // requires the full certificate; eviction only selects the slow fallback.
+  if (layouts.size() == 4) layouts.pop_back();
+  layouts.insert(layouts.begin(), {frame->code, st.program.size()});
   const auto relocate = [&](const double* ptr) -> double* {
     const auto ref = encoder.local(ptr);
     return ref >= 0 ? frame->values.data() + ref : const_cast<double*>(ptr);
@@ -744,7 +742,7 @@ struct FrameExecution {
 
 bool LoopState::clone_from(const KernelState& source) {
   const auto* src = dynamic_cast<const LoopState*>(&source);
-  if (!frame_clone || no_replay || !(frame_mode || frame_auto) || !src ||
+  if (no_replay || !(frame_mode || frame_auto) || !src ||
       &p != &src->p || !src->frame_clone_ready || src->building ||
       !src->frames || !src->frames->ready)
     return false;

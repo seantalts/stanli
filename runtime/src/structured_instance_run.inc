@@ -1598,15 +1598,13 @@ void Execution::commit(const FrameTemplate& t, const Relocation& r,
   }
   if (!ok)
     throw std::logic_error("structured frame instance lost a relocation");
-  if (s.frame_layout) {
-    auto& layouts = tape.sealing->layouts;
-    const auto found =
-        std::find_if(layouts.begin(), layouts.end(),
-                     [&](const auto& layout) { return layout.code == f.code; });
-    if (found != layouts.end()) layouts.erase(found);
-    if (layouts.size() == 4) layouts.pop_back();
-    layouts.insert(layouts.begin(), {f.code, t.instructions});
-  }
+  auto& layouts = tape.sealing->layouts;
+  const auto found =
+      std::find_if(layouts.begin(), layouts.end(),
+                   [&](const auto& layout) { return layout.code == f.code; });
+  if (found != layouts.end()) layouts.erase(found);
+  if (layouts.size() == 4) layouts.pop_back();
+  layouts.insert(layouts.begin(), {f.code, t.instructions});
   tape.frames.push_back(std::move(frame));
   note_frame();
 }

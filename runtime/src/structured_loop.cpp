@@ -1589,8 +1589,6 @@ struct LoopState : KernelState {
   std::unique_ptr<FrameTape> frames;
   bool frame_mode = false;
   bool frame_auto = false;
-  bool frame_layout = debug_env("STANLI_NO_STRUCTURED_FRAME_LAYOUT") == nullptr;
-  bool frame_clone = debug_env("STANLI_NO_STRUCTURED_FRAME_CLONE") == nullptr;
   bool frame_instance =
       debug_env("STANLI_NO_STRUCTURED_FRAME_INSTANCE") == nullptr;
   const double* initial = nullptr;

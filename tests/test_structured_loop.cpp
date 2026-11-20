@@ -5836,27 +5836,20 @@ static void frame_layout_tests() {
     const auto graph = outer(plan, {1, 1}, {6});
     test_setenv("STANLI_STRUCTURED_FRAMES", "1");
     Executor candidate = diagnosed_executor(graph);
-    test_setenv("STANLI_NO_STRUCTURED_FRAME_LAYOUT", "1");
-    Executor baseline = diagnosed_executor(graph);
-    test_unsetenv("STANLI_NO_STRUCTURED_FRAME_LAYOUT");
     test_unsetenv("STANLI_STRUCTURED_FRAMES");
     test_setenv("STANLI_NO_STRUCTURED_REPLAY", "1");
     Executor tree(graph);
     test_unsetenv("STANLI_NO_STRUCTURED_REPLAY");
     for (int step = 0; step < 4; ++step) {
-      for (auto* ex : {&candidate, &baseline, &tree})
+      for (auto* ex : {&candidate, &tree})
         for (int i = 0; i < 6; ++i)
           ex->value_ptr(2)[i] = (i / 2 + step / 2) % 2 == 0;
       const double theta_value = step % 2 ? -.5 : .25;
       const auto expected = evaluate(tree, theta_value, 2);
-      stanli_test::StdoutCapture baseline_capture(stderr);
-      const auto flat = evaluate(baseline, theta_value, 2);
-      const auto base_diagnostics = baseline_capture.finish();
       stanli_test::StdoutCapture capture(stderr);
       const auto actual = evaluate(candidate, theta_value, 2);
       const auto diagnostics = capture.finish();
-      check(std::memcmp(&actual, &expected, sizeof(Evaluation)) == 0 &&
-                std::memcmp(&actual, &flat, sizeof(Evaluation)) == 0,
+      check(std::memcmp(&actual, &expected, sizeof(Evaluation)) == 0,
             "checked layouts preserve alias splits, merges and index geometry");
       if (step == 0) {
         const auto attempts = reported_field(diagnostics, "layout_attempts=");
@@ -5870,8 +5863,6 @@ static void frame_layout_tests() {
                       attempts, matches);
         check(exercised,
               "layout fixtures exercise both successful binding and refusal");
-        check(reported_field(base_diagnostics, "layout_attempts=") == 0,
-              "layout-disabled comparator uses canonical encoding only");
       }
       candidate.run_forward_only();
       const auto repeated = evaluate(candidate, theta_value, 2);
@@ -5945,11 +5936,8 @@ static void frame_clone_tests() {
           "recorded clone replays its first gradient without recording");
     check(same(evaluate(*chain, .25, 2), expected),
           "copy of an unused recorded copy relocates every binding again");
-    test_setenv("STANLI_NO_STRUCTURED_FRAME_CLONE", "1");
-    auto refused = copy(*source, false);
-    test_unsetenv("STANLI_NO_STRUCTURED_FRAME_CLONE");
-    check(same(evaluate(*refused, .25, 2), expected),
-          "disabled recorded cloning retains the fresh-recording fallback");
+    check(same(evaluate(*cold, .25, 2), expected),
+          "a refused clone records afresh");
 
     // Mutating and destroying the source cannot invalidate the copied tape.
     source->value_ptr(2)[1] = -3;
