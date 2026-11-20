@@ -3,7 +3,6 @@
 #include <stanli/extrema_grouping.hpp>
 #include <stanli/graph.hpp>
 #include <stanli/optable.hpp>
-#include <stanli/pairwise_sum.hpp>
 
 #include <stan/math/prim/fun/prod.hpp>
 #include <stan/math/prim/fun/max.hpp>
@@ -319,12 +318,19 @@ void gather_fwd(KernelCtx& ctx) {
 }
 STANLI_ALIGN_FUNCTION_64 void gather_bwd(KernelCtx& ctx) {
   if (!ctx.in_adj[0].data) return;
+  double* in_adj = ctx.in_adj[0].data;
   const double* out_adj = ctx.out_adj_vec.data;
   const int* idata = ctx.idata;
-  scatter_add_pairwise(
-      ctx.in_adj[0].data, ctx.in[0].len, ctx.out.len,
-      [idata](int64_t k) { return idata[k]; },
-      [out_adj](int64_t k) { return out_adj[k]; });
+  const int64_t n = ctx.out.len;
+  int64_t k = 0;
+  while (k < n) {
+    const int idx = idata[k];
+    double sum = out_adj[k];
+    int64_t j = k + 1;
+    while (j < n && idata[j] == idx) sum += out_adj[j++];
+    in_adj[idx] += sum;
+    k = j;
+  }
 }
 
 // OP_CONCAT2: out = [in[0]; in[1]] (contiguous; serves append_row of

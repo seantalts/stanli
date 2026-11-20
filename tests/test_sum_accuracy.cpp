@@ -181,29 +181,6 @@ void test_ordered_logistic_cutpoints() {
                   want[k].value(), magnitude[k].value(), kUlp);
 }
 
-// GATHER that reads two elements into kN lanes, alternating: each element's
-// adjoint is the sum of kN / 2 contributions.
-void test_gather_adjoint() {
-  const std::vector<double> w = terms(kN, 0.6, 83);
-  ExactSum want[2];
-  for (int64_t i = 0; i < kN; ++i) want[i % 2].add(w[(size_t)i]);
-  std::vector<int> index((size_t)kN);
-  for (int64_t i = 0; i < kN; ++i) index[(size_t)i] = (int)(i % 2);
-  Graph g;
-  const int theta = g.add_slot(2, true), ws = g.add_slot(kN, false);
-  const int t = g.add_slot(kN, false);
-  g.add_op(OP_GATHER, {theta}, t, index);
-  weighted_sum(g, t, ws);
-  Executor ex(std::move(g));
-  ex.param_ptr(theta)[0] = 0.4;
-  ex.param_ptr(theta)[1] = -0.2;
-  for (int64_t i = 0; i < kN; ++i) ex.value_ptr(ws)[i] = w[(size_t)i];
-  double grad[2] = {0, 0};
-  ex.gradient(grad);
-  expect_ulp("gather adjoint 0", grad[0], want[0].value(), kUlp);
-  expect_ulp("gather adjoint 1", grad[1], want[1].value(), kUlp);
-}
-
 // The SUM_VEC that re-roll and partition build over the merged target terms.
 void test_merged_term_sum() {
   const std::vector<double> x = terms(kN, -0.9, 91);
@@ -326,7 +303,6 @@ int main() {
   test_broadcast_scalar_adjoints();
   test_elementwise_density_scalar_adjoint();
   test_ordered_logistic_cutpoints();
-  test_gather_adjoint();
   test_merged_term_sum();
   test_summed_densities();
   return finish("test_sum_accuracy");

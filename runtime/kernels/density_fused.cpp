@@ -597,8 +597,9 @@ void ordered_logistic_summed(const Lambda& lambda_val, const int* y,
   // Observation i adds d2 to cut point y[i] - 1 and -d1 to cut point
   // y[i] - 2. With cut point j at sums[j + 1], the first and the last
   // category's missing cut points fall in sums[0] and sums[K], unused.
-  std::vector<double> sums(static_cast<std::size_t>(K) + 1, 0.0);
-  scatter_add_pairwise(
+  thread_local std::vector<double> sums;
+  sums.assign(static_cast<std::size_t>(K) + 1, 0.0);
+  scatter_add(
       sums.data(), K + 1, 2 * N,
       [y](Eigen::Index k) { return y[k / 2] - k % 2; },
       [&](Eigen::Index k) {
