@@ -426,7 +426,7 @@ void cumsum_fwd(KernelCtx& ctx) {
   }
 }
 void cumsum_bwd(KernelCtx& ctx) {
-  if (!ctx.in_adj[0].data) return;
+  if (!ctx.in_adj[0].data || ctx.out.len == 0) return;
   if (ctx.out.len == 1) {
     ctx.in_adj[0].data[0] += ctx.out_adj;
     return;
