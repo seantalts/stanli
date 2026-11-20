@@ -60,7 +60,7 @@ void ProgramCompiler::mark_int_reset(const std::string& name) {
   if (!structured_while_depth) return;
   const int at = emit(Program::JMP, 0);
   int_reset_at[name] = at;
-  unused_int_resets.insert(at);
+  unused_markers.insert(at);
 }
 
 void ProgramCompiler::assigned_names(const mir::Stmt& s,
@@ -122,10 +122,10 @@ void ProgramCompiler::reify_written_int(const std::string& name) {
   const double value = static_cast<double>(it->second[0]);
   const auto reset = int_reset_at.find(name);
   if (reset == int_reset_at.end()) {
-    hoisted_int_initializers.push_back(const_instr(r, &value, 1));
+    hoisted_initializers.push_back(const_instr(r, &value, 1));
   } else {
     p.code[reset->second] = const_instr(r, &value, 1);
-    unused_int_resets.erase(reset->second);
+    unused_markers.erase(reset->second);
     int_reset_at.erase(reset);
   }
   reals[name] = Range{r, 1};
@@ -159,7 +159,7 @@ void ProgramCompiler::reify_loop_write(const std::string& name) {
   // preparation constant, even before the first write in this body.
   if (!reals.count(name) && bind_extern) {
     Range value;
-    if (bind_extern(name, &value)) reals[name] = value;
+    if (bind_outer(name, &value)) reals[name] = value;
   }
   extern_bound.erase(name);
 }
@@ -184,7 +184,12 @@ void ProgramCompiler::compile_loop_body(const mir::Stmt& loop, int index) {
   structured_while_seen = true;
   ++structured_while_depth;
   ++runtime_for_depth;
+  for (const auto& child : loop.body)
+    assigned_names(child, &loops.back().assigned);
+  forget_flags(loops.back().assigned, loop.loopvar);
+  start_loop_facts();
   (void)compile_body(loop.body);
+  join_loop_exits();
   --runtime_for_depth;
   --structured_while_depth;
   loops.pop_back();
@@ -213,6 +218,186 @@ void ProgramCompiler::refuse_second_size(const std::string& name) {
     bail(name +
          " is given containers of different sizes under a condition that "
          "depends on a parameter, which stanli does not support");
+}
+
+bool ProgramCompiler::bind_outer(const std::string& name, Range* r) {
+  if (!bind_extern || !bind_extern(name, r)) return false;
+  int status = -1;
+  if (bind_empty_status && bind_empty_status(name, &status)) {
+    if (!is_tracked(name)) unassigned.tracked.push_back(name);
+    unassigned.empty_reg[name] = status;
+    unassigned.path.maybe_empty.insert(name);
+  } else if (r->len == 0) {
+    note_entered_empty(name);
+  }
+  return true;
+}
+
+ProgramCompiler::PathFacts ProgramCompiler::join(const PathFacts& a,
+                                                 const PathFacts& b) {
+  if (!a.reachable) return b;
+  if (!b.reachable) return a;
+  PathFacts out{true, a.maybe_empty, {}};
+  out.maybe_empty.insert(b.maybe_empty.begin(), b.maybe_empty.end());
+  for (const auto& [name, value] : a.flags) {
+    const auto other = b.flags.find(name);
+    if (other != b.flags.end() && other->second == value)
+      out.flags.emplace(name, value);
+  }
+  return out;
+}
+
+void ProgramCompiler::note_entered_empty(const std::string& name) {
+  if (is_tracked(name)) return;
+  unassigned.tracked.push_back(name);
+  unassigned.entered_empty.insert(name);
+  unassigned.marks[name];
+  unassigned.path.maybe_empty.insert(name);
+}
+
+void ProgramCompiler::write_empty_status(const std::string& name,
+                                         double status) {
+  const auto reg = unassigned.empty_reg.find(name);
+  if (reg != unassigned.empty_reg.end()) {
+    emit_const(reg->second, &status, 1);
+    return;
+  }
+  if (!unassigned.marks.count(name)) unassigned.tracked.push_back(name);
+  const int at = emit(Program::JMP, 0);
+  unassigned.marks[name].emplace_back(at, status);
+  unused_markers.insert(at);
+}
+
+void ProgramCompiler::note_empty(const std::string& name) {
+  unassigned.path.maybe_empty.insert(name);
+  write_empty_status(name, 1.0);
+}
+
+void ProgramCompiler::note_assigned(const std::string& name) {
+  // Where no path has the local empty, its status is already 0.
+  auto& maybe_empty = unassigned.path.maybe_empty;
+  if (maybe_empty.empty()) return;
+  const auto found = maybe_empty.find(name);
+  if (found == maybe_empty.end()) return;
+  const auto it = reals.find(name);
+  if (it == reals.end() || it->second.len == 0) return;
+  maybe_empty.erase(found);
+  write_empty_status(name, 0.0);
+}
+
+int ProgramCompiler::empty_status_register(const std::string& name) {
+  const auto found = unassigned.empty_reg.find(name);
+  if (found != unassigned.empty_reg.end()) return found->second;
+  const int reg = alloc(1);
+  if (unassigned.entered_empty.count(name)) {
+    const double empty = 1.0;
+    hoisted_initializers.push_back(const_instr(reg, &empty, 1));
+  }
+  for (const auto& [at, status] : unassigned.marks[name]) {
+    p.code[(size_t)at] = const_instr(reg, &status, 1);
+    unused_markers.erase(at);
+  }
+  unassigned.marks.erase(name);
+  unassigned.empty_reg[name] = reg;
+  return reg;
+}
+
+bool ProgramCompiler::may_be_empty(const std::string& name) const {
+  const auto it = reals.find(name);
+  return it != reals.end() && it->second.len != 0 &&
+         unassigned.path.reachable && unassigned.path.maybe_empty.count(name) &&
+         (unassigned.empty_reg.count(name) || unassigned.marks.count(name));
+}
+
+void ProgramCompiler::require_assigned(const std::string& name) {
+  if (!unassigned.path.reachable) return;
+  auto& maybe_empty = unassigned.path.maybe_empty;
+  const bool in_loop = runtime_for_depth || structured_while_depth;
+  // Most reads have nothing to check; answer those without a lookup.
+  if (maybe_empty.empty() && !in_loop) return;
+  const auto it = reals.find(name);
+  if (it == reals.end()) return;
+  if (it->second.len != 0) {
+    if (!maybe_empty.count(name) || !is_tracked(name)) return;
+    emit_empty_check(name, empty_status_register(name));
+    // The paths that continue past the check have the local assigned.
+    maybe_empty.erase(name);
+    return;
+  }
+  // The read was compiled for an empty local, which a later statement of
+  // the loop around it may have assigned on an earlier trip.
+  if (!in_loop || !is_tracked(name)) return;
+  for (const LoopFrame& loop : loops)
+    if (loop.assigned.count(name)) {
+      emit_empty_check(name, empty_status_register(name), true);
+      return;
+    }
+}
+
+void ProgramCompiler::emit_empty_check(const std::string& name, int status,
+                                       bool if_assigned) {
+  Program::Message m;
+  m.spec.chunks = {
+      "stanli does not support a local whose size depends on a "
+      "branch on parameters: " +
+      name +
+      (if_assigned ? " was assigned on an earlier trip of a loop"
+                   : " was not assigned on this path")};
+  m.spec.error = MessageError::Runtime;
+  p.messages.push_back(std::move(m));
+  const int skip = emit(Program::JZ, 0, status);
+  int pass = -1;
+  if (if_assigned) {
+    pass = emit(Program::JMP, 0);
+    p.code[(size_t)skip].dst = (int)p.code.size();
+  }
+  emit(Program::REJECT, 0, (int)p.messages.size() - 1);
+  p.code[(size_t)(if_assigned ? pass : skip)].dst = (int)p.code.size();
+}
+
+void ProgramCompiler::jump_with_facts(PathFacts* target) {
+  if (target) *target = join(*target, unassigned.path);
+  unassigned.path = PathFacts{};
+}
+
+bool ProgramCompiler::is_tracked(const std::string& name) const {
+  return unassigned.empty_reg.count(name) || unassigned.marks.count(name);
+}
+
+void ProgramCompiler::join_entered(size_t tracked_before) {
+  if (!unassigned.path.reachable) return;
+  for (size_t k = tracked_before; k < unassigned.tracked.size(); ++k)
+    unassigned.path.maybe_empty.insert(unassigned.tracked[k]);
+}
+
+void ProgramCompiler::start_loop_facts() {
+  loops.back().at_start = unassigned.path;
+  loops.back().tracked_at_start = unassigned.tracked.size();
+}
+
+void ProgramCompiler::join_loop_exits() {
+  LoopFrame& loop = loops.back();
+  unassigned.path = join(join(unassigned.path, loop.at_start),
+                         join(loop.at_break, loop.at_continue));
+  loop.at_start = loop.at_break = loop.at_continue = PathFacts{};
+  join_entered(loop.tracked_at_start);
+}
+
+void ProgramCompiler::forget_flags(const std::set<std::string>& written,
+                                   const std::string& loopvar) {
+  if (unassigned.path.flags.empty()) return;
+  unassigned.path.flags.erase(loopvar);
+  for (const std::string& name : written) unassigned.path.flags.erase(name);
+}
+
+void ProgramCompiler::join_jumps(PathFacts* jumps) {
+  unassigned.path = join(unassigned.path, *jumps);
+  *jumps = PathFacts{};
+}
+
+void ProgramCompiler::forget_local(const std::string& name) {
+  unassigned.path.maybe_empty.erase(name);
+  unassigned.path.flags.erase(name);
 }
 
 void ProgramCompiler::emit_assign_size_reject(const std::string& name,
@@ -338,9 +523,44 @@ ProgramCompiler::Path ProgramCompiler::compile_multi_assign(
   return Path::Open;
 }
 
+ProgramCompiler::Path ProgramCompiler::compile_runtime_if(const mir::Stmt& s) {
+  std::vector<int> to_else;
+  cond_jump(s.cond, false, &to_else);
+  ++branch_depth;
+  const PathFacts before = unassigned.path;
+  const size_t tracked_before = unassigned.tracked.size();
+  std::optional<long> flag;
+  if (s.cond.kind == mir::Expr::Var)
+    if (const auto known = before.flags.find(s.cond.name);
+        known != before.flags.end())
+      flag = known->second;
+  // An arm on a flag that is known not to run adds no path.
+  if (flag && *flag == 0) unassigned.path = PathFacts{};
+  const bool then_exits =
+      !s.body.empty() && compile_stmt(s.body[0]) == Path::Ended;
+  PathFacts after_then = std::exchange(unassigned.path, before);
+  if (flag && *flag != 0) unassigned.path = PathFacts{};
+  bool else_exits = false;
+  if (s.body.size() > 1) {
+    const int jmp = then_exits ? -1 : emit(Program::JMP, 0);
+    patch_jumps(to_else);
+    else_exits = compile_stmt(s.body[1]) == Path::Ended;
+    if (jmp >= 0) p.code[(size_t)jmp].dst = (int)p.code.size();
+  } else {
+    patch_jumps(to_else);
+  }
+  unassigned.path = join(after_then, unassigned.path);
+  join_entered(tracked_before);
+  --branch_depth;
+  return then_exits && else_exits ? Path::Ended : Path::Open;
+}
+
 ProgramCompiler::Path ProgramCompiler::compile_stmt(const mir::Stmt& s) {
+  const bool assigns = s.kind == mir::Stmt::Assignment;
+  if (assigns && !s.lhs_idx.empty()) require_assigned(s.lhs);
+  Path path;
   try {
-    return compile_stmt_folded(s);
+    path = compile_stmt_folded(s);
   } catch (const std::domain_error& error) {
     Program::Message m;
     m.spec.chunks = {error.what()};
@@ -349,6 +569,15 @@ ProgramCompiler::Path ProgramCompiler::compile_stmt(const mir::Stmt& s) {
     emit(Program::REJECT, 0, (int)p.messages.size() - 1);
     return Path::Open;
   }
+  if (assigns && s.lhs_idx.empty()) {
+    note_assigned(s.lhs);
+    // A folded integer's branches fold too; only a register needs a flag.
+    if (s.rhs.kind == mir::Expr::LitInt && !given(s) && reals.count(s.lhs))
+      unassigned.path.flags[s.lhs] = s.rhs.lit_i;
+    else if (!unassigned.path.flags.empty())
+      unassigned.path.flags.erase(s.lhs);
+  }
+  return path;
 }
 
 ProgramCompiler::Path ProgramCompiler::compile_stmt_folded(const mir::Stmt& s) {
@@ -364,6 +593,7 @@ ProgramCompiler::Path ProgramCompiler::compile_stmt_folded(const mir::Stmt& s) {
       known_reals.erase(s.decl_id);
       deferred_shapes.erase(s.decl_id);
       region_sized.erase(s.decl_id);
+      forget_local(s.decl_id);
       known_int_arrays.erase(s.decl_id);
       known_int_array_dims.erase(s.decl_id);
       int_array_names.erase(s.decl_id);
@@ -391,6 +621,7 @@ ProgramCompiler::Path ProgramCompiler::compile_stmt_folded(const mir::Stmt& s) {
             bail("runtime for needs a sized container declaration");
           reals[s.decl_id] = Range{};
           deferred_shapes[s.decl_id] = view;
+          note_empty(s.decl_id);
           return Path::Open;
         }
 
@@ -570,7 +801,7 @@ ProgramCompiler::Path ProgramCompiler::compile_stmt_folded(const mir::Stmt& s) {
         // untaken branch has to leave it alone) and assign into those
         // registers.
         Range ext;
-        if (bind_extern && bind_extern(s.lhs, &ext)) {
+        if (bind_outer(s.lhs, &ext)) {
           reals[s.lhs] = ext;
           extern_bound.insert(s.lhs);
           it = reals.find(s.lhs);
@@ -585,6 +816,7 @@ ProgramCompiler::Path ProgramCompiler::compile_stmt_folded(const mir::Stmt& s) {
         // shape" case below, minus the placeholder declaration -- give it
         // one now.
         reals[s.lhs] = Range{};
+        note_entered_empty(s.lhs);
         it = reals.find(s.lhs);
       }
       if (it == reals.end()) bail("assignment to undeclared " + s.lhs);
@@ -905,6 +1137,7 @@ ProgramCompiler::Path ProgramCompiler::compile_stmt_folded(const mir::Stmt& s) {
       if (loops.empty()) bail("break outside a loop");
       if (branch_depth > loops.back().branch_depth || loops.back().structured) {
         loops.back().breaks.push_back(emit(Program::JMP, 0));
+        jump_with_facts(&loops.back().at_break);
         return Path::Open;
       }
       throw CompileBreak{};
@@ -912,6 +1145,7 @@ ProgramCompiler::Path ProgramCompiler::compile_stmt_folded(const mir::Stmt& s) {
       if (loops.empty()) bail("continue outside a loop");
       if (branch_depth > loops.back().branch_depth || loops.back().structured) {
         loops.back().continues.push_back(emit(Program::JMP, 0));
+        jump_with_facts(&loops.back().at_continue);
         return Path::Open;
       }
       throw CompileContinue{};
@@ -950,9 +1184,13 @@ ProgramCompiler::Path ProgramCompiler::compile_stmt_folded(const mir::Stmt& s) {
         const int body_head = (int)p.code.size();
         loops.push_back({});
         loops.back().structured = true;
+        loops.back().assigned = written;
         ++runtime_for_depth;
+        forget_flags(written, s.loopvar);
+        start_loop_facts();
         // Other paths may still continue or break; patch them below.
         (void)compile_body(s.body);
+        join_loop_exits();
         --runtime_for_depth;
         --structured_while_depth;
         for (int jump : loops.back().continues)
@@ -1011,12 +1249,14 @@ ProgramCompiler::Path ProgramCompiler::compile_stmt_folded(const mir::Stmt& s) {
         for (int jump : loops.back().continues)
           p.code[(size_t)jump].dst = (int)p.code.size();
         loops.back().continues.clear();
+        join_jumps(&loops.back().at_continue);
         if (broken) break;
       }
       ints.erase(s.loopvar);
       int_decl_at.erase(s.loopvar);
       for (int jump : loops.back().breaks)
         p.code[(size_t)jump].dst = (int)p.code.size();
+      join_jumps(&loops.back().at_break);
       loops.pop_back();
       if (returned_directly) return Path::Returned;
       return returned ? Path::Ended : Path::Open;
@@ -1038,7 +1278,11 @@ ProgramCompiler::Path ProgramCompiler::compile_stmt_folded(const mir::Stmt& s) {
       cond_jump(s.cond, false, &exits);
       loops.push_back({});
       loops.back().structured = true;
+      loops.back().assigned = written;
+      forget_flags(written, "");
+      start_loop_facts();
       const bool body_returned = compile_body(s.body) == Path::Ended;
+      join_loop_exits();
       --structured_while_depth;
       for (int jump : loops.back().continues) p.code[(size_t)jump].dst = head;
       if (!body_returned) emit(Program::JMP, head);
@@ -1055,22 +1299,7 @@ ProgramCompiler::Path ProgramCompiler::compile_stmt_folded(const mir::Stmt& s) {
         if (c == 0 && s.body.size() > 1) return compile_stmt(s.body[1]);
         return Path::Open;
       }
-      std::vector<int> to_else;
-      cond_jump(s.cond, false, &to_else);
-      ++branch_depth;
-      const bool then_exits =
-          !s.body.empty() && compile_stmt(s.body[0]) == Path::Ended;
-      bool else_exits = false;
-      if (s.body.size() > 1) {
-        const int jmp = then_exits ? -1 : emit(Program::JMP, 0);
-        patch_jumps(to_else);
-        else_exits = compile_stmt(s.body[1]) == Path::Ended;
-        if (jmp >= 0) p.code[(size_t)jmp].dst = (int)p.code.size();
-      } else {
-        patch_jumps(to_else);
-      }
-      --branch_depth;
-      return then_exits && else_exits ? Path::Ended : Path::Open;
+      return compile_runtime_if(s);
     }
     case mir::Stmt::Block:
     case mir::Stmt::SList:

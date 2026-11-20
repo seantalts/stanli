@@ -373,6 +373,7 @@ long Lowering::eval_int(const mir::Expr& e) {
           e.args[0].kind == mir::Expr::Var) {
         auto sit = scope.find(e.args[0].name);
         if (sit != scope.end()) {
+          require_assigned(e.args[0].name);
           if (has_runtime_shape(sit->second))
             fail(e.name + ": operand has no compile-time extent", e.raw);
           return answer_shape_query(e, sit->second.si,
@@ -795,6 +796,7 @@ Lowering::Val Lowering::lower_expr(const mir::Expr& e) {
 Lowering::Val Lowering::lower_expr_impl(const mir::Expr& e) {
   switch (e.kind) {
     case mir::Expr::Var: {
+      require_assigned(e.name);
       auto it = scope.find(e.name);
       if (it == scope.end()) {
         auto ii = int_env.find(e.name);

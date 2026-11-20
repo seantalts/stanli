@@ -1788,6 +1788,7 @@ void ProgramCompiler::emit_function_return(const std::vector<Range>& values,
       emit(Program::MOV, slots[k].reg + i, values[k].reg + i);
   if (!several) frame.result = slots[0];
   frame.jumps.push_back(emit(Program::JMP, 0));
+  jump_with_facts(nullptr);
 }
 
 Range ProgramCompiler::function_body(const std::vector<mir::Stmt>& body,
@@ -1852,6 +1853,7 @@ Range ProgramCompiler::inline_call(const mir::FunDef& f,
   auto saved_int_array_names = std::exchange(int_array_names, {});
   auto saved_deferred_shapes = std::exchange(deferred_shapes, {});
   auto saved_region_sized = std::exchange(region_sized, {});
+  auto saved_unassigned = std::exchange(unassigned, {});
   auto saved_int_decl_at = std::exchange(int_decl_at, {});
   auto saved_int_reset_at = std::exchange(int_reset_at, {});
   auto saved_extern_bound = std::exchange(extern_bound, {});
@@ -1910,6 +1912,7 @@ Range ProgramCompiler::inline_call(const mir::FunDef& f,
     int_array_names = std::move(saved_int_array_names);
     deferred_shapes = std::move(saved_deferred_shapes);
     region_sized = std::move(saved_region_sized);
+    unassigned = std::move(saved_unassigned);
     int_decl_at = std::move(saved_int_decl_at);
     int_reset_at = std::move(saved_int_reset_at);
     extern_bound = std::move(saved_extern_bound);
@@ -1930,6 +1933,7 @@ Range ProgramCompiler::inline_call(const mir::FunDef& f,
   int_array_names = std::move(saved_int_array_names);
   deferred_shapes = std::move(saved_deferred_shapes);
   region_sized = std::move(saved_region_sized);
+  unassigned = std::move(saved_unassigned);
   int_decl_at = std::move(saved_int_decl_at);
   int_reset_at = std::move(saved_int_reset_at);
   extern_bound = std::move(saved_extern_bound);
