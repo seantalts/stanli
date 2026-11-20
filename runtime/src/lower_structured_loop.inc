@@ -2968,10 +2968,13 @@ uint64_t region_cost(const mir::Stmt& s, uint64_t limit, unsigned depth = 0) {
   return std::min(body, limit);
 }
 
+// `before_publish` runs once the candidate has passed every refusal, just
+// before the loop is added to the graph.
 bool try_lower_region(
     const mir::Stmt& s,
     std::optional<std::pair<int64_t, int64_t>> exact_bounds = std::nullopt,
-    const std::set<std::string>* output_references = nullptr) {
+    const std::set<std::string>* output_references = nullptr,
+    const std::function<void()>& before_publish = {}) {
   const StructuredMode mode = structured_policy;
   if (mode == StructuredMode::Off) return false;
   if (in_write_array && !output_references &&
@@ -3226,6 +3229,7 @@ bool try_lower_region(
   if (!plan) {
     return refuse("native: " + native_refusal);
   }
+  if (before_publish) before_publish();
   // No proof/refusal follows publication. Allocation failure aborts this
   // whole compilation; it never falls through into a partially changed graph.
   *shape_pool = std::move(*shapes);

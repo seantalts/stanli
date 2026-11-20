@@ -2194,8 +2194,8 @@ Lowering::Flow Lowering::lower_stmt_impl(const mir::Stmt& s) {
       // it unrolls to, so unroll it and roll back if it should be kept.
       const int64_t trips = hi - lo + 1;
       std::optional<WaSnapshot> before_unroll;
+      std::set<std::string> mentioned, written;
       if (log_prob_loop_may_retain(s, trips)) {
-        std::set<std::string> mentioned, written;
         mir::collect_names(s, &mentioned);
         mentioned.insert(s.loopvar);
         std::vector<std::string> assigned;
@@ -2214,20 +2214,24 @@ Lowering::Flow Lowering::lower_stmt_impl(const mir::Stmt& s) {
                         " ops=" + std::to_string(g.ops.size()) + " delta=" +
                         std::to_string(loop_ops) + carry_diagnostic);
       if (before_unroll && log_prob_loop_retained(loop_ops, trips)) {
-        wa_restore(*before_unroll);
+        // The trial sees the names as they were before the loop. Only an
+        // accepted trial rolls the unroll back, so a refused one keeps it.
+        WaSnapshot unrolled = wa_snapshot(mentioned, &written);
+        WaSnapshot before_names = *before_unroll;
+        wa_restore_names(before_names);
         bool kept = false;
         {
           const StructuredMode old_policy = structured_policy;
           structured_policy = StructuredMode::Prefer;
           const ScopeExit leave{[&] { structured_policy = old_policy; }};
-          kept = try_lower_region(s, std::pair<int64_t, int64_t>{lo, hi});
+          kept = try_lower_region(s, std::pair<int64_t, int64_t>{lo, hi},
+                                  nullptr, [&] { wa_restore(*before_unroll); });
         }
         if (diagnostics)
           emit_diagnostic(std::string("stanli_structured large loop ") +
-                          (kept ? "retained" : "unrolled again") +
+                          (kept ? "retained" : "kept unrolled") +
                           " loop=" + s.loopvar);
-        if (!kept)
-          if (const auto flow = unroll()) return *flow;
+        if (!kept) wa_restore_names(unrolled);
       }
       int_env.erase(s.loopvar);
       return Flow::Next;

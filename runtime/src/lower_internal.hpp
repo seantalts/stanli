@@ -2565,7 +2565,8 @@ struct Lowering {
       s.int_locals.emplace_back(name, int_locals.count(name) > 0);
     return s;
   }
-  void wa_restore(WaSnapshot& s) {
+  // Puts back the named values only; the graph keeps what was added since.
+  void wa_restore_names(WaSnapshot& s) {
     restore_named(scope, s.scope);
     restore_named(decls, s.decls);
     restore_named(int_env, s.int_env);
@@ -2576,6 +2577,9 @@ struct Lowering {
       else
         int_locals.erase(name);
     }
+  }
+  void wa_restore(WaSnapshot& s) {
+    wa_restore_names(s);
     wa_rollback(s);
   }
 #include "lower_structured_loop.inc"

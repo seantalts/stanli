@@ -171,7 +171,53 @@ def check_reduce_sum_beside_data(run_measure):
     return []
 
 
-CASES = [check_ifs_in_retained_loop, check_calls_in_retained_loop]
+def carried_loop_after_large_graph(first):
+    """A loop of 1000 trips that carries m, beside 300,000 rows of
+    independent terms that come before it or after it. After them, the
+    graph has passed the size at which lowering asks whether to keep the
+    loop. The slice that starts at t keeps the retained loop from holding
+    it, so the answer is no."""
+    t, n = 1000, 300000
+    loop = """  {
+    real m = 0;
+    for (t in 1:T) {
+      m = 0.5 * m + sin(theta * x[t]) + cos(theta * x[t]) + exp(-theta * x[t])
+          + log1p(square(theta) * x[t]) + tanh(theta * x[t]) + sin(m * x[t])
+          + cos(m * x[t]) + atan(m * x[t]) + sqrt(1 + square(m) * x[t])
+          + sin(m * y[t]);
+      m += 0.001 * sum(x[t:T]);
+      target += normal_lpdf(y[t] | m, 1);
+    }
+  }
+"""
+    rows = "  for (n in 1:N) target += normal_lpdf(z[n] | theta * w[n] + n, 2);\n"
+    head = """data { int T; int N; vector[T] x; vector[T] y; vector[N] z; vector[N] w; }
+parameters { real theta; }
+model {
+  theta ~ normal(0, 1);
+"""
+    source = head + (loop + rows if first else rows + loop) + "}\n"
+    data = {"T": t, "N": n, "x": [0.001 * i for i in range(t)],
+            "y": [0.002 * i for i in range(t)],
+            "z": [0.0001 * i for i in range(n)],
+            "w": [0.0003 * i for i in range(n)]}
+    return source, data
+
+
+def check_refused_retention(measure):
+    first = measure("loop_first", *carried_loop_after_large_graph(True))
+    after = measure("loop_after", *carried_loop_after_large_graph(False))
+    first, after = first["log_prob"][0], after["log_prob"][0]
+    print(f"refused retention: {first} statements with the loop first, "
+          f"{after} with it after the rows")
+    if after - first >= 1000:
+        return [f"a loop that lowering declined to keep was lowered again: "
+                f"{after - first} more statements"]
+    return []
+
+
+CASES = [check_ifs_in_retained_loop, check_calls_in_retained_loop,
+         check_refused_retention]
 RUN_CASES = [check_reduce_sum_beside_data]
 
 
