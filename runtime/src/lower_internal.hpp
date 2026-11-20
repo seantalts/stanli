@@ -592,7 +592,7 @@ struct Lowering {
   struct LoweredArgument {
     struct Cache {
       std::optional<DataMap::Entry> owned_pure_value;
-      // Observations live in Lowering::observations, whose std::map entries
+      // Observations live in Lowering::observations, whose entries
       // remain stable while a call is lowered. Do not duplicate their
       // vector-owned payload merely to memoize the lookup here.
       const DataMap::Entry* borrowed_pure_value = nullptr;
@@ -919,18 +919,31 @@ struct Lowering {
   // -1 means the entire runtime logical extent, excluding unused capacity.
   // Only bounded output reductions consume that stronger shape-aware proof.
   std::map<int, int64_t> int_initialized_prefix;
-  std::map<uint64_t, int> const_cache;
+  // By bit pattern. An unrolled loop over data makes one constant per data
+  // value, so this holds millions of entries for a large loop.
+  std::unordered_map<uint64_t, int> const_cache;
   struct ObservationKey {
     int slot;
     SlotInfo si;
-    bool operator<(const ObservationKey& b) const {
-      return std::tie(slot, si.kind, si.shape, si.rows, si.cols) <
+    bool operator==(const ObservationKey& b) const {
+      return std::tie(slot, si.kind, si.shape, si.rows, si.cols) ==
              std::tie(b.slot, b.si.kind, b.si.shape, b.si.rows, b.si.cols);
+    }
+  };
+  struct ObservationHash {
+    size_t operator()(const ObservationKey& k) const {
+      size_t h = std::hash<int>()(k.slot);
+      for (const size_t part :
+           {static_cast<size_t>(k.si.kind), static_cast<size_t>(k.si.shape),
+            static_cast<size_t>(k.si.rows), static_cast<size_t>(k.si.cols)})
+        h = h * 1000003u ^ part;
+      return h;
     }
   };
   // Interpreter-native semantic values. Graph fills use a different physical
   // order for arrays, so compile-time observation must never reuse them.
-  std::map<ObservationKey, DataMap::Entry> observations;
+  std::unordered_map<ObservationKey, DataMap::Entry, ObservationHash>
+      observations;
   std::vector<KnownOutput> known_outputs;
   std::vector<int> target_terms;
   std::vector<int> jac_slots;
