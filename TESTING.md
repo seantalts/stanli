@@ -61,7 +61,10 @@ CI enforces:
 - The [ULP gate](#the-ulp-gate) on every value of every corpus replay, on the
   platforms that the ledger has measured (macOS arm64 today).
 - Limits from measured deviations for the ill-conditioned models
-  (`ILL_CONDITIONED`) and `kronecker_gp`.
+  (`ILL_CONDITIONED`: 1.5e-6 scaled error on gradient entries only) and for
+  the two `kronecker_gp` gradient entries in `MISMATCH_OUTPUTS` (the
+  `gate_for` floor, 3.3e-2 or more). Every other value of these models keeps
+  the 1e-9 gate.
 - Matching rejection: stanli must reject a point that CmdStan rejects, and a
   non-finite value must match in kind.
 - 10 ULP by default in the generated conformance sweep, with reviewed

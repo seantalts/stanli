@@ -114,19 +114,17 @@ CORPUS_INTERPRETED = {}
 # reference records those nonfinite values and stanli reproduces them.
 NONFINITE_GRAD_OK = {}
 
-# Models held at every point to the floor gate_for gives a MISMATCH
-# point, because the instruction set moves their values rather than
-# stanli. Every entry factors an exponentiated-quadratic covariance that
-# brms holds up with a 1e-12 jitter on the diagonal, and the smallest
-# Cholesky pivot at the evaluation points is 3.7e-12 for i320_gp_expquad,
-# 1.1e-12 for sw_gp and 1.8e-12 for s2_gp_by_gr against a diagonal of 1,
-# so the factorization is singular to machine precision. Moving the GP
-# covariates by one ulp on arm64 moves the latent-GP gradients at point 2
-# by 1.9e-7 and 4.7e-8 relative, the same scale the x86_64 runner
-# measured against references recorded on arm64: 1.03e-7 and 6.38e-9 at
-# point 2, which arm64 recorded clean (CI run 33938697559). Points 0 and
-# 1 of all three are recorded MISMATCH and were already held to that
-# floor.
+# Models whose gradient entries are held to ILL_CONDITIONED_GATE instead of
+# the clean gate, off the platforms whose recordings they match. lp and
+# write_array keep the clean gate. Every entry factors an
+# exponentiated-quadratic covariance that brms holds up with a 1e-12 jitter
+# on the diagonal, and the smallest Cholesky pivot at the evaluation points
+# is 3.7e-12 for i320_gp_expquad, 1.1e-12 for sw_gp and 1.8e-12 for
+# s2_gp_by_gr against a diagonal of 1, so the factorization is singular to
+# machine precision. Moving the GP covariates by one ulp on arm64 moves the
+# latent-GP gradients at point 2 by 1.9e-7 and 4.7e-8 relative. stanli
+# matches the arm64 recording to 4.4e-16 on arm64, and the Linux x86-64
+# recording within the 10-ULP brms gate there.
 ILL_CONDITIONED = {
     "i320_gp_expquad": "cholesky_decompose of a jittered exp-quad "
                        "covariance whose smallest pivot is 3.7e-12",
@@ -135,6 +133,45 @@ ILL_CONDITIONED = {
     "sw_gp": "cholesky_decompose of a jittered exp-quad covariance whose "
              "smallest pivot is 1.1e-12",
 }
+# About 4x the largest gradient deviation measured against the arm64
+# recording on another platform: 3.58e-7 for s2_gp_by_gr on macOS x86-64
+# (main run 44727913083), and 4.15e-7 for it before the CmdStan 2.40
+# refresh (tests/brms/README.md). The others: sw_gp 1.72e-7 on Linux
+# aarch64, i320_gp_expquad 1.03e-7 on Linux x86-64 before that platform
+# had its own recording.
+# The Linux x86-64 CmdStan recording is within 5.7e-11 of the arm64 one on
+# lp and 1.6e-16 on write_array for all three models.
+ILL_CONDITIONED_GATE = 1.5e-6
+
+# For each model with a point recorded MISMATCH, the lp/gradient value
+# indices that disagree with CmdStan and why. Only these values get the
+# MISMATCH floor of gate_for; the rest of the point keeps the clean gate.
+MISMATCH_OUTPUTS = {
+    "kronecker_gp": (
+        (1, 2), "the two gradient entries that flow through eigenvectors_sym "
+                "of a covariance with eigenvalue gaps down to 6.5e-17"),
+}
+
+
+@dataclasses.dataclass(frozen=True)
+class Floored:
+    """lp/gradient value indices held to their own scaled-error gate."""
+    indices: frozenset
+    gate: float
+    reason: str
+
+
+def floored_outputs(model, pt, default):
+    """The Floored values of one recorded point, or None."""
+    if "values" not in pt:
+        return None
+    if model in ILL_CONDITIONED:
+        return Floored(frozenset(range(1, len(pt["values"]))),
+                       gate_for(model, pt, default), ILL_CONDITIONED[model])
+    if pt.get("status") == "MISMATCH":
+        indices, reason = MISMATCH_OUTPUTS[model]
+        return Floored(frozenset(indices), gate_for(model, pt, default), reason)
+    return None
 
 
 # These cancellation regressions used to pass the scaled-error gate despite
@@ -866,12 +903,15 @@ def fast_dev(rv, gv):
 
 def check_point(model, stan, dj, check_bin, point, pt, timeout, no_wa,
                 strict=False, fast_math=False, opts=None, off_platform=False,
-                ulp_entries=None, measured=None):
+                ulp_entries=None, measured=None, floored=None, notes=None):
     """Replay one recorded point. (status, worst, worst_ulp, n, detail).
 
     ulp_entries, when not None, are the model's ULP ledger entries, and
     every value is held to its bound (ulp_gate). measured, when given,
     collects each value's scaled ULP distance, keeping the worst seen.
+    floored (a Floored) holds some lp/gradient values to their own
+    scaled-error gate, and keeps them out of the worst deviation that the
+    caller gates; a nonzero deviation there is added to notes.
 
     A point whose entry has no `values` is one CmdStan itself refuses (it
     threw, or answered with a row of nan, which is how a unit_vector at
@@ -950,10 +990,27 @@ def check_point(model, stan, dj, check_bin, point, pt, timeout, no_wa,
         failed = ulp_gate(ulp_entries, ulps, point, labels)
         if failed:
             return (failed[0], 0.0, max(ulps.values()), len(rv), failed[1])
+    # The scaled-error gate reads `scored`, in which the values that have
+    # their own floor (floored_outputs) are set to CmdStan's after being
+    # held to that floor here. Every ULP check still reads gv.
+    scored = gv
+    if floored:
+        held = [i for i in floored.indices if i < len(rv)]
+        fworst = max([pair_dev(rv[i], gv[i])[0] for i in held] or [0.0])
+        if fworst >= floored.gate:
+            return ("GATE", fworst, 0, len(rv),
+                    f"point {point}: {fworst:.2e} over "
+                    f"{', '.join(density_label(i, opts) for i in held)}, "
+                    f"allowed {floored.gate:.1e} ({floored.reason})")
+        if fworst >= WA_MAX_REL and notes is not None:
+            notes.append(f"FLOORED {model} point {point}: {fworst:.2e} over "
+                         f"{len(held)} values allowed {floored.gate:.1e} "
+                         f"({floored.reason})")
+        scored = [rv[i] if i in floored.indices else v for i, v in enumerate(gv)]
     if fast_math:
-        worst, worst_ulp = fast_dev(rv, gv)
+        worst, worst_ulp = fast_dev(rv, scored)[0], fast_dev(rv, gv)[1]
     else:
-        worst, worst_ulp = worst_pair(rv, gv, floor)
+        worst, worst_ulp = worst_pair(rv, scored, floor)[0], worst_pair(rv, gv, floor)[1]
         if own:
             worst_ulp = worst_pair(*([v for i, v in enumerate(side)
                                       if i not in own] for side in (rv, gv)),
@@ -962,8 +1019,10 @@ def check_point(model, stan, dj, check_bin, point, pt, timeout, no_wa,
                 off_platform and model in GRADIENT_AGAINST_LARGEST_OFF_PLATFORM):
             worst_ulp = max(worst_pair(rv[:1], gv[:1])[1],
                             gradient_ulp(rv[1:], gv[1:]))
-    where = worst_values(rv, gv, floor, own,
-                         lambda i: density_label(i, opts))
+    where = (worst_values(rv, scored, floor, own,
+                          lambda i: density_label(i, opts))[0],
+             worst_values(rv, gv, floor, own,
+                          lambda i: density_label(i, opts))[1])
     for i, (limit, reason, expected) in own.items():
         label = density_label(i, opts)
         ulp = pair_dev(rv[i], gv[i], floor)[1]
@@ -1089,10 +1148,10 @@ def replay_model(model, ref, pdb, check_bin, tmp, timeout, max_rel,
     ulp_entries and measured are as in check_point, over all points.
 
     Returns (model, status, max_rel, max_ulp, n_values, detail, notes).
-    The deviation reported is the worst over the points held to the clean
-    gate; a point recorded as MISMATCH is gated against what it was
-    recorded at (gate_for) and kept out of the headline number, so one
-    documented deviation cannot become the corpus-wide "worst".
+    The deviation reported is the worst over the values held to the clean
+    gate. The values that floored_outputs names are gated against their
+    own floor (gate_for) and kept out of that number, so one documented
+    deviation cannot become the corpus-wide "worst".
 
     The points run sequentially inside one pool task rather than as three
     tasks, because model_files unpacks the shared posteriordb data zip to
@@ -1134,6 +1193,14 @@ def replay_model(model, ref, pdb, check_bin, tmp, timeout, max_rel,
     worst, worst_ulp, total, notes = 0.0, 0, 0, []
     if measured is None:
         measured = {}
+    unnamed = [p for p, pt in ref["points"].items()
+               if pt.get("status") == "MISMATCH" and model not in MISMATCH_OUTPUTS]
+    if unnamed:
+        return (model, "REFERENCE_INCOMPLETE", 0.0, 0, 0,
+                f"points {', '.join(unnamed)} are recorded MISMATCH; name the "
+                f"values that disagree in MISMATCH_OUTPUTS", [])
+    floored = {int(p): floored_outputs(model, pt, max_rel)
+               for p, pt in ref["points"].items()}
     done = {}
     if opts:
         # One dict per point: the workers would race on a shared one.
@@ -1143,7 +1210,7 @@ def replay_model(model, ref, pdb, check_bin, tmp, timeout, max_rel,
                         check_point, model, stan, dj, check_bin, point,
                         ref["points"][str(point)], timeout, no_wa, strict,
                         fast_math, opts, off_platform, ulp_entries,
-                        point_measured[point])
+                        point_measured[point], floored[point], notes)
                     for point in POINTS if str(point) in ref["points"]
                     and (model, point) not in QUARANTINED}
     for point in POINTS:
@@ -1179,15 +1246,14 @@ def replay_model(model, ref, pdb, check_bin, tmp, timeout, max_rel,
             status, rel, ulp, n, detail = check_point(
                 model, stan, dj, check_bin, point, pt, timeout, no_wa, strict,
                 fast_math, off_platform=off_platform, ulp_entries=ulp_entries,
-                measured=measured)
+                measured=measured, floored=floored[point], notes=notes)
         total += n
         if status != "OK":
             return (model, status, worst, worst_ulp, total, detail, notes)
-        # The documented ill-conditioned limits are floors measured in
-        # default mode; the tighter fast-mode bound must not undercut them.
-        documented = model in ILL_CONDITIONED or pt.get("status") == "MISMATCH"
-        gate = gate_for(model, pt, max(max_rel, WA_MAX_REL)
-                        if fast_math and documented else max_rel)
+        # The values of a documented model that keep the clean gate get
+        # the default-mode one in fast mode too.
+        gate = (max(max_rel, WA_MAX_REL) if fast_math and floored[point]
+                else max_rel)
         if fast_math and model in FAST_HP_CHECKED:
             gate = max(gate, FAST_HP_CHECKED[model][0])
         if rel >= gate:
@@ -1198,10 +1264,7 @@ def replay_model(model, ref, pdb, check_bin, tmp, timeout, max_rel,
             return (model, "ULP_GATE", rel, ulp, total,
                     f"point {point}: {ulp} ULP over {n} values, "
                     f"allowed {ulp_limit}, worst at {detail[1]}", notes)
-        if model in ILL_CONDITIONED and rel >= max_rel:
-            notes.append(f"ILL-CONDITIONED {model} point {point}: "
-                         f"{ILL_CONDITIONED[model]} ({rel:.2e})")
-        if pt.get("status") != "MISMATCH" and model not in ILL_CONDITIONED:
+        if floored[point] is None:
             worst, worst_ulp = max(worst, rel), max(worst_ulp, ulp)
     if ulp_entries:
         notes += ledger_notes(model, ulp_entries, measured)
@@ -1288,14 +1351,15 @@ def check_wa_coverage(pdb, check_bin, models, contains, timeout, excluded=()):
 
 
 def gate_for(model, pt, default):
-    """The threshold this recorded point is held to.
+    """The threshold for the values of this recorded point that
+    floored_outputs names.
 
     A point recorded as MISMATCH is one whose disagreement with CmdStan is
     documented and understood (kronecker_gp: two of 438 gradients flow
-    through eigenvectors of a nearly degenerate covariance). Gating it at
-    the clean threshold would fail every run; ignoring it would let a real
-    regression hide behind a known deviation. Gate it above what it was
-    recorded at, so it can never get much worse unnoticed.
+    through eigenvectors of a nearly degenerate covariance). Gating those
+    values at the clean threshold would fail every run; ignoring them would
+    let a real regression hide behind a known deviation. Gate them above
+    what they were recorded at, so they can never get much worse unnoticed.
 
     A point recorded with no finite deviation at all -- one side nonfinite
     where the other is not, which pair_dev scores as infinite -- gets the
@@ -1315,19 +1379,15 @@ def gate_for(model, pt, default):
     x86_64 (CI run 32637919029) -- 7.8x where point 0 moved 2.4x -- so a
     pure multiplier under-gates precisely the smallest recorded
     deviations. The floor is 4x the worst cross-platform measurement over
-    the model's points, and a clean point keeps the clean gate unless its
-    model is in ILL_CONDITIONED, where the recording platform decides
-    which points come out clean and holding one of them to 1e-9 fails on
-    the others. The gate is a tripwire for the regression class this
-    corpus has actually caught, which measured 1.7e+5 relative, six
-    orders of magnitude above the floor.
+    the model's points. An ILL_CONDITIONED model's gradient gets
+    ILL_CONDITIONED_GATE instead.
     """
+    if model in ILL_CONDITIONED:
+        return max(ILL_CONDITIONED_GATE, default)
     rel = pt.get("max_rel")
-    if rel is None:
+    if rel is None or pt.get("status") != "MISMATCH":
         return default
-    if model in ILL_CONDITIONED or pt.get("status") == "MISMATCH":
-        return max(rel * 4.0, 4.0 * 8.2e-3, default)
-    return default
+    return max(rel * 4.0, 4.0 * 8.2e-3, default)
 
 # The corpora CTest replays: each is a set of models, one reference archive
 # in the corpus schema, and how to run and gate them. Unlike the corpus

@@ -371,17 +371,24 @@ class CheckModelPointsTest(unittest.TestCase):
         self.assertEqual(status, "OK")
         self.assertIn(f"QUARANTINE {MODEL} point 1: test", notes)
 
-    def test_an_ill_conditioned_model_is_gated_at_the_mismatch_floor(self):
+    def test_an_ill_conditioned_model_floors_only_its_gradient(self):
         # Which of these models' points come out clean is a property of
         # the machine that recorded them, so a clean point in one of them
         # gets the floor too, and the run says the floor carried it.
-        body = ('if [ "$point" = 2 ]; then echo "OK -3.5 1 -2.00001"; '
+        body = ('if [ "$point" = 2 ]; then echo "OK -3.5 1 -2.000001"; '
                 'else echo "OK -3.5 1 -2"; fi')
         self.assertEqual(self.run_check(body)[1], "GATE")
         with unittest.mock.patch.dict(ILL_CONDITIONED, {MODEL: "test"}):
             _, status, _, _, _, _, notes = self.run_check(body)
-        self.assertEqual(status, "OK")
-        self.assertIn(f"ILL-CONDITIONED {MODEL} point 2: test", " ".join(notes))
+            self.assertEqual(status, "OK")
+            self.assertIn(f"FLOORED {MODEL} point 2: 5.00e-07", " ".join(notes))
+            self.assertNotIn("point 1", " ".join(notes))
+            # 5e-6 is under the old 3.3% floor and over the measured one.
+            self.assertEqual(self.run_check('echo "OK -3.5 1 -2.00001"')[1],
+                             "GATE")
+            # lp keeps the clean gate.
+            self.assertEqual(self.run_check('echo "OK -3.50001 1 -2"')[1],
+                             "GATE")
 
     def test_a_known_gap_may_refuse_the_model(self):
         with unittest.mock.patch.dict(KNOWN_GAPS, {MODEL: "test gap"}):
@@ -694,14 +701,16 @@ class FastModeGateTest(unittest.TestCase):
 
     def test_ill_conditioned_models_keep_their_documented_limit(self):
         # A point with no recorded deviation, as the brms GP points are.
-        pt = {"values": VALUES["values"], "status": "VERIFIED"}
+        pt = {"values": VALUES["values"], "status": "VERIFIED", "max_rel": 0.0}
         body = 'echo "OK -3.5 1.0000000001 -2"'  # 1e-10 of the largest
         self.assertEqual(self.run_check(body, pt)[1], "GATE")
         with unittest.mock.patch.dict(verify_refs.ILL_CONDITIONED,
                                       {MODEL: "a test"}):
             self.assertEqual(self.run_check(body, pt)[1], "OK")
             self.assertEqual(
-                self.run_check('echo "OK -3.5 1.00000001 -2"', pt)[1], "GATE")
+                self.run_check('echo "OK -3.5 1.00001 -2"', pt)[1], "GATE")
+            self.assertEqual(
+                self.run_check('echo "OK -3.50001 1 -2"', pt)[1], "GATE")
 
     def test_other_outputs_keep_the_default_gate(self):
         pt = {**VALUES, "wa": {"names": "a", "values": ["1"]}}
@@ -1263,7 +1272,8 @@ class SparsePlatformReferenceTest(unittest.TestCase):
 
     def test_selected_answers_still_enforce_numerics_and_actual_input_hashes(self):
         selected = self.select()
-        with tempfile.TemporaryDirectory() as tmp:
+        with tempfile.TemporaryDirectory() as tmp, unittest.mock.patch.dict(
+                verify_refs.MISMATCH_OUTPUTS, {MODEL: ((1,), "a test")}):
             for value, verdict in (("1.01", "OK"), ("99", "GATE")):
                 result = check_model(MODEL, selected, REPO / "nonexistent-pdb",
                                      stub(tmp, f'echo "OK -3.5 {value} -2"'),
