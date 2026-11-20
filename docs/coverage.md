@@ -88,9 +88,8 @@ The name metric in the table above does not show these gaps:
   (six unexpected-unsupported signatures and two generator gaps).
 - `wiener_lcdf_unnorm` and `wiener_lccdf_unnorm` with all-real arguments have
   no graph operation and are refused.
-- The cross-covariance forms of the GP kernels, which take two location
-  arrays (`gp_exp_quad_cov(x1, x2, sigma, l)` and the others), are refused.
-  The square forms of all five kernels work: exponentiated quadratic,
+- `gp_dot_prod_cov` is refused. The other five GP kernels work in every
+  form that Stan has, square and cross-covariance: exponentiated quadratic,
   Matern 3/2, Matern 5/2, exponential and periodic.
 - Complex arguments and results are refused by policy. The graph holds real
   and integer values only.

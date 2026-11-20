@@ -2456,31 +2456,54 @@ std::optional<Lowering::Val> Lowering::lower_matrix_fn(const mir::Expr& e,
     fail("rep_matrix arity", e.raw);
   }
   if (const std::optional<GpCov> gp = gp_cov_family(e.name);
-      gp && (int)e.args.size() == 1 + gp_cov_hyperparameters(*gp)) {
+      gp && ((int)e.args.size() == 1 + gp_cov_hyperparameters(*gp) ||
+             (int)e.args.size() == 2 + gp_cov_hyperparameters(*gp))) {
+    const bool cross = (int)e.args.size() == 2 + gp_cov_hyperparameters(*gp);
+    const int h = cross ? 2 : 1;
     Val x = actuals.at(0).value();
-    Val alpha = actuals.at(1).value();
-    Val rho = actuals.at(2).value();
+    Val alpha = actuals.at(h).value();
+    Val rho = actuals.at(h + 1).value();
     // x may be data or a parameter: gp_cov_bwd rebuilds the points from
     // the promoted input, so a parameter x gets its adjoints too.
     // x is array[N] real (D == 1) or array[N] vector[D], stored
-    // array-major, so D falls out of the declared dims.
-    int64_t D = 1;
-    if (is_array(x.si) && array_shape(x.si).dims.size() == 2)
-      D = array_shape(x.si).dims[1];
-    const int64_t N = g.slots[x.slot].len / D;
-    SlotInfo si = matrix_view(N, N);
-    Val v = *gp == kGpPeriodic
+    // array-major, so N and D fall out of the declared dims.
+    const auto points = [&](const Val& v) -> std::pair<int64_t, int64_t> {
+      if (is_array(v.si) && array_shape(v.si).dims.size() == 2)
+        return {array_shape(v.si).dims[0], array_shape(v.si).dims[1]};
+      return {g.slots[v.slot].len, 1};
+    };
+    const auto [N, D] = points(x);
+    std::optional<Val> x2;
+    int64_t M = N;
+    if (cross) {
+      x2 = actuals.at(1).value();
+      const auto [M2, D2] = points(*x2);
+      if (D2 != D)
+        fail(e.name + ": the two location arrays need the same dimension",
+             e.raw);
+      M = M2;
+    }
+    std::vector<int> idata = {(int)N, (int)D};
+    if (cross) idata.push_back((int)M);
+    SlotInfo si = matrix_view(N, M);
+    const bool periodic = *gp == kGpPeriodic;
+    Val v = cross ? (periodic ? emit_value(OP_GP_COV,
+                                           {x, *x2, alpha, rho,
+                                            actuals.at(h + 2).value()},
+                                           N * M, si, idata)
+                              : emit_value(OP_GP_COV, {x, *x2, alpha, rho},
+                                           N * M, si, idata))
+            : periodic
                 ? emit_value(OP_GP_COV, {x, alpha, rho, actuals.at(3).value()},
-                             N * N, si, {(int)N, (int)D})
-                : emit_value(OP_GP_COV, {x, alpha, rho}, N * N, si,
-                             {(int)N, (int)D});
+                             N * N, si, idata)
+                : emit_value(OP_GP_COV, {x, alpha, rho}, N * N, si, idata);
     // The declared type picks the overload: array[1] real with D == 1 is
     // still the per-dimension form, which rounds differently.
     const bool per_dimension =
-        e.args[2].unsized.depth == 1 || g.slots[rho.slot].len != 1;
-    if (per_dimension && *gp == kGpPeriodic)
+        e.args[h + 1].unsized.depth == 1 || g.slots[rho.slot].len != 1;
+    if (per_dimension && periodic)
       fail(e.name + ": the length scale must be a scalar", e.raw);
-    g.ops.back().variant = GpCovMode{*gp, per_dimension}.byte();
+    g.ops.back().variant = GpCovMode{*gp, per_dimension, cross}.byte();
     return with_layout(v, owning_layout(si));
   }
   if (e.name == "quad_form_diag" && e.args.size() == 2) {

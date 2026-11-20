@@ -13,7 +13,7 @@ int fuse_gp_diagonal_updates(Graph& g, const std::vector<int>& roots) {
     // The fused op keeps the variant, so a per-dimension length scale stays
     // one.
     const GpCovMode mode = GpCovMode::of(op.variant);
-    return mode.family != kGpExpQuad &&
+    return mode.family != kGpExpQuad && !mode.cross &&
            op.n_in == gp_cov_jitter_input(mode.family) && op.n_idata == 2 &&
            op.idata[0] > 0;
   };

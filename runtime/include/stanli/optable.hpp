@@ -1010,36 +1010,46 @@ inline std::optional<GpCov> gp_cov_family(std::string_view name) {
   return std::nullopt;
 }
 
-// OP_GP_COV's variant byte: the covariance function, and whether the length
+// OP_GP_COV's variant byte: the covariance function, whether the length
 // scale is an array with one entry per input dimension (Stan Math's
-// std::vector overloads, which divide each dimension by its own scale).
-// Only the exp-quad, Matern and exponential functions have that form.
+// std::vector overloads, which divide each dimension by its own scale), and
+// whether the call is the cross-covariance form with a second location
+// array. Only the exp-quad, Matern and exponential functions have the
+// per-dimension form.
 struct GpCovMode {
   GpCov family = kGpExpQuad;
   bool per_dimension = false;
+  bool cross = false;
 
   static constexpr uint8_t kPerDimensionBit = 1u << 7;
+  static constexpr uint8_t kCrossBit = 1u << 6;
 
   constexpr uint8_t byte() const {
-    return (uint8_t)(family | (per_dimension ? kPerDimensionBit : 0u));
+    return (uint8_t)(family | (per_dimension ? kPerDimensionBit : 0u) |
+                     (cross ? kCrossBit : 0u));
   }
   static constexpr GpCovMode of(uint8_t byte) {
-    return {(GpCov)(byte & ~kPerDimensionBit), (byte & kPerDimensionBit) != 0};
+    return {(GpCov)(byte & ~(kPerDimensionBit | kCrossBit)),
+            (byte & kPerDimensionBit) != 0, (byte & kCrossBit) != 0};
   }
 };
 
-// OP_GP_COV's inputs are the locations, then this many hyperparameters
-// (sigma, the length scale and, for the periodic kernel, the period), then
-// an optional scalar that adds to every diagonal entry. Each hyperparameter
-// is one input; a per-dimension length scale is one input of D values.
+// OP_GP_COV's inputs are the locations (one array, or two for the cross
+// form), then this many hyperparameters (sigma, the length scale and, for
+// the periodic kernel, the period), then, for the square form only, an
+// optional scalar that adds to every diagonal entry. Each hyperparameter is
+// one input; a per-dimension length scale is one input of D values.
 inline int gp_cov_hyperparameters(GpCov family) {
   return family == kGpPeriodic ? 3 : 2;
+}
+inline int gp_cov_first_hyperparameter(GpCovMode mode) {
+  return mode.cross ? 2 : 1;
 }
 inline int gp_cov_jitter_input(GpCov family) {
   return 1 + gp_cov_hyperparameters(family);
 }
-inline bool gp_cov_has_jitter(GpCov family, int n_in) {
-  return n_in > gp_cov_jitter_input(family);
+inline bool gp_cov_has_jitter(GpCovMode mode, int n_in) {
+  return !mode.cross && n_in > gp_cov_jitter_input(mode.family);
 }
 
 struct Kernel {
