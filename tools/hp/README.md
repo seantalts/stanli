@@ -27,6 +27,9 @@ reference is a central finite difference per coordinate at step
 `10^-(dps/3)`. Above that it is `--dirs` (4) directional derivatives along
 unit vectors drawn from `random.Random("MODEL:POINT:K")`, each by a central
 difference with two evaluations. The seeds are in the output JSON.
+`--grad-index 1,387` adds, above that size, a central difference along each
+listed coordinate (1-based, as the ULP ledger names gradient entries), stored
+as `grad_coord` in the point's entry.
 
 Errors, in `metrics.py`: log density `|a-b| / max(|a|,|b|,1)`; full gradient
 `max|g-r| / max(1, max|g|, max|r|)` (the fast gate in
@@ -49,6 +52,20 @@ default error is below 1e-12. Otherwise it is `ill_conditioned` (a member of
 `verify_refs.ILL_CONDITIONED`) or `gate_fail`. Fast is `fast_worse` when its
 error exceeds twice the default error and 1e-14, `fast_better` for the
 mirror image.
+
+## The ULP ledger
+
+    PYTHONPATH=... tools/hp/ledger_accuracy.py HP_DIR --check build-rel/stanli_check
+    PYTHONPATH=... tools/hp/ledger_accuracy.py HP_DIR --only ldaK5 --switch NO_REROLL NO_REROLL+NO_PARTITION
+    PYTHONPATH=... tools/hp/ledger_accuracy.py HP_DIR --census --only ch12_m12_5 --switch NO_REROLL
+
+Scores each `main` entry of `tests/ulp_ledger.json` against the 80-digit
+values in `HP_DIR`: at the point and index where stanli is farthest from
+CmdStan, it prints how many ULPs of the scale each engine is from the true
+value, and whether stanli is `FARTHER` than CmdStan. `--switch` repeats the
+stanli run with `STANLI_<NAME>` set and scores it at the same point and
+index. `--census` scores every value of the listed models instead of the
+ledger's entries, and counts how often stanli is the closer one.
 
 ## Attribution
 
