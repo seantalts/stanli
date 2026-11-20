@@ -25,7 +25,7 @@ sample_cstan(
   metric = c("diag_e", "dense_e", "unit_e"),
   inv_metric = NULL,
   step_size = NULL,
-  adapt_engaged = TRUE,
+  adapt_engaged = NULL,
   adapt_metric = TRUE,
   ...
 )

@@ -622,15 +622,21 @@ test_that("adapt_metric = FALSE adapts only the step size", {
   expect_false(fit$adapt_metric)
 })
 
-test_that("warmup = 0 searches for a step size only while adaptation is engaged", {
+test_that("warmup = 0 runs at the given step size unless adaptation is asked for", {
   skip_without_runtime()
   m <- metric_model()
-  searched <- sample_model(m, chains = 1, seed = 3, warmup = 0, samples = 10,
-                           step_size = 0.25, refresh = 0)
-  expect_false(all(searched$sampler[, , "stepsize__"] == 0.25))
   fixed <- sample_model(m, chains = 1, seed = 3, warmup = 0, samples = 10,
-                        step_size = 0.25, adapt_engaged = FALSE, refresh = 0)
+                        step_size = 0.25, refresh = 0)
   expect_true(all(fixed$sampler[, , "stepsize__"] == 0.25))
+  expect_false(fixed$adapt_engaged)
+  expect_error(
+    sample_model(m, chains = 1, seed = 3, warmup = 0, samples = 10,
+                 adapt_engaged = TRUE, refresh = 0),
+    "warmup must be an integer >= 1 when adaptation is engaged",
+    fixed = TRUE)
+  adapted <- sample_model(m, chains = 1, seed = 3, warmup = 20, samples = 10,
+                          refresh = 0)
+  expect_true(adapted$adapt_engaged)
 })
 
 test_that("a length-one inverse metric fits a one-parameter model", {

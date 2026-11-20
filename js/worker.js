@@ -186,6 +186,9 @@ function sampleNuts(M, model, req, warmup, samples, initPtr, width, live,
     new Float64Array(M.HEAPF64.buffer, optsPtr + so.fields.delta, 1)[0] =
         +req.delta;
     if (initPtr) u32("inits", initPtr);
+    if (warmup === 0)
+      new Int32Array(M.HEAPF64.buffer,
+                     metricPtr + mo.fields.adapt_engaged, 1)[0] = 0;
 
     const valuesPtr = alloc(8 * samples * width);
     const statsPtr = alloc(8 * samples * 7);

@@ -643,14 +643,12 @@ complete_partial_inits <- function(model, values, init_radius, seed) {
 #' @param step_size Optional initial step size, a single positive number used
 #'   by every chain. `NULL` uses 1, as CmdStan does. With adaptation on it is
 #'   the starting point of the step size search and of dual averaging.
-#' @param adapt_engaged `TRUE` (the default) adapts the step size and, unless
+#' @param adapt_engaged `TRUE` adapts the step size and, unless
 #'   `metric = "unit_e"`, the metric during warmup. `FALSE` runs no adaptation:
 #'   `warmup` iterations are ordinary transitions and `inv_metric` and
-#'   `step_size` are used as given. With `warmup = 0` and `adapt_engaged =
-#'   TRUE`, stanli still runs Stan's initial step size search, as Stan's
-#'   adaptive sampler does, so the step size in use differs from `step_size`.
-#'   To use a supplied step size exactly, set `adapt_engaged = FALSE`, as with
-#'   CmdStanR.
+#'   `step_size` are used as given. The default, `NULL`, means `TRUE` unless
+#'   `warmup = 0`, which then runs at exactly `step_size`; an explicit
+#'   `adapt_engaged = TRUE` with `warmup = 0` is an error, as in CmdStan.
 #' @param adapt_metric `TRUE` (the default) adapts the metric during warmup
 #'   when `adapt_engaged` is `TRUE`. `FALSE` adapts only the step size and
 #'   keeps `inv_metric` (the identity when `NULL`) as given. It has no effect
@@ -681,7 +679,7 @@ sample_model <- function(model, chains = 4, seed = 1, warmup = 1000,
                          threads_per_chain = NULL, fixed_param = FALSE,
                          metric = c("diag_e", "dense_e", "unit_e"),
                          inv_metric = NULL, step_size = NULL,
-                         adapt_engaged = TRUE, adapt_metric = TRUE,
+                         adapt_engaged = NULL, adapt_metric = TRUE,
                          chain_id = 1L) {
   threads_per_chain <- run_threads(model, threads_per_chain, "sample_model")
   cstan_integer(seed, "seed", 0)
@@ -698,13 +696,15 @@ sample_model <- function(model, chains = 4, seed = 1, warmup = 1000,
     init_radius = sampler_number(init_radius, "init_radius"))
   stanfit_flag(fixed_param, "fixed_param")
   metric <- match.arg(metric)
-  stanfit_flag(adapt_engaged, "adapt_engaged")
+  if (!is.null(adapt_engaged)) stanfit_flag(adapt_engaged, "adapt_engaged")
   stanfit_flag(adapt_metric, "adapt_metric")
   check_step_size(step_size)
   if (fixed_param && (metric != "diag_e" || !is.null(inv_metric) ||
-                      !is.null(step_size) || !adapt_engaged || !adapt_metric))
+                      !is.null(step_size) || isFALSE(adapt_engaged) ||
+                      !adapt_metric))
     stop("metric, inv_metric, step_size, adapt_engaged and adapt_metric do ",
          "not apply with fixed_param = TRUE", call. = FALSE)
+  if (is.null(adapt_engaged)) adapt_engaged <- opts$warmup != 0L
   if (fixed_param && !is.null(pathfinder_init))
     stop("pathfinder_init does not apply with fixed_param = TRUE",
          call. = FALSE)

@@ -48,7 +48,7 @@ sample_cstan <- function(model_code, data = list(), chains = 4, parallel_chains 
                          threads_per_chain = 1, include_paths = NULL,
                          metric = c("diag_e", "dense_e", "unit_e"),
                          inv_metric = NULL, step_size = NULL,
-                         adapt_engaged = TRUE, adapt_metric = TRUE, ...) {
+                         adapt_engaged = NULL, adapt_metric = TRUE, ...) {
   if (length(list(...))) stop("unsupported sample_cstan arguments: ",
                              paste(names(list(...)), collapse = ", "), call. = FALSE)
   for (name in c("chains", "parallel_chains", "threads_per_chain", "iter_sampling", "max_treedepth", "thin"))

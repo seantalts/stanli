@@ -24,7 +24,7 @@ sample_model(
   metric = c("diag_e", "dense_e", "unit_e"),
   inv_metric = NULL,
   step_size = NULL,
-  adapt_engaged = TRUE,
+  adapt_engaged = NULL,
   adapt_metric = TRUE,
   chain_id = 1L
 )
@@ -99,14 +99,12 @@ With adaptation on, the metric is adapted during warmup from this start.}
 by every chain. `NULL` uses 1, as CmdStan does. With adaptation on it is
 the starting point of the step size search and of dual averaging.}
 
-\item{adapt_engaged}{`TRUE` (the default) adapts the step size and, unless
+\item{adapt_engaged}{`TRUE` adapts the step size and, unless
 `metric = "unit_e"`, the metric during warmup. `FALSE` runs no adaptation:
 `warmup` iterations are ordinary transitions and `inv_metric` and
-`step_size` are used as given. With `warmup = 0` and `adapt_engaged =
-TRUE`, stanli still runs Stan's initial step size search, as Stan's
-adaptive sampler does, so the step size in use differs from `step_size`.
-To use a supplied step size exactly, set `adapt_engaged = FALSE`, as with
-CmdStanR.}
+`step_size` are used as given. The default, `NULL`, means `TRUE` unless
+`warmup = 0`, which then runs at exactly `step_size`; an explicit
+`adapt_engaged = TRUE` with `warmup = 0` is an error, as in CmdStan.}
 
 \item{adapt_metric}{`TRUE` (the default) adapts the metric during warmup
 when `adapt_engaged` is `TRUE`. `FALSE` adapts only the step size and

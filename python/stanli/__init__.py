@@ -1518,7 +1518,7 @@ _CONTINUE_FIXED = {
     "chains": 4, "seed": 1, "warmup": 1000, "delta": 0.8, "max_depth": 10,
     "thin": 1, "save_warmup": False, "inits": None, "init_radius": 2.0,
     "pathfinder_init": None, "metric": "diag_e", "inv_metric": None,
-    "step_size": None, "adapt_engaged": True, "adapt_metric": True,
+    "step_size": None, "adapt_engaged": None, "adapt_metric": True,
 }
 
 
@@ -2088,7 +2088,7 @@ class Model:
                inits=None, init_radius=2.0, pathfinder_init=None,
                parallel_chains=None, refresh=100, threads_per_chain=None,
                metric="diag_e", inv_metric=None, step_size=None,
-               adapt_engaged=True, adapt_metric=True, continue_from=None):
+               adapt_engaged=None, adapt_metric=True, continue_from=None):
         """NUTS draws as a Fit.
 
         Four chains by default, because R-hat needs more than one and a
@@ -2137,11 +2137,11 @@ class Model:
         list of one array per chain such as `fit.inv_metric`. None starts from
         the identity. "unit_e" takes none. `step_size` is the initial step
         size (default 1). `adapt_engaged=False` runs no adaptation, so the
-        metric and step size stay as given. With warmup under 150 Stan does
-        not adapt the metric and a supplied one is kept, as in CmdStan. With
-        `adapt_engaged=True` and `warmup=0` Stan still runs its initial step
-        size search, so use `adapt_engaged=False` to run at exactly `step_size`.
-        `adapt_metric=False` with `adapt_engaged=True` adapts only the step
+        metric and step size stay as given. The default, None, means True
+        unless `warmup=0`, which then runs at exactly `step_size`; an explicit
+        `adapt_engaged=True` with `warmup=0` is an error, as in CmdStan. With
+        warmup under 150 Stan does not adapt the metric and a supplied one is
+        kept, as in CmdStan. `adapt_metric=False` with `adapt_engaged=True` adapts only the step
         size and keeps `inv_metric` (the identity if None) unchanged; it has
         no effect with "unit_e" or `adapt_engaged=False`.
 
@@ -2207,8 +2207,9 @@ class Model:
             raise ValueError(
                 f"metric must be one of {', '.join(_METRICS)}, got {metric!r}")
         step_size_value = _check_step_size(step_size)
-        if not isinstance(adapt_engaged, (bool, np.bool_)):
-            raise TypeError("adapt_engaged must be a bool")
+        if adapt_engaged is not None and not isinstance(
+                adapt_engaged, (bool, np.bool_)):
+            raise TypeError("adapt_engaged must be a bool or None")
         if not isinstance(adapt_metric, (bool, np.bool_)):
             raise TypeError("adapt_metric must be a bool")
         if isinstance(refresh, (bool, np.bool_)):
@@ -2228,6 +2229,8 @@ class Model:
         opts.seed = seed
         opts.chains = _int_arg("chains", chains)
         opts.warmup = _int_arg("warmup", warmup)
+        if adapt_engaged is None:
+            adapt_engaged = opts.warmup != 0
         opts.samples = _int_arg("samples", samples)
         opts.thin = _int_arg("thin", thin)
         opts.delta = _real_arg("delta", delta)

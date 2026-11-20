@@ -2229,6 +2229,21 @@ def test_sample_still_accepts_zero_warmup_and_integral_floats():
     assert fit.n_chains == 2 and fit.n_draws == 10
 
 
+def test_zero_warmup_runs_at_the_given_step_size_unless_adaptation_is_asked_for():
+    fit = _metric_fit(chains=2, warmup=0, samples=10, step_size=0.25)
+    assert np.all(fit.sampler_stats[:, :, 2] == 0.25)
+    for engaged in (True, np.True_):
+        try:
+            _metric_fit(chains=2, warmup=0, samples=10, adapt_engaged=engaged)
+        except RuntimeError as e:
+            assert "warmup must be an integer >= 1 when adaptation is " \
+                   "engaged" in str(e), str(e)
+        else:
+            raise AssertionError("adapt_engaged=True with warmup=0 must fail")
+    _bad_sample_argument(TypeError, "adapt_engaged must be a bool or None",
+                         adapt_engaged="yes")
+
+
 def test_optimize_rejects_bad_arguments():
     model = _metric_model()
     for kw, text in [

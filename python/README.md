@@ -141,7 +141,9 @@ fit = model.sample(seed=2, metric="dense_e", warmup=0, adapt_engaged=False,
 ```
 
 With fewer than 150 warmup iterations, Stan does not adapt the metric and
-keeps the one that you supply.
+keeps the one that you supply. With `warmup=0` and no `adapt_engaged` given,
+sampling runs at exactly `step_size`; `adapt_engaged=True` with `warmup=0` is
+an error, as in CmdStan.
 
 ### More draws from the same chains
 
@@ -252,7 +254,7 @@ fit = model.sample(chains=4, seed=1, warmup=1000, samples=1000, delta=0.8,
                    max_depth=10, thin=1, save_warmup=False, inits=None,
                    init_radius=2.0, pathfinder_init=None,
                    parallel_chains=None, refresh=100, metric="diag_e",
-                   inv_metric=None, step_size=None, adapt_engaged=True,
+                   inv_metric=None, step_size=None, adapt_engaged=None,
                    adapt_metric=True, continue_from=None)
 fit["theta"]                        # (chains*draws, 8), declared shape
 fit["theta[1]"]                     # one column, chains concatenated
