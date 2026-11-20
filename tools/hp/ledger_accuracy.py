@@ -95,7 +95,8 @@ def score(p, i, sc, rv, gv, h):
     t = truth(h, i) if h else None
     if t is None or gv is None or not sc:
         return None
-    return {"point": p, "index": i, "cmdstan": err(rv[i], t, sc), "stanli": err(gv[i], t, sc)}
+    return {"point": p, "index": i, "cmdstan": err(rv[i], t, sc), "stanli": err(gv[i], t, sc),
+            "same_as_cmdstan": gv[i] == rv[i]}
 
 
 def census(a, configs, refs, tmp):
