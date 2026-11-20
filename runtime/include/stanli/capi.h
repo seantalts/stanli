@@ -642,7 +642,9 @@ void stanli_optimize_opts_init(stanli_optimize_opts* o);
 /* Writes the mode to `unconstrained` (n_unconstrained doubles) and, when
  * `values` is non-null, every CSV column there (stanli_wa_n_columns, or
  * n_constrained when the model has no generated quantities). *lp receives
- * the log density at the mode.
+ * the log density at the mode. The start and the generated quantities at the
+ * mode draw from the stream of (seed, chain_id), in that order, as in
+ * CmdStan; the model's stanli_wa_seed stream is not touched.
  *
  * Returns 0 when the optimizer converged, nonzero otherwise with a
  * message in err -- and in that case the buffers still hold the last

@@ -1696,15 +1696,9 @@ int stanli_optimize(stanli_model* m, const stanli_optimize_opts* opts,
     cfg.init_radius = opts->init_radius;
     cfg.init = opts->init;
 
-    // The CSV side, so the optimizer can report the mode the way a draw is
-    // reported: whichever write_array path this model has.
-    stanli::WriteArray wa;
-    wa.names = m->wa_n > 0 ? m->wa_names : m->flat_names;
-    wa.row = [m](const double* q, double* out) {
-      write_row(*m, *m->ex, m->wa_ex.get(), q, out, m->wa_rng);
-    };
-
-    const stanli::OptimizeResult r = stanli::run_optimize(*m->ex, &wa, cfg);
+    const stanli::AlgorithmHost host =
+        algorithm_host(m, nullptr, nullptr, nullptr, nullptr);
+    const stanli::OptimizeResult r = stanli::run_optimize(*m->ex, host, cfg);
     for (size_t i = 0; i < r.unconstrained.size(); ++i)
       unconstrained[i] = r.unconstrained[i];
     if (values != nullptr)

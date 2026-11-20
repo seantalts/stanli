@@ -12,6 +12,7 @@
 #ifndef STANLI_ESTIMATE_HPP
 #define STANLI_ESTIMATE_HPP
 
+#include <stanli/algorithms.hpp>
 #include <stanli/graph.hpp>
 #include <stanli/model_adapter.hpp>
 
@@ -59,8 +60,10 @@ struct OptimizeResult {
   std::string message;
 };
 
-// L-BFGS, the same one CmdStan's `optimize` runs.
-OptimizeResult run_optimize(Executor& ex, const WriteArray* wa,
+// L-BFGS, the same one CmdStan's `optimize` runs. The start and the row at
+// the mode draw from one stream, create_rng(seed, chain_id), as CmdStan's
+// do; host.names and host.row give that row.
+OptimizeResult run_optimize(Executor& ex, const AlgorithmHost& host,
                             const OptimizeConfig& cfg);
 
 // ---- Pathfinder ------------------------------------------------------------

@@ -1,9 +1,10 @@
 #include <stanli/estimate.hpp>
 
+#include <stanli/wa_interp.hpp>
+
 #include "initialize.hpp"
 
 #include <stan/optimization/bfgs.hpp>
-#include <stan/services/util/create_rng.hpp>
 
 #include <sstream>
 
@@ -53,7 +54,7 @@ int run_lbfgs(ExecutorModel& model, std::vector<double>& cont,
 
 }  // namespace
 
-OptimizeResult run_optimize(Executor& ex, const WriteArray* wa,
+OptimizeResult run_optimize(Executor& ex, const AlgorithmHost& host,
                             const OptimizeConfig& cfg) {
   OptimizeResult out;
   if (!cfg.jacobian) {
@@ -65,18 +66,18 @@ OptimizeResult run_optimize(Executor& ex, const WriteArray* wa,
         "the posterior mode.";
     return out;
   }
-  ExecutorModel model(ex, wa);
-  stan::rng_t rng = stan::services::util::create_rng(cfg.seed, cfg.chain_id);
+  ExecutorModel model(ex);
+  WaRng rng(cfg.seed, (unsigned)cfg.chain_id);
   std::vector<double> cont((size_t)ex.n_params());
-  initialize_point(ex, rng, cfg.init_radius, cfg.init, cont.data(),
+  initialize_point(ex, rng.gen(), cfg.init_radius, cfg.init, cont.data(),
                    FixedInitPolicy::SkipValidation);
 
   out.return_code = run_lbfgs(model, cont, cfg, &out.lp, &out.message);
   out.unconstrained = cont;
-  if (wa != nullptr) {
-    out.names = wa->names;
-    out.values.assign(wa->names.size(), 0.0);
-    wa->row(cont.data(), out.values.data());
+  if (host.row) {
+    out.names = host.names;
+    out.values.assign(host.names.size(), 0.0);
+    host.row(cont.data(), out.values.data(), rng);
   }
   return out;
 }

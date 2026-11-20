@@ -327,6 +327,67 @@ void test_optimize_options(stanli_model* m) {
              std::string(err) == "init_radius must be a finite number >= 0");
 }
 
+stanli_model* from_stan(const char* code) {
+  if (!stanli_has_embedded_stanc()) return nullptr;
+  char err[4096]{};
+  stanli_model* m = stanli_model_new_from_stan_with_opts(code, "{}", nullptr,
+                                                         err, sizeof err);
+  if (m == nullptr) {
+    ++failures;
+    std::printf("FAIL compiling a test model: %s\n", err);
+  }
+  return m;
+}
+
+// CmdStan's optimize draws the row at the mode from the stream that chose
+// the start, create_rng(seed, chain_id), as fixed_param draws its first row.
+void test_optimize_generated_quantities_stream() {
+  stanli_model* m = from_stan(
+      "parameters { real mu; } model { mu ~ normal(0, 1); }\n"
+      "generated quantities { real y = normal_rng(0, 1); }\n");
+  if (m == nullptr) return;
+  const auto y_at_mode = [m](uint32_t seed, int chain_id) {
+    stanli_optimize_opts o;
+    stanli_optimize_opts_init(&o);
+    o.seed = seed;
+    o.chain_id = chain_id;
+    double q = 0, lp = 0, values[2] = {0, 0};
+    char err[4096]{};
+    const int rc = stanli_optimize(m, &o, &q, values, &lp, err, sizeof err);
+    expect(std::string("optimize runs: ") + err, rc == 0);
+    return values[1];
+  };
+  const auto y_fixed_param = [m](uint32_t seed, int chain_id) {
+    stanli_fixed_param_opts o;
+    stanli_fixed_param_opts_init(&o);
+    o.seed = seed;
+    o.chains = 1;
+    o.chain_id = chain_id;
+    o.samples = 1;
+    double values[2] = {0, 0};
+    char err[4096]{};
+    const int rc =
+        stanli_fixed_param(m, &o, values, nullptr, nullptr, nullptr, nullptr,
+                           nullptr, nullptr, err, sizeof err);
+    expect(std::string("fixed_param runs: ") + err, rc == 0);
+    return values[1];
+  };
+  const double y5 = y_at_mode(5, 1);
+  expect("optimize generated quantities repeat for one seed",
+         y_at_mode(5, 1) == y5);
+  expect("optimize generated quantities follow the seed",
+         y_at_mode(6, 1) != y5);
+  expect("optimize generated quantities follow the chain id",
+         y_at_mode(5, 2) != y5);
+  for (int chain_id : {1, 2})
+    expect("optimize draws from the (seed, chain_id) stream of fixed_param",
+           y_at_mode(5, chain_id) == y_fixed_param(5, chain_id));
+  double q = 0.3, row[2];
+  stanli_wa_row(m, &q, row);
+  expect("optimize ignores the model's own stream", y_at_mode(5, 1) == y5);
+  stanli_model_free(m);
+}
+
 void test_laplace(stanli_model* m) {
   char err[4096]{};
   const std::vector<double> mode = find_mode(m);
@@ -789,6 +850,7 @@ int main() {
   }
   test_noparam();
   test_optimize_rejected_mode();
+  test_optimize_generated_quantities_stream();
   if (failures) {
     std::printf("%d failures\n", failures);
     return 1;
