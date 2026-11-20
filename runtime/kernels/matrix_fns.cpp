@@ -2101,7 +2101,32 @@ double wiener_select(KernelCtx& ctx, unsigned active, WienerPass pass,
   static constexpr Eval table[] = {&wiener_eval<Scalar, Mask>...};
   return table[active](ctx, pass);
 }
+// Stan Math checks every argument before it returns 0 for an empty one. When
+// the others have length 1, wiener_load spreads them to length 0 and Stan
+// Math sees no value to check, so check them here in its order.
+void wiener_check_beside_empty(const KernelCtx& ctx) {
+  bool empty = false;
+  for (int k = 0; k < 5; ++k) {
+    if (ctx.in[k].len > 1) return;
+    empty = empty || ctx.in[k].len == 0;
+  }
+  if (!empty) return;
+  constexpr const char* fn = "wiener_lpdf";
+  const auto value = [&](int k, auto check) {
+    if (ctx.in[k].len == 1) check(ctx.in[k].data[0]);
+  };
+  namespace sm = stan::math;
+  value(0, [](double y) { sm::check_positive(fn, "Random variable", y); });
+  value(1, [](double a) {
+    sm::check_positive_finite(fn, "Boundary separation", a);
+  });
+  value(2,
+        [](double t) { sm::check_positive_finite(fn, "Nondecision time", t); });
+  value(3, [](double w) { sm::check_bounded(fn, "A-priori bias", w, 0, 1); });
+  value(4, [](double v) { sm::check_finite(fn, "Drift rate", v); });
+}
 double wiener_run(KernelCtx& ctx, unsigned active, WienerPass pass) {
+  wiener_check_beside_empty(ctx);
   const auto masks = std::make_integer_sequence<unsigned, 32>{};
   return wiener_extent(ctx) == 1
              ? wiener_select<true>(ctx, active, pass, masks)

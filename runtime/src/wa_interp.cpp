@@ -352,6 +352,13 @@ void multi_normal_rng_draw(const double* location, size_t location_size,
            std::numeric_limits<size_t>::max() / covariance_rows) ||
       covariance_rows * covariance_cols != covariance_size)
     throw std::logic_error("malformed multi-normal RNG arguments");
+  // Stan Math does not check that the location has one element per row of
+  // the covariance. A mismatch makes it write past the end of a buffer.
+  if (covariance_rows == covariance_cols)
+    stan::math::check_size_match(
+        cholesky ? "multi_normal_cholesky_rng" : "multi_normal_rng",
+        "Size of location parameter", location_size,
+        "rows of covariance parameter", covariance_rows);
 
   Eigen::VectorXd mu(static_cast<Eigen::Index>(location_size));
   for (size_t i = 0; i < location_size; ++i)
@@ -378,6 +385,8 @@ void dirichlet_rng_draw(const double* alpha, size_t alpha_size, double* output,
   Eigen::VectorXd a(static_cast<Eigen::Index>(alpha_size));
   for (size_t i = 0; i < alpha_size; ++i)
     a[static_cast<Eigen::Index>(i)] = alpha[i];
+  // Stan Math reads the first element of an empty vector.
+  stan::math::check_nonzero_size("dirichlet_rng", "prior sample sizes", a);
   const Eigen::VectorXd draw = stan::math::dirichlet_rng(a, rng.gen());
   for (size_t i = 0; i < output_size; ++i)
     output[i] = draw[static_cast<Eigen::Index>(i)];
@@ -524,9 +533,16 @@ RngDraw library_rng_draw(const LibraryRngSpec& spec, const RngArgument* args,
     case LibraryRng::DirichletMultinomial:
       return rng_result(
           m::dirichlet_multinomial_rng(rng_vector(a[0]), rng_int(a[1]), g));
-    case LibraryRng::HmmLatent:
-      return rng_result(m::hmm_latent_rng(rng_matrix(a[0]), rng_matrix(a[1]),
-                                          rng_vector(a[2]), g));
+    case LibraryRng::HmmLatent: {
+      // Stan Math reads the first column of log_omegas, which may be empty.
+      // Its own checks come first, so they keep their messages.
+      const Eigen::MatrixXd log_omegas = rng_matrix(a[0]);
+      const Eigen::MatrixXd Gamma = rng_matrix(a[1]);
+      const Eigen::VectorXd rho = rng_vector(a[2]);
+      m::hmm_check(log_omegas, Gamma, rho, "hmm_latent_rng");
+      m::check_nonzero_size("hmm_latent_rng", "log_omegas", log_omegas);
+      return rng_result(m::hmm_latent_rng(log_omegas, Gamma, rho, g));
+    }
     case LibraryRng::MultiStudentT:
       return rng_result(m::multi_student_t_rng(a[0].data[0], rng_vector(a[1]),
                                                rng_matrix(a[2]), g));
@@ -542,9 +558,13 @@ RngDraw library_rng_draw(const LibraryRngSpec& spec, const RngArgument* args,
     case LibraryRng::Hypergeometric:
       return rng_result(m::hypergeometric_rng(rng_int(a[0]), rng_int(a[1]),
                                               rng_int(a[2]), g));
+    // Stan Math takes the dimension as size_t and loops K - 1 times, so a
+    // dimension below 1 never finishes.
     case LibraryRng::LkjCorr:
+      m::check_positive(spec.name, "Dimension", rng_int(a[0]));
       return rng_result(m::lkj_corr_rng(rng_int(a[0]), a[1].data[0], g));
     case LibraryRng::LkjCorrCholesky:
+      m::check_positive(spec.name, "Dimension", rng_int(a[0]));
       return rng_result(
           m::lkj_corr_cholesky_rng(rng_int(a[0]), a[1].data[0], g));
     case LibraryRng::Wishart:

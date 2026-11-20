@@ -1163,7 +1163,8 @@ if(NOT EMSCRIPTEN)
                   gq_integer_fill_paths gq_bounded_integer_refusals
                   gq_bounded_nested gq_bounded_nested3 gq_bounded_nested5
                   gq_runtime_int_index gq_library_rng gpperiodic gp_cov_forms
-                  multi_gp_rectangular propto_data_arguments propto_multi_gp)
+                  multi_gp_rectangular propto_data_arguments propto_multi_gp
+                  zero_size_kernels)
     add_test(NAME ${fixture}_reference
       COMMAND ${Python3_EXECUTABLE} tools/verify_refs.py --corpus fixtures
               --check $<TARGET_FILE:stanli_check> --model ${fixture}
