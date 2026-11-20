@@ -72,6 +72,19 @@ inline void fabs_rule(double t, double x, double& adj_a) {
     adj_a -= t;
 }
 
+// rev/fun/softmax.hpp for a Matrix<var> argument: in_adj += p * (out_adj -
+// p . out_adj), with p the softmax values. The dot product adds in ascending
+// order, as Eigen does for var expressions, which have no packet access.
+// Elements sit `stride` apart.
+inline void softmax_rule(int64_t n, const double* p, const double* out_adj,
+                         double* in_adj, int64_t stride = 1) {
+  if (n == 0) return;
+  double d = p[0] * out_adj[0];
+  for (int64_t k = 1; k < n; ++k) d += p[k * stride] * out_adj[k * stride];
+  for (int64_t k = 0; k < n; ++k)
+    in_adj[k * stride] += p[k * stride] * (out_adj[k * stride] - d);
+}
+
 inline void lse2_rule(double t, double va, double vb, double& adj_a,
                       double& adj_b) {
   adj_a += t * stan::math::inv_logit(va - vb);

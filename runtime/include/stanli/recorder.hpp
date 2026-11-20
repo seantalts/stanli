@@ -28,6 +28,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <ostream>
+#include <stdexcept>
 #include <type_traits>
 #include <utility>
 #include <vector>
@@ -445,7 +446,13 @@ class partials_propagator<stanli::rvar, void, Ops...> {
     using E = std::tuple_element_t<I, decltype(edges_)>;
     if constexpr (rt_has_emit<E>::value) {
       auto& e = std::get<I>(edges_);
-      if (s->buf[I] != nullptr && e.size() == s->len[I]) e.emit(s->buf[I]);
+      if (s->buf[I] == nullptr) return;
+      // A skipped edge would leave the previous gradient's partials in the
+      // slot.
+      if (e.size() != s->len[I])
+        throw std::logic_error(
+            "recorder: an operand's size does not match its partials slot");
+      e.emit(s->buf[I]);
     }
   }
 

@@ -251,11 +251,11 @@ generated quantities compare too. Per-model status and worst deviations are in
 
 | corpus | models | CTest |
 | --- | --- | --- |
-| `functions` | [10 models calling 437 names](tests/function_coverage/README.md), including data-only helpers, RNGs, solvers and five operators | `test_function_models` |
+| `functions` | [10 models calling 468 names](tests/function_coverage/README.md), including data-only helpers, RNGs, solvers and five operators | `test_function_models` |
 | `signatures` | 74 generated models covering 19,641 signatures, one output per case | `signature_refs_*` |
 | `sized_functions` | 5 models calling library functions at real sizes | `test_sized_functions_reference` |
 | `container_flow` | 66 models that write each container shape in each block and read it back | `test_container_flow_reference` |
-| `fixtures` | 60 models from `tests/fixtures`, held to 10 ULP | `*_reference` |
+| `fixtures` | 63 models from `tests/fixtures`, held to 10 ULP | `*_reference` |
 | `cmdstan_replay` | 14 models for lowering rewrites that stock stanc's `--O1` MIR reaches | `test_cmdstan_replay` |
 | `oncobayes2` | the 3 OncoBayes2 models | `test_oncobayes2_reference` |
 
@@ -280,12 +280,8 @@ refuses, or whose `write_array` it cannot run, does not fail the run if it is
 listed in `KNOWN_GAPS`. Each entry says what it excuses. A `write_array` entry
 excuses only that section: the replay still compares the log density and
 gradient at every point, with every gate, and fails if anything but the
-`write_array` runs through the interpreter. Four entries are of this kind:
-`examplemodels_cjs_mnl_ran`, `examplemodels_hmm_marginal`, `bmgarch_ccc` and
-`bmgarch_bekk_arma`, whose generated quantities call `multinomial_rng`,
-`hmm_latent_rng` and `multi_student_t_rng`. A whole-model entry excuses any
-failure except a crash. The one entry of this kind is `bayesdfa_dfa_gp`, which
-stanli refuses because it lacks `gp_exp_quad_cov` in the form the model calls.
+`write_array` runs through the interpreter. A whole-model entry excuses any
+failure except a crash. The list is empty today.
 Once stanli supports the model, the run fails until you delete the entry.
 
 [`tools/check_corpus_sampling.py`](tools/check_corpus_sampling.py) runs the

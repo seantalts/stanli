@@ -64,7 +64,7 @@ void register_density_kernels() {
                   with_cached_micro(Kernel{beta_binomial_fwd, density_bwd<2>,
                                            density_scratch<2>},
                                     density_micro<2>));
-#define STANLI_REGISTER_CDF(code, fn, n, tier)                                 \
+#define STANLI_REGISTER_CDF(code, fn, n)                                       \
   register_kernel(code, with_cached_micro(Kernel{fn##_fwd_gen, density_bwd<n>, \
                                                  density_scratch<n>},          \
                                           density_micro<n>));

@@ -538,11 +538,15 @@ static void check_log_sum_exp() {
 }
 
 // Vector output, exercising output-adjoint seeding:
-// lp = normal_lpdf(y | softmax(v), 0.5).
-static void check_softmax() {
-  const int N = 4;
-  double vv[N] = {0.3, -1.2, 2.0, 0.4};
-  double yv[N] = {0.3, 0.2, 0.4, 0.1};
+// lp = normal_lpdf(y | softmax(v), 0.5). The longer case has enough elements
+// for a packet reduction of the dot product to round differently from Stan
+// Math's ascending one.
+static void check_softmax(int N) {
+  std::vector<double> vv(N), yv(N);
+  for (int i = 0; i < N; ++i) {
+    vv[i] = 0.3 * std::sin(1.7 * i) - 0.05 * i;
+    yv[i] = 0.4 * std::cos(0.9 * i) * std::cos(0.9 * i) / N;
+  }
   Graph g;
   const int v = g.add_slot(N, true);
   const int ys = g.add_slot(N, false);
@@ -556,20 +560,21 @@ static void check_softmax() {
   for (int i = 0; i < N; ++i) ex.param_ptr(v)[i] = vv[i];
   for (int i = 0; i < N; ++i) ex.value_ptr(ys)[i] = yv[i];
   ex.value_ptr(half)[0] = 0.5;
-  double grad[N];
-  const double val = ex.gradient(grad);
+  std::vector<double> grad(N);
+  const double val = ex.gradient(grad.data());
 
   // Reference with the same activity: v var, softmax through the var path,
   // then the same all-var-shape normal call the kernel makes.
   Eigen::Matrix<var, -1, 1> xv(N);
   for (int i = 0; i < N; ++i) xv(i) = vv[i];
   Eigen::Matrix<var, -1, 1> vsm = stan::math::softmax(xv);
-  Eigen::Map<Eigen::VectorXd> ym(yv, N);
+  Eigen::Map<Eigen::VectorXd> ym(yv.data(), N);
   var vlp = stan::math::normal_lpdf<false>(ym, vsm, 0.5);
   vlp.grad();
-  expect_eq("softmax value", val, vlp.val());
+  const std::string n = std::to_string(N);
+  expect_eq("softmax[" + n + "] value", val, vlp.val());
   for (int i = 0; i < N; ++i)
-    expect_eq("softmax d" + std::to_string(i), grad[i], xv(i).adj());
+    expect_eq("softmax[" + n + "] d" + std::to_string(i), grad[i], xv(i).adj());
   stan::math::recover_memory();
 }
 
@@ -642,6 +647,7 @@ int main() {
   check_sum_rows();
 
   check_log_sum_exp();
-  check_softmax();
+  check_softmax(4);
+  check_softmax(37);
   return finish("test_mixture");
 }

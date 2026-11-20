@@ -384,8 +384,7 @@ static void test_call_primal_read_contract() {
   // Registry identity alone is insufficient: a replacement implementation
   // has no contract unless it explicitly registers one alongside itself.
   const Kernel saved_add = *find_kernel(OP_ADD);
-  register_kernel(OP_ADD,
-                  Kernel{saved_add.forward, test_call_backward, nullptr});
+  kernel(OP_ADD) = Kernel{saved_add.forward, test_call_backward, nullptr};
   IslandProg replaced;
   replaced.n_regs = 5;
   replaced.ins = p.ins;
@@ -404,7 +403,7 @@ static void test_call_primal_read_contract() {
     expect("replacement CALL defaults to output checkpoint",
            replaced.calls[0].bwd_value_out != 2);
   }
-  register_kernel(OP_ADD, saved_add);
+  kernel(OP_ADD) = saved_add;
 }
 
 // One case, both ways. `tol` is how many ulp of disagreement the case
@@ -1426,7 +1425,7 @@ static void test_extremum_instantiations() {
 
 static void test_density_opcode_lookup() {
   std::vector<int> expected(65536, -1);
-#define STANLI_EXPECT_DENSITY_OPCODE(opc, fn, arity, tier) \
+#define STANLI_EXPECT_DENSITY_OPCODE(opc, fn, ...) \
   expected[opc] = program_density_id_by_name(#fn);
   STANLI_SCALAR_DENSITY_LIST(STANLI_EXPECT_DENSITY_OPCODE)
   STANLI_SCALAR_CDF_LIST(STANLI_EXPECT_DENSITY_OPCODE)

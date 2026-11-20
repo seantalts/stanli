@@ -45,6 +45,21 @@ enum class ScalarRng : uint8_t {
   // Container variants below also reserve 26 through 28. Future scalar
   // additions must start at 29 to preserve the existing variant numbers.
   YuleSimon = 29,
+  BetaNegBinomial,
+  BetaProportion,
+  DiscreteRange,
+  ExpModNormal,
+  Frechet,
+  InvChiSquare,
+  Loglogistic,
+  NegBinomial,
+  Pareto,
+  ParetoType2,
+  Rayleigh,
+  ScaledInvChiSquare,
+  SkewDoubleExponential,
+  SkewNormal,
+  VonMises,
 };
 
 // OP_RNG's first non-scalar-argument variant. Keep it outside ScalarRng:
@@ -68,6 +83,50 @@ inline constexpr uint8_t kMultiNormalCholeskyRngVariant =
 const ScalarRng* scalar_rng_family(const std::string& name);
 size_t scalar_rng_arity(ScalarRng family);
 bool scalar_rng_is_int(ScalarRng family);
+// Bit k is set when argument k is a Stan int (a count or a range bound).
+unsigned scalar_rng_int_arguments(ScalarRng family);
+
+// Stan Math RNGs that take vector or matrix arguments or return a container,
+// each called with one Stan signature's arguments. OP_RNG's variant is the
+// family's value, above every ScalarRng and container variant.
+enum class LibraryRng : uint8_t {
+  Multinomial = 64,
+  MultinomialLogit,
+  DirichletMultinomial,
+  HmmLatent,
+  MultiStudentT,
+  MultiStudentTCholesky,
+  OrderedLogistic,
+  OrderedProbit,
+  Hypergeometric,
+  LkjCorr,
+  LkjCorrCholesky,
+  Wishart,
+  WishartCholesky,
+  InvWishart,
+  InvWishartCholesky,
+  BernoulliLogitGlm,
+};
+static_assert(static_cast<uint8_t>(ScalarRng::VonMises) <
+                  static_cast<uint8_t>(LibraryRng::Multinomial),
+              "library RNG variants must not overlap the scalar families");
+
+// A library RNG argument is a real or int scalar, a vector (or row vector),
+// or a matrix (a row vector counts as one row).
+enum class RngArgumentKind : uint8_t { Real, Int, Vector, Matrix };
+enum class RngResultKind : uint8_t { Int, IntArray, Vector, Matrix };
+
+struct LibraryRngSpec {
+  LibraryRng family;
+  const char* name;
+  uint8_t arity;
+  RngArgumentKind args[3];
+  RngResultKind result;
+};
+
+// The spec for a Stan name or an OP_RNG variant, or null.
+const LibraryRngSpec* library_rng_spec(const std::string& name);
+const LibraryRngSpec* library_rng_spec(uint8_t variant);
 
 }  // namespace stanli
 

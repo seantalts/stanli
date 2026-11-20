@@ -75,6 +75,7 @@ Lowering::BuiltinDispatch Lowering::resolve_builtin(const mir::Expr& e) {
   // still carried into the handler, so dispatch performs this lookup once.
   if (const ScalarRng* rng = scalar_rng_family(e.name))
     return rng_dispatch(*rng);
+  if (library_rng_spec(e.name)) return {BuiltinFamily::LibraryRng};
   if (ends_with(e.name, "_lpdf") || ends_with(e.name, "_lpmf") ||
       ends_with(e.name, "_cdf") || ends_with(e.name, "_ccdf") ||
       ends_with(e.name, "_lcdf") || ends_with(e.name, "_lccdf"))
@@ -938,6 +939,116 @@ Lowering::Val Lowering::lower_categorical_rng(const mir::Expr& e,
   set_int_initialized(draw);
   return draw;
 }
+Lowering::Val Lowering::lower_library_rng(const mir::Expr& e,
+                                          CallArguments& actuals,
+                                          const LibraryRngSpec& spec) {
+  if (!in_write_array)
+    fail(e.name + " is supported only in generated quantities", e.raw);
+  if (actuals.size() != spec.arity)
+    fail(e.name + ": expected " + std::to_string(spec.arity) + " arguments",
+         e.raw);
+  std::vector<Val> args;
+  // Each argument's rows and columns; zero for a non-matrix.
+  std::vector<int> idata;
+  for (size_t k = 0; k < spec.arity; ++k) {
+    const mir::UnsizedView& type = actuals.at(k).expr().unsized;
+    const bool scalar_type = type.leaf == mir::UnsizedLeaf::Real ||
+                             type.leaf == mir::UnsizedLeaf::Int;
+    bool matches = type.depth == 0;
+    switch (spec.args[k]) {
+      case RngArgumentKind::Real:
+        matches = matches && scalar_type;
+        break;
+      case RngArgumentKind::Int:
+        matches = matches && type.leaf == mir::UnsizedLeaf::Int;
+        break;
+      case RngArgumentKind::Vector:
+        matches = matches && (type.leaf == mir::UnsizedLeaf::Vector ||
+                              type.leaf == mir::UnsizedLeaf::RowVector);
+        break;
+      case RngArgumentKind::Matrix:
+        matches = matches && type.leaf == mir::UnsizedLeaf::Matrix;
+        break;
+    }
+    if (!matches) fail(e.name + ": unsupported argument types", e.raw);
+    Val v = actuals.at(k).value();
+    if (has_runtime_shape(v))
+      fail(e.name + ": RNG arguments need fixed extents", e.raw);
+    const bool matrix = spec.args[k] == RngArgumentKind::Matrix;
+    if (matrix && !is_matrix(v.si))
+      fail(e.name + ": argument has no known matrix shape", e.raw);
+    idata.push_back(matrix ? (int)v.si.rows : 0);
+    idata.push_back(matrix ? (int)v.si.cols : 0);
+    args.push_back(v);
+  }
+  const auto len = [&](size_t k) { return g.slots[args[k].slot].len; };
+  int64_t rows = 1, cols = 1;
+  switch (spec.family) {
+    case LibraryRng::Multinomial:
+    case LibraryRng::MultinomialLogit:
+    case LibraryRng::DirichletMultinomial:
+      rows = len(0);
+      break;
+    case LibraryRng::HmmLatent:
+      rows = idata[1];
+      break;
+    case LibraryRng::MultiStudentT:
+    case LibraryRng::MultiStudentTCholesky:
+      rows = len(1);
+      break;
+    case LibraryRng::OrderedLogistic:
+    case LibraryRng::OrderedProbit:
+    case LibraryRng::Hypergeometric:
+      break;
+    case LibraryRng::LkjCorr:
+    case LibraryRng::LkjCorrCholesky:
+      rows = cols = actuals.at(0).require_constant_int("LKJ dimension");
+      if (rows < 0) fail(e.name + ": negative dimension", e.raw);
+      break;
+    case LibraryRng::Wishart:
+    case LibraryRng::WishartCholesky:
+    case LibraryRng::InvWishart:
+    case LibraryRng::InvWishartCholesky:
+      rows = idata[2];
+      cols = idata[3];
+      break;
+    case LibraryRng::BernoulliLogitGlm:
+      rows = idata[0];
+      break;
+  }
+  SlotInfo si;
+  ExpressionLayout layout = ExpressionLayout::direct();
+  switch (spec.result) {
+    case RngResultKind::Int:
+      si = view_of(e.unsized);
+      layout = ExpressionLayout::scalar();
+      break;
+    case RngResultKind::IntArray:
+      si = array_view({rows}, ViewKind::Flat, false);
+      layout = owning_layout(si);
+      break;
+    case RngResultKind::Vector:
+      si = view_of(e.unsized);
+      break;
+    case RngResultKind::Matrix:
+      si = matrix_view(rows, cols);
+      layout = owning_layout(si);
+      break;
+  }
+  const int64_t n = rows * cols;
+  Val draw = with_layout(
+      spec.arity == 2
+          ? emit_value(OP_RNG, {args[0], args[1]}, n, si, idata)
+          : emit_value(OP_RNG, {args[0], args[1], args[2]}, n, si, idata),
+      layout);
+  g.ops.back().variant = static_cast<uint8_t>(spec.family);
+  draw.si.param_free = false;
+  draw.autodiff = false;
+  if (spec.result == RngResultKind::Int ||
+      spec.result == RngResultKind::IntArray)
+    set_int_initialized(draw);
+  return draw;
+}
 Lowering::Val Lowering::lower_scalar_rng(const mir::Expr& e,
                                          CallArguments& actuals,
                                          ScalarRng family) {
@@ -954,13 +1065,16 @@ Lowering::Val Lowering::lower_scalar_rng(const mir::Expr& e,
                             e.unsized.leaf == mir::UnsizedLeaf::Real;
   if (e.unsized.leaf != result_leaf && !promoted_int)
     fail(e.name + ": result type does not match RNG family", e.raw);
-  // Unlike the other scalar families, binomial's (and beta_binomial's)
-  // first argument is a population count. Valid stanc MIR always marks it
-  // UInt; fail closed on malformed hand-authored MIR rather than silently
-  // truncating a real in the runtime helper's graph-storage conversion.
-  if ((family == ScalarRng::Binomial || family == ScalarRng::BetaBinomial) &&
-      actuals.at(0).expr().unsized.leaf != mir::UnsizedLeaf::Int)
-    fail(e.name + ": first argument must be int", e.raw);
+  // Some families take counts or range bounds. Valid stanc MIR always marks
+  // them UInt; fail closed on malformed hand-authored MIR rather than
+  // silently truncating a real in the runtime helper's graph-storage
+  // conversion.
+  for (size_t i = 0; i < actuals.size(); ++i)
+    if ((scalar_rng_int_arguments(family) >> i & 1u) &&
+        actuals.at(i).expr().unsized.leaf != mir::UnsizedLeaf::Int)
+      fail(e.name + (i == 0 ? ": first argument" : ": second argument") +
+               " must be int",
+           e.raw);
   std::vector<Val> args;
   args.reserve(arity);
   int64_t n = 1;
@@ -1255,6 +1369,8 @@ Lowering::Val Lowering::lower_funapp(const mir::Expr& e) {
     case BuiltinFamily::ScalarRng:
       assert(dispatch.scalar_rng.has_value());
       return lower_scalar_rng(e, actuals, *dispatch.scalar_rng);
+    case BuiltinFamily::LibraryRng:
+      return lower_library_rng(e, actuals, *library_rng_spec(e.name));
     case BuiltinFamily::Density:
       if (auto v = lower_density_fn(e, actuals, dispatch.density)) return *v;
       break;
@@ -1767,16 +1883,35 @@ std::optional<Lowering::Val> Lowering::lower_eltwise_fn(
         return with_layout(result, elementwise_layout({a, b}));
       }
     }
-    // Stan's scalar pow(var, data) overload dispatches these exponents to
-    // the corresponding unary function. Preserve that arithmetic (and its
-    // derivative grouping) before an island or reroll can erase the static
-    // argument types. This is overload selection, not an algebraic rewrite.
+    // Stan's pow(var, data) overloads, scalar and container, dispatch these
+    // exponents to the corresponding unary function. Preserve that
+    // arithmetic (and its derivative grouping) before an island or reroll
+    // can erase the static argument types. This is overload selection, not
+    // an algebraic rewrite.
     if (builtin->opcode == OP_POW && a.autodiff && !b.autodiff &&
-        mir::language_scalar(e.args[0]) && mir::language_scalar(e.args[1])) {
+        mir::language_scalar(e.args[1])) {
+      std::optional<double> known;
       if (const auto* exponent = observation(b);
-          exponent && exponent->r.size() == 1) {
-        const double power = exponent->r[0];
+          exponent && exponent->r.size() == 1)
+        known = exponent->r[0];
+      else if (const auto exponent = needs_runtime_value(e.args[1])
+                                         ? std::nullopt
+                                         : try_eval_pure(e.args[1]);
+               exponent && exponent->r.size() == 1)
+        known = exponent->r[0];
+      if (known) {
+        const double power = *known;
         if (power == 1.0) return a;
+        // inv_square of an Eigen container of var is inv(square(x)), two
+        // nodes, where the scalar and std::vector forms have one.
+        if (power == -2.0 && mir::eigen_leaf(e.args[0]) &&
+            e.args[0].unsized.depth == 0) {
+          const Val squared =
+              with_layout(emit_value(OP_SQUARE, {a}, layout.lanes, si),
+                          elementwise_layout({a}));
+          return with_layout(emit_value(OP_INV, {squared}, layout.lanes, si),
+                             elementwise_layout({squared}));
+        }
         const uint16_t unary = power == 0.5    ? OP_SQRT
                                : power == 2.0  ? OP_SQUARE
                                : power == -2.0 ? OP_INV_SQUARE
@@ -2135,8 +2270,11 @@ std::optional<Lowering::Val> Lowering::lower_eltwise_fn(
       g.ops.back().variant = static_cast<uint8_t>(sum);
       return with_layout(result, ExpressionLayout::scalar());
     }
-    return with_layout(emit_value(reduction->opcode, {a}, 1),
-                       ExpressionLayout::scalar());
+    Val result = emit_value(reduction->opcode, {a}, 1);
+    if (reduction->opcode == OP_VARIANCE && e.args[0].unsized.depth == 1 &&
+        a.autodiff && !in_write_array)
+      g.ops.back().variant = kVarianceOfVarArray;
+    return with_layout(result, ExpressionLayout::scalar());
   }
 
   if (builtin != nullptr && builtin->arity == 1 &&
@@ -2188,6 +2326,19 @@ std::optional<Lowering::Val> Lowering::lower_eltwise_fn(
     // re-deriving its provenance from MIR syntax.
     if (e.args.size() == 1 || e.args.size() == 2)
       if (auto v = fold_const(e)) return *v;
+    // Stan Math rejects an empty int array when the call runs, so a model
+    // that never reaches the call still loads.
+    if (e.args.size() == 1 && e.args[0].unsized.leaf == mir::UnsizedLeaf::Int &&
+        e.args[0].unsized.depth == 1 &&
+        g.slots[actuals.at(0).value().slot].len == 0) {
+      try {
+        (void)(e.name == "min" ? stan::math::min(std::vector<int>{})
+                               : stan::math::max(std::vector<int>{}));
+      } catch (const std::invalid_argument& error) {
+        emit_error(MessageError::InvalidArgument, error.what());
+      }
+      return constant(0.0);
+    }
     const mir::ExtremaCall call = mir::extrema_call(e);
     if (call.kind == mir::ExtremaKind::Legacy)
       fail("min/max expression surface stays on WaInterp", e.raw);
@@ -2456,31 +2607,54 @@ std::optional<Lowering::Val> Lowering::lower_matrix_fn(const mir::Expr& e,
     fail("rep_matrix arity", e.raw);
   }
   if (const std::optional<GpCov> gp = gp_cov_family(e.name);
-      gp && (int)e.args.size() == 1 + gp_cov_hyperparameters(*gp)) {
+      gp && ((int)e.args.size() == 1 + gp_cov_hyperparameters(*gp) ||
+             (int)e.args.size() == 2 + gp_cov_hyperparameters(*gp))) {
+    const bool cross = (int)e.args.size() == 2 + gp_cov_hyperparameters(*gp);
+    const int h = cross ? 2 : 1;
     Val x = actuals.at(0).value();
-    Val alpha = actuals.at(1).value();
-    Val rho = actuals.at(2).value();
+    Val alpha = actuals.at(h).value();
+    Val rho = actuals.at(h + 1).value();
     // x may be data or a parameter: gp_cov_bwd rebuilds the points from
     // the promoted input, so a parameter x gets its adjoints too.
     // x is array[N] real (D == 1) or array[N] vector[D], stored
-    // array-major, so D falls out of the declared dims.
-    int64_t D = 1;
-    if (is_array(x.si) && array_shape(x.si).dims.size() == 2)
-      D = array_shape(x.si).dims[1];
-    const int64_t N = g.slots[x.slot].len / D;
-    SlotInfo si = matrix_view(N, N);
-    Val v = *gp == kGpPeriodic
+    // array-major, so N and D fall out of the declared dims.
+    const auto points = [&](const Val& v) -> std::pair<int64_t, int64_t> {
+      if (is_array(v.si) && array_shape(v.si).dims.size() == 2)
+        return {array_shape(v.si).dims[0], array_shape(v.si).dims[1]};
+      return {g.slots[v.slot].len, 1};
+    };
+    const auto [N, D] = points(x);
+    std::optional<Val> x2;
+    int64_t M = N;
+    if (cross) {
+      x2 = actuals.at(1).value();
+      const auto [M2, D2] = points(*x2);
+      if (D2 != D)
+        fail(e.name + ": the two location arrays need the same dimension",
+             e.raw);
+      M = M2;
+    }
+    std::vector<int> idata = {(int)N, (int)D};
+    if (cross) idata.push_back((int)M);
+    SlotInfo si = matrix_view(N, M);
+    const bool periodic = *gp == kGpPeriodic;
+    Val v = cross ? (periodic ? emit_value(OP_GP_COV,
+                                           {x, *x2, alpha, rho,
+                                            actuals.at(h + 2).value()},
+                                           N * M, si, idata)
+                              : emit_value(OP_GP_COV, {x, *x2, alpha, rho},
+                                           N * M, si, idata))
+            : periodic
                 ? emit_value(OP_GP_COV, {x, alpha, rho, actuals.at(3).value()},
-                             N * N, si, {(int)N, (int)D})
-                : emit_value(OP_GP_COV, {x, alpha, rho}, N * N, si,
-                             {(int)N, (int)D});
+                             N * N, si, idata)
+                : emit_value(OP_GP_COV, {x, alpha, rho}, N * N, si, idata);
     // The declared type picks the overload: array[1] real with D == 1 is
     // still the per-dimension form, which rounds differently.
     const bool per_dimension =
-        e.args[2].unsized.depth == 1 || g.slots[rho.slot].len != 1;
-    if (per_dimension && *gp == kGpPeriodic)
+        e.args[h + 1].unsized.depth == 1 || g.slots[rho.slot].len != 1;
+    if (per_dimension && periodic)
       fail(e.name + ": the length scale must be a scalar", e.raw);
-    g.ops.back().variant = GpCovMode{*gp, per_dimension}.byte();
+    g.ops.back().variant = GpCovMode{*gp, per_dimension, cross}.byte();
     return with_layout(v, owning_layout(si));
   }
   if (e.name == "quad_form_diag" && e.args.size() == 2) {

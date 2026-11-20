@@ -47,7 +47,7 @@ functions {
     matrix[2,2] corr = [[1, rho], [rho, 1]];
     matrix[2,2] lcorr = cholesky_decompose(corr);
     vector[2] p = softmax(x);
-    vector[28] observed;
+    vector[59] observed;
     observed[1] = probe(normal_rng(theta[1], 1.3)); // normal_rng
     observed[2] = probe(std_normal_rng()); // std_normal_rng
     observed[3] = probe(lognormal_rng(theta[1], 1.3)); // lognormal_rng
@@ -76,11 +76,42 @@ functions {
     observed[26] = probe(gumbel_rng(theta[1], 1.3)); // gumbel_rng
     observed[27] = probe(dirichlet_rng(v)); // dirichlet_rng
     observed[28] = probe(beta_binomial_rng(5, 2.0, 3.0)); // beta_binomial_rng
+    observed[29] = probe(beta_neg_binomial_rng(4.0, 3.0, 2.0)); // beta_neg_binomial_rng
+    observed[30] = probe(beta_proportion_rng(inv_logit(theta[1]), 5.0)); // beta_proportion_rng
+    observed[31] = probe(discrete_range_rng(2, 9)); // discrete_range_rng
+    observed[32] = probe(exp_mod_normal_rng(theta[1], 1.3, 2.0)); // exp_mod_normal_rng
+    observed[33] = probe(frechet_rng(2.0, 1.3)); // frechet_rng
+    observed[34] = probe(inv_chi_square_rng(3.0)); // inv_chi_square_rng
+    observed[35] = probe(loglogistic_rng(1.5, 3.0)); // loglogistic_rng
+    observed[36] = probe(neg_binomial_rng(2.0, 0.5)); // neg_binomial_rng
+    observed[37] = probe(pareto_rng(1.5, 3.0)); // pareto_rng
+    observed[38] = probe(pareto_type_2_rng(theta[1], 1.3, 3.0)); // pareto_type_2_rng
+    observed[39] = probe(rayleigh_rng(1.3)); // rayleigh_rng
+    observed[40] = probe(scaled_inv_chi_square_rng(3.0, 1.3)); // scaled_inv_chi_square_rng
+    observed[41] = probe(skew_double_exponential_rng(theta[1], 1.3, 0.3)); // skew_double_exponential_rng
+    observed[42] = probe(skew_normal_rng(theta[1], 1.3, 2.0)); // skew_normal_rng
+    observed[43] = probe(von_mises_rng(theta[1], 2.0)); // von_mises_rng
+    observed[44] = probe(hypergeometric_rng(5, 8, 6)); // hypergeometric_rng
+    observed[45] = probe(multinomial_rng(v / sum(v), 10)); // multinomial_rng
+    observed[46] = probe(multinomial_logit_rng(v, 10)); // multinomial_logit_rng
+    observed[47] = probe(dirichlet_multinomial_rng(v, 10)); // dirichlet_multinomial_rng
+    observed[48] = probe(hmm_latent_rng(m, [[0.9, 0.1], [0.2, 0.8]], p)); // hmm_latent_rng
+    observed[49] = probe(multi_student_t_rng(4.0, x, s)); // multi_student_t_rng
+    observed[50] = probe(multi_student_t_cholesky_rng(4.0, x, l)); // multi_student_t_cholesky_rng
+    observed[51] = probe(ordered_logistic_rng(theta[1], [-0.5, 1.5]')); // ordered_logistic_rng
+    observed[52] = probe(ordered_probit_rng(theta[1], [-0.5, 1.5]')); // ordered_probit_rng
+    observed[53] = probe(lkj_corr_rng(3, 1.3)); // lkj_corr_rng
+    observed[54] = probe(lkj_corr_cholesky_rng(3, 1.3)); // lkj_corr_cholesky_rng
+    observed[55] = probe(wishart_rng(4.0, s)); // wishart_rng
+    observed[56] = probe(wishart_cholesky_rng(4.0, l)); // wishart_cholesky_rng
+    observed[57] = probe(inv_wishart_rng(4.0, s)); // inv_wishart_rng
+    observed[58] = probe(inv_wishart_cholesky_rng(4.0, l)); // inv_wishart_cholesky_rng
+    observed[59] = probe(bernoulli_logit_glm_rng(m', v, x)); // bernoulli_logit_glm_rng
     return observed;
   }
 }
 transformed data {
-  vector[28] prepared = coverage_rng([0.1, -0.2, 0.3, 0.4, -0.5, 0.6, 0.7, -0.8]');
+  vector[59] prepared = coverage_rng([0.1, -0.2, 0.3, 0.4, -0.5, 0.6, 0.7, -0.8]');
 }
 parameters { vector[8] theta; }
 model { target += dot_self(theta) + theta[1] * sum(prepared); }
@@ -95,7 +126,7 @@ generated quantities {
   matrix[2,2] corr = [[1, rho], [rho, 1]];
   matrix[2,2] lcorr = cholesky_decompose(corr);
   vector[2] p = softmax(x);
-  vector[28] observed;
+  vector[59] observed;
   observed[1] = probe(normal_rng(theta[1], 1.3)); // normal_rng
   observed[2] = probe(std_normal_rng()); // std_normal_rng
   observed[3] = probe(lognormal_rng(theta[1], 1.3)); // lognormal_rng
@@ -124,5 +155,36 @@ generated quantities {
   observed[26] = probe(gumbel_rng(theta[1], 1.3)); // gumbel_rng
   observed[27] = probe(dirichlet_rng(v)); // dirichlet_rng
   observed[28] = probe(beta_binomial_rng(5, 2.0, 3.0)); // beta_binomial_rng
-  vector[28] values = prepared;
+  observed[29] = probe(beta_neg_binomial_rng(4.0, 3.0, 2.0)); // beta_neg_binomial_rng
+  observed[30] = probe(beta_proportion_rng(inv_logit(theta[1]), 5.0)); // beta_proportion_rng
+  observed[31] = probe(discrete_range_rng(2, 9)); // discrete_range_rng
+  observed[32] = probe(exp_mod_normal_rng(theta[1], 1.3, 2.0)); // exp_mod_normal_rng
+  observed[33] = probe(frechet_rng(2.0, 1.3)); // frechet_rng
+  observed[34] = probe(inv_chi_square_rng(3.0)); // inv_chi_square_rng
+  observed[35] = probe(loglogistic_rng(1.5, 3.0)); // loglogistic_rng
+  observed[36] = probe(neg_binomial_rng(2.0, 0.5)); // neg_binomial_rng
+  observed[37] = probe(pareto_rng(1.5, 3.0)); // pareto_rng
+  observed[38] = probe(pareto_type_2_rng(theta[1], 1.3, 3.0)); // pareto_type_2_rng
+  observed[39] = probe(rayleigh_rng(1.3)); // rayleigh_rng
+  observed[40] = probe(scaled_inv_chi_square_rng(3.0, 1.3)); // scaled_inv_chi_square_rng
+  observed[41] = probe(skew_double_exponential_rng(theta[1], 1.3, 0.3)); // skew_double_exponential_rng
+  observed[42] = probe(skew_normal_rng(theta[1], 1.3, 2.0)); // skew_normal_rng
+  observed[43] = probe(von_mises_rng(theta[1], 2.0)); // von_mises_rng
+  observed[44] = probe(hypergeometric_rng(5, 8, 6)); // hypergeometric_rng
+  observed[45] = probe(multinomial_rng(v / sum(v), 10)); // multinomial_rng
+  observed[46] = probe(multinomial_logit_rng(v, 10)); // multinomial_logit_rng
+  observed[47] = probe(dirichlet_multinomial_rng(v, 10)); // dirichlet_multinomial_rng
+  observed[48] = probe(hmm_latent_rng(m, [[0.9, 0.1], [0.2, 0.8]], p)); // hmm_latent_rng
+  observed[49] = probe(multi_student_t_rng(4.0, x, s)); // multi_student_t_rng
+  observed[50] = probe(multi_student_t_cholesky_rng(4.0, x, l)); // multi_student_t_cholesky_rng
+  observed[51] = probe(ordered_logistic_rng(theta[1], [-0.5, 1.5]')); // ordered_logistic_rng
+  observed[52] = probe(ordered_probit_rng(theta[1], [-0.5, 1.5]')); // ordered_probit_rng
+  observed[53] = probe(lkj_corr_rng(3, 1.3)); // lkj_corr_rng
+  observed[54] = probe(lkj_corr_cholesky_rng(3, 1.3)); // lkj_corr_cholesky_rng
+  observed[55] = probe(wishart_rng(4.0, s)); // wishart_rng
+  observed[56] = probe(wishart_cholesky_rng(4.0, l)); // wishart_cholesky_rng
+  observed[57] = probe(inv_wishart_rng(4.0, s)); // inv_wishart_rng
+  observed[58] = probe(inv_wishart_cholesky_rng(4.0, l)); // inv_wishart_cholesky_rng
+  observed[59] = probe(bernoulli_logit_glm_rng(m', v, x)); // bernoulli_logit_glm_rng
+  vector[59] values = prepared;
 }

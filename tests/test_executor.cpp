@@ -373,6 +373,21 @@ static void test_result_slot_out_of_range() {
   }
 }
 
+// Registering a second kernel for an opcode throws and keeps the first.
+static void test_duplicate_registration_refused() {
+  using namespace stanli;
+  const Kernel registered = *find_kernel(OP_ADD);
+  bool refused = false;
+  try {
+    register_kernel(OP_ADD, registered);
+  } catch (const std::logic_error&) {
+    refused = true;
+  }
+  expect_i64("a second registration for an opcode is refused", refused, 1);
+  expect_i64("the refused registration leaves the kernel in place",
+             find_kernel(OP_ADD)->forward == registered.forward, 1);
+}
+
 int main() {
   using namespace stanli;
 
@@ -567,6 +582,7 @@ int main() {
   test_shared_data_with_cached_primals();
   test_borrowed_data();
   test_result_slot_out_of_range();
+  test_duplicate_registration_refused();
   test_compact_idata_lifecycle();
   test_compact_append_after_copy();
   test_mixed_owned_borrowed_idata();

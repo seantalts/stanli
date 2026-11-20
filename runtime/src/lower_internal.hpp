@@ -786,6 +786,7 @@ struct Lowering {
     DirichletRng,
     CategoricalRng,
     ScalarRng,
+    LibraryRng,
     Density,
     CallableTransform,
     Elementwise,
@@ -2228,6 +2229,8 @@ struct Lowering {
 
   Val lower_categorical_rng(const mir::Expr& e, CallArguments& actuals);
 
+  Val lower_library_rng(const mir::Expr& e, CallArguments& actuals,
+                        const LibraryRngSpec& spec);
   Val lower_scalar_rng(const mir::Expr& e, CallArguments& actuals,
                        ScalarRng family);
 

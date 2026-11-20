@@ -632,6 +632,9 @@ void structured_fwd(KernelCtx& ctx) {
   ctx.out2.data[0] = lp;
 }
 
+// rev/constraint/simplex_constrain.hpp: the softmax pullback with the
+// Jacobian term, then internal::sum_to_zero_vector_backprop's loop, written
+// out so that z_adj needs no vector of its own.
 void simplex_bwd_batch(KernelCtx& ctx, int64_t b, int64_t inner_raw,
                        int64_t inner_con) {
   const double* res = ctx.out.data + b * inner_con;
@@ -737,6 +740,18 @@ void structured_bwd(KernelCtx& ctx) {
   if constexpr (K == StructuredKind::Simplex) {
     for (int64_t b = 0; b < nb; ++b)
       simplex_bwd_batch(ctx, b, inner_raw, inner_con);
+    return;
+  }
+  if constexpr (K == StructuredKind::SumToZero) {
+    // Volume preserving: the Jacobian term has no adjoint.
+    Eigen::VectorXd z_adj(inner_con);
+    for (int64_t b = 0; b < nb; ++b) {
+      z_adj = Eigen::Map<const Eigen::VectorXd>(
+          ctx.out_adj_vec.data + b * inner_con, inner_con);
+      Eigen::Map<Eigen::VectorXd> y_adj(ctx.in_adj[0].data + b * inner_raw,
+                                        inner_raw);
+      stan::math::internal::sum_to_zero_vector_backprop(y_adj, z_adj);
+    }
     return;
   }
   if constexpr (K == StructuredKind::Ordered ||

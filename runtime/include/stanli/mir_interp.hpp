@@ -721,9 +721,26 @@ class MirInterp {
               static_cast<int>(as_int(st.fn_args[2])));
           return;
         }
-        if (mir::internal_name(st) == "FnValidateSizePositive" ||
-            mir::library_name(st) == "check_greater_or_equal")
+        if (mir::internal_name(st) == "FnValidateSizePositive") {
+          if (st.fn_args.size() != 3 ||
+              st.fn_args[0].kind != mir::Expr::LitStr ||
+              st.fn_args[1].kind != mir::Expr::LitStr)
+            fail("malformed FnValidateSizePositive", st.raw);
+          stan::math::validate_positive_index(
+              st.fn_args[0].lit_s.c_str(), st.fn_args[1].lit_s.c_str(),
+              static_cast<int>(as_int(st.fn_args[2])));
           return;
+        }
+        if (mir::library_name(st) == "check_greater_or_equal") {
+          if (st.fn_args.size() != 4 ||
+              st.fn_args[0].kind != mir::Expr::LitStr ||
+              st.fn_args[1].kind != mir::Expr::LitStr)
+            fail("malformed check_greater_or_equal", st.raw);
+          stan::math::check_greater_or_equal(
+              st.fn_args[0].lit_s.c_str(), st.fn_args[1].lit_s.c_str(),
+              as_int(st.fn_args[2]), as_int(st.fn_args[3]));
+          return;
+        }
         if (mir::internal_name(st) == "FnValidateSizeUnitVector") {
           if (st.fn_args.size() != 3 ||
               st.fn_args[0].kind != mir::Expr::LitStr ||
@@ -1002,6 +1019,55 @@ class MirInterp {
         return stan::math::gp_exp_quad_cov(pts, sigma, length_scale);
     }
   }
+  template <typename P, typename L>
+  static Eigen::Matrix<T, Eigen::Dynamic, Eigen::Dynamic> gp_family_cov(
+      GpCov family, const P& x1, const P& x2, const T& sigma,
+      const L& length_scale) {
+    switch (family) {
+      case kGpMatern32:
+        return stan::math::gp_matern32_cov(x1, x2, sigma, length_scale);
+      case kGpMatern52:
+        return stan::math::gp_matern52_cov(x1, x2, sigma, length_scale);
+      case kGpExponential:
+        return stan::math::gp_exponential_cov(x1, x2, sigma, length_scale);
+      default:
+        return stan::math::gp_exp_quad_cov(x1, x2, sigma, length_scale);
+    }
+  }
+
+  // gp_*_cov(x1, x2, sigma, length_scale[, period]): the cross-covariance
+  // form, always through Stan Math.
+  Value gp_cross_cov(const mir::Expr& e, GpCov family) {
+    using Vec = Eigen::Matrix<T, Eigen::Dynamic, 1>;
+    const auto points = [&](const Value& x) {
+      const int64_t N = x.dims.size() == 2 ? x.dims[0] : (int64_t)x.r.size();
+      const int64_t D = x.dims.size() == 2 ? x.dims[1] : 1;
+      std::vector<Vec> pts((size_t)N, Vec((Eigen::Index)D));
+      for (int64_t n = 0; n < N; ++n)
+        for (int64_t d = 0; d < D; ++d)
+          pts[(size_t)n]((Eigen::Index)d) = x.r.at((size_t)(n + N * d));
+      return pts;
+    };
+    const std::vector<Vec> x1 = points(eval(e.args[0]));
+    const std::vector<Vec> x2 = points(eval(e.args[1]));
+    const T sigma = eval(e.args[2]).r.at(0);
+    const Value rho = eval(e.args[3]);
+    Eigen::Matrix<T, Eigen::Dynamic, Eigen::Dynamic> c;
+    if (family == kGpPeriodic)
+      c = stan::math::gp_periodic_cov(x1, x2, sigma, rho.r.at(0),
+                                      eval(e.args[4]).r.at(0));
+    else if (e.args[3].unsized.depth == 1)
+      c = gp_family_cov(family, x1, x2, sigma, rho.r);
+    else
+      c = gp_family_cov(family, x1, x2, sigma, rho.r.at(0));
+    Value o;
+    o.dims = {(int64_t)c.rows(), (int64_t)c.cols()};
+    o.r.resize((size_t)c.size());
+    for (Eigen::Index j = 0; j < c.cols(); ++j)
+      for (Eigen::Index i = 0; i < c.rows(); ++i)
+        o.r[(size_t)(j * c.rows() + i)] = c(i, j);
+    return o;
+  }
 
   // Bind and execute one graph-kernel CALL over materialized inputs. Shared
   // by density_eval and builtin_kernel_eval: the double interpreter runs the
@@ -1084,10 +1150,13 @@ class MirInterp {
       }
     }
     activity &= spec.activity_mask;
-    const uint8_t variant =
+    uint8_t variant =
         spec.opcode == OP_POW
             ? mir::pow_zero_base_law(e.args[0], e.args[1], !e.args[1].data_only)
             : 0;
+    if (!std::is_same_v<T, double> && spec.opcode == OP_VARIANCE &&
+        e.args[0].unsized.depth == 1 && !e.args[0].data_only)
+      variant = kVarianceOfVarArray;
     Value o;
     std::vector<int> idata;
     if (layout.groups >= 0)
@@ -2873,6 +2942,9 @@ class MirInterp {
                                      v.r.at((size_t)j);
       return o;
     }
+    if (const std::optional<GpCov> gp = gp_cov_family(e.name);
+        gp && (int)e.args.size() == 2 + gp_cov_hyperparameters(*gp))
+      return gp_cross_cov(e, *gp);
     if (const std::optional<GpCov> gp = gp_cov_family(e.name);
         gp && (int)e.args.size() == 1 + gp_cov_hyperparameters(*gp)) {
       Value x = eval(e.args[0]);
