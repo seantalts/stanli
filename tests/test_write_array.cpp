@@ -1294,6 +1294,13 @@ void test_write_array_forward_only() {
         (long long)wex.scratch_storage_size(), (long long)largest,
         (long long)total);
   }
+  // A small executor is cheap to copy, so each chain gets its own.
+  if (wex.storage_bytes() <= 0 || share_across_chains(wex, 4) ||
+      share_across_chains(wex, 1)) {
+    ++failures;
+    std::printf("FAIL small write_array executor (%lld bytes) is shared\n",
+                (long long)wex.storage_bytes());
+  }
   bool threw = false;
   try {
     std::vector<double> g(static_cast<size_t>(wex.n_params()));

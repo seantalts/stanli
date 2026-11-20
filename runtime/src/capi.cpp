@@ -35,6 +35,7 @@
 #include <map>
 #include <limits>
 #include <memory>
+#include <mutex>
 #include <cstddef>
 #include <optional>
 #include <stdexcept>
@@ -1445,10 +1446,19 @@ int stanli_sample_multi_metric(stanli_model* m, const stanli_sample_opts* opts,
     const int64_t width = m->wa_n > 0 ? m->wa_n : m->n_con;
     std::vector<std::unique_ptr<stanli::Executor>> wa_clones;
     std::vector<stanli::Executor*> wa_execs;
+    // A large write_array executor is shared: chains take turns with it
+    // rather than each holding a copy.
+    const bool share_wa =
+        m->wa_ex && stanli::share_across_chains(*m->wa_ex, n_chains);
+    std::mutex wa_turn;
     if (values != nullptr) {
       if (m->wa_ex) {
         wa_execs.push_back(m->wa_ex.get());
         for (int c = 1; c < n_chains; ++c) {
+          if (share_wa) {
+            wa_execs.push_back(m->wa_ex.get());
+            continue;
+          }
           wa_clones.push_back(std::make_unique<stanli::Executor>(*m->wa_ex));
           wa_execs.push_back(wa_clones.back().get());
         }
@@ -1461,6 +1471,8 @@ int stanli_sample_multi_metric(stanli_model* m, const stanli_sample_opts* opts,
                    const stanli::SamplerRow&) {
         if (row >= n_stored) return;
         double* out = values + ((int64_t)c * n_stored + row) * width;
+        std::unique_lock<std::mutex> turn(wa_turn, std::defer_lock);
+        if (share_wa) turn.lock();
         try {
           write_row(*m, *execs[(size_t)c],
                     m->wa_ex ? wa_execs[(size_t)c] : nullptr, q, out, rng);

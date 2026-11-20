@@ -153,6 +153,13 @@ struct BoundCheckSpec {
 // checks that the norm is positive and finite. The var overload does not.
 inline constexpr uint8_t kUnitVectorChecksNorm = 1;
 
+class Executor;
+// Whether `chains` chains should take turns with one forward-only executor
+// instead of each copying it. Copies run in parallel but each costs
+// storage_bytes(); chains share once the copies would take 1 GiB.
+// STANLI_SHARE_WRITE_ARRAY=1 or =0 overrides the choice.
+bool share_across_chains(const Executor& ex, int chains);
+
 class Executor {
  public:
   explicit Executor(Graph g);
@@ -184,6 +191,10 @@ class Executor {
   int64_t scratch_storage_size() const {
     return static_cast<int64_t>(scratch_.size());
   }
+  // Bytes a copy of this executor allocates for itself: values, adjoints,
+  // scratch and kernel contexts. Kernel state, such as the recordings of
+  // retained loops, comes on top.
+  int64_t storage_bytes() const;
   // The bound graph, so a second executor over the same model can be
   // built without re-lowering. Multi-chain sampling needs one executor
   // per chain -- the arenas are mutable per-evaluation state -- and

@@ -46,6 +46,7 @@
 #include <cstdlib>
 #include <map>
 #include <memory>
+#include <mutex>
 #include <string>
 #include <vector>
 
@@ -259,9 +260,17 @@ int main(int argc, char** argv) {
       wa_execs.push_back(
           std::make_unique<stanli::Executor>(std::move(cm.write_array->graph)));
       cm.write_array->bind(*wa_execs[0]);
-      for (int c = 1; c < n_chains; ++c)
-        wa_execs.push_back(std::make_unique<stanli::Executor>(*wa_execs[0]));
     }
+    // A large write_array executor is shared: chains take turns with it
+    // rather than each holding a copy.
+    const bool share_wa =
+        have_wa && stanli::share_across_chains(*wa_execs[0], n_chains);
+    for (int c = 1; have_wa && !share_wa && c < n_chains; ++c)
+      wa_execs.push_back(std::make_unique<stanli::Executor>(*wa_execs[0]));
+    std::mutex wa_turn;
+    const auto wa_exec = [&](int c) -> stanli::Executor& {
+      return *wa_execs[share_wa ? 0 : (size_t)c];
+    };
     struct ChainOutput {
       std::shared_ptr<stanli::WaInterp> interp;
       std::unique_ptr<stanli::tooling::ChainCsv> csv;
@@ -296,6 +305,8 @@ int main(int argc, char** argv) {
             const stanli::SamplerRow& stats) {
           auto& o = output[(size_t)c];
           ++o.stored;
+          std::unique_lock<std::mutex> turn(wa_turn, std::defer_lock);
+          if (share_wa) turn.lock();
           stanli::Executor& model_ex = *execs[(size_t)c];
           bool stream_arena = false;
           try {
@@ -312,7 +323,7 @@ int main(int argc, char** argv) {
                       std::numeric_limits<double>::quiet_NaN());
               }
             } else {
-              stanli::Executor& out = have_wa ? *wa_execs[(size_t)c] : model_ex;
+              stanli::Executor& out = have_wa ? wa_exec(c) : model_ex;
               std::copy_n(q, out.n_params(), out.params_data());
               out.run_forward_only(stanli::EvalState{&rng});
               // CSV can read a completed graph's values directly. Materialize
@@ -340,8 +351,7 @@ int main(int argc, char** argv) {
           if (want_stats)
             for (double value : stats) csv.value(value);
           if (stream_arena) {
-            const stanli::Executor& out =
-                have_wa ? *wa_execs[(size_t)c] : model_ex;
+            const stanli::Executor& out = have_wa ? wa_exec(c) : model_ex;
             const auto& cols = have_wa ? cm.write_array->columns : cm.views;
             for (const auto& v : cols) {
               const double* p = out.value_ptr(v.slot);

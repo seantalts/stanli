@@ -1,3 +1,4 @@
+#include <stanli/debug_switch.hpp>
 #include <stanli/graph.hpp>
 #include <stanli/optable.hpp>
 #include <stanli/program.hpp>
@@ -800,6 +801,22 @@ std::string Executor::profile_report() const {
                 (long long)grand);
   out += line;
   return out;
+}
+
+int64_t Executor::storage_bytes() const {
+  const auto bytes = [](const auto& v) {
+    return static_cast<int64_t>(v.size() * sizeof(v[0]));
+  };
+  return bytes(values_) + bytes(adjoints_) + bytes(scratch_) + bytes(ctx_) +
+         bytes(fwd_fn_) + bytes(bwd_);
+}
+
+bool share_across_chains(const Executor& ex, int chains) {
+  if (const char* forced = debug_env("STANLI_SHARE_WRITE_ARRAY"))
+    return chains > 1 && forced[0] == '1';
+  constexpr int64_t kCopyBudget = int64_t{1} << 30;
+  return chains > 1 && ex.graph().forward_only &&
+         (chains - 1) * ex.storage_bytes() >= kCopyBudget;
 }
 
 void Executor::run_forward_only() {
