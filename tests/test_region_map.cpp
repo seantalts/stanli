@@ -17,6 +17,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <filesystem>
 #include <limits>
 #include <fstream>
 #include <functional>
@@ -1962,6 +1963,102 @@ void test_lane_cogmod() {
                        m.lanes);
   }
 }
+
+// Input points for each unary in STANLI_PROGRAM_UNARY_LIST. The last point
+// of each row lies near an edge of the function's domain or range.
+std::vector<double> unary_points(const std::string& fn) {
+  static const std::map<std::string, std::vector<double>> points = {
+      {"exp", {-3.0, 0.5, 700.0}},         {"log", {0.5, 3.0, 1e-300}},
+      {"sqrt", {0.25, 2.0, 1e-300}},       {"square", {-1.0, 3.0, 1e150}},
+      {"inv", {-2.0, 0.5, 1e-150}},        {"fabs", {-2.0, 0.5, 0.0}},
+      {"inv_logit", {-1.0, 0.0, 40.0}},    {"log1m", {-3.0, 0.5, 1.0 - 1e-12}},
+      {"log1p_exp", {-2.0, 2.0, 40.0}},    {"tanh", {-0.5, 0.0, 5.0}},
+      {"erfc", {0.0, 1.0, 25.0}},          {"log1p", {-0.5, 3.0, -1.0 + 1e-12}},
+      {"log1m_exp", {-0.5, -3.0, -1e-10}}, {"inv_square", {-3.0, 0.5, 1e-100}},
+  };
+  const auto found = points.find(fn);
+  return found == points.end() ? std::vector<double>{} : found->second;
+}
+
+// Every unary that the lane kernels list, inside a region map, against Stan
+// Math and against the scalar map. Each data point fills every lane, so the
+// lp and the gradient are one function value and one derivative repeated.
+void test_every_unary_in_lanes() {
+  struct Unary {
+    stanli::Program::Code code;
+    std::string fn;
+    std::function<var(const var&)> ref;
+  };
+  const std::vector<Unary> unaries = {
+#define STANLI_TEST_UNARY(code, fn, from_out, pullback) \
+  {stanli::Program::code, #fn, [](const var& x) { return stan::math::fn(x); }},
+      STANLI_PROGRAM_UNARY_LIST(STANLI_TEST_UNARY)
+#undef STANLI_TEST_UNARY
+  };
+  const int n = 33;
+  const std::string dir = std::filesystem::temp_directory_path().string();
+  for (const Unary& u : unaries) {
+    const std::string stan_fn = u.fn == "fabs" ? "abs" : u.fn;
+    const std::string path = dir + "/region_map_unary_" + u.fn + ".stan";
+    {
+      std::ofstream out(path);
+      out << "data { int N; vector[N] u; }\n"
+             "parameters { real a; real b; }\n"
+             "model {\n"
+             "  for (n in 1:N) {\n"
+             "    if (a < b) target += "
+          << stan_fn
+          << "(u[n] + a);\n"
+             "    else target += -square(u[n] - a);\n"
+             "  }\n"
+             "}\n";
+    }
+    const std::string mir =
+        stanli::tooling::run_stanc_process(STANLI_TEST_STANC, path);
+    std::remove(path.c_str());
+    const std::vector<double> xs = unary_points(u.fn);
+    check(!xs.empty(), u.fn + ": the test has input points for this unary");
+    for (double x : xs) {
+      std::ostringstream json;
+      json.precision(17);
+      json << "{\"N\":" << n << ",\"u\":[";
+      for (int i = 0; i < n; ++i) json << (i ? "," : "") << x;
+      json << "]}";
+      const DataMap data = DataMap::from_json(json.str());
+      std::ostringstream label;
+      label.precision(17);
+      label << u.fn << "(" << x << ")";
+      const std::string what = label.str();
+      CompiledModel lanes = stanli::compile_model(mir, data);
+      test_setenv("STANLI_REGION_MAP_LANES", "0", 1);
+      CompiledModel scalar = stanli::compile_model(mir, data);
+      test_unsetenv("STANLI_REGION_MAP_LANES");
+      expect_mapped(what, lanes);
+      const auto& p = map_payload(lanes);
+      check(p.lanes.active, what + ": lane plan active (" +
+                                (p.lanes.active ? "" : p.lanes.refusal) + ")");
+      check(map_has_code(lanes, u.code) || !p.calls.empty(),
+            what + ": body computes the unary");
+      Executor el(lanes.graph), es(scalar.graph);
+      lanes.bind(el);
+      scalar.bind(es);
+      const Params at = {0.0, 1.0};
+      const Eval got = evaluate(el, at);
+      const Eval base = evaluate(es, at);
+      check(same_bits(got.lp, base.lp) && same_bits(got.grad[0], base.grad[0]),
+            what + ": lanes bitwise equal to the scalar map");
+      var a = 0.0;
+      var lp = 0.0;
+      for (int i = 0; i < n; ++i) lp += u.ref(x + a);
+      lp.grad();
+      const double want_lp = lp.val(), want_da = a.adj();
+      stan::math::recover_memory();
+      expect_ulp(what + " lp", got.lp, want_lp);
+      expect_ulp(what + " d/da", got.grad[0], want_da);
+      check(got.grad[1] == 0.0, what + ": d/db is zero");
+    }
+  }
+}
 #endif
 
 void test_mode_policy() {
@@ -2295,6 +2392,7 @@ int main() {
   test_data_early_return_unrolls();
 #ifdef STANLI_TEST_STANC
   test_lane_cogmod();
+  test_every_unary_in_lanes();
 #endif
   test_mode_policy();
   test_recompute_visits_taken_blocks();
