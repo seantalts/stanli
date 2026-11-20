@@ -53,11 +53,13 @@ runtime_cache_dir <- function(version = stanli_runtime_release) {
 #' Where the stanli runtime lives
 #'
 #' The path is taken from `STANLI_RUNTIME` when that is set (which is how
-#' a development build is used), then from a runtime bundled into the
+#' a local build is used), then from a runtime bundled into the
 #' package (wasm builds bundle one at build time, since a browser cannot
 #' download it), and from the user cache directory otherwise. The cache
 #' path includes the release the package pins, so a runtime downloaded by
 #' an older version of the package is never picked up by a newer one.
+#' When that release's runtime is not in the cache but one installed by
+#' `stanli_install("dev")` is, the dev runtime is used.
 #'
 #' @return A file path, which may not exist yet.
 #' @export
@@ -66,7 +68,9 @@ stanli_runtime_path <- function() {
   if (nzchar(from_env)) return(from_env)
   bundled <- system.file("runtime", runtime_filename(), package = "stanli")
   if (nzchar(bundled)) return(bundled)
-  file.path(runtime_cache_dir(), runtime_filename())
+  pinned <- file.path(runtime_cache_dir(), runtime_filename())
+  dev <- file.path(runtime_cache_dir("dev"), runtime_filename())
+  if (!file.exists(pinned) && file.exists(dev)) dev else pinned
 }
 
 #' Is the stanli runtime available?
@@ -85,7 +89,14 @@ stanli_available <- function() {
 #'   version of the package was built against, which is the pairing its
 #'   ABI check will accept. Only that release's runtime is found by
 #'   [stanli_runtime_path()]; to run a different build, set
-#'   `STANLI_RUNTIME`.
+#'   `STANLI_RUNTIME`. `"dev"` fetches the runtime built from the commit
+#'   that the package was installed from, for a package installed from
+#'   the main branch on GitHub. A package without a recorded commit gets
+#'   the newest dev runtime. The runtime for a commit appears about an
+#'   hour after the commit lands on main, and only the newest ten are
+#'   kept. Installing the dev runtime removes the release runtime from
+#'   the cache, and installing a release removes the dev runtime, so the
+#'   one installed last is used.
 #' @param quiet Passed to [utils::download.file()].
 #' @param overwrite Re-download even if the runtime is already present.
 #' @return The path it was installed to, invisibly.
@@ -102,23 +113,40 @@ stanli_install <- function(version = stanli_runtime_release, quiet = FALSE,
          " runtime and looks for no other; pass a release tag to fetch ",
          "one anyway, and point STANLI_RUNTIME at it to use it.",
          call. = FALSE)
+  dev <- identical(version, "dev")
+  # Every dev runtime shares one directory, and the tag file in it says
+  # which commit's runtime is there.
+  tag <- if (dev) dev_release_tag(quiet = quiet) else version
   dest_dir <- runtime_cache_dir(version)
   dir.create(dest_dir, recursive = TRUE, showWarnings = FALSE)
   dest <- file.path(dest_dir, runtime_filename())
-  if (file.exists(dest) && !overwrite) {
+  tag_file <- file.path(dest_dir, "tag")
+  pinned <- file.path(runtime_cache_dir(), runtime_filename())
+  if (file.exists(dest) && !overwrite &&
+      (!dev || (identical(installed_dev_tag(), tag) && !file.exists(pinned)))) {
     if (!quiet) message("stanli runtime already at ", dest)
     return(invisible(dest))
   }
+  # Windows cannot delete or replace a DLL that this session has loaded,
+  # and loading stanli loads the cached runtime, so clearing the cache has
+  # to happen before stanli is loaded.
+  if (dev && on_windows() && runtime_loaded() &&
+      !nzchar(Sys.getenv("STANLI_RUNTIME")) &&
+      (file.exists(pinned) || file.exists(dest)))
+    stop("this R session has loaded a stanli runtime, which Windows does ",
+         "not let stanli_install() replace. Restart R and, before loading ",
+         "stanli, run\n  unlink(tools::R_user_dir(\"stanli\", \"cache\"), ",
+         "recursive = TRUE)\n  stanli::stanli_install(\"dev\")", call. = FALSE)
   asset <- runtime_asset()
   base <- "https://github.com/seantalts/stanli/releases"
-  url <- file.path(base, "download", version, asset)
+  url <- file.path(base, "download", tag, asset)
   tmp <- tempfile(fileext = ".tar.gz")
   on.exit(unlink(tmp), add = TRUE)
   tryCatch(
-    utils::download.file(url, tmp, mode = "wb", quiet = quiet),
+    download_runtime(url, tmp, quiet),
     error = function(e) {
-      stop(download_failure_message(url, version, asset, conditionMessage(e),
-                                    release_published(base, version)),
+      stop(download_failure_message(url, tag, asset, conditionMessage(e),
+                                    release_published(base, tag)),
            call. = FALSE)
     })
   # download.file() reports some failures through a non-zero status
@@ -129,27 +157,79 @@ stanli_install <- function(version = stanli_runtime_release, quiet = FALSE,
          if (file.exists(tmp)) file.size(tmp) else 0, " bytes). ",
          "If this platform has no release asset, build from source and ",
          "point STANLI_RUNTIME at the result.", call. = FALSE)
+  # The dev directory holds an older commit's files, which a new archive
+  # may not overwrite.
+  if (dev) {
+    unlink(dest_dir, recursive = TRUE)
+    dir.create(dest_dir, recursive = TRUE, showWarnings = FALSE)
+  }
   utils::untar(tmp, exdir = dest_dir)
   if (!file.exists(dest))
     stop("the downloaded archive did not contain ", runtime_filename(),
          call. = FALSE)
+  if (dev) writeLines(tag, tag_file)
   # Runtimes for other releases, and the unversioned file that packages
   # before 0.9.3 wrote, are ~16 MB each of cache nothing looks for now.
+  # The pinned release's runtime goes too once dev is installed, since
+  # stanli_runtime_path() would prefer it.
   root <- tools::R_user_dir("stanli", "cache")
   unlink(file.path(root, runtime_filename()))
   stale <- setdiff(list.dirs(root, recursive = FALSE),
-                   c(dest_dir, runtime_cache_dir()))
+                   c(dest_dir, if (!dev) runtime_cache_dir()))
   unlink(stale, recursive = TRUE)
   if (!quiet) message("stanli runtime installed to ", dest)
   if (identical(dest, stanli_runtime_path())) {
-    load_runtime()
-    note <- commit_mismatch_note()
-    if (!quiet && !is.null(note)) message(note)
+    # A runtime that is already loaded stays loaded until R restarts.
+    if (runtime_loaded()) {
+      if (!quiet) message("a stanli runtime is already loaded in this ",
+                          "session; restart R to use the one just installed")
+    } else {
+      load_runtime()
+      note <- commit_mismatch_note()
+      if (!quiet && !is.null(note)) message(note)
+    }
   } else if (!quiet) {
     message("this package loads the ", stanli_runtime_release,
             " runtime; set STANLI_RUNTIME to use the one just installed")
   }
   invisible(dest)
+}
+
+download_runtime <- function(url, dest, quiet) {
+  utils::download.file(url, dest, mode = "wb", quiet = quiet)
+}
+
+runtime_loaded <- function() .Call("stanli_bridge_loaded")
+
+on_windows <- function() .Platform$OS.type == "windows"
+
+installed_dev_tag <- function() {
+  path <- file.path(runtime_cache_dir("dev"), "tag")
+  if (file.exists(path)) readLines(path, n = 1, warn = FALSE) else NA_character_
+}
+
+github_releases_json <- function() {
+  api <- "https://api.github.com/repos/seantalts/stanli/releases?per_page=100"
+  paste(readLines(api, warn = FALSE), collapse = "\n")
+}
+
+# The dev release for the commit the package was installed from. Without a
+# recorded commit, the newest one: GitHub lists releases newest first, and
+# lists drafts only to the repository's owners.
+dev_release_tag <- function(sha = installed_commit(), quiet = FALSE) {
+  if (!is.na(sha)) return(paste0("dev-", substr(sha, 1, 12)))
+  json <- tryCatch(github_releases_json(), error = function(e)
+    stop("could not list stanli's releases on GitHub to find a development ",
+         "runtime: ", conditionMessage(e), call. = FALSE))
+  found <- regmatches(json, regexec('"tag_name"\\s*:\\s*"(dev-[0-9a-f]{12})"',
+                                    json))[[1]]
+  if (length(found) != 2)
+    stop("GitHub lists no development runtime for stanli. Install a release ",
+         "with stanli_install() instead.", call. = FALSE)
+  if (!quiet)
+    message("this package does not record the commit it was installed from; ",
+            "using the newest development runtime, ", found[2])
+  found[2]
 }
 
 # TRUE when the release page exists, FALSE when GitHub answers 404 for it,
@@ -165,6 +245,17 @@ download_failure_message <- function(url, version, asset, reason,
                                      release_found,
                                      paired = identical(version,
                                                         stanli_runtime_release)) {
+  if (isFALSE(release_found) && startsWith(version, "dev-"))
+    return(paste0(
+      "the stanli runtime for commit ", substring(version, 5), " is not ",
+      "published. A runtime appears about an hour after a commit lands on ",
+      "main, and only commits on main get one. When several commits land ",
+      "close together, some of them get no runtime. A runtime is removed ",
+      "once 10 newer commits on main have one. Reinstall the package from ",
+      "main with remotes::install_github(\"seantalts/stanli\", subdir = \"r\") ",
+      "to get a newer commit, or install a release with ",
+      "remotes::install_github(\"seantalts/stanli@*release\", subdir = \"r\") ",
+      "and run stanli_install()."))
   if (isFALSE(release_found))
     return(paste0(
       "stanli release ", version, " is not published on GitHub, so its ",

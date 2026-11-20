@@ -145,7 +145,7 @@ class CiPolicyTest(unittest.TestCase):
             self.assertIn(dependency, self.jobs["windows"]["needs"])
         for dependency in ("stanc-windows", "browser-compiler"):
             self.assertIn(dependency, self.jobs["windows-compiler"]["needs"])
-        for publisher in ("publish", "runtime-release"):
+        for publisher in ("publish", "runtime-release", "dev-runtime-release"):
             self.assertIn("windows", self.jobs[publisher]["needs"])
 
     def test_core_correctness_and_install_checks_still_run_on_prs(self):
@@ -463,6 +463,115 @@ class NpmPublishTest(unittest.TestCase):
         status, log = self.publish("", 1)
         self.assertEqual(status, 0)
         self.assertIn("npm publish", log)
+
+
+class DevRuntimeReleaseTest(unittest.TestCase):
+    sha = "0123456789abcdef0123456789abcdef01234567"
+
+    @classmethod
+    def setUpClass(cls):
+        cls.jobs = workflow("wheels.yml")["jobs"]
+        cls.job = cls.jobs["dev-runtime-release"]
+
+    def test_runs_only_on_main_after_merge(self):
+        for event in ("pull_request", "push", "schedule", "workflow_dispatch"):
+            with self.subTest(event=event):
+                self.assertEqual(enabled(self.job, event), event != "pull_request")
+        self.assertFalse(enabled(self.job, "push", ref="refs/tags/v1.0.0"))
+        self.assertFalse(enabled(self.job, "push", ref="refs/heads/other"))
+
+    def test_needs_jobs_that_run_on_a_push_to_main(self):
+        # A skipped need would skip the release too.
+        needs = self.job["needs"]
+        self.assertNotIn("stanr", needs)
+        for name in ("static_checks", "build", "windows", "wasm-webr",
+                     "r-tests", "r-platform-tests"):
+            with self.subTest(need=name):
+                self.assertIn(name, needs)
+                if name != "r-tests":
+                    for event in ("push", "schedule", "workflow_dispatch"):
+                        self.assertTrue(enabled(self.jobs[name], event))
+
+    def run_step(self, name, view="", view_status=1, listing="[]", tarballs=6):
+        step = next(item for item in self.job["steps"] if item.get("name") == name)
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = Path(tmp)
+            (tmp / "runtime").mkdir()
+            for i in range(tarballs):
+                (tmp / "runtime" / f"stanli-runtime-{i}.tar.gz").write_text("")
+            bin_dir = tmp / "bin"
+            bin_dir.mkdir()
+            log = tmp / "log"
+            fake = bin_dir / "gh"
+            fake.write_text(
+                '#!/usr/bin/env bash\necho "gh $*" >> "$GH_LOG"\n'
+                'case "$2" in\n'
+                '  view) printf "%s" "$GH_VIEW"; exit "$GH_VIEW_STATUS" ;;\n'
+                '  list) printf "%s" "$GH_LIST" ;;\n'
+                'esac\n')
+            fake.chmod(0o755)
+            result = subprocess.run(
+                ["bash", "-e", "-o", "pipefail", "-c", step["run"]],
+                cwd=tmp, capture_output=True, text=True,
+                env=dict(os.environ,
+                         PATH=str(bin_dir) + os.pathsep + os.environ["PATH"],
+                         GITHUB_SHA=self.sha, GH_LOG=str(log), GH_VIEW=view,
+                         GH_VIEW_STATUS=str(view_status), GH_LIST=listing))
+            return result.returncode, log.read_text() if log.exists() else ""
+
+    def publish(self, **kwargs):
+        return self.run_step("Publish the prerelease", **kwargs)
+
+    def test_a_new_commit_gets_a_draft_prerelease_that_is_then_published(self):
+        status, log = self.publish()
+        self.assertEqual(status, 0)
+        lines = log.splitlines()
+        create = next(line for line in lines if line.startswith("gh release create"))
+        self.assertIn("dev-0123456789ab", create)
+        for flag in ("--draft", "--prerelease", "--latest=false",
+                     "--target " + self.sha):
+            self.assertIn(flag, create)
+        upload = lines.index(next(l for l in lines if l.startswith("gh release upload")))
+        edit = lines.index(next(l for l in lines if l.startswith("gh release edit")))
+        self.assertLess(lines.index(create), upload)
+        self.assertLess(upload, edit)
+        self.assertIn("--draft=false", lines[edit])
+        self.assertIn("--latest=false", lines[edit])
+
+    def test_a_draft_left_by_a_failed_run_is_finished(self):
+        status, log = self.publish(view="true", view_status=0)
+        self.assertEqual(status, 0)
+        self.assertNotIn("gh release create", log)
+        self.assertIn("gh release upload", log)
+        self.assertIn("--draft=false", log)
+
+    def test_a_rerun_after_publishing_uploads_nothing(self):
+        status, log = self.publish(view="false", view_status=0)
+        self.assertEqual(status, 0)
+        self.assertNotIn("gh release upload", log)
+        self.assertNotIn("gh release edit", log)
+
+    def test_a_missing_platform_publishes_nothing(self):
+        status, log = self.publish(tarballs=5)
+        self.assertNotEqual(status, 0)
+        self.assertNotIn("gh release create", log)
+
+    def test_prune_keeps_the_newest_ten_dev_releases(self):
+        releases = [{"tagName": "dev-%012x" % i,
+                     "publishedAt": "2026-11-%02dT00:00:00Z" % (i + 1)}
+                    for i in range(13)]
+        releases.append({"tagName": "v0.30.0",
+                         "publishedAt": "2026-01-01T00:00:00Z"})
+        step = next(item for item in self.job["steps"]
+                    if item.get("name") == "Prune old dev releases")
+        self.assertEqual(step.get("continue-on-error"), "true")
+        status, log = self.run_step("Prune old dev releases",
+                                    listing=json.dumps(releases))
+        self.assertEqual(status, 0)
+        deleted = sorted(re.findall(r"gh release delete (\S+)", log))
+        self.assertEqual(deleted, ["dev-%012x" % i for i in range(3)])
+        self.assertEqual(log.count("--cleanup-tag --yes"), 3)
+        self.assertIn("--exclude-drafts", log)
 
 
 class DecodeSpeedGateTest(unittest.TestCase):
