@@ -12,28 +12,38 @@ stanli_run model.stan data.json --chains 4 --num-threads 2 --threads-per-chain 4
 ```
 
 ```python
-fit = model.sample(chains=4, parallel_chains=2, threads_per_chain=4)
+model = stanli.Model(stan_file="model.stan", data="data.json",
+                     threads_per_chain=4)
+fit = model.sample(chains=4, parallel_chains=2)
 print(model.reduce_sum_count, model.reduce_sum_fallbacks)
 ```
 
 ```r
-fit <- sample_model(model, chains = 4, parallel_chains = 2, threads_per_chain = 4)
+model <- stanli_model("model.stan", data = data, threads_per_chain = 4)
+fit <- sample_model(model, chains = 4, parallel_chains = 2)
 fit$model$reduce_sum_count
 fit$model$reduce_sum_fallbacks
-# Also accepted by sample_cstan() and cstan_model(code)$sample().
+# sample_cstan() and cstan_model(code)$sample() also take threads_per_chain.
 ```
 
 Each example runs at most two chains at once with four threads each, so up to
 eight sampling threads are active. The thread count per chain includes the
 chain's own sampling thread. Thread counts must be positive integers.
 
-If you change the thread setting, stanli prepares a new graph before
-sampling. Python updates the model in place. R returns the prepared model in
+In Python and R, the model is compiled for the count that you give
+`stanli.Model()` or `stanli_model()`, and sampling, optimization, the
+approximate methods and direct gradients use that count. The default is one.
+To use another count, build a new model. R's `sample_nutpie()` builds its own
+model through BridgeStan and does not use the count.
+
+Passing `threads_per_chain` to Python's `sample()` is deprecated. A count
+that differs from the model's gives a warning and rebuilds that model in
+place. Passing it to R's `sample_model()` or `sample_more()` is deprecated
+too. A count that differs from the model's gives a warning, and stanli
+rebuilds the model for that run only; the fit carries the rebuilt model in
 `fit$model`.
 
-Constructors also accept `threads_per_chain`, which applies to direct
-gradient calls. Sampling has its own setting, which defaults to one. A thread
-count above one needs a thread-safe runtime.
+A thread count above one needs a thread-safe runtime.
 
 The reduction count is the number of `reduce_sum` calls that stay parallel.
 Zero means that every call uses the ordinary serial path. The fallback reasons

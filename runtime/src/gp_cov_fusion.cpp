@@ -9,8 +9,9 @@ namespace stanli {
 int fuse_gp_diagonal_updates(Graph& g, const std::vector<int>& roots) {
   const auto candidate = [](const Op& op) {
     // Exp-quad has an upstream matrix callback with distinct output nodes.
-    return op.opcode == OP_GP_COV && op.n_in == 3 && op.variant != kGpExpQuad &&
-           op.n_idata == 2 && op.idata[0] > 0;
+    return op.opcode == OP_GP_COV && op.variant != kGpExpQuad &&
+           op.n_in == gp_cov_jitter_input(op.variant) && op.n_idata == 2 &&
+           op.idata[0] > 0;
   };
   if (std::none_of(g.ops.begin(), g.ops.end(), candidate)) return 0;
 

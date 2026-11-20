@@ -19,7 +19,7 @@ sample_model(
   pathfinder_init = NULL,
   parallel_chains = NULL,
   refresh = 100,
-  threads_per_chain = 1,
+  threads_per_chain = NULL,
   fixed_param = FALSE,
   metric = c("diag_e", "dense_e", "unit_e"),
   inv_metric = NULL,
@@ -64,12 +64,15 @@ not perform PSIS resampling.}
 each phase, plus the first and last transition of the phase. Set to 0 to
 suppress all automatic sampling output.}
 
-\item{threads_per_chain}{Positive thread count per chain for eligible native
-`reduce_sum` calls, default 1. Small or unsupported calls stay serial.
-Changing this setting prepares a new graph; reduction rounding and NUTS
-draws can differ across thread counts. Active chains may each use this
-many threads. `fit$model$reduce_sum_count` and `reduce_sum_fallbacks`
-report retained reductions and graph-lowering refusals (not opaque regions).}
+\item{threads_per_chain}{Deprecated. Set the thread count when building
+the model, with `stanli_model(threads_per_chain = )`; sampling uses the
+count the model was built with. `NULL` (the default) or the model's own
+count changes nothing. Any other count still works but gives a warning of
+class `deprecatedWarning`, and the model is rebuilt with that count for
+this run. Reduction rounding and NUTS draws can differ across thread
+counts. Active chains may each use the model's count of threads.
+`fit$model$reduce_sum_count` and `reduce_sum_fallbacks` report retained
+reductions and graph-lowering refusals (not opaque regions).}
 
 \item{fixed_param}{`TRUE` runs Stan's fixed-parameter sampler instead of
 NUTS: every chain keeps its parameters at its starting point and only

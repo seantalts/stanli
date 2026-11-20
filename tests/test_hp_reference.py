@@ -145,6 +145,18 @@ class Builtins(unittest.TestCase):
         tol = mpf(10) ** -45 if tol is None else tol
         self.assertLess(abs(a - b), tol * max(1, abs(b)))
 
+    def test_gp_periodic_cov(self):
+        f = mpextra.F["gp_periodic_cov"]
+        x = [mpf("0.1"), mpf("0.9"), mpf("3.2")]
+        sg, ell, per = mpf("1.3"), mpf("0.8"), mpf("2.7")
+        k = f(x, sg, ell, per)
+        self.close(k[0][0], sg ** 2)
+        want = sg ** 2 * mp.exp(-2 * mp.sin(mp.pi * mpf("0.8") / per) ** 2 / ell ** 2)
+        self.close(k[0][1], want)
+        self.close(k[1][0], want)
+        # One full period apart is the same as no distance at all.
+        self.close(f([mpf(0)], [per], sg, ell, per)[0][0], sg ** 2, mpf(10) ** -40)
+
     def test_student_t_lccdf_at_center_is_log_half(self):
         f = mpextra.CDFS["student_t_lccdf"]
         self.close(f(mpf(0), mpf(3), mpf(0), mpf(1)), -mp.log(2))

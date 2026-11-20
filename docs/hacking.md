@@ -717,8 +717,9 @@ entry points are not part of it.
 Native C++, C, Python, R and `stanli_run` support opt-in within-chain
 `reduce_sum` parallelism with reusable per-chain workers
 ([`native-reduce-sum.md`](native-reduce-sum.md)). Pass
-`threads_per_chain=N` to Python or R sampling, or `--threads-per-chain N`
-to the CLI; the default is one.
+`threads_per_chain=N` when you build the model (`stanli.Model()` in Python,
+`stanli_model()` in R), or `--threads-per-chain N` to the CLI; the default is
+one.
 
 ## Building
 

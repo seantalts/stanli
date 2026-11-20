@@ -484,6 +484,14 @@ def gp_cov_cross(kern):
     return f
 
 
+def gp_periodic_cov(*a):
+    x1, x2, sg, ell, per = a if len(a) == 5 else (a[0], a[0]) + a[1:]
+    def kern(p, q):
+        s = mp.sin(mp.pi * mp.sqrt(sqdist(p, q)) / per)
+        return sg ** 2 * mp.exp(-2 * s * s / (ell * ell))
+    return Mat([[kern(p, q) for q in x2] for p in x1])
+
+
 def multinomial(args, flags, propto):
     ns, th = args
     ns = flat(ns)
@@ -511,6 +519,7 @@ F.update({
     "gp_matern32_cov": gp_cov_cross(lambda s, l, d: s ** 2 * (1 + mp.sqrt(3) * d / l) * mp.exp(-mp.sqrt(3) * d / l)),
     "gp_matern52_cov": gp_cov_cross(lambda s, l, d: s ** 2 * (1 + mp.sqrt(5) * d / l + 5 * d * d / (3 * l * l)) * mp.exp(-mp.sqrt(5) * d / l)),
     "gp_exponential_cov": gp_cov_cross(lambda s, l, d: s ** 2 * mp.exp(-d / l)),
+    "gp_periodic_cov": gp_periodic_cov,
     "append_array": lambda a, b: list(a) + list(b),
     "sqrt2": lambda: mp.sqrt(2),
 })

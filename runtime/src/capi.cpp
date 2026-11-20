@@ -1030,16 +1030,24 @@ int stanli_sample_stream_stats_init(stanli_model* m, uint32_t seed, int warmup,
   }
 }
 
-int stanli_sample_walnuts_stream(stanli_model* m, uint32_t seed, int warmup,
-                                 int samples, double max_error, double* draws,
-                                 stanli_draw_cb cb, void* user, char* err,
-                                 size_t err_len) {
+int stanli_sample_walnuts_stats_init(stanli_model* m, uint32_t seed,
+                                     int chain_id, int warmup, int samples,
+                                     double max_error, double init_radius,
+                                     const double* init, double* draws,
+                                     double* stats, stanli_draw_cb cb,
+                                     void* user, char* err, size_t err_len) {
   try {
+    if (chain_id < 1) throw std::invalid_argument("chain_id must be >= 1");
+    if (!(init_radius >= 0) || !std::isfinite(init_radius))
+      throw std::invalid_argument("init_radius must be finite and >= 0");
     stanli::WalnutsConfig cfg;
     cfg.seed = seed;
+    cfg.chain_id = chain_id;
     cfg.warmup = warmup;
     cfg.samples = samples;
     if (max_error > 0) cfg.max_error = max_error;
+    cfg.init_radius = init_radius;
+    cfg.init = init;
     const int64_t n = m->ex->n_params();
     stanli::DrawObserver observe;
     if (cb) {
@@ -1048,14 +1056,30 @@ int stanli_sample_walnuts_stream(stanli_model* m, uint32_t seed, int warmup,
         cb((int32_t)i, wu ? 1 : 0, user);
       };
     }
-    auto out = stanli::run_walnuts(*m->ex, cfg, nullptr, observe);
+    stanli::SamplerStats sampler_stats;
+    auto out = stanli::run_walnuts(*m->ex, cfg,
+                                   stats ? &sampler_stats : nullptr, observe);
     for (size_t s = 0; s < out.size(); ++s)
       std::memcpy(draws + s * n, out[s].data(), sizeof(double) * n);
+    if (stats)
+      for (size_t s = 0; s < sampler_stats.rows.size(); ++s)
+        std::memcpy(stats + s * STANLI_N_SAMPLER_COLS,
+                    sampler_stats.rows[s].data(),
+                    sizeof(double) * STANLI_N_SAMPLER_COLS);
     return 0;
   } catch (const std::exception& e) {
     put_err(err, err_len, e.what());
     return 1;
   }
+}
+
+int stanli_sample_walnuts_stream(stanli_model* m, uint32_t seed, int warmup,
+                                 int samples, double max_error, double* draws,
+                                 stanli_draw_cb cb, void* user, char* err,
+                                 size_t err_len) {
+  return stanli_sample_walnuts_stats_init(m, seed, 1, warmup, samples,
+                                          max_error, 2.0, nullptr, draws,
+                                          nullptr, cb, user, err, err_len);
 }
 
 int stanli_run_pathfinder(stanli_model* m, uint32_t seed, int chain_id,

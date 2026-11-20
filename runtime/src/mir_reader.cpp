@@ -98,6 +98,10 @@ void validate_funapp_arity(const Expr& e) {
     require_arity(e, 3, 4);
     return;
   }
+  if (e.name == "gp_periodic_cov") {
+    require_arity(e, 4, 5);
+    return;
+  }
   if (e.name == "map_rect") {
     require_arity(e, 5);
     return;

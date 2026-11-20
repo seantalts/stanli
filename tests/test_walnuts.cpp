@@ -211,6 +211,40 @@ int main() {
     for (double v : p1) expect_in("init in radius", v, -2.0, 2.0);
   }
 
+  // ---- chain_id streams and the stats rows -------------------------------
+  {
+    Graph g;
+    const int x = g.add_slot(3, true);
+    const int zero = g.add_slot(1, false);
+    const int one = g.add_slot(1, false);
+    const int lp = g.add_slot(1, false);
+    stanli::testutil::add_density(g, OP_NORMAL_LPDF, {x, zero, one}, lp);
+    g.result_slot = lp;
+    Executor ex(std::move(g));
+    ex.value_ptr(zero)[0] = 0.0;
+    ex.value_ptr(one)[0] = 1.0;
+
+    WalnutsConfig cfg;
+    cfg.seed = 11;
+    cfg.warmup = 100;
+    cfg.samples = 50;
+    SamplerStats stats;
+    auto a = run_walnuts(ex, cfg, &stats);
+    cfg.chain_id = 2;
+    auto b = run_walnuts(ex, cfg);
+    expect_in("chain_id 2 differs", a != b ? 1 : 0, 1, 1);
+    expect_in("stats rows", (double)stats.rows.size(), 50, 50);
+    std::vector<double> grad(3);
+    for (size_t s = 0; s < a.size() && s < stats.rows.size(); ++s) {
+      for (int d = 0; d < 3; ++d) ex.params_data()[d] = a[s][d];
+      const double want = ex.gradient(grad.data());
+      expect_in("stats lp__ " + std::to_string(s), stats.rows[s][0], want,
+                want);
+      expect_in("stats stepsize__ positive", stats.rows[s][2] > 0 ? 1 : 0, 1,
+                1);
+    }
+  }
+
   if (failures) {
     std::printf("%d failures\n", failures);
     return 1;

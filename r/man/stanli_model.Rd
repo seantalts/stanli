@@ -36,12 +36,15 @@ draw from it once, here, the way CmdStan's generated constructor does.
 when transformed data drew from it, rebuilding the model for that run,
 so one seed governs a whole run as it does in CmdStan. The rebuilt
 model is the one the fit carries as `fit$model`; the object passed in
-is unchanged. Models are also rebuilt when sampling changes
-`threads_per_chain`.}
+is unchanged. A rebuilt model keeps the `threads_per_chain` it was
+built with.}
 
 \item{threads_per_chain}{Positive thread count for eligible native `reduce_sum`
-calls. Defaults to 1. Sampling uses its own setting; direct gradients use
-the model's setting. Requires a thread-safe runtime for values above 1.}
+calls. Defaults to 1. The model is compiled for this count, and
+[sample_model()], optimization, the approximate methods and direct
+gradients all use it.
+To run with another count, build a new model with `stanli_model()`.
+Requires a thread-safe runtime for values above 1.}
 
 \item{include_paths}{Character vector of directories searched in order for
 Stan `#include` files, followed by the directory containing `file` (or the

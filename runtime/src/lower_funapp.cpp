@@ -41,6 +41,7 @@ Lowering::BuiltinDispatch Lowering::resolve_builtin(const mir::Expr& e) {
           {"gp_matern32_cov", BuiltinFamily::Matrix},
           {"gp_matern52_cov", BuiltinFamily::Matrix},
           {"gp_exponential_cov", BuiltinFamily::Matrix},
+          {"gp_periodic_cov", BuiltinFamily::Matrix},
           {"quad_form_diag", BuiltinFamily::Matrix},
           {"append_row", BuiltinFamily::Matrix},
           {"append_col", BuiltinFamily::Matrix},
@@ -2400,7 +2401,7 @@ std::optional<Lowering::Val> Lowering::lower_matrix_fn(const mir::Expr& e,
     fail("rep_matrix arity", e.raw);
   }
   if (const std::optional<GpCov> gp = gp_cov_family(e.name);
-      gp && e.args.size() == 3) {
+      gp && (int)e.args.size() == 1 + gp_cov_hyperparameters(*gp)) {
     Val x = actuals.at(0).value();
     Val alpha = actuals.at(1).value();
     Val rho = actuals.at(2).value();
@@ -2413,7 +2414,11 @@ std::optional<Lowering::Val> Lowering::lower_matrix_fn(const mir::Expr& e,
       D = array_shape(x.si).dims[1];
     const int64_t N = g.slots[x.slot].len / D;
     SlotInfo si = matrix_view(N, N);
-    Val v = emit_value(OP_GP_COV, {x, alpha, rho}, N * N, si, {(int)N, (int)D});
+    Val v = *gp == kGpPeriodic
+                ? emit_value(OP_GP_COV, {x, alpha, rho, actuals.at(3).value()},
+                             N * N, si, {(int)N, (int)D})
+                : emit_value(OP_GP_COV, {x, alpha, rho}, N * N, si,
+                             {(int)N, (int)D});
     g.ops.back().variant = static_cast<uint8_t>(*gp);
     return with_layout(v, owning_layout(si));
   }

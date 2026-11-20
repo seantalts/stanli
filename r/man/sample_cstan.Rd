@@ -66,7 +66,8 @@ CmdStanR.}
 \item{pathfinder_init}{Optional Pathfinder settings passed to [sample_model()].}
 
 \item{threads_per_chain}{Threads per chain for eligible native `reduce_sum`
-calls; see [sample_model()]. Defaults to 1.}
+calls. The model is built for this count; see [stanli_model()]. Defaults
+to 1.}
 
 \item{include_paths}{Directories searched for Stan `#include` files; see
 [stanli_model()].}

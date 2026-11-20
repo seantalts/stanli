@@ -693,6 +693,22 @@ int stanli_sample_walnuts_stream(stanli_model* m, uint32_t seed, int warmup,
                                  stanli_draw_cb cb, void* user, char* err,
                                  size_t err_len);
 
+/* WALNUTS with the chain's stream and start chosen as for NUTS: the sampler
+ * and the starting point use (seed, chain_id), chain_id >= 1, and `init`,
+ * when non-null, is one n_unconstrained start on the unconstrained scale;
+ * otherwise the start is drawn uniformly in (-init_radius, init_radius).
+ * stanli_sample_walnuts_stream is this call with chain_id 1, init_radius 2,
+ * no init and no stats. `stats`, when non-null, receives samples *
+ * STANLI_N_SAMPLER_COLS doubles in the NUTS column order after return:
+ * lp__ and stepsize__ (the adapted macro step) are set, the other columns
+ * are NaN because WALNUTS has no counterpart for them. */
+int stanli_sample_walnuts_stats_init(stanli_model* m, uint32_t seed,
+                                     int chain_id, int warmup, int samples,
+                                     double max_error, double init_radius,
+                                     const double* init, double* draws,
+                                     double* stats, stanli_draw_cb cb,
+                                     void* user, char* err, size_t err_len);
+
 /* Single-path Pathfinder: a normal approximation fitted along an L-BFGS
  * path, drawn from in milliseconds where a sampler takes seconds. Draws
  * come back UNCONSTRAINED, num_draws rows of stanli_n_unconstrained

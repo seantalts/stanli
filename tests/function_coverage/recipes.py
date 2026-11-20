@@ -91,6 +91,7 @@ GROUPS = {
         "gp_exponential_cov": "gp_exponential_cov({0.0, 1.0}, x[1], x[2])",
         "gp_matern32_cov": "gp_matern32_cov({0.0, 1.0}, x[1], x[2])",
         "gp_matern52_cov": "gp_matern52_cov({0.0, 1.0}, x[1], x[2])",
+        "gp_periodic_cov": "gp_periodic_cov({0.0, 1.0}, x[1], x[2], v[3])",
         "logical_negation": "logical_probe(theta[1])",
         "head": "head(v, 2)", "inverse": "inverse(s)",
         "inverse_spd": "inverse_spd(s)",
