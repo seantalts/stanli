@@ -1,11 +1,11 @@
 # Corpus status
 
-Models that evaluate: 410/411
-Models with CmdStan reference values: 410/411, at 1230 evaluation points in total.
+Models that evaluate: 412/413
+Models with CmdStan reference values: 412/413, at 1236 evaluation points in total.
 
 The corpus includes models from posteriordb, generated brms and cogmod models, ctsem's state-space template, models from CRAN packages, imported teaching models, and language fixtures. The source collection column says where each model came from. `tools/verify_refs.py` checks all reference values the same way.
 
-For 394 verified models, the table below shows how far stanli was from CmdStan at the primary evaluation point. These numbers were measured when the reference was recorded. Imported references keep their original CmdStan answers and a record of how each one was made. No deviation was recorded for them, so their rows say "not recorded". Having a reference for a model does not mean that the current build matches it. The numerical replay checks the current build.
+For 396 verified models, the table below shows how far stanli was from CmdStan at the primary evaluation point. These numbers were measured when the reference was recorded. Imported references keep their original CmdStan answers and a record of how each one was made. No deviation was recorded for them, so their rows say "not recorded". Having a reference for a model does not mean that the current build matches it. The numerical replay checks the current build.
 
 A model passes only when tools/verify_sample.py finds that stanli's log_prob and full gradient match CmdStan's at a shared, fixed evaluation point. The accuracy columns show the worst deviation over lp and every gradient component, as a relative difference and in ULPs. 0 ULP means bitwise identical to CmdStan. The bitwise results are for information only. The replay requires a scaled error of at most 1e-9, with documented exceptions for ill-conditioned models. Models that evaluate but are not verified are listed in a separate section and do not count as passing.
 
@@ -407,6 +407,8 @@ A model passes only when tools/verify_sample.py finds that stanli's log_prob and
 | `tuple_loops` | regressions | 7 | 4.2e-16 | 2 |
 | `tuple_reduce_sum` | regressions | 5 | 0 (bitwise) | 0 |
 | `tuple_return_slices` | regressions | 5 | 1.8e-16 | 1 |
+| `walker_rw1_model` | walker | 5 | 8.4e-16 | 5 |
+| `walker_rw1_model_naive` | walker | 305 | 0 (bitwise) | 0 |
 | `wells_daae_c_model` | posteriordb | 7 | 0 (bitwise) | 0 |
 | `wells_dae_c_model` | posteriordb | 6 | 0 (bitwise) | 0 |
 | `wells_dae_inter_model` | posteriordb | 8 | 0 (bitwise) | 0 |
@@ -824,6 +826,8 @@ The reference recorder also saves CmdStan's write_array output at the same point
 | `tuple_loops` | 96 |
 | `tuple_reduce_sum` | 5 |
 | `tuple_return_slices` | 100 |
+| `walker_rw1_model` | 410 |
+| `walker_rw1_model_naive` | 607 |
 | `wells_daae_c_model` | 6 |
 | `wells_dae_c_model` | 5 |
 | `wells_dae_inter_model` | 7 |

@@ -2708,6 +2708,20 @@
   "point": 0,
   "status": "VERIFIED"
  },
+ "walker_rw1_model": {
+  "max_rel": 8.381685937923907e-16,
+  "max_ulp": 5,
+  "n_values": 5,
+  "point": 0,
+  "status": "VERIFIED"
+ },
+ "walker_rw1_model_naive": {
+  "max_rel": 0.0,
+  "max_ulp": 0,
+  "n_values": 305,
+  "point": 0,
+  "status": "VERIFIED"
+ },
  "wells_daae_c_model": {
   "max_rel": 0.0,
   "max_ulp": 0,

@@ -118,3 +118,4 @@ dates in the R package boot (License "Unlimited"). The BSD text is in
 - `tests/hbayesdm/`: hBayesDM 2.0.1, GPL-3, by Woo-Young Ahn, Nate Haines and Lei Zhang with contributions from Jinwoo Jeong, Harhim Park, Jaeyeong Yang and Jethro Lee. The four models have no `#include` and are copied as published.
 
 - `tests/bmgarch/`: bmgarch 2.1.0, GPL (>= 3), by Philippe Rast and Stephen Martin. The two models' `#include` lines are replaced by the text of the files they name; nothing else is edited.
+- `tests/walker/`: walker 1.0.10, GPL (>= 3), by Jouni Helske. The two models have no `#include` and are copied as published.

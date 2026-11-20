@@ -81,6 +81,7 @@ tests/hdbayes/*.hpp
 tests/ecoensemble/*.hpp
 tests/examplemodels/*.hpp
 tests/stanguide/*.hpp
+tests/walker/*.hpp
 tests/bmgarch/*.hpp
 tests/hbayesdm/*.hpp
 
