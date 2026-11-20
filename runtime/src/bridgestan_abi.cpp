@@ -31,7 +31,7 @@
 #ifndef BRIDGESTAN_EXPORT
 #define BRIDGESTAN_EXPORT 1
 #endif
-#include "../third_party/bridgestan.h"
+#include "../ext/bridgestan.h"
 
 #include <stanli/bridgestan_internal.hpp>
 #include <stanli/compile.hpp>
@@ -60,7 +60,7 @@
 #include <utility>
 #include <vector>
 
-// The version of the reference header vendored in runtime/third_party.
+// The version of the reference header vendored in runtime/ext.
 #define STANLI_BS_VERSION_STR "2.9.0"
 
 namespace {

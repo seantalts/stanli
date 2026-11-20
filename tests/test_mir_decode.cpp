@@ -8,7 +8,7 @@
 #include <stanli/wa_interp.hpp>
 
 #include "../runtime/src/mir_tuples.hpp"
-#include "../runtime/third_party/nlohmann_json.hpp"
+#include "../runtime/ext/nlohmann_json.hpp"
 
 #include <algorithm>
 #include <cmath>

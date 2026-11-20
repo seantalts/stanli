@@ -12,11 +12,11 @@
 // disagrees. Second, the refusals: every call stanli cannot honor must
 // return exactly -1 with a message, never a plausible number for flags it
 // did not implement.
-#include "../runtime/third_party/bridgestan.h"
+#include "../runtime/ext/bridgestan.h"
 #include "categorical_check_mir.hpp"
 
 #include "../runtime/src/build_id.hpp"
-#include "../runtime/third_party/nlohmann_json.hpp"
+#include "../runtime/ext/nlohmann_json.hpp"
 
 #include <stanli/bridgestan_internal.hpp>
 #include <stanli/compile.hpp>

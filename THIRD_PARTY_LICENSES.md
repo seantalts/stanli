@@ -22,7 +22,7 @@ Full license texts ship with the vendored sources fetched by
 `deps/fetch.sh`; see `deps/math/LICENSE.md`, `deps/stan/LICENSE.md`, and
 the license files under `deps/math/lib/`. walnutpie is vendored directly
 in this repository, headers and license together, at
-`runtime/third_party/walnutpie/`.
+`runtime/ext/walnutpie/`.
 The CLI formatter is pinned to {fmt} 11.2.0; its license is in `deps/fmt/LICENSE`.
 
 Notes on the two that carry conditions beyond attribution:

@@ -170,9 +170,15 @@ struct stanli_model {
 
 namespace {
 
+// memcpy from a null pointer is undefined even for zero bytes, and an empty
+// vector's data() may be null: a model with no parameters has empty rows.
+void copy_doubles(double* to, const double* from, int64_t n) {
+  if (n > 0) std::memcpy(to, from, sizeof(double) * (size_t)n);
+}
+
 void constrained_row(stanli::Executor& ex, const stanli::CompiledModel& cm,
                      const double* q, double* out) {
-  std::memcpy(ex.params_data(), q, sizeof(double) * (size_t)ex.n_params());
+  copy_doubles(ex.params_data(), q, ex.n_params());
   ex.run_forward_only();
   int64_t at = 0;
   for (const auto& v : cm.views) {
@@ -192,7 +198,7 @@ void write_row(const stanli_model& m, stanli::Executor& ex,
                stanli::Executor* wa_ex, const double* q, double* out,
                stanli::WaRng& rng) {
   if (m.wa_interp) {
-    std::memcpy(ex.params_data(), q, sizeof(double) * (size_t)ex.n_params());
+    copy_doubles(ex.params_data(), q, ex.n_params());
     ex.run_forward_only();
     const auto row = m.wa_interp->eval(m.cm.constrained_env(ex), rng);
     const int64_t width = row_width(m);
@@ -200,10 +206,9 @@ void write_row(const stanli_model& m, stanli::Executor& ex,
       throw std::runtime_error("write_array produced " +
                                std::to_string(row.size()) +
                                " columns, expected " + std::to_string(width));
-    std::memcpy(out, row.data(), sizeof(double) * (size_t)width);
+    copy_doubles(out, row.data(), width);
   } else if (wa_ex) {
-    std::memcpy(wa_ex->params_data(), q,
-                sizeof(double) * (size_t)wa_ex->n_params());
+    copy_doubles(wa_ex->params_data(), q, wa_ex->n_params());
     wa_ex->run_forward_only(stanli::EvalState{&rng});
     int64_t at = 0;
     for (const auto& col : m.wa_cols) {
@@ -944,7 +949,7 @@ void stanli_sparse_factor_free(stanli_sparse_factor* f) { delete f; }
 
 int stanli_grad(stanli_model* m, const double* q, double* lp, double* grad) {
   const int64_t n = m->ex->n_params();
-  std::memcpy(m->ex->params_data(), q, sizeof(double) * n);
+  copy_doubles(m->ex->params_data(), q, n);
   try {
     if (grad == nullptr) {
       *lp = m->ex->forward();
@@ -1010,7 +1015,7 @@ int stanli_sample_stream_stats_init(stanli_model* m, uint32_t seed, int warmup,
       // Each post-warmup draw lands in the caller's buffer before its
       // callback fires, so a streaming consumer can read rows [0, i].
       observe = [&](int64_t i, bool wu, const double* q) {
-        if (!wu) std::memcpy(draws + i * n, q, sizeof(double) * n);
+        if (!wu) copy_doubles(draws + i * n, q, n);
         cb((int32_t)i, wu ? 1 : 0, user);
       };
     }
@@ -1018,7 +1023,7 @@ int stanli_sample_stream_stats_init(stanli_model* m, uint32_t seed, int warmup,
     auto out = stanli::run_nuts(*m->ex, cfg, stats ? &sampler_stats : nullptr,
                                 observe);
     for (size_t s = 0; s < out.size(); ++s)
-      std::memcpy(draws + s * n, out[s].data(), sizeof(double) * n);
+      copy_doubles(draws + s * n, out[s].data(), n);
     if (stats)
       for (size_t s = 0; s < sampler_stats.rows.size(); ++s)
         std::memcpy(stats + s * STANLI_N_SAMPLER_COLS,
@@ -1053,7 +1058,7 @@ int stanli_sample_walnuts_stats_init(stanli_model* m, uint32_t seed,
     stanli::DrawObserver observe;
     if (cb) {
       observe = [&](int64_t i, bool wu, const double* q) {
-        if (!wu) std::memcpy(draws + i * n, q, sizeof(double) * n);
+        if (!wu) copy_doubles(draws + i * n, q, n);
         cb((int32_t)i, wu ? 1 : 0, user);
       };
     }
@@ -1061,7 +1066,7 @@ int stanli_sample_walnuts_stats_init(stanli_model* m, uint32_t seed,
     auto out = stanli::run_walnuts(*m->ex, cfg,
                                    stats ? &sampler_stats : nullptr, observe);
     for (size_t s = 0; s < out.size(); ++s)
-      std::memcpy(draws + s * n, out[s].data(), sizeof(double) * n);
+      copy_doubles(draws + s * n, out[s].data(), n);
     if (stats)
       for (size_t s = 0; s < sampler_stats.rows.size(); ++s)
         std::memcpy(stats + s * STANLI_N_SAMPLER_COLS,
@@ -1106,8 +1111,7 @@ int stanli_run_pathfinder(stanli_model* m, uint32_t seed, int chain_id,
     }
     const int64_t n = m->ex->n_params();
     for (size_t s = 0; s < r.draws.size(); ++s) {
-      if (draws)
-        std::memcpy(draws + s * n, r.draws[s].data(), sizeof(double) * n);
+      if (draws) copy_doubles(draws + s * n, r.draws[s].data(), n);
       if (lp) lp[s] = r.lp[s];
       if (lp_approx) lp_approx[s] = r.lp_approx[s];
     }
@@ -1526,8 +1530,8 @@ int stanli_sample_multi_metric(stanli_model* m, const stanli_sample_opts* opts,
       // the buffer is the caller's, so write only what exists.
       const int64_t rows = std::min<int64_t>((int64_t)r.draws.size(), n_stored);
       for (int64_t i = 0; i < rows; ++i) {
-        std::memcpy(draws + ((int64_t)c * n_stored + i) * n,
-                    r.draws[(size_t)i].data(), sizeof(double) * (size_t)n);
+        copy_doubles(draws + ((int64_t)c * n_stored + i) * n,
+                     r.draws[(size_t)i].data(), n);
         if (stats != nullptr && i < (int64_t)r.stats.rows.size())
           std::memcpy(
               stats + ((int64_t)c * n_stored + i) * STANLI_N_SAMPLER_COLS,

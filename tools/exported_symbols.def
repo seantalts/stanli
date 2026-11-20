@@ -2,7 +2,7 @@
 ; exported_symbols.txt (Mach-O) and exported_symbols.map (ELF), which say
 ; the same thing as stanli_* and bs_* wildcards.
 ;
-; The bs_* half is the BridgeStan C ABI (runtime/third_party/bridgestan.h).
+; The bs_* half is the BridgeStan C ABI (runtime/ext/bridgestan.h).
 ; Every symbol it declares is listed even though bs_model_construct refuses
 ; on Windows: clients bind the whole set at load time, so a missing one
 ; fails before any call can explain itself. The three version numbers are
