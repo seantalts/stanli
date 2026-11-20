@@ -13,6 +13,7 @@
 #include <cstdint>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -100,6 +101,22 @@ struct DensitySizeError : std::invalid_argument {
   using std::invalid_argument::invalid_argument;
 };
 
+// The arguments that a density's Stan Math function passes to
+// check_consistent_sizes, in that call's order, with the names it reports.
+// Every container among them must have the size of the first container; a
+// language scalar broadcasts, and a one-element container is still a
+// container. A density whose Stan Math function makes no such call has no
+// entry.
+struct DensitySizeName {
+  int argument;
+  const char* name;
+};
+struct DensitySizeCheck {
+  const char* function;
+  std::vector<DensitySizeName> arguments;
+};
+const DensitySizeCheck* density_size_check(std::string_view function);
+
 struct VectorizedDensityLayout {
   int64_t width = 0;
   // One entry for every set bit in DensitySpec::vectorized_vector_args, in
@@ -152,6 +169,7 @@ struct DensitySpec {
   uint8_t vectorized_vector_args = 0;
   bool categorical_logit = false;
   PoissonBinomialKind poisson_binomial = PoissonBinomialKind::Lpmf;
+  const DensitySizeCheck* size_check = nullptr;
 };
 
 // OP_CATEGORICAL's ordinary variant byte replaces its former opaque per-op

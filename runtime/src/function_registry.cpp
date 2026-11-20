@@ -807,6 +807,7 @@ const std::vector<FunctionSpec>& function_specs() {
     builtin("append_array", append_builtin(BuiltinSlice::AppendArray, kInt));
 
     const auto density = [&](std::string_view name, DensitySpec spec) {
+      spec.size_check = density_size_check(name);
       result.emplace_back(name, std::move(spec));
     };
     density("poisson_log_lpmf",

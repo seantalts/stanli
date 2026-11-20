@@ -5,6 +5,7 @@
 #include <stan/math/prim/prob/discrete_range_lccdf.hpp>
 #include <stan/math/prim/prob/discrete_range_lcdf.hpp>
 #include <stan/math/prim/err/check_consistent_size.hpp>
+#include <stan/math/prim/err/check_consistent_sizes.hpp>
 #include <stan/math/prim/err/check_size_match.hpp>
 #include <stan/math/prim/prob/discrete_range_lpmf.hpp>
 #include <stan/math/prim/prob/hypergeometric_lpmf.hpp>
@@ -82,6 +83,458 @@ double evaluate_all_integer(
 
 void density_layout_error(const char* what) { throw std::logic_error(what); }
 
+// Generated from the pinned deps/math prim/prob sources: each function's
+// check_consistent_sizes arguments and names, case included.
+// test_density_sizes checks every entry against Stan Math itself.
+const DensitySizeCheck* density_size_check(std::string_view function) {
+  static const std::vector<DensitySizeCheck> checks{
+      {"bernoulli_cdf", {{0, "Random variable"}, {1, "Probability parameter"}}},
+      {"bernoulli_lccdf",
+       {{0, "Random variable"}, {1, "Probability parameter"}}},
+      {"bernoulli_lcdf",
+       {{0, "Random variable"}, {1, "Probability parameter"}}},
+      {"bernoulli_logit_lpmf",
+       {{0, "Random variable"}, {1, "Probability parameter"}}},
+      {"bernoulli_lpmf",
+       {{0, "Random variable"}, {1, "Probability parameter"}}},
+      {"beta_binomial_cdf",
+       {{0, "Successes variable"},
+        {1, "Population size parameter"},
+        {2, "First prior sample size parameter"},
+        {3, "Second prior sample size parameter"}}},
+      {"beta_binomial_lccdf",
+       {{0, "Successes variable"},
+        {1, "Population size parameter"},
+        {2, "First prior sample size parameter"},
+        {3, "Second prior sample size parameter"}}},
+      {"beta_binomial_lcdf",
+       {{0, "Successes variable"},
+        {1, "Population size parameter"},
+        {2, "First prior sample size parameter"},
+        {3, "Second prior sample size parameter"}}},
+      {"beta_binomial_lpmf",
+       {{0, "Successes variable"},
+        {1, "Population size parameter"},
+        {2, "First prior sample size parameter"},
+        {3, "Second prior sample size parameter"}}},
+      {"beta_cdf",
+       {{0, "Random variable"},
+        {1, "First shape parameter"},
+        {2, "Second shape parameter"}}},
+      {"beta_lccdf",
+       {{0, "Random variable"},
+        {1, "First shape parameter"},
+        {2, "Second shape parameter"}}},
+      {"beta_lcdf",
+       {{0, "Random variable"},
+        {1, "First shape parameter"},
+        {2, "Second shape parameter"}}},
+      {"beta_lpdf",
+       {{0, "Random variable"},
+        {1, "First shape parameter"},
+        {2, "Second shape parameter"}}},
+      {"beta_neg_binomial_cdf",
+       {{0, "Failures variable"},
+        {1, "Number of successes parameter"},
+        {2, "Prior success parameter"},
+        {3, "Prior failure parameter"}}},
+      {"beta_neg_binomial_lccdf",
+       {{0, "Failures variable"},
+        {1, "Number of successes parameter"},
+        {2, "Prior success parameter"},
+        {3, "Prior failure parameter"}}},
+      {"beta_neg_binomial_lcdf",
+       {{0, "Failures variable"},
+        {1, "Number of successes parameter"},
+        {2, "Prior success parameter"},
+        {3, "Prior failure parameter"}}},
+      {"beta_neg_binomial_lpmf",
+       {{0, "Failures variable"},
+        {1, "Number of successes parameter"},
+        {2, "Prior success parameter"},
+        {3, "Prior failure parameter"}}},
+      {"beta_proportion_lccdf",
+       {{0, "Random variable"},
+        {1, "Location parameter"},
+        {2, "Precision parameter"}}},
+      {"beta_proportion_lcdf",
+       {{0, "Random variable"},
+        {1, "Location parameter"},
+        {2, "Precision parameter"}}},
+      {"beta_proportion_lpdf",
+       {{0, "Random variable"},
+        {1, "Location parameter"},
+        {2, "Precision parameter"}}},
+      {"binomial_cdf",
+       {{0, "Successes variable"},
+        {1, "Population size parameter"},
+        {2, "Probability parameter"}}},
+      {"binomial_lccdf",
+       {{0, "Successes variable"},
+        {1, "Population size parameter"},
+        {2, "Probability parameter"}}},
+      {"binomial_lcdf",
+       {{0, "Successes variable"},
+        {1, "Population size parameter"},
+        {2, "Probability parameter"}}},
+      {"binomial_logit_lpmf",
+       {{0, "Successes variable"},
+        {1, "Population size parameter"},
+        {2, "Probability parameter"}}},
+      {"binomial_lpmf",
+       {{0, "Successes variable"},
+        {1, "Population size parameter"},
+        {2, "Probability parameter"}}},
+      {"cauchy_cdf",
+       {{0, "Random variable"},
+        {1, "Location parameter"},
+        {2, "Scale Parameter"}}},
+      {"cauchy_lccdf",
+       {{0, "Random variable"},
+        {1, "Location parameter"},
+        {2, "Scale Parameter"}}},
+      {"cauchy_lcdf",
+       {{0, "Random variable"},
+        {1, "Location parameter"},
+        {2, "Scale Parameter"}}},
+      {"cauchy_lpdf",
+       {{0, "Random variable"},
+        {1, "Location parameter"},
+        {2, "Scale parameter"}}},
+      {"chi_square_cdf",
+       {{0, "Random variable"}, {1, "Degrees of freedom parameter"}}},
+      {"chi_square_lccdf",
+       {{0, "Random variable"}, {1, "Degrees of freedom parameter"}}},
+      {"chi_square_lcdf",
+       {{0, "Random variable"}, {1, "Degrees of freedom parameter"}}},
+      {"chi_square_lpdf",
+       {{0, "Random variable"}, {1, "Degrees of freedom parameter"}}},
+      {"double_exponential_lccdf",
+       {{0, "Random variable"},
+        {1, "Location parameter"},
+        {2, "Scale Parameter"}}},
+      {"double_exponential_lcdf",
+       {{0, "Random variable"},
+        {1, "Location parameter"},
+        {2, "Scale Parameter"}}},
+      {"double_exponential_lpdf",
+       {{0, "Random variable"},
+        {1, "Location parameter"},
+        {2, "Shape parameter"}}},
+      {"exp_mod_normal_cdf",
+       {{0, "Random variable"},
+        {1, "Location parameter"},
+        {2, "Scale parameter"},
+        {3, "Inv_scale parameter"}}},
+      {"exp_mod_normal_lccdf",
+       {{0, "Random variable"},
+        {1, "Location parameter"},
+        {2, "Scale parameter"},
+        {3, "Inv_scale parameter"}}},
+      {"exp_mod_normal_lcdf",
+       {{0, "Random variable"},
+        {1, "Location parameter"},
+        {2, "Scale parameter"},
+        {3, "Inv_scale parameter"}}},
+      {"exp_mod_normal_lpdf",
+       {{0, "Random variable"},
+        {1, "Location parameter"},
+        {2, "Scale parameter"},
+        {3, "Inv_scale parameter"}}},
+      {"exponential_lpdf",
+       {{0, "Random variable"}, {1, "Inverse scale parameter"}}},
+      {"frechet_lpdf",
+       {{0, "Random variable"},
+        {1, "Shape parameter"},
+        {2, "Scale parameter"}}},
+      {"gamma_cdf",
+       {{0, "Random variable"},
+        {1, "Shape parameter"},
+        {2, "Inverse scale parameter"}}},
+      {"gamma_lccdf",
+       {{0, "Random variable"},
+        {1, "Shape parameter"},
+        {2, "Inverse scale parameter"}}},
+      {"gamma_lcdf",
+       {{0, "Random variable"},
+        {1, "Shape parameter"},
+        {2, "Inverse scale parameter"}}},
+      {"gamma_lpdf",
+       {{0, "Random variable"},
+        {1, "Shape parameter"},
+        {2, "Inverse scale parameter"}}},
+      {"gumbel_cdf",
+       {{0, "Random variable"},
+        {1, "Location parameter"},
+        {2, "Scale parameter"}}},
+      {"gumbel_lcdf",
+       {{0, "Random variable"},
+        {1, "Location parameter"},
+        {2, "Scale parameter"}}},
+      {"gumbel_lpdf",
+       {{0, "Random variable"},
+        {1, "Location parameter"},
+        {2, "Scale parameter"}}},
+      {"inv_chi_square_cdf",
+       {{0, "Random variable"}, {1, "Degrees of freedom parameter"}}},
+      {"inv_chi_square_lccdf",
+       {{0, "Random variable"}, {1, "Degrees of freedom parameter"}}},
+      {"inv_chi_square_lcdf",
+       {{0, "Random variable"}, {1, "Degrees of freedom parameter"}}},
+      {"inv_chi_square_lpdf",
+       {{0, "Random variable"}, {1, "Degrees of freedom parameter"}}},
+      {"inv_gamma_cdf",
+       {{0, "Random variable"},
+        {1, "Shape parameter"},
+        {2, "Scale Parameter"}}},
+      {"inv_gamma_lccdf",
+       {{0, "Random variable"},
+        {1, "Shape parameter"},
+        {2, "Scale Parameter"}}},
+      {"inv_gamma_lcdf",
+       {{0, "Random variable"},
+        {1, "Shape parameter"},
+        {2, "Scale Parameter"}}},
+      {"inv_gamma_lpdf",
+       {{0, "Random variable"},
+        {1, "Shape parameter"},
+        {2, "Scale parameter"}}},
+      {"logistic_cdf",
+       {{0, "Random variable"},
+        {1, "Location parameter"},
+        {2, "Scale parameter"}}},
+      {"logistic_lccdf",
+       {{0, "Random variable"},
+        {1, "Location parameter"},
+        {2, "Scale parameter"}}},
+      {"logistic_lcdf",
+       {{0, "Random variable"},
+        {1, "Location parameter"},
+        {2, "Scale parameter"}}},
+      {"logistic_lpdf",
+       {{0, "Random variable"},
+        {1, "Location parameter"},
+        {2, "Scale parameter"}}},
+      {"loglogistic_cdf",
+       {{0, "Random variable"},
+        {1, "Scale parameter"},
+        {2, "Shape parameter"}}},
+      {"loglogistic_lpdf",
+       {{0, "Random variable"},
+        {1, "Scale parameter"},
+        {2, "Shape parameter"}}},
+      {"lognormal_lpdf",
+       {{0, "Random variable"},
+        {1, "Location parameter"},
+        {2, "Scale parameter"}}},
+      {"neg_binomial_2_cdf",
+       {{0, "Random variable"},
+        {1, "Location parameter"},
+        {2, "Precision Parameter"}}},
+      {"neg_binomial_2_lccdf",
+       {{0, "Random variable"},
+        {1, "Location parameter"},
+        {2, "Precision Parameter"}}},
+      {"neg_binomial_2_lcdf",
+       {{0, "Random variable"},
+        {1, "Location parameter"},
+        {2, "Precision Parameter"}}},
+      {"neg_binomial_2_log_lpmf",
+       {{0, "Failures variable"},
+        {1, "Log location parameter"},
+        {2, "Precision parameter"}}},
+      {"neg_binomial_2_lpmf",
+       {{0, "Failures variable"},
+        {1, "Location parameter"},
+        {2, "Precision parameter"}}},
+      {"neg_binomial_cdf",
+       {{0, "Failures variable"},
+        {1, "Shape parameter"},
+        {2, "Inverse scale parameter"}}},
+      {"neg_binomial_lccdf",
+       {{0, "Failures variable"},
+        {1, "Shape parameter"},
+        {2, "Inverse scale parameter"}}},
+      {"neg_binomial_lcdf",
+       {{0, "Failures variable"},
+        {1, "Shape parameter"},
+        {2, "Inverse scale parameter"}}},
+      {"neg_binomial_lpmf",
+       {{0, "Failures variable"},
+        {1, "Shape parameter"},
+        {2, "Inverse scale parameter"}}},
+      {"normal_cdf",
+       {{0, "Random variable"},
+        {1, "Location parameter"},
+        {2, "Scale parameter"}}},
+      {"normal_lcdf",
+       {{0, "Random variable"},
+        {1, "Location parameter"},
+        {2, "Scale parameter"}}},
+      {"normal_lpdf",
+       {{0, "Random variable"},
+        {1, "Location parameter"},
+        {2, "Scale parameter"}}},
+      {"ordered_logistic_lpmf", {{0, "Integers"}, {1, "Locations"}}},
+      {"ordered_probit_lpmf", {{0, "Integers"}, {1, "Locations"}}},
+      {"pareto_cdf",
+       {{0, "Random variable"},
+        {1, "Scale parameter"},
+        {2, "Shape parameter"}}},
+      {"pareto_lccdf",
+       {{0, "Random variable"},
+        {1, "Scale parameter"},
+        {2, "Shape parameter"}}},
+      {"pareto_lcdf",
+       {{0, "Random variable"},
+        {1, "Scale parameter"},
+        {2, "Shape parameter"}}},
+      {"pareto_lpdf",
+       {{0, "Random variable"},
+        {1, "Scale parameter"},
+        {2, "Shape parameter"}}},
+      {"pareto_type_2_cdf",
+       {{0, "Random variable"},
+        {1, "Location parameter"},
+        {2, "Scale parameter"},
+        {3, "Shape parameter"}}},
+      {"pareto_type_2_lccdf",
+       {{0, "Random variable"},
+        {1, "Location parameter"},
+        {2, "Scale parameter"},
+        {3, "Shape parameter"}}},
+      {"pareto_type_2_lcdf",
+       {{0, "Random variable"},
+        {1, "Location parameter"},
+        {2, "Scale parameter"},
+        {3, "Shape parameter"}}},
+      {"pareto_type_2_lpdf",
+       {{0, "Random variable"},
+        {1, "Location parameter"},
+        {2, "Scale parameter"},
+        {3, "Shape parameter"}}},
+      {"poisson_cdf", {{0, "Random variable"}, {1, "Rate parameter"}}},
+      {"poisson_lccdf", {{0, "Random variable"}, {1, "Rate parameter"}}},
+      {"poisson_lcdf", {{0, "Random variable"}, {1, "Rate parameter"}}},
+      {"poisson_log_lpmf", {{0, "Random variable"}, {1, "Log rate parameter"}}},
+      {"poisson_lpmf", {{0, "Random variable"}, {1, "Rate parameter"}}},
+      {"rayleigh_cdf", {{0, "Random variable"}, {1, "Scale parameter"}}},
+      {"rayleigh_lccdf", {{0, "Random variable"}, {1, "Scale parameter"}}},
+      {"rayleigh_lcdf", {{0, "Random variable"}, {1, "Scale parameter"}}},
+      {"rayleigh_lpdf", {{0, "Random variable"}, {1, "Scale parameter"}}},
+      {"scaled_inv_chi_square_cdf",
+       {{0, "Random variable"},
+        {1, "Degrees of freedom parameter"},
+        {2, "Scale parameter"}}},
+      {"scaled_inv_chi_square_lccdf",
+       {{0, "Random variable"},
+        {1, "Degrees of freedom parameter"},
+        {2, "Scale parameter"}}},
+      {"scaled_inv_chi_square_lcdf",
+       {{0, "Random variable"},
+        {1, "Degrees of freedom parameter"},
+        {2, "Scale parameter"}}},
+      {"scaled_inv_chi_square_lpdf",
+       {{0, "Random variable"},
+        {1, "Degrees of freedom parameter"},
+        {2, "Scale parameter"}}},
+      {"skew_double_exponential_cdf",
+       {{0, "Random variable"},
+        {1, "Location parameter"},
+        {2, "Shape parameter"},
+        {3, "Skewness parameter"}}},
+      {"skew_double_exponential_lccdf",
+       {{0, "Random variable"},
+        {1, "Location parameter"},
+        {2, "Shape parameter"},
+        {3, "Skewness parameter"}}},
+      {"skew_double_exponential_lcdf",
+       {{0, "Random variable"},
+        {1, "Location parameter"},
+        {2, "Shape parameter"},
+        {3, "Skewness parameter"}}},
+      {"skew_double_exponential_lpdf",
+       {{0, "Random variable"},
+        {1, "Location parameter"},
+        {2, "Shape parameter"},
+        {3, "Skewness parameter"}}},
+      {"skew_normal_cdf",
+       {{0, "Random variable"},
+        {1, "Location parameter"},
+        {2, "Scale parameter"},
+        {3, "Shape parameter"}}},
+      {"skew_normal_lccdf",
+       {{0, "Random variable"},
+        {1, "Location parameter"},
+        {2, "Scale parameter"},
+        {3, "Shape parameter"}}},
+      {"skew_normal_lcdf",
+       {{0, "Random variable"},
+        {1, "Location parameter"},
+        {2, "Scale parameter"},
+        {3, "Shape parameter"}}},
+      {"skew_normal_lpdf",
+       {{0, "Random variable"},
+        {1, "Location parameter"},
+        {2, "Scale parameter"},
+        {3, "Shape parameter"}}},
+      {"student_t_lpdf",
+       {{0, "Random variable"},
+        {1, "Degrees of freedom parameter"},
+        {2, "Location parameter"},
+        {3, "Scale parameter"}}},
+      {"uniform_cdf",
+       {{0, "Random variable"},
+        {1, "Lower bound parameter"},
+        {2, "Upper bound parameter"}}},
+      {"uniform_lccdf",
+       {{0, "Random variable"},
+        {1, "Lower bound parameter"},
+        {2, "Upper bound parameter"}}},
+      {"uniform_lcdf",
+       {{0, "Random variable"},
+        {1, "Lower bound parameter"},
+        {2, "Upper bound parameter"}}},
+      {"uniform_lpdf",
+       {{0, "Random variable"},
+        {1, "Lower bound parameter"},
+        {2, "Upper bound parameter"}}},
+      {"von_mises_cdf",
+       {{0, "Random variable"},
+        {1, "Location parameter"},
+        {2, "Scale parameter"}}},
+      {"von_mises_lccdf",
+       {{0, "Random variable"},
+        {1, "Location parameter"},
+        {2, "Scale parameter"}}},
+      {"von_mises_lcdf",
+       {{0, "Random variable"},
+        {1, "Location parameter"},
+        {2, "Scale parameter"}}},
+      {"von_mises_lpdf",
+       {{0, "Random variable"},
+        {1, "Location parameter"},
+        {2, "Scale parameter"}}},
+      {"weibull_lpdf",
+       {{0, "Random variable"},
+        {1, "Shape parameter"},
+        {2, "Scale parameter"}}},
+      {"wiener_lpdf",
+       {{0, "Random variable"},
+        {1, "Boundary separation"},
+        {3, "A-priori bias"},
+        {2, "Nondecision time"},
+        {4, "Drift rate"}}},
+      {"yule_simon_cdf", {{0, "Outcome variable"}, {1, "Shape parameter"}}},
+      {"yule_simon_lccdf", {{0, "Outcome variable"}, {1, "Shape parameter"}}},
+      {"yule_simon_lcdf", {{0, "Outcome variable"}, {1, "Shape parameter"}}},
+      {"yule_simon_lpmf", {{0, "Failures variable"}, {1, "Shape parameter"}}},
+  };
+  for (const DensitySizeCheck& check : checks)
+    if (function == check.function) return &check;
+  return nullptr;
+}
+
 const DensitySpec& multinomial_softmax_density() {
   static const DensitySpec spec{OP_MULTINOMIAL_SOFTMAX_LPMF, 2, 1, false,
                                 DensityShape::Plain};
@@ -153,6 +606,66 @@ double evaluate_packed_all_integer_density(AllIntegerDensity density,
     arguments.push_back({{g.values, g.values + g.count}, g.scalar});
   }
   return evaluate_all_integer(density, arguments, propto);
+}
+
+// Stan Math's check_consistent_sizes over the arguments that the density's
+// function names: the first container sets the size, and the first container
+// of another size is the error. The kernels bind a one-element argument as a
+// scalar, so this check is the only place where it is still a container.
+void check_consistent_density_sizes(
+    const DensitySpec& spec,
+    const std::vector<DensityCallArgument>& arguments) {
+  const DensitySizeCheck& check = *spec.size_check;
+  const DensitySizeName* first = nullptr;
+  size_t first_size = 0;
+  for (const DensitySizeName& named : check.arguments) {
+    const DensityCallArgument& argument = arguments.at(named.argument);
+    const bool integer = named.argument < spec.integer_args;
+    if (integer ? argument.scalar
+                : argument.shape.container == FunctionContainerKind::Scalar)
+      continue;
+    const size_t size = integer
+                            ? argument.integers.size()
+                            : static_cast<size_t>(argument.shape.storage_size);
+    if (first == nullptr) {
+      first = &named;
+      first_size = size;
+      continue;
+    }
+    if (size == first_size) continue;
+    try {
+      stan::math::check_consistent_sizes(check.function, first->name,
+                                         std::vector<double>(first_size),
+                                         named.name, std::vector<double>(size));
+    } catch (const std::invalid_argument& error) {
+      const std::string prefix = std::string(check.function) + ": ";
+      std::string message = error.what();
+      if (message.compare(0, prefix.size(), prefix) == 0)
+        message.erase(0, prefix.size());
+      throw DensitySizeError(message);
+    }
+  }
+}
+
+// Stan Math's check_consistent_size for a GLM argument that may be a scalar
+// or one value per instance.
+void check_glm_argument_size(const char* function, const char* name,
+                             const DensityArgumentShape& shape,
+                             int64_t instances) {
+  if (shape.container == FunctionContainerKind::Scalar ||
+      shape.storage_size == instances)
+    return;
+  try {
+    stan::math::check_consistent_size(function, name,
+                                      Eigen::VectorXd(shape.storage_size),
+                                      static_cast<size_t>(instances));
+  } catch (const std::invalid_argument& error) {
+    const std::string prefix = std::string(function) + ": ";
+    std::string message = error.what();
+    if (message.compare(0, prefix.size(), prefix) == 0)
+      message.erase(0, prefix.size());
+    throw DensitySizeError(message);
+  }
 }
 
 // multi_normal, multi_normal_cholesky and multi_normal_prec compare the
@@ -276,6 +789,9 @@ DensityCallPlan density_call_plan(
     plan.variant = AllIntegerMode{spec.all_integer, propto}.byte();
     return plan;
   }
+
+  if (spec.size_check != nullptr)
+    check_consistent_density_sizes(spec, arguments);
 
   std::vector<std::vector<int>> integer_groups;
   int glm_flags = 0;
@@ -421,6 +937,42 @@ DensityCallPlan density_call_plan(
     } else if (spec.integer_args == 1 &&
                static_cast<int64_t>(plan.idata.size()) != instances) {
       throw std::invalid_argument("density outcome does not match matrix rows");
+    }
+    // The intercept, and normal_id_glm's scale, is a scalar or one value per
+    // instance. The kernels read a one-element vector as a shared scalar, so
+    // the check Stan Math makes on it happens here.
+    const char* glm_function =
+        spec.opcode == OP_POISSON_LOG_GLM_LPMF ? "poisson_log_glm_lpmf"
+        : spec.opcode == OP_BERNOULLI_LOGIT_GLM_LPMF
+            ? "bernoulli_logit_glm_lpmf"
+        : spec.opcode == OP_NEG_BINOMIAL_2_LOG_GLM_LPMF
+            ? "neg_binomial_2_log_glm_lpmf"
+        : spec.opcode == OP_BINOMIAL_LOGIT_GLM_LPMF ? "binomial_logit_glm_lpmf"
+        : spec.opcode == OP_NORMAL_ID_GLM_LPDF      ? "normal_id_glm_lpdf"
+                                                    : nullptr;
+    if (glm_function != nullptr) {
+      const size_t alpha = spec.glm_matrix_arg + 1u;
+      int64_t expected = instances;
+      if (spec.opcode == OP_NORMAL_ID_GLM_LPDF &&
+          (glm_flags & kGlmRowVectorDesign) != 0)
+        expected = real_shapes[0].container == FunctionContainerKind::Scalar
+                       ? 1
+                       : real_shapes[0].storage_size;
+      // binomial_logit_glm takes the instance count from all of n, N, x
+      // and alpha.
+      if (spec.opcode == OP_BINOMIAL_LOGIT_GLM_LPMF) {
+        expected = rows;
+        for (size_t k = 0; k < 2; ++k)
+          expected = std::max(
+              expected, static_cast<int64_t>(arguments[k].integers.size()));
+        if (real_shapes[alpha].container != FunctionContainerKind::Scalar)
+          expected = std::max(expected, real_shapes[alpha].storage_size);
+      }
+      if (spec.opcode == OP_NORMAL_ID_GLM_LPDF)
+        check_glm_argument_size(glm_function, "Vector of scale parameters",
+                                real_shapes[alpha + 2], expected);
+      check_glm_argument_size(glm_function, "Vector of intercepts",
+                              real_shapes[alpha], expected);
     }
     // normal_id_glm has no integer outcomes; its row_vector design is the
     // same flag.

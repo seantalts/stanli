@@ -888,6 +888,9 @@ class MirInterp {
     DensityCallPlan plan;
     try {
       plan = density_call_plan(spec, plan_arguments, propto(e));
+    } catch (const DensitySizeError& error) {
+      reject(MessageError::InvalidArgument, e.name + ": " + error.what(),
+             e.raw);
     } catch (const std::exception& error) {
       fail_builtin(e.name, error, e.raw);
     }

@@ -2953,6 +2953,14 @@ struct ProgramCompiler {
       Range out{0, 1};
       return kernel_call(spec.opcode, args, out, plan.variant,
                          plan.activity_mask, plan.idata, {}, e.name);
+    } catch (const DensitySizeError& error) {
+      // Stan rejects the call when it runs, so the program rejects there too.
+      Program::Message message;
+      message.spec.chunks = {e.name + ": " + error.what()};
+      message.spec.error = MessageError::InvalidArgument;
+      p.messages.push_back(std::move(message));
+      emit(Program::REJECT, 0, (int)p.messages.size() - 1);
+      return {konst(0.0), 1};
     } catch (const std::exception& error) {
       bail(builtin_error_message(e.name, error));
     }
