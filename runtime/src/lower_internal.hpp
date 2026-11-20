@@ -31,6 +31,7 @@
 #include <stanli/quadrature.hpp>
 #include <stanli/reroll.hpp>
 #include <stanli/builtin_registry.hpp>
+#include "lower_work.hpp"
 #include <stanli/structured_check.hpp>
 #include <stanli/wa_interp.hpp>
 
@@ -84,6 +85,7 @@ struct PrepTrace {
     Regions,
     Truncated,
     MirBytes,
+    Work,
   };
 
   struct Row {
@@ -120,6 +122,21 @@ struct PrepTrace {
   }
 
   bool enabled() const { return enabled_; }
+
+  // Counts of lowering work that do not depend on the clock, for tests that
+  // check how preparation grows with the size of a model. Trial lowerings
+  // share their parent's trace, so their work is counted too.
+  int64_t lowered_statements = 0;
+  int64_t copied_data_bytes = 0;
+  void work(const char* graph) {
+    if (!enabled_) return;
+    Row& r = next();
+    r.graph = graph;
+    r.stage = "lower_work";
+    r.extra = Extra::Work;
+    r.a = lowered_statements;
+    r.b = copied_data_bytes;
+  }
 
   Time start() const { return enabled_ ? Clock::now() : Time{}; }
 
@@ -240,6 +257,10 @@ struct PrepTrace {
           break;
         case Extra::MirBytes:
           field("mir_bytes", r.a);
+          break;
+        case Extra::Work:
+          field("statements", r.a);
+          field("copied_data_bytes", r.b);
           break;
         case Extra::None:
           break;
@@ -2357,6 +2378,10 @@ struct Lowering {
   // before first binding.
   std::map<std::string, DeclView> decls;
 
+  void count_data_copy(const std::map<std::string, DataMap::Entry>& env) {
+    if (prep.enabled())
+      prep.copied_data_bytes += static_cast<int64_t>(data_payload_bytes(env));
+  }
   std::vector<std::pair<std::string, std::optional<DataMap::Entry>>> td_journal;
   void td_erase(const std::string& name) {
     auto it = td.env().find(name);
@@ -2547,6 +2572,7 @@ struct Lowering {
 #include "lower_structured_loop.inc"
 
   Flow lower_stmt(const mir::Stmt& s) {
+    ++prep.lowered_statements;
     if (bounded_specialization &&
         ++specialization_steps > specialization_step_limit)
       throw SpecializationRefused{};
