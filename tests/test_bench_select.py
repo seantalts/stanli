@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Selection of the corpus models that a compiler-pipeline change must time."""
+import csv
 import pathlib
 import sys
 import unittest
@@ -102,6 +103,33 @@ class PreparationTests(unittest.TestCase):
         self.assertTrue(select.prep_regressed(0.010, 0.0151))
         self.assertFalse(select.prep_regressed(1.0, 1.019))
         self.assertTrue(select.prep_regressed(1.0, 1.021))
+
+
+SUMMARY = REPO / "output/corpus-performance/benchmark-summary.tsv"
+MAX_SPREAD = 0.015
+
+
+def relative_spread(summary):
+    with open(summary, newline="") as stream:
+        return {row["model"]: float(row["paired_speedup_mad"]) / float(row["paired_speedup"])
+                for row in csv.DictReader(stream, delimiter="\t") if row["paired_speedup"]}
+
+
+class ControlTests(unittest.TestCase):
+    def test_the_control_set_is_pinned(self):
+        self.assertEqual(select.CONTROLS, (
+            "i319_pois_re", "sw_ar", "eight_schools_noncentered", "hmm_example",
+            "one_comp_mm_elim_abs", "gpcm_latent_reg_irt", "cm_lba2",
+            "mlumr_survival_mspline_relaxed", "hierarchical_gp", "kronecker_gp",
+            "oncobayes2_blrm_exnex_combo3"))
+
+    def test_every_control_is_quiet_in_the_published_run(self):
+        if not SUMMARY.exists():
+            self.skipTest("no published corpus run")
+        spread = relative_spread(SUMMARY)
+        for name in select.CONTROLS:
+            self.assertIn(name, spread)
+            self.assertLessEqual(spread[name], MAX_SPREAD, name)
 
 
 class SelectionTests(unittest.TestCase):
