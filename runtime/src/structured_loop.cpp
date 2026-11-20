@@ -1,3 +1,4 @@
+#include <stanli/builtin_registry.hpp>
 #include <stanli/debug_switch.hpp>
 #include <stanli/structured_loop.hpp>
 #include <stanli/message_sink.hpp>
@@ -754,6 +755,16 @@ IndexRuntime validate_index(const DynamicIndexSpec& p, const KernelCtx& c,
         (axis.kind == DynamicIndexSpec::Axis::Single && axis.count != 1) ||
         (axis.kind == DynamicIndexSpec::Axis::All && axis.count != axis.extent))
       index_fault("invalid structured index shape");
+    if (axis.kind == DynamicIndexSpec::Axis::Range && axis.upfrom) {
+      const double lo = selector->data[axis.input_offset];
+      if (!std::isfinite(lo) || std::trunc(lo) != lo ||
+          std::fabs(lo) > std::numeric_limits<int32_t>::max() ||
+          !resolve_range_selector(
+               axis.array_axis ? SelectorSite::Array : SelectorSite::Vector,
+               logical_extent, static_cast<int64_t>(lo), std::nullopt)
+               .ok())
+        index_out_of_range();
+    }
     // Validate selectors even when a different axis makes the result empty.
     if (axis.kind == DynamicIndexSpec::Axis::All ||
         (axis.kind == DynamicIndexSpec::Axis::Range && count == 0))

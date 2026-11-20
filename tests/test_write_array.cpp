@@ -4326,8 +4326,14 @@ void test_gq_reduction_lowering_guards() {
       } catch (const std::exception&) {
       }
     };
-    expect_invalid_range(0, 1, "out of bounds", "low OOB range assignment");
-    expect_invalid_range(5, 6, "out of bounds", "high OOB range assignment");
+    expect_invalid_range(0, 1,
+                         "array[multi, ...] assign: accessing element out of "
+                         "range. index 0 out of range",
+                         "low OOB range assignment");
+    expect_invalid_range(5, 6,
+                         "array[multi, ...] assign: accessing element out of "
+                         "range. index 6 out of range",
+                         "high OOB range assignment");
     expect_invalid_range(4, 4, "width mismatch",
                          "range assignment RHS width mismatch");
 
@@ -4341,8 +4347,11 @@ void test_gq_reduction_lowering_guards() {
     } else {
       matrix_rows.replace(lhs_z, std::string("(LVariable z)").size(),
                           "(LVariable partial_matrix)");
-      expect_reduction_interp(matrix_rows, "out of bounds",
-                              "out-of-bounds row-range assignment falls back");
+      expect_reduction_interp(
+          matrix_rows,
+          "array[multi, ...] assign: accessing element out of range. index 4 "
+          "out of range",
+          "out-of-bounds row-range assignment falls back");
     }
   }
 }

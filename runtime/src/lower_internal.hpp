@@ -1165,35 +1165,21 @@ struct Lowering {
       reject(MessageError::OutOfRange,
              index_out_of_range_message(stan_label, n, i), raw);
   }
-  // A range with hi < lo is empty and never reads, whatever the endpoints.
-  void check_range(int64_t lo, int64_t hi, int64_t n, const char* what,
-                   const std::string& raw) {
-    if (hi >= lo && (lo < 1 || hi > n))
-      fail(std::string(what) + ": range [" + std::to_string(lo) + ", " +
-               std::to_string(hi) + "] out of bounds for size " +
-               std::to_string(n),
-           raw);
-  }
-  struct StaticRange {
-    int64_t lo, hi;
-  };
   static bool is_range(const mir::Expr& ix) {
     return ix.kind == mir::Expr::IndexBetween ||
            ix.kind == mir::Expr::IndexUpfrom;
   }
-  std::optional<StaticRange> static_range(const mir::Expr& ix, int64_t extent) {
-    if (ix.kind == mir::Expr::IndexBetween)
-      return StaticRange{eval_int(ix.args[0]), eval_int(ix.args[1])};
-    if (ix.kind == mir::Expr::IndexUpfrom)
-      return StaticRange{eval_int(ix.args[0]), extent};
-    if (ix.kind == mir::Expr::IndexAll) return StaticRange{1, extent};
-    return std::nullopt;
-  }
+  // A range selector (or `:`) over bind-time constants, resolved by Stan's
+  // rule for its site, with Stan's error when the selection runs.
+  RangeSelection range_selection(const mir::Expr& ix, int64_t extent,
+                                 SelectorSite site, const std::string& raw,
+                                 bool assign = false);
   // Every index the lowering sees is a bind-time constant, so what CmdStan
   // bounds-checks at runtime is checked here instead.
   std::vector<int64_t> index_positions(const mir::Expr& ix, int64_t extent,
-                                       const char* what,
-                                       const std::string& raw);
+                                       SelectorSite site, const char* what,
+                                       const std::string& raw,
+                                       bool assign = false);
 
   int const_slot(double v) {
     uint64_t bits;

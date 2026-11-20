@@ -1357,6 +1357,9 @@ Val region_index(const Val& base, const std::vector<mir::Expr>& selectors,
         fail("structured slice needs a fixed lower bound and finite capacity");
       axis.kind = DynamicIndexSpec::Axis::Range;
       axis.count = std::max<int64_t>(0, dims[d] - lo->lo + 1);
+      axis.upfrom = true;
+      axis.array_axis =
+          is_array(base.si) && d + (size_t)leaf_rank(leaf) < dims.size();
       Val lower = lower_expr(ix->args[0]);
       index_offsets.push_back(index_width);
       indices.push_back(lower);

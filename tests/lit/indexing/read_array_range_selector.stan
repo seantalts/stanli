@@ -1,5 +1,5 @@
 // STANLI-LIT: PASS
-// STANLI-LIT-EXPECT: COMPILE_FAIL array[..., ...] index: accessing element out of range. index 6 out of range; expecting index to be between 1 and 3
+// STANLI-LIT-EXPECT: COMPILE_FAIL array[..., ...] index: accessing element out of range. index 4 out of range; expecting index to be between 1 and 3
 // STANLI-LIT-DATA: {"K": 6}
 data {
   int K;
