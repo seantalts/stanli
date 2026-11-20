@@ -63,6 +63,19 @@ log density and every gradient component, because some near-zero gradient
 lanes vary with container instantiation and compiler optimization. The policy
 is in [TESTING.md](../TESTING.md#numerical-policy).
 
+Two differences in the numbers are known and expected. The first is between
+platforms. On arm64, Eigen's vectorized kernels use fused multiply-add
+instructions, and the default x86-64 build does not use them, so the two
+platforms can differ by a few ULP in matrix products, reductions and vectorized
+`exp` and `log`. The cause is in Eigen, which CmdStan also uses, so a CmdStan
+reference that one platform recorded can differ from stanli on the other.
+[TESTING.md](../TESTING.md#numerical-policy) describes how the matrix product
+case is handled. The second is between stanli and Stan Math. In the graph kernel
+for `logit`, stanli divides the incoming adjoint by `x * (1 - x)` where Stan
+Math multiplies it by `1 / (x - x * x)`. Near `x = 1` the second form loses
+digits to cancellation. Against exact arithmetic stanli is within one ULP at
+`x = 0.999`, and Stan Math is about 250 ULP away.
+
 Under `~`, stanli drops the same data-only terms as CmdStan; see
 [lp__ and dropped constants](lp-constant.md).
 
