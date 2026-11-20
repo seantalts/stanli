@@ -74,10 +74,10 @@ def check_repaired_gaussian(A):
     want = (V * np.maximum(np.abs(w), 1e-8 * np.abs(w).max())) @ V.T
     assert rep.n_clipped == int((w < 0).sum()) and rep.rank == rep.n_clipped
     assert any("absolute" in str(c.message) for c in caught)
-    assert np.abs(rep.precision - want).max() <= 1e-6 * np.abs(want).max(), \
+    assert np.abs(rep.precision - want).max() <= 1e-10 * np.abs(want).max(), \
         np.abs(rep.precision - want).max()
     _, _, h = wh.log_prob_hessian(np.zeros(n))
-    assert np.abs(h @ h - np.eye(n)).max() <= 1e-5, np.abs(h @ h - np.eye(n)).max()
+    assert np.abs(h @ h - np.eye(n)).max() <= 1e-10, np.abs(h @ h - np.eye(n)).max()
     assert int((np.linalg.eigvalsh(-h) < 0).sum()) == rep.n_clipped
 
 

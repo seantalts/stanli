@@ -9,11 +9,11 @@
  * compilation at a time by itself). One handle is NOT safe for concurrent
  * use. A call that evaluates the model (stanli_grad, stanli_grad_err,
  * stanli_hessian*, stanli_constrain, stanli_wa_row, stanli_wa_seed*,
- * stanli_unconstrain_inits, the samplers, optimize and the other
- * algorithms) uses the handle's own executors and its stanli_wa_seed
- * stream, so at most one such call may run on a handle at a time, and none
- * while stanli_model_free runs. Calls that only read what construction
- * fixed (counts, names, variables, layouts, warnings, messages,
+ * stanli_unconstrain_inits, the samplers, optimize, stanli_laplace_whiten
+ * and the other algorithms) uses the handle's own executors and its
+ * stanli_wa_seed stream, so at most one such call may run on a handle at a
+ * time, and none while stanli_model_free runs. Calls that only read what
+ * construction fixed (counts, names, variables, layouts, warnings, messages,
  * stanli_resume_size) may run at any time while the handle lives. A call's
  * callbacks (progress, poll, log) run on the calling thread during the call
  * and must not evaluate the same handle. A sampling call runs its chains on

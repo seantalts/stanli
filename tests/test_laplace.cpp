@@ -820,6 +820,37 @@ void test_probe_and_dense_patterns_give_the_same_whitening() {
   expect_true("outer evaluations counted", c.outer_evaluations > 0);
 }
 
+// A gradient whose first call (the probe's gradient at the start) is not
+// finite makes the probe give up; the builder then warns and takes the dense
+// pattern, at 1 + 2n more gradients.
+void test_failed_probe_falls_back_to_the_dense_pattern() {
+  const auto h = hierarchical(14, 10, 5);
+  const auto m = model(h, 17);
+  const auto base = m.gradient();
+  bool first = true;
+  Gradient grad([&](const VectorXd& q, VectorXd& g) {
+    const double lp = base(q, g);
+    if (first) g[3] = std::numeric_limits<double>::quiet_NaN();
+    first = false;
+    return lp;
+  });
+  stanli::laplace::Options o;
+  const auto r = stanli::laplace::whiten(grad, m.hessian(), VectorXd::Zero(17),
+                                         range(2, 16), o);
+  stanli::laplace::Options dense = o;
+  dense.dense_pattern = true;
+  const auto d = build(m, VectorXd::Zero(17), range(2, 16), dense, nullptr);
+  expect_true("the failed probe is reported", r.pattern_fallback);
+  bool warned = false;
+  for (const auto& w : r.warnings)
+    warned = warned || w.find("dense Hessian pattern") != std::string::npos;
+  expect_true("and warned about", warned);
+  expect_true("the probe's one gradient plus the dense Hessian's",
+              r.pattern_gradients == 1 + (1 + 2 * 17));
+  expect_true("the fallback gives the dense pattern's result",
+              r.q_hat == d.q_hat && r.values == d.values);
+}
+
 void test_saddle_repairs() {
   const auto m = model(Saddles{1}, 2);
   stanli::laplace::Options abs_o, dense_o, clip_o;
@@ -922,6 +953,7 @@ int main() {
   test_gaussian_marginal_mode_and_precision();
   test_hierarchical_marginal_mode_is_a_maximum();
   test_probe_and_dense_patterns_give_the_same_whitening();
+  test_failed_probe_falls_back_to_the_dense_pattern();
   test_saddle_repairs();
   test_many_saddles_lanczos_repair_matches_dense();
   test_all_latent_has_no_hyperparameters();
