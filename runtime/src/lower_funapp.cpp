@@ -1883,16 +1883,35 @@ std::optional<Lowering::Val> Lowering::lower_eltwise_fn(
         return with_layout(result, elementwise_layout({a, b}));
       }
     }
-    // Stan's scalar pow(var, data) overload dispatches these exponents to
-    // the corresponding unary function. Preserve that arithmetic (and its
-    // derivative grouping) before an island or reroll can erase the static
-    // argument types. This is overload selection, not an algebraic rewrite.
+    // Stan's pow(var, data) overloads, scalar and container, dispatch these
+    // exponents to the corresponding unary function. Preserve that
+    // arithmetic (and its derivative grouping) before an island or reroll
+    // can erase the static argument types. This is overload selection, not
+    // an algebraic rewrite.
     if (builtin->opcode == OP_POW && a.autodiff && !b.autodiff &&
-        mir::language_scalar(e.args[0]) && mir::language_scalar(e.args[1])) {
+        mir::language_scalar(e.args[1])) {
+      std::optional<double> known;
       if (const auto* exponent = observation(b);
-          exponent && exponent->r.size() == 1) {
-        const double power = exponent->r[0];
+          exponent && exponent->r.size() == 1)
+        known = exponent->r[0];
+      else if (const auto exponent = needs_runtime_value(e.args[1])
+                                         ? std::nullopt
+                                         : try_eval_pure(e.args[1]);
+               exponent && exponent->r.size() == 1)
+        known = exponent->r[0];
+      if (known) {
+        const double power = *known;
         if (power == 1.0) return a;
+        // inv_square of an Eigen container of var is inv(square(x)), two
+        // nodes, where the scalar and std::vector forms have one.
+        if (power == -2.0 && mir::eigen_leaf(e.args[0]) &&
+            e.args[0].unsized.depth == 0) {
+          const Val squared =
+              with_layout(emit_value(OP_SQUARE, {a}, layout.lanes, si),
+                          elementwise_layout({a}));
+          return with_layout(emit_value(OP_INV, {squared}, layout.lanes, si),
+                             elementwise_layout({squared}));
+        }
         const uint16_t unary = power == 0.5    ? OP_SQRT
                                : power == 2.0  ? OP_SQUARE
                                : power == -2.0 ? OP_INV_SQUARE

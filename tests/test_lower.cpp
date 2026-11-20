@@ -4731,6 +4731,40 @@ int main() {
     stan::math::recover_memory();
   }
 
+  // pow(vector, data) takes Stan Math's container overload, which hands the
+  // exponents 2, 0.5, -1, -2, -0.5 and 1 to square, sqrt, inv, inv_square,
+  // inv_sqrt and the identity; pow(real, data) does the same per value.
+  {
+    DataMap d =
+        DataMap::from_json(slurp("tests/fixtures/pow_data_exponent.json"));
+    CompiledModel lm =
+        compile_model(slurp("tests/fixtures/pow_data_exponent.tmir.sexp"), d);
+    Executor lex(std::move(lm.graph));
+    lm.bind(lex);
+    const double q[6] = {0.3, 1.7, 0.011, 2.9, 0.77, 1.3};
+    for (int k = 0; k < 6; ++k) lex.params_data()[k] = q[k];
+    double grad[6];
+    const double lp = lex.gradient(grad);
+
+    using stan::math::var;
+    Eigen::Matrix<var, -1, 1> x(5);
+    for (int k = 0; k < 5; ++k) x(k) = q[k];
+    var t = q[5];
+    var acc = stan::math::sum(stan::math::pow(x, 2)) +
+              stan::math::sum(stan::math::pow(x, 0.5)) +
+              stan::math::sum(stan::math::pow(x, -1)) +
+              stan::math::sum(stan::math::pow(x, -2.0)) +
+              stan::math::sum(stan::math::pow(x, -0.5)) +
+              stan::math::sum(stan::math::pow(x, 1));
+    for (double e : {1.0, 3.0, 2.0, 0.5}) acc += stan::math::pow(t, e);
+    acc.grad();
+    expect_eq("pow data exponent lp", lp, acc.val());
+    for (int k = 0; k < 5; ++k)
+      expect_eq("pow data exponent g" + std::to_string(k), grad[k], x(k).adj());
+    expect_eq("pow data exponent gt", grad[5], t.adj());
+    stan::math::recover_memory();
+  }
+
   // gp_exp_quad_cov with a parameter x: the lowering used to refuse a
   // non-data first argument. gp_cov_bwd now rebuilds the points from the
   // promoted input, so x's adjoints propagate. Check every gradient
