@@ -18,8 +18,8 @@ namespace stanli {
 
 using Fills = std::vector<std::pair<int, std::vector<double>>>;
 
-// The lane-fusing passes' shared currencies (island.cpp's dispatch cost
-// against its per-element cost): ~5 ns per graph op eliminated, against
+// The lane-fusing passes' shared currencies, whose dispatch cost the island
+// carver also uses: ~5 ns per graph op eliminated, against
 // ~1 ns per element a slice or gather copies or scatters, and ~6 op
 // dispatches to evaluate one density element. A fused region must beat
 // its unpacked cost by more than a rounding error, or it churns the graph
