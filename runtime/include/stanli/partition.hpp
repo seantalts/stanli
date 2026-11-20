@@ -6,6 +6,7 @@
 #define STANLI_PARTITION_HPP
 
 #include <stanli/graph.hpp>
+#include <stanli/lane_decline.hpp>
 
 #include <cstdint>
 #include <utility>
@@ -27,6 +28,8 @@ struct PartitionStats {
                                   //   re-roll quadratic on ldaK5
   int64_t term_steps = 0;         // target-term entries read while swapping
                                   //   a bucket's terms for its replacement
+  // One entry per group of matching lanes left unfused.
+  std::vector<LaneDeclineRecord> declines;
 };
 
 // In place, after re-roll and its in-place re-run, before the island carver.

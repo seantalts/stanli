@@ -511,6 +511,8 @@ static void test_duplicate_lanes_decline() {
   Fills f2 = fills;
   const PartitionStats st = partition_lanes(g, f2, tt, {});
   expect("duplicate lanes decline", st.groups == 0 && st.declined == 1);
+  expect("duplicate lanes name the cost model",
+         st.declines.size() == 1 && st.declines[0].why == LaneDecline::kCost);
   expect("duplicate graph unchanged", g.ops.size() == before && tt == terms);
 }
 
@@ -1158,6 +1160,9 @@ static void test_cost_declines() {
   Fills f2 = fills;
   const PartitionStats st = partition_lanes(g, f2, tt, {});
   expect("wide lanes decline", st.groups == 0 && st.declined == 1);
+  expect("wide lanes name the cost model",
+         st.declines.size() == 1 && st.declines[0].why == LaneDecline::kCost &&
+             st.declines[0].lanes == L);
   expect("declined graph unchanged", g.ops.size() == before && tt == terms);
 }
 

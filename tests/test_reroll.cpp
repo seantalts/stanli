@@ -272,6 +272,10 @@ static void test_bail_recurrence() {
   RerollStats st = reroll(g, fills, tt, {});
   expect("recurrence not rerolled", st.regions == 0);
   expect("recurrence ops unchanged", g.ops.size() == before);
+  expect("recurrence names the varying slot",
+         !st.declines.empty() &&
+             st.declines[0].why == LaneDecline::kVaryingSlot &&
+             st.declines[0].period == 2 && st.declines[0].op == 0);
 }
 
 // (b) density outs consumed inside their own lanes (gauss_mix shape): the
@@ -865,6 +869,9 @@ static void test_cost_model_declines_small_gather() {
   const RerollStats st = reroll(g, f2, tt, {});
   expect("small gather declines",
          st.regions == 0 && g.ops.size() == before && tt.size() == (size_t)L);
+  expect("small gather names the cost model",
+         st.declines.size() == 1 && st.declines[0].why == LaneDecline::kCost &&
+             st.declines[0].lanes == L);
 }
 
 // (d) STANLI_NO_REROLL disables the pass.

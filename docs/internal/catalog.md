@@ -249,6 +249,7 @@ paths and hashes in raw records unchanged.
 | [2026-09-21 · Issue 374: retained evidence and next measurement](../../notes/performance/2026-09-21-issue-374-triage.md) | Dated results, proof limits and linked evidence. |
 | [2026-09-22 · Full-range slice regression](../../notes/performance/2026-09-22-identity-slice.md) | Dated results, proof limits and linked evidence. |
 | [2026-09-22 · Intel macOS oracle for kronecker_gp](../../notes/performance/2026-09-22-intel-oracle.md) | Dated results, proof limits and linked evidence. |
+| [2026-11-20 · Why reroll and partition decline lanes](../../notes/performance/2026-11-20-lane-declines.md) | Dated results, proof limits and linked evidence. |
 
 ## Parallel reductions
 

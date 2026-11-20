@@ -994,6 +994,8 @@ RerollStats reroll(Graph& g,
       int64_t Luse = doomed ? 0 : L;
       using SelectedPlan = detail::reroll_plan::SelectedPlan;
       std::optional<SelectedPlan> selected;
+      // The first refusal, which is the one at the full lane count.
+      std::optional<LaneDeclineRecord> why;
       for (int attempt = 0;
            !doomed && attempt < kMaxClassifyAttempts && Luse >= kMinLanes;
            ++attempt) {
@@ -1007,6 +1009,10 @@ RerollStats reroll(Graph& g,
         bool any_term_widen = false;
         layout_set = false;
         const size_t region_end = i + (size_t)P * (size_t)Luse;
+        const auto refuse = [&](LaneDecline reason, const Op& at) {
+          ok = false;
+          if (!why) why = LaneDeclineRecord{reason, 0, 0, 0, at.opcode};
+        };
         const auto row_operands_ok = [&](Pos& ap, const Op& t) {
           for (int j = 0; j < t.n_in; ++j) {
             PosIn& in = ap.ins[j];
@@ -1110,7 +1116,7 @@ RerollStats reroll(Graph& g,
               ap.ins[j].width = cw;
               continue;
             }
-            ok = false;
+            refuse(LaneDecline::kVaryingSlot, t);
             prefix = std::min(prefix, std::max({br_inv, br_local, br_const}));
           }
           for (int j = 0; j < t.n_in; ++j) {
@@ -1180,7 +1186,9 @@ RerollStats reroll(Graph& g,
               if (v < 0 || v >= blen) in_range = false;
             }
             if (ap.ins[0].kind != InKind::kInvariant || io_ok < Luse) {
-              ok = false;
+              refuse(io_ok < Luse ? LaneDecline::kEscapes
+                                  : LaneDecline::kIndexShape,
+                     t);
               prefix = std::min(prefix, io_ok);
             } else if (br_prog == Luse && blen == Luse) {
               ap.read.kind = LaneLayout::Kind::kElide;  // whole base, in order
@@ -1196,7 +1204,7 @@ RerollStats reroll(Graph& g,
               for (int64_t l = 0; l < Luse; ++l)
                 ap.gather_idx.push_back(op_at(p, l).idata[0]);
             } else {
-              ok = false;
+              refuse(LaneDecline::kIndexShape, t);
               prefix = 0;  // out-of-range index: not ours to rewrite
             }
           } else if (is_element_store(t)) {
@@ -1279,7 +1287,7 @@ RerollStats reroll(Graph& g,
                 written_after = true;
             }
             if (!clean || br_run < Luse) {
-              ok = false;
+              refuse(LaneDecline::kStoreShape, t);
               if (ap.ins[0].kind == InKind::kInvariant)
                 prefix = std::min(prefix, clean ? br_run : (int64_t)0);
             } else {
@@ -1375,7 +1383,7 @@ RerollStats reroll(Graph& g,
                 written_after = true;
             }
             if (!clean) {
-              ok = false;
+              refuse(LaneDecline::kStoreShape, t);
               prefix = std::min(prefix,
                                 shape && br_row < Luse ? br_row : (int64_t)0);
             } else {
@@ -1406,7 +1414,9 @@ RerollStats reroll(Graph& g,
               }
             }
             if (ap.ins[0].kind != InKind::kInvariant || io_ok < Luse) {
-              ok = false;
+              refuse(
+                  io_ok < Luse ? LaneDecline::kEscapes : LaneDecline::kRowShape,
+                  t);
               prefix = std::min(prefix, io_ok);
             } else if (br_row == Luse && Luse == rows && blen == rows * w) {
               bool layout_ok = w == 1;
@@ -1423,11 +1433,11 @@ RerollStats reroll(Graph& g,
                 ap.read.kind = LaneLayout::Kind::kElide;
                 ap.width = w;
               } else {
-                ok = false;
+                refuse(LaneDecline::kWidth, t);
                 prefix = std::min(prefix, br_row < Luse ? br_row : (int64_t)0);
               }
             } else {
-              ok = false;
+              refuse(LaneDecline::kRowShape, t);
               prefix = std::min(prefix, br_row < Luse ? br_row : (int64_t)0);
             }
           } else if (t.opcode == OP_GATHER && t.n_in == 1) {
@@ -1443,7 +1453,9 @@ RerollStats reroll(Graph& g,
             // here combines OP_GATHER lanes into one op yet.
             const int64_t io_ok = std::min(br_internal, br_nonterm);
             if (ap.ins[0].kind != InKind::kInvariant || io_ok < Luse) {
-              ok = false;
+              refuse(
+                  io_ok < Luse ? LaneDecline::kEscapes : LaneDecline::kRowShape,
+                  t);
               prefix = std::min(prefix, io_ok);
             } else {
               std::vector<int64_t> offsets;
@@ -1460,7 +1472,7 @@ RerollStats reroll(Graph& g,
                 ap.read.offset = run.offset;
                 ap.width = t.n_idata;
               } else {
-                ok = false;
+                refuse(LaneDecline::kRowShape, t);
                 prefix = 0;  // not a contiguous permutation: not ours to pack
               }
             }
@@ -1476,13 +1488,15 @@ RerollStats reroll(Graph& g,
                                       outcomes == ap.width && !header &&
                                       !two_int_groups(t.opcode);
             if (br_internal < Luse || (!all_terms && !no_terms)) {
-              ok = false;
+              refuse(br_internal < Luse ? LaneDecline::kEscapes
+                                        : LaneDecline::kMixedTerms,
+                     t);
               prefix = std::min(
                   prefix, std::min(br_internal, std::max(br_term, br_nonterm)));
             } else if (header && (!all_terms || all_inputs_invariant)) {
               // The kernel has no elementwise form, and pairs an outcome
               // array with a location vector, never a broadcast scalar.
-              ok = false;
+              refuse(LaneDecline::kDensityForm, t);
               prefix = 0;
             } else if (idata_density && outcomes != 1 && !row_outcomes) {
               // More than one immediate: either already a vector op, or one
@@ -1499,16 +1513,16 @@ RerollStats reroll(Graph& g,
               if (!all_terms && all_inputs_invariant && br_iinv == Luse) {
                 ap.hoist = true;
               } else {
-                ok = false;
+                refuse(LaneDecline::kDensityForm, t);
                 prefix = 0;
               }
             } else if (ap.width > 1 && ((idata_density && !row_outcomes) ||
                                         !row_operands_ok(ap, t))) {
-              ok = false;
+              refuse(LaneDecline::kWidth, t);
               prefix = 0;
             } else if (all_terms) {
               if (!uses[(size_t)t.out].empty()) {
-                ok = false;
+                refuse(LaneDecline::kTermAlsoInput, t);
                 prefix = 0;  // a term that is also an op input
               } else if (all_inputs_invariant &&
                          !has_op_trait(t.opcode,
@@ -1516,7 +1530,7 @@ RerollStats reroll(Graph& g,
                 // L identical lanes (the const pool dedup'd even the data
                 // argument): the "fused" density would compute one lane's
                 // lp where the target owes L of them.
-                ok = false;
+                refuse(LaneDecline::kIdenticalLanes, t);
                 prefix = 0;
               } else {
                 ap.term_density = true;
@@ -1541,7 +1555,7 @@ RerollStats reroll(Graph& g,
             if (io_ok == Luse) {
               ap.hoist = true;
             } else {
-              ok = false;
+              refuse(LaneDecline::kEscapes, t);
               prefix = std::min(prefix, io_ok);
             }
           } else if (t.opcode == OP_CONCAT2 && t.n_in == 2) {
@@ -1565,10 +1579,10 @@ RerollStats reroll(Graph& g,
                 cols_ok = false;
             }
             if (io_ok < Luse) {
-              ok = false;
+              refuse(LaneDecline::kEscapes, t);
               prefix = std::min(prefix, io_ok);
             } else if (!cols_ok) {
-              ok = false;
+              refuse(LaneDecline::kWidth, t);
               prefix = 0;
             } else {
               layout_set = true;
@@ -1578,14 +1592,14 @@ RerollStats reroll(Graph& g,
           } else if (has_op_trait(t.opcode, op_trait::kRerollWidenable)) {
             if (ap.width > 1 &&
                 (g.slots[t.out].len != ap.width || !row_operands_ok(ap, t))) {
-              ok = false;
+              refuse(LaneDecline::kWidth, t);
               prefix = 0;
             } else if (br_term == Luse && br_internal == Luse) {
               // Every lane's out is a target term (log_mix under
               // `target +=`): widen the op, SUM_VEC the lanes, and swap
               // the N terms for the sum.
               if (!uses[(size_t)t.out].empty()) {
-                ok = false;
+                refuse(LaneDecline::kTermAlsoInput, t);
                 prefix = 0;  // a term that is also an op input
               } else {
                 ap.term_widen = true;
@@ -1595,12 +1609,14 @@ RerollStats reroll(Graph& g,
               const int64_t io_ok =
                   std::min(br_internal, std::max(br_term, br_nonterm));
               if (io_ok < Luse || br_nonterm < Luse) {
-                ok = false;
+                refuse(br_internal < Luse ? LaneDecline::kEscapes
+                                          : LaneDecline::kMixedTerms,
+                       t);
                 prefix = std::min(prefix, io_ok);
               }
             }
           } else {
-            ok = false;
+            refuse(LaneDecline::kOpcode, t);
             prefix = 0;  // opcode outside the vocabulary: no prefix helps
           }
           // The fused lpmf's outcome vector is the lanes' immediates. Only
@@ -1631,7 +1647,7 @@ RerollStats reroll(Graph& g,
                   (!g.slots[(size_t)s].is_param && writers[(size_t)s].empty()))
                 continue;
               if (!shared_adjoints.insert(s).second) {
-                ok = false;
+                refuse(LaneDecline::kSharedAdjoint, op);
                 prefix = 0;
               }
             }
@@ -1655,14 +1671,26 @@ RerollStats reroll(Graph& g,
           selected = SelectedPlan::select(
               g, plan, detail::reroll_plan::GraphSource{g.ops.data() + i, P});
           if (selected) break;
-          ok = false;
+          refuse(LaneDecline::kCost, op_at(0, 0));
         }
-        if (ok) prefix = 0;                     // classifiable but useless
+        if (ok) {  // classifiable but useless
+          if (!why)
+            why = LaneDeclineRecord{LaneDecline::kNothingToFuse, 0, 0, 0,
+                                    op_at(0, 0).opcode};
+          prefix = 0;
+        }
         if (prefix >= Luse) prefix = Luse - 1;  // guarantee progress
         Luse = prefix;
       }
 
       if (!selected) {
+        if (!why)
+          why = LaneDeclineRecord{LaneDecline::kRigidInputs, 0, 0, 0,
+                                  op_at(0, 0).opcode};
+        why->op = (int64_t)i;
+        why->lanes = L;
+        why->period = P;
+        st.declines.push_back(*why);
         // Bookkeeping. Soft failures (positive prefix) re-attempt at the
         // reported boundary; hard failures (prefix 0) get one second
         // chance one lane in, then the whole run is skipped.

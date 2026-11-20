@@ -36,13 +36,16 @@
 #include <stanli/builtin_registry.hpp>
 #include <stanli/density_registry.hpp>
 #include <stanli/optable.hpp>
+#include <stanli/message_sink.hpp>
 #include <stanli/partition.hpp>
 
 #include "pass_util.hpp"
 #include "reroll_profile.hpp"
 
 #include <algorithm>
+#include <cstdio>
 #include <cstdlib>
+#include <optional>
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
@@ -513,8 +516,17 @@ PartitionStats partition_lanes(Graph& g, Fills& fills,
     // Split at the op that broke the run and requeue the halves. A lane
     // straddling it belongs to neither.
     size_t split_at = n_ops;
+    std::optional<LaneDeclineRecord> why;
+    const auto decline = [&](LaneDecline reason, uint16_t opcode) {
+      if (!why)
+        why = LaneDeclineRecord{reason, (int64_t)lane0.begin, L, 0, opcode};
+    };
     const auto split_here = [&]() {
-      if (split_at >= n_ops || splits >= kMaxSplits) return;
+      if (split_at >= n_ops) return false;
+      if (splits >= kMaxSplits) {
+        why->why = LaneDecline::kSplitCap;
+        return false;
+      }
       std::vector<int> lo, hi;
       for (int id : ids) {
         if (lanes[(size_t)id].end <= split_at)
@@ -522,10 +534,11 @@ PartitionStats partition_lanes(Graph& g, Fills& fills,
         else if (lanes[(size_t)id].begin > split_at)
           hi.push_back(id);
       }
-      if (lo.size() == ids.size() || hi.size() == ids.size()) return;
+      if (lo.size() == ids.size() || hi.size() == ids.size()) return false;
       ++splits;
       if ((int64_t)lo.size() >= kMinLanes) work.push_back(std::move(lo));
       if ((int64_t)hi.size() >= kMinLanes) work.push_back(std::move(hi));
+      return true;
     };
     // Every slot the fused ops read from outside the bucket must hold still
     // for the length of the run: a writer between the lanes is a cross-lane
@@ -657,7 +670,10 @@ PartitionStats partition_lanes(Graph& g, Fills& fills,
             if (g.slots[(size_t)t.in[j]].len != 1) wide_candidates.push_back(j);
           } else {
             all_shared = false;
-            if (width && width != prod.width) ok = false;
+            if (width && width != prod.width) {
+              ok = false;
+              decline(LaneDecline::kWidth, t.opcode);
+            }
             width = prod.width;
           }
           continue;
@@ -668,7 +684,10 @@ PartitionStats partition_lanes(Graph& g, Fills& fills,
         if (invariant) {
           in.kind = InKind::kInvariant;
           if (store_delim && p == k - 1 && j == 0) continue;
-          if (!settled(t.in[j])) ok = false;
+          if (!settled(t.in[j])) {
+            ok = false;
+            decline(LaneDecline::kWrittenBetween, t.opcode);
+          }
           if (t.in[j] >= 0 && g.slots[(size_t)t.in[j]].len != 1)
             wide_candidates.push_back(j);
           continue;
@@ -683,6 +702,7 @@ PartitionStats partition_lanes(Graph& g, Fills& fills,
         }
         if ((int64_t)vals.size() != L) {
           ok = false;  // a different slot per lane that is not a constant
+          decline(LaneDecline::kVaryingSlot, t.opcode);
           break;
         }
         in.kind = InKind::kConstLanes;
@@ -690,7 +710,10 @@ PartitionStats partition_lanes(Graph& g, Fills& fills,
         all_shared = false;
         // A categorical's outcome is one per lane whatever its row's width.
         if (t.opcode == OP_CATEGORICAL && j == 0) continue;
-        if (width && width != 1) ok = false;
+        if (width && width != 1) {
+          ok = false;
+          decline(LaneDecline::kWidth, t.opcode);
+        }
         width = 1;
       }
       if (!ok) break;
@@ -724,6 +747,7 @@ PartitionStats partition_lanes(Graph& g, Fills& fills,
           if (start < 0 || step < 1 || start + (w - 1) * step >= blen ||
               (strided_read && o.idata[1] != step)) {
             ok = false;
+            decline(LaneDecline::kIndexShape, t.opcode);
             break;
           }
           for (int64_t e = 0; e < w; ++e)
@@ -780,7 +804,10 @@ PartitionStats partition_lanes(Graph& g, Fills& fills,
             ok = false;
           }
         }
-        if (!ok) break;
+        if (!ok) {
+          decline(LaneDecline::kStoreShape, t.opcode);
+          break;
+        }
         ap.emit = Emit::kStore;
         ap.width = 1;
         ap.idx.assign(1, (int)start);
@@ -806,6 +833,7 @@ PartitionStats partition_lanes(Graph& g, Fills& fills,
       }
       if (wide_shared) {
         ok = false;
+        decline(LaneDecline::kWidth, t.opcode);
         break;
       }
       // L lanes computing the identical scalar, each one a term: the const
@@ -816,6 +844,7 @@ PartitionStats partition_lanes(Graph& g, Fills& fills,
       if (is_term && all_shared &&
           !has_op_trait(t.opcode, op_trait::kRerollIdataDensity)) {
         ok = false;
+        decline(LaneDecline::kIdenticalLanes, t.opcode);
         break;
       }
       ap.width = width;
@@ -836,7 +865,10 @@ PartitionStats partition_lanes(Graph& g, Fills& fills,
              ap.ins[0].kind == InKind::kConstLanes &&
              ap.ins[1].kind == InKind::kLaneLocal &&
              width == g.slots[(size_t)t.in[1]].len;
-        if (!ok) break;
+        if (!ok) {
+          decline(LaneDecline::kDensityForm, t.opcode);
+          break;
+        }
         ap.width = 1;
         ap.rows = width;
         ap.emit = Emit::kTermDensity;
@@ -850,6 +882,7 @@ PartitionStats partition_lanes(Graph& g, Fills& fills,
         const int64_t w = all_shared ? dw : width;
         if (dw < 1 || (dw != 1 && dw != w)) {
           ok = false;
+          decline(LaneDecline::kDensityForm, t.opcode);
           break;
         }
         ap.width = 1;
@@ -860,15 +893,17 @@ PartitionStats partition_lanes(Graph& g, Fills& fills,
       if (has_op_trait(t.opcode, op_trait::kRerollWidenable)) {
         if (is_term && width != 1) {
           ok = false;
+          decline(LaneDecline::kWidth, t.opcode);
           break;
         }
         ap.emit = is_term ? Emit::kTermWiden : Emit::kWiden;
         continue;
       }
       ok = false;
+      decline(LaneDecline::kOpcode, t.opcode);
     }
     if (!ok) {
-      split_here();
+      if (!split_here()) st.declines.push_back(*why);
       continue;
     }
     // Preserve per-lane reverse order when several operations contribute to
@@ -885,15 +920,16 @@ PartitionStats partition_lanes(Graph& g, Fills& fills,
             g.slots[(size_t)s].len != 1 ||
             (!g.slots[(size_t)s].is_param && writers[(size_t)s].empty()))
           continue;
-        if (hoisted) {
-          if (!in_op.insert(s).second) ok = false;
-        } else if (!shared_adjoints.insert(s).second) {
+        if (hoisted ? !in_op.insert(s).second
+                    : !shared_adjoints.insert(s).second) {
           ok = false;
+          decline(LaneDecline::kSharedAdjoint, op.opcode);
         }
       }
     }
     if (!ok) {
       ++st.declined;
+      st.declines.push_back(*why);
       continue;
     }
     // Exactly one delimiter per lane, at its end: any other disposition
@@ -905,7 +941,11 @@ PartitionStats partition_lanes(Graph& g, Fills& fills,
           e == Emit::kTermDensity || e == Emit::kTermWiden || e == Emit::kStore;
       ok = delim == (p == k - 1);
     }
-    if (!ok) continue;
+    if (!ok) {
+      decline(LaneDecline::kDelimiter, op_at(k - 1, 0).opcode);
+      st.declines.push_back(*why);
+      continue;
+    }
 
     // Lanes identical down to their immediates and their external slots are
     // one op once CSE runs, and the fused form evaluates all L of them. That
@@ -974,6 +1014,8 @@ PartitionStats partition_lanes(Graph& g, Fills& fills,
     added += ops_out * kOpCost + (L - distinct) * lane_elems;
     if (distinct * (int64_t)k * kOpCost <= added + kPartitionMargin) {
       ++st.declined;
+      decline(LaneDecline::kCost, op_at(k - 1, 0).opcode);
+      st.declines.push_back(*why);
       continue;
     }
 
@@ -1147,6 +1189,21 @@ PartitionStats partition_lanes(Graph& g, Fills& fills,
   }
   g.ops = std::move(result);
   return st;
+}
+
+void print_lane_declines(const std::vector<LaneDeclineRecord>& declines,
+                         const char* pass, const char* graph) {
+  char line[512];
+  for (const LaneDeclineRecord& d : declines) {
+    std::snprintf(line, sizeof line,
+                  "LANES {\"graph\":\"%s\",\"pass\":\"%s\",\"op\":%lld,"
+                  "\"lanes\":%lld,\"period\":%lld,\"opcode\":\"%s\","
+                  "\"reason\":\"%s\"}",
+                  graph, pass, (long long)d.op, (long long)d.lanes,
+                  (long long)d.period, opcode_name(d.opcode),
+                  lane_decline_text(d.why));
+    emit_diagnostic(line);
+  }
 }
 
 }  // namespace stanli

@@ -2,10 +2,13 @@
 #ifndef STANLI_PASS_UTIL_HPP
 #define STANLI_PASS_UTIL_HPP
 
+#include <stanli/debug_switch.hpp>
 #include <stanli/graph.hpp>
+#include <stanli/message_sink.hpp>
 #include <stanli/optable.hpp>
 
 #include <cstdint>
+#include <string>
 #include <unordered_map>
 #include <unordered_set>
 #include <utility>
@@ -90,6 +93,9 @@ inline void scale_repeated_terms(Graph& g, Fills& fills,
   std::unordered_map<int, int> copies;
   for (int t : target_terms) ++copies[t];
   if (copies.size() == target_terms.size()) return;
+  if (debug_env("STANLI_LANE_REPORT"))
+    emit_diagnostic("LANES {\"pass\":\"terms\",\"repeated\":" +
+                    std::to_string(target_terms.size() - copies.size()) + "}");
   std::vector<int> scaled;
   scaled.reserve(copies.size());
   for (int t : target_terms) {

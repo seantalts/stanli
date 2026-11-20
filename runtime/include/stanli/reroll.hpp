@@ -6,6 +6,7 @@
 #define STANLI_REROLL_HPP
 
 #include <stanli/graph.hpp>
+#include <stanli/lane_decline.hpp>
 
 #include <cstdint>
 #include <utility>
@@ -40,6 +41,8 @@ struct RerollStats {
   int64_t element_density = 0;
   int64_t term_widen = 0;
   int64_t element_store = 0;
+  // One entry per group of matching lanes left unfused.
+  std::vector<LaneDeclineRecord> declines;
 };
 
 // In place. `fills` gains entries for materialized constant vectors.
