@@ -92,7 +92,7 @@ function diagnose(M, req) {
 // but the climb itself streams out iterate by iterate so the page can
 // animate it.
 //
-// chain_id is 1, which is what stanli_sample_stream_stats_init passes too, so
+// chain_id is 1, which is what the worker's NUTS chain uses too, so
 // Pathfinder and a NUTS chain given the same seed start from the exact
 // same point. lp and lp_approx per draw are available from the same
 // call and left unasked-for here: k-hat, the one thing the page shows
@@ -132,6 +132,84 @@ function runPathfinderInit(M, model, req, initPtr, errPtr, errLen) {
   if (rc !== 0)
     throw new Error("Pathfinder initialization failed: " +
                     M.UTF8ToString(errPtr));
+}
+
+// Byte offsets of a C struct's fields, read from the runtime's own layout
+// table so that the worker never hard-codes them.
+function structLayout(M, type) {
+  const entries = M._stanli_field_layouts();
+  const count = Number(M._stanli_n_field_layouts());
+  const fields = {};
+  let size = 0;
+  for (let i = 0; i < count; ++i) {
+    // {const char* type, const char* field, size_t offset, size, type_size}
+    const e = new Uint32Array(M.HEAPF64.buffer, entries + 20 * i, 5);
+    if (M.UTF8ToString(e[0]) !== type) continue;
+    fields[M.UTF8ToString(e[1])] = e[2];
+    size = e[4];
+  }
+  if (!size) throw new Error("the runtime does not describe " + type);
+  return { fields, size };
+}
+
+// One NUTS chain through the multi-chain sampler, as Python and R run it:
+// generated quantities draw from the chain's own stream between stored
+// draws, and a rejected generated quantity leaves a row of NaN. When `live`
+// is given, live.onRow(i, rowPtr) sees each stored output row as it is
+// written and live.onWarmup(i) each warmup transition. Returns the output
+// rows and the sampler columns, draw-major.
+function sampleNuts(M, model, req, warmup, samples, initPtr, width, live,
+                    errPtr, errLen) {
+  const allocations = [];
+  const alloc = (bytes) => {
+    const ptr = M._malloc(bytes);
+    allocations.push(ptr);
+    return ptr;
+  };
+  let cbPtr = 0;
+  try {
+    const so = structLayout(M, "stanli_sample_opts");
+    const mo = structLayout(M, "stanli_metric_opts");
+    const optsPtr = alloc(so.size);
+    const metricPtr = alloc(mo.size);
+    M._stanli_sample_opts_init(optsPtr);
+    M._stanli_metric_opts_init(metricPtr);
+    const u32 = (field, v) =>
+      new Uint32Array(M.HEAPF64.buffer, optsPtr + so.fields[field], 1)[0] = v;
+    const i32 = (field, v) =>
+      new Int32Array(M.HEAPF64.buffer, optsPtr + so.fields[field], 1)[0] = v;
+    u32("seed", req.seed >>> 0);
+    i32("chains", 1);
+    i32("chain_id", 1);
+    i32("warmup", warmup);
+    i32("samples", samples);
+    new Float64Array(M.HEAPF64.buffer, optsPtr + so.fields.delta, 1)[0] =
+        +req.delta;
+    if (initPtr) u32("inits", initPtr);
+
+    const valuesPtr = alloc(8 * samples * width);
+    const statsPtr = alloc(8 * samples * 7);
+    const reportsPtr = alloc(32);
+    // refresh 1 calls back after every transition; the row of a sampling
+    // transition is already in `values` then.
+    if (live)
+      cbPtr = M.addFunction((chain, iteration, total, isWarmup) => {
+        const i = Number(iteration) - 1;
+        if (isWarmup) live.onWarmup(i);
+        else live.onRow(i - warmup, valuesPtr + 8 * (i - warmup) * width);
+      }, "vijjijji");
+    const rc = M._stanli_sample_multi_metric(
+        model, optsPtr, metricPtr, live ? 1 : 0, 0, statsPtr, valuesPtr,
+        cbPtr, 0, 0, 0, 0, reportsPtr, errPtr, errLen);
+    if (rc !== 0) throw new Error(M.UTF8ToString(errPtr));
+    return {
+      values: M.HEAPF64.slice(valuesPtr / 8, valuesPtr / 8 + samples * width),
+      stats: M.HEAPF64.slice(statsPtr / 8, statsPtr / 8 + samples * 7),
+    };
+  } finally {
+    if (cbPtr) M.removeFunction(cbPtr);
+    for (const ptr of allocations) M._free(ptr);
+  }
 }
 
 onmessage = async (e) => {
@@ -204,107 +282,114 @@ onmessage = async (e) => {
         ? "Pathfinder: L-BFGS path + " + samples + " draws"
         : (walnuts ? "WALNUTS: " : "NUTS: ") + warmup + " warmup + " +
           samples + " draws");
-    const drawsPtr = M._malloc(8 * samples * n);
-    const initPtr = req.pathfinderInit ? M._malloc(8 * n) : 0;
-
-    // Stream: every draw lands in the buffer before its callback, so the
-    // page can plot the chain as it grows. Constrained rows batch in
-    // chunks of 20 to keep message traffic sane.
-    // Streaming is opt-in: without a live consumer the sampler runs the
-    // plain path and pays nothing for callbacks or message traffic.
-    let cbPtr = 0, liveRowPtr = 0;
-    if (req.live && !pathfinder) {
-    const nLive = Number(M._stanli_n_constrained(model));
-    const liveNames = [];
-    for (let i = 0; i < nLive; ++i)
-      liveNames.push(
-          M.UTF8ToString(M._stanli_constrained_name(model, BigInt(i))));
-    postMessage({ liveMeta: { names: liveNames, warmup, samples } });
-    liveRowPtr = M._malloc(8 * nLive);
-    let pend = [];
-    cbPtr = M.addFunction((i, wu) => {
-      if (wu) {
-        if (i % 25 === 0 || i + 1 === warmup)
-          postMessage({ live: { phase: "warmup", i: i + 1 } });
-        return;
-      }
-      M._stanli_constrain(model, drawsPtr + 8 * i * n, liveRowPtr);
-      const row = new Float64Array(nLive);
-      row.set(M.HEAPF64.subarray(liveRowPtr / 8, liveRowPtr / 8 + nLive));
-      pend.push(row);
-      if (pend.length >= 20 || i + 1 === samples) {
-        const chunk = new Float64Array(pend.length * nLive);
-        pend.forEach((r, k) => chunk.set(r, k * nLive));
-        pend = [];
-        postMessage({ live: { phase: "sampling", i: i + 1, nCon: nLive,
-                              rows: chunk.buffer } }, [chunk.buffer]);
-      }
-    }, "viii");
-    }
-    // Same streaming contract either way; WALNUTS's tunable is the max
-    // Hamiltonian error per macro step rather than NUTS's target
-    // acceptance rate, and 0 asks the runtime for its default.
-    let pf = null;
-    let samplerStats = null;
-    const statsPtr = pathfinder || walnuts ? 0 : M._malloc(8 * samples * 7);
-    try {
-      if (pathfinder) {
-        pf = runPathfinder(M, model, req, samples, drawsPtr, errPtr, errLen);
-      } else {
-        if (req.pathfinderInit) {
-          say("Pathfinder initialization: fitting approximation");
-          runPathfinderInit(M, model, req, initPtr, errPtr, errLen);
-          say("Pathfinder initialization complete; starting NUTS");
-        }
-        const rc = walnuts
-            ? M._stanli_sample_walnuts_stream(model, req.seed >>> 0, warmup,
-                                              samples, +req.maxError || 0,
-                                              drawsPtr, cbPtr, 0, errPtr, errLen)
-            : M._stanli_sample_stream_stats_init(
-                model, req.seed >>> 0, warmup, samples, +req.delta,
-                initPtr, drawsPtr, statsPtr, cbPtr, 0, errPtr, errLen);
-        if (rc !== 0) throw new Error(M.UTF8ToString(errPtr));
-        if (statsPtr)
-          samplerStats = M.HEAPF64.slice(statsPtr / 8, statsPtr / 8 + samples * 7);
-      }
-    } finally {
-      if (cbPtr) M.removeFunction(cbPtr);
-      if (liveRowPtr) M._free(liveRowPtr);
-      if (statsPtr) M._free(statsPtr);
-      if (initPtr) M._free(initPtr);
-    }
-    const tSample = performance.now();
-
-    say("computing CSV columns");
-    // write_array supplies every CmdStan CSV column (constrained params,
-    // transformed parameters, generated quantities with seeded RNG);
-    // models without a generate_quantities section fall back to the
-    // constrained view.
-    const nWa = Number(M._stanli_wa_n_columns(model));
-    const useWa = nWa > 0;
-    const nCon = useWa ? nWa : Number(M._stanli_n_constrained(model));
+    // Every CmdStan CSV column (constrained params, transformed parameters,
+    // generated quantities). Models without a generated quantities section
+    // have only the constrained view, which stanli_constrain writes.
+    const useWa = Number(M._stanli_wa_n_columns(model)) > 0;
+    const nCon = Number(M._stanli_n_output_columns(model));
     const generatedStart = useWa
         ? Number(M._stanli_wa_n_generated_start(model)) : nCon;
     const names = [];
     for (let i = 0; i < nCon; ++i)
       names.push(M.UTF8ToString(
-          useWa ? M._stanli_wa_column_name(model, BigInt(i))
-                : M._stanli_constrained_name(model, BigInt(i))));
-    if (useWa) M._stanli_wa_seed_chain(model, req.seed >>> 0, 1);
-    const cols = new Float64Array(nCon * samples);
-    const rowPtr = M._malloc(8 * nCon);
-    for (let s = 0; s < samples; ++s) {
-      if (useWa) {
-        if (M._stanli_wa_row(model, drawsPtr + 8 * s * n, rowPtr) !== 0)
-          throw new Error("write_array failed on draw " + s);
-      } else {
-        M._stanli_constrain(model, drawsPtr + 8 * s * n, rowPtr);
-      }
-      for (let i = 0; i < nCon; ++i)
-        cols[i * samples + s] = M.HEAPF64[rowPtr / 8 + i];
+          M._stanli_output_column_name(model, BigInt(i))));
+
+    // Stream: the page plots the chain as it grows from the constrained
+    // parameters, the first columns of each row, in chunks of 20 rows to
+    // keep message traffic sane. Streaming is opt-in: without a live
+    // consumer the sampler runs the plain path and pays nothing for
+    // callbacks or message traffic.
+    let live = null;
+    if (req.live && !pathfinder) {
+      const nLive = Number(M._stanli_n_constrained(model));
+      postMessage({ liveMeta: { names: names.slice(0, nLive), warmup,
+                                samples } });
+      let pend = [];
+      live = {
+        onWarmup(i) {
+          if (i % 25 === 0 || i + 1 === warmup)
+            postMessage({ live: { phase: "warmup", i: i + 1 } });
+        },
+        onRow(i, rowPtr) {
+          pend.push(M.HEAPF64.slice(rowPtr / 8, rowPtr / 8 + nLive));
+          if (pend.length >= 20 || i + 1 === samples) {
+            const chunk = new Float64Array(pend.length * nLive);
+            pend.forEach((r, k) => chunk.set(r, k * nLive));
+            pend = [];
+            postMessage({ live: { phase: "sampling", i: i + 1, nCon: nLive,
+                                  rows: chunk.buffer } }, [chunk.buffer]);
+          }
+        },
+      };
     }
-    M._free(rowPtr);
-    M._free(drawsPtr);
+
+    let pf = null;
+    let samplerStats = null;
+    let rows = null;  // output rows, draw-major
+    if (pathfinder || walnuts) {
+      // These two return unconstrained draws; their rows are written after.
+      // WALNUTS's tunable is the max Hamiltonian error per macro step, and 0
+      // asks the runtime for its default.
+      const drawsPtr = M._malloc(8 * samples * n);
+      let cbPtr = 0;
+      try {
+        if (pathfinder) {
+          pf = runPathfinder(M, model, req, samples, drawsPtr, errPtr, errLen);
+        } else {
+          const rowPtr = live ? M._malloc(8 * nCon) : 0;
+          if (live)
+            cbPtr = M.addFunction((i, wu) => {
+              if (wu) return live.onWarmup(i);
+              M._stanli_constrain(model, drawsPtr + 8 * i * n, rowPtr);
+              live.onRow(i, rowPtr);
+            }, "viii");
+          const rc = M._stanli_sample_walnuts_stream(
+              model, req.seed >>> 0, warmup, samples, +req.maxError || 0,
+              drawsPtr, cbPtr, 0, errPtr, errLen);
+          if (rowPtr) M._free(rowPtr);
+          if (rc !== 0) throw new Error(M.UTF8ToString(errPtr));
+        }
+        rows = new Float64Array(nCon * samples);
+        const rowPtr = M._malloc(8 * nCon);
+        if (useWa) M._stanli_wa_seed_chain(model, req.seed >>> 0, 1);
+        for (let s = 0; s < samples; ++s) {
+          if (useWa) {
+            if (M._stanli_wa_row(model, drawsPtr + 8 * s * n, rowPtr) !== 0)
+              throw new Error("write_array failed on draw " + s);
+          } else {
+            M._stanli_constrain(model, drawsPtr + 8 * s * n, rowPtr);
+          }
+          rows.set(M.HEAPF64.subarray(rowPtr / 8, rowPtr / 8 + nCon),
+                   s * nCon);
+        }
+        M._free(rowPtr);
+      } finally {
+        if (cbPtr) M.removeFunction(cbPtr);
+        M._free(drawsPtr);
+      }
+    } else {
+      const initPtr = req.pathfinderInit ? M._malloc(8 * n) : 0;
+      try {
+        if (req.pathfinderInit) {
+          say("Pathfinder initialization: fitting approximation");
+          runPathfinderInit(M, model, req, initPtr, errPtr, errLen);
+          say("Pathfinder initialization complete; starting NUTS");
+        }
+        const run = sampleNuts(M, model, req, warmup, samples, initPtr, nCon,
+                               live, errPtr, errLen);
+        rows = run.values;
+        samplerStats = run.stats;
+      } finally {
+        if (initPtr) M._free(initPtr);
+      }
+    }
+    const tSample = performance.now();
+
+    say("computing CSV columns");
+    const cols = new Float64Array(nCon * samples);
+    for (let s = 0; s < samples; ++s)
+      for (let i = 0; i < nCon; ++i)
+        cols[i * samples + s] = rows[s * nCon + i];
     M._free(errPtr);
     M._stanli_model_free(model);
 

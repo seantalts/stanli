@@ -725,6 +725,7 @@ lw_pathfinder_mean <- function(model, seed, n) {
   opts <- unname(.pathfinder_init_options(list()))
   draws <- .Call("stanli_r_pathfinder_inits", model$ptr, as.integer(seed),
                  as.integer(num_draws), opts, 1L)
+  algorithm_interrupt(draws, "Pathfinder")
   draws <- draws[apply(is.finite(draws), 1L, all), , drop = FALSE]
   if (!nrow(draws))
     stop("Pathfinder returned no finite draws; pass init to choose the ",

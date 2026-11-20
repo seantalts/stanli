@@ -48,9 +48,9 @@ algorithm_inits <- function(model, init, count) {
   as.double(t(m))
 }
 
-# A stopped run returns no fit: raise the interrupt the user sent.
+# A stopped run returns no result: raise the interrupt the user sent.
 algorithm_interrupt <- function(res, what) {
-  if (!isTRUE(res$interrupted)) return(invisible(NULL))
+  if (!is.list(res) || !isTRUE(res$interrupted)) return(invisible(NULL))
   signalCondition(structure(class = c("interrupt", "condition"),
                             list(message = paste(what, "interrupted"),
                                  call = NULL)))
@@ -91,15 +91,14 @@ approximation_fit <- function(model, algorithm, seed, values, diagnostics,
   structure(c(fit, extra), class = "stanli_fit")
 }
 
-# sample_model(fixed_param = TRUE).
+# sample_model(fixed_param = TRUE), which has checked the arguments.
 fixed_param_fit <- function(model, chains, seed, samples, thin, init,
                             init_radius, refresh, chain_id = 1L) {
-  chains <- algorithm_count(chains, "chains")
-  samples <- algorithm_count(samples, "samples")
-  thin <- algorithm_count(thin, "thin")
+  chains <- as.integer(chains)
+  samples <- as.integer(samples)
+  thin <- as.integer(thin)
   opts <- list(as.integer(seed), chains, samples, thin,
-               algorithm_number(init_radius, "init_radius", positive = FALSE),
-               as.integer(refresh), chain_id)
+               as.double(init_radius), as.integer(refresh), chain_id)
   res <- .Call("stanli_r_fixed_param", model$ptr, opts,
                algorithm_inits(model, init, chains))
   algorithm_interrupt(res, "sampling")
@@ -181,16 +180,18 @@ variational_model <- function(model, algorithm = c("meanfield", "fullrank"),
                               draws = 1000, init = NULL, init_radius = 2,
                               refresh = 100) {
   algorithm <- match.arg(algorithm)
+  # The runtime checks the ranges. Its options call draws output_samples,
+  # and refresh is not one of them, so those two are checked here.
   opts <- list(
     as.integer(seed), algorithm == "fullrank",
-    algorithm_count(iter, "iter"),
-    algorithm_count(grad_samples, "grad_samples"),
-    algorithm_count(elbo_samples, "elbo_samples"),
-    algorithm_number(eta, "eta"), stanfit_flag(adapt_engaged, "adapt_engaged"),
-    algorithm_count(adapt_iter, "adapt_iter"),
-    algorithm_number(tol_rel_obj, "tol_rel_obj"),
-    algorithm_count(eval_elbo, "eval_elbo"), algorithm_count(draws, "draws"),
-    algorithm_number(init_radius, "init_radius", positive = FALSE),
+    sampler_integer(iter, "iter"),
+    sampler_integer(grad_samples, "grad_samples"),
+    sampler_integer(elbo_samples, "elbo_samples"),
+    sampler_number(eta, "eta"), stanfit_flag(adapt_engaged, "adapt_engaged"),
+    sampler_integer(adapt_iter, "adapt_iter"),
+    sampler_number(tol_rel_obj, "tol_rel_obj"),
+    sampler_integer(eval_elbo, "eval_elbo"), algorithm_count(draws, "draws"),
+    sampler_number(init_radius, "init_radius"),
     algorithm_count(refresh, "refresh", 0L))
   load_runtime()
   model <- with_run_seed(model, seed)
@@ -262,23 +263,24 @@ pathfinder_model <- function(model, seed = 1, num_paths = 1, draws = 1000,
          "2.40's multi-path service reads past the end of an array while ",
          "resampling. Use num_paths = 1 for single-path Pathfinder.",
          call. = FALSE)
+  # The runtime checks the ranges; its options call draws num_draws.
   draws <- algorithm_count(draws, "draws")
   # The runtime's options keep the two multi-path fields (the resampled draw
   # count and the resampling switch); they are filled and not read.
   opts <- list(
     as.integer(seed), num_paths, draws, draws,
-    algorithm_count(num_elbo_draws, "num_elbo_draws"),
-    algorithm_count(max_lbfgs_iters, "max_lbfgs_iters"),
-    algorithm_count(history_size, "history_size"),
-    algorithm_number(init_alpha, "init_alpha"),
-    algorithm_number(tol_obj, "tol_obj", positive = FALSE),
-    algorithm_number(tol_rel_obj, "tol_rel_obj", positive = FALSE),
-    algorithm_number(tol_grad, "tol_grad", positive = FALSE),
-    algorithm_number(tol_rel_grad, "tol_rel_grad", positive = FALSE),
-    algorithm_number(tol_param, "tol_param", positive = FALSE),
-    algorithm_number(init_radius, "init_radius", positive = FALSE),
+    sampler_integer(num_elbo_draws, "num_elbo_draws"),
+    sampler_integer(max_lbfgs_iters, "max_lbfgs_iters"),
+    sampler_integer(history_size, "history_size"),
+    sampler_number(init_alpha, "init_alpha"),
+    sampler_number(tol_obj, "tol_obj"),
+    sampler_number(tol_rel_obj, "tol_rel_obj"),
+    sampler_number(tol_grad, "tol_grad"),
+    sampler_number(tol_rel_grad, "tol_rel_grad"),
+    sampler_number(tol_param, "tol_param"),
+    sampler_number(init_radius, "init_radius"),
     TRUE, stanfit_flag(calculate_lp, "calculate_lp"),
-    algorithm_count(refresh, "refresh", 0L))
+    sampler_integer(refresh, "refresh"))
   load_runtime()
   model <- with_run_seed(model, seed)
   started <- proc.time()[["elapsed"]]
@@ -330,6 +332,7 @@ laplace_model <- function(model, seed = 1, draws = 1000, mode = NULL,
   if (!stanfit_flag(jacobian, "jacobian"))
     stop("jacobian = FALSE is unsupported: stanli's compiled graph includes ",
          "the parameter-transform Jacobian", call. = FALSE)
+  # Checked here because a NULL mode runs the optimizer first.
   draws <- algorithm_count(draws, "draws")
   load_runtime()
   model <- with_run_seed(model, seed)

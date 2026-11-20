@@ -411,7 +411,9 @@ log_prob_grad <- function(model, q) {
 #'   matrix.
 #' @export
 log_prob_hessian <- function(model, q) {
-  .Call("stanli_r_hessian", model$ptr, as.double(q))
+  res <- .Call("stanli_r_hessian", model$ptr, as.double(q))
+  algorithm_interrupt(res, "Hessian evaluation")
+  res
 }
 
 #' Names of a model's parameters
@@ -729,6 +731,7 @@ sample_model <- function(model, chains = 4, seed = 1, warmup = 1000,
   if (!is.null(pathfinder_init)) {
     init <- .Call("stanli_r_pathfinder_inits", model$ptr, as.integer(seed),
                   as.integer(chains), unname(pathfinder_init), chain_id)
+    algorithm_interrupt(init, "Pathfinder initialization")
   }
   init_vec <- numeric(0)
   if (!is.null(init)) {
@@ -1087,6 +1090,7 @@ optimize_model <- function(model, seed = 1, iter = 2000, init = NULL,
   opts <- list(as.integer(seed), iter, TRUE, init_radius)
   init_vec <- if (is.null(init)) numeric(0) else as.double(init)
   r <- .Call("stanli_r_optimize", model$ptr, opts, init_vec)
+  algorithm_interrupt(r, "optimization")
   names(r$values) <- model$columns
   r
 }
