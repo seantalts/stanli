@@ -10,6 +10,9 @@
 // Unlike run_nuts and run_pathfinder, these return CONSTRAINED rows: the
 // services interleave generated-quantity draws with their own, so the rows
 // have to be written as the service goes.
+//
+// The C layer checks argument ranges (the stanli_*_opts_check functions in
+// capi.h) before calling these; they refuse only what stanli cannot do.
 #ifndef STANLI_ALGORITHMS_HPP
 #define STANLI_ALGORITHMS_HPP
 

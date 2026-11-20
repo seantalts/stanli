@@ -18,7 +18,6 @@
 #include <stan/callbacks/structured_writer.hpp>
 #include <stan/services/pathfinder/single.hpp>
 
-#include <cmath>
 #include <memory>
 #include <string>
 #include <type_traits>
@@ -55,17 +54,12 @@ AlgorithmResult run_pathfinder_paths(Executor& ex, const AlgorithmHost& host,
     out.message = message;
     return true;
   };
-  if (refuse(cfg.num_paths < 1, "num_paths must be positive") ||
-      refuse(cfg.num_paths > 1,
+  // The C layer checks the ranges (stanli_pathfinder_opts_check). This is
+  // what this version cannot do.
+  if (refuse(cfg.num_paths != 1,
              "multi-path Pathfinder is not available in this version: Stan "
              "2.40's multi-path service reads past the end of an array while "
-             "resampling. Use num_paths = 1 for single-path Pathfinder.") ||
-      refuse(cfg.num_draws < 1, "num_draws must be positive") ||
-      refuse(cfg.num_elbo_draws < 1, "num_elbo_draws must be positive") ||
-      refuse(cfg.max_lbfgs_iters < 1, "max_lbfgs_iters must be positive") ||
-      refuse(cfg.history_size < 1, "history_size must be positive") ||
-      refuse(!std::isfinite(cfg.init_radius) || cfg.init_radius < 0,
-             "init_radius must be finite and nonnegative"))
+             "resampling. Use num_paths = 1 for single-path Pathfinder."))
     return out;
 
   const detail::ServiceHooks hooks{&host.names, host.row, host.poll};

@@ -72,8 +72,7 @@ OptimizeResult run_optimize(Executor& ex, const AlgorithmHost& host,
   ExecutorModel model(ex);
   WaRng rng(cfg.seed, (unsigned)cfg.chain_id);
   std::vector<double> cont((size_t)ex.n_params());
-  initialize_point(ex, rng.gen(), cfg.init_radius, cfg.init, cont.data(),
-                   FixedInitPolicy::SkipValidation);
+  initialize_point(ex, rng.gen(), cfg.init_radius, cfg.init, cont.data());
 
   detail::ThrottledPoll poll(&host.poll);
   try {

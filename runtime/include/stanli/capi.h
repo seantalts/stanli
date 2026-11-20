@@ -405,13 +405,23 @@ typedef struct {
  * the wrong starting point rather than fail. */
 void stanli_sample_opts_init(stanli_sample_opts* o);
 
-/* 0 when `o` is a request the sampler can run; else 1, with a message naming
- * the first bad field in err: chains >= 1, warmup >= 0, samples >= 0,
- * thin >= 1, delta strictly between 0 and 1, max_depth >= 1, init_radius
- * finite and >= 0, chain_id >= 1 with chain_id + chains - 1 representable.
- * stanli_sample_multi_metric applies it first and fails the
- * same way, so a binding that sizes buffers from the options should call
- * this before allocating them. */
+/* ARGUMENT CHECKS. Each options struct has a _check function, and its entry
+ * point applies it first and fails with the same message, so a binding that
+ * sizes buffers from the options can call the check before allocating and
+ * need not repeat the rules. The rules are CmdStan's: chain_id >= 0 (CmdStan
+ * accepts id 0), counts that CmdStan requires to be positive >= 1, its
+ * tolerances and step sizes finite and > 0. CmdStan accepts a negative init
+ * radius and then hangs drawing from it; stanli requires a finite radius
+ * >= 0. A check returns 0 when every rule holds, else 1 with one message
+ * naming the first field that breaks one, in one of these forms:
+ *   "<field> must be an integer >= <n>"
+ *   "<field> must be a finite number > 0"
+ *   "init_radius must be a finite number >= 0"
+ *   "chain_id + chains - 1 must not exceed 2147483647"
+ * or a sentence for a rule of its own (delta's range, an enum's values).
+ *
+ * stanli_sample_opts_check: chains >= 1, warmup >= 0, samples >= 0,
+ * thin >= 1, delta >= 0.1 and < 1, max_depth >= 1, init_radius, chain_id. */
 int stanli_sample_opts_check(const stanli_sample_opts* o, char* err,
                              size_t err_len);
 
@@ -492,6 +502,15 @@ typedef struct {
 /* Fill with diag, identity, step size 1, adaptation engaged for the step size
  * and the metric, no outputs. */
 void stanli_metric_opts_init(stanli_metric_opts* o);
+
+/* Everything stanli_sample_multi_metric checks before it starts, apart from
+ * the values in the inverse metric and resume records:
+ * stanli_sample_opts_check, a known metric kind, and, as in CmdStan, warmup >=
+ * 1 whenever adaptation is engaged on a run that does not continue from resume
+ * records. A null metric means the defaults. */
+int stanli_sample_check(const stanli_sample_opts* o,
+                        const stanli_metric_opts* metric, char* err,
+                        size_t err_len);
 
 /* Run opts->chains chains. draws, when non-null, holds
  * chains * stanli_n_stored_draws(opts) * n_unconstrained doubles; stats,
@@ -677,6 +696,11 @@ typedef struct {
 /* CmdStan's defaults. Call before setting fields, for the same reason
  * stanli_sample_opts_init exists. */
 void stanli_optimize_opts_init(stanli_optimize_opts* o);
+/* chain_id, iter >= 1, history_size >= 1, init_alpha and the five tolerances
+ * > 0, init_radius. jacobian = 0 passes the check and is refused by the run,
+ * because stanli cannot compute it. */
+int stanli_optimize_opts_check(const stanli_optimize_opts* o, char* err,
+                               size_t err_len);
 
 /* Writes the mode to `unconstrained` (n_unconstrained doubles) and, when
  * `values` is non-null, every CSV column there (stanli_wa_n_columns, or
@@ -856,6 +880,10 @@ typedef struct {
 
 /* seed 1, 4 chains from id 1, 1000 samples, thin 1, radius 2, no progress. */
 void stanli_fixed_param_opts_init(stanli_fixed_param_opts* o);
+/* chains >= 1, chain_id, samples >= 0, thin >= 1, init_radius,
+ * refresh >= 0. */
+int stanli_fixed_param_opts_check(const stanli_fixed_param_opts* o, char* err,
+                                  size_t err_len);
 /* Stored rows per chain under these options. */
 int64_t stanli_fixed_param_n_draws(const stanli_fixed_param_opts* o);
 /* `values` holds chains * stanli_fixed_param_n_draws(opts) rows, chain-major.
@@ -880,6 +908,9 @@ typedef struct {
 
 /* seed 1, 1000 draws, jacobian 1, calculate_lp 1, no progress. */
 void stanli_laplace_opts_init(stanli_laplace_opts* o);
+/* draws >= 1, refresh >= 0. */
+int stanli_laplace_opts_check(const stanli_laplace_opts* o, char* err,
+                              size_t err_len);
 /* `mode` is n_unconstrained doubles, normally stanli_optimize's
  * `unconstrained` from a run with jacobian = 1. `values` holds opts->draws
  * rows. `lp` and `lp_approx`, each opts->draws doubles or null, receive the
@@ -928,6 +959,11 @@ typedef struct {
  * iterations, history 5, L-BFGS tolerances as in stanli_optimize_opts,
  * radius 2, lp on. */
 void stanli_pathfinder_opts_init(stanli_pathfinder_opts* o);
+/* chain_id, num_paths, num_draws, num_elbo_draws, max_lbfgs_iters and
+ * history_size >= 1, init_alpha and the tolerances > 0, init_radius,
+ * refresh >= 0. num_paths other than 1 passes and is refused by the run. */
+int stanli_pathfinder_opts_check(const stanli_pathfinder_opts* o, char* err,
+                                 size_t err_len);
 /* The rows a run under these options returns: num_draws, or 0 for options
  * the run would refuse. */
 int64_t stanli_pathfinder_max_draws(const stanli_pathfinder_opts* o);
@@ -966,6 +1002,10 @@ typedef struct {
  * iterations, tol_rel_obj 0.01, ELBO every 100 iterations, 1000 output
  * samples, radius 2. */
 void stanli_variational_opts_init(stanli_variational_opts* o);
+/* chain_id, a known algorithm, iter, grad_samples, elbo_samples, adapt_iter,
+ * eval_elbo and output_samples >= 1, eta and tol_rel_obj > 0, init_radius. */
+int stanli_variational_opts_check(const stanli_variational_opts* o, char* err,
+                                  size_t err_len);
 /* `mean`, one row or null, receives the columns at the mean of the
  * approximation, which is the row Stan writes ahead of the draws. `values`
  * holds opts->output_samples rows. `lp` and `lp_approx`, each

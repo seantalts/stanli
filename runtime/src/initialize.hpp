@@ -14,19 +14,14 @@
 
 namespace stanli {
 
-enum class FixedInitPolicy { Validate, SkipValidation };
-
 template <typename RNG>
 void initialize_point(Executor& ex, RNG& rng, double radius, const double* init,
-                      double* q, FixedInitPolicy fixed_policy) {
+                      double* q) {
   const int64_t n = ex.n_params();
   for (int64_t i = 0; i < n; ++i) q[i] = 0.0;
   const bool fixed = init != nullptr || radius == 0.0;
   if (init != nullptr)
     for (int64_t i = 0; i < n; ++i) q[i] = init[i];
-  // The sampler validates its one fixed point before stepsize search. The
-  // optimizer historically hands fixed starts directly to L-BFGS.
-  if (fixed && fixed_policy == FixedInitPolicy::SkipValidation) return;
   std::vector<double> grad((size_t)n);
   std::string first_error;
   const auto acceptable = [&] {

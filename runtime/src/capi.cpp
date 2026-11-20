@@ -53,6 +53,47 @@ void put_err(char* err, size_t err_len, const char* what) {
   err[err_len - 1] = '\0';
 }
 
+// Argument rules for every entry point, with one wording. The first broken
+// rule wins.
+class Rules {
+ public:
+  void at_least(const char* name, int64_t v, int64_t lo) {
+    if (v < lo)
+      fail(std::string(name) + " must be an integer >= " + std::to_string(lo));
+  }
+  void positive(const char* name, double v) {
+    if (!(v > 0 && std::isfinite(v)))
+      fail(std::string(name) + " must be a finite number > 0");
+  }
+  void init_radius(double r) {
+    if (!(std::isfinite(r) && r >= 0))
+      fail("init_radius must be a finite number >= 0");
+  }
+  // CmdStan accepts id 0. Chain c of a run uses chain_id + c.
+  void chain_ids(int chain_id, int chains) {
+    at_least("chain_id", chain_id, 0);
+    if ((int64_t)chain_id + chains - 1 > std::numeric_limits<int>::max())
+      fail("chain_id + chains - 1 must not exceed 2147483647");
+  }
+  void require(bool ok, const char* message) {
+    if (!ok) fail(message);
+  }
+  bool ok() const { return problem_.empty(); }
+  const std::string& problem() const { return problem_; }
+  // 0 when every rule held; else 1 with the first problem in err.
+  int report(char* err, size_t err_len) const {
+    if (ok()) return 0;
+    put_err(err, err_len, problem_.c_str());
+    return 1;
+  }
+
+ private:
+  void fail(std::string what) {
+    if (problem_.empty()) problem_ = std::move(what);
+  }
+  std::string problem_;
+};
+
 int64_t scalar_column_start(
     const std::vector<stanli::CompiledModel::ParamView>& columns,
     size_t view_start) {
@@ -252,7 +293,7 @@ int algorithm_status(const stanli::AlgorithmResult& r, int* interrupted,
 stanli::PathfinderRunConfig pathfinder_config(const stanli_pathfinder_opts& o) {
   stanli::PathfinderRunConfig cfg;
   cfg.seed = o.seed;
-  cfg.chain_id = o.chain_id > 0 ? o.chain_id : 1;
+  cfg.chain_id = o.chain_id;
   cfg.num_paths = o.num_paths;
   cfg.num_draws = o.num_draws;
   cfg.num_psis_draws = o.num_psis_draws;
@@ -1078,9 +1119,12 @@ int stanli_sample_walnuts_stats_init(stanli_model* m, uint32_t seed,
                                      double* stats, stanli_draw_cb cb,
                                      void* user, char* err, size_t err_len) {
   try {
-    if (chain_id < 1) throw std::invalid_argument("chain_id must be >= 1");
-    if (!(init_radius >= 0) || !std::isfinite(init_radius))
-      throw std::invalid_argument("init_radius must be finite and >= 0");
+    Rules r;
+    r.chain_ids(chain_id, 1);
+    r.at_least("warmup", warmup, 0);
+    r.at_least("samples", samples, 0);
+    r.init_radius(init_radius);
+    if (!r.ok()) throw std::invalid_argument(r.problem());
     stanli::WalnutsConfig cfg;
     cfg.seed = seed;
     cfg.chain_id = chain_id;
@@ -1183,19 +1227,18 @@ int stanli_pathfinder_inits_with_poll(stanli_model* m, uint32_t seed,
                                       char* err, size_t err_len) {
   if (interrupted != nullptr) *interrupted = 0;
   try {
-    if (chains <= 0) throw std::invalid_argument("chains must be positive");
-    if (num_iterations <= 0)
-      throw std::invalid_argument("num_iterations must be positive");
-    if (num_elbo_draws <= 0)
-      throw std::invalid_argument("num_elbo_draws must be positive");
-    if (history_size <= 0)
-      throw std::invalid_argument("history_size must be positive");
-    if (!std::isfinite(init_radius) || init_radius < 0)
-      throw std::invalid_argument("init_radius must be finite and nonnegative");
+    Rules rules;
+    rules.at_least("chains", chains, 1);
+    rules.chain_ids(chain_id, 1);
+    rules.at_least("num_iterations", num_iterations, 1);
+    rules.at_least("num_elbo_draws", num_elbo_draws, 1);
+    rules.at_least("history_size", history_size, 1);
+    rules.init_radius(init_radius);
+    if (!rules.ok()) throw std::invalid_argument(rules.problem());
 
     stanli::PathfinderConfig cfg;
     cfg.seed = seed;
-    cfg.chain_id = chain_id > 0 ? chain_id : 1;
+    cfg.chain_id = chain_id;
     cfg.num_draws = chains;
     cfg.num_iterations = num_iterations;
     cfg.num_elbo_draws = num_elbo_draws;
@@ -1263,31 +1306,41 @@ void stanli_sample_opts_init(stanli_sample_opts* o) {
 
 int stanli_sample_opts_check(const stanli_sample_opts* o, char* err,
                              size_t err_len) {
-  const char* problem = nullptr;
-  if (o == nullptr)
-    problem = "null options";
-  else if (o->chains < 1)
-    problem = "chains must be an integer >= 1";
-  else if (o->warmup < 0)
-    problem = "warmup must be an integer >= 0";
-  else if (o->samples < 0)
-    problem = "samples must be an integer >= 0";
-  else if (o->thin < 1)
-    problem = "thin must be an integer >= 1";
-  else if (!(o->delta > 0.0 && o->delta < 1.0))
-    problem = "delta must be between 0 and 1";
-  else if (o->max_depth < 1)
-    problem = "max_depth must be an integer >= 1";
-  else if (!(std::isfinite(o->init_radius) && o->init_radius >= 0.0))
-    problem = "init_radius must be a finite number >= 0";
-  else if (o->chain_id < 1)
-    problem = "chain_id must be an integer >= 1";
-  else if ((int64_t)o->chain_id + o->chains - 1 >
-           std::numeric_limits<int>::max())
-    problem = "chain_id + chains - 1 must not exceed 2147483647";
-  if (problem == nullptr) return 0;
-  put_err(err, err_len, problem);
-  return 1;
+  if (o == nullptr) {
+    put_err(err, err_len, "null options");
+    return 1;
+  }
+  Rules r;
+  r.at_least("chains", o->chains, 1);
+  r.at_least("warmup", o->warmup, 0);
+  r.at_least("samples", o->samples, 0);
+  r.at_least("thin", o->thin, 1);
+  r.require(o->delta >= 0.1 && o->delta < 1.0,
+            "delta must be a number >= 0.1 and < 1");
+  r.at_least("max_depth", o->max_depth, 1);
+  r.init_radius(o->init_radius);
+  r.chain_ids(o->chain_id, o->chains);
+  return r.report(err, err_len);
+}
+
+int stanli_sample_check(const stanli_sample_opts* o,
+                        const stanli_metric_opts* metric, char* err,
+                        size_t err_len) {
+  if (stanli_sample_opts_check(o, err, err_len) != 0) return 1;
+  stanli_metric_opts defaults;
+  stanli_metric_opts_init(&defaults);
+  const stanli_metric_opts& mo = metric != nullptr ? *metric : defaults;
+  Rules r;
+  r.require(mo.metric == STANLI_METRIC_UNIT ||
+                mo.metric == STANLI_METRIC_DIAG ||
+                mo.metric == STANLI_METRIC_DENSE,
+            "metric must be STANLI_METRIC_UNIT, STANLI_METRIC_DIAG or "
+            "STANLI_METRIC_DENSE");
+  // A continued run has no warmup and no adaptation by definition.
+  r.require(o->resume_in != nullptr || mo.adapt_engaged == 0 || o->warmup > 0,
+            "warmup must be an integer >= 1 when adaptation is engaged; set "
+            "adapt_engaged to 0 to sample without warmup");
+  return r.report(err, err_len);
 }
 
 int64_t stanli_n_stored_draws(const stanli_sample_opts* o) {
@@ -1377,7 +1430,7 @@ int stanli_sample_multi_metric(stanli_model* m, const stanli_sample_opts* opts,
       put_err(err, err_len, "refresh must be nonnegative");
       return -1;
     }
-    if (stanli_sample_opts_check(opts, err, err_len) != 0) return -1;
+    if (stanli_sample_check(opts, metric, err, err_len) != 0) return -1;
     const int n_chains = opts->chains;
     const int64_t n = m->ex->n_params();
     const int64_t n_stored = stanli_n_stored_draws(opts);
@@ -1450,12 +1503,9 @@ int stanli_sample_multi_metric(stanli_model* m, const stanli_sample_opts* opts,
       case STANLI_METRIC_DIAG:
         cfg.metric = stanli::Metric::Diag;
         break;
-      case STANLI_METRIC_DENSE:
+      default:
         cfg.metric = stanli::Metric::Dense;
         break;
-      default:
-        put_err(err, err_len, "unknown metric kind");
-        return -1;
     }
     cfg.step_size = mo.step_size;
     cfg.adapt = mo.adapt_engaged != 0 && resumes.empty();
@@ -1697,6 +1747,96 @@ int stanli_diagnose_counts(const double* draws, int64_t n_chains,
   }
 }
 
+namespace {
+// The L-BFGS controls optimize and Pathfinder share.
+void lbfgs_rules(Rules& r, double init_alpha, double tol_obj,
+                 double tol_rel_obj, double tol_grad, double tol_rel_grad,
+                 double tol_param, int history_size) {
+  r.positive("init_alpha", init_alpha);
+  r.positive("tol_obj", tol_obj);
+  r.positive("tol_rel_obj", tol_rel_obj);
+  r.positive("tol_grad", tol_grad);
+  r.positive("tol_rel_grad", tol_rel_grad);
+  r.positive("tol_param", tol_param);
+  r.at_least("history_size", history_size, 1);
+}
+
+int null_options(char* err, size_t err_len) {
+  put_err(err, err_len, "null options");
+  return 1;
+}
+}  // namespace
+
+int stanli_optimize_opts_check(const stanli_optimize_opts* o, char* err,
+                               size_t err_len) {
+  if (o == nullptr) return null_options(err, err_len);
+  Rules r;
+  r.chain_ids(o->chain_id, 1);
+  r.at_least("iter", o->iter, 1);
+  lbfgs_rules(r, o->init_alpha, o->tol_obj, o->tol_rel_obj, o->tol_grad,
+              o->tol_rel_grad, o->tol_param, o->history_size);
+  r.init_radius(o->init_radius);
+  return r.report(err, err_len);
+}
+
+int stanli_fixed_param_opts_check(const stanli_fixed_param_opts* o, char* err,
+                                  size_t err_len) {
+  if (o == nullptr) return null_options(err, err_len);
+  Rules r;
+  r.at_least("chains", o->chains, 1);
+  r.chain_ids(o->chain_id, o->chains);
+  r.at_least("samples", o->samples, 0);
+  r.at_least("thin", o->thin, 1);
+  r.init_radius(o->init_radius);
+  r.at_least("refresh", o->refresh, 0);
+  return r.report(err, err_len);
+}
+
+int stanli_laplace_opts_check(const stanli_laplace_opts* o, char* err,
+                              size_t err_len) {
+  if (o == nullptr) return null_options(err, err_len);
+  Rules r;
+  r.at_least("draws", o->draws, 1);
+  r.at_least("refresh", o->refresh, 0);
+  return r.report(err, err_len);
+}
+
+int stanli_pathfinder_opts_check(const stanli_pathfinder_opts* o, char* err,
+                                 size_t err_len) {
+  if (o == nullptr) return null_options(err, err_len);
+  Rules r;
+  r.chain_ids(o->chain_id, 1);
+  r.at_least("num_paths", o->num_paths, 1);
+  r.at_least("num_draws", o->num_draws, 1);
+  r.at_least("num_elbo_draws", o->num_elbo_draws, 1);
+  r.at_least("max_lbfgs_iters", o->max_lbfgs_iters, 1);
+  lbfgs_rules(r, o->init_alpha, o->tol_obj, o->tol_rel_obj, o->tol_grad,
+              o->tol_rel_grad, o->tol_param, o->history_size);
+  r.init_radius(o->init_radius);
+  r.at_least("refresh", o->refresh, 0);
+  return r.report(err, err_len);
+}
+
+int stanli_variational_opts_check(const stanli_variational_opts* o, char* err,
+                                  size_t err_len) {
+  if (o == nullptr) return null_options(err, err_len);
+  Rules r;
+  r.chain_ids(o->chain_id, 1);
+  r.require(o->algorithm == STANLI_ADVI_MEANFIELD ||
+                o->algorithm == STANLI_ADVI_FULLRANK,
+            "algorithm must be STANLI_ADVI_MEANFIELD or STANLI_ADVI_FULLRANK");
+  r.at_least("iter", o->iter, 1);
+  r.at_least("grad_samples", o->grad_samples, 1);
+  r.at_least("elbo_samples", o->elbo_samples, 1);
+  r.positive("eta", o->eta);
+  r.at_least("adapt_iter", o->adapt_iter, 1);
+  r.positive("tol_rel_obj", o->tol_rel_obj);
+  r.at_least("eval_elbo", o->eval_elbo, 1);
+  r.at_least("output_samples", o->output_samples, 1);
+  r.init_radius(o->init_radius);
+  return r.report(err, err_len);
+}
+
 void stanli_optimize_opts_init(stanli_optimize_opts* o) {
   if (o == nullptr) return;
   *o = stanli_optimize_opts{};
@@ -1729,21 +1869,10 @@ int stanli_optimize_with_poll(stanli_model* m, const stanli_optimize_opts* opts,
                               int* interrupted, char* err, size_t err_len) {
   if (interrupted != nullptr) *interrupted = 0;
   try {
-    if (opts == nullptr) {
-      put_err(err, err_len, "null options");
-      return 1;
-    }
-    if (opts->iter < 1) {
-      put_err(err, err_len, "iter must be an integer >= 1");
-      return 1;
-    }
-    if (!(std::isfinite(opts->init_radius) && opts->init_radius >= 0.0)) {
-      put_err(err, err_len, "init_radius must be a finite number >= 0");
-      return 1;
-    }
+    if (stanli_optimize_opts_check(opts, err, err_len) != 0) return 1;
     stanli::OptimizeConfig cfg;
     cfg.seed = opts->seed;
-    cfg.chain_id = opts->chain_id > 0 ? opts->chain_id : 1;
+    cfg.chain_id = opts->chain_id;
     cfg.iter = opts->iter;
     cfg.jacobian = opts->jacobian != 0;
     cfg.init_alpha = opts->init_alpha;
@@ -1752,7 +1881,7 @@ int stanli_optimize_with_poll(stanli_model* m, const stanli_optimize_opts* opts,
     cfg.tol_grad = opts->tol_grad;
     cfg.tol_rel_grad = opts->tol_rel_grad;
     cfg.tol_param = opts->tol_param;
-    cfg.history_size = opts->history_size > 0 ? opts->history_size : 5;
+    cfg.history_size = opts->history_size;
     cfg.init_radius = opts->init_radius;
     cfg.init = opts->init;
 
@@ -1806,9 +1935,7 @@ int stanli_fixed_param(stanli_model* m, const stanli_fixed_param_opts* opts,
                        size_t err_len) {
   try {
     if (interrupted != nullptr) *interrupted = 0;
-    if (opts == nullptr) throw std::invalid_argument("null options");
-    if (opts->chains < 1)
-      throw std::invalid_argument("chains must be positive");
+    if (stanli_fixed_param_opts_check(opts, err, err_len) != 0) return 1;
     const stanli::AlgorithmHost host =
         algorithm_host(m, log, log_user, poll, poll_user);
     const int64_t n = m->ex->n_params();
@@ -1820,9 +1947,8 @@ int stanli_fixed_param(stanli_model* m, const stanli_fixed_param_opts* opts,
     cfg.thin = opts->thin;
     cfg.init_radius = opts->init_radius;
     cfg.refresh = opts->refresh;
-    const int first = opts->chain_id > 0 ? opts->chain_id : 1;
     for (int c = 0; c < opts->chains; ++c) {
-      cfg.chain_id = first + c;
+      cfg.chain_id = opts->chain_id + c;
       cfg.init = opts->inits ? opts->inits + (int64_t)c * n : nullptr;
       const auto started = std::chrono::steady_clock::now();
       const stanli::AlgorithmResult r =
@@ -1873,7 +1999,7 @@ int stanli_laplace_sample(stanli_model* m, const stanli_laplace_opts* opts,
                           int* interrupted, char* err, size_t err_len) {
   try {
     if (interrupted != nullptr) *interrupted = 0;
-    if (opts == nullptr) throw std::invalid_argument("null options");
+    if (stanli_laplace_opts_check(opts, err, err_len) != 0) return 1;
     const stanli::AlgorithmHost host =
         algorithm_host(m, log, log_user, poll, poll_user);
     stanli::LaplaceConfig cfg;
@@ -1938,7 +2064,7 @@ int stanli_pathfinder(stanli_model* m, const stanli_pathfinder_opts* opts,
   try {
     if (interrupted != nullptr) *interrupted = 0;
     if (n_draws != nullptr) *n_draws = 0;
-    if (opts == nullptr) throw std::invalid_argument("null options");
+    if (stanli_pathfinder_opts_check(opts, err, err_len) != 0) return 1;
     const stanli::AlgorithmHost host =
         algorithm_host(m, log, log_user, poll, poll_user);
     const stanli::PathfinderRunConfig cfg = pathfinder_config(*opts);
@@ -1988,15 +2114,12 @@ int stanli_variational(stanli_model* m, const stanli_variational_opts* opts,
                        int* interrupted, char* err, size_t err_len) {
   try {
     if (interrupted != nullptr) *interrupted = 0;
-    if (opts == nullptr) throw std::invalid_argument("null options");
-    if (opts->algorithm != STANLI_ADVI_MEANFIELD &&
-        opts->algorithm != STANLI_ADVI_FULLRANK)
-      throw std::invalid_argument("unknown variational algorithm");
+    if (stanli_variational_opts_check(opts, err, err_len) != 0) return 1;
     const stanli::AlgorithmHost host =
         algorithm_host(m, log, log_user, poll, poll_user);
     stanli::VariationalConfig cfg;
     cfg.seed = opts->seed;
-    cfg.chain_id = opts->chain_id > 0 ? opts->chain_id : 1;
+    cfg.chain_id = opts->chain_id;
     cfg.fullrank = opts->algorithm == STANLI_ADVI_FULLRANK;
     cfg.iter = opts->iter;
     cfg.grad_samples = opts->grad_samples;

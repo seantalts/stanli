@@ -1447,10 +1447,11 @@ void expect_walnuts_chain_and_stats() {
                                                fixed_stats.data(), nullptr,
                                                nullptr, err, sizeof err) == 0);
   expect_true("explicit init changes the chain", fixed != one);
-  expect_true("walnuts rejects chain_id 0",
+  expect_true("walnuts rejects chain_id -1",
               stanli_sample_walnuts_stats_init(
-                  model, 31, 0, warmup, samples, 0, 2, nullptr, one.data(),
-                  nullptr, nullptr, nullptr, err, sizeof err) != 0);
+                  model, 31, -1, warmup, samples, 0, 2, nullptr, one.data(),
+                  nullptr, nullptr, nullptr, err, sizeof err) != 0 &&
+                  std::string(err) == "chain_id must be an integer >= 0");
   stanli_model_free(model);
 }
 
@@ -1482,16 +1483,18 @@ void expect_sample_options_validated() {
       {"max_depth = 0", [](stanli_sample_opts& o) { o.max_depth = 0; },
        "max_depth must be an integer >= 1"},
       {"delta = 0", [](stanli_sample_opts& o) { o.delta = 0.0; },
-       "delta must be between 0 and 1"},
+       "delta must be a number >= 0.1 and < 1"},
+      {"delta = 0.05", [](stanli_sample_opts& o) { o.delta = 0.05; },
+       "delta must be a number >= 0.1 and < 1"},
       {"delta = 1", [](stanli_sample_opts& o) { o.delta = 1.0; },
-       "delta must be between 0 and 1"},
+       "delta must be a number >= 0.1 and < 1"},
       {"delta = 1.5", [](stanli_sample_opts& o) { o.delta = 1.5; },
-       "delta must be between 0 and 1"},
+       "delta must be a number >= 0.1 and < 1"},
       {"delta = NaN",
        [](stanli_sample_opts& o) {
          o.delta = std::numeric_limits<double>::quiet_NaN();
        },
-       "delta must be between 0 and 1"},
+       "delta must be a number >= 0.1 and < 1"},
       {"init_radius < 0", [](stanli_sample_opts& o) { o.init_radius = -1.0; },
        "init_radius must be a finite number >= 0"},
       {"init_radius = Inf",
@@ -1499,8 +1502,8 @@ void expect_sample_options_validated() {
          o.init_radius = std::numeric_limits<double>::infinity();
        },
        "init_radius must be a finite number >= 0"},
-      {"chain_id = 0", [](stanli_sample_opts& o) { o.chain_id = 0; },
-       "chain_id must be an integer >= 1"},
+      {"chain_id < 0", [](stanli_sample_opts& o) { o.chain_id = -1; },
+       "chain_id must be an integer >= 0"},
   };
   for (const Case& c : cases) {
     stanli_sample_opts opts;
@@ -1532,10 +1535,52 @@ void expect_sample_options_validated() {
   err[0] = '\0';
   expect_true("default options pass the check",
               stanli_sample_opts_check(&ok, err, sizeof err) == 0);
+  ok.chain_id = 0;
+  ok.delta = 0.1;
+  expect_true("chain id 0 and delta 0.1 pass the check, as in CmdStan",
+              stanli_sample_opts_check(&ok, err, sizeof err) == 0);
   ok.warmup = 0;
   ok.samples = 0;
   expect_true("zero warmup and zero samples pass the check",
               stanli_sample_opts_check(&ok, err, sizeof err) == 0);
+
+  // CmdStan refuses num_warmup=0 while adaptation is engaged.
+  ok.chains = 1;
+  ok.samples = 5;
+  stanli_metric_opts metric;
+  stanli_metric_opts_init(&metric);
+  err[0] = '\0';
+  const char* no_warmup =
+      "warmup must be an integer >= 1 when adaptation is engaged; set "
+      "adapt_engaged to 0 to sample without warmup";
+  expect_true("sample check refuses warmup 0 with adaptation",
+              stanli_sample_check(&ok, &metric, err, sizeof err) != 0 &&
+                  std::string(err) == no_warmup);
+  expect_true("sample check refuses warmup 0 with default adaptation",
+              stanli_sample_check(&ok, nullptr, err, sizeof err) != 0);
+  std::vector<double> draws((size_t)(5 * stanli_n_unconstrained(model)));
+  err[0] = '\0';
+  expect_true(
+      "sampling refuses warmup 0 with adaptation",
+      stanli_sample_multi_metric(model, &ok, &metric, 0, draws.data(), nullptr,
+                                 nullptr, nullptr, nullptr, nullptr, nullptr,
+                                 nullptr, nullptr, err, sizeof err) == -1 &&
+          std::string(err) == no_warmup);
+  metric.adapt_engaged = 0;
+  expect_true("warmup 0 without adaptation passes",
+              stanli_sample_check(&ok, &metric, err, sizeof err) == 0 &&
+                  stanli_sample_multi_metric(
+                      model, &ok, &metric, 0, draws.data(), nullptr, nullptr,
+                      nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, err,
+                      sizeof err) == 0);
+  metric.adapt_engaged = 1;
+  metric.metric = 7;
+  expect_true("sample check refuses an unknown metric",
+              stanli_sample_check(&ok, &metric, err, sizeof err) != 0 &&
+                  std::string(err) ==
+                      "metric must be STANLI_METRIC_UNIT, "
+                      "STANLI_METRIC_DIAG or "
+                      "STANLI_METRIC_DENSE");
   stanli_model_free(model);
 }
 
