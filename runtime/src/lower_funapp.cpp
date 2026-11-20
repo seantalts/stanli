@@ -1482,6 +1482,7 @@ std::optional<Lowering::Val> Lowering::lower_density_fn(
           argument.active = expression_autodiff(source);
           argument.shape = builtin_argument_shape(source, value);
           if (has_runtime_shape(value)) {
+            argument.runtime_length = true;
             const int slot = one_runtime_extent(value, e.name);
             if ((extent >= 0 && extent != slot) ||
                 (dyn_capacity != 0 && dyn_capacity != g.slots[value.slot].len))
@@ -1506,28 +1507,6 @@ std::optional<Lowering::Val> Lowering::lower_density_fn(
     if (extent >= 0) {
       if (!plan.idata.empty() || spec.shape != stanli::DensityShape::Plain)
         fail(e.name + ": no form over a runtime-length operand", e.raw);
-      // The plan compared capacities. A runtime-length operand can have one
-      // element when the call runs, and the kernel would then broadcast it
-      // against a fixed-size container that Stan Math rejects.
-      if (spec.size_check != nullptr) {
-        bool runtime_length = false, fixed_container = false;
-        for (const stanli::DensitySizeName& named :
-             spec.size_check->arguments) {
-          const stanli::DensityCallArgument& argument =
-              plan_arguments.at(named.argument);
-          if (argument.shape.container == FunctionContainerKind::Scalar)
-            continue;
-          const int real = named.argument - spec.integer_args;
-          if (real >= 0 && (dyn_lengths >> real) & 1u)
-            runtime_length = true;
-          else
-            fixed_container = true;
-        }
-        if (runtime_length && fixed_container)
-          fail(e.name +
-                   ": a runtime-length operand beside a fixed-size container",
-               e.raw);
-      }
       ins.push_back(extent);
     }
     if (plan.data_term) ins.push_back(constant(*plan.data_term).slot);

@@ -133,6 +133,8 @@ struct DensityCallArgument {
   bool scalar = false;
   bool data_only = true;
   bool active = false;
+  // The length is set when the call runs; shape holds only its capacity.
+  bool runtime_length = false;
 };
 
 // The shared descriptor for a leading integer argument: a language scalar or

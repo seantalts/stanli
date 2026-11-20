@@ -611,7 +611,8 @@ double evaluate_packed_all_integer_density(AllIntegerDensity density,
 // Stan Math's check_consistent_sizes over the arguments that the density's
 // function names: the first container sets the size, and the first container
 // of another size is the error. The kernels bind a one-element argument as a
-// scalar, so this check is the only place where it is still a container.
+// scalar, so this check is the only place where it is still a container. An
+// argument whose length is set only when the call runs is left out.
 void check_consistent_density_sizes(
     const DensitySpec& spec,
     const std::vector<DensityCallArgument>& arguments) {
@@ -624,6 +625,7 @@ void check_consistent_density_sizes(
     if (integer ? argument.scalar
                 : argument.shape.container == FunctionContainerKind::Scalar)
       continue;
+    if (argument.runtime_length) continue;
     const size_t size = integer
                             ? argument.integers.size()
                             : static_cast<size_t>(argument.shape.storage_size);
@@ -954,7 +956,8 @@ DensityCallPlan density_call_plan(
       const size_t alpha = spec.glm_matrix_arg + 1u;
       int64_t expected = instances;
       if (spec.opcode == OP_NORMAL_ID_GLM_LPDF &&
-          (glm_flags & kGlmRowVectorDesign) != 0)
+          real_shapes[spec.glm_matrix_arg].container ==
+              FunctionContainerKind::RowVector)
         expected = real_shapes[0].container == FunctionContainerKind::Scalar
                        ? 1
                        : real_shapes[0].storage_size;
