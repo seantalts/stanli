@@ -821,10 +821,14 @@ model with each revision's own compiler, prepares it with each revision's
 runtime, and selects these models:
 
 - Every model whose prepared program differs: the MIR, the `dump_ops` op list
-  or the `dump_islands` output.
+  (which includes the ops inside each retained loop body) or the
+  `dump_islands` output.
 - Every model that runs an opcode named with `--opcodes`. Name each opcode
   whose kernel the change edits. A kernel change leaves the program as it
   was, and a tool cannot tell reliably which opcodes a source change touches.
+  Opcodes match by exact name. A retained loop runs some ops under their
+  `_DYNAMIC` names, for example `MATRIX_EXP_DYNAMIC` in the ctsem models, so
+  name those as well.
 - Every model whose preparation gets slower by more than 2% or 5 ms. The
   tool times preparation for every model in both revisions, one process at a
   time with the revisions alternating, and keeps the best of three. A pass

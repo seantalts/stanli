@@ -227,7 +227,11 @@ The tools you will reach for most:
   For compile timing, use `graph=compile stage=total`: the enclosing driver
   call also includes emitting the buffered profile rows.
 - [`dump_ops`](../tools/dump_ops.cpp): print the op list a model
-  lowered to. Usually the first thing to look at.
+  lowered to. Usually the first thing to look at. Under each `LOOP` op it
+  prints the loop body: the ops in control order, indented, in the same line
+  format and with their storage class, between lines that show the `for`,
+  `while`, `if` and `alias` structure. It prints the log density graph; pass
+  `--write-array` after the op limit for the generated-quantities graph.
 - `dump_ops model.tmir.sexp data.json --execution-json`: JSON describing the
   final selected graph, nested register calls, structured sites, solver
   callback admission, write-array fallback and constrained initialization.

@@ -4,6 +4,7 @@
 #include <stanli/graph.hpp>
 #include <stanli/optable.hpp>
 #include <stanli/execution_report.hpp>
+#include <stanli/structured_loop.hpp>
 
 #include <algorithm>
 #include <cstdio>
@@ -52,6 +53,82 @@ static void summarize(const stanli::Graph& g) {
   for (size_t k = 0; k < rank.size() && k < 8; ++k)
     std::printf("  %-24s total=%lld scalar=%lld\n", shortname(rank[k].second),
                 (long long)per_op[rank[k].second], (long long)rank[k].first);
+}
+
+static void print_op(const stanli::Graph& g, size_t i, int depth,
+                     const std::string& suffix = "") {
+  const stanli::Op& op = g.ops[i];
+  std::printf("%*s%5zu %-10s v=%02x out=s%d(len%lld)", 4 * depth, "", i,
+              shortname(op.opcode), op.variant, op.out,
+              (long long)g.slots[op.out].len);
+  std::printf(" in=");
+  for (int k = 0; k < op.n_in; ++k) {
+    std::printf("%ss%d(l%lld%s)", k ? "," : "", op.in[k],
+                (long long)g.slots[op.in[k]].len,
+                g.slots[op.in[k]].is_param ? ",P" : "");
+  }
+  if (op.n_idata) {
+    std::printf(" idata=[");
+    for (int64_t k = 0; k < op.n_idata && k < 4; ++k)
+      std::printf("%s%d", k ? "," : "", op.idata[k]);
+    if (op.n_idata > 4) std::printf(",...x%lld", (long long)op.n_idata);
+    std::printf("]");
+  }
+  std::printf("%s\n", suffix.c_str());
+}
+
+static const char* control_name(stanli::StructuredLoop::Node::Kind kind) {
+  using Node = stanli::StructuredLoop::Node;
+  switch (kind) {
+    case Node::Sequence:
+      return "seq";
+    case Node::KernelCall:
+      return "call";
+    case Node::Alias:
+      return "alias";
+    case Node::If:
+      return "if";
+    case Node::For:
+      return "for";
+    case Node::While:
+      return "while";
+    case Node::Break:
+      return "break";
+    case Node::Continue:
+      return "continue";
+    case Node::Target:
+      return "target";
+  }
+  return "?";
+}
+
+static void print_control(const stanli::StructuredLoop& loop,
+                          const stanli::StructuredLoop::Node& node, int depth) {
+  using Node = stanli::StructuredLoop::Node;
+  if (node.kind == Node::KernelCall) {
+    static const char* const storage[] = {"retained", "transient", "inplace"};
+    print_op(loop.body, (size_t)node.op, depth,
+             std::string(" storage=") + storage[node.storage] +
+                 " active=" + (node.active ? "1" : "0"));
+    return;
+  }
+  std::printf("%*s      %s", 4 * depth, "", control_name(node.kind));
+  const std::pair<const char*, int> fields[] = {
+      {"cond", node.condition}, {"iter", node.iterator}, {"lower", node.lower},
+      {"upper", node.upper},    {"dst", node.dst},       {"src", node.src}};
+  for (const auto& f : fields)
+    if (f.second >= 0) std::printf(" %s=s%d", f.first, f.second);
+  std::printf("\n");
+  for (const Node& child : node.children) print_control(loop, child, depth + 1);
+}
+
+static void print_loop_body(const stanli::StructuredLoop& loop, int depth) {
+  std::printf("%*s      body slots=%zu ops=%zu outputs=", 4 * depth, "",
+              loop.body.slots.size(), loop.body.ops.size());
+  for (size_t k = 0; k < loop.outputs.size(); ++k)
+    std::printf("%ss%d", k ? "," : "", loop.outputs[k]);
+  std::printf("%s\n", loop.has_target ? " target" : "");
+  print_control(loop, loop.root, depth + 1);
 }
 
 int main(int argc, char** argv) {
@@ -111,23 +188,10 @@ int main(int argc, char** argv) {
     return 0;
   }
   for (size_t i = 0; i < g.ops.size() && (int)i < max_ops; ++i) {
+    print_op(g, i, 0);
     const stanli::Op& op = g.ops[i];
-    std::printf("%5zu %-10s v=%02x out=s%d(len%lld)", i, shortname(op.opcode),
-                op.variant, op.out, (long long)g.slots[op.out].len);
-    std::printf(" in=");
-    for (int k = 0; k < op.n_in; ++k) {
-      std::printf("%ss%d(l%lld%s)", k ? "," : "", op.in[k],
-                  (long long)g.slots[op.in[k]].len,
-                  g.slots[op.in[k]].is_param ? ",P" : "");
-    }
-    if (op.n_idata) {
-      std::printf(" idata=[");
-      for (int64_t k = 0; k < op.n_idata && k < 4; ++k)
-        std::printf("%s%d", k ? "," : "", op.idata[k]);
-      if (op.n_idata > 4) std::printf(",...x%lld", (long long)op.n_idata);
-      std::printf("]");
-    }
-    std::printf("\n");
+    if (op.opcode == stanli::OP_LOOP && op.udata)
+      print_loop_body(*static_cast<const stanli::StructuredLoop*>(op.udata), 1);
   }
   return 0;
 }

@@ -1208,6 +1208,10 @@ if(NOT EMSCRIPTEN)
     COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_callback_geometry.py
             $<TARGET_FILE:stanli_check> $<TARGET_FILE:dump_ops>
     WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
+  add_test(NAME dump_ops_loops
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_dump_ops_loops.py
+            $<TARGET_FILE:dump_ops>
+    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
   # Native hosts initialize the sanitizer runtime before the C ABI library;
   # an ordinary Python interpreter cannot load that library with ctypes.
   add_executable(capi_execution_report tests/capi_execution_report.cpp)
