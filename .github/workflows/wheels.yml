@@ -2246,14 +2246,6 @@ jobs:
       - id: deployment
         uses: actions/deploy-pages@v4
 
-  # The downstream package vendors this runtime and exercises an integration
-  # surface that is expensive and independent enough not to gate every pull
-  # request. Run it once for a full release and make every publisher below
-  # wait for it.
-  stanr:
-    if: startsWith(github.ref, 'refs/tags/v')
-    uses: ./.github/workflows/stanr.yml
-
   # npm, tag-gated like PyPI. A release tag v* publishes every channel
   # at once (PyPI, the runtime release, npm); versions move in lockstep,
   # and both publish jobs assert their manifest agrees with the tag.
@@ -2263,18 +2255,14 @@ jobs:
   # the artifacts are the same ones the wasm and browser-compiler jobs
   # produced for this exact commit.
   npm-publish:
-    # A full release waits for stanr. An npm-v* recovery tag only republishes
-    # npm, so it may proceed after the stanr job is intentionally skipped.
     if: >-
       !cancelled() &&
       (startsWith(github.ref, 'refs/tags/v') ||
        startsWith(github.ref, 'refs/tags/npm-v')) &&
       needs.static_checks.result == 'success' &&
       needs.wasm.result == 'success' &&
-      needs.browser-compiler.result == 'success' &&
-      (startsWith(github.ref, 'refs/tags/npm-v') ||
-       needs.stanr.result == 'success')
-    needs: [static_checks, wasm, browser-compiler, stanr]
+      needs.browser-compiler.result == 'success'
+    needs: [static_checks, wasm, browser-compiler]
     runs-on: ubuntu-latest
     timeout-minutes: 15
     environment: npm
@@ -2351,7 +2339,7 @@ jobs:
   # source R-universe follows.
   runtime-release:
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: [static_checks, build, windows, wasm-webr, browser-compiler, stanr, r-tests, r-platform-tests]
+    needs: [static_checks, build, windows, wasm-webr, browser-compiler, r-tests, r-platform-tests]
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
@@ -2479,7 +2467,7 @@ jobs:
     # Tags only. PyPI versions can never be reused, so this must not fire
     # on a branch push.
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: [static_checks, build, windows, stanr]
+    needs: [static_checks, build, windows]
     runs-on: ubuntu-latest
     timeout-minutes: 30
     environment: pypi
