@@ -14,7 +14,8 @@
 // by a structural fingerprint (opcodes, shapes, dataflow edges, immediate
 // SHAPES -- never which slot a lane reads, which is what lets two branches of
 // a data condition share a bucket), and a bucket is rewritten in place of its
-// first lane.
+// first lane. A bucket whose lanes read different slots at one position
+// splits into one bucket per slot.
 //
 // What a bucket's ops read is proven, not assumed: no slot the fused ops read
 // from outside may be written while the run is in flight. That one rule
@@ -540,6 +541,34 @@ PartitionStats partition_lanes(Graph& g, Fills& fills,
       if ((int64_t)hi.size() >= kMinLanes) work.push_back(std::move(hi));
       return true;
     };
+    // Lanes that read different slots at one position may still fuse in
+    // groups that each read one slot there, as two branches of a data
+    // condition do. Constants form one group, since they fuse as values.
+    int vary_p = -1, vary_j = -1;
+    const auto split_by_slot = [&]() {
+      if (splits >= kMaxSplits) {
+        why->why = LaneDecline::kSplitCap;
+        return false;
+      }
+      std::unordered_map<int, size_t> group_of;
+      std::vector<std::vector<int>> groups;
+      for (int64_t l = 0; l < L; ++l) {
+        const int s = op_at(vary_p, l).in[vary_j];
+        const bool constant =
+            const_val.count(s) != 0 && writers[(size_t)s].empty();
+        const auto it = group_of.emplace(constant ? -1 : s, groups.size());
+        if (it.second) groups.emplace_back();
+        groups[it.first->second].push_back(ids[(size_t)l]);
+      }
+      bool any = false;
+      for (std::vector<int>& grp : groups)
+        if ((int64_t)grp.size() >= kMinLanes) {
+          work.push_back(std::move(grp));
+          any = true;
+        }
+      splits += any;
+      return any;
+    };
     // Every slot the fused ops read from outside the bucket must hold still
     // for the length of the run: a writer between the lanes is a cross-lane
     // recurrence, a mid-bucket store, or a destructive update, and the fused
@@ -703,6 +732,8 @@ PartitionStats partition_lanes(Graph& g, Fills& fills,
         if ((int64_t)vals.size() != L) {
           ok = false;  // a different slot per lane that is not a constant
           decline(LaneDecline::kVaryingSlot, t.opcode);
+          vary_p = p;
+          vary_j = j;
           break;
         }
         in.kind = InKind::kConstLanes;
@@ -903,7 +934,8 @@ PartitionStats partition_lanes(Graph& g, Fills& fills,
       decline(LaneDecline::kOpcode, t.opcode);
     }
     if (!ok) {
-      if (!split_here()) st.declines.push_back(*why);
+      const bool requeued = vary_p >= 0 ? split_by_slot() : split_here();
+      if (!requeued) st.declines.push_back(*why);
       continue;
     }
     // Preserve per-lane reverse order when several operations contribute to
