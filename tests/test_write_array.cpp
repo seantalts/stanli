@@ -30,6 +30,7 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <cstddef>
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
@@ -1449,17 +1450,17 @@ void test_write_array_rng_loops() {
   expect_rng_loop_parity("wa_rng_loops auto", 20000, nullptr, 5);
 }
 
-// Each carried loop starts from a value that depends only on data (an
-// accumulator set to zero, a copy of a data vector, an integer counter) and
-// updates it with a value that depends on mu. The import holds the same
-// value on every draw, so each loop records once and replays after that.
-void test_write_array_data_start() {
+// Retains `want` carried loops once 20,000 padding loops make write_array
+// large, none without them. Every draw matches the unrolled program, and
+// every draw after the first replays each retained loop instead of
+// recording it again.
+void expect_replayed_write_array_loops(const std::string& stem,
+                                       std::ptrdiff_t want) {
   using namespace stanli;
   const int n = 64;
-  const std::string text =
-      slurp("tests/fixtures/structured_wa_data_start.tmir.sexp");
+  const std::string text = slurp("tests/fixtures/" + stem + ".tmir.sexp");
   for (const int t : {8, 20000}) {
-    const std::string label = "structured_wa_data_start T=" + std::to_string(t);
+    const std::string label = stem + " T=" + std::to_string(t);
     DataMap data;
     data.set_int("N", n);
     data.set_int("T", t);
@@ -1478,7 +1479,7 @@ void test_write_array_data_start() {
     const auto loops = std::count_if(ops.begin(), ops.end(), [](const Op& op) {
       return op.opcode == OP_LOOP;
     });
-    if (loops != (t > 8 ? 4 : 0)) {
+    if (loops != (t > 8 ? want : 0)) {
       ++failures;
       std::printf("FAIL %s: %td retained loops\n", label.c_str(), loops);
     }
@@ -1513,6 +1514,21 @@ void test_write_array_data_start() {
       }
     }
   }
+}
+
+// Each carried loop starts from a value that depends only on data (an
+// accumulator set to zero, a copy of a data vector, an integer counter, a
+// vector with only its first element set) and updates it with a value that
+// depends on mu. The import holds the same bits on every draw.
+void test_write_array_data_start() {
+  expect_replayed_write_array_loops("structured_wa_data_start", 4);
+}
+
+// Two carried loops branch on data only: on the sign of x[n], and on the
+// inner index against the outer one. Their decisions are the same on every
+// draw. A third loop branches on mu * x[n] and stays unrolled.
+void test_write_array_data_branch() {
+  expect_replayed_write_array_loops("structured_wa_data_branch", 2);
 }
 
 // An inlined function declares a matrix whose row count multiplies a
@@ -4845,6 +4861,7 @@ int main() {
   test_write_array_vector_rng();
   test_write_array_rng_loops();
   test_write_array_data_start();
+  test_write_array_data_branch();
   test_write_array_compare_size();
   test_write_array_bounded_blocks();
   test_write_array_selected_loop_refused();

@@ -15,6 +15,10 @@ std::map<std::string, Val> region_cells;
 std::map<std::string, IntRange> region_analysis_ints;
 int region_control_depth = 0;
 bool region_control_active = false;
+// Set once the region retains a branch or while loop whose condition depends
+// on a parameter. Replay checks each such decision and records again when one
+// changes between executions.
+bool region_parameter_control = false;
 unsigned structured_outer_depth = 0;
 bool region_unreachable = false;
 std::set<std::string> region_unsized_unagreed;
@@ -1535,6 +1539,8 @@ std::optional<Val> region_expr(const mir::Expr& e) {
     if (auto c = region_static_truth(e.args[0]))
       return lower_expr(e.args[*c ? 1 : 2]);
     Val condition = lower_expr(e.args[0]);
+    region_parameter_control |=
+        region_control_active || !condition.si.param_free;
     region_flush();
     RegionNode branch;
     branch.kind = RegionNode::If;
@@ -2142,6 +2148,7 @@ Flow lower_region_stmt(const mir::Stmt& s) {
       region_current = &loop.children[1];
       const bool saved_control = region_control_active;
       region_control_active |= !condition.si.param_free;
+      region_parameter_control |= region_control_active;
       ++region_control_depth;
       lower_region_body(s.body);
       --region_control_depth;
@@ -2207,6 +2214,7 @@ Flow lower_region_stmt(const mir::Stmt& s) {
         real_ranges = base_real_ranges;
         region_refine_condition(s.cond, arm == 0);
         region_control_active = base_control || !condition.si.param_free;
+        region_parameter_control |= region_control_active;
         region_current = &branch.children[arm];
         ++region_control_depth;
         region_unreachable = false;
@@ -2910,6 +2918,7 @@ bool try_lower_region(
       Lowering trial = fork_region_trial(&mentioned);
       trial.in_write_array = in_write_array;
       trial.bounded_output = output_references != nullptr;
+      trial.region_parameter_control = false;
       auto p = std::make_shared<StructuredLoop>();
       p->cache_execution_path = !output_references;
       trial.region_current = &p->root;
@@ -3072,8 +3081,9 @@ bool try_lower_region(
           return false;
         };
         const bool control = retains_control(retains_control, p->root);
-        if (retaining_write_array_loop && control && !draws)
-          fail("write_array loop retains runtime control");
+        if (retaining_write_array_loop && control &&
+            trial.region_parameter_control && !draws)
+          fail("write_array loop branches on a parameter");
         if (!retaining_write_array_loop && !control)
           fail("automatic candidate has no retained runtime control");
       }
