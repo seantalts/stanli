@@ -7,6 +7,19 @@ Targeted measurements are included where available. Current absolute results
 across the model corpus are in
 [`docs/benchmarks.md`](../../docs/benchmarks.md).
 
+The switches in this file are developer switches. They work only in a build
+configured with `-DSTANLI_DEBUG_SWITCHES=ON`, which the wheels, the R runtime
+and the browser builds do not use
+([`docs/hacking.md`](../../docs/hacking.md#building)). A switch that is set in
+another build is ignored, with a one-time notice. [Developer
+switches](#developer-switches) lists every switch, what it does and the file
+that reads it. Corpus sizes and model counts in the measurements are the ones
+at the time of each measurement. The corpus has grown since the early ones;
+[`docs/corpus-status.md`](../../docs/corpus-status.md) has the current count. The file names
+below that have no directory are in
+`runtime/src/`, except the kernels, which are in `runtime/kernels/`, and
+headers such as `mir_prog.hpp`, which are in `runtime/include/stanli/`.
+
 ## Data input preload (`lower.cpp`, disable: `STANLI_NO_DATA_PRELOAD=1`)
 
 stanc's transformed MIR contains a small program that reconstructs each input
@@ -30,7 +43,7 @@ the JSON happened to spell a real matrix with integer tokens. Set
 `STANLI_NO_DATA_PRELOAD=1` to replay the generated hydration as a correctness
 oracle.
 
-## Loop-invariant target collapse (`lower.cpp`)
+## Loop-invariant target collapse (`lower_stmt.cpp`)
 
 Before unrolling a `for` loop, lowering checks whether its only externally
 visible effect is adding iterator-independent terms to `target`. Such a loop
@@ -67,8 +80,9 @@ reads some buffers, computes something, and writes a buffer. The log
 density is the list run top to bottom; the gradient is the list run
 bottom to top.
 
-Running one op costs roughly 15-20 nanoseconds regardless of how small
-the computation inside it is. An op that adds two numbers pays the same
+Running one op costs a fixed overhead regardless of how small the
+computation inside it is. The cost models of the passes below
+(`pass_util.hpp`, `island.cpp`) put it at about 5 nanoseconds per op. An op that adds two numbers pays the same
 fixed cost as an op that adds two vectors of 10,000 numbers. So the
 main way to make a model faster is to make the list shorter: replace
 many small ops with few big ones.
@@ -82,18 +96,78 @@ for (n in 1:1000) {
 ```
 
 becomes several thousand single-number ops. The passes below undo that
-without changing the numbers the model computes. They run in this
-order, from `lower.cpp`:
+without changing the model's results beyond last-bit rounding. They run in this
+order, from `Lowering::run_passes` in `lower.cpp`:
 
-1. in-place updates (`inplace.cpp`)
-2. store-to-load forwarding (`inplace.cpp`)
-3. constant folding (`constfold.cpp`)
-4. loop re-rolling (`reroll.cpp`)
-5. in-place updates again, for slice stores created by re-rolling
-6. tape islands (`island.cpp`)
+1. splitting of target sums (`target_sums.cpp`, log density only)
+2. folding of diagonal updates into GP covariances (`gp_cov_fusion.cpp`)
+3. in-place updates (`inplace.cpp`)
+4. store-to-load forwarding (`inplace.cpp`)
+5. constant folding (`constfold.cpp`)
+6. loop re-rolling (`reroll.cpp`)
+7. in-place updates again, for slice stores created by re-rolling
+8. observation collapse (`collapse.cpp`, fast mode only, not in `write_array`)
+9. lane partitioning (`partition.cpp`)
+10. in-place updates again, for slice stores created by partitioning
+11. eliding of full-extent stores (`inplace.cpp`)
+12. common-subexpression elimination (`cse.cpp`)
+13. tape islands (`island.cpp`)
 
-Fast mode adds one pass between steps 5 and 6 that does change the numbers,
-within the fast-mode gate: observation collapse (`collapse.cpp`).
+Each stage has a section below. Not every stage runs on every
+graph. A `PassPlan` in `lower_internal.hpp` switches five of them on or off:
+constant folding, partitioning, eliding stores, CSE and islands. The
+log-density graph runs all five. The `write_array` graph is forward only and
+has no target to reduce, so it runs constant folding and CSE and skips the
+other three. The body of a higher-order callback (`kCallbackPasses`) runs
+partitioning, eliding and CSE. It skips constant folding, because its inactive
+inputs are bound at run time and folding would evaluate them against zero
+storage, and it skips islands. The two in-place re-runs do work only if the
+stage before them replaced something.
+
+Fast mode (`CompileOptions::fast_math`) does change the numbers, within the
+fast-mode gate, and it touches four of these stages. It adds observation
+collapse. It lets re-rolling and partitioning fuse lanes that read one active
+scalar at several positions (`fuse_shared_params`); in the default mode they
+leave such a region scalar, because widening it would regroup that scalar's
+adjoint contributions. Re-rolling then also prices each position by its own
+number of distinct lanes. And CSE merges duplicates of an active value
+completely (`merge_active`), where the default mode shares the value and keeps
+each pullback. The sections on [re-rolling](#loop-re-rolling-rerollcpp-disable-stanli_no_reroll1),
+[partitioning](#lane-partitioning-partitioncpp-disable-stanli_no_partition1) and
+[CSE](#common-subexpression-elimination-csecpp-disable-stanli_no_cse1) say
+where each of these applies.
+
+## Splitting target sums (`target_sums.cpp`, no switch)
+
+A model can add terms to a local, `lp += f(n);` in a loop, and add the local to
+`target` once. A `reduce_sum` partial-sum function does this. The target term
+is then one long chain of scalar additions, which re-rolling cannot treat as
+separate per-element terms. The pass replaces such a chain with its operands as
+separate target terms, so that re-rolling and partitioning can vectorize them.
+The target is already a sum in an order that stanli chooses (`reduce_terms`
+adds the terms in groups), so splitting a chain only picks a different order
+of the same terms. It runs first, and only on the log-density graph, so that every pass
+configuration sees the same terms.
+
+An addition is removed only when it is the sole writer of its result and its
+one reader is the next addition in the chain or the target. A chain with a
+repeated operand, or one shorter than the re-roll lane threshold (four), is
+left alone, and a `+0.0` operand is dropped.
+
+## Folding diagonal updates into GP covariances (`gp_cov_fusion.cpp`, no switch)
+
+A covariance function followed by a loop that adds one scalar (a jitter) to
+each diagonal element lowers to the covariance op and then, for every diagonal
+element, an index read, an add and an indexed store. The pass folds a complete
+chain of these into the covariance op, which takes the scalar as an extra
+input. It applies to the Matern 3/2, Matern 5/2, exponential and periodic
+covariances. Some of these return diagonal variables that alias one another in
+Stan Math, so materializing the matrix between the update ops would lose their
+reverse accumulation order. The exponentiated quadratic covariance has an
+upstream matrix callback with distinct output nodes, and the pass leaves it
+alone. Fusing keeps the covariance and its diagonal additions on one Stan Math
+tape. The pass refuses an incomplete chain, and a chain whose intermediate
+values anything else reads.
 
 ## In-place updates (`inplace.cpp`, disable: `STANLI_NO_INPLACE=1`)
 
@@ -167,6 +241,9 @@ If a surviving op reads the buffer at a moment when it held different,
 earlier contents (this happens with in-place write chains), that buffer
 cannot be folded, and nothing computed from it can be either.
 
+Unlike the other `STANLI_NO_*` developer switches, which act when they are set
+to any value, `STANLI_NO_CONSTFOLD` acts only when its value starts with `1`.
+
 ## Loop re-rolling (`reroll.cpp`, disable: `STANLI_NO_REROLL=1`)
 
 The main pass. An unrolled loop shows up as the same short op pattern
@@ -234,10 +311,11 @@ as the row tiles via `OP_REP_MAT` instead of blocking the region; and a row
 density whose result feeds another op (a mixture over rows) folds back with
 one `OP_SUM_ROWS` per lane, repacking first when the region's convention is
 column-major, since `OP_SUM_ROWS` needs each lane's elements contiguous.
-A lane that builds its row with `OP_CONCAT2` (`mu[n] = [a[n], b[n]]'`, the
-brms categorical and multivariate shape) commits the region to column-major,
-where the lanes' concatenations are one `OP_CONCAT2` of the packed operands;
-a shared operand such as brms's leading zero tiles to every lane. A row store
+A lane that builds its row with `OP_CONCAT2` (`mu[n] = [a[n], b[n]]'`, a shape
+that brms generates for categorical and multivariate models) commits the
+region to column-major, where the lanes' concatenations are one `OP_CONCAT2`
+of the packed operands; a shared operand, such as a leading zero, tiles to
+every lane. A row store
 whose container uses the other convention takes one `OP_TRANSPOSE`. When
 that transpose's input is the widened chain of C length-L columns, the
 chain would copy its growing prefix once per link, so instead the first
@@ -251,12 +329,15 @@ Partition's `indexed_read` and its own wide-operand check share the same
 affine classifier and the same tiling, so a lane found by structure there
 or by period here is priced and packed the same way.
 
-Fixed-width row reductions get one deliberately narrower pre-pass. The LDA
-shape fills every element of a short `gamma` vector, then contributes
-`log_sum_exp(gamma)` once per document. Because K=2 is below the ordinary
-lane threshold and the scalar reduction separates the outer rows, the exact
-concrete grammar is recognized as a unit: two indexed reads, logs, an add,
-the complete element stores, and a target-only reduction. Consecutive rows
+Fixed-width row reductions get one deliberately narrower pre-pass. It
+recognizes a short vector that an outer loop fills element by element and then
+reduces with `log_sum_exp` into the target once per iteration (the topic-model
+likelihood has this form, with a vector of K entries per document). A width
+below the ordinary lane threshold (`kMinLanes = 4`) cannot be re-rolled at all,
+and at larger widths the scalar reduction between rows stops the outer loop
+from looking periodic. So the exact concrete grammar is recognized as a unit:
+two indexed reads, logs, an add, the complete element stores, and a
+target-only reduction. Consecutive rows
 become two gathers over packed row-major indices, vector logs/add, one
 `OP_LOG_SUM_EXP_ROWS`, and `OP_SUM_VEC`. Every removed temporary and the
 row scratch buffers must have only the proven readers/writers and no external
@@ -300,9 +381,15 @@ currencies `partition.cpp` uses (`pass_util.hpp`'s `kLaneOpCost`,
 slice or gather at their element count, a store only when it is not the
 whole-vector or write-chained form, and a CSE-collapse charge
 (`(Luse - distinct) * lane_elems`) for lanes distinguishable only by an
-immediate CSE would otherwise merge. A region that fails to clear its own
+immediate CSE would otherwise merge. In fast mode, where CSE also merges
+active duplicates, the charge is made for each position by its own count of
+distinct lanes. A region that fails to clear its own
 cost declines through the same shrink-and-retry path a hard classification
-failure already takes.
+failure already takes. In the default mode a region also declines when one
+active scalar is read at more than one of its positions: widening evaluates one
+reverse operation across all lanes before the next, so that scalar would
+receive its contributions regrouped. Fast mode lifts this refusal
+(`fuse_shared_params`).
 
 This matters most exactly where it looks least intuitive: a discrete
 idata-density region whose lanes carry mostly repeated outcomes (a
@@ -507,9 +594,15 @@ A lane ends at a target term or at an element store, and reaches back
 over the ops whose values never leave it. Lane bounds are therefore
 computed rather than discovered, and lanes need not be adjacent. They are
 grouped by a structural fingerprint (opcodes, shapes, dataflow edges, and
-the shapes of immediates, never which slot a lane reads), which is what
-lets the two branches of a data-dependent condition share one bucket, and
-each bucket is rewritten in place of its first lane.
+the shapes of immediates, never which slot a lane reads), and each bucket
+is rewritten in place of its first lane. Because the fingerprint ignores the
+slots, lanes that differ only in constants, or in indices into one shared
+base, share a bucket. That includes the two branches of a data-dependent
+condition when they differ in that way. After bucketing, every operand must
+be the same slot in every lane, a constant per lane, or an indexed read of
+one base. A bucket in which an operand is a different non-constant slot in
+different lanes (two branches that use different parameters) fails that
+check, and the bucket stays scalar unless a writer lets it split.
 
 What a bucket's ops read is proven rather than assumed: no slot the fused
 ops read from outside may be written while the run is in flight. That one
@@ -520,6 +613,11 @@ between the first lane's position and the last lane's end. Ops only ever
 move earlier, so an in-place store already proven safe against a later
 reader stays safe, and a bucket that trips the rule splits at the writer
 rather than declining.
+
+In the default mode a bucket also declines when several of its operations read
+one active scalar. Grouping those contributions by opcode can lose many ULP
+against the source order, which the unrolled graph keeps. Fast mode skips this
+check (`fuse_shared_params`).
 
 A bucket is rewritten in one of these forms:
 
@@ -541,7 +639,8 @@ A bucket is rewritten in one of these forms:
 - A bucket holding more than one template splits at any mid-range writer
   and reconsiders both halves, so an interleaved model still gets the
   lanes on either side of the writer. Splits are capped rather than
-  retried to a fixed point.
+  retried to a fixed point. The cap of 32 (`kMaxSplits`) counts every split in
+  the whole pass, across all buckets.
 - One arm rewrites a chain instead of widening it. A lane that multiplies
   two scalars, subtracts a width-m vector, prepends a zero, cumulatively
   sums, and hands the result to a scalar-outcome categorical is one row
@@ -557,11 +656,15 @@ A bucket is rewritten in one of these forms:
   target the result is bitwise the per-row graph's.
 
 Fusing is not always a win, so each bucket is costed before it is
-emitted, in the currencies the island carver uses (`pass_util.hpp`'s
-`kLaneOpCost`, `kLaneDensityElem`, `kLanePartitionMargin`, the same ones reroll.cpp's
-own region pricing uses): about 5 ns per graph op against about 1 ns per
-element moved, with a density element charged six op dispatches. Two
-measured pessimizations live in that model rather
+emitted, in the currencies of `pass_util.hpp` (`kLaneOpCost`,
+`kLaneDensityElem`, `kLanePartitionMargin`, the same ones that reroll.cpp's
+own region pricing uses). The island carver has its own constants in
+`island.cpp`. The currencies are about 5 ns per graph op against about 1 ns per
+element moved, and a density element is charged `kLaneDensityElem = 6`
+element units. The comment on that constant calls this six op dispatches, which
+is 30 units, so the code and the comment disagree; the question is open in
+[`notes/performance/audit-2026-11-20-open-questions.md`](../../notes/performance/audit-2026-11-20-open-questions.md).
+Two measured pessimizations live in that model rather
 than in the shipped graph. Lanes identical down to their immediates and
 their external slots are one op once CSE runs, so fusing them re-expands
 what CSE would collapse and the bucket is charged for every duplicate it
@@ -579,6 +682,24 @@ to 19 (2.29x per gradient), `Mth_model` 1,563 to 35 (1.63x), `Mh_model`
 1,542 to 18 (1.53x), `Mtbh_model` 1.43x, `Survey_model` 1,427 to 9,
 and the two IRT models that reach the GLM arm, `gpcm_latent_reg_irt`
 34,634 to 91 (6.5x) and `grsm_latent_reg_irt` (6.3x).
+
+## Eliding full-extent stores (`inplace.cpp`, disable: `STANLI_NO_INPLACE=1`)
+
+Re-rolling and partitioning can leave a store that overwrites a whole
+destination (`v = tmp;` as one slice store, or an identity slice of the whole
+value). That store is a copy. The pass renames the later readers of the
+destination to read the copied value and deletes the store. The conditions are
+the ones that keep the numbers the same. The copied value has exactly one
+reader, which is the store, and neither it nor the destination is a parameter
+or a root. The next write to the destination, if there is one, neither reads
+what the store put there nor leaves adjoints for the reverse sweep to carry
+past it; a store that covers the whole destination and writes in place
+qualifies. An op that holds its inputs in a payload the rename cannot reach (an
+island, a loop, a region map or a `reduce_sum`) and that reads the destination
+blocks the rewrite. With one reader, the reverse sweep's additions keep the
+grouping they had. The pass runs after every pass that emits slice stores and
+before CSE and islands. It has no switch of its own: `STANLI_NO_INPLACE` turns
+it off together with the in-place updates.
 
 ## Common-subexpression elimination (`cse.cpp`, disable: `STANLI_NO_CSE=1`)
 
@@ -612,8 +733,10 @@ the island carver a smaller residue. `Mt_model` falls from 1,062 ops to
 enters the partition pass with 34,634 ops rather than 61,612. Forward
 results are bitwise unchanged.
 
-An active duplicate normally shares only its value and keeps its own
-pullback, so the reverse sweep accumulates in source order. A duplicate
+In the default mode, an active duplicate normally shares only its value and
+keeps its own pullback, so the reverse sweep accumulates in source order. In
+fast mode (`merge_active`) every active duplicate merges completely, and the
+rest of this paragraph does not apply. A duplicate
 whose seed is a whole number is different. The target seeds each term
 with 1 and a scalar addition passes its seed on unchanged, so a copy that
 reaches the target only as a term or through additions has a whole-number
@@ -629,12 +752,13 @@ the gradient: in `s2_hurdle_cumulative` each nonzero row adds
 terms left those 26 pullbacks accumulating against one large one (9.6 ULP
 on one entry, against 3.4 before). With both sides merged it is 0.4 ULP.
 
-The `hurdle_poisson` model passes each zero's `mu[n]` to a branch that
-never reads it, so the pass also drops a static `INDEX`, `SLICE` or
-`GATHER` whose value nothing reads, and a copy that shares another op's
-value once nothing reads it (merging terms leaves the copies that
-computed their arguments unread). It drops no other unused op, since an
-unused density can still reject.
+A branch can receive an argument that it never reads: the `hurdle_poisson`
+model above passes each zero's `mu[n]` to a branch that ignores it. So the
+pass also drops a static `INDEX`, `SLICE`, `SLICE_STRIDED` or `GATHER` whose
+value nothing reads, and a copy that shares another op's value once nothing
+reads it (merging terms leaves the copies that computed their arguments
+unread). It drops no other unused op, since an unused density can still
+reject.
 
 ## Native scalar probability categorical (`message.cpp`)
 
@@ -671,8 +795,11 @@ The write-array graph used to stop at every RNG call. Drivers then selected
 draw; even a late scalar draw therefore reinterpreted constrained parameters,
 transformed parameters, and all earlier generated quantities.
 
-`OP_RNG` now covers scalar `poisson_log_rng`, `uniform_rng`, `bernoulli_rng`,
-`normal_rng`, `lognormal_rng`, and `binomial_rng`. The graph and interpreter
+`OP_RNG` now covers the 24 scalar RNG families in the `ScalarRng` enum
+(`rng_family.hpp`): the first tranche was `poisson_log_rng`, `uniform_rng`,
+`bernoulli_rng`, `normal_rng`, `lognormal_rng` and `binomial_rng`, and later
+ones added more, among them `gamma_rng`, `student_t_rng`, `beta_binomial_rng`
+and `neg_binomial_2_log_rng`. The graph and interpreter
 share one draw helper, so they call the same Stan Math function in the same
 order on the same caller-owned `WaRng`. An executor holds only a temporary
 pointer to that chain resource for one forward sweep; scoped restoration and
@@ -681,9 +808,11 @@ caller's stream. The graph passes treat every RNG op as an ordered effect, so
 they cannot fold, reroll, carve, delete, or duplicate a draw whose result is
 otherwise unused.
 
-The boundary is deliberately fail-closed. Apart from the audited categorical
-and covariance-form multivariate-normal extensions below, container-valued
-results or unsupported RNGs still select the whole-section interpreter. Scalar
+The boundary is deliberately fail-closed. Apart from the container-valued
+families below (`categorical_rng`, `categorical_logit_rng`,
+`poisson_binomial_rng`, `dirichlet_rng`, `multi_normal_rng` and
+`multi_normal_cholesky_rng`), container-valued results or unsupported RNGs
+still select the whole-section interpreter. Scalar
 integer results live exactly in one double slot. The runtime-control tranche
 below admits that value only as a checked flat-array/vector index or a branch
 input inside a structured register program; loop bounds, shapes, integer
@@ -717,9 +846,9 @@ uses Stan Math's Eigen product grouping while hiding the graph arena's input ali
 materialized vectors, so an odd slot offset cannot change their packet
 boundary. A strided matrix-row operand instead records and preserves Stan
 Math's ascending scalar grouping before the expression is materialized.
-Lowering admits only a bare materialized vector/row-vector and the exact
-outer-subtraction surfaces used by these models. Shifted views, arbitrary
-nested expressions, UDF formals, and empty containers remain on the existing
+Lowering admits any nonempty vector or row-vector value whose reduction
+grouping the kernel can reproduce (`reduction_grouping`); an argument whose
+grouping is not known, and an empty container, stay on the existing
 fallback. The opcode carries the `kVariantGrouped` trait, which excludes it
 from reroll matching and island CALLs.
 
@@ -764,9 +893,9 @@ targeted medians; the committed full-corpus timing table remains unchanged.
 ## Compiled categorical generated-quantities RNG (`rng.cpp`, `wa_interp.cpp`)
 
 `categorical_rng` is the first graph-native RNG with a nonscalar argument but a
-scalar result. It reuses `OP_RNG`: variants 0 through 5 retain their scalar
-double inputs, while the categorical variant reads one variable-length vector
-descriptor and writes the one-based Stan int exactly into one double slot. It
+scalar result. It reuses `OP_RNG`: the scalar-family variants retain their
+scalar double inputs, while the categorical variant reads one variable-length
+vector descriptor and writes the one-based Stan int exactly into one double slot. It
 stays outside `ScalarRng`, whose arity counts scalar arguments rather than
 logical containers.
 
@@ -808,12 +937,19 @@ table in `docs/benchmarks.md`.
 
 `OP_EXTREMA_VEC` has `min` and `max` variants with forward and backward
 kernels. The backward kernel adds the output adjoint to the selected element.
-A top-level call must consume a direct `UVector` or `URowVector` `Var`. The
-kernel uses the same address-independent grouping that the pinned Stan Math
+The argument may be a vector, row vector, matrix, one-dimensional real array
+or one-dimensional integer array, and the two-argument integer form of `min`
+and `max` has its own scalar op. The argument must be the whole container that
+the overload names; a slice or any other part of a container is refused. The
+lowering looks at the layout of the lowered argument, whatever the MIR
+expression looks like, so an expression that produces a whole container
+qualifies when its evaluation grouping is one the kernel reproduces
+(`reduction_grouping`). The kernel uses
+the same address-independent grouping that the pinned Stan Math
 implementation applies to an owning Eigen value, while retaining its
 empty-real results: positive infinity for `min` and negative infinity for
-`max`. Arrays, matrices, indexed views, expressions, and UDF calls
-remain in `WaInterp`.
+`max`. An argument whose grouping is not known, and any other call that
+the lowering cannot place, remain in `WaInterp`.
 
 The opcode carries the `kVariantGrouped` trait, because its variant bits pick
 the reduction grouping. That excludes it from reroll matching, CSE, collapse,
@@ -936,11 +1072,14 @@ full-corpus table.
 time, and this statement picks its branch anew at every evaluation. The
 region (just the conditional, not the model around it) is translated
 into the same instruction list the ODE right-hand sides use, and one op
-runs it: on plain numbers for the value, and again under stan-math's
-own autodiff for the derivatives, which are the derivatives of
-whichever branch ran. That is what CmdStan's generated C++ does for the
+runs it: on plain numbers for the value, and for the derivatives either
+a generated backward (the same one that tape islands use, below) or, when
+none can be generated or `STANLI_NO_NATIVE_ADJ` is set, a replay under
+stan-math's own autodiff. Both give the derivatives of whichever branch
+ran. That is what CmdStan's generated C++ does for the
 same statement. This is not an optimization and no switch turns it off;
-without it the model does not run.
+without it the model does not run. A loop over many observations whose
+body branches on a parameter has its own op, described in the next section.
 
 One refusal: `y ~ normal(mu, 1)` inside such a region is rejected with
 a message saying to write `target += normal_lpdf(y | mu, 1)` instead.
@@ -960,6 +1099,70 @@ did. One list now
 ([`program_density.hpp`](../include/stanli/program_density.hpp)), shared
 with the MIR interpreter and with the generated derivatives, so a
 density added to the runtime arrives in all three at once.
+
+## Parameter-branch loops over many observations (`lower_region_map.cpp`, disable: `STANLI_REGION_MAP=0`)
+
+A `for` loop whose body branches on a parameter used to have two lowerings.
+Lowering could unroll it and compile one small region per observation, which is
+correct under any branch pattern but compiles N programs and leaves N ops.
+Or the retained loop (`OP_LOOP`, below) recorded one pass and replayed it,
+which is fast until an observation changes branch and then re-records the whole
+loop, which the design note measured at about thirty times the cost of a replay. Under sampling the parameters
+move on every step, so observations near a threshold flip and the loop
+re-records on nearly every gradient.
+
+`OP_REGION_MAP` is one graph op for the whole loop. Its body is compiled once
+into a register program, by the compiler that handles the regions above, with
+the loop variable held in a register. The op runs that program for each
+iteration and adds up the target terms. Its backward is a generated adjoint
+program. It records nothing, so it does not matter which branch each
+observation takes. The op is on by default.
+
+Lowering maps a loop when all of these hold (`lower_region_map.cpp`):
+
+- It is the log-density graph, the loop is the outermost one, the bounds are
+  fixed at lowering, and the trip count is at least 32. A model compiled with
+  `STANLI_STRUCTURED_LOOPS=1` or `=force` never maps.
+- The body branches on a parameter: an `if`, a ternary, an `&&` or `||`, or a
+  `while` whose condition depends on one, followed into user functions with each
+  argument's dependence taken from the call site.
+- Iterations are independent. Everything the body assigns is declared inside it,
+  with one exception: a real declared outside may collect the terms, if the
+  body only adds to it and never reads it. Nothing escapes with `break`,
+  `continue` or `return`, the body has no effect (`print`, `reject`, an RNG
+  call), no enclosing loop scales the target, and no call returns several
+  values.
+- The body compiles to at most 16,384 instructions, and a generated backward
+  exists for all of them.
+
+A loop that is refused lowers as it did before. A loop that carries a value
+between iterations stays on the retained-loop path.
+`STANLI_REGION_MAP_DIAGNOSTICS=1` prints the reason for each refusal and the
+form each mapped loop got.
+
+There are three forms. In the lane form, iterations run in tiles of 64: each
+instruction runs once over a tile instead of once per iteration, and a branch
+splits a 64-bit lane mask so that a block runs for the lanes that reach it and
+is skipped when none do. In the scalar-save form, one iteration runs at a time
+and its registers are saved for the backward. In the scalar-recompute form the
+backward reruns each iteration's forward instead of reading saved registers;
+lowering picks it when the saved state is large, more than 1,024 cells per
+iteration or more than 2^24 cells in all (`STANLI_REGION_MAP_SAVE_LIMIT` changes
+the second limit). Lowering tries the lane form first and falls back to the other two when the
+lane plan refuses the program, for example because it holds an opcode that the
+lanes do not batch. `STANLI_REGION_MAP_LANES=0` skips the lane form.
+
+Each iteration computes the same scalar operations as the unrolled graph. The
+op adds the iteration terms in order and then adds that total to the rest of
+the target, which regroups the sum within the ULP policy. In the lane form,
+iterations that add into one shared adjoint cell (a scalar parameter that every
+iteration reads) log their additions, and the tile replays them in scalar
+order, so the lane gradient equals the scalar one bit for bit. The design, the
+lane plan and the measurements are in
+[`notes/execution/2026-10-03-region-map-design.md`](../../notes/execution/2026-10-03-region-map-design.md),
+[`2026-10-02-region-map-lanes.md`](../../notes/execution/2026-10-02-region-map-lanes.md)
+and
+[`notes/performance/2026-10-03-cogmod-sampling.md`](../../notes/performance/2026-10-03-cogmod-sampling.md).
 
 ## Tape islands (`island.cpp`, disable: `STANLI_NO_ISLAND=1`)
 
@@ -1010,7 +1213,8 @@ cost, and a cost-neutral correction for calls to graph kernels. This is the
 same layout the native island backward allocates and clears, rather than a
 fixed weight per forward register.
 
-The constants behind that estimate (5, 2, 3) are calibrated on corpus
+The constants behind that estimate (5 for `kOpCost`, 2 for `kValueRegWeight`,
+and a bare 3 for each live-out element in `island.cpp`) are calibrated on corpus
 timing, not on instruction dispatch. A micro-benchmark of one graph op
 against one island instruction and of a live-in and a live-out element
 measured ratios of 1.458, 0.131 and 0.684, and setting the constants to
@@ -1037,7 +1241,10 @@ a special function -- compiles as a *call to the graph's own kernel*,
 the exact code the op would have run, partials and derivative included.
 So one op the machine has no instruction for stops ending a run, which
 used to split regions in half; a call buys continuity, never speed, and
-the estimate charges it accordingly. Vector-result ops still end runs.
+the estimate charges it accordingly. Elementwise vector ops compile at any
+width, with length-1 operands broadcast, and a run that holds them is priced
+both whole and split at them. A call must have a single-number result, so any
+other op with a vector result still ends a run.
 
 The pass still refuses outright: short runs (under 32 ops), regions with
 more than six distinct inputs, densities in the dropped-constants form
@@ -1102,17 +1309,20 @@ paired graph operation and is deliberately outside this kernel-only change.
 
 ## Native single-vector Cholesky normal (`matrix_fns.cpp`)
 
-The `gp_regr` likelihood is one `multi_normal_cholesky_lpdf` observation with
-data `y` and `mu`, an active Cholesky factor, and `propto=true`. Stan Math has
-an analytic matrix partial for that exact instantiation, but the generic
-kernel rebuilt an elementwise var matrix and nested tape in both sweeps.
+A `multi_normal_cholesky_lpdf` with one observation (not an array of vectors),
+data `y` and `mu`, an active Cholesky factor and `propto=true` has an analytic
+matrix partial in Stan Math, but the generic kernel rebuilt an elementwise var
+matrix and nested tape in both sweeps. A Gaussian-process regression with a
+single response vector, such as `gp_regr`, has this shape.
 
-The exact `variant=0x84`, one-observation shape now evaluates Stan Math's
+That instantiation (`variant=0x84`, selected by the kernel's `mnc_path`) now
+evaluates Stan Math's
 triangular inverse, half-vector, value, and full factor-partial matrix in the
 same expression order during forward, retaining the partial matrix in
 scratch. Backward is only the seeded accumulation into the factor. All other
 activity masks, vectorized observations, and non-propto calls keep the generic
-Stan Math replay. On `gp_regr` the density falls from 2.48 to 0.70 us and the
+Stan Math replay, except that widths 1 and 2 take their own fixed-size kernel
+(`kMncSmall`). On `gp_regr` the density falls from 2.48 to 0.70 us and the
 whole gradient from 6.05 to 4.20 us (1.44x internally, 1.12x CmdStan).
 
 ## Matvec through Eigen gemv (`elementwise.cpp`, `lower.cpp`)
@@ -1302,7 +1512,10 @@ gate.
 ## Retained loops
 
 `OP_LOOP` keeps a loop whose body has a `while` or a parameter branch as one
-graph op (`lower.cpp`, `structured_loop.cpp`, `structured_recording.inc`).
+graph op (`lower.cpp`, `structured_loop.cpp`, `structured_recording.inc`). A
+loop of at least 32 independent iterations with a parameter branch goes to
+[`OP_REGION_MAP`](#parameter-branch-loops-over-many-observations-lower_region_mapcpp-disable-stanli_region_map0)
+first, and only a loop that op refuses reaches this path.
 In `write_array` it also keeps a loop that carries a value between
 iterations once the graph is large (`write_array_loop_retained`).
 [How it works](../../docs/how-it-works.md#retained-loops) explains selection,
@@ -1326,7 +1539,7 @@ have the proofs and ctsem measurements.
 | `STANLI_NO_STRUCTURED_FRAME_LAYOUT=1` | do not reuse a sealed frame's code layout for later frames | `structured_loop.cpp` |
 | `STANLI_NO_STRUCTURED_FRAME_CLONE=1` | do not clone a ready frame tape into another loop state with the same plan | `structured_loop.cpp` |
 | `STANLI_NO_STRUCTURED_FRAME_INSTANCE=1` | record every frame instead of building repeated frames from a template | `structured_loop.cpp` |
-| `STANLI_STRUCTURED_CHECK_FRAME_INSTANCE=1` | also record each instantiated frame and require the same frame and recorder state | `structured_instance_run.inc` |
+| `STANLI_STRUCTURED_CHECK_FRAME_INSTANCE=1` | also record each instantiated frame and require the same frame and recorder state | `structured_loop.cpp` |
 | `STANLI_STRUCTURED_COMPILED_RECORDING=0` | record with the tree walk instead of the temporary program | `structured_instance_run.inc` |
 | `STANLI_STRUCTURED_DATA_RECORDING=0` | disable data-only call specialization in that program | `structured_recording.inc` |
 | `STANLI_STRUCTURED_PREPARED_INDEX=0` | disable prepared data-only point reads | `structured_recording.inc` |
@@ -1335,7 +1548,7 @@ have the proofs and ctsem measurements.
 | `STANLI_DATA_LOOP_MEMO_MIN_WORK=n` | minimum executed steps before a data-loop memo is kept (default 256) | `structured_recording.inc` |
 | `STANLI_DATA_LOOP_MEMO_MIN_RATIO=n` | minimum executed steps per recorded event for a kept memo (default 8) | `structured_recording.inc` |
 | `STANLI_STRUCTURED_CHECK_REMAP=1` | check that no recorded pointer still refers to a released arena block | `structured_loop.cpp` |
-| `STANLI_STRUCTURED_LOOP_DIAGNOSTICS=1` | print selection, recording and frame diagnostics to stderr (also enables the remap check) | `structured_loop.cpp`, `lower_structured_loop.inc` |
+| `STANLI_STRUCTURED_LOOP_DIAGNOSTICS=1` | print selection, recording and frame diagnostics to stderr (also enables the remap check) | `structured_loop.cpp`, `lower_structured_loop.inc`, `lower_stmt.cpp` |
 | `STANLI_NO_REGION_RANGE_CACHE=1` | do not cache the range of an integer index expression over its loop-variable grid | `lower_structured_loop.inc` |
 | `STANLI_NO_STRUCTURED_DIRECT_INDEX_INPUTS=1` | pass indexed region inputs through the packed layout instead of directly | `lower_structured_loop.inc` |
 
@@ -1388,8 +1601,9 @@ share fell from 39.6-39.9% to 12.7%. Drift is reassociation-class, bounded at
 
 ## Unblocked: reduction reassociation (surveyed 2026-08-25, unblocked 2026-09-04)
 
-The candidates below change summation order rather than any elementwise
-result. Each was measured or profiled during the 2026-08-25 precision survey
+This section is a backlog of candidates and measured dead ends. It does not
+describe the current code. The candidates below change summation order
+rather than any elementwise result. Each was measured or profiled during the 2026-08-25 precision survey
 and is unblocked under the 10 ULP budget for reassociation-class changes.
 Implementations must state that budget in the commit message and update
 [`docs/corpus-status.md`](../../docs/corpus-status.md) and the conformance
@@ -1484,11 +1698,94 @@ silently. Three layers:
 
 Some of the env switches (`STANLI_NO_DATA_PRELOAD`, `STANLI_NO_INPLACE`,
 `STANLI_NO_CONSTFOLD`, `STANLI_NO_REROLL`, `STANLI_NO_ISLAND`,
-`STANLI_NO_ISLAND_COMPACT`, `STANLI_NO_ODE_DIRECT_RK`; more are listed
-by grepping the sources for `STANLI_NO_`) exist so a wrong result
+`STANLI_NO_ISLAND_COMPACT`, `STANLI_NO_ODE_DIRECT_RK`, and the others in
+[Developer switches](#developer-switches)) exist so a wrong result
 can be attributed to one optimization quickly, and they are how each one is
 measured: every speed number is the same build with one variable set and
 unset.
+
+## Developer switches
+
+Every `STANLI_*` variable that the runtime sources read is listed here, with
+what it does and the file that reads it. The retained-loop switches are in the
+[table in that section](#retained-loops). Unless a row says otherwise, a
+switch acts when the variable is set to any value, including an empty value or
+`0`, and the developer switches work only in a build configured with
+`-DSTANLI_DEBUG_SWITCHES=ON` (see the top of this file). Three variables are
+read with `getenv` directly and work in every build: `STANLI_NO_INTERPRETER`,
+`STANLI_NO_FUSED_DENSITY` and `STANLI_ISA`. A fourth that works in every build,
+`STANLI_NO_O1_FALLBACK`, is read by the OCaml compiler
+(`compiler/ocaml/stanli_pipeline.ml`). The runtime does not read it.
+
+Graph passes:
+
+| switch | effect | read in |
+| --- | --- | --- |
+| `STANLI_NO_DATA_PRELOAD` | replay the generated data hydration through the interpreter | `lower.cpp` |
+| `STANLI_NO_INPLACE` | turn off in-place updates, store forwarding and the eliding of full-extent stores | `inplace.cpp` |
+| `STANLI_NO_CONSTFOLD` | turn off constant folding; acts only when the value starts with `1` | `constfold.cpp` |
+| `STANLI_NO_REROLL` | turn off loop re-rolling, including the fixed-width row reduction pre-pass | `reroll.cpp` |
+| `STANLI_NO_COLLAPSE` | turn off observation collapse in fast mode | `collapse.cpp` |
+| `STANLI_COLLAPSE_REPORT` | print each term that collapse examined, with its observations, rows, groups and the form chosen or the reason for refusal | `lower.cpp` |
+| `STANLI_NO_PARTITION` | turn off lane partitioning | `partition.cpp` |
+| `STANLI_NO_CSE` | turn off common-subexpression elimination | `cse.cpp` |
+| `STANLI_NO_DENSITY_MASK` | bind every density argument in a generated backward as a recorder scalar again, instead of by its activity mask | `adjoint.cpp` |
+| `STANLI_NO_FUSED_DENSITY` | use Stan Math's kernels instead of the fused kernels for the seven fused densities; acts when the value is set, nonempty and not `0`; ignored, with a notice, in a build with CMake option `STANLI_STAN_DENSITY_ORACLE=OFF` | `density_fused.cpp` |
+
+Islands and register programs:
+
+| switch | effect | read in |
+| --- | --- | --- |
+| `STANLI_NO_ISLAND` | turn off the island carver | `island.cpp` |
+| `STANLI_NO_ISLAND_COMPACT` | turn off register-program compaction for islands | `island.cpp` |
+| `STANLI_NO_ISLAND_LIVENESS` | turn off the liveness search that splits a run of ops into several islands | `island.cpp` |
+| `STANLI_NO_ISLAND_JOIN_GUARD` | turn off the cost-floor shortcuts that decide between one joined island and several separate ones without compiling both | `island.cpp` |
+| `STANLI_NO_ISLAND_PRICING_CACHE` | do not cache the prices of candidate splits, which are a speed-up of the search | `island.cpp` |
+| `STANLI_ISLAND_PRICING_BUDGET` | unset or `1`: bound speculative pricing to the larger of 65,536 and four times the span; any other value removes the bound | `island.cpp` |
+| `STANLI_ISLAND_ALWAYS` | skip the cost estimate and carve every run that compiles | `island.cpp` |
+| `STANLI_DEBUG_ISLAND` | print the carver's decisions and cost estimates | `island.cpp` |
+| `STANLI_NO_NATIVE_ADJ` | replay islands and regions under stan-math's autodiff instead of running a generated backward | `island.cpp`, `lower_stmt.cpp` |
+| `STANLI_NO_PROGRAM_DEST_FORWARD` | do not redirect a producer to write the destination of the copy that follows it | `program.cpp`, `island.cpp` |
+| `STANLI_NO_FILL_SINK` | do not delay a constant fill until a path reads it | `program.cpp` |
+| `STANLI_NO_CFG_DEAD_CONSTANTS` | do not remove unreachable instructions and constant stores that are overwritten before any read | `program.cpp` |
+| `STANLI_NO_COPY_PROP` | turn off copy propagation in register programs | `program.cpp` |
+| `STANLI_NO_NATIVE_MATH` | compile `erfc`, `log1p`, `log1m_exp` and `inv_square` as calls to the graph's kernels, with no register-program instruction of their own | `mir_prog.hpp` |
+| `STANLI_NO_REGION_DIRECT_OUTPUT` | extract a region's only live-out through an op instead of reading the region's output slot directly | `lower_stmt.cpp` |
+| `STANLI_NO_REPLAY_REUSE` | do not reuse the register workspace of an island that replays under autodiff | `kernels/island.cpp` |
+| `STANLI_NO_ODE_DIRECT_RK` | solve ODEs through Stan Math's autodiff solve instead of the direct RK sensitivities | `lower_higher_order.cpp` |
+
+Region map:
+
+| switch | effect | read in |
+| --- | --- | --- |
+| `STANLI_REGION_MAP=0` | never map a loop; any other value keeps the default | `lower_region_map.cpp` |
+| `STANLI_REGION_MAP_DIAGNOSTICS` | print why each loop was refused or mapped, and the form it got | `lower_region_map.cpp` |
+| `STANLI_REGION_MAP_LANES=0` | skip the lane form | `lower_region_map.cpp` |
+| `STANLI_REGION_MAP_SAVE_LIMIT=n` | the limit on saved cells for all iterations, default 2^24 | `lower_region_map.cpp` |
+| `STANLI_REGION_MAP_CHECK_CLEAN` | check after each iteration or tile that the adjoint cells are zero again, and throw if not | `lower_region_map.cpp` |
+| `STANLI_REGION_MAP_TILE_CALLS=0` | turn off the tiled form of kernel calls in the lane form | `region_map_lanes.cpp` |
+| `STANLI_REGION_MAP_TILE_CELLS=n` | recompute each tile's forward registers in the backward when it needs more than `n` registers, instead of saving every tile's | `region_map_lanes.cpp` |
+| `STANLI_REGION_MAP_PROFILE` | print occupancy and per-opcode counts for the lane form when the process exits | `region_map_lanes.cpp` |
+
+Lowering policy and write_array:
+
+| switch | effect | read in |
+| --- | --- | --- |
+| `STANLI_BOUNDED_SPECIALIZATION` | unset or `1`: for a model with a loop whose branch or `while` condition is not data-only, first try a second lowering with retained loops turned off, and use it when it succeeds; any other value skips the attempt | `lower.cpp` |
+| `STANLI_PARALLEL_WA` | lower `write_array` beside the log density: `auto` or empty is the default, `1` or `force` always uses a second thread, any other value lowers them one after the other; `CompileOptions::parallel_write_array` does this in every build | `lower.cpp` |
+| `STANLI_SHARE_WRITE_ARRAY` | with several chains, `1` shares one `write_array` graph's storage across them and any other value copies it; unset shares when copying would cost 1 GiB or more | `executor.cpp` |
+| `STANLI_WA_FORCE_INTERP` | attach the per-draw interpreter to a model whose graph covers `write_array`; for the cross-path harness only, because drivers prefer the interpreter when it is there | `lower.cpp` |
+| `STANLI_NO_INTERPRETER` | refuse a model that has a part without a compiled path; acts when the value is nonempty and not `0` | `lower.cpp` |
+| `STANLI_ISA` | `avx2` runs the AVX2 copies of the matrix kernels on x86-64; unset uses the baseline copies | `isa_dispatch.cpp` |
+
+Reports and dumps:
+
+| switch | effect | read in |
+| --- | --- | --- |
+| `STANLI_DUMP_PASSES` | write one graph dump per lowering stage, to a directory or, with `-`, to stdout; `CompileOptions::dump_passes` does this in every build | `lower.cpp` |
+| `STANLI_DUMP_STAGES` | choose the stages to dump, by name or as `graph:stage`; `CompileOptions::dump_stages` does this in every build | `lower.cpp` |
+| `STANLI_PROFILE_PREP` | print preparation time for each stage; acts when the first character is not `0` | `lower.cpp`, `lower_structured_loop.inc` |
+| `STANLI_EXECUTION_REPORT` | print which engine each part of the model runs on; acts when the value is nonempty and not `0`; `CompileOptions::execution_report` does this in every build | `execution_report.cpp` |
 
 ## Historical targeted measurements
 
@@ -1497,7 +1794,11 @@ lived in `docs/benchmarks.md`. These are dated, targeted A/B medians used to
 attribute a change to one mechanism; they are not replacements for the current
 absolute corpus results in [`docs/benchmarks.md`](../../docs/benchmarks.md).
 Some results repeat measurements alongside the implementation sections above
-so that none of the historical performance record is lost.
+so that none of the historical performance record is lost. Each entry describes
+the code at its own date, so the eligibility rules in it can be narrower than
+the ones in the sections above, which describe the current code. The
+`STANLI_PROFILE=1` switch that some entries use no longer exists. The nearest
+current switches are `STANLI_PROFILE_PREP` and `STANLI_EXECUTION_REPORT`.
 
 ### Kernel-tail attribution
 
