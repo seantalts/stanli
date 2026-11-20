@@ -60,6 +60,25 @@ std::unique_ptr<stanli::Executor> make_executor(bool schools) {
   return ex;
 }
 
+// The reference side of an explicit start: Stan's initialize reads it by
+// the adapter's unconstrained names.
+struct InitModel : stanli::ExecutorModel {
+  using stanli::ExecutorModel::ExecutorModel;
+  template <typename Context>
+  void transform_inits(const Context& context, std::vector<int>&,
+                       std::vector<double>& params_r,
+                       std::ostream* = nullptr) const {
+    std::vector<std::string> names;
+    unconstrained_param_names(names);
+    params_r.resize(names.size());
+    for (size_t i = 0; i < names.size(); ++i)
+      params_r[i] = context.vals_r(names[i]).at(0);
+  }
+};
+
+// Scenario 4 starts from an explicit point. CmdStan still builds its random
+// context first, so the chain's stream has moved on by one uniform draw per
+// parameter before the first transition.
 bool compare(bool schools, int scenario) {
   stanli::NutsConfig cfg;
   cfg.seed = 17 + scenario;
@@ -74,11 +93,18 @@ bool compare(bool schools, int scenario) {
 
   auto ours = make_executor(schools);
   auto reference = make_executor(schools);
+  std::vector<double> start((size_t)ours->n_params());
+  for (size_t i = 0; i < start.size(); ++i) start[i] = 0.3 - 0.1 * (double)i;
+  if (scenario == 4) cfg.init = start.data();
   stanli::SamplerStats stats;
   const auto draws = stanli::run_nuts(*ours, cfg, &stats);
 
-  stanli::ExecutorModel model(*reference);
-  stan::io::empty_var_context init;
+  InitModel model(*reference);
+  std::vector<std::string> names;
+  if (scenario == 4) model.unconstrained_param_names(names);
+  const std::vector<std::vector<size_t>> dims(names.size());
+  stan::io::array_var_context init(
+      names, scenario == 4 ? start : std::vector<double>{}, dims);
   stan::callbacks::interrupt interrupt;
   stan::callbacks::logger logger;
   stan::callbacks::writer init_writer, diagnostic_writer;
@@ -565,7 +591,7 @@ int main() {
   std::setvbuf(stdout, nullptr, _IONBF, 0);
   int failures = 0;
   for (bool schools : {false, true})
-    for (int scenario = 0; scenario < 4; ++scenario)
+    for (int scenario = 0; scenario < 5; ++scenario)
       if (!compare(schools, scenario)) ++failures;
   using stanli::Metric;
   const MetricCase metric_cases[] = {

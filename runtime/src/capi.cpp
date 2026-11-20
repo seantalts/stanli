@@ -1473,7 +1473,8 @@ int stanli_sample_multi_metric(stanli_model* m, const stanli_sample_opts* opts,
     cfg.max_depth = opts->max_depth;
     cfg.save_warmup = opts->save_warmup != 0;
     cfg.init_radius = opts->init_radius;
-    cfg.log_messages = refresh > 0;
+    // CmdStan's refresh controls only the progress lines.
+    cfg.log_messages = true;
     cfg.sample_offset = sample_offset;
     struct FlushStdout {
       ~FlushStdout() {

@@ -1093,11 +1093,16 @@ void expect_sampling_messages() {
   int rc = 1;
   collect_message(quiet, [&] { rc = run(0); });
   expect_true("quiet run succeeds", rc == 0);
-  expect_true("refresh 0 prints no sampler messages", quiet.messages.empty());
+  // As in CmdStan, refresh controls only the progress lines: rejection
+  // notices and adaptation warnings are printed either way.
+  expect_true("refresh 0 still reports rejected proposals",
+              !quiet.messages.empty());
   const std::vector<double> quiet_draws = draws;
 
   MessageCapture loud;
   collect_message(loud, [&] { rc = run(100); });
+  expect_true("refresh changes no sampler message",
+              loud.messages == quiet.messages);
   expect_true("refresh run succeeds", rc == 0);
   expect_true("messages leave the draws bitwise unchanged",
               draws == quiet_draws);
@@ -1244,9 +1249,14 @@ void expect_captured_messages() {
   expect_true("capture: threaded sample succeeds", rc == 0);
   const std::string sampled = seen_during_poll + take_messages();
   const size_t lines = count_substring(sampled, "\n");
-  expect_true(
-      "every chain's prints arrive whole",
-      lines > 0 && count_substring(sampled, "drawing at x = ") == lines);
+  // Each line is one whole print or one line of a sampler notice.
+  bool whole = count_substring(sampled, "drawing at x = ") > 0;
+  std::istringstream sampled_lines(sampled);
+  for (std::string line; std::getline(sampled_lines, line);)
+    whole = whole && (line.empty() || line.rfind("Chain [", 0) == 0 ||
+                      (line.rfind("drawing at x = ", 0) == 0 &&
+                       count_substring(line, "drawing") == 1));
+  expect_true("every chain's prints arrive whole", lines > 0 && whole);
   expect_true("held text ends on a line boundary",
               !sampled.empty() && sampled.back() == '\n');
   stanli_model_free(printer);
@@ -3492,7 +3502,47 @@ void test_out_of_range_accessors() {
   stanli_compilation_free(c);
 }
 
+// CmdStan's initialize retries a random start only when the model rejects
+// it with a domain error; any other error stops it at once.
+void test_init_retries_only_rejections() {
+  const char* msg =
+      "Unrecoverable error evaluating the log probability at "
+      "the initial value: ";
+  stanli_model* bad_index = from_stan(
+      "parameters { real x; }\n"
+      "model { array[2] real a = {1.0, 2.0}; int i = 3;\n"
+      "  if (x > 1e10) i = 1; target += a[i]; }\n");
+  stanli_model* rejects =
+      from_stan("parameters { real x; } model { reject(\"always\"); }\n");
+  if (bad_index == nullptr || rejects == nullptr) return;
+  stanli_sample_opts o;
+  stanli_sample_opts_init(&o);
+  o.chains = 1;
+  o.warmup = 10;
+  o.samples = 10;
+  std::vector<double> draws(10);
+  char err[4096]{};
+  int rc = stanli_sample_multi_metric(
+      bad_index, &o, nullptr, 0, draws.data(), nullptr, nullptr, nullptr,
+      nullptr, nullptr, nullptr, nullptr, nullptr, err, sizeof err);
+  expect_true(
+      std::string("an index error stops initialization at once: ") + err,
+      rc == 1 && std::string(err).find(msg) != std::string::npos &&
+          std::string(err).find("index") != std::string::npos);
+  rc = stanli_sample_multi_metric(rejects, &o, nullptr, 0, draws.data(),
+                                  nullptr, nullptr, nullptr, nullptr, nullptr,
+                                  nullptr, nullptr, nullptr, err, sizeof err);
+  expect_true(std::string("a reject is retried 100 times: ") + err,
+              rc == 1 &&
+                  std::string(err).find("no draw in 100 attempts") !=
+                      std::string::npos &&
+                  std::string(err).find("always") != std::string::npos);
+  stanli_model_free(bad_index);
+  stanli_model_free(rejects);
+}
+
 int main() {
+  test_init_retries_only_rejections();
   test_out_of_range_accessors();
   test_grad_messages();
   test_shared_write_array_executor();

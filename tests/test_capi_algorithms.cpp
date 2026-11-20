@@ -385,6 +385,29 @@ void test_optimize_generated_quantities_stream() {
   for (int chain_id : {1, 2})
     expect("optimize draws from the (seed, chain_id) stream of fixed_param",
            y_at_mode(5, chain_id) == y_fixed_param(5, chain_id));
+  // A supplied start still moves the stream on by one draw per parameter,
+  // as CmdStan's initialize does; fixed_param runs that initialize itself.
+  {
+    const double start = 0.25;
+    stanli_optimize_opts o;
+    stanli_optimize_opts_init(&o);
+    o.seed = 5;
+    o.init = &start;
+    double q = 0, lp = 0, values[2] = {0, 0};
+    char err[4096]{};
+    stanli_optimize(m, &o, &q, values, &lp, err, sizeof err);
+    stanli_fixed_param_opts f;
+    stanli_fixed_param_opts_init(&f);
+    f.seed = 5;
+    f.chains = 1;
+    f.samples = 1;
+    f.inits = &start;
+    double row[2] = {0, 0};
+    stanli_fixed_param(m, &f, row, nullptr, nullptr, nullptr, nullptr, nullptr,
+                       nullptr, err, sizeof err);
+    expect("a supplied start leaves optimize on fixed_param's stream",
+           values[1] == row[1] && row[0] == start);
+  }
   double q = 0.3, row[2];
   stanli_wa_row(m, &q, row);
   expect("optimize ignores the model's own stream", y_at_mode(5, 1) == y5);
