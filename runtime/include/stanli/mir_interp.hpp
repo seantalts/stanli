@@ -981,12 +981,7 @@ class MirInterp {
     if (base->kind == mir::Expr::FunApp &&
         callable_transform(base->name, &transform))
       layout = ExpressionLayout::direct();
-    if (!layout.packet_access())
-      return std::pair<SumGrouping, int64_t>{SumGrouping::InOrder, 0};
-    if (layout.direct_access() && layout.element_offset != 0)
-      return std::pair<SumGrouping, int64_t>{SumGrouping::Phased,
-                                             layout.element_offset};
-    return std::pair<SumGrouping, int64_t>{SumGrouping::Packet, 0};
+    return sum_grouping(layout);
   }
 
   // The exp-quad, Matern and exponential covariances. L is one length scale

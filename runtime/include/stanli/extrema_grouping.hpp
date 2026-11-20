@@ -3,9 +3,12 @@
 #ifndef STANLI_EXTREMA_GROUPING_HPP
 #define STANLI_EXTREMA_GROUPING_HPP
 
+#include <stanli/expression_layout.hpp>
+
 #include <stan/math/prim.hpp>
 
 #include <cstdint>
+#include <utility>
 
 namespace stanli {
 
@@ -91,6 +94,17 @@ inline double prod_phased(const double* data, int64_t len, int64_t offset) {
 // aligned; Phased is the same for a view that starts `offset` elements into
 // one. None of them depends on the address of the slot.
 enum class SumGrouping : uint8_t { InOrder = 0, Packet = 1, Phased = 2 };
+
+// The grouping of Eigen's sum over an operand with this source layout, and
+// the phase offset. A layout that is not known to allow packets adds in
+// order.
+inline std::pair<SumGrouping, int64_t> sum_grouping(
+    const ExpressionLayout& layout) {
+  if (!layout.packet_access()) return {SumGrouping::InOrder, 0};
+  if (layout.direct_access() && layout.element_offset != 0)
+    return {SumGrouping::Phased, layout.element_offset};
+  return {SumGrouping::Packet, 0};
+}
 
 inline double sum_grouped(const double* data, int64_t len, SumGrouping grouping,
                           int64_t offset) {
