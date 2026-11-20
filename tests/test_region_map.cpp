@@ -281,6 +281,13 @@ void test_same_executor_two_points() {
   run_points("region_map_branch", 512, branch_points, ref_branch);
 }
 
+// A short loop is mapped too. Unrolled, it gets one island per iteration
+// instead of one op.
+void test_short_loops_map() {
+  for (int n : {2, 3, 16, 31})
+    run_points("region_map_branch", n, branch_points, ref_branch);
+}
+
 void test_size_independent() {
   for (const char* stem :
        {"region_map_branch", "region_map_udf", "region_map_many"}) {
@@ -356,7 +363,6 @@ void test_refusals() {
     return lp;
   };
   expect_refused("region_map_data_control", 64, ref_data, branch_points);
-  expect_refused("region_map_branch", 16, ref_branch, branch_points);
   {
     CompiledModel off =
         compile_with("region_map_branch", 64, "STANLI_REGION_MAP", "0");
@@ -2383,6 +2389,7 @@ int main() {
   using namespace region_map_test;
   test_same_executor_two_points();
   test_copy_propagation_in_map();
+  test_short_loops_map();
   test_size_independent();
   test_refusals();
   test_shapes();

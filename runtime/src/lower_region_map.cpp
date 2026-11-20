@@ -300,7 +300,7 @@ bool Lowering::lower_region_map(const mir::Stmt& s, long lo, long hi) {
     return false;
   };
   if (structured_outer_depth != 1) return false;
-  if (hi - lo + 1 < 32) return refuse("trip count below 32");
+  if (hi - lo + 1 < 2) return refuse("fewer than two iterations");
   if (!ParameterControl(fun_defs)(s))
     return refuse("no parameter-dependent control");
   if (target_scale != 1.0) return refuse("enclosing target scaling");

@@ -1121,8 +1121,17 @@ observation takes. The op is on by default.
 Lowering maps a loop when all of these hold (`lower_region_map.cpp`):
 
 - It is the log-density graph, the loop is the outermost one, the bounds are
-  fixed at lowering, and the trip count is at least 32. A model compiled with
-  `STANLI_STRUCTURED_LOOPS=1` or `=force` never maps.
+  fixed at lowering, and the loop runs at least twice. A model compiled with
+  `STANLI_STRUCTURED_LOOPS=1` or `=force` never maps. A short loop maps too.
+  Unrolled, such a loop gets one island per iteration, so it pays one graph
+  op and one program dispatch per iteration where the map pays one op and
+  runs its body once per 64-lane tile. Two costs do not shrink with the trip
+  count. The tile holds 64 lanes of the forward registers, and the body is
+  compiled for every iteration, so it reads by index what the unrolled form
+  knew at compile time. A 3-trip outer loop over a 100-trip inner loop (an
+  experiment, not a corpus model) became one map of 2,002 instructions with
+  300 dynamic-index calls per lane and a tile of about 616 KB, against 300
+  islands of about 19 instructions.
 - The body branches on a parameter: an `if`, a ternary, an `&&` or `||`, or a
   `while` whose condition depends on one, followed into user functions with each
   argument's dependence taken from the call site.
@@ -1513,7 +1522,7 @@ gate.
 
 `OP_LOOP` keeps a loop whose body has a `while` or a parameter branch as one
 graph op (`lower.cpp`, `structured_loop.cpp`, `structured_recording.inc`). A
-loop of at least 32 independent iterations with a parameter branch goes to
+loop of independent iterations with a parameter branch goes to
 [`OP_REGION_MAP`](#parameter-branch-loops-over-many-observations-lower_region_mapcpp-disable-stanli_region_map0)
 first, and only a loop that op refuses reaches this path.
 In `write_array` it also keeps a loop that carries a value between
