@@ -1,4 +1,5 @@
 #include "lower_internal.hpp"
+#include "mir_reader_internal.hpp"
 
 namespace stanli {
 namespace lower_detail {
@@ -507,10 +508,12 @@ bool non_tail_return(const mir::Stmt& s, bool tail) {
   }
 }
 
-// A return inside a loop also sets `exited`, and each loop that holds one is
-// followed by `if (exited) break;` so the break reaches the single pass.
-mir::Stmt returns_to_breaks(const mir::Stmt& s, const std::string& result,
-                            const std::string& exited) {
+// Each return assigns the result. With `leave`, it also breaks out of the
+// single pass. A return inside a loop also sets `exited`, and each loop that
+// holds one is followed by `if (exited) break;` so the break reaches the
+// single pass.
+mir::Stmt rewrite_returns(const mir::Stmt& s, const std::string& result,
+                          const std::string& exited, bool leave) {
   mir::Expr flag;
   flag.kind = mir::Expr::Var;
   flag.name = exited;
@@ -520,18 +523,18 @@ mir::Stmt returns_to_breaks(const mir::Stmt& s, const std::string& result,
   if (s.kind != mir::Stmt::Return) {
     mir::Stmt out = s;
     for (auto& child : out.body)
-      child = returns_to_breaks(child, result, exited);
+      child = rewrite_returns(child, result, exited, leave);
     if (exited.empty() || !contains_return(s) ||
         (s.kind != mir::Stmt::For && s.kind != mir::Stmt::While))
       return out;
-    mir::Stmt leave;
-    leave.kind = mir::Stmt::IfElse;
-    leave.cond = flag;
-    leave.body.push_back(exit);
+    mir::Stmt stop;
+    stop.kind = mir::Stmt::IfElse;
+    stop.cond = flag;
+    stop.body.push_back(exit);
     mir::Stmt both;
     both.kind = mir::Stmt::SList;
     both.body.push_back(std::move(out));
-    both.body.push_back(std::move(leave));
+    both.body.push_back(std::move(stop));
     return both;
   }
   mir::Stmt block;
@@ -555,20 +558,22 @@ mir::Stmt returns_to_breaks(const mir::Stmt& s, const std::string& result,
     assign.rhs = s.rhs;
     block.body.push_back(std::move(assign));
   }
-  block.body.push_back(std::move(exit));
+  if (leave) block.body.push_back(std::move(exit));
   return block;
 }
 
 // stanc's inliner form: one pass of a loop, each return an assignment and a
-// break, then one return of the result.
+// break, then one return of the result. When every return is in tail
+// position, nothing follows it, so the assignments need no loop.
 std::vector<mir::Stmt> single_exit_body(const mir::FunDef& f,
                                         const mir::Expr& call) {
-  const std::string result = "__stanli_" + f.name + "_result";
+  // A shape error inside the body names this variable, so it reads as the
+  // function's result; Stan names cannot hold spaces.
+  const std::string result = "the result of " + f.name;
   mir::Stmt decl;
   decl.kind = mir::Stmt::Decl;
   decl.decl_id = result;
-  decl.decl_type.base =
-      mir::is_unsized(call, mir::UnsizedLeaf::Int) ? "SInt" : "SReal";
+  decl.decl_type = mir::detail::unsized_declaration(call.unsized, "");
   mir::Expr one;
   one.kind = mir::Expr::LitInt;
   one.lit_i = 1;
@@ -582,10 +587,11 @@ std::vector<mir::Stmt> single_exit_body(const mir::FunDef& f,
   bool looped = false;
   for (const auto& st : f.body) looped = looped || return_in_loop(st, false);
   const std::string exited = looped ? "__stanli_" + f.name + "_exited" : "";
+  const bool tail_only = !non_tail_return(f.body, true);
   mir::Stmt body;
   body.kind = mir::Stmt::Block;
   for (const auto& st : f.body)
-    body.body.push_back(returns_to_breaks(st, result, exited));
+    body.body.push_back(rewrite_returns(st, result, exited, !tail_only));
   pass.body.push_back(std::move(body));
   mir::Expr value;
   value.kind = mir::Expr::Var;
@@ -612,7 +618,7 @@ std::vector<mir::Stmt> single_exit_body(const mir::FunDef& f,
     out.push_back(std::move(flag));
     out.push_back(std::move(clear));
   }
-  out.push_back(std::move(pass));
+  out.push_back(tail_only ? std::move(pass.body[0]) : std::move(pass));
   if (has_result) out.push_back(std::move(ret));
   return out;
 }
@@ -732,8 +738,7 @@ Lowering::Val Lowering::lower_call_udf(const mir::Expr& e,
     }
   }
   const std::vector<mir::Stmt>* body = &f.body;
-  const bool void_call = f.results.empty();
-  if ((mir::language_scalar(e) || void_call) &&
+  if (f.results.size() <= 1 &&
       (non_tail_return(f.body, true) ||
        std::any_of(f.body.begin(), f.body.end(), return_in_branch))) {
     auto rewritten =

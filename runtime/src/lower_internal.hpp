@@ -1813,13 +1813,6 @@ struct Lowering {
     }
     return true;
   }
-  // Remove a return at the lexical end of a statement arm, preserving every
-  // statement that precedes it.  This is the structured form used by UDFs
-  // such as ctsem's mcalc: each arm returns, but one arm first updates a local
-  // matrix.  The updates can lower as an ordinary statement island and the
-  // two returned expressions can then join through a ternary value island.
-  static bool peel_terminal_return(mir::Stmt* s, mir::Expr* value);
-
   // Data-only operands of a retained call are folded while the Program is
   // compiled, as their graph counterparts are.
   DataMap::Entry program_constant(ProgramCompiler& c, const mir::Expr& arg,

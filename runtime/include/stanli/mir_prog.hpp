@@ -4743,9 +4743,11 @@ struct ProgramCompiler {
                                         fold_is_certain(s.lhs) && !given(s) &&
                                         try_cints(s.rhs, &folded_ints) &&
                                         folded_ints.size() == (size_t)v.len;
-          if (dst.len == 0 && v.len != 0) {
+          if (dst.len == 0 && (v.len != 0 || !same_view(v, dst))) {
             // stan::model::assign gives a zero-size destination the
-            // right-hand side's size, so adopt the assigned shape.
+            // right-hand side's size, so adopt the assigned shape. That
+            // includes an empty value of another shape, such as a 0x0
+            // matrix assigned to a name first written in this region.
             //
             // The assignment can sit inside a data-dependent
             // branch -- `cond ? udf(x) : y` inlines to an assignment under
