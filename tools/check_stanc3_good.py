@@ -201,7 +201,8 @@ def normalize(text):
 
 def messages_agree(cmdstan, stanli):
     core = message_core(cmdstan or "")
-    return not core or core in normalize(stanli or "")
+    got = normalize(stanli or "")
+    return core in got if core else not got
 
 
 def accepted(status):
