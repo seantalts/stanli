@@ -81,6 +81,7 @@ tests/hdbayes/*.hpp
 tests/ecoensemble/*.hpp
 tests/examplemodels/*.hpp
 tests/stanguide/*.hpp
+tests/bmgarch/*.hpp
 tests/hbayesdm/*.hpp
 
 # Compiler output beside generated teaching fixtures.

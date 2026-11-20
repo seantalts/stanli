@@ -151,13 +151,12 @@ sampling tests skip.
 [`tools/verify_refs.py`](tools/verify_refs.py) replays every corpus against
 CmdStan's recorded answers.
 [`corpus-refs.json.gz`](docs/internal/artifacts/corpus-refs.json.gz) holds the
-main [corpus](tools/corpus_inventory.py): 408 models at 3 points each. They
+main [corpus](tools/corpus_inventory.py): 410 models at 3 points each. They
 are 119 posteriordb, 124 brms, 62 Rethinking, 22 cogmod, 13 Aalto, 13
-regression and 3 ctsem models, 23 models from 10 CRAN packages (OncoBayes2,
-rstanarm, multinma, EpiNow2, mlumr, rbioacc, BeeGUTS, hdbayes, EcoEnsemble and
-hBayesDM), 23 programs from stan-dev/example-models and 6 from the Stan User's
-Guide. Nearly all
-also carry `write_array` rows, which the replay
+regression and 3 ctsem models, 25 models from 11 CRAN packages (OncoBayes2,
+rstanarm, multinma, EpiNow2, mlumr, rbioacc, BeeGUTS, hdbayes, EcoEnsemble,
+hBayesDM and bmgarch), 23 programs from stan-dev/example-models and 6 from the
+Stan User's Guide. Nearly all also carry `write_array` rows, which the replay
 compares by column name. Both drivers seed Stan's RNG the same way, so
 generated quantities compare too. Per-model status and worst deviations are in
 [`docs/corpus-status.md`](docs/corpus-status.md).

@@ -1,11 +1,11 @@
 # Corpus status
 
-Models that evaluate: 408/409
-Models with CmdStan reference values: 408/409, at 1224 evaluation points in total.
+Models that evaluate: 410/411
+Models with CmdStan reference values: 410/411, at 1230 evaluation points in total.
 
 The corpus includes models from posteriordb, generated brms and cogmod models, ctsem's state-space template, models from CRAN packages, imported teaching models, and language fixtures. The source collection column says where each model came from. `tools/verify_refs.py` checks all reference values the same way.
 
-For 392 verified models, the table below shows how far stanli was from CmdStan at the primary evaluation point. These numbers were measured when the reference was recorded. Imported references keep their original CmdStan answers and a record of how each one was made. No deviation was recorded for them, so their rows say "not recorded". Having a reference for a model does not mean that the current build matches it. The numerical replay checks the current build.
+For 394 verified models, the table below shows how far stanli was from CmdStan at the primary evaluation point. These numbers were measured when the reference was recorded. Imported references keep their original CmdStan answers and a record of how each one was made. No deviation was recorded for them, so their rows say "not recorded". Having a reference for a model does not mean that the current build matches it. The numerical replay checks the current build.
 
 A model passes only when tools/verify_sample.py finds that stanli's log_prob and full gradient match CmdStan's at a shared, fixed evaluation point. The accuracy columns show the worst deviation over lp and every gradient component, as a relative difference and in ULPs. 0 ULP means bitwise identical to CmdStan. The bitwise results are for information only. The replay requires a scaled error of at most 1e-9, with documented exceptions for ill-conditioned models. Models that evaluate but are not verified are listed in a separate section and do not count as passing.
 
@@ -47,6 +47,8 @@ A model passes only when tools/verify_sample.py finds that stanli's log_prob and
 | `arma11` | posteriordb | 5 | 0 (bitwise) | 0 |
 | `beeguts_guts_sd` | beeguts | 5 | 3.6e-16 | 2 |
 | `blr` | posteriordb | 7 | 1.8e-16 | 1 |
+| `bmgarch_bekk_arma` | bmgarch | 28 | 1.5e-15 | 8 |
+| `bmgarch_ccc` | bmgarch | 23 | 1.2e-15 | 40 |
 | `bones_model` | posteriordb | 14 | 1.5e-16 | 1 |
 | `bym2_offset_only` | posteriordb | 3846 | 1.3e-15 | 8 |
 | `ch09_m5_8s` | rethinking | 5 | 7.2e-16 | 4 |

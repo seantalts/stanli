@@ -160,6 +160,20 @@
   "point": 0,
   "status": "VERIFIED"
  },
+ "bmgarch_bekk_arma": {
+  "max_rel": 1.5331325190925363e-15,
+  "max_ulp": 8,
+  "n_values": 28,
+  "point": 0,
+  "status": "VERIFIED"
+ },
+ "bmgarch_ccc": {
+  "max_rel": 1.1994055943831115e-15,
+  "max_ulp": 40,
+  "n_values": 23,
+  "point": 0,
+  "status": "VERIFIED"
+ },
  "bones_model": {
   "max_rel": 1.4502254306022434e-16,
   "max_ulp": 1,

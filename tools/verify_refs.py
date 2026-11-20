@@ -102,6 +102,10 @@ KNOWN_GAPS = {
         "generated quantities fall back to the interpreter, which throws",
     "examplemodels_hmm_marginal": "write_array has no hmm_latent_rng: "
         "generated quantities fall back to the interpreter, which throws",
+    "bmgarch_ccc": "write_array has no multi_student_t_rng: generated "
+        "quantities fall back to the interpreter, which throws",
+    "bmgarch_bekk_arma": "write_array has no multi_student_t_rng: generated "
+        "quantities fall back to the interpreter, which throws",
 }
 
 # Corpus models that run through the MIR interpreter, mapped to why. Any
