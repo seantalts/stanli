@@ -2963,18 +2963,6 @@ bool try_lower_region(
       std::vector<int> candidate_inputs;
       std::vector<std::string> writes;
       assigned_names(s, &writes);
-      // Replay compares a data-only import with the value it recorded, so a
-      // loop that updates one records again on every draw. A loop that draws
-      // is checked once its body shows whether a draw survived lowering.
-      const auto updates_data_only = [&] {
-        return retaining_write_array_loop &&
-               std::any_of(writes.begin(), writes.end(), [&](const auto& name) {
-                 const auto item = scope.find(name);
-                 return item != scope.end() && item->second.si.param_free;
-               });
-      };
-      if (!(stmt_effects(s) & kRngEffect) && updates_data_only())
-        trial.fail("write_array loop updates a data-only value");
       std::set<std::string> locals;
       collect_loop_locals(s, &locals);
       for (const auto& name : writes)
@@ -3074,8 +3062,6 @@ bool try_lower_region(
         fail(
             "structured body requires the per-draw fallback for a stateful "
             "call");
-      if (!draws && updates_data_only())
-        fail("write_array loop updates a data-only value");
       if (!output_references && mode == StructuredMode::Auto) {
         const auto retains_control = [&](const auto& self,
                                          const RegionNode& node) -> bool {

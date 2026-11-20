@@ -1347,6 +1347,14 @@ struct FrozenImport {
   bool data_only = false;
 };
 
+// Replay checks that a data-only import still holds the value it recorded.
+// It compares bits rather than values: a Stan local that is declared but not
+// yet assigned holds NaN, and NaN never equals itself.
+bool same_import(const double* now, const double* recorded, int64_t len) {
+  return std::memcmp(now, recorded,
+                     static_cast<size_t>(len) * sizeof(double)) == 0;
+}
+
 // A read whose selector is constant: the position of every output element
 // is fixed for the life of the frozen stream, so replay is a plain gather
 // (forward) or scatter-add (backward), with no index validation at all.
@@ -3138,7 +3146,7 @@ bool replay_forward(LoopState& s, KernelCtx& ctx) {
   for (const auto& imp : st.imports) {
     const double* src = ctx.in[imp.input].data + imp.offset;
     if (imp.data_only) {
-      if (!std::equal(src, src + imp.len, imp.dst)) return false;
+      if (!same_import(src, imp.dst, imp.len)) return false;
     } else {
       std::copy_n(src, imp.len, imp.dst);
     }

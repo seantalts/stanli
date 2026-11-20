@@ -11,6 +11,7 @@
 //   * the whole pipeline on tests/fixtures/wanames.stan, whose expected
 //     header was taken verbatim from a CmdStan run of the same model.
 #include "env_helpers.hpp"
+#include "stdout_capture.hpp"
 
 #include <stanli/compile.hpp>
 #include <stanli/execution_report.hpp>
@@ -1446,6 +1447,72 @@ void expect_rng_loop_parity(const std::string& label, int pad,
 void test_write_array_rng_loops() {
   expect_rng_loop_parity("wa_rng_loops prefer", 0, "1", 5);
   expect_rng_loop_parity("wa_rng_loops auto", 20000, nullptr, 5);
+}
+
+// Each carried loop starts from a value that depends only on data (an
+// accumulator set to zero, a copy of a data vector, an integer counter) and
+// updates it with a value that depends on mu. The import holds the same
+// value on every draw, so each loop records once and replays after that.
+void test_write_array_data_start() {
+  using namespace stanli;
+  const int n = 64;
+  const std::string text =
+      slurp("tests/fixtures/structured_wa_data_start.tmir.sexp");
+  for (const int t : {8, 20000}) {
+    const std::string label = "structured_wa_data_start T=" + std::to_string(t);
+    DataMap data;
+    data.set_int("N", n);
+    data.set_int("T", t);
+    std::vector<double> x(static_cast<size_t>(n));
+    for (int i = 0; i < n; ++i)
+      x[static_cast<size_t>(i)] = 0.25 * (i % 5) - 0.5;
+    data.set_real_array("x", x);
+    CompiledModel retained = compile_model(text, data);
+    test_setenv("STANLI_STRUCTURED_LOOPS", "0");
+    CompiledModel unrolled = compile_model(text, data);
+    test_unsetenv("STANLI_STRUCTURED_LOOPS");
+    if (!compiled_completely(retained, label) ||
+        !compiled_completely(unrolled, label + " unrolled"))
+      continue;
+    const auto& ops = retained.write_array->graph.ops;
+    const auto loops = std::count_if(ops.begin(), ops.end(), [](const Op& op) {
+      return op.opcode == OP_LOOP;
+    });
+    if (loops != (t > 8 ? 4 : 0)) {
+      ++failures;
+      std::printf("FAIL %s: %td retained loops\n", label.c_str(), loops);
+    }
+    test_setenv("STANLI_STRUCTURED_LOOP_DIAGNOSTICS", "1");
+    Executor rex(retained.write_array->graph);
+    test_unsetenv("STANLI_STRUCTURED_LOOP_DIAGNOSTICS");
+    Executor uex(unrolled.write_array->graph);
+    retained.write_array->bind(rex);
+    unrolled.write_array->bind(uex);
+    for (int draw = 0; draw < 4; ++draw) {
+      const double mu = 0.9 * std::sin(1.3 * draw + 0.2);
+      rex.params_data()[0] = uex.params_data()[0] = mu;
+      WaRng rrng(9), urng(9);
+      stanli_test::StdoutCapture captured(stderr);
+      rex.run_forward_only(EvalState{&rrng});
+      const std::string diagnostics = captured.finish();
+      uex.run_forward_only(EvalState{&urng});
+      if (!same_double_bytes(read_row(retained.write_array->columns, rex),
+                             read_row(unrolled.write_array->columns, uex))) {
+        ++failures;
+        std::printf("FAIL %s: draw %d differs from the unrolled loops\n",
+                    label.c_str(), draw);
+      }
+      size_t replays = 0;
+      for (size_t at = diagnostics.find("replay=1"); at != std::string::npos;
+           at = diagnostics.find("replay=1", at + 1))
+        ++replays;
+      if (draw > 0 && replays != static_cast<size_t>(loops)) {
+        ++failures;
+        std::printf("FAIL %s: draw %d replayed %zu of %td loops\n",
+                    label.c_str(), draw, replays, loops);
+      }
+    }
+  }
 }
 
 // An inlined function declares a matrix whose row count multiplies a
@@ -4777,6 +4844,7 @@ int main() {
   test_write_array_block_order();
   test_write_array_vector_rng();
   test_write_array_rng_loops();
+  test_write_array_data_start();
   test_write_array_compare_size();
   test_write_array_bounded_blocks();
   test_write_array_selected_loop_refused();
