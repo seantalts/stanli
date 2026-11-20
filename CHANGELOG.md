@@ -20,9 +20,10 @@ source into the portable format this release's runtime reads.
 
 ### Fixes
 
-- Sampling a model with no parameters copied zero bytes from a null pointer.
-  That is undefined behavior in C, and UBSan on Linux reported it. Those
-  copies are now skipped (#621, #625).
+- For a model with no parameters, sampling and the BridgeStan density and
+  constrain functions copied zero bytes from a null pointer. That is
+  undefined behavior in C, and UBSan on Linux reported it. Those copies are
+  now skipped (#621, #625).
 
 ### Internal
 
