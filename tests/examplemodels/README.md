@@ -124,12 +124,10 @@ differences in ULP are `ms` (50,581 ULP, 1.4e-12 relative), `ode_one_comp_mm`
 others are 76 ULP or less.
 
 Two models are in `KNOWN_GAPS` in `tools/verify_refs.py` because their
-generated quantities use a function that `write_array` lacks. stanli computes
-their log density and gradient and matched CmdStan when the references were
-recorded, but the generated quantities fall back to the MIR interpreter, which
-throws. A `KNOWN_GAPS` entry excuses the whole model in the replay, so the
-replay does not enforce the log density and gradient of these two models while
-the entries stand:
+generated quantities use a function that `write_array` lacks: the generated
+quantities fall back to the MIR interpreter, which throws. The entries excuse
+only the `write_array`, so the replay still compares the log density and
+gradient of these two models at every point:
 
 - `cjs_mnl_ran`: `unsupported function multinomial_rng`
 - `hmm_marginal`: `unsupported function hmm_latent_rng`

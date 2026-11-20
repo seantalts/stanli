@@ -91,23 +91,49 @@ POINTS = (0, 1, 2)
 # held s2_ar_cov's two points was fixed.
 QUARANTINED = {}
 
-# Models stanli does not run at all, mapped to what stops them. The
+WRITE_ARRAY = "write_array"
+WHOLE_MODEL = "the whole model"
+
+
+@dataclasses.dataclass(frozen=True)
+class Gap:
+    """What a KNOWN_GAPS entry excuses, and why.
+
+    WRITE_ARRAY excuses a write_array section that runs through the
+    interpreter or fails; lp and the gradient are still compared at every
+    point. WHOLE_MODEL excuses any failure short of a crash.
+    """
+    excuses: str
+    reason: str
+
+    def __post_init__(self):
+        if self.excuses not in (WRITE_ARRAY, WHOLE_MODEL):
+            raise ValueError(f"a gap excuses {WRITE_ARRAY!r} or "
+                             f"{WHOLE_MODEL!r}, not {self.excuses!r}")
+
+
+# Models stanli cannot run in full, mapped to what is excused. The
 # references are recorded from CmdStan the same way every other model's
 # are, so the only thing an entry suppresses is the failure; when the gap
 # closes, the model matches its references, the replay reports GAP_CLOSED,
 # and the run stays red until the entry is deleted. A crash is never
 # excused: a segfault and a refusal are different bugs.
 KNOWN_GAPS = {
-    "examplemodels_cjs_mnl_ran": "write_array has no multinomial_rng: "
-        "generated quantities fall back to the interpreter, which throws",
-    "examplemodels_hmm_marginal": "write_array has no hmm_latent_rng: "
-        "generated quantities fall back to the interpreter, which throws",
-    "bayesdfa_dfa_gp": "stanli refuses the model: unsupported function "
-        "gp_exp_quad_cov",
-    "bmgarch_ccc": "write_array has no multi_student_t_rng: generated "
-        "quantities fall back to the interpreter, which throws",
-    "bmgarch_bekk_arma": "write_array has no multi_student_t_rng: generated "
-        "quantities fall back to the interpreter, which throws",
+    "examplemodels_cjs_mnl_ran": Gap(
+        WRITE_ARRAY, "write_array has no multinomial_rng: generated "
+        "quantities fall back to the interpreter, which throws"),
+    "examplemodels_hmm_marginal": Gap(
+        WRITE_ARRAY, "write_array has no hmm_latent_rng: generated "
+        "quantities fall back to the interpreter, which throws"),
+    "bayesdfa_dfa_gp": Gap(
+        WHOLE_MODEL, "stanli refuses the model: unsupported function "
+        "gp_exp_quad_cov"),
+    "bmgarch_ccc": Gap(
+        WRITE_ARRAY, "write_array has no multi_student_t_rng: generated "
+        "quantities fall back to the interpreter, which throws"),
+    "bmgarch_bekk_arma": Gap(
+        WRITE_ARRAY, "write_array has no multi_student_t_rng: generated "
+        "quantities fall back to the interpreter, which throws"),
 }
 
 # Corpus models that run through the MIR interpreter, mapped to why. Any
@@ -933,10 +959,24 @@ def fast_dev(rv, gv):
     return (max(worst, diff / scale), worst_ulp)
 
 
+def density_interpreted(status):
+    """Does anything but the write_array section run through the
+    interpreter? A fallback that the section names as its own truncation
+    belongs to it; any other one counts against the log density."""
+    own = status.write_array().get("truncated")
+    return any(note != own
+               for note in (status.compile or {}).get("interpreter_fallbacks", []))
+
+
 def check_point(model, stan, dj, check_bin, point, pt, timeout, no_wa,
                 strict=False, fast_math=False, opts=None, off_platform=False,
-                ulp_entries=None, measured=None, floored=None, notes=None):
+                ulp_entries=None, measured=None, floored=None, notes=None,
+                wa_gap=False):
     """Replay one recorded point. (status, worst, worst_ulp, n, detail).
+
+    wa_gap (a WRITE_ARRAY gap, replayed with no_wa) lets the write_array
+    section run through the interpreter, and nothing else
+    (density_interpreted).
 
     ulp_entries, when not None, are the model's ULP ledger entries, and
     every value is held to its bound (ulp_gate). measured, when given,
@@ -997,7 +1037,8 @@ def check_point(model, stan, dj, check_bin, point, pt, timeout, no_wa,
         return ("CRASH", 0.0, 0, 0,
                 f"point {point}: stanli_check wrote no status record")
     expected = opts.interpreted if opts else model in CORPUS_INTERPRETED
-    if status.interpreted != expected:
+    interpreted = density_interpreted(status) if wa_gap else status.interpreted
+    if interpreted != expected:
         parts = (status.compile["interpreter_fallbacks"]
                  or ["write_array section"])
         return ("INTERPRETER", 0.0, 0, 0,
@@ -1155,29 +1196,42 @@ def worst_values(rv, gv, floor, skip, label):
 def check_model(model, ref, pdb, check_bin, tmp, timeout, max_rel,
                 no_wa=False, target_platform=None,
                 fast_math=False, opts=None, ulp_entries=None, measured=None):
-    """Replay one model, under whatever KNOWN_GAPS says about it."""
-    result = replay_model(model, ref, pdb, check_bin, tmp, timeout, max_rel,
-                          no_wa, target_platform, fast_math, opts,
-                          ulp_entries, measured)
-    if model not in KNOWN_GAPS:
+    """Replay one model, under whatever KNOWN_GAPS says about it.
+
+    A WRITE_ARRAY gap replays lp and the gradient first, without the
+    write_array, and any failure there is the model's result.
+    """
+    args = (model, ref, pdb, check_bin, tmp, timeout, max_rel)
+    rest = (target_platform, fast_math, opts, ulp_entries, measured)
+    gap = KNOWN_GAPS.get(model)
+    density = None
+    if gap is not None and gap.excuses == WRITE_ARRAY:
+        density = replay_model(*args, True, *rest, wa_gap=True)
+        if density[1] != "OK":
+            return density
+    result = replay_model(*args, no_wa, *rest)
+    if gap is None:
         return result
     _, status, rel, ulp, total, _, notes = result
-    notes.append(f"KNOWN GAP {model}: {KNOWN_GAPS[model]}")
+    notes.append(f"KNOWN GAP {model}: {gap.reason}")
     if status == "CRASH":
         return result
     if status == "OK":
         return (model, "GAP_CLOSED", rel, ulp, total,
                 f"{model} matches its references now "
-                f"({KNOWN_GAPS[model]}); delete it from KNOWN_GAPS", notes)
+                f"({gap.reason}); delete it from KNOWN_GAPS", notes)
+    if density is not None:
+        return density[:6] + (density[6] + notes,)
     return (model, "OK", 0.0, 0, total, "", notes)
 
 
 def replay_model(model, ref, pdb, check_bin, tmp, timeout, max_rel,
                  no_wa=False, target_platform=None,
-                 fast_math=False, opts=None, ulp_entries=None, measured=None):
+                 fast_math=False, opts=None, ulp_entries=None, measured=None,
+                 wa_gap=False):
     """Replay every point of one model.
 
-    ulp_entries and measured are as in check_point, over all points.
+    ulp_entries, measured and wa_gap are as in check_point, over all points.
 
     Returns (model, status, max_rel, max_ulp, n_values, detail, notes).
     The deviation reported is the worst over the values held to the clean
@@ -1242,7 +1296,7 @@ def replay_model(model, ref, pdb, check_bin, tmp, timeout, max_rel,
                         check_point, model, stan, dj, check_bin, point,
                         ref["points"][str(point)], timeout, no_wa, strict,
                         fast_math, opts, off_platform, ulp_entries,
-                        point_measured[point], floored[point], notes)
+                        point_measured[point], floored[point], notes, wa_gap)
                     for point in POINTS if str(point) in ref["points"]
                     and (model, point) not in QUARANTINED}
     for point in POINTS:
@@ -1278,7 +1332,8 @@ def replay_model(model, ref, pdb, check_bin, tmp, timeout, max_rel,
             status, rel, ulp, n, detail = check_point(
                 model, stan, dj, check_bin, point, pt, timeout, no_wa, strict,
                 fast_math, off_platform=off_platform, ulp_entries=ulp_entries,
-                measured=measured, floored=floored[point], notes=notes)
+                measured=measured, floored=floored[point], notes=notes,
+                wa_gap=wa_gap)
         total += n
         if status != "OK":
             return (model, status, worst, worst_ulp, total, detail, notes)

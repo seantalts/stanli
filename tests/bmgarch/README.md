@@ -53,11 +53,9 @@ largest distance is 70 ULP.
 Both models are in `KNOWN_GAPS` in `tools/verify_refs.py`: their generated
 quantities call `multi_student_t_rng`, which `write_array` lacks, so the
 generated quantities fall back to the MIR interpreter, which throws
-(`unsupported function multi_student_t_rng`). stanli's log density and
-gradient matched CmdStan when the references were recorded, but a
-`KNOWN_GAPS` entry excuses the whole model in the replay, so the replay does
-not enforce them while the entries stand. Neither has a recorded
-`write_array` row.
+(`unsupported function multi_student_t_rng`). The entries excuse only the
+`write_array`: the replay still compares the log density and gradient at
+every point. Neither has a recorded `write_array` row.
 
 Their benchmark points stay fixed for the same reason: the NUTS run reads
 every column of the generated quantities.

@@ -49,12 +49,12 @@ VALUES = {"values": ["-3.5", "1", "-2"], "status": "VERIFIED",
 REF = {"primary": 0, "points": {str(p): VALUES for p in POINTS}}
 
 
-def compiled(fallbacks=(), section="graph"):
+def compiled(fallbacks=(), section="graph", truncated=None):
     """Shell that writes stanli_check's compile record to $status."""
     record = {"record": "compile", "ok": True,
               "interpreter_fallbacks": list(fallbacks),
               "write_array": {"section": section, "columns": 1,
-                              "truncated": None}}
+                              "truncated": truncated}}
     return f"echo '{json.dumps(record)}' > \"$status\"\n"
 
 
@@ -411,24 +411,80 @@ class CheckModelPointsTest(unittest.TestCase):
                              "GATE")
 
     def test_a_known_gap_may_refuse_the_model(self):
-        with unittest.mock.patch.dict(KNOWN_GAPS, {MODEL: "test gap"}):
+        gap = verify_refs.Gap(verify_refs.WHOLE_MODEL, "test gap")
+        with unittest.mock.patch.dict(KNOWN_GAPS, {MODEL: gap}):
             _, status, _, _, _, _, notes = self.run_check(
                 'echo "COMPILE_FAIL unsupported function"')
         self.assertEqual(status, "OK")
         self.assertIn(f"KNOWN GAP {MODEL}: test gap", notes)
 
     def test_a_known_gap_that_passes_is_reported(self):
-        with unittest.mock.patch.dict(KNOWN_GAPS, {MODEL: "test gap"}):
-            _, status, _, _, _, detail, _ = self.run_check(
-                'echo "OK -3.5 1 -2"')
-        self.assertEqual(status, "GAP_CLOSED")
-        self.assertIn(MODEL, detail)
+        for excuses in (verify_refs.WHOLE_MODEL, verify_refs.WRITE_ARRAY):
+            gap = verify_refs.Gap(excuses, "test gap")
+            with self.subTest(excuses=excuses), \
+                    unittest.mock.patch.dict(KNOWN_GAPS, {MODEL: gap}):
+                _, status, _, _, _, detail, _ = self.run_check(
+                    'echo "OK -3.5 1 -2"')
+                self.assertEqual(status, "GAP_CLOSED")
+                self.assertIn(MODEL, detail)
 
     def test_a_known_gap_still_may_not_crash(self):
-        with unittest.mock.patch.dict(KNOWN_GAPS, {MODEL: "test gap"}):
-            _, status, _, _, _, detail, _ = self.run_check('kill -SEGV $$')
-        self.assertEqual(status, "CRASH")
-        self.assertIn("signal 11", detail)
+        for excuses in (verify_refs.WHOLE_MODEL, verify_refs.WRITE_ARRAY):
+            gap = verify_refs.Gap(excuses, "test gap")
+            with self.subTest(excuses=excuses), \
+                    unittest.mock.patch.dict(KNOWN_GAPS, {MODEL: gap}):
+                _, status, _, _, _, detail, _ = self.run_check('kill -SEGV $$')
+                self.assertEqual(status, "CRASH")
+                self.assertIn("signal 11", detail)
+
+    # What stanli_check reports for a model whose generated quantities
+    # call a function that only the interpreter knows, and it throws.
+    WA_GAP = (compiled(["generated quantities (unsupported f)"], "interpreted",
+                       "generated quantities (unsupported f)")
+              + 'if [ -n "$wa" ]; then echo "WANAMES FAIL unsupported f"; '
+                'echo "WAVALS FAIL"; fi\n')
+
+    def test_a_write_array_gap_excuses_only_the_write_array(self):
+        gap = verify_refs.Gap(verify_refs.WRITE_ARRAY, "test gap")
+        with unittest.mock.patch.dict(KNOWN_GAPS, {MODEL: gap}):
+            _, status, _, _, _, _, notes = self.run_check(
+                self.WA_GAP + 'echo "OK -3.5 1 -2"', wa=False)
+            self.assertEqual(status, "OK")
+            self.assertIn(f"KNOWN GAP {MODEL}: test gap", notes)
+            # lp and the gradient are still compared, at every point.
+            for body in ('echo "OK -3.6 1 -2"',
+                         'if [ "$point" = 2 ]; then echo "OK -3.5 1 -2.1"; '
+                         'else echo "OK -3.5 1 -2"; fi'):
+                with self.subTest(body=body):
+                    self.assertEqual(self.run_check(self.WA_GAP + body,
+                                                    wa=False)[1], "GATE")
+            # So is the ULP gate.
+            near = 1 + 40 * math.ulp(1.0)
+            with tempfile.TemporaryDirectory() as tmp:
+                result = check_model(
+                    MODEL, self.REF, REPO / "nonexistent-pdb",
+                    stub(tmp, self.WA_GAP + f'echo "OK -3.5 {near!r} -2"', False),
+                    pathlib.Path(tmp), 60, 1e-9, ulp_entries={})
+            self.assertEqual(result[1], "ULP_GATE")
+            # A log density that runs through the interpreter is not part
+            # of the gap.
+            other = compiled(["generated quantities (unsupported f)",
+                              "the ODE right-hand side g (unsupported h)"],
+                             "interpreted", "generated quantities (unsupported f)")
+            body = (other + 'if [ -n "$wa" ]; then echo "WANAMES FAIL x"; '
+                    'echo "WAVALS FAIL"; fi\necho "OK -3.5 1 -2"')
+            self.assertEqual(self.run_check(body, wa=False)[1], "INTERPRETER")
+            # Neither is a model that stanli refuses.
+            self.assertEqual(
+                self.run_check('echo "COMPILE_FAIL unsupported function"')[1],
+                "RUN_FAIL")
+
+    def test_a_gap_says_what_it_excuses(self):
+        with self.assertRaises(ValueError):
+            verify_refs.Gap("generated quantities", "test gap")
+        for gap in KNOWN_GAPS.values():
+            self.assertIn(gap.excuses, (verify_refs.WRITE_ARRAY,
+                                        verify_refs.WHOLE_MODEL))
 
 
 class PairDevTest(unittest.TestCase):

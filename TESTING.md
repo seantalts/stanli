@@ -262,10 +262,15 @@ changed inputs, and references recorded against an unpinned CmdStan, Stan or
 Stan Math. [`tools/toolchain.py`](tools/toolchain.py) makes the recording
 tools stop with an error on an unpinned CmdStan checkout. A model that stanli
 refuses, or whose `write_array` it cannot run, does not fail the run if it is
-listed in `KNOWN_GAPS`; the entry excuses the whole model, so the replay stops
-enforcing its log density and gradient too. It has two entries today,
-`cjs_mnl_ran` and `hmm_marginal`, whose generated quantities call
-`multinomial_rng` and `hmm_latent_rng`.
+listed in `KNOWN_GAPS`. Each entry says what it excuses. A `write_array` entry
+excuses only that section: the replay still compares the log density and
+gradient at every point, with every gate, and fails if anything but the
+`write_array` runs through the interpreter. Four entries are of this kind:
+`examplemodels_cjs_mnl_ran`, `examplemodels_hmm_marginal`, `bmgarch_ccc` and
+`bmgarch_bekk_arma`, whose generated quantities call `multinomial_rng`,
+`hmm_latent_rng` and `multi_student_t_rng`. A whole-model entry excuses any
+failure except a crash. The one entry of this kind is `bayesdfa_dfa_gp`, which
+stanli refuses because it lacks `gp_exp_quad_cov` in the form the model calls.
 Once stanli supports the model, the run fails until you delete the entry.
 
 [`tools/check_corpus_sampling.py`](tools/check_corpus_sampling.py) runs the
