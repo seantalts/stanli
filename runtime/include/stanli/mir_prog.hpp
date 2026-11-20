@@ -4266,6 +4266,20 @@ struct ProgramCompiler {
     return given(s) ? given_value : expr(s.rhs);
   }
 
+  // Stan evaluates the whole right-hand side before it assigns, but an
+  // indexed write moves one cell at a time. A value of several cells that
+  // shares registers with the destination (`x[2:4] = x[1:3]`,
+  // `v[{3, 2, 1}] = v`) is copied out first, so later moves do not read
+  // cells that earlier moves overwrote.
+  Range copied_if_overlapping(const Range& v, const Range& dst) {
+    if (v.len < 2 || v.reg >= dst.reg + dst.len || dst.reg >= v.reg + v.len)
+      return v;
+    Range copy = v;
+    copy.reg = alloc(v.len);
+    for (int k = 0; k < v.len; ++k) emit(Program::MOV, copy.reg + k, v.reg + k);
+    return copy;
+  }
+
   // The statements a call returning several values needs, kept out of
   // compile_stmt: a register-program refusal unwinds through every
   // compile_stmt frame, and each statement compiled inline there makes every
@@ -4573,7 +4587,9 @@ struct ProgramCompiler {
         }
         if (it == reals.end()) bail("assignment to undeclared " + s.lhs);
         const Range dst = it->second;
-        const Range v = assignment_value(s);
+        const Range v = s.lhs_idx.empty()
+                            ? assignment_value(s)
+                            : copied_if_overlapping(assignment_value(s), dst);
         // Once written here, the imported value can no longer be answered
         // from the enclosing graph's preparation-time observation.
         extern_bound.erase(s.lhs);
