@@ -519,6 +519,21 @@ fallback are in
 [`benchmark-points.json.gz`](internal/artifacts/benchmark-points.json.gz).
 Both engines read the same vectors. The tables mark fallback models with †.
 
+Each entry also records the Stanli build id and C ABI version of the library
+that ran its reference run. These two values are provenance and nothing
+compares them with the build under test. The file mixes builds on purpose:
+`tools/gen_benchmark_points.py --missing` runs only new or changed models with
+the current build and keeps every other entry. The ABI version counts changes
+to the C function signatures, and the points are plain lists of doubles that
+every build reads the same way, so an entry stays usable after the ABI number
+moves. What can make an entry wrong is a changed model source or data, which
+the loader rejects through the two hashes, or a changed number of parameters,
+which the timing drivers reject. A newer sampler would draw different points
+and take a somewhat different number of gradients. That moves the total
+sampling estimate for the model. It does not move the gradient comparison,
+because both engines evaluate the same points. Rerun a model's reference run
+with `--models` when a change to NUTS or adaptation should move its count.
+
 ### Gradient time
 
 Each engine builds its model and evaluates every point once outside the
