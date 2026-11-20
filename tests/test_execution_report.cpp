@@ -79,11 +79,11 @@ int main() {
   CompiledModel synthetic;
   auto region = std::make_shared<IslandProg>();
   region->native_adj = true;
-  const Kernel* softmax = find_kernel(OP_SOFTMAX);
+  const Kernel* log_softmax = find_kernel(OP_LOG_SOFTMAX);
   Program::Call call;
-  call.opcode = OP_SOFTMAX;
-  call.forward = softmax->forward;
-  call.backward = softmax->backward;
+  call.opcode = OP_LOG_SOFTMAX;
+  call.forward = log_softmax->forward;
+  call.backward = log_softmax->backward;
   call.out_len = 2;
   region->calls.push_back(call);
   region->code.emplace_back(Program::CALL, 0, 0);
