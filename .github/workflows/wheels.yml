@@ -2461,7 +2461,8 @@ jobs:
             jq -r '[.[] | select(.tagName | startswith("dev-"))]
                    | sort_by(.publishedAt) | reverse | .[10:] | .[].tagName' |
             while read -r tag; do
-              gh release delete "$tag" --cleanup-tag --yes
+              gh release delete "$tag" --cleanup-tag --yes ||
+                echo "::warning::could not delete $tag"
             done
 
   publish:

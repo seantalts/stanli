@@ -141,16 +141,54 @@ test_that("installing dev replaces the pinned runtime and records its tag", {
                              stanli:::runtime_filename()))
 })
 
+# Mocks for an install into a session that already has a runtime loaded.
+mock_loaded_session <- function(log, windows, env = parent.frame()) {
+  local_mocked_bindings(dev_release_tag = function(...) "dev-0123456789ab",
+                        download_runtime = fake_download(log),
+                        load_runtime = function(...) stop("loaded twice"),
+                        runtime_loaded = function() TRUE,
+                        on_windows = function() windows,
+                        commit_mismatch_note = function(...) "NOTE",
+                        .package = "stanli", .env = env)
+}
+
 test_that("installing into a session that has a runtime loaded says to restart", {
   restore <- use_temp_cache()
   on.exit(restore(), add = TRUE)
-  local_mocked_bindings(dev_release_tag = function(...) "dev-0123456789ab",
-                        download_runtime = fake_download(tempfile()),
-                        load_runtime = function(...) invisible(TRUE),
-                        runtime_loaded = function() TRUE,
-                        commit_mismatch_note = function(...) NULL,
-                        .package = "stanli")
-  expect_message(stanli_install("dev"), "restart R")
+  mock_loaded_session(tempfile(), windows = FALSE)
+  put_runtime(stanli:::stanli_runtime_release)
+  messages <- character()
+  withCallingHandlers(stanli_install("dev"), message = function(m) {
+    messages <<- c(messages, conditionMessage(m))
+    invokeRestart("muffleMessage")
+  })
+  expect_true(any(grepl("restart R", messages)))
+  # The note would compare against the runtime that is still loaded.
+  expect_false(any(grepl("NOTE", messages)))
+})
+
+test_that("on Windows, replacing a loaded runtime stops before downloading", {
+  restore <- use_temp_cache()
+  on.exit(restore(), add = TRUE)
+  log <- tempfile()
+  mock_loaded_session(log, windows = TRUE)
+  pinned <- put_runtime(stanli:::stanli_runtime_release)
+  expect_error(stanli_install("dev"), "R_user_dir")
+  expect_false(file.exists(log))
+  unlink(pinned)
+
+  # A dev runtime from another commit.
+  put_runtime("dev")
+  writeLines("dev-bbbbbbbbbbbb",
+             file.path(stanli:::runtime_cache_dir("dev"), "tag"))
+  expect_error(stanli_install("dev"), "R_user_dir")
+  expect_false(file.exists(log))
+
+  # The same commit, with no release runtime left, is already installed.
+  writeLines("dev-0123456789ab",
+             file.path(stanli:::runtime_cache_dir("dev"), "tag"))
+  expect_message(stanli_install("dev"), "already at")
+  expect_false(file.exists(log))
 })
 
 test_that("\"latest\" is still refused", {

@@ -92,8 +92,8 @@ stanli_available <- function() {
 #'   `STANLI_RUNTIME`. `"dev"` fetches the runtime built from the commit
 #'   that the package was installed from, for a package installed from
 #'   the main branch on GitHub. A package without a recorded commit gets
-#'   the newest dev runtime. Each push to main publishes one about an hour
-#'   after it lands, and only the newest ten are kept. Installing the dev
+#'   the newest dev runtime. The runtime for a commit appears about an
+#'   hour after the commit lands on main, and only the newest ten are kept. Installing the dev
 #'   runtime removes the release runtime from the cache, and installing a
 #'   release removes the dev runtime, so the one installed last is used.
 #' @param quiet Passed to [utils::download.file()].
@@ -120,11 +120,22 @@ stanli_install <- function(version = stanli_runtime_release, quiet = FALSE,
   dir.create(dest_dir, recursive = TRUE, showWarnings = FALSE)
   dest <- file.path(dest_dir, runtime_filename())
   tag_file <- file.path(dest_dir, "tag")
+  pinned <- file.path(runtime_cache_dir(), runtime_filename())
   if (file.exists(dest) && !overwrite &&
-      (!dev || identical(installed_dev_tag(), tag))) {
+      (!dev || (identical(installed_dev_tag(), tag) && !file.exists(pinned)))) {
     if (!quiet) message("stanli runtime already at ", dest)
     return(invisible(dest))
   }
+  # Windows cannot delete or replace a DLL that this session has loaded,
+  # and loading stanli loads the cached runtime, so clearing the cache has
+  # to happen before stanli is loaded.
+  if (dev && on_windows() && runtime_loaded() &&
+      !nzchar(Sys.getenv("STANLI_RUNTIME")) &&
+      (file.exists(pinned) || file.exists(dest)))
+    stop("this R session has loaded a stanli runtime, which Windows does ",
+         "not let stanli_install() replace. Restart R and, before loading ",
+         "stanli, run\n  unlink(tools::R_user_dir(\"stanli\", \"cache\"), ",
+         "recursive = TRUE)\n  stanli::stanli_install(\"dev\")", call. = FALSE)
   asset <- runtime_asset()
   base <- "https://github.com/seantalts/stanli/releases"
   url <- file.path(base, "download", tag, asset)
@@ -166,12 +177,6 @@ stanli_install <- function(version = stanli_runtime_release, quiet = FALSE,
                    c(dest_dir, if (!dev) runtime_cache_dir()))
   unlink(stale, recursive = TRUE)
   if (!quiet) message("stanli runtime installed to ", dest)
-  # Windows cannot delete a DLL that this session has loaded.
-  if (dev && !identical(dest, stanli_runtime_path()) &&
-      file.exists(file.path(runtime_cache_dir(), runtime_filename())))
-    stop("could not remove the ", stanli_runtime_release, " runtime, which ",
-         "this R session has loaded. Restart R and run stanli_install(\"dev\") ",
-         "again.", call. = FALSE)
   if (identical(dest, stanli_runtime_path())) {
     # A runtime that is already loaded stays loaded until R restarts.
     if (runtime_loaded()) {
@@ -179,9 +184,9 @@ stanli_install <- function(version = stanli_runtime_release, quiet = FALSE,
                           "session; restart R to use the one just installed")
     } else {
       load_runtime()
+      note <- commit_mismatch_note()
+      if (!quiet && !is.null(note)) message(note)
     }
-    note <- commit_mismatch_note()
-    if (!quiet && !is.null(note)) message(note)
   } else if (!quiet) {
     message("this package loads the ", stanli_runtime_release,
             " runtime; set STANLI_RUNTIME to use the one just installed")
@@ -194,6 +199,8 @@ download_runtime <- function(url, dest, quiet) {
 }
 
 runtime_loaded <- function() .Call("stanli_bridge_loaded")
+
+on_windows <- function() .Platform$OS.type == "windows"
 
 installed_dev_tag <- function() {
   path <- file.path(runtime_cache_dir("dev"), "tag")

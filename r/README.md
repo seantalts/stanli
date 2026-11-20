@@ -43,8 +43,8 @@ remotes::install_github("seantalts/stanli", subdir = "r")
 stanli::stanli_install("dev")
 ```
 
-CI publishes the runtime about an hour after a commit lands on main, so a
-commit that was merged in the last hour may not have one yet. Only the last
+The runtime for a commit appears about an hour after the commit lands on
+main, so a commit that was merged in the last hour may not have one yet. Only the last
 10 commits on main keep a runtime, so reinstall the package from main if
 yours is older.
 
