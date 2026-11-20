@@ -33,6 +33,21 @@ from its own release, so run `stanli_install()` again after you upgrade the
 package. Nothing else is downloaded. To use a runtime library that you built
 yourself, set `STANLI_RUNTIME`.
 
+### Installing from main
+
+To try changes that are not yet in a release, install the package from the
+main branch and then the runtime that was built from the same commit:
+
+```r
+remotes::install_github("seantalts/stanli", subdir = "r")
+stanli::stanli_install("dev")
+```
+
+CI publishes the runtime about an hour after a commit lands on main, so a
+commit that was merged in the last hour may not have one yet. Only the last
+10 commits on main keep a runtime, so reinstall the package from main if
+yours is older.
+
 ## Quick start
 
 ```r

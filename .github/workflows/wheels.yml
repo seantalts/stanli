@@ -2406,6 +2406,64 @@ jobs:
             runtime/*.tar.gz stanli_*.tar.gz --clobber
           gh release edit "$GITHUB_REF_NAME" --draft=false
 
+  # The runtime for each push to main, so an R package installed from that
+  # commit can run stanli_install("dev"). Published assets are immutable and
+  # a deleted release's tag can never be reused, so every commit gets a new
+  # prerelease and only the newest ten are kept. Main runs share one
+  # concurrency group without cancelling, so two of these never overlap.
+  dev-runtime-release:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: [static_checks, build, windows, wasm-webr, r-tests, r-platform-tests]
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: write  # create, publish and delete dev releases
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: runtime
+          pattern: runtime-*
+          merge-multiple: true
+
+      - name: Publish the prerelease
+        run: |
+          ls -la runtime/
+          n=$(ls runtime/*.tar.gz | wc -l)
+          echo "$n runtime assets"
+          [ "$n" -eq 6 ]
+          tag="dev-${GITHUB_SHA::12}"
+          # As in runtime-release: attach everything while it is a draft.
+          # A rerun after publishing must not upload, since that fails.
+          draft=$(gh release view "$tag" --json isDraft --jq .isDraft) ||
+            draft=missing
+          if [ "$draft" = false ]; then
+            echo "$tag is already published"
+            exit 0
+          fi
+          if [ "$draft" = missing ]; then
+            gh release create "$tag" --draft --prerelease --latest=false \
+              --target "$GITHUB_SHA" --title "stanli dev ${GITHUB_SHA::12}" \
+              --notes "Development build of main at $GITHUB_SHA, for stanli_install(\"dev\") from an R package installed from that commit. This is not a release."
+          fi
+          gh release upload "$tag" runtime/*.tar.gz --clobber
+          gh release edit "$tag" --draft=false --latest=false
+
+      # A failed prune leaves extra releases until the next push; it should
+      # not mark the build failed.
+      - name: Prune old dev releases
+        continue-on-error: true
+        run: |
+          gh release list --limit 1000 --exclude-drafts \
+              --json tagName,publishedAt |
+            jq -r '[.[] | select(.tagName | startswith("dev-"))]
+                   | sort_by(.publishedAt) | reverse | .[10:] | .[].tagName' |
+            while read -r tag; do
+              gh release delete "$tag" --cleanup-tag --yes
+            done
+
   publish:
     # Tags only. PyPI versions can never be reused, so this must not fire
     # on a branch push.

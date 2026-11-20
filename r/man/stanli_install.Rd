@@ -15,7 +15,13 @@ stanli_install(
 version of the package was built against, which is the pairing its
 ABI check will accept. Only that release's runtime is found by
 [stanli_runtime_path()]; to run a different build, set
-`STANLI_RUNTIME`.}
+`STANLI_RUNTIME`. `"dev"` fetches the runtime built from the commit
+that the package was installed from, for a package installed from
+the main branch on GitHub. A package without a recorded commit gets
+the newest dev runtime. Each push to main publishes one about an hour
+after it lands, and only the newest ten are kept. Installing the dev
+runtime removes the release runtime from the cache, and installing a
+release removes the dev runtime, so the one installed last is used.}
 
 \item{quiet}{Passed to [utils::download.file()].}
 
