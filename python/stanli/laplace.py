@@ -113,7 +113,7 @@ def _block_index(model, latent):
     for name, size in layout:
         ranges[name] = (start, start + size)
         start += size
-    columns = {c.split("[")[0] for c in model._column_names()[0]}
+    columns = {c.split("[")[0] for c in model._column_names()}
     for name in latent:
         if name in ranges:
             continue

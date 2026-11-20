@@ -264,7 +264,7 @@ static const char* (*p_build_id)(void);
 static char* (*p_bridgestan_data)(const char*, const char*, const char*, char*,
                                   size_t);
 static int64_t (*p_n_unconstrained)(const void*);
-static int (*p_grad)(void*, const double*, double*, double*);
+static int (*p_grad_err)(void*, const double*, double*, double*, char*, size_t);
 static int (*p_hessian)(void*, const double*, double*, double*, double*, char*,
                         size_t);
 
@@ -319,7 +319,7 @@ static int64_t (*p_sampling_warnings)(const stanli_sample_opts*,
                                       const stanli_sample_report*,
                                       const double*, char*, size_t);
 static int64_t (*p_wa_n_columns)(const void*);
-static const char* (*p_wa_column_name)(const void*, int64_t);
+static int64_t (*p_n_output_columns)(const void*);
 static void (*p_wa_seed_chain)(void*, uint32_t, uint32_t);
 static int (*p_wa_row)(void*, const double*, double*);
 static const char* (*p_warnings)(const void*);
@@ -551,7 +551,7 @@ SEXP stanli_bridge_load(SEXP path) {
   BIND("stanli_build_id", p_build_id);
   BIND("stanli_bridgestan_data", p_bridgestan_data);
   BIND("stanli_n_unconstrained", p_n_unconstrained);
-  BIND("stanli_grad", p_grad);
+  BIND("stanli_grad_err", p_grad_err);
   BIND("stanli_hessian", p_hessian);
   BIND_OPTIONAL("stanli_model_whiten_lowrank", p_model_whiten_lowrank);
   BIND_OPTIONAL("stanli_sparse_factor_new", p_sparse_factor_new);
@@ -581,7 +581,7 @@ SEXP stanli_bridge_load(SEXP path) {
   BIND("stanli_diagnose_text", p_diagnose_text);
   BIND("stanli_sampling_warnings", p_sampling_warnings);
   BIND("stanli_wa_n_columns", p_wa_n_columns);
-  BIND("stanli_wa_column_name", p_wa_column_name);
+  BIND("stanli_n_output_columns", p_n_output_columns);
   BIND("stanli_wa_seed_chain", p_wa_seed_chain);
   BIND("stanli_wa_row", p_wa_row);
   BIND("stanli_warnings", p_warnings);
@@ -732,13 +732,11 @@ SEXP stanli_r_compiler_messages(SEXP m) {
 }
 
 /* list(name = character, dims = list of integer vectors): the constrained
- * parameters when `parameters` is TRUE, else the columns
- * stanli_r_column_names reports. */
+ * parameters when `parameters` is TRUE, else the output columns. */
 SEXP stanli_r_variables(SEXP m, SEXP parameters) {
   require_loaded();
   const void* mm = model_ptr(m);
-  const int set =
-      asLogical(parameters) != TRUE && p_wa_n_columns(mm) > 0 ? 1 : 0;
+  const int set = asLogical(parameters) == TRUE ? 0 : 2;
   const int64_t n = p_n_variables(mm, set);
   SEXP names = PROTECT(allocVector(STRSXP, (R_xlen_t)n));
   SEXP dims = PROTECT(allocVector(VECSXP, (R_xlen_t)n));
@@ -826,24 +824,6 @@ SEXP stanli_r_n_unconstrained(SEXP m) {
   return ScalarInteger((int)p_n_unconstrained(model_ptr(m)));
 }
 
-SEXP stanli_r_column_names(SEXP m) {
-  require_loaded();
-  void* mm = model_ptr(m);
-  /* write_array columns when the model has generated quantities, the
-   * constrained parameters otherwise -- the same rule the Python
-   * wrapper follows, so both report the same CSV. */
-  int64_t n = p_wa_n_columns(mm);
-  int wa = n > 0;
-  if (!wa) n = p_n_constrained(mm);
-  SEXP out = PROTECT(allocVector(STRSXP, (R_xlen_t)n));
-  for (int64_t i = 0; i < n; ++i) {
-    const char* s = wa ? p_wa_column_name(mm, i) : p_constrained_name(mm, i);
-    SET_STRING_ELT(out, (R_xlen_t)i, mkChar(s ? s : ""));
-  }
-  UNPROTECT(1);
-  return out;
-}
-
 SEXP stanli_r_warnings(SEXP m) {
   require_loaded();
   const char* s = p_warnings(model_ptr(m));
@@ -876,11 +856,9 @@ SEXP stanli_r_write_array(SEXP m, SEXP q) {
   const int64_t n = p_n_unconstrained(mm);
   if (TYPEOF(q) != REALSXP || XLENGTH(q) != n)
     error("upars must contain %lld unconstrained values", (long long)n);
-  const int64_t wa_n = p_wa_n_columns(mm);
-  const int64_t ncol = wa_n > 0 ? wa_n : p_n_constrained(mm);
-  SEXP out = PROTECT(allocVector(REALSXP, (R_xlen_t)ncol));
-  const int rc = wa_n > 0 ? p_wa_row(mm, REAL(q), REAL(out))
-                          : p_constrain(mm, REAL(q), REAL(out));
+  SEXP out = PROTECT(allocVector(REALSXP, (R_xlen_t)p_n_output_columns(mm)));
+  const int rc = p_wa_n_columns(mm) > 0 ? p_wa_row(mm, REAL(q), REAL(out))
+                                        : p_constrain(mm, REAL(q), REAL(out));
   flush_messages();
   if (rc != 0) {
     UNPROTECT(1);
@@ -892,6 +870,20 @@ SEXP stanli_r_write_array(SEXP m, SEXP q) {
   return out;
 }
 
+/* stanli_eval_status in capi.h. */
+enum { EVAL_REJECTED = 1, EVAL_INTERNAL_ERROR = 3 };
+
+/* An error for a failed stanli_grad_err, by its status. */
+static void eval_error(int status, const char* message) {
+  const char* what =
+      status == EVAL_REJECTED ? "the log density rejected this point"
+      : status == EVAL_INTERNAL_ERROR
+          ? "log density evaluation failed inside stanli at this point (this "
+            "is a bug in stanli; please report it)"
+          : "log density evaluation failed at this point";
+  error("%s: %s", what, message);
+}
+
 /* Value-only evaluation avoids a reverse pass; gradient evaluation reuses
  * the existing bridge routine and its domain-error handling below. */
 SEXP stanli_r_log_prob(SEXP m, SEXP q) {
@@ -901,12 +893,10 @@ SEXP stanli_r_log_prob(SEXP m, SEXP q) {
   if (TYPEOF(q) != REALSXP || XLENGTH(q) != n)
     error("upars must contain %lld unconstrained values", (long long)n);
   double lp = 0;
-  const int rc = p_grad(mm, REAL(q), &lp, NULL);
+  char err[4096];
+  const int status = p_grad_err(mm, REAL(q), &lp, NULL, err, sizeof err);
   flush_messages();
-  if (rc != 0)
-    error(
-        "log density evaluation failed at this point (domain error in a "
-        "distribution or function)");
+  if (status != 0) eval_error(status, err);
   return ScalarReal(lp);
 }
 
@@ -942,13 +932,12 @@ SEXP stanli_r_grad(SEXP m, SEXP q) {
           (long long)XLENGTH(q), (long long)n);
   SEXP grad = PROTECT(allocVector(REALSXP, (R_xlen_t)n));
   double lp = 0;
-  const int rc = p_grad(mm, REAL(q), &lp, REAL(grad));
+  char err[4096];
+  const int status = p_grad_err(mm, REAL(q), &lp, REAL(grad), err, sizeof err);
   flush_messages();
-  if (rc != 0) {
+  if (status != 0) {
     UNPROTECT(1);
-    error(
-        "log density evaluation failed at this point (domain error in a "
-        "distribution or function)");
+    eval_error(status, err);
   }
   SEXP out = PROTECT(allocVector(VECSXP, 2));
   SET_VECTOR_ELT(out, 0, ScalarReal(lp));
@@ -1393,9 +1382,7 @@ SEXP stanli_r_sample(SEXP m, SEXP optlist, SEXP inits, SEXP refresh,
 
   SEXP raw = PROTECT(allocVector(REALSXP, (R_xlen_t)(nchain * rows * n)));
   SEXP stats = PROTECT(allocVector(REALSXP, (R_xlen_t)(nchain * rows * 7)));
-  int64_t ncol = p_wa_n_columns(mm);
-  const int wa = ncol > 0;
-  if (!wa) ncol = p_n_constrained(mm);
+  const int64_t ncol = p_n_output_columns(mm);
   SEXP vals = PROTECT(allocVector(REALSXP, (R_xlen_t)(nchain * rows * ncol)));
   char err[4096];
   err[0] = '\0';
@@ -1558,8 +1545,7 @@ SEXP stanli_r_optimize(SEXP m, SEXP optlist, SEXP init) {
   if (XLENGTH(init) > 0) o.init = REAL(init);
 
   const int64_t n = p_n_unconstrained(mm);
-  int64_t ncol = p_wa_n_columns(mm);
-  if (ncol == 0) ncol = p_n_constrained(mm);
+  const int64_t ncol = p_n_output_columns(mm);
   SEXP q = PROTECT(allocVector(REALSXP, (R_xlen_t)n));
   SEXP vals = PROTECT(allocVector(REALSXP, (R_xlen_t)ncol));
   double lp = 0;
@@ -1620,11 +1606,6 @@ static void run_log_init(run_log* log, int verbose) {
   log->notes[0] = '\0';
 }
 
-static int64_t row_width(void* mm) {
-  const int64_t n = p_wa_n_columns(mm);
-  return n > 0 ? n : p_n_constrained(mm);
-}
-
 /* A named list from parallel arrays; `values` are already protected by the
  * caller, and stay so until it returns. */
 static SEXP named_list(int n, const char** names, SEXP* values) {
@@ -1664,7 +1645,7 @@ SEXP stanli_r_fixed_param(SEXP m, SEXP optlist, SEXP inits) {
   if (o.chains < 1) error("chains must be positive");
 
   const int64_t rows = p_fixed_param_n_draws(&o);
-  const int64_t width = row_width(mm);
+  const int64_t width = p_n_output_columns(mm);
   SEXP vals =
       PROTECT(allocVector(REALSXP, (R_xlen_t)(o.chains * rows * width)));
   run_log log;
@@ -1755,7 +1736,7 @@ SEXP stanli_r_walnuts(SEXP m, SEXP optlist, SEXP init) {
   const int64_t n = p_n_unconstrained(mm);
   if (XLENGTH(init) != 0 && XLENGTH(init) != n)
     error("init must hold %lld values", (long long)n);
-  const int64_t width = row_width(mm);
+  const int64_t width = p_n_output_columns(mm);
   const int wa = p_wa_n_columns(mm) > 0;
   const int ncols = p_n_sampler_columns();
   SEXP raw = PROTECT(allocVector(REALSXP, (R_xlen_t)(run.samples * n)));
@@ -1812,7 +1793,7 @@ SEXP stanli_r_laplace(SEXP m, SEXP optlist, SEXP mode) {
     error("mode must hold %lld unconstrained values",
           (long long)p_n_unconstrained(mm));
 
-  const int64_t width = row_width(mm);
+  const int64_t width = p_n_output_columns(mm);
   SEXP values[4];
   values[0] = PROTECT(allocVector(REALSXP, (R_xlen_t)(o.draws * width)));
   values[1] = PROTECT(allocVector(REALSXP, (R_xlen_t)o.draws));
@@ -1872,7 +1853,7 @@ SEXP stanli_r_pathfinder(SEXP m, SEXP optlist, SEXP inits) {
   /* Zero for options the runtime refuses, more than one path among them. */
   const int64_t cap = p_pathfinder_max_draws(&o);
   if (cap < 1) error("num_paths must be 1 and draws positive");
-  const int64_t width = row_width(mm);
+  const int64_t width = p_n_output_columns(mm);
   double* raw = (double*)R_alloc((size_t)(cap * width), sizeof(double));
   double* lp = (double*)R_alloc((size_t)cap, sizeof(double));
   double* lp_approx = (double*)R_alloc((size_t)cap, sizeof(double));
@@ -1933,7 +1914,7 @@ SEXP stanli_r_variational(SEXP m, SEXP optlist, SEXP init) {
   if (XLENGTH(init) > 0) o.init = REAL(init);
   if (o.output_samples < 1) error("draws must be positive");
 
-  const int64_t width = row_width(mm);
+  const int64_t width = p_n_output_columns(mm);
   SEXP values[5];
   values[0] = PROTECT(allocVector(REALSXP, (R_xlen_t)width));
   values[1] =

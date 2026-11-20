@@ -384,7 +384,7 @@ def test_unconstrain_round_trip():
 
     # The forward direction has no public wrapper yet, so drive the C entry
     # point the module already binds. The point of this test is unconstrain().
-    names, _ = m._column_names()
+    names = m._column_names()
     row = np.empty(len(names))
     rc = stanli._lib.stanli_wa_row(m._m, stanli._dptr(q), stanli._dptr(row))
     assert rc == 0
@@ -425,9 +425,25 @@ def test_failing_gradient_raises():
         stan_code="parameters { real x; } model { x ~ normal(0, -1); }")
     try:
         m.log_prob_grad(np.zeros(1))
-    except RuntimeError:
+    except RuntimeError as e:
+        assert "rejected" in str(e), str(e)
+        assert "Scale parameter is -1" in str(e), str(e)
         return
     raise AssertionError("expected RuntimeError from a failing gradient")
+
+
+def test_gradient_error_that_is_not_a_rejection_says_so():
+    m = stanli.Model(
+        stan_code="data { int k; } parameters { real x; } "
+                  "model { vector[2] v = [x, x]'; target += v[k]; }",
+        data={"k": 3})
+    try:
+        m.log_prob_grad(np.zeros(1))
+    except RuntimeError as e:
+        assert "rejected" not in str(e), str(e)
+        assert "index" in str(e).lower(), str(e)
+        return
+    raise AssertionError("expected RuntimeError from an index out of range")
 
 
 def test_sample_returns_transformed_parameters():

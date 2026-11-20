@@ -44,7 +44,14 @@ _COMPILER_WARNING = 0
 _COMPILER_O1_FALLBACK = 1
 # The column sets of stanli_n_variables.
 _CONSTRAINED_COLUMNS = 0
-_WRITE_ARRAY_COLUMNS = 1
+_OUTPUT_COLUMNS = 2
+# stanli_eval_status in capi.h, as the start of an error message.
+_EVAL_FAILURE = {
+    1: "the log density rejected this point",
+    2: "log density evaluation failed at this point",
+    3: "log density evaluation failed inside stanli at this point (this is "
+       "a bug in stanli; please report it)",
+}
 
 
 class O1FallbackWarning(RuntimeWarning):
@@ -218,11 +225,12 @@ def _load_lib():
     lib.stanli_model_free.argtypes = [ctypes.c_void_p]
     lib.stanli_n_unconstrained.restype = ctypes.c_int64
     lib.stanli_n_unconstrained.argtypes = [ctypes.c_void_p]
-    lib.stanli_grad.restype = ctypes.c_int
-    lib.stanli_grad.argtypes = [ctypes.c_void_p,
-                                ctypes.POINTER(ctypes.c_double),
-                                ctypes.POINTER(ctypes.c_double),
-                                ctypes.POINTER(ctypes.c_double)]
+    lib.stanli_grad_err.restype = ctypes.c_int
+    lib.stanli_grad_err.argtypes = [ctypes.c_void_p,
+                                    ctypes.POINTER(ctypes.c_double),
+                                    ctypes.POINTER(ctypes.c_double),
+                                    ctypes.POINTER(ctypes.c_double),
+                                    ctypes.c_char_p, ctypes.c_size_t]
     lib.stanli_hessian.restype = ctypes.c_int
     lib.stanli_hessian.argtypes = [ctypes.c_void_p,
                                    ctypes.POINTER(ctypes.c_double),
@@ -248,10 +256,6 @@ def _load_lib():
     lib.stanli_unconstrain_inits.argtypes = [ctypes.c_void_p, ctypes.c_char_p,
                                              ctypes.POINTER(ctypes.c_double),
                                              ctypes.c_char_p, ctypes.c_size_t]
-    lib.stanli_n_constrained.restype = ctypes.c_int64
-    lib.stanli_n_constrained.argtypes = [ctypes.c_void_p]
-    lib.stanli_constrained_name.restype = ctypes.c_char_p
-    lib.stanli_constrained_name.argtypes = [ctypes.c_void_p, ctypes.c_int64]
     lib.stanli_n_param_blocks.restype = ctypes.c_int64
     lib.stanli_n_param_blocks.argtypes = [ctypes.c_void_p]
     lib.stanli_param_block_name.restype = ctypes.c_char_p
@@ -322,10 +326,6 @@ def _load_lib():
     lib.stanli_take_messages.argtypes = []
     lib.stanli_build_id.restype = ctypes.c_char_p
     lib.stanli_build_id.argtypes = []
-    lib.stanli_wa_n_columns.restype = ctypes.c_int64
-    lib.stanli_wa_n_columns.argtypes = [ctypes.c_void_p]
-    lib.stanli_wa_column_name.restype = ctypes.c_char_p
-    lib.stanli_wa_column_name.argtypes = [ctypes.c_void_p, ctypes.c_int64]
     lib.stanli_warnings.restype = ctypes.c_char_p
     lib.stanli_warnings.argtypes = [ctypes.c_void_p]
     lib.stanli_transformed_data_rng.restype = ctypes.c_int
@@ -1644,7 +1644,7 @@ class Model:
         self._threads_per_chain = threads_per_chain
         self.n_unconstrained = _lib.stanli_n_unconstrained(m)
         self.constrained_names = _variable_columns(
-            self._column_shapes(False))
+            self._column_shapes(_CONSTRAINED_COLUMNS))
 
     def _construct(self, seed, threads_per_chain):
         mir, stan_code, data_json = self._source
@@ -1861,14 +1861,16 @@ class Model:
                              f"{self.n_unconstrained} unconstrained parameters")
         lp = ctypes.c_double()
         grad = np.empty(self.n_unconstrained)
+        err = ctypes.create_string_buffer(4096)
         with _native_output():
-            rc = _lib.stanli_grad(self._handle, _dptr(q), ctypes.byref(lp),
-                                  _dptr(grad))
-        if rc != 0:
+            status = _lib.stanli_grad_err(self._handle, _dptr(q),
+                                          ctypes.byref(lp), _dptr(grad), err,
+                                          len(err))
+        if status != 0:
             # The gradient buffer is uninitialized on failure; never let a
             # caller see it.
-            raise RuntimeError("log density evaluation failed at this point "
-                               "(domain error in a distribution or function)")
+            raise RuntimeError(f"{_EVAL_FAILURE[status]}: "
+                               f"{err.value.decode(errors='replace')}")
         return lp.value, grad
 
     def log_prob_hessian(self, q):
@@ -1934,23 +1936,16 @@ class Model:
                 for i in range(_lib.stanli_n_param_blocks(self._handle))]
 
     def _column_names(self):
-        """The CSV columns for a draw, and whether write_array supplies them.
+        """The CSV columns of a draw: the row every entry point writes."""
+        return _variable_columns(self._column_shapes(_OUTPUT_COLUMNS))
 
-        Every column CmdStan would write when the model has a generated
-        quantities section; the constrained parameters otherwise.
-        """
-        if _lib.stanli_wa_n_columns(self._handle) > 0:
-            return _variable_columns(self._column_shapes(True)), True
-        return list(self.constrained_names), False
-
-    def _column_variables(self, write_array):
+    def _column_variables(self):
         """The declared variables behind _column_names, from the runtime."""
-        return _variables_from_shapes(self._column_shapes(write_array))
+        return _variables_from_shapes(self._column_shapes(_OUTPUT_COLUMNS))
 
-    def _column_shapes(self, write_array):
-        """The runtime's (CmdStan name, dims) behind _column_names."""
+    def _column_shapes(self, which):
+        """The runtime's (CmdStan name, dims) for one set of columns."""
         m = self._m
-        which = _WRITE_ARRAY_COLUMNS if write_array else _CONSTRAINED_COLUMNS
         shapes = []
         for i in range(_lib.stanli_n_variables(m, which)):
             dims = tuple(_lib.stanli_variable_dim(m, which, i, k) for k in
@@ -2028,8 +2023,8 @@ class Model:
                     f"unconstrained scale, got {init_arr.shape}")
             opts.init = _dptr(init_arr)
 
-        names, write_array = self._column_names()
-        variables = self._column_variables(write_array)
+        names = self._column_names()
+        variables = self._column_variables()
         q = np.empty(self.n_unconstrained)
         vals = np.empty(len(names))
         lp = ctypes.c_double()
@@ -2279,8 +2274,8 @@ class Model:
         n_stored = _lib.stanli_n_stored_draws(ctypes.byref(opts))
         raw = np.empty((opts.chains, n_stored, self.n_unconstrained))
         stats = np.empty((opts.chains, n_stored, _N_SAMPLER_COLS))
-        names, write_array = self._column_names()
-        variables = self._column_variables(write_array)
+        names = self._column_names()
+        variables = self._column_variables()
         out = np.empty((opts.chains, n_stored, len(names)))
         reports = (_SampleReport * opts.chains)()
         err = ctypes.create_string_buffer(4096)

@@ -276,20 +276,18 @@ onmessage = async (e) => {
     const tSample = performance.now();
 
     say("computing CSV columns");
-    // write_array supplies every CmdStan CSV column (constrained params,
-    // transformed parameters, generated quantities with seeded RNG);
-    // models without a generate_quantities section fall back to the
-    // constrained view.
-    const nWa = Number(M._stanli_wa_n_columns(model));
-    const useWa = nWa > 0;
-    const nCon = useWa ? nWa : Number(M._stanli_n_constrained(model));
+    // Every CmdStan CSV column (constrained params, transformed parameters,
+    // generated quantities with seeded RNG). Models without a
+    // generate_quantities section have only the constrained view, which
+    // stanli_constrain writes.
+    const useWa = Number(M._stanli_wa_n_columns(model)) > 0;
+    const nCon = Number(M._stanli_n_output_columns(model));
     const generatedStart = useWa
         ? Number(M._stanli_wa_n_generated_start(model)) : nCon;
     const names = [];
     for (let i = 0; i < nCon; ++i)
       names.push(M.UTF8ToString(
-          useWa ? M._stanli_wa_column_name(model, BigInt(i))
-                : M._stanli_constrained_name(model, BigInt(i))));
+          M._stanli_output_column_name(model, BigInt(i))));
     if (useWa) M._stanli_wa_seed_chain(model, req.seed >>> 0, 1);
     const cols = new Float64Array(nCon * samples);
     const rowPtr = M._malloc(8 * nCon);

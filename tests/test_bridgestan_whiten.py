@@ -114,7 +114,7 @@ def bs_unconstrain_json(lib, m, values, n):
 
 
 def inner_row(model, z, width):
-    names, _ = model._column_names()
+    names = model._column_names()
     out = np.empty(len(names))
     rc = stanli._lib.stanli_wa_row(model._m, stanli._dptr(z), stanli._dptr(out))
     assert rc == 0

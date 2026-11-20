@@ -252,7 +252,7 @@ def check_kernel_against_dense_c(inner, seed):
             C, scipy.linalg.solve_triangular(L, g_q[perm], lower=True),
             lower=True)
         assert np.abs(g_z - want).max() <= 1e-10 * max(1, np.abs(want).max())
-        names = inner._column_names()[0]
+        names = inner._column_names()
         row = np.empty(len(names))
         stanli._lib.stanli_wa_row(whitened._m, stanli._dptr(z),
                                   stanli._dptr(row))
@@ -282,7 +282,7 @@ def test_unconstrain_round_trip_with_c():
     whitened = inner.whiten(0.1 * rng.randn(n), rng.permutation(n),
                             scipy.sparse.identity(n, format="csc"),
                             lowrank=(c, B, W))
-    names = inner._column_names()[0]
+    names = inner._column_names()
     n_con = len(inner.constrained_names)
     for _ in range(3):
         z = 0.4 * rng.randn(n)

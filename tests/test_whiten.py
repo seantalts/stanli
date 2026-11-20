@@ -131,7 +131,7 @@ class Fixture:
 
 
 def wa_row(model, q):
-    names, _ = model._column_names()
+    names = model._column_names()
     out = np.empty(len(names))
     rc = stanli._lib.stanli_wa_row(model._m, stanli._dptr(q), stanli._dptr(out))
     assert rc == 0
