@@ -8480,9 +8480,6 @@ int main() {
     invariant_gradient_order_test();
     test_unsetenv(flag);
   }
-  test_setenv("STANLI_NO_STRUCTURED_INVARIANT_PRIMALS", "1");
-  invariant_gradient_order_test();
-  test_unsetenv("STANLI_NO_STRUCTURED_INVARIANT_PRIMALS");
   inplace_import_base_tests();
   inplace_promotion_tests();
   inplace_duplicate_position_tests();

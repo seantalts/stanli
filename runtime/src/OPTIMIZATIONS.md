@@ -1582,7 +1582,6 @@ have the proofs and ctsem measurements.
 | `STANLI_STRUCTURED_LOOPS=0` / `=1` / `=force` | retain no loops / prefer retaining loops / retain every loop; `auto` or unset is the default policy | `lower.cpp` |
 | `STANLI_NO_STRUCTURED_REPLAY=1` | walk the control tree on every evaluation | `structured_loop.cpp` |
 | `STANLI_NO_STRUCTURED_CELL_CONSTANTS=1` | disable the per-cell data proof for updated containers | `structured_loop.cpp` |
-| `STANLI_NO_STRUCTURED_INVARIANT_PRIMALS=1` | do not cache the primal of a loop-invariant active kernel call | `structured_loop.cpp` |
 | `STANLI_STRUCTURED_FRAMES=0` / `=1` | disable frames / force them on eligible plans | `structured_loop.cpp` |
 | `STANLI_NO_STRUCTURED_FRAME_LAYOUT=1` | do not reuse a sealed frame's code layout for later frames | `structured_loop.cpp` |
 | `STANLI_NO_STRUCTURED_FRAME_CLONE=1` | do not clone a ready frame tape into another loop state with the same plan | `structured_loop.cpp` |
