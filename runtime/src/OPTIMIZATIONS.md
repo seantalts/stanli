@@ -1586,9 +1586,6 @@ have the proofs and ctsem measurements.
 | `STANLI_NO_STRUCTURED_FRAME_INSTANCE=1` | record every frame instead of building repeated frames from a template | `structured_loop.cpp` |
 | `STANLI_STRUCTURED_CHECK_FRAME_INSTANCE=1` | also record each instantiated frame and require the same frame and recorder state | `structured_loop.cpp` |
 | `STANLI_STRUCTURED_COMPILED_RECORDING=0` | record with the tree walk instead of the temporary program | `structured_instance_run.inc` |
-| `STANLI_STRUCTURED_DATA_RECORDING=0` | disable data-only call specialization in that program | `structured_recording.inc` |
-| `STANLI_STRUCTURED_PREPARED_INDEX=0` | disable prepared data-only point reads | `structured_recording.inc` |
-| `STANLI_STRUCTURED_PREPARED_ITERATOR=0` | disable transient iterator rebinding reuse | `structured_recording.inc` |
 | `STANLI_NO_DATA_LOOP_MEMO=1` | do not compile memoization for data-controlled loops | `structured_recording.inc` |
 | `STANLI_DATA_LOOP_MEMO_MIN_WORK=n` | minimum executed steps before a data-loop memo is kept (default 256) | `structured_recording.inc` |
 | `STANLI_DATA_LOOP_MEMO_MIN_RATIO=n` | minimum executed steps per recorded event for a kept memo (default 8) | `structured_recording.inc` |
