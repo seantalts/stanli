@@ -1047,6 +1047,26 @@ def test_ctrl_c_stops_optimize_pathfinder_inits_and_the_hessian():
         "the SIGINT handler was not restored"
 
 
+def test_one_model_shared_by_threads_gives_the_serial_answers():
+    # The C API allows one evaluating call per handle at a time; the Model
+    # serializes them, so threads that share it get the serial results.
+    m = _es()
+    q = np.linspace(-1, 1, m.n_unconstrained)
+
+    def run(seed):
+        fit = m.sample(chains=1, seed=seed, warmup=150, samples=50,
+                       refresh=0)
+        return fit.draws(), m.log_prob_grad(q * seed)[1], \
+            m.optimize(seed=seed).unconstrained
+
+    serial = [run(seed) for seed in range(1, 7)]
+    with concurrent.futures.ThreadPoolExecutor(max_workers=6) as pool:
+        threaded = list(pool.map(run, range(1, 7)))
+    for want, got in zip(serial, threaded):
+        for a, b in zip(want, got):
+            np.testing.assert_array_equal(a, b)
+
+
 def test_sampling_off_the_main_thread_still_works():
     m = _es()
     with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
