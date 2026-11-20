@@ -62,9 +62,13 @@ CI enforces:
   platforms that the ledger has measured (macOS arm64 today).
 - Limits from measured deviations for the ill-conditioned models
   (`ILL_CONDITIONED`: 1.5e-6 scaled error on gradient entries only) and for
-  the two `kronecker_gp` gradient entries in `MISMATCH_OUTPUTS` (the
-  `gate_for` floor, 3.3e-2 or more). Every other value of these models keeps
-  the 1e-9 gate.
+  the values that `MISMATCH_OUTPUTS` names at the points recorded as
+  MISMATCH (`gate_for`: 4 times the recorded deviation, and at least the
+  entry's own floor). These are two `kronecker_gp` gradient entries, with a
+  floor of 3.3e-2 from its measurements on x86-64, and three
+  `stanguide_ode_adjoint` gradient entries from an adjoint ODE solve at
+  tolerance 1e-6, with no floor (1.5e-5 and 1.3e-5). Every other value of
+  these models keeps the 1e-9 gate.
 - Matching rejection: stanli must reject a point that CmdStan rejects, and a
   non-finite value must match in kind.
 - 10 ULP by default in the generated conformance sweep, with reviewed

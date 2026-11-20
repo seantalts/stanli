@@ -154,13 +154,33 @@ ILL_CONDITIONED = {
 # lp and 1.6e-16 on write_array for all three models.
 ILL_CONDITIONED_GATE = 1.5e-6
 
-# For each model with a point recorded MISMATCH, the lp/gradient value
-# indices that disagree with CmdStan and why. Only these values get the
-# MISMATCH floor of gate_for; the rest of the point keeps the clean gate.
+@dataclasses.dataclass(frozen=True)
+class Mismatch:
+    """The lp/gradient value indices of a MISMATCH model that disagree with
+    CmdStan, why, and the smallest gate they get (see gate_for)."""
+    indices: tuple
+    reason: str
+    floor: float = 0.0
+
+
+# For each model with a point recorded MISMATCH, the values that disagree
+# with CmdStan. Only these values get the MISMATCH gate of gate_for; the
+# rest of the point keeps the clean gate.
 MISMATCH_OUTPUTS = {
-    "kronecker_gp": (
+    # The floor is 4x the largest deviation measured on another platform,
+    # 8.2e-3 at point 2 on x86_64 (CI run 32637919029), because the
+    # amplification is not proportional to the deviation that arm64
+    # recorded (1.05e-3 at that point).
+    "kronecker_gp": Mismatch(
         (1, 2), "the two gradient entries that flow through eigenvectors_sym "
-                "of a covariance with eigenvalue gaps down to 6.5e-17"),
+                "of a covariance with eigenvalue gaps down to 6.5e-17",
+        floor=4.0 * 8.2e-3),
+    "stanguide_ode_adjoint": Mismatch(
+        (1, 2, 5), "the gradient entries of y0 and theta come from the "
+                   "adjoint ODE solve at the guide's tolerances of 1e-6; "
+                   "solved at 1e-11 the two engines agree to 1e-10, and "
+                   "at 1e-6 both are up to 4.4e-5 from that solution "
+                   "(NOTES in tools/corpus.py)"),
 }
 
 
@@ -180,8 +200,9 @@ def floored_outputs(model, pt, default):
         return Floored(frozenset(range(1, len(pt["values"]))),
                        gate_for(model, pt, default), ILL_CONDITIONED[model])
     if pt.get("status") == "MISMATCH":
-        indices, reason = MISMATCH_OUTPUTS[model]
-        return Floored(frozenset(indices), gate_for(model, pt, default), reason)
+        mismatch = MISMATCH_OUTPUTS[model]
+        return Floored(frozenset(mismatch.indices), gate_for(model, pt, default),
+                       mismatch.reason)
     return None
 
 
@@ -1385,12 +1406,11 @@ def gate_for(model, pt, default):
     for kronecker_gp point 0: 7.1e-3 on arm64 (where the reference was
     recorded), 1.71e-2 on both x86_64 runners, identical to each other.
 
-    And a floor, because the amplification is not proportional to the
-    deviation: point 2 recorded 1.05e-3 on arm64 and measured 8.2e-3 on
-    x86_64 (CI run 32637919029) -- 7.8x where point 0 moved 2.4x -- so a
-    pure multiplier under-gates precisely the smallest recorded
-    deviations. The floor is 4x the worst cross-platform measurement over
-    the model's points. An ILL_CONDITIONED model's gradient gets
+    And the model's Mismatch.floor, where the amplification is not
+    proportional to the deviation: kronecker_gp's point 2 recorded 1.05e-3
+    on arm64 and measured 8.2e-3 on x86_64 -- 7.8x where point 0 moved
+    2.4x -- so a pure multiplier under-gates precisely its smallest
+    recorded deviations. An ILL_CONDITIONED model's gradient gets
     ILL_CONDITIONED_GATE instead.
     """
     if model in ILL_CONDITIONED:
@@ -1398,7 +1418,7 @@ def gate_for(model, pt, default):
     rel = pt.get("max_rel")
     if rel is None or pt.get("status") != "MISMATCH":
         return default
-    return max(rel * 4.0, 4.0 * 8.2e-3, default)
+    return max(rel * 4.0, MISMATCH_OUTPUTS[model].floor, default)
 
 # The corpora CTest replays: each is a set of models, one reference archive
 # in the corpus schema, and how to run and gate them. Unlike the corpus

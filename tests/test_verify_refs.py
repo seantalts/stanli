@@ -371,6 +371,26 @@ class CheckModelPointsTest(unittest.TestCase):
         self.assertEqual(status, "OK")
         self.assertIn(f"QUARANTINE {MODEL} point 1: test", notes)
 
+    def test_a_mismatch_point_floors_only_its_named_values(self):
+        # The named value is held to 4x the deviation recorded at the
+        # point, plus the entry's own floor; the other values keep the
+        # clean gate.
+        pt = {"values": ["-3.5", "1", "-2"], "status": "MISMATCH",
+              "max_rel": 1e-6, "max_ulp": 0}
+        ref = {"primary": 0, "points": {str(p): pt for p in POINTS}}
+        with unittest.mock.patch.dict(verify_refs.MISMATCH_OUTPUTS, {
+                MODEL: verify_refs.Mismatch((1,), "a test")}):
+            self.assertEqual(self.run_check('echo "OK -3.5 1.000003 -2"', ref)[1],
+                             "OK")
+            self.assertEqual(self.run_check('echo "OK -3.5 1.00001 -2"', ref)[1],
+                             "GATE")
+            self.assertEqual(self.run_check('echo "OK -3.5 1 -2.000003"', ref)[1],
+                             "GATE")
+        with unittest.mock.patch.dict(verify_refs.MISMATCH_OUTPUTS, {
+                MODEL: verify_refs.Mismatch((1,), "a test", floor=1e-4)}):
+            self.assertEqual(self.run_check('echo "OK -3.5 1.00001 -2"', ref)[1],
+                             "OK")
+
     def test_an_ill_conditioned_model_floors_only_its_gradient(self):
         # Which of these models' points come out clean is a property of
         # the machine that recorded them, so a clean point in one of them
@@ -1230,8 +1250,10 @@ class SparsePlatformReferenceTest(unittest.TestCase):
             after = selected["points"][str(point)]
             self.assertEqual(after["values"], ["-3.5", "1.01", "-2"])
             self.assertNotIn("wa", after)
-            self.assertEqual(verify_refs.gate_for(MODEL, before, 1e-9),
-                             verify_refs.gate_for(MODEL, after, 1e-9))
+            with unittest.mock.patch.dict(verify_refs.MISMATCH_OUTPUTS, {
+                    MODEL: verify_refs.Mismatch((1,), "a test")}):
+                self.assertEqual(verify_refs.gate_for(MODEL, before, 1e-9),
+                                 verify_refs.gate_for(MODEL, after, 1e-9))
         self.assertIsNone(verify_refs.ulp_limit_for(MODEL, selected, "Darwin x86_64"))
 
     def test_platform_compiler_and_dependency_provenance_fail_closed(self):
@@ -1273,7 +1295,7 @@ class SparsePlatformReferenceTest(unittest.TestCase):
     def test_selected_answers_still_enforce_numerics_and_actual_input_hashes(self):
         selected = self.select()
         with tempfile.TemporaryDirectory() as tmp, unittest.mock.patch.dict(
-                verify_refs.MISMATCH_OUTPUTS, {MODEL: ((1,), "a test")}):
+                verify_refs.MISMATCH_OUTPUTS, {MODEL: verify_refs.Mismatch((1,), "a test")}):
             for value, verdict in (("1.01", "OK"), ("99", "GATE")):
                 result = check_model(MODEL, selected, REPO / "nonexistent-pdb",
                                      stub(tmp, f'echo "OK -3.5 {value} -2"'),
