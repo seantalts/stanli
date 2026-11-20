@@ -221,6 +221,105 @@ void test_merged_term_sum() {
   expect_ulp("pairwise SUM_VEC value", value, want.value(), kUlp);
 }
 
+// A summed integer-outcome density over kN observations, as re-roll and
+// partition emit for a loop of scalar calls. The value is held to the exact
+// sum of the scalar calls' values, which CmdStan adds one at a time. The
+// gradient and a rejection are held to Stan Math's vector call, bit for bit.
+template <typename Scalar, typename Vector>
+void check_summed_density(const std::string& name, uint16_t opcode, bool propto,
+                          const std::vector<int>& y, std::vector<double> arg,
+                          double invalid, const Scalar& scalar,
+                          const Vector& vector) {
+  ExactSum want, magnitude;
+  for (size_t i = 0; i < y.size(); ++i) {
+    const double t = scalar(y[i], arg[i], propto);
+    want.add(t);
+    magnitude.add(std::abs(t));
+  }
+  const auto run = [&](const std::vector<double>& values,
+                       std::vector<double>& grad) {
+    Graph g;
+    const int a = g.add_slot((int64_t)values.size(), true),
+              lp = g.add_slot(1, false);
+    g.add_op(opcode, {a}, lp, y);
+    g.ops.back().variant = DensityMode{0x1u, false, propto}.byte();
+    g.result_slot = lp;
+    Executor ex(std::move(g));
+    for (size_t i = 0; i < values.size(); ++i) ex.param_ptr(a)[i] = values[i];
+    grad.assign(values.size(), 0.0);
+    return ex.gradient(grad.data());
+  };
+  const auto reference = [&](const std::vector<double>& values,
+                             std::vector<double>& grad) {
+    stan::math::nested_rev_autodiff nested;
+    Eigen::Matrix<stan::math::var, -1, 1> a(values.size());
+    for (size_t i = 0; i < values.size(); ++i) a(i) = values[i];
+    stan::math::var lp = vector(y, a, propto);
+    stan::math::grad(lp.vi_);
+    grad.resize(values.size());
+    for (size_t i = 0; i < values.size(); ++i) grad[i] = a(i).adj();
+  };
+  std::vector<double> grad, want_grad;
+  const double value = run(arg, grad);
+  reference(arg, want_grad);
+  expect_ulp_of(name + " summed value", value, want.value(), magnitude.value(),
+                kUlp);
+  for (size_t i = 0; i < arg.size(); ++i)
+    expect_eq(name + " gradient " + std::to_string(i), grad[i], want_grad[i]);
+
+  arg[arg.size() / 2] = invalid;
+  std::string got_error, want_error;
+  try {
+    run(arg, grad);
+  } catch (const std::exception& e) {
+    got_error = e.what();
+  }
+  try {
+    reference(arg, want_grad);
+  } catch (const std::exception& e) {
+    want_error = e.what();
+  }
+  expect_true(name + " rejects as Stan Math does: " + got_error,
+              !want_error.empty() && got_error == want_error);
+}
+
+void test_summed_densities() {
+  std::vector<int> y((size_t)kN), count((size_t)kN);
+  std::vector<double> theta((size_t)kN), alpha((size_t)kN);
+  for (int64_t i = 0; i < kN; ++i) {
+    y[(size_t)i] = (int)(i % 3 != 0);
+    theta[(size_t)i] = 0.55 + 0.3 / (2 + i % 17);
+    count[(size_t)i] = 3 + (int)(i % 7);
+    alpha[(size_t)i] = 1.2 + 0.4 / (1 + i % 11);
+  }
+  for (bool propto : {false, true}) {
+    const std::string form = propto ? " propto" : "";
+    check_summed_density(
+        "bernoulli" + form, OP_BERNOULLI_LPMF, propto, y, theta, 1.5,
+        [](int n, double t, bool p) {
+          return p ? stan::math::bernoulli_lpmf<true>(n, stan::math::var(t))
+                         .val()
+                   : stan::math::bernoulli_lpmf<false>(n, t);
+        },
+        [](const std::vector<int>& n, const auto& t, bool p) {
+          return p ? stan::math::bernoulli_lpmf<true>(n, t)
+                   : stan::math::bernoulli_lpmf<false>(n, t);
+        });
+    check_summed_density(
+        "poisson_log" + form, OP_POISSON_LOG_LPMF, propto, count, alpha,
+        std::nan(""),
+        [](int n, double a, bool p) {
+          return p ? stan::math::poisson_log_lpmf<true>(n, stan::math::var(a))
+                         .val()
+                   : stan::math::poisson_log_lpmf<false>(n, a);
+        },
+        [](const std::vector<int>& n, const auto& a, bool p) {
+          return p ? stan::math::poisson_log_lpmf<true>(n, a)
+                   : stan::math::poisson_log_lpmf<false>(n, a);
+        });
+  }
+}
+
 }  // namespace
 
 int main() {
@@ -229,5 +328,6 @@ int main() {
   test_ordered_logistic_cutpoints();
   test_gather_adjoint();
   test_merged_term_sum();
+  test_summed_densities();
   return finish("test_sum_accuracy");
 }
