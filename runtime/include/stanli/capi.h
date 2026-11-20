@@ -894,7 +894,7 @@ int stanli_sample_walnuts_stream(stanli_model* m, uint32_t seed, int warmup,
                                  size_t err_len);
 
 /* WALNUTS with the chain's stream and start chosen as for NUTS: the sampler
- * and the starting point use (seed, chain_id), chain_id >= 1, and `init`,
+ * and the starting point use (seed, chain_id), chain_id >= 0, and `init`,
  * when non-null, is one n_unconstrained start on the unconstrained scale;
  * otherwise the start is drawn uniformly in (-init_radius, init_radius).
  * stanli_sample_walnuts_stream is this call with chain_id 1, init_radius 2,

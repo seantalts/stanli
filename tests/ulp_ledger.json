@@ -437,8 +437,8 @@
       "reason": "measured on Darwin arm64; the 14-day generation-time PMF tail loses 7 digits in double (FAST_HP_CHECKED in tools/verify_refs.py); both engines are 2.0e+07 (stanli) and 2.0e+07 (CmdStan) scaled ULP from the 80-digit gradient at point 0"
      },
      "wa": {
-      "bound": 24,
-      "reason": "measured on Darwin arm64; cause not yet explained; the 80-digit evaluator covers lp and gradient only"
+      "bound": 95,
+      "reason": "measured on Darwin arm64; measured on Darwin arm64; the 14-day generation-time PMF tail loses 7 digits in double and the renewal recursion carries the error to infections; at point 0 infections.56 is 61660893 (stanli) and 61660798 (CmdStan) scaled ULP from the 80-digit value, so stanli is 95 farther; the well-conditioned R is at most 4.4 (stanli) and 3.1 (CmdStan) scaled ULP from the 80-digit value; the value moved when mean began to group its terms as sum does; 9 wa values over 10"
      }
     },
     "epinow2_estimate_secondary": {
