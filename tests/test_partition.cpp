@@ -1020,6 +1020,58 @@ static void test_mid_bucket_writer_split() {
   expect_same_grad("split", std::move(g), f2, tt, want);
 }
 
+// A bucket that needs more splits than the budget allows uses up its own
+// budget only: a later bucket still gets the splits it needs.
+static void test_split_budget_per_bucket() {
+  const int N = 128;
+  Graph g;
+  Fills fills;
+  const int p = g.add_slot(N, true);
+  const int sigma = g.add_slot(1, true);
+  const auto lanes = [&](int base, uint16_t density, int L, int writers_every,
+                         double y0) {
+    std::vector<int> terms;
+    for (int l = 0; l < L; ++l) {
+      if (l > 0 && l % writers_every == 0)
+        g.add_op(OP_SET_INDEX_INPLACE, {base, sigma}, base, {N - 1});
+      const int idx = g.add_slot(1, false);
+      g.add_op(OP_INDEX, {base}, idx, {l});
+      const int y = g.add_slot(1, false);
+      fills.emplace_back(y, std::vector<double>{y0 + 0.05 * l});
+      const int lp = g.add_slot(1, false);
+      const int id =
+          stanli::testutil::add_density(g, density, {y, idx, sigma}, lp);
+      g.ops[(size_t)id].variant = 0x06;
+      terms.push_back(lp);
+    }
+    return terms;
+  };
+  // Four buckets that each split at every lane spend the budget a few
+  // splits at a time, while the last one needs a split every 12 lanes.
+  std::vector<int> terms;
+  for (uint16_t density : {OP_NORMAL_LPDF, OP_CAUCHY_LPDF, OP_LOGISTIC_LPDF,
+                           OP_DOUBLE_EXP_LPDF, OP_LOGNORMAL_LPDF}) {
+    const int base = g.add_slot(N, false);
+    g.add_op(OP_EXPV, {p}, base);
+    const bool last = density == OP_LOGNORMAL_LPDF;
+    const std::vector<int> more =
+        lanes(base, density, last ? 96 : 40, last ? 12 : 1, last ? 0.3 : -0.5);
+    terms.insert(terms.end(), more.begin(), more.end());
+  }
+  const std::vector<double> want = reference(g, fills, terms);
+
+  std::vector<int> tt = terms;
+  Fills f2 = fills;
+  const PartitionStats st = partition_lanes(g, f2, tt, {});
+  expect("later bucket fuses every piece",
+         count_opcode(g, OP_LOGNORMAL_LPDF) == 8);
+  bool capped = false;
+  for (const LaneDeclineRecord& d : st.declines)
+    capped = capped || d.why == LaneDecline::kSplitCap;
+  expect("first bucket reports its spent budget", capped);
+  expect_same_grad("split budget", std::move(g), f2, tt, want);
+}
+
 // The reader half of the same hazard: a second bucket's lanes read the vector
 // the first bucket's lanes store into. Nothing may read a vector while its
 // run is in flight, so the store bucket refuses and the readers still see
@@ -1679,6 +1731,7 @@ int main() {
   test_mid_bucket_writer_split();
   test_cross_bucket_read_after_write();
   test_lanes_split_by_slot();
+  test_split_budget_per_bucket();
   test_kill_switch();
   test_state_space_shape();
   test_irt_glm_synthesis();
