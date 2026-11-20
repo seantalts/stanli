@@ -1774,6 +1774,15 @@ struct Lowering {
     });
     for (const auto& k : s.body) assigned_names(k, out);
   }
+  // Every name `s` can bind: its declarations, loop variables and
+  // assignment targets.
+  static void bound_names(const mir::Stmt& s, std::set<std::string>* out) {
+    if (s.kind == mir::Stmt::Decl) out->insert(s.decl_id);
+    if (s.kind == mir::Stmt::For) out->insert(s.loopvar);
+    mir::for_each_assigned(s,
+                           [&](const std::string& name) { out->insert(name); });
+    for (const auto& k : s.body) bound_names(k, out);
+  }
   // The subset of those that resolve outside `s`. Lowering's scope keeps a
   // block's locals after the block ends, so a name `s` declares for itself
   // can match a stale outer binding; within its declaration's block it is

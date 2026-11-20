@@ -1549,6 +1549,11 @@ if(Python3_Interpreter_FOUND)
                    $<TARGET_FILE:bench_grad> ${STANLI_STANC_EXECUTABLE}
            WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
   set_tests_properties(test_prep_loop_body PROPERTIES RUN_SERIAL TRUE)
+  add_test(NAME test_prep_work
+           COMMAND ${Python3_EXECUTABLE} tests/test_prep_work.py
+                   $<TARGET_FILE:bench_grad> ${STANLI_STANC_EXECUTABLE}
+                   $<TARGET_FILE:stanli_run>
+           WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
   add_test(NAME test_missing_data
            COMMAND ${Python3_EXECUTABLE} tests/test_missing_data.py
                    $<TARGET_FILE:bench_grad> ${STANLI_STANC_EXECUTABLE}

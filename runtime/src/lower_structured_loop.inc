@@ -413,8 +413,7 @@ std::optional<DataMap::Entry> region_bounded_data_value(const mir::Expr& e) {
   try {
     record_interpreter_event("lowering", "bounded_admission_probe");
     MirInterp<double> probe(fun_defs, "structured data probe", hooks);
-    probe.env() = td.env();
-    count_data_copy(td.env());
+    probe.set_parent_env(&td.env());
     probe.set_propto_context(td.propto_context());
     probe.refuse_propto_densities();
     return probe.eval(e);
@@ -2180,8 +2179,12 @@ Flow lower_region_stmt(const mir::Stmt& s) {
       const auto base_ints = int_env;
       const auto base_locals = int_locals;
       const auto base_decls = decls;
-      const auto base_env = td.env();
-      count_data_copy(base_env);
+      // Data is never assigned, so only the names this `if` binds need
+      // their data values put back; copying the whole environment cost
+      // the size of every data array the loop reads, per `if`.
+      std::set<std::string> bound;
+      bound_names(s, &bound);
+      const auto base_env = save_named(td.env(), bound);
       const auto base_ranges = int_ranges;
       const auto base_real_ranges = real_ranges;
       const bool base_control = region_control_active;
@@ -2196,8 +2199,8 @@ Flow lower_region_stmt(const mir::Stmt& s) {
         int_env = base_ints;
         int_locals = base_locals;
         decls = base_decls;
-        td.env() = base_env;
-        count_data_copy(base_env);
+        auto arm_env = base_env;
+        restore_named(td.env(), arm_env);
         int_ranges = base_ranges;
         real_ranges = base_real_ranges;
         region_refine_condition(s.cond, arm == 0);
@@ -2220,8 +2223,8 @@ Flow lower_region_stmt(const mir::Stmt& s) {
       int_env = base_ints;
       int_locals = base_locals;
       decls = base_decls;
-      td.env() = base_env;
-      count_data_copy(base_env);
+      auto after_env = base_env;
+      restore_named(td.env(), after_env);
       int_ranges = base_ranges;
       real_ranges = base_real_ranges;
       region_control_active = base_control;
