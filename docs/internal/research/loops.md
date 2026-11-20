@@ -19,6 +19,7 @@ recover the recording time or transient peak already paid.
 | [Remaining architecture results](../../../notes/performance/2026-09-20-ctsem-remaining-architecture.md) | Decisions about QR retention, recording/encoding, reuse and numerical alternatives. |
 | [Implementation/review trail](../archive/plans/2026-09-20-ctsem-remaining-architecture.md) | Integration details, derivative lifetime tests and direct-entry control cases. |
 | [Data-loop memo](../../../notes/performance/2026-10-25-ctsem-data-loop-memo.md) | First recording of data-controlled scans, the keys and proofs that let a trace replay, and the measured 2.3x first-gradient gain. |
+| [Memo and frame-instance reach](../../../notes/performance/audit-2026-11-20-loop-memo-instances.md) | Which corpus models reach either mechanism (one by default), what each skips, and the timing that would decide whether they stay. |
 | [Ordinary-model controls](../../../notes/performance/2026-09-20-ctsem-ordinary-model-controls.md) | Unresolved preparation/RSS observations and A/A attribution; not a universal no-regression claim. |
 
 Keep data dependence separate from derivative activity. A memoized result needs
