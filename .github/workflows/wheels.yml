@@ -317,6 +317,12 @@ jobs:
       - name: Build tooling
         run: python3 -m pip install --upgrade pip setuptools wheel
 
+      # tests/test_hp_reference.py skips its 80-digit reference classes
+      # without mpmath. The Tests step below sets STANLI_REQUIRE_MPMATH, which
+      # turns that skip into a failure.
+      - name: Install mpmath
+        run: python3 -m pip install mpmath==1.3.0
+
 
       # Everything fetch.sh pulls is pinned by a git SHA, so these two source
       # trees are a pure function of the script. Compiler products under
@@ -597,6 +603,8 @@ jobs:
       # generated signature models alone are ~280 s of work, which -j2
       # served in 150 s on a 4-core runner.
       - name: Tests
+        env:
+          STANLI_REQUIRE_MPMATH: '1'
         run: |
           cores=$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 2)
           echo "runner: $cores cores, testing -j$cores"

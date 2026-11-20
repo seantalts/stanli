@@ -700,5 +700,15 @@ class MainStatusTest(unittest.TestCase):
                     self.assertNotIn("issue " + verb, log)
 
 
+class MpmathRequiredTest(unittest.TestCase):
+    def test_the_matrix_tests_install_and_require_mpmath(self):
+        steps = workflow("wheels.yml")["jobs"]["build"]["steps"]
+        names = [step.get("name") for step in steps]
+        self.assertLess(names.index("Install mpmath"), names.index("Tests"))
+        self.assertIn("mpmath", steps[names.index("Install mpmath")]["run"])
+        self.assertEqual(steps[names.index("Tests")]["env"],
+                         {"STANLI_REQUIRE_MPMATH": "1"})
+
+
 if __name__ == "__main__":
     unittest.main()
