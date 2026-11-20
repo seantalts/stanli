@@ -70,6 +70,12 @@ paths and hashes in raw records unchanged.
 | [Model from BeeGUTS](../../tests/beeguts/README.md) | Fixture scope, provenance or test workflow. |
 | [Models from hdbayes](../../tests/hdbayes/README.md) | Fixture scope, provenance or test workflow. |
 | [Model from EcoEnsemble](../../tests/ecoensemble/README.md) | Fixture scope, provenance or test workflow. |
+| [Model from bayesdfa](../../tests/bayesdfa/README.md) | Fixture scope, provenance or test workflow. |
+| [Models from walker](../../tests/walker/README.md) | Fixture scope, provenance or test workflow. |
+| [Models from bmgarch](../../tests/bmgarch/README.md) | Fixture scope, provenance or test workflow. |
+| [Models from hBayesDM](../../tests/hbayesdm/README.md) | Fixture scope, provenance or test workflow. |
+| [Models from stan-dev/example-models](../../tests/examplemodels/README.md) | Fixture scope, provenance or test workflow. |
+| [Programs from the Stan User's Guide](../../tests/stanguide/README.md) | Fixture scope, provenance or test workflow. |
 | [Compiler producer fixtures](../../tests/compiler/README.md) | Fixture scope, provenance or test workflow. |
 | [Stan teaching-model corpus for Stanli](../../tests/educational/IMPORT_README.md) | Fixture scope, provenance or test workflow. |
 | [Models from Aalto Stan lessons](../../tests/educational/README.md) | Fixture scope, provenance or test workflow. |

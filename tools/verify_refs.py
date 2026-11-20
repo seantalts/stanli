@@ -97,7 +97,18 @@ QUARANTINED = {}
 # closes, the model matches its references, the replay reports GAP_CLOSED,
 # and the run stays red until the entry is deleted. A crash is never
 # excused: a segfault and a refusal are different bugs.
-KNOWN_GAPS = {}
+KNOWN_GAPS = {
+    "examplemodels_cjs_mnl_ran": "write_array has no multinomial_rng: "
+        "generated quantities fall back to the interpreter, which throws",
+    "examplemodels_hmm_marginal": "write_array has no hmm_latent_rng: "
+        "generated quantities fall back to the interpreter, which throws",
+    "bayesdfa_dfa_gp": "stanli refuses the model: unsupported function "
+        "gp_exp_quad_cov",
+    "bmgarch_ccc": "write_array has no multi_student_t_rng: generated "
+        "quantities fall back to the interpreter, which throws",
+    "bmgarch_bekk_arma": "write_array has no multi_student_t_rng: generated "
+        "quantities fall back to the interpreter, which throws",
+}
 
 # Corpus models that run through the MIR interpreter, mapped to why. Any
 # other model that reports an interpreted log density or write_array
