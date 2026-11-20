@@ -19,9 +19,10 @@ ABI check will accept. Only that release's runtime is found by
 that the package was installed from, for a package installed from
 the main branch on GitHub. A package without a recorded commit gets
 the newest dev runtime. The runtime for a commit appears about an
-hour after the commit lands on main, and only the newest ten are kept. Installing the dev
-runtime removes the release runtime from the cache, and installing a
-release removes the dev runtime, so the one installed last is used.}
+hour after the commit lands on main, and only the newest ten are
+kept. Installing the dev runtime removes the release runtime from
+the cache, and installing a release removes the dev runtime, so the
+one installed last is used.}
 
 \item{quiet}{Passed to [utils::download.file()].}
 

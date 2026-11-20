@@ -473,10 +473,10 @@ class DevRuntimeReleaseTest(unittest.TestCase):
         cls.jobs = workflow("wheels.yml")["jobs"]
         cls.job = cls.jobs["dev-runtime-release"]
 
-    def test_runs_only_for_a_push_to_main(self):
+    def test_runs_only_on_main_after_merge(self):
         for event in ("pull_request", "push", "schedule", "workflow_dispatch"):
             with self.subTest(event=event):
-                self.assertEqual(enabled(self.job, event), event == "push")
+                self.assertEqual(enabled(self.job, event), event != "pull_request")
         self.assertFalse(enabled(self.job, "push", ref="refs/tags/v1.0.0"))
         self.assertFalse(enabled(self.job, "push", ref="refs/heads/other"))
 
@@ -489,7 +489,8 @@ class DevRuntimeReleaseTest(unittest.TestCase):
             with self.subTest(need=name):
                 self.assertIn(name, needs)
                 if name != "r-tests":
-                    self.assertTrue(enabled(self.jobs[name], "push"))
+                    for event in ("push", "schedule", "workflow_dispatch"):
+                        self.assertTrue(enabled(self.jobs[name], event))
 
     def run_step(self, name, view="", view_status=1, listing="[]", tarballs=6):
         step = next(item for item in self.job["steps"] if item.get("name") == name)
