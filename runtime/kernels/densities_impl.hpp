@@ -20,6 +20,7 @@
 
 #include <stanli/kernel_types.hpp>
 #include <stanli/optable.hpp>
+#include <stanli/pairwise_sum.hpp>
 #include <stanli/recorder.hpp>
 
 // The full prim aggregate, not per-density headers: densities call helpers
@@ -261,9 +262,9 @@ STANLI_NOINLINE inline void accumulate_partial(double* adj, double out_adj,
 // Partials for argument k live at scratch[sum of lens of args < k]. A scalar
 // argument paired with vector ones holds the already-summed partial.
 // Elementwise variant: column k is scratch[k * N .. k * N + N), each element
-// scaled by its own adjoint; a broadcast (len-1) argument sums its column,
-// descending to match the executor's reverse sweep over the scalar ops the
-// fused op replaces (bit-identical accumulation).
+// scaled by its own adjoint; a broadcast (len-1) argument sums its column.
+// A short column is added descending, as the executor's reverse sweep over
+// the scalar ops that the fused op replaces adds it; a long one pairwise.
 template <int NArgs>
 void density_bwd(KernelCtx& ctx) {
   const DensityMode mode = density_mode(ctx);
@@ -276,8 +277,10 @@ void density_bwd(KernelCtx& ctx) {
       const double* col = ctx.scratch + static_cast<int64_t>(k) * N;
       if (ctx.in_adj[k].len == 1 && N > 1) {
         double acc = 0;
-        for (int64_t n = N; n-- > 0;)
-          if (connected[n] != 0.0) acc += ctx.out_adj_vec.data[n] * col[n];
+        add_sum(acc, N, [&](int64_t j) {
+          const int64_t n = N - 1 - j;
+          return connected[n] != 0.0 ? ctx.out_adj_vec.data[n] * col[n] : 0.0;
+        });
         ctx.in_adj[k].data[0] += acc;
       } else {
         for (int64_t n = 0; n < N; ++n)

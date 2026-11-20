@@ -128,17 +128,21 @@ measured; a person replaces it with the cause. A replay that measures half
 the bound or less prints a `ULP LEDGER` note asking for a rerun to tighten it.
 
 Inside a section, a value over 10 that no entry covers fails the gate, so a
-model that is new to the corpus gets its first entries from a separate run:
+model that is new to the corpus, or a value that moved for a known reason,
+gets its entries from a separate run:
 
     tools/verify_refs.py deps/posteriordb MODEL... --add-ulp-entries REASONS.json
 
 `REASONS.json` maps each named model to `{label: reason}`. The run replays
-those models without their ULP gate, and every other model with it. It
-refuses a model that already has entries, because the ledger cannot tell a
-new model from an old one that has moved: only the person who names the
-model can. It writes nothing unless every model passes the other gates and
-every value over 10 has a reason, and no reason names a value within 10. A
-first run with an empty `{}` per model lists the values that need one.
+those models without their ULP gate, and every other model with it, and
+replaces the named models' entries. The same run raises an entry of a model
+that has moved for a known reason, because the ledger cannot tell that from
+a regression: only the person who names the model can. A value over 10
+needs a reason in the file, unless the model has an entry for it that the
+value is within, which keeps its reason. The run writes nothing unless every
+model passes the other gates and every value over 10 has a reason, and no
+reason names a value within 10. A first run with an empty `{}` per model
+lists the values that need one.
 `--corpus NAME` takes the same flag.
 
 The reasons in the macOS arm64 section compare both engines with the 80-digit

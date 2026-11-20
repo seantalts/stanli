@@ -10,7 +10,7 @@
 namespace stanli {
 namespace dens {
 
-STANLI_LPMF_FWD(poisson_log_fwd, poisson_log_lpmf, 1)
+STANLI_LPMF_FWD(poisson_log_recorded_fwd, poisson_log_lpmf, 1)
 STANLI_LPMF_FWD(bernoulli_logit_recorded_fwd, bernoulli_logit_lpmf, 1)
 STANLI_LPMF_FWD(poisson_fwd, poisson_lpmf, 1)
 STANLI_LPMF_FWD(neg_binomial_2_fwd, neg_binomial_2_lpmf, 2)
@@ -170,6 +170,24 @@ void bernoulli_logit_array_fwd(KernelCtx& ctx) {
   }
 }
 
+// Stan Math adds the terms of a vector theta in one running sum. Add them
+// pairwise instead: a merged loop of scalar calls presents thousands at once.
+double bernoulli_vector_value(const Eigen::Map<const Eigen::VectorXi>& y,
+                              const Desc& theta, bool drop) {
+  static constexpr const char* function = "bernoulli_lpmf";
+  const Eigen::Map<const Eigen::VectorXd> theta_vec(theta.data, theta.len);
+  stan::math::check_consistent_sizes(function, "Random variable", y,
+                                     "Probability parameter", theta_vec);
+  stan::math::check_bounded(function, "n", y, 0, 1);
+  stan::math::check_bounded(function, "Probability parameter", theta_vec, 0.0,
+                            1.0);
+  if (drop || y.size() == 0) return 0.0;
+  return pairwise_sum(0, theta.len, [&](int64_t i) {
+    return y[i] == 1 ? std::log(theta.data[i])
+                     : stan::math::log1m(theta.data[i]);
+  });
+}
+
 template <bool Logit>
 void bernoulli_native_fwd(KernelCtx& ctx) {
   const bool active = bernoulli_arg_active(ctx);
@@ -193,7 +211,9 @@ void bernoulli_native_fwd(KernelCtx& ctx) {
 
   const Eigen::Map<const Eigen::VectorXi> y(
       ctx.idata, static_cast<Eigen::Index>(ctx.n_idata));
-  ctx.out.data[0] = bernoulli_value<Logit>(y, theta, drop);
+  ctx.out.data[0] = !Logit && theta.len > kPairwiseBlock
+                        ? bernoulli_vector_value(y, theta, drop)
+                        : bernoulli_value<Logit>(y, theta, drop);
   std::fill_n(ctx.scratch, static_cast<size_t>(theta.len + 1), 0.0);
 
   // Both functions return a literal zero before constructing their partials
@@ -233,6 +253,49 @@ void bernoulli_native_fwd(KernelCtx& ctx) {
 }
 
 }  // namespace
+
+// Stan Math's vector poisson_log_lpmf forms sum(n * alpha) - sum(exp(alpha)),
+// two sums that can cancel to a much smaller lp. With a vector of log rates,
+// form each observation's term first and add the terms pairwise. The checks
+// and the partials are Stan Math's.
+void poisson_log_fwd(KernelCtx& ctx) {
+  const Desc& alpha = ctx.in[0];
+  const DensityMode mode = density_mode(ctx);
+  if (mode.elementwise || alpha.len <= kPairwiseBlock) {
+    poisson_log_recorded_fwd(ctx);
+    return;
+  }
+  static constexpr const char* function = "poisson_log_lpmf";
+  const Eigen::Map<const Eigen::VectorXi> n(
+      ctx.idata, static_cast<Eigen::Index>(ctx.n_idata));
+  const Eigen::Map<const Eigen::ArrayXd> alpha_val(alpha.data, alpha.len);
+  stan::math::check_consistent_sizes(function, "Random variable", n,
+                                     "Log rate parameter", alpha_val);
+  stan::math::check_nonnegative(function, "Random variable", n);
+  stan::math::check_not_nan(function, "Log rate parameter", alpha_val);
+  std::fill_n(ctx.scratch, static_cast<size_t>(alpha.len + 1), 0.0);
+  ctx.out.data[0] = 0.0;
+  const bool active = mode.is_active(0);
+  if (alpha.len == 0 || (mode.propto && !active)) return;
+  for (int64_t i = 0; i < alpha.len; ++i) {
+    if (alpha.data[i] == stan::math::INFTY ||
+        (alpha.data[i] == stan::math::NEGATIVE_INFTY && n[i] != 0)) {
+      ctx.out.data[0] = stan::math::LOG_ZERO;
+      return;
+    }
+  }
+  const Eigen::ArrayXd exp_alpha = stan::math::exp(alpha_val);
+  ctx.out.data[0] = pairwise_sum(0, alpha.len, [&](int64_t i) {
+    double term = n[i] * alpha.data[i];
+    term -= exp_alpha[i];
+    if (!mode.propto) term -= stan::math::lgamma(n[i] + 1.0);
+    return term;
+  });
+  if (!active) return;
+  Eigen::Map<Eigen::ArrayXd>(ctx.scratch, alpha.len) =
+      n.array().cast<double>() - exp_alpha;
+  ctx.scratch[alpha.len] = 1.0;
+}
 
 void bernoulli_fwd(KernelCtx& ctx) { bernoulli_native_fwd<false>(ctx); }
 void bernoulli_logit_fwd(KernelCtx& ctx) {

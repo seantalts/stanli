@@ -223,15 +223,15 @@
     "model": "region_map_acc_init",
     "quantity": "grad[0]",
     "pair": "default/no_region_map",
-    "bound_ulp": 1,
-    "cause": "the lp entry's regrouping carried through the adjoint, plus the region map adding each iteration's contribution in iteration order where the loop adds them in reverse. Against a 50-digit mpmath reference at point 1 the region map is 2 ULP off and the loop 1 ULP.",
+    "bound_ulp": 2,
+    "cause": "the lp entry's regrouping carried through the adjoint, plus the region map's vector a * x, whose scalar adjoint adds its 64 contributions pairwise where the loop adds them one at a time in reverse. Against a 60-digit mpmath reference at stanli_check --point 1 the region map is 3.4 scaled ULP off and the loop 1.4; before the pairwise sum the region map was 2.4.",
     "since": "2026-11-12"
   },
   {
     "model": "region_map_acc_init",
     "quantity": "grad[0]",
     "pair": "default/no_native_adj",
-    "bound_ulp": 1,
+    "bound_ulp": 2,
     "cause": "STANLI_NO_NATIVE_ADJ refuses the region map, so it gives the same bits as default/no_region_map. See default/no_region_map.",
     "since": "2026-11-12"
   },

@@ -670,13 +670,26 @@ class UlpLedgerTest(unittest.TestCase):
         self.assertEqual(entries["grad"], {
             "bound": 30, "reason": "measured on P; why; 10 grad values over 10"})
 
-    def test_first_entries_are_only_for_models_with_none(self):
+    def test_named_entries_replace_a_model_and_keep_unnamed_reasons(self):
+        old = {"lp": {"bound": 20, "reason": "lp before"},
+               "grad[1]": {"bound": 15, "reason": "grad before"}}
+        measured = {"lp": 12, "grad[1]": 30, "grad[2]": 25}
+        entries, problems = verify_refs.first_entries(
+            measured, {"grad[1]": "moved", "grad[2]": "new"}, "P", old)
+        self.assertEqual(problems, [])
+        self.assertEqual(entries, {
+            "lp": {"bound": 12, "reason": "lp before"},
+            "grad[1]": {"bound": 30, "reason": "measured on P; moved"},
+            "grad[2]": {"bound": 25, "reason": "measured on P; new"}})
+        _, problems = verify_refs.first_entries(measured, {"grad[2]": "new"},
+                                                "P", old)
+        self.assertEqual(problems, ["grad[1] measured 30 needs a reason"])
+
+    def test_entries_may_be_added_to_models_that_have_some(self):
         section = {"old": {"lp": {"bound": 20, "reason": "why"}}}
         check = verify_refs.first_entry_models
         self.assertEqual(check({"new": {}}, section, ["new", "old"]), [])
-        self.assertEqual(check({"old": {"lp": "why"}}, section, ["old"]),
-                         ["old already has ledger entries; only "
-                          "--update-ulp-ledger may change them"])
+        self.assertEqual(check({"old": {"lp": "why"}}, section, ["old"]), [])
         self.assertEqual(check({"new": {}}, section, ["old"]),
                          ["new is not in this replay"])
         self.assertEqual(check({"new": {}}, None, ["new"]),
@@ -701,8 +714,8 @@ class UlpLedgerTest(unittest.TestCase):
                 "old": {"lp": {"bound": 99, "reason": "why"}}})
             path.unlink()
             problems = verify_refs.add_first_entries(
-                ledger, "P", "main", {"new": {"lp": 30}}, {"new": {}}, path)
-            self.assertEqual(problems, ["new: lp measured 30 needs a reason"])
+                ledger, "P", "main", {"new": {"lp": 31}}, {"new": {}}, path)
+            self.assertEqual(problems, ["new: lp measured 31 needs a reason"])
             self.assertFalse(path.exists())
 
     def test_the_checked_in_ledger_loads(self):
