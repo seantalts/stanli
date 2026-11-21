@@ -429,6 +429,23 @@ long Lowering::eval_int(const mir::Expr& e) {
         } catch (const CompileError&) {
         }
       }
+      // A user function of integers: its arguments may be known only here
+      // (a shape of a parameter, an int formal), so pass them as literals.
+      if (e.fn_lib == mir::Expr::Lib::UserDefined &&
+          std::all_of(e.args.begin(), e.args.end(), [](const mir::Expr& a) {
+            return mir::is_unsized(a, mir::UnsizedLeaf::Int);
+          })) {
+        mir::Expr call = e;
+        for (mir::Expr& a : call.args) {
+          const long value = eval_int(a);
+          a.kind = mir::Expr::LitInt;
+          a.lit_i = value;
+          a.args.clear();
+          a.data_only = true;
+        }
+        call.data_only = true;
+        return td.as_int(call);
+      }
       fail("unsupported int size function " + e.name, e.raw);
     default:
       fail("unsupported size expression", e.raw);

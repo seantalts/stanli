@@ -1335,6 +1335,35 @@ static void test_udf_guard_returns() {
   stan::math::recover_memory();
 }
 
+// A user function that stanc did not inline sizes a local and bounds a range
+// index from the shape of a parameter argument.
+static void test_udf_call_int_size() {
+  using namespace stanli;
+  CompiledModel cm;
+  try {
+    cm = compile_model(
+        slurp("tests/fixtures/udf_call_int_size.tmir.sexp"),
+        DataMap::from_json(slurp("tests/fixtures/udf_call_int_size.json")));
+  } catch (const std::exception& error) {
+    check(false, std::string("udf call int size compile: ") + error.what());
+    return;
+  }
+  const double u[5] = {0.3, -1.2, 0.7, 2.0, -0.4};
+  Eigen::Matrix<stan::math::var, -1, 1> mu(5);
+  for (int i = 0; i < 5; ++i) mu(i) = u[i];
+  stan::math::var lp = stan::math::normal_lpdf(mu.head(2), 0, 1);
+  lp.grad();
+  Executor ex(cm.graph);
+  cm.bind(ex);
+  for (int i = 0; i < 5; ++i) ex.params_data()[i] = u[i];
+  double grad[5] = {};
+  expect_ulp("udf call int size lp", ex.gradient(grad), lp.val(), 10);
+  for (int i = 0; i < 5; ++i)
+    expect_ulp("udf call int size grad " + std::to_string(i), grad[i],
+               mu(i).adj(), 10);
+  stan::math::recover_memory();
+}
+
 // User functions stanc did not inline, under `~`. CmdStan instantiates an
 // `_lp` function and an `_lupdf` call with the caller's propto__, and the
 // body with the actual argument types, so the data-bound sigma is a double
@@ -9703,6 +9732,7 @@ int main() {
   test_region_dynamic_index(false);
   test_region_constant_shadow();
   test_udf_guard_returns();
+  test_udf_call_int_size();
   test_udf_lp_propto();
   test_repeated_target_terms();
   test_inplace_copy_then_store();
