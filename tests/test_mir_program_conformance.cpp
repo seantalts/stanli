@@ -822,6 +822,90 @@ void test_matrix_row_indexing() {
            {std::move(entry)}, 1.0, {3.0});
 }
 
+void test_data_matrix_times_vector() {
+  // Stan computes a data matrix times a vector with Eigen's product, which
+  // fuses each multiply-add on arm64. These rows come from a model where a
+  // separate multiply and add gave a different last bit, and a later
+  // difference of two log-sum-exps made that 30 ULP.
+  const double rows[3][4] = {{-10.629011274361268, 0.7121903024775802,
+                              0.29381364949080413, 0.44615443076455386},
+                             {-2.0186369303224936, 0.7121903024775802,
+                              0.29381364949080413, -0.5538455692354461},
+                             {-12.105887849236908, 0.7121903024775802,
+                              -0.7061863505091959, 0.44615443076455386}};
+  const double beta[4] = {0.0, 0.02, 0.04, -0.04};
+  std::vector<Expr> matrix_rows;
+  for (const auto& row : rows) {
+    std::vector<Expr> entries;
+    for (double value : row) entries.push_back(lit_real(value));
+    Expr made = fun("FnMakeRowVec", std::move(entries), kRowVector,
+                    Expr::Lib::Internal);
+    made.data_only = true;
+    matrix_rows.push_back(std::move(made));
+  }
+  Expr matrix = make_array(std::move(matrix_rows), kMatrix);
+  matrix.data_only = true;
+  // theta[1] - 0.75 is 0, so the vector depends on a parameter.
+  Expr first = fun(
+      "Minus__",
+      {index_single(var("theta", kVector), 1, kReal), lit_real(0.75)}, kReal);
+  Expr vector = make_array({std::move(first), lit_real(beta[1]),
+                            lit_real(beta[2]), lit_real(beta[3])});
+  Expr product =
+      fun("Times__", {var("X", kMatrix), var("b", kVector)}, kVector);
+
+  FunDef entry = rhs_function(
+      "matrix_vector_rhs",
+      {declaration("X", "SMatrix", {lit_int(3), lit_int(4)}),
+       assignment("X", std::move(matrix)),
+       declaration("b", "SVector", {lit_int(4)}),
+       assignment("b", std::move(vector)), return_value(std::move(product))});
+
+  Eigen::MatrixXd X(3, 4);
+  for (int i = 0; i < 3; ++i)
+    for (int j = 0; j < 4; ++j) X(i, j) = rows[i][j];
+  const Eigen::VectorXd b = Eigen::Map<const Eigen::VectorXd>(beta, 4);
+  const Eigen::VectorXd stan = X * b;
+  const std::vector<double> want(stan.data(), stan.data() + 3);
+  // The interpreter. The register program refuses this matrix literal.
+  run_case("data matrix times vector", "X * b rounds as Eigen's product does",
+           {std::move(entry)}, 1.0, want);
+
+  // The register program, with X and b bound as a statement island binds
+  // graph slots.
+  stanli::Program program;
+  std::map<std::string, const FunDef*> functions;
+  stanli::ProgramCompiler compiler{program, functions};
+  stanli::Range x{compiler.alloc(12), 12};
+  x.kind = stanli::ViewKind::Matrix;
+  x.rows = 3;
+  x.cols = 4;
+  compiler.emit_const(x.reg, X.data(), 12);
+  stanli::Range bv{compiler.alloc(4), 4};
+  bv.kind = stanli::ViewKind::Vector;
+  compiler.emit_const(bv.reg, beta, 4);
+  stanli::Range dst{compiler.alloc(3), 3};
+  dst.kind = stanli::ViewKind::Vector;
+  const std::vector<double> initial(3, -1.0);
+  compiler.emit_const(dst.reg, initial.data(), 3);
+  compiler.reals["X"] = x;
+  compiler.reals["b"] = bv;
+  compiler.reals["dst"] = dst;
+  Expr data_matrix = var("X", kMatrix);
+  data_matrix.data_only = true;
+  compiler.stmt(full_span_assignment(
+      "dst",
+      fun("Times__", {std::move(data_matrix), var("b", kVector)}, kVector)));
+  compiler.finish();
+  const stanli::Range out = compiler.reals.at("dst");
+  std::vector<double> registers(static_cast<size_t>(program.n_regs));
+  stanli::run_program(program, registers);
+  const std::vector<double> got(registers.begin() + out.reg,
+                                registers.begin() + out.reg + out.len);
+  expect_observation("data matrix times vector", "Program",
+                     observed_values(got), observed_values(want), 0);
+}
+
 void test_mixed_integer_udf_arguments() {
   // Arguments bind by source position.  With t > 0, score(t > 0, 3) is
   // 10*1 + 3 = 13; partitioning runtime and constant ints must not swap them.
@@ -1446,6 +1530,7 @@ int main() {
   test_full_span_program_views();
   test_program_extrema();
   test_matrix_row_indexing();
+  test_data_matrix_times_vector();
   test_mixed_integer_udf_arguments();
   test_runtime_for_bound_effects();
   test_nested_print_effect();

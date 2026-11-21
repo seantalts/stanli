@@ -2567,31 +2567,21 @@ class MirInterp {
         }
         switch (map.kind) {
           case BuiltinProductMap::Kind::Gemm:
-            // Matrix * matrix must use Eigen's product evaluator, just as
-            // the graph GEMM and generated Stan do. A hand-written scalar
-            // loop has a measurably different association for a one-column
-            // product.
-            if (a_mat && b_mat) {
-              using Mat = Eigen::Matrix<T, Eigen::Dynamic, Eigen::Dynamic>;
-              r.r.resize((size_t)(map.m * map.n));
-              Eigen::Map<const Mat> am(a.r.data(), map.m, map.k);
-              Eigen::Map<const Mat> bm(b.r.data(), map.k, map.n);
-              Eigen::Map<Mat>(r.r.data(), map.m, map.n) = am * bm;
-              r.dims = {map.m, map.n};
-              return r;
-            }
-            [[fallthrough]];
           case BuiltinProductMap::Kind::MatVec: {
-            // Col-major storage on both sides.
-            r.r.assign((size_t)(map.m * map.n), T(0.0));
-            for (int64_t j = 0; j < map.n; ++j)
-              for (int64_t k = 0; k < map.k; ++k) {
-                const T& bv = b.r.at((size_t)(b_mat ? j * map.k + k : k));
-                for (int64_t i = 0; i < map.m; ++i)
-                  r.r[(size_t)(j * map.m + i)] +=
-                      a.r.at((size_t)(a_mat ? k * map.m + i : k)) * bv;
-              }
-            r.dims = {(int64_t)r.r.size()};
+            // Use Eigen's product evaluator, as the graph's MATVEC and GEMM
+            // kernels and generated Stan do. A hand-written loop rounds
+            // differently: Eigen fuses each multiply-add on arm64.
+            // Storage is column-major, so a one-axis operand is a 1 x k row
+            // before a matrix or a k x 1 column after one.
+            using Mat = Eigen::Matrix<T, Eigen::Dynamic, Eigen::Dynamic>;
+            r.r.resize((size_t)(map.m * map.n));
+            Eigen::Map<const Mat> am(a.r.data(), map.m, map.k);
+            Eigen::Map<const Mat> bm(b.r.data(), map.k, map.n);
+            Eigen::Map<Mat>(r.r.data(), map.m, map.n) = am * bm;
+            if (a_mat && b_mat)
+              r.dims = {map.m, map.n};
+            else
+              r.dims = {(int64_t)r.r.size()};
             return r;
           }
           case BuiltinProductMap::Kind::Outer: {
