@@ -48,6 +48,8 @@ O0_FIXTURES = {
     "udf_branch_kernels",
     "udf_call_int_index",
     "udf_call_int_size",
+    "udf_call_while_inline_o0",
+    "udf_call_while_o0",
     "udf_conditional_return",
     "udf_constant_branch",
     "udf_data_actual_branch_inline_o0",

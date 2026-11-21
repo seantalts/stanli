@@ -341,6 +341,38 @@
     "since": "2026-11-21"
   },
   {
+    "model": "udf_call_while_o0",
+    "quantity": "lp",
+    "pair": "default/passes_off",
+    "bound_ulp": 2,
+    "cause": "the per-row target terms of the 40-row loop, each a sum over a while loop, are summed in a different grouping with and without STANLI_NO_REROLL and STANLI_NO_PARTITION, and CSE changes the grouping again, so the totals differ in the last bits. The same body written in the model block (udf_call_while_inline_o0, run with this data) differs from passes_off and no_cse in the same way, so this is the unrolled graph's own regrouping, not the call. Measured at the three cross-path points: lp up to 2 ULP, grad up to 4 ULP.",
+    "since": "2026-11-21"
+  },
+  {
+    "model": "udf_call_while_o0",
+    "quantity": "grad[*]",
+    "pair": "default/passes_off",
+    "bound_ulp": 4,
+    "cause": "see lp default/passes_off on this fixture.",
+    "since": "2026-11-21"
+  },
+  {
+    "model": "udf_call_while_o0",
+    "quantity": "lp",
+    "pair": "default/no_cse",
+    "bound_ulp": 2,
+    "cause": "see lp default/passes_off on this fixture.",
+    "since": "2026-11-21"
+  },
+  {
+    "model": "udf_call_while_o0",
+    "quantity": "grad[*]",
+    "pair": "default/no_cse",
+    "bound_ulp": 4,
+    "cause": "see lp default/passes_off on this fixture.",
+    "since": "2026-11-21"
+  },
+  {
     "model": "viewalias",
     "quantity": "grad[*]",
     "pair": "default/no_cse",

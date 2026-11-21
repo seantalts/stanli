@@ -1394,16 +1394,17 @@ static void test_udf_call_int_index() {
 // The index case reads the data matrix inside the function; the branch case
 // tests a real formal bound to data. The call still gives each argument a
 // slot, so in the branch case one constant that no op reads is extra.
-static void test_udf_data_actual(const std::string& name, bool same_slots) {
+static void test_call_matches_inlined(const std::string& name,
+                                      bool same_slots) {
   using namespace stanli;
-  const std::string base = "tests/fixtures/udf_data_actual_" + name;
+  const std::string base = "tests/fixtures/" + name;
   const DataMap data = DataMap::from_json(slurp(base + "_o0.json"));
   CompiledModel call, inlined;
   try {
     call = compile_model(slurp(base + "_o0.tmir.sexp"), data);
     inlined = compile_model(slurp(base + "_inline_o0.tmir.sexp"), data);
   } catch (const std::exception& error) {
-    check(false, "udf data actual " + name + " compile: " + error.what());
+    check(false, name + " compile: " + error.what());
     return;
   }
   const auto opcodes = [](const CompiledModel& cm) {
@@ -1412,23 +1413,28 @@ static void test_udf_data_actual(const std::string& name, bool same_slots) {
     return out;
   };
   check(opcodes(call) == opcodes(inlined),
-        "udf data actual " + name + ": call and inlined ops match (" +
+        name + ": call and inlined ops match (" +
             std::to_string(call.graph.ops.size()) + " vs " +
             std::to_string(inlined.graph.ops.size()) + ")");
   if (same_slots)
     check(same_graph_structure(call, inlined),
-          "udf data actual " + name + ": call and inlined graphs match");
+          name + ": call and inlined graphs match");
   for (double q : {0.4, -1.3}) {
-    double lp[2], grad[2];
+    double lp[2];
+    std::vector<double> grad[2];
     CompiledModel* models[2] = {&call, &inlined};
     for (int k = 0; k < 2; ++k) {
       Executor ex(models[k]->graph);
       models[k]->bind(ex);
-      ex.params_data()[0] = q;
-      lp[k] = ex.gradient(&grad[k]);
+      grad[k].resize(ex.n_params());
+      for (int64_t i = 0; i < ex.n_params(); ++i)
+        ex.params_data()[i] = q * (1 + 0.5 * i);
+      lp[k] = ex.gradient(grad[k].data());
     }
-    expect_ulp("udf data actual " + name + " lp", lp[0], lp[1], 0);
-    expect_ulp("udf data actual " + name + " grad", grad[0], grad[1], 0);
+    expect_ulp(name + " lp", lp[0], lp[1], 0);
+    check(grad[0].size() == grad[1].size(), name + " parameter count");
+    for (size_t i = 0; i < grad[0].size() && i < grad[1].size(); ++i)
+      expect_ulp(name + " grad", grad[0][i], grad[1][i], 0);
   }
 }
 
@@ -9802,8 +9808,9 @@ int main() {
   test_udf_guard_returns();
   test_udf_call_int_size();
   test_udf_call_int_index();
-  test_udf_data_actual("index", true);
-  test_udf_data_actual("branch", false);
+  test_call_matches_inlined("udf_data_actual_index", true);
+  test_call_matches_inlined("udf_data_actual_branch", false);
+  test_call_matches_inlined("udf_call_while", false);
   test_udf_lp_propto();
   test_repeated_target_terms();
   test_inplace_copy_then_store();

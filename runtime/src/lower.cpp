@@ -1264,19 +1264,30 @@ using namespace lower_detail;
 
 namespace {
 
-// The first bounded alternative covers already-inlined, effect-free loop
-// bodies. Pure shape queries are allowed; unknown loop guards still refuse
-// during lowering. A user call or observable statement keeps the established
-// representation, rather than broadening this proof through another engine.
+// The first bounded alternative covers effect-free loop bodies. Pure shape
+// queries are allowed; unknown loop guards still refuse during lowering. A
+// user call qualifies when its body does, as it would once inlined. An
+// observable statement keeps the established representation, rather than
+// broadening this proof through another engine.
 bool bounded_specialization_candidate(Lowering& lo, const mir::Program& p) {
   bool controlled_loop = false;
+  std::set<const mir::FunDef*> visited;
+  std::function<bool(const mir::Stmt&)> statement;
   std::function<bool(const mir::Expr&)> shape = [&](const mir::Expr& e) {
     // Expansion gains were established for single selectors. Range/gather
     // bodies also expose different reduction/fusion choices; keep their
     // established representation until that separate arithmetic is proved.
     if (mir::is_index(e) && e.kind != mir::Expr::IndexSingle) return false;
-    if (e.kind == mir::Expr::FunApp && e.fn_lib == mir::Expr::Lib::UserDefined)
-      return false;
+    if (e.kind == mir::Expr::FunApp &&
+        e.fn_lib == mir::Expr::Lib::UserDefined) {
+      const auto found = lo.fun_defs.find(mir::function_key(e));
+      if (found == lo.fun_defs.end()) return false;
+      const auto specialized = lo.call_site_def(*found->second, e.args);
+      const mir::FunDef* f = specialized ? specialized.get() : found->second;
+      if (visited.insert(f).second)
+        for (const auto& s : f->body)
+          if (!statement(s)) return false;
+    }
     for (const auto& a : e.args)
       if (!shape(a)) return false;
     return true;
@@ -1284,7 +1295,7 @@ bool bounded_specialization_candidate(Lowering& lo, const mir::Program& p) {
   const auto expression = [&](const mir::Expr& e) {
     return shape(e) && !lo.expr_effectful(e);
   };
-  std::function<bool(const mir::Stmt&)> statement = [&](const mir::Stmt& s) {
+  statement = [&](const mir::Stmt& s) {
     if (s.kind == mir::Stmt::NRFunApp && mir::internal_name(s) != "FnCheck" &&
         mir::internal_name(s) != "FnValidateSize")
       return false;
