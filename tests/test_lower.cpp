@@ -17,6 +17,7 @@
 #include <stanli/region_map.hpp>
 #include <stanli/wa_interp.hpp>
 
+#include <stan/io/dump.hpp>
 #include <stan/math.hpp>
 #include <algorithm>
 #include <cmath>
@@ -1006,6 +1007,7 @@ static std::pair<double, double> anchor_gradient(const std::string& mir,
 }
 
 static void test_bounded_specialization() {
+  SKIP_WITHOUT_DEBUG_SWITCHES();
   using namespace stanli;
   const auto mir = slurp("tests/fixtures/bounded_control.tmir.sexp");
   for (int mode : {0, 1})
@@ -1091,6 +1093,7 @@ static void test_bounded_specialization() {
 // per call, and each region reads one element, so its register file must not
 // grow with the length of the data vector.
 static void test_udf_tail_branch() {
+  SKIP_WITHOUT_DEBUG_SWITCHES();
   using namespace stanli;
   const DataMap data =
       DataMap::from_json(slurp("tests/fixtures/udf_tail_branch.json"));
@@ -1147,6 +1150,7 @@ static void test_udf_tail_branch() {
 // ones. Each region reads one element of each transformed vector, so the
 // packed input must not grow with the vector.
 static void test_udf_packed_branch() {
+  SKIP_WITHOUT_DEBUG_SWITCHES();
   using namespace stanli;
   const DataMap data =
       DataMap::from_json(slurp("tests/fixtures/udf_packed_branch.json"));
@@ -1177,32 +1181,40 @@ static void test_udf_packed_branch() {
     else
       lp += -stan::math::square(yn - m4) * m5 + m6;
   }
-  lp.grad();
   Executor ex(cm.graph);
   cm.bind(ex);
   ex.params_data()[0] = a0;
   ex.params_data()[1] = b0;
   double grad[2] = {};
   expect_ulp("udf packed branch lp", ex.gradient(grad), lp.val());
-  expect_ulp("udf packed branch grad a", grad[0], a.adj());
-  expect_ulp("udf packed branch grad b", grad[1], b.adj(), 10);
+  // The gradient sums 64 terms per parameter, which stanli adds pairwise and
+  // the var loop in observation order, so it is held to the true value: a
+  // 60-digit mpmath evaluation of the same lp and its derivatives at
+  // (a0, b0) on this fixture. The var loop is 14.8 and 9.4 ULP from it.
+  expect_ulp("udf packed branch grad a", grad[0], 351.17603325812319);
+  expect_ulp("udf packed branch grad b", grad[1], 50.908421919336608, 10);
   stan::math::recover_memory();
 }
 
 // A runtime integer chosen by a parameter comparison indexes a parameter
 // vector inside a parameter-dependent region. The region compiles the index
-// as DYN_INDEX and must still get a generated adjoint.
-static void test_region_dynamic_index() {
+// as DYN_INDEX and must still get a generated adjoint, both as one region
+// map and, with the map off, as one island per iteration.
+static void test_region_dynamic_index(bool map) {
+  if (!map) SKIP_WITHOUT_DEBUG_SWITCHES();
   using namespace stanli;
   const DataMap data =
       DataMap::from_json(slurp("tests/fixtures/dynindex_region.json"));
   test_setenv("STANLI_STRUCTURED_LOOPS", "0", 1);
+  if (!map) test_setenv("STANLI_REGION_MAP", "0", 1);
   CompiledModel cm =
       compile_model(slurp("tests/fixtures/dynindex_region.tmir.sexp"), data);
   test_unsetenv("STANLI_STRUCTURED_LOOPS");
+  test_unsetenv("STANLI_REGION_MAP");
+  const uint16_t region = map ? OP_REGION_MAP : OP_ISLAND;
   int islands = 0, dynamic = 0, native = 0;
   for (const Op& op : cm.graph.ops) {
-    if (op.opcode != OP_ISLAND) continue;
+    if (op.opcode != region) continue;
     ++islands;
     const auto& prog = *static_cast<const IslandProg*>(op.udata);
     const bool indexed =
@@ -1212,7 +1224,7 @@ static void test_region_dynamic_index() {
     native += indexed && prog.native_adj;
   }
   check(islands > 0 && dynamic == islands,
-        "dynamic index regions lower every iteration through DYN_INDEX");
+        "dynamic index regions lower through DYN_INDEX");
   check(native == dynamic, "dynamic index regions get a native adjoint");
   const std::vector<double>& y = data.at("y").r;
   const double points[][4] = {{0.4, -0.2, 0.7, 0.6},
@@ -1252,6 +1264,7 @@ static void test_region_dynamic_index() {
 // parameter-dependent region. The region folds it, so the unused arm and its
 // kernel call are not compiled.
 static void test_udf_constant_branch() {
+  SKIP_WITHOUT_DEBUG_SWITCHES();
   using namespace stanli;
   const DataMap data =
       DataMap::from_json(slurp("tests/fixtures/udf_constant_branch.json"));
@@ -1353,6 +1366,78 @@ static void test_udf_lp_propto() {
   stan::math::recover_memory();
 }
 
+// Each `target += lp` adds lp, so a local added twice counts twice, also in
+// a loop that reroll or partition could fuse.
+static void test_repeated_target_terms() {
+  using namespace stanli;
+  using stan::math::var;
+  const DataMap data =
+      DataMap::from_json(slurp("tests/fixtures/repeated_target_terms.json"));
+  CompiledModel cm;
+  try {
+    cm = compile_model(slurp("tests/fixtures/repeated_target_terms.tmir.sexp"),
+                       data);
+  } catch (const std::exception& error) {
+    check(false, std::string("repeated target terms compile: ") + error.what());
+    return;
+  }
+  const std::vector<double>& y = data.at("y").r;
+  const double q[2] = {0.3, -0.2};
+  var mu = q[0], tau = q[1];
+  var lp = 0;
+  for (double yn : y) {
+    lp += 2 * stan::math::normal_lpdf(yn, mu, 1) +
+          3 * stan::math::normal_lpdf(yn, tau, 1);
+  }
+  Eigen::Map<const Eigen::VectorXd> yv(y.data(), (Eigen::Index)y.size());
+  lp += 2 * stan::math::normal_lpdf(yv, tau, 2);
+  lp.grad();
+  Executor ex(cm.graph);
+  cm.bind(ex);
+  ex.params_data()[0] = q[0];
+  ex.params_data()[1] = q[1];
+  double grad[2] = {0, 0};
+  expect_ulp("repeated target terms lp", ex.gradient(grad), lp.val(), 16);
+  expect_ulp("repeated target terms d/mu", grad[0], mu.adj(), 16);
+  expect_ulp("repeated target terms d/tau", grad[1], tau.adj(), 16);
+  stan::math::recover_memory();
+}
+
+// Each block copies a container, writes the copy and then writes the
+// original in place. The copy keeps the element that the original held when
+// it was copied: w = [y1, x, 1], b = [y2, 1, 2], u = [0, y3, x, 0],
+// m2 = [y4, x; 0, 1] and r2 = [y5, x, 1], while each original ends as
+// [z, x, 0...]. That puts x in 9 of the 33 elements and z in 5, and the
+// constants 1, 1, 2, 1, 1 in the others.
+static void test_inplace_copy_then_store() {
+  using namespace stanli;
+  CompiledModel cm;
+  try {
+    cm = compile_model(
+        slurp("tests/fixtures/inplace_copy_then_store.tmir.sexp"), DataMap{});
+  } catch (const std::exception& error) {
+    check(false, std::string("inplace copy compile: ") + error.what());
+    return;
+  }
+  const double q[7] = {0.3, 0.5, -0.7, 1.1, -1.3, 0.9, -0.4};
+  const double x = q[0], z = q[6];
+  double squares = 9 * x * x + 5 * z * z + 1 + 1 + 4 + 1 + 1;
+  for (int i = 1; i <= 5; ++i) squares += q[i] * q[i];
+  const double want_lp =
+      -33 * 0.5 * std::log(2 * stan::math::pi()) - 0.5 * squares;
+  double want_grad[7] = {-9 * x, 0, 0, 0, 0, 0, -5 * z};
+  for (int i = 1; i <= 5; ++i) want_grad[i] = -q[i];
+  Executor ex(cm.graph);
+  cm.bind(ex);
+  for (int i = 0; i < 7; ++i) ex.params_data()[i] = q[i];
+  double grad[7] = {};
+  expect_ulp("inplace copy lp", ex.gradient(grad), want_lp, 4);
+  const char* names[7] = {"x", "y1", "y2", "y3", "y4", "y5", "z"};
+  for (int i = 0; i < 7; ++i)
+    expect_ulp(std::string("inplace copy d/") + names[i], grad[i], want_grad[i],
+               2);
+}
+
 // An `_lpdf` call keeps the constants of the `_lupdf` calls in its body.
 // Lowering folds a call with data arguments in the MIR interpreter, which
 // has to use the call's normalization as the graph does. The branch in
@@ -1387,6 +1472,7 @@ static void test_udf_lpdf_folded_normalized() {
   const std::vector<double> want = {q, t, t,
                                     stan::math::normal_lpdf(0.75, 0.5, 0.5)};
   for (bool interp : {false, true}) {
+    if (interp && !debug_switches_available()) continue;
     const std::string path = interp ? "interpreted" : "compiled";
     const std::vector<double> row = write_array_row(mir, data, {q}, interp);
     check(row.size() == want.size(), "udf lpdf folded write_array " + path);
@@ -1933,6 +2019,7 @@ static void test_udf_void_statements() {
   const std::vector<double> want = {q[0], q[1],        q[2],
                                     q[3], q[3] * q[3], q[3] * q[3] + 1};
   for (bool interp : {false, true}) {
+    if (interp && !debug_switches_available()) continue;
     const std::vector<double> row = write_array_row(mir, data, q, interp);
     check(row.size() == want.size(),
           std::string("udf void statements write_array ") +
@@ -1953,6 +2040,7 @@ static void test_write_array_shadowed_size() {
   const std::vector<double> q{0.25};
   const std::vector<double> want{0.25, 0.5, 0.5, 0.5};
   for (bool interp : {false, true}) {
+    if (interp && !debug_switches_available()) continue;
     const std::string what = std::string("shadowed size write_array ") +
                              (interp ? "interpreted" : "compiled");
     try {
@@ -1967,6 +2055,7 @@ static void test_write_array_shadowed_size() {
 // and assigns it in each arm. The structured loop sizes it from those
 // assignments instead of refusing the loop.
 static void test_structured_vector_return() {
+  SKIP_WITHOUT_DEBUG_SWITCHES();
   using namespace stanli;
   const DataMap data =
       DataMap::from_json(slurp("tests/fixtures/structured_vector_return.json"));
@@ -2003,6 +2092,7 @@ static void test_structured_vector_return() {
 // Statements after an unconditional break are unreachable, so the
 // structured loop does not lower them.
 static void test_structured_dead_after_break() {
+  SKIP_WITHOUT_DEBUG_SWITCHES();
   using namespace stanli;
   const DataMap data = DataMap::from_json(
       slurp("tests/fixtures/structured_dead_after_break.json"));
@@ -2546,7 +2636,7 @@ int main() {
   // the bounded graph must come directly from lowering, before CSE or
   // re-rolling could hide an unroll. The nested form accumulates N*M into
   // the same one multiply rather than leaving a chain of scalar scales.
-  {
+  if (debug_switches_available()) {
     const std::string mir =
         slurp("tests/fixtures/invariant_target_loop.tmir.sexp");
     const auto compile_loop = [&](int mode, int N, int M = 1) {
@@ -2937,12 +3027,14 @@ int main() {
         compile_model(slurp("tests/fixtures/whileloop.tmir.sexp"), long_d);
     check(count_whiles(long_loop) == 3,
           "long while lowers without a compile-time iteration cap");
-    test_setenv("STANLI_STRUCTURED_LOOPS", "0", 1);
-    CompiledModel islands =
-        compile_model(slurp("tests/fixtures/whileloop.tmir.sexp"), d);
-    test_unsetenv("STANLI_STRUCTURED_LOOPS");
-    check(count_opcode(islands, OP_ISLAND) == 3,
-          "while loops lower as three control islands on the legacy path");
+    if (debug_switches_available()) {
+      test_setenv("STANLI_STRUCTURED_LOOPS", "0", 1);
+      CompiledModel islands =
+          compile_model(slurp("tests/fixtures/whileloop.tmir.sexp"), d);
+      test_unsetenv("STANLI_STRUCTURED_LOOPS");
+      check(count_opcode(islands, OP_ISLAND) == 3,
+            "while loops lower as three control islands on the legacy path");
+    }
   }
 
   // The matrix vocabulary used by ctsem remains inside a genuinely runtime
@@ -3459,10 +3551,14 @@ int main() {
       check(rejects(d, tag, message), tag + " rejected");
     };
     expect_oob("k", 7, "oob v[7]", "accessing element out of range");
-    expect_oob("hi", 9, "oob v[2:9]");
+    expect_oob("hi", 9, "oob v[2:9]",
+               "vector[min_max] max indexing: accessing element out of range. "
+               "index 9 out of range");
     expect_oob("i1", 5, "oob M[5]", "accessing element out of range");
     expect_oob("j1", 5, "oob M[:,5]", "accessing element out of range");
-    expect_oob("rh", 9, "oob M[2:9]");
+    expect_oob("rh", 9, "oob M[2:9]",
+               "matrix[min_max] max row indexing: accessing element out of "
+               "range. index 9 out of range");
     expect_oob("m", 9, "oob interp xs[9]",
                "array[uni, ...] index: accessing element out of range. index "
                "9 out of range");
@@ -4150,7 +4246,7 @@ int main() {
   // forced interpreter keeps this interpreter-specific oracle on WaInterp;
   // Stan's empty-outcome logit overload returns zero without indexing either
   // the outcomes or the empty vector.
-  {
+  if (debug_switches_available()) {
     const std::string fn = "categorical_logit_lpmf";
     std::string mir =
         categorical_write_array_mir(slurp("tests/fixtures/cat.tmir.sexp"), fn,
@@ -4489,8 +4585,9 @@ int main() {
     want_row.push_back(q[1]);
     check(write_array_row(mir, d, q, false) == want_row,
           "to_array_2d write_array graph");
-    check(write_array_row(mir, d, q, true) == want_row,
-          "to_array_2d write_array interp");
+    if (debug_switches_available())
+      check(write_array_row(mir, d, q, true) == want_row,
+            "to_array_2d write_array interp");
   }
 
   // A density of an empty integer outcome is 0, as in Stan Math, also when
@@ -4502,6 +4599,7 @@ int main() {
     const std::vector<double> q{0.75};
     const std::vector<double> want_row{0.75, 0, 0};
     for (bool interp : {false, true}) {
+      if (interp && !debug_switches_available()) continue;
       const std::string what = std::string("empty int outcome write_array ") +
                                (interp ? "interp" : "graph");
       try {
@@ -4533,8 +4631,9 @@ int main() {
     const std::vector<double> want_row{0.75, 2.25, 1, 3, -2, 0, 1, 3, 2, 4, 3};
     check(write_array_row(mir, d, q, false) == want_row,
           "to_int write_array graph");
-    check(write_array_row(mir, d, q, true) == want_row,
-          "to_int write_array interp");
+    if (debug_switches_available())
+      check(write_array_row(mir, d, q, true) == want_row,
+            "to_int write_array interp");
   }
 
   // Compare acceptance against Stan Math independently of the flat gather
@@ -4640,6 +4739,43 @@ int main() {
     stan::math::recover_memory();
   }
 
+  // pow(vector, data) takes Stan Math's container overload, which hands the
+  // exponents 2, 0.5, -1, -2, -0.5 and 1 to square, sqrt, inv, inv_square,
+  // inv_sqrt and the identity; pow(real, data) does the same per value.
+  {
+    DataMap d =
+        DataMap::from_json(slurp("tests/fixtures/pow_data_exponent.json"));
+    CompiledModel lm =
+        compile_model(slurp("tests/fixtures/pow_data_exponent.tmir.sexp"), d);
+    Executor lex(std::move(lm.graph));
+    lm.bind(lex);
+    const double q[6] = {0.3, 1.7, 0.011, 2.9, 0.77, 1.3};
+    for (int k = 0; k < 6; ++k) lex.params_data()[k] = q[k];
+    double grad[6];
+    const double lp = lex.gradient(grad);
+
+    using stan::math::var;
+    Eigen::Matrix<var, -1, 1> x(5);
+    for (int k = 0; k < 5; ++k) x(k) = q[k];
+    var t = q[5];
+    // One statement per term: in a single expression C++ leaves the order of
+    // the operands open, and GCC on x86-64 puts them on the tape right to
+    // left, which sums each gradient in another order.
+    var acc = stan::math::sum(stan::math::pow(x, 2));
+    acc += stan::math::sum(stan::math::pow(x, 0.5));
+    acc += stan::math::sum(stan::math::pow(x, -1));
+    acc += stan::math::sum(stan::math::pow(x, -2.0));
+    acc += stan::math::sum(stan::math::pow(x, -0.5));
+    acc += stan::math::sum(stan::math::pow(x, 1));
+    for (double e : {1.0, 3.0, 2.0, 0.5}) acc += stan::math::pow(t, e);
+    acc.grad();
+    expect_eq("pow data exponent lp", lp, acc.val());
+    for (int k = 0; k < 5; ++k)
+      expect_eq("pow data exponent g" + std::to_string(k), grad[k], x(k).adj());
+    expect_eq("pow data exponent gt", grad[5], t.adj());
+    stan::math::recover_memory();
+  }
+
   // gp_exp_quad_cov with a parameter x: the lowering used to refuse a
   // non-data first argument. gp_cov_bwd now rebuilds the points from the
   // promoted input, so x's adjoints propagate. Check every gradient
@@ -4703,6 +4839,55 @@ int main() {
     expect_ulp("gpmatern lp", lp, acc.val());
     for (int k = 0; k < 8; ++k)
       expect_ulp("gpmatern g" + std::to_string(k), grad[k], qv(k).adj());
+    stan::math::recover_memory();
+  }
+
+  // An array of length scales divides each input dimension by its own
+  // scale (Stan Math's std::vector overloads). The lowering used to read
+  // only the first entry. array[1] real with one dimension is still this
+  // form. The jitter loop on the Matern 3/2 matrix is the shape that
+  // fuse_gp_diagonal_updates folds into the covariance op.
+  {
+    CompiledModel lm =
+        compile_model(slurp("tests/fixtures/gpard.tmir.sexp"), DataMap());
+    check(lm.n_unconstrained == 14, "gpard 14 unconstrained");
+    Executor lex(std::move(lm.graph));
+    lm.bind(lex);
+    double q[14];
+    for (int k = 0; k < 14; ++k) q[k] = 0.4 * std::sin(1.7 * k + 0.3);
+    for (int k = 0; k < 14; ++k) lex.params_data()[k] = q[k];
+    double grad[14];
+    const double lp = lex.gradient(grad);
+
+    using stan::math::var;
+    Eigen::Matrix<var, -1, 1> qv(14);
+    for (int k = 0; k < 14; ++k) qv(k) = q[k];
+    var jac = 0.0;
+    std::vector<Eigen::Matrix<var, -1, 1>> x(3, Eigen::Matrix<var, -1, 1>(2));
+    std::vector<Eigen::Matrix<var, -1, 1>> z(3, Eigen::Matrix<var, -1, 1>(1));
+    for (int n = 0; n < 3; ++n) {
+      for (int d = 0; d < 2; ++d) x[n](d) = qv(n * 2 + d);
+      z[n](0) = qv(6 + n);
+    }
+    var alpha = stan::math::lb_constrain<true>(qv(9), 0.0, jac);
+    std::vector<var> l{stan::math::lb_constrain<true>(qv(10), 0.0, jac),
+                       stan::math::lb_constrain<true>(qv(11), 0.0, jac)};
+    std::vector<var> l1{stan::math::lb_constrain<true>(qv(12), 0.0, jac)};
+    var jitter = stan::math::lb_constrain<true>(qv(13), 0.0, jac);
+    Eigen::Matrix<var, -1, -1> kq = stan::math::gp_exp_quad_cov(x, alpha, l);
+    Eigen::Matrix<var, -1, -1> a = stan::math::gp_matern32_cov(x, alpha, l);
+    for (int i = 0; i < 3; ++i) a(i, i) += jitter;
+    Eigen::Matrix<var, -1, -1> b = stan::math::gp_matern52_cov(x, alpha, l);
+    Eigen::Matrix<var, -1, -1> c = stan::math::gp_exponential_cov(x, alpha, l);
+    Eigen::Matrix<var, -1, -1> d = stan::math::gp_exp_quad_cov(z, alpha, l1);
+    var acc = stan::math::sum(kq) + stan::math::sum(a) +
+              2 * stan::math::sum(b) + 3 * stan::math::sum(c) +
+              4 * stan::math::sum(d);
+    acc += kq(0, 1) * a(0, 1) * b(1, 2) * c(0, 2) * d(1, 2) + jac;
+    acc.grad();
+    expect_ulp("gpard lp", lp, acc.val());
+    for (int k = 0; k < 14; ++k)
+      expect_ulp("gpard g" + std::to_string(k), grad[k], qv(k).adj());
     stan::math::recover_memory();
   }
 
@@ -5095,7 +5280,7 @@ int main() {
   // The same, with a parameter feeding one container argument (`mu`, via
   // `rep_row_vector`): the density CALL has to run correctly as var replay too,
   // not just reproduce a data-only lp.
-  {
+  if (debug_switches_available()) {
     DataMap d = DataMap::from_json(slurp("tests/fixtures/densityvecgrad.json"));
     test_setenv("STANLI_STRUCTURED_LOOPS", "0", 1);
     CompiledModel lm =
@@ -5213,7 +5398,7 @@ int main() {
 
   // The same call inside a while loop: the region compiles to the register
   // machine, which reaches the kernel through one CALL re-executed under var.
-  {
+  if (debug_switches_available()) {
     DataMap d = DataMap::from_json(slurp("tests/fixtures/mltgrad.json"));
     test_setenv("STANLI_STRUCTURED_LOOPS", "0", 1);
     CompiledModel lm =
@@ -9040,6 +9225,45 @@ int main() {
   }
 
   {
+    // Every way into a DataMap carries the dims that its source found, and
+    // they must equal the declared dims, as in CmdStan. A 3x3 matrix given
+    // nine flat values, or nine values under a 1x9 shape, has the right
+    // count but the wrong shape.
+    const std::string mir = slurp("tests/fixtures/quad_form_sym.tmir.sexp");
+    const auto message = [&](const DataMap& d) {
+      try {
+        compile_model(mir, d);
+      } catch (const std::invalid_argument& e) {
+        return std::string(e.what());
+      } catch (const std::exception& e) {
+        return std::string("wrong exception type: ") + e.what();
+      }
+      return std::string("accepted");
+    };
+    DataMap flat;
+    flat.set_real_array("d", std::vector<double>(9, 1.0));
+    flat.set_real_array("dv", std::vector<double>(3, 1.0));
+    const std::string flat_msg = message(flat);
+    check(flat_msg.find("mismatch in number dimensions declared and found in "
+                        "context; processing stage=data initialization; "
+                        "variable name=d; dims declared=(3,3); dims "
+                        "found=(9)") != std::string::npos,
+          "a flat matrix is rejected by its shape: " + flat_msg);
+
+    std::istringstream dumped(
+        "d <- structure(c(1, 2, 3, 4, 5, 6, 7, 8, 9), .Dim = c(1, 9))\n"
+        "dv <- c(1, 2, 3)\n");
+    stan::io::dump context(dumped);
+    const std::string context_msg = message(DataMap::from_var_context(context));
+    check(context_msg.find("mismatch in dimension declared and found in "
+                           "context; processing stage=data initialization; "
+                           "variable name=d; position=0; dims "
+                           "declared=(3,3); dims found=(1,9)") !=
+              std::string::npos,
+          "a var_context matrix is rejected by its shape: " + context_msg);
+  }
+
+  {
     // `target += <container>`. Stan defines the increment for a container
     // `e` as adding `sum(e)`; lowering used to push the container's slot
     // straight into the target terms, where a scalar consumer read element
@@ -9207,7 +9431,7 @@ int main() {
   // graph kernels. Both new functions must exist there as well. The test-only
   // hook attaches the same interpreter used by ordinary late-truncation
   // recovery beside this fixture's complete write_array graph.
-  {
+  if (debug_switches_available()) {
     DataMap d = DataMap::from_json(R"({"a":[7],"m":[[0,0],[0,0]]})");
     check(test_setenv("STANLI_WA_FORCE_INTERP", "1", 1) == 0,
           "enable new-functions write_array interpreter");
@@ -9267,7 +9491,7 @@ int main() {
     const std::vector<double> dm = {1.5, 0.3,  -0.2, 0.3, 2.0,
                                     0.7, -0.2, 0.7,  1.1};
     const std::vector<double> dvv = {0.6, -1.2, 0.4};
-    d.set_real_array("d", dm);
+    d.set_real_array("d", dm, {3, 3});
     d.set_real_array("dv", dvv);
     CompiledModel mm =
         compile_model(slurp("tests/fixtures/quad_form_sym.tmir.sexp"), d);
@@ -9320,7 +9544,7 @@ int main() {
   // returning the finite unsymmetrized c.
   {
     DataMap d;
-    d.set_real_array("d", std::vector<double>(9, 0.0));
+    d.set_real_array("d", std::vector<double>(9, 0.0), {3, 3});
     d.set_real_array("dv", std::vector<double>(3, 0.0));
     CompiledModel qm =
         compile_model(slurp("tests/fixtures/quad_form_sym.tmir.sexp"), d);
@@ -9475,10 +9699,13 @@ int main() {
   test_udf_tail_branch();
   test_udf_packed_branch();
   test_udf_constant_branch();
-  test_region_dynamic_index();
+  test_region_dynamic_index(true);
+  test_region_dynamic_index(false);
   test_region_constant_shadow();
   test_udf_guard_returns();
   test_udf_lp_propto();
+  test_repeated_target_terms();
+  test_inplace_copy_then_store();
   test_udf_lpdf_folded_normalized();
   test_udf_truncate();
   test_udf_lp_inlined_propto();

@@ -189,13 +189,11 @@ test_that("the whitening routines leave R's protect stack balanced", {
   skip_without_whiten()
   inner <- es_whiten_model()
   n <- inner$n_unconstrained
-  A <- Matrix::sparseMatrix(i = c(1:n, 2:n), j = c(1:n, 1:(n - 1)),
-                            x = c(rep(2, n), rep(-0.5, n - 1)), dims = c(n, n))
-  U <- matrix(c(1, rep(0, n - 1)), n, 1)
   noise <- capture.output(type = "message", {
     for (i in 1:3) {
-      f <- stanli:::lw_ldlt(A)
-      stanli:::lw_lowrank(f, U)
+      suppressWarnings(laplace_whiten(inner, latent = "theta_tilde",
+                                      init = numeric(n), max_outer = 1L,
+                                      inner_iter = 5L))
       whitened <- whiten(inner, numeric(n), seq_len(n), Matrix::Diagonal(n))
       parameter_annotations(inner)
       parameter_annotations(whitened)
@@ -258,33 +256,6 @@ test_that("a latent argument wins over annotations and bad names are refused", {
   expect_error(laplace_whiten(plain), "@latent")
 })
 
-test_that("the gradient probe finds the dense Hessian's pattern", {
-  skip_without_whiten()
-  code <- "data { int<lower=1> K; vector[K] y; }
-    parameters { real<lower=0> s; real<lower=0> sy; @latent vector[K] x; }
-    model { s ~ normal(0, 1); sy ~ normal(0, 1); x[1] ~ normal(0, 3);
-      x[2:K] ~ normal(x[1:(K - 1)], s); y ~ normal(x, sy); }"
-  set.seed(2)
-  for (K in c(40L, 600L)) {
-    m <- suppressWarnings(stanli_model(code = code, data = list(
-      K = K, y = cumsum(rnorm(K, 0, 0.3)))))
-    iu <- stanli:::lw_latent_index(m, "x")
-    q <- 0.3 * rnorm(m$n_unconstrained)
-    counter <- new.env()
-    counter$n <- 0L
-    P <- stanli:::lw_probe_pattern(m, q, iu, 1e-6, counter, 1)
-    dense <- stanli:::lw_pattern(log_prob_hessian(m, q)$hessian, 1e-6)[iu, iu]
-    expect_identical(as.matrix(P) != 0, as.matrix(dense) != 0)
-    expect_lt(counter$n, 1 + 2 * m$n_unconstrained)
-    step <- 1e-4 * pmax(1, abs(q[iu]))
-    H <- Matrix::Matrix(log_prob_hessian(m, q)$hessian[iu, iu], sparse = TRUE)
-    grad <- function(x) log_prob_grad(m, x)
-    expect_true(stanli:::lw_probe_agrees(grad, q, iu, H, step, 1e-6))
-    expect_false(stanli:::lw_probe_agrees(grad, q, iu, Matrix::Diagonal(x = Matrix::diag(H)),
-                                          step, 1e-6))
-  }
-})
-
 test_that("probe and dense patterns give the same whitening", {
   skip_without_whiten()
   m <- centred_model()
@@ -296,14 +267,32 @@ test_that("probe and dense patterns give the same whitening", {
   expect_identical(b$gradients$pattern_hessian, 1L + 2L * 15L)
 })
 
-test_that("the eigenpair search finds a negative eigenvalue among many positive ones", {
+test_that("laplace_whiten repairs saddles and passes the repair to whiten", {
   skip_without_whiten()
-  d <- seq(1, 400, length.out = 300)
-  d[150] <- -80
-  Q <- Matrix::Diagonal(x = d)
-  r <- stanli:::lw_bad_eigenpairs(Q, 1e-8, 1L)
-  expect_equal(r$w, -80)
-  expect_equal(abs(as.numeric(r$V)), as.numeric(seq_len(300) == 150))
+  m <- stanli_model(code = "
+    data { int<lower=1> J; vector[J] c; }
+    parameters { vector[J] x; vector[J] y; }
+    model {
+      target += sum(c .* square(x)) / 2 - sum(square(square(x))) / 4;
+      y ~ normal(0.5 * x, 1);
+    }", data = list(J = 3L, c = c(1, 1.2, 1.4)))
+  expect_warning(out <- laplace_whiten(m, latent = "y", init = numeric(6)),
+                 "replaced by absolute values")
+  r <- out$report
+  expect_identical(r$n_clipped, 3L)
+  expect_identical(r$rank, 3L)
+  expect_lt(r$min_eigenvalue, 0)
+  # The whitened Hessian is -|Q|^-1/2 Q |Q|^-1/2 in some basis, whose square
+  # is the identity.
+  h <- log_prob_hessian(out$model, numeric(6))$hessian
+  expect_lt(max(abs(h %*% h - diag(6))), 1e-7)
+  expect_warning(clip <- laplace_whiten(m, latent = "y", init = numeric(6),
+                                        repair = "clip"), "clipped")
+  expect_identical(clip$report$rank, 0L)
+  dense <- suppressWarnings(laplace_whiten(m, latent = "y", init = numeric(6),
+                                           hessian = "dense"))
+  expect_identical(dense$report$gradients$final_hessian, 1L + 2L * 6L)
+  expect_identical(dense$report$n_colours, 6L)
 })
 
 test_that("a whitened hierarchical model samples to the default posterior", {

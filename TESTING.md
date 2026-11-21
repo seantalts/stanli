@@ -54,17 +54,116 @@ CI enforces:
   matrix product fuses multiply-adds on arm64 and not on x86-64 or MSVC.
   CmdStan built on arm64, with Eigen's kernel changed to round each product,
   matches stanli on Linux within 2 ULP. Against an 80-digit reference, the
-  largest gradient error is the same on both platforms.
-- A scaled error `|a-b| / max(|a|, |b|, 1)` below 1e-9 for every other
-  reference comparison. It does not prove a ULP bound; per-model ULP
-  distances are in [`docs/corpus-status.md`](docs/corpus-status.md).
+  largest gradient error is the same on both platforms. In the same way,
+  off the recording platform, the write_array variables listed in
+  `WRITE_ARRAY_AGAINST_LARGEST_OFF_PLATFORM` are measured in ULP of their
+  variable's largest value. Today that is `lk` in `gq_library_rng`, whose
+  `lkj_corr_rng` draws go through `tan`. macOS's `tan` is 0.97 ULP off at
+  one of its draws, and a correlation near 0.25, computed as 2 * beta - 1,
+  then differs by 16 ULP. Stan Math run on macOS with a correctly rounded
+  `tan` gives the Linux value exactly. Its `lk` values are then at most 3
+  ULP from the macOS reference, counted in ULP of 1, the largest entry.
+- A scaled error `|a-b| / max(|a|, |b|, 1)` below 1e-9 for every reference
+  comparison. For a value below 1 in magnitude this is an absolute error of
+  1e-9, so it does not prove a ULP bound.
+- The [ULP gate](#the-ulp-gate) on every value of every corpus replay, on the
+  platforms that the ledger has measured (macOS arm64 today).
 - Limits from measured deviations for the ill-conditioned models
-  (`ILL_CONDITIONED`) and `kronecker_gp`.
+  (`ILL_CONDITIONED`: 1.5e-6 scaled error on gradient entries, and on the
+  log density only for a model in `ILL_CONDITIONED_LP_GATE`, today
+  `examplemodels_gp_fit_multi_output` at 5e-8, whose covariance has
+  condition number 5.6e10 at point 0) and for
+  the values that `MISMATCH_OUTPUTS` names at the points recorded as
+  MISMATCH (`gate_for`: 4 times the recorded deviation, and at least the
+  entry's own floor). These are two `kronecker_gp` gradient entries, with a
+  floor of 3.3e-2 from its measurements on x86-64, and three
+  `stanguide_ode_adjoint` gradient entries from an adjoint ODE solve at
+  tolerance 1e-6, with no floor (1.5e-5 and 1.3e-5). Every other value of
+  these models keeps the 1e-9 gate.
 - Matching rejection: stanli must reject a point that CmdStan rejects, and a
   non-finite value must match in kind.
 - 10 ULP by default in the generated conformance sweep, with reviewed
   per-case exceptions.
 - A separate limit for [fast mode](#fast-mode).
+
+<a id="the-ulp-gate"></a>
+
+### The ULP gate
+
+[`tools/verify_refs.py`](tools/verify_refs.py) counts the distance between
+each stanli value `b` and its CmdStan value `a` as
+
+    min(ulp_distance(a, b), ceil(|a - b| / ulp(S)))
+
+where `S` is the largest finite CmdStan magnitude among the values computed
+together with `a`: the whole gradient for a gradient entry, `|a|` itself for
+the log density, and the other columns of the same variable for a
+`write_array` value (`scaled_ulp`). The second term keeps a gradient entry
+that cancels to nearly zero from counting as 1e18 ULP when stanli and CmdStan
+round one term differently; it is measured against the size of the terms that
+formed the entry, not against the constant 1. `S` comes from CmdStan's values
+only, so a wrong large stanli value cannot widen it. In the `signatures`
+corpus, one gradient holds many independent cases, so `S` is the largest case
+(at most 2.8 there) and not the terms of each case. A small case is then held
+to an absolute error of about `10 ulp(S)`, at most 4.4e-15. 186 nonzero
+signature values are more than 10 ULP from CmdStan in their own magnitude and
+pass this way; the worst is grad[1178] of `density_signatures_13`, 1.02e-6 and
+5243 ULP from CmdStan in its own magnitude, 1 ULP of `S`. Both NaN, or the same
+infinity, is a distance of 0; a nonfinite value on one side only fails.
+
+Every value must be within 10 of these ULP (`DEFAULT_ULP_BOUND`) unless
+[`tests/ulp_ledger.json`](tests/ulp_ledger.json) lists a measured bound for
+it. The ledger is keyed by platform, then corpus (`main` for the main corpus,
+the local corpus name, with ` --stanc` for the stock-stanc replays), then
+model. An entry covers one value (`lp`, `grad[3]`, `wa mu.2`) or, when one
+model has more than 8 such values of one kind, every `grad` or `wa` value
+that has no entry of its own. Each entry has the bound, which is the worst
+value measured over the three points, and a reason. A replay on a platform
+with no section in the ledger skips this gate, as do fast mode and the
+WebAssembly replay (`--no-wa`). The gate adds to the scaled-error gate and
+the per-element brms limits above; it replaces neither.
+
+The bounds come only from a tool run:
+
+    tools/verify_refs.py deps/posteriordb --update-ulp-ledger
+    tools/verify_refs.py --corpus NAME [--stanc STANC] --update-ulp-ledger
+
+The run writes nothing unless every model passes every gate, including the
+ledger's current bounds. It lowers an entry to the new measurement and
+deletes an entry that is back within 10. It never raises a bound: a value
+over its bound fails the replay, and raising it means editing the entry by
+hand in a commit that says why. On a platform or corpus with no section yet,
+the gate is off, and the run creates the section with an entry for every
+value over 10. Such a generated entry's reason says only where it was
+measured; a person replaces it with the cause. A replay that measures half
+the bound or less prints a `ULP LEDGER` note asking for a rerun to tighten it.
+
+Inside a section, a value over 10 that no entry covers fails the gate, so a
+model that is new to the corpus, or a value that moved for a known reason,
+gets its entries from a separate run:
+
+    tools/verify_refs.py deps/posteriordb MODEL... --add-ulp-entries REASONS.json
+
+`REASONS.json` maps each named model to `{label: reason}`. The run replays
+those models without their ULP gate, and every other model with it, and
+replaces the named models' entries. The same run raises an entry of a model
+that has moved for a known reason, because the ledger cannot tell that from
+a regression: only the person who names the model can. A value over 10
+needs a reason in the file, unless the model has an entry for it that the
+value is within, which keeps its reason. The run writes nothing unless every
+model passes the other gates and every value over 10 has a reason, and no
+reason names a value within 10. A first run with an empty `{}` per model
+lists the values that need one.
+`--corpus NAME` takes the same flag.
+
+The reasons in the macOS arm64 section compare both engines with the 80-digit
+evaluator in [`tools/hp`](tools/hp/README.md) where it can score the value.
+Of the 154 main-corpus entries, it scores 89. stanli is at least as close to
+the true value as CmdStan in 61 of them, including 28 of the 31 lp entries.
+Entries whose reason says
+"stanli is farther from it than CmdStan" are open findings under the budgets
+above. Linux and Windows have no section yet, so pull request CI does not run
+this gate; record a section by running the commands above on that platform.
 
 Kernels keep the reference summation order where practical, so the unit tests
 are stricter than the corpus check. A reordered matrix-vector
@@ -95,7 +194,7 @@ branch, use `gh workflow run wheels.yml --ref BRANCH`. The jobs are in
 | [lowering and pass tests](#unit-tests-for-numerical-operations) | log density, gradient, `write_array` rows and op counts of small compiled models | stan-math `var` references, hand-derived constants or the MIR interpreter | PR (CTest) | models outside the fixtures |
 | [lit](#unit-tests-for-numerical-operations) | each marked `.stan` file's compile or evaluation result, and optionally one pass dump | the expectation written in the file | PR (CTest) | values the file does not state |
 | [fused-density differential](#unit-tests-for-numerical-operations) | the seven fused densities over activity masks, shapes and edge values | Stan Math's kernels; bitwise, 2 ULP for normal and cauchy | Linux x86-64 on PRs and post-merge; AddressSanitizer; Windows ARM64 dev setup | macOS |
-| [corpus replay](#comparison-with-cmdstan-on-complete-models) | log density, gradient and `write_array` rows of 373 models at 3 points | recorded CmdStan values | PR on Linux x86-64; post-merge on macOS arm64 and x86-64, Linux aarch64 and Linux GCC | parameter values away from the 3 points; Windows |
+| [corpus replay](#comparison-with-cmdstan-on-complete-models) | log density, gradient and `write_array` rows of 404 models at 3 points | recorded CmdStan values | PR on Linux x86-64; post-merge on macOS arm64 and x86-64, Linux aarch64 and Linux GCC | parameter values away from the 3 points; Windows |
 | [fast-mode replay](#fast-mode) | the same models compiled in fast mode | the same references, fast-mode limits | PR, Linux x86-64 | macOS, Windows and ARM |
 | [local corpus replays](#comparison-with-cmdstan-on-complete-models) | log density, gradient and outputs of the function, signature, fixture and other local models | recorded CmdStan values | PR (CTest) | signatures and sizes the generators exclude |
 | [stanc3 good models](#testing-stan-language-coverage) | the 1,382 models in stanc3's `good` integration tests at up to 5 points | recorded CmdStan values and messages, 1e-9; a status ledger | PR (CTest) | models whose generated data CmdStan rejects |
@@ -105,6 +204,7 @@ branch, use `gh workflow run wheels.yml --ref BRANCH`. The jobs are in
 | [posteriordb cross-path](#comparing-stanli-execution-paths) | the posteriordb models under the same configurations plus one pass-off set | each other, within 1e-11 | by hand after pass changes | an error present in both cells |
 | [sampler parity](#samplers-and-other-algorithms) | NUTS draws and statistics across metrics and options | Stan's own NUTS services on the same executor, bitwise | PR (CTest) | compiler numerics (both sides share the executor) |
 | [algorithm checks](#samplers-and-other-algorithms) | optimize, Laplace, Pathfinder, ADVI, fixed_param, RNG streams | a known Gaussian posterior; Stan's generator | PR (CTest) | non-Gaussian posteriors |
+| [reference posteriors](#samplers-and-other-algorithms) | NUTS means and standard deviations of the 39 posteriordb models with reference draws | posteriordb reference draws, within 4 Monte Carlo standard errors | by hand, post-merge | WALNUTS; models without reference draws |
 | [sampler trace](#samplers-and-other-algorithms) | step counts, tree depth, step size, divergences, mean `lp__` | CmdStan with the same settings | by hand after sampler changes | statistical validity of NUTS |
 | [compiler producer parity](#compiler-producer-parity) | compact MIR bytes from the native, JavaScript and Windows compilers | each other, byte for byte | PR | numerical behavior |
 | MIR wire cost | compact MIR decode time and size on Eight Schools | legacy MIR; each must be at most half | post-merge | other models |
@@ -123,6 +223,7 @@ branch, use `gh workflow run wheels.yml --ref BRANCH`. The jobs are in
 | WebAssembly replay | log density and gradient of the corpus through the wasm build | the same references and limits | by hand | `write_array`; `nn_rbm1bJ100`, whose compile does not fit in 4 GB |
 | Safari 17 bundle check | the js_of_ocaml bundles | no line ending in `static` | PR | |
 | docs and formatting | stamped numbers, C/C++ formatting | their artifacts ([`tools/gen_docs.py --check`](tools/gen_docs.py)), the pinned formatter | every PR | |
+| red-main issue | whether any post-merge job of `wheels.yml` failed | none: it opens, updates or closes one GitHub issue, "main is red: wheels" | after each push to `main` and each nightly run | a run in which a job is cancelled |
 
 Release tags also check the version strings, the runtime tarballs and the PyPI
 description. Three checks fail on time and compare no numbers: the MIR wire
@@ -151,11 +252,12 @@ sampling tests skip.
 [`tools/verify_refs.py`](tools/verify_refs.py) replays every corpus against
 CmdStan's recorded answers.
 [`corpus-refs.json.gz`](docs/internal/artifacts/corpus-refs.json.gz) holds the
-main [corpus](tools/corpus_inventory.py): 373 models at 3 points each. They are
-119 posteriordb, 124 brms, 62 Rethinking, 22 cogmod, 13 Aalto, 11 regression
-and 3 ctsem models, and 19 models from 9 CRAN packages (OncoBayes2,
-rstanarm, multinma, EpiNow2, mlumr, rbioacc, BeeGUTS, hdbayes and
-EcoEnsemble). Nearly all also carry `write_array` rows, which the replay
+main [corpus](tools/corpus_inventory.py): 414 models at 3 points each. They
+are 119 posteriordb, 124 brms, 62 Rethinking, 22 cogmod, 13 Aalto, 13
+regression and 3 ctsem models, 29 models from 13 CRAN packages (OncoBayes2,
+rstanarm, multinma, EpiNow2, mlumr, rbioacc, BeeGUTS, hdbayes, EcoEnsemble,
+hBayesDM, bmgarch, walker and bayesdfa), 23 programs from stan-dev/example-
+models and 6 from the Stan User's Guide. Nearly all also carry `write_array` rows, which the replay
 compares by column name. Both drivers seed Stan's RNG the same way, so
 generated quantities compare too. Per-model status and worst deviations are in
 [`docs/corpus-status.md`](docs/corpus-status.md).
@@ -164,11 +266,11 @@ generated quantities compare too. Per-model status and worst deviations are in
 
 | corpus | models | CTest |
 | --- | --- | --- |
-| `functions` | [10 models calling 437 names](tests/function_coverage/README.md), including data-only helpers, RNGs, solvers and five operators | `test_function_models` |
+| `functions` | [10 models calling 468 names](tests/function_coverage/README.md), including data-only helpers, RNGs, solvers and five operators | `test_function_models` |
 | `signatures` | 74 generated models covering 19,641 signatures, one output per case | `signature_refs_*` |
 | `sized_functions` | 5 models calling library functions at real sizes | `test_sized_functions_reference` |
 | `container_flow` | 66 models that write each container shape in each block and read it back | `test_container_flow_reference` |
-| `fixtures` | 60 models from `tests/fixtures`, held to 10 ULP | `*_reference` |
+| `fixtures` | 63 models from `tests/fixtures`, held to 10 ULP | `*_reference` |
 | `cmdstan_replay` | 14 models for lowering rewrites that stock stanc's `--O1` MIR reaches | `test_cmdstan_replay` |
 | `oncobayes2` | the 3 OncoBayes2 models | `test_oncobayes2_reference` |
 
@@ -189,7 +291,12 @@ before evaluating, never by closeness. The run fails on missing points,
 changed inputs, and references recorded against an unpinned CmdStan, Stan or
 Stan Math. [`tools/toolchain.py`](tools/toolchain.py) makes the recording
 tools stop with an error on an unpinned CmdStan checkout. A model that stanli
-refuses does not fail the run if it is listed in `KNOWN_GAPS` (empty today).
+refuses, or whose `write_array` it cannot run, does not fail the run if it is
+listed in `KNOWN_GAPS`. Each entry says what it excuses. A `write_array` entry
+excuses only that section: the replay still compares the log density and
+gradient at every point, with every gate, and fails if anything but the
+`write_array` runs through the interpreter. A whole-model entry excuses any
+failure except a crash. The list is empty today.
 Once stanli supports the model, the run fails until you delete the entry.
 
 [`tools/check_corpus_sampling.py`](tools/check_corpus_sampling.py) runs the
@@ -233,6 +340,15 @@ builds the call that CmdStan's generated C++ would make with
 `test_capi` links the shared library, so it tests the C ABI that the packages
 use. A regression test must first fail against the pre-fix source, for the
 expected reason.
+
+A check that compares a run with itself, because the switch it sets is
+ignored in an OFF build, is not a check. The shared write_array test in
+`test_capi` therefore compares sampled rows with their own draws in every
+build, and compares the shared and copied executors only when switches are
+available. `tests/test_hp_reference.py` skips its 80-digit reference classes
+when `mpmath` is missing; CI installs `mpmath` and sets
+`STANLI_REQUIRE_MPMATH=1` for the matrix legs, which turns the skip into a
+failure.
 
 [`tests/expect.hpp`](tests/expect.hpp) provides the assertions. `expect_eq` is
 bitwise, so `+0` and `-0` differ and a NaN never matches.
@@ -280,12 +396,21 @@ stochastic columns, which the CmdStan replay covers.
 
 The check is bitwise. A divergence fails unless
 [`tests/cross_path_ledger.json`](tests/cross_path_ledger.json) lists it with a
-cause and a bound in ULP (-1 allows any distance). The ledger lists three
-operations that only the `write_array` graph supports, and summation
+cause and a bound in ULP (-1 allows any distance). The ledger lists summation
 regroupings of 1 to 10 ULP by the region map and the lane passes. It also
 lists one open bug: one gradient entry each of `higher_order_all_contexts` and
-`ode_adjoint_region` was far off in one Windows run, and the cause is not yet
-known.
+`ode_adjoint_region` was far off in Windows x86-64 runs, and the cause is not
+yet known. Those entries, and the `cm_rdm` entries for a Windows x86-64
+rounding difference, name `"platform": "windows-x86_64"`, so they excuse
+nothing on other platforms. A platform is `windows`, `macos` or `linux`,
+optionally followed by `-x86_64` or `-arm64`; an entry without one applies
+everywhere. Every entry needs a non-empty `cause`.
+
+A full run of a model fails when an entry for that model that applies on the
+running platform excused no comparison. The divergence it names has gone, and
+the entry would excuse the next one, so delete it. `test_cross_path` also
+fails for an entry that names a model no harness runs. An entry for another
+platform is not checked on this one.
 
 [`tests/test_cross_path.cpp`](tests/test_cross_path.cpp) runs the matrix over
 every fixture. When a fixture has no data file, the test generates unit data
@@ -351,7 +476,9 @@ stanc3's integration tests cover syntax and type combinations that posteriordb
 and the generators miss. [`tools/check_stanc3_good.py`](tools/check_stanc3_good.py)
 runs the `test/integration/good` models and compares log density, gradient and
 `write_array` row with recorded CmdStan answers. Where CmdStan throws, stanli
-must throw the same message.
+must throw the same message. A CmdStan message that is empty after the file
+location and numbers are removed agrees only with an empty stanli message, so
+CmdStan returning NaN does not agree with stanli throwing.
 [`tools/check_stanc3_bad.py`](tools/check_stanc3_bad.py) compares the error
 text of the `test/integration/bad` models with stanc3's expected output. A
 model fails if it does better or worse than its ledger entry
@@ -396,6 +523,22 @@ difference in leapfrog steps. Keep its default adaptation target, because
 [`harnesses/fast_sampling_check.py`](harnesses/fast_sampling_check.py)
 compares fast-mode posteriors with default-mode and posteriordb reference
 posteriors. You run it by hand. CTest tests its flag rules.
+
+[`tools/verify_posteriors.py`](tools/verify_posteriors.py) samples each
+posteriordb corpus model that has posteriordb reference draws (39 models) with
+NUTS: 4 chains, 1000 warmup and 1000 kept iterations, adapt delta 0.8 and a
+fixed seed. For each parameter it compares the mean and the standard
+deviation with the reference draws by
+`z = (stanli - reference) / sqrt(mcse_stanli^2 + mcse_reference^2)`, and fails a
+model when any `|z|` exceeds 4. Each side's Monte Carlo standard error comes
+from its own draws by batch means, with batches of `sqrt(n)` draws per chain;
+for the standard deviation, the delta method is applied to the batched squared
+deviations. It reports split R-hat of the stanli chains and the divergence
+count, which do not fail a model. The `deps/posteriordb` checkout has no
+reference draws, so pass a checkout of the same posteriordb revision that has
+`posterior_database/reference_posteriors` with `--references`. It runs by hand
+or after merge, not in pull request CI, and covers NUTS only. CTest runs its
+statistics tests (`tests/test_verify_posteriors.py`) on synthetic draws.
 
 [`harnesses/brms_end_to_end.R`](harnesses/brms_end_to_end.R) fits each brms
 formula and checks the common post-processing calls.
@@ -452,10 +595,30 @@ the wheels, the R runtime and the browser builds ship.
 
 A test that sets a switch is listed in `STANLI_DEBUG_SWITCH_TESTS` in
 [`CMakeLists.txt`](CMakeLists.txt) and carries the CTest label
-`debug_switches`. In an OFF build, CTest reports it as `Not Run (Disabled)`
-and the run still passes. CI runs CTest that way in the shipped `build-rel/`.
-The manylinux job's differential step builds ON and runs
-`ctest -L debug_switches`. Locally:
+`debug_switches`. Such a test builds and runs in every configuration. In an
+OFF build, a case that needs a switch skips itself: it starts with
+`SKIP_WITHOUT_DEBUG_SWITCHES()` or tests `debug_switches_available()`, both
+in [`tests/env_helpers.hpp`](tests/env_helpers.hpp), and prints a `SKIP` line,
+while the cases that need no switch run. A case that sets a switch and does
+not skip still runs in an OFF build, where the switch is ignored, so it passes
+only if its checks hold without it. Some cases that compare a run with and
+without a switch are like that today: they pass by comparing the default with
+itself, and only an ON build tests them.
+
+Nine tests and the 22 cogmod runs of the cross-path matrix
+(`test_cross_path_cm_*`) are disabled in an OFF build, because almost every
+case in them needs a switch. They are in `STANLI_DEBUG_SWITCH_ONLY_TESTS`, and CTest
+reports `Not Run (Disabled)`: `test_cross_path`, `test_structured_loop`,
+`test_region_map`, `test_wa_parallel_switches`, `test_pass_dump_switches`,
+`test_prep_profile_reroll_dispositions`, `test_prep_work`, `test_ctsem_engine`
+and `test_data_loop_memo`. An OFF build on macOS registers 704 tests and runs
+673 of them.
+
+CI runs CTest in the shipped OFF `build-rel/` on every platform, so the
+switch-free cases of the pass, lowering, write_array and sampler-parity tests
+run on macOS, Linux aarch64 and Windows x64 as well. The manylinux job's
+differential step builds ON and runs `ctest -L debug_switches`, which is
+where the skipped cases and the nine disabled tests run. Locally:
 
 ```sh
 cmake -B build -DSTANLI_DEBUG_SWITCHES=ON

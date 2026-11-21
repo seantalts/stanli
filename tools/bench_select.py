@@ -6,7 +6,7 @@ python3 tools/bench_select.py PDB OUT_DIR --base BUILD --candidate BUILD [--opco
 Each BUILD is a shipped-configuration build directory with bench_grad, dump_ops
 and dump_islands. Every corpus model is compiled with each arm's own compiler
 and prepared by each arm's runtime. A model is selected when its prepared
-program differs, when it runs a named opcode, when its preparation gets slower,
+program (the log-density graph, the write_array graph or the islands) differs, when it runs a named opcode, when its preparation gets slower,
 when any step fails in either arm, or when it is a control. OUT_DIR/selection.json
 keeps the evidence, and its "models" field is the --models list for
 harnesses/corpus_bench.py. See docs/benchmarks.md#selected-models.
@@ -29,8 +29,10 @@ REPO = pathlib.Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO / "tools"))
 from corpus_inventory import corpus_cases, materialize_data
 
-CONTROLS = ("i319_pois_re", "arma11", "eight_schools_noncentered", "hmm_example",
-            "one_comp_mm_elim_abs", "gpcm_latent_reg_irt")
+CONTROLS = ("i319_pois_re", "sw_ar", "eight_schools_noncentered", "hmm_example",
+            "one_comp_mm_elim_abs", "gpcm_latent_reg_irt", "cm_lba2",
+            "mlumr_survival_mspline_relaxed", "hierarchical_gp", "kronecker_gp",
+            "oncobayes2_blrm_exnex_combo3")
 ARMS = ("base", "candidate")
 ALL_OPS = "1000000000"
 THREAD_ENV = {k: "1" for k in ("STAN_NUM_THREADS", "OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS",
@@ -51,19 +53,31 @@ def used_opcodes(ops_text, wanted, islands_text=""):
     return [name for name in map(short_opcode, wanted) if name in present]
 
 
+def program_opcodes(program, wanted):
+    """The named opcodes that either graph of a prepared program runs."""
+    return used_opcodes(program["ops"] + program["wa_ops"], wanted, program["islands"])
+
+
 def table_opcodes(optable_text):
     return set(re.findall(r"X\(OP_(\w+)\)", optable_text))
 
 
+def ops_change(graph, base_ops, candidate_ops):
+    old, new = opcode_counts(base_ops), opcode_counts(candidate_ops)
+    deltas = [(f"-{name}", old[name] - new[name]) for name in old if old[name] > new[name]]
+    deltas += [(f"+{name}", new[name] - old[name]) for name in new if new[name] > old[name]]
+    text = ", ".join(sign + (f" x{n}" if n > 1 else "") for sign, n in deltas)
+    return (f"{graph} {sum(old.values())} -> {sum(new.values())}: "
+            + (text or "same opcodes, different operands"))
+
+
 def program_change(base, candidate):
     """One line on how the candidate's prepared program differs, or None."""
-    if base["ops"] != candidate["ops"]:
-        old, new = opcode_counts(base["ops"]), opcode_counts(candidate["ops"])
-        deltas = [(f"-{name}", old[name] - new[name]) for name in old if old[name] > new[name]]
-        deltas += [(f"+{name}", new[name] - old[name]) for name in new if new[name] > old[name]]
-        text = ", ".join(sign + (f" x{n}" if n > 1 else "") for sign, n in deltas)
-        return (f"ops {sum(old.values())} -> {sum(new.values())}: "
-                + (text or "same opcodes, different operands"))
+    graphs = [ops_change(graph, base[key], candidate[key])
+              for graph, key in (("ops", "ops"), ("write_array ops", "wa_ops"))
+              if base[key] != candidate[key]]
+    if graphs:
+        return "; ".join(graphs)
     if base["islands"] != candidate["islands"]:
         return "islands differ"
     if base["mir"] != candidate["mir"]:
@@ -100,15 +114,34 @@ def sha(path):
     return hashlib.sha256(pathlib.Path(path).read_bytes()).hexdigest()
 
 
-def run(argv, timeout):
+def run_process(argv, timeout):
     try:
-        done = subprocess.run([str(a) for a in argv], capture_output=True, text=True,
-                              timeout=timeout, env={**os.environ, **THREAD_ENV})
+        return subprocess.run([str(a) for a in argv], capture_output=True, text=True,
+                              timeout=timeout, env={**os.environ, **THREAD_ENV}), None
     except subprocess.TimeoutExpired:
         return None, "timed out"
+
+
+def run(argv, timeout):
+    done, error = run_process(argv, timeout)
+    if error:
+        return None, error
     if done.returncode:
         return None, f"exit {done.returncode}"
     return done.stdout, None
+
+
+NO_WRITE_ARRAY = "model has no write_array graph"
+
+
+def write_array_ops(returncode, stdout, stderr):
+    """(text, failure) of dump_ops --write-array. A model with nothing to
+    write has no graph, which is an empty dump and not a failure."""
+    if returncode == 1 and stderr.strip() == NO_WRITE_ARRAY:
+        return "", None
+    if returncode:
+        return None, f"exit {returncode}"
+    return stdout, None
 
 
 def arm_tools(build):
@@ -152,9 +185,16 @@ def prepare(arm, tools, name, stan, data, out):
         if error:
             return None, f"{arm} {step} failed ({error})"
         texts[step] = text
+    done, error = run_process([tools["dump_ops"], mir, data, ALL_OPS, "--write-array"], 300)
+    if not error:
+        texts["wa_ops"], error = write_array_ops(done.returncode, done.stdout, done.stderr)
+    if error:
+        return None, f"{arm} dump_ops --write-array failed ({error})"
     (work / "ops.txt").write_text(texts["dump_ops"])
+    (work / "wa_ops.txt").write_text(texts["wa_ops"])
     (work / "islands.txt").write_text(texts["dump_islands"])
-    return dict(mir=sha(mir), ops=texts["dump_ops"], islands=texts["dump_islands"]), None
+    return dict(mir=sha(mir), ops=texts["dump_ops"], wa_ops=texts["wa_ops"],
+                islands=texts["dump_islands"]), None
 
 
 def prep_seconds(tools, mir, data):
@@ -232,8 +272,7 @@ def main(argv=None):
                if (c := program_change(programs["base", n], programs["candidate", n]))}
     opcode_users = {n: used for n in prepared
                     if (used := sorted({u for arm in ARMS
-                                     for u in used_opcodes(programs[arm, n]["ops"], opcodes,
-                                                           programs[arm, n]["islands"])}))}
+                                     for u in program_opcodes(programs[arm, n], opcodes)}))}
 
     times, prep_failures = time_preparation(prepared, arms, data, out, args.prep_reps)
     failures.update(prep_failures)

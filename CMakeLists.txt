@@ -169,9 +169,11 @@ endif()
 # tuning limits or print diagnostics (runtime/include/stanli/debug_switch.hpp).
 # Tests and investigations use them. OFF, the default and what packaging
 # builds use, compiles them out, so the runtime's behavior cannot change
-# through the environment. The tests that need them carry the debug_switches
-# label and are disabled in an OFF build (STANLI_DEBUG_SWITCH_TESTS below);
-# tools/dev_setup.sh configures ON. STANLI_NO_INTERPRETER, STANLI_ISA,
+# through the environment. The tests that use them carry the debug_switches
+# label (STANLI_DEBUG_SWITCH_TESTS below). In an OFF build a case that needs a
+# switch skips itself (tests/env_helpers.hpp), and a test whose every case
+# needs one is disabled (STANLI_DEBUG_SWITCH_ONLY_TESTS); tools/dev_setup.sh
+# configures ON. STANLI_NO_INTERPRETER, STANLI_ISA,
 # STANLI_NO_FUSED_DENSITY and STANLI_NO_O1_FALLBACK are not developer
 # switches.
 option(STANLI_DEBUG_SWITCHES
@@ -180,6 +182,7 @@ if(NOT STANLI_DEBUG_SWITCHES)
   target_compile_definitions(stanmath INTERFACE STANLI_NO_DEBUG_SWITCHES=1)
 endif()
 set(STANLI_DEBUG_SWITCH_TESTS)
+set(STANLI_DEBUG_SWITCH_ONLY_TESTS)
 
 # Chains in threads. stan-math's autodiff stack is a plain static unless
 # STAN_THREADS is defined, in which case it is thread_local (__thread on
@@ -353,6 +356,12 @@ set(STANLI_RUNTIME_SOURCES
   runtime/kernels/dae.cpp
   runtime/kernels/ode_adjoint.cpp
   runtime/src/ode_prog.cpp
+  runtime/src/mir_prog.cpp
+  runtime/src/mir_prog_fold.cpp
+  runtime/src/mir_prog_index.cpp
+  runtime/src/mir_prog_expr.cpp
+  runtime/src/mir_prog_call.cpp
+  runtime/src/mir_prog_stmt.cpp
   runtime/src/higher_order_eval.cpp
   runtime/src/program.cpp
   runtime/src/program_transform.cpp
@@ -386,11 +395,13 @@ set(STANLI_RUNTIME_SOURCES
   runtime/src/lower_expr.cpp
   runtime/src/lower_stmt.cpp
   runtime/src/lower_region_map.cpp
+  runtime/src/lower_structured_loop.cpp
   runtime/src/lower_funapp.cpp
   runtime/src/lower_higher_order.cpp
   runtime/src/structured_loop.cpp
   runtime/src/whiten.cpp
   runtime/src/sparse_factor.cpp
+  runtime/src/laplace.cpp
   runtime/src/reduce_sum.cpp
   runtime/src/init_interp.cpp
   runtime/src/unconstrain.cpp
@@ -1034,6 +1045,7 @@ foreach(_stanli_cogmod_source IN LISTS STANLI_COGMOD_SOURCES)
     PASS_REGULAR_EXPRESSION "CROSS OK "
     FAIL_REGULAR_EXPRESSION "CROSS (FAIL|SKIP)")
   list(APPEND STANLI_DEBUG_SWITCH_TESTS test_cross_path_${_stanli_cogmod})
+  list(APPEND STANLI_DEBUG_SWITCH_ONLY_TESTS test_cross_path_${_stanli_cogmod})
 endforeach()
 add_executable(bench_grad tools/bench_grad.cpp
   $<TARGET_OBJECTS:stanli_tbb_stub>)
@@ -1158,8 +1170,9 @@ if(NOT EMSCRIPTEN)
   foreach(fixture gq_bounded_vector gq_bounded_row_vector gq_bounded_integer
                   gq_integer_fill_paths gq_bounded_integer_refusals
                   gq_bounded_nested gq_bounded_nested3 gq_bounded_nested5
-                  gq_runtime_int_index gpperiodic
-                  multi_gp_rectangular propto_data_arguments propto_multi_gp)
+                  gq_runtime_int_index gq_library_rng gpperiodic gp_cov_forms
+                  multi_gp_rectangular propto_data_arguments propto_multi_gp
+                  zero_size_kernels)
     add_test(NAME ${fixture}_reference
       COMMAND ${Python3_EXECUTABLE} tools/verify_refs.py --corpus fixtures
               --check $<TARGET_FILE:stanli_check> --model ${fixture}
@@ -1207,6 +1220,10 @@ if(NOT EMSCRIPTEN)
   add_test(NAME callback_geometry
     COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_callback_geometry.py
             $<TARGET_FILE:stanli_check> $<TARGET_FILE:dump_ops>
+    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
+  add_test(NAME dump_ops_loops
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_dump_ops_loops.py
+            $<TARGET_FILE:dump_ops>
     WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
   # Native hosts initialize the sanitizer runtime before the C ABI library;
   # an ordinary Python interpreter cannot load that library with ctypes.
@@ -1369,6 +1386,7 @@ set(STANLI_TESTS
   test_eight_schools test_glm test_normal_glm test_nuts test_walnuts
   test_model_adapter test_sampler_parity
   test_mir test_mir_decode test_transforms test_eltwise test_sort test_scalar_binary
+  test_sum_accuracy
   test_lower test_region_map test_copy_prop test_dynamic_index
   test_lower_views
   test_native_matrix_pullbacks
@@ -1387,7 +1405,8 @@ set(STANLI_TESTS
   test_odevariadic test_callback_values test_algebra test_brmsmono
   test_reduce_sum
   test_structured_arrays test_pathfinder test_algorithms test_unconstrain
-  test_init_interp test_constrain_structured test_csr_times_vector)
+  test_init_interp test_constrain_structured test_csr_times_vector
+  test_laplace)
 foreach(STANLI_TEST IN LISTS STANLI_TESTS)
   stanli_add_test(${STANLI_TEST})
 endforeach()
@@ -1417,6 +1436,15 @@ if(STANLI_FAST_TEST_TUS)
   target_compile_options(test_capi PRIVATE -O0)
 endif()
 add_test(NAME test_capi COMMAND test_capi
+         WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
+
+# The Laplace whitening builder, through the same boundary.
+add_executable(test_laplace_capi tests/test_laplace_capi.cpp)
+target_link_libraries(test_laplace_capi PRIVATE stanli_shared)
+if(STANLI_FAST_TEST_TUS)
+  target_compile_options(test_laplace_capi PRIVATE -O0)
+endif()
+add_test(NAME test_laplace_capi COMMAND test_laplace_capi
          WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
 
 # write_array lowered beside log_prob, through the same boundary.
@@ -1541,6 +1569,11 @@ if(Python3_Interpreter_FOUND)
                    $<TARGET_FILE:bench_grad> ${STANLI_STANC_EXECUTABLE}
            WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
   set_tests_properties(test_prep_loop_body PROPERTIES RUN_SERIAL TRUE)
+  add_test(NAME test_prep_work
+           COMMAND ${Python3_EXECUTABLE} tests/test_prep_work.py
+                   $<TARGET_FILE:bench_grad> ${STANLI_STANC_EXECUTABLE}
+                   $<TARGET_FILE:stanli_run>
+           WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
   add_test(NAME test_missing_data
            COMMAND ${Python3_EXECUTABLE} tests/test_missing_data.py
                    $<TARGET_FILE:bench_grad> ${STANLI_STANC_EXECUTABLE}
@@ -1786,12 +1819,16 @@ if(Python3_Interpreter_FOUND)
              COMMAND ${Python3_EXECUTABLE} tests/test_hp_reference.py
              WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
   endif()
+  add_test(NAME test_verify_posteriors
+           COMMAND ${Python3_EXECUTABLE} tests/test_verify_posteriors.py
+           WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
 endif()
 
 # Tests that set developer switches, to turn a pass off for a differential
-# check, force an engine, or read a diagnostic. An OFF build ignores the
-# switches, so these would fail or check nothing there: they carry the
-# debug_switches label (ctest -L debug_switches) and are disabled.
+# check, force an engine, or read a diagnostic. They carry the debug_switches
+# label (ctest -L debug_switches). An OFF build ignores the switches, so a
+# case that needs one skips itself there; the tests listed as switch-only
+# have no case left to run and are disabled in an OFF build.
 list(APPEND STANLI_DEBUG_SWITCH_TESTS
   test_execution_report test_sampler_parity test_lower test_region_map
   test_reroll test_inplace test_pass_safety test_structured_checks
@@ -1802,14 +1839,23 @@ list(APPEND STANLI_DEBUG_SWITCH_TESTS
   test_prep_profile_reroll_dispositions test_write_array_semantics
   hypergeometric_1f0_register_reference
   hypergeometric_1f0_structured_reference callback_geometry
-  test_run_rng test_ctsem_engine test_data_loop_memo)
+  test_run_rng test_ctsem_engine test_data_loop_memo test_prep_work)
+list(APPEND STANLI_DEBUG_SWITCH_ONLY_TESTS
+  test_region_map test_structured_loop test_cross_path
+  test_wa_parallel_switches test_pass_dump_switches
+  test_prep_profile_reroll_dispositions test_ctsem_engine
+  test_data_loop_memo test_prep_work)
 foreach(_stanli_switch_test IN LISTS STANLI_DEBUG_SWITCH_TESTS)
   if(TEST ${_stanli_switch_test})
     set_property(TEST ${_stanli_switch_test} APPEND PROPERTY
                  LABELS debug_switches)
-    if(NOT STANLI_DEBUG_SWITCHES)
-      set_property(TEST ${_stanli_switch_test} PROPERTY DISABLED TRUE)
-    endif()
   endif()
 endforeach()
+if(NOT STANLI_DEBUG_SWITCHES)
+  foreach(_stanli_switch_test IN LISTS STANLI_DEBUG_SWITCH_ONLY_TESTS)
+    if(TEST ${_stanli_switch_test})
+      set_property(TEST ${_stanli_switch_test} PROPERTY DISABLED TRUE)
+    endif()
+  endforeach()
+endif()
 endif()  # NOT EMSCRIPTEN

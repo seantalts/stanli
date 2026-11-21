@@ -608,13 +608,12 @@ class MirInterp {
               drops[d] = true;
             } else if (index.kind == mir::Expr::IndexBetween ||
                        index.kind == mir::Expr::IndexUpfrom) {
-              const long lo = as_int(index.args[0]);
-              const long hi = index.kind == mir::Expr::IndexBetween
-                                  ? as_int(index.args[1])
-                                  : extent;
-              if (hi >= lo && (lo < 1 || hi > extent))
-                fail("multi-index assignment range out of bounds", st.raw);
-              for (long k = lo; k <= hi; ++k) selected[d].push_back(k - 1);
+              const RangeSelection range = range_selection(
+                  index, extent,
+                  assign_site(st.lhs, d).value_or(SelectorSite::Array), true,
+                  st.raw);
+              for (int64_t k = 0; k < range.count; ++k)
+                selected[d].push_back(range.first - 1 + k);
             } else if (index.kind == mir::Expr::IndexMulti) {
               const Value positions = eval(index.args[0]);
               if (!positions.is_int)
@@ -722,9 +721,26 @@ class MirInterp {
               static_cast<int>(as_int(st.fn_args[2])));
           return;
         }
-        if (mir::internal_name(st) == "FnValidateSizePositive" ||
-            mir::library_name(st) == "check_greater_or_equal")
+        if (mir::internal_name(st) == "FnValidateSizePositive") {
+          if (st.fn_args.size() != 3 ||
+              st.fn_args[0].kind != mir::Expr::LitStr ||
+              st.fn_args[1].kind != mir::Expr::LitStr)
+            fail("malformed FnValidateSizePositive", st.raw);
+          stan::math::validate_positive_index(
+              st.fn_args[0].lit_s.c_str(), st.fn_args[1].lit_s.c_str(),
+              static_cast<int>(as_int(st.fn_args[2])));
           return;
+        }
+        if (mir::library_name(st) == "check_greater_or_equal") {
+          if (st.fn_args.size() != 4 ||
+              st.fn_args[0].kind != mir::Expr::LitStr ||
+              st.fn_args[1].kind != mir::Expr::LitStr)
+            fail("malformed check_greater_or_equal", st.raw);
+          stan::math::check_greater_or_equal(
+              st.fn_args[0].lit_s.c_str(), st.fn_args[1].lit_s.c_str(),
+              as_int(st.fn_args[2]), as_int(st.fn_args[3]));
+          return;
+        }
         if (mir::internal_name(st) == "FnValidateSizeUnitVector") {
           if (st.fn_args.size() != 3 ||
               st.fn_args[0].kind != mir::Expr::LitStr ||
@@ -888,6 +904,9 @@ class MirInterp {
     DensityCallPlan plan;
     try {
       plan = density_call_plan(spec, plan_arguments, propto(e));
+    } catch (const DensitySizeError& error) {
+      reject(MessageError::InvalidArgument, e.name + ": " + error.what(),
+             e.raw);
     } catch (const std::exception& error) {
       fail_builtin(e.name, error, e.raw);
     }
@@ -964,6 +983,90 @@ class MirInterp {
         {nargs, (int)lanes, active, propto ? 1 : 0, (int)form.kind},
         std::move(inputs), 1)[0]};
     return result;
+  }
+
+  // How Stan Math's Eigen reduction groups a sum over a vector, row vector
+  // or matrix operand, with the phase offset; nullopt for any other operand.
+  static std::optional<std::pair<SumGrouping, int64_t>> eigen_sum_grouping(
+      const mir::Expr& operand) {
+    if (!mir::eigen_leaf(operand) || operand.unsized.depth != 0)
+      return std::nullopt;
+    ExpressionLayout layout = mir::source_expression_layout(operand);
+    const mir::Expr* base = &operand;
+    if (base->kind == mir::Expr::Indexed && !base->args.empty() &&
+        base->args[0].unsized.depth > 0)
+      base = &base->args[0];
+    CallableTransformSpec transform;
+    if (base->kind == mir::Expr::FunApp &&
+        callable_transform(base->name, &transform))
+      layout = ExpressionLayout::direct();
+    return sum_grouping(layout);
+  }
+
+  // The exp-quad, Matern and exponential covariances. L is one length scale
+  // or a std::vector with one per dimension.
+  template <typename P, typename L>
+  static Eigen::Matrix<T, Eigen::Dynamic, Eigen::Dynamic> gp_family_cov(
+      GpCov family, const P& pts, const T& sigma, const L& length_scale) {
+    switch (family) {
+      case kGpMatern32:
+        return stan::math::gp_matern32_cov(pts, sigma, length_scale);
+      case kGpMatern52:
+        return stan::math::gp_matern52_cov(pts, sigma, length_scale);
+      case kGpExponential:
+        return stan::math::gp_exponential_cov(pts, sigma, length_scale);
+      default:
+        return stan::math::gp_exp_quad_cov(pts, sigma, length_scale);
+    }
+  }
+  template <typename P, typename L>
+  static Eigen::Matrix<T, Eigen::Dynamic, Eigen::Dynamic> gp_family_cov(
+      GpCov family, const P& x1, const P& x2, const T& sigma,
+      const L& length_scale) {
+    switch (family) {
+      case kGpMatern32:
+        return stan::math::gp_matern32_cov(x1, x2, sigma, length_scale);
+      case kGpMatern52:
+        return stan::math::gp_matern52_cov(x1, x2, sigma, length_scale);
+      case kGpExponential:
+        return stan::math::gp_exponential_cov(x1, x2, sigma, length_scale);
+      default:
+        return stan::math::gp_exp_quad_cov(x1, x2, sigma, length_scale);
+    }
+  }
+
+  // gp_*_cov(x1, x2, sigma, length_scale[, period]): the cross-covariance
+  // form, always through Stan Math.
+  Value gp_cross_cov(const mir::Expr& e, GpCov family) {
+    using Vec = Eigen::Matrix<T, Eigen::Dynamic, 1>;
+    const auto points = [&](const Value& x) {
+      const int64_t N = x.dims.size() == 2 ? x.dims[0] : (int64_t)x.r.size();
+      const int64_t D = x.dims.size() == 2 ? x.dims[1] : 1;
+      std::vector<Vec> pts((size_t)N, Vec((Eigen::Index)D));
+      for (int64_t n = 0; n < N; ++n)
+        for (int64_t d = 0; d < D; ++d)
+          pts[(size_t)n]((Eigen::Index)d) = x.r.at((size_t)(n + N * d));
+      return pts;
+    };
+    const std::vector<Vec> x1 = points(eval(e.args[0]));
+    const std::vector<Vec> x2 = points(eval(e.args[1]));
+    const T sigma = eval(e.args[2]).r.at(0);
+    const Value rho = eval(e.args[3]);
+    Eigen::Matrix<T, Eigen::Dynamic, Eigen::Dynamic> c;
+    if (family == kGpPeriodic)
+      c = stan::math::gp_periodic_cov(x1, x2, sigma, rho.r.at(0),
+                                      eval(e.args[4]).r.at(0));
+    else if (e.args[3].unsized.depth == 1)
+      c = gp_family_cov(family, x1, x2, sigma, rho.r);
+    else
+      c = gp_family_cov(family, x1, x2, sigma, rho.r.at(0));
+    Value o;
+    o.dims = {(int64_t)c.rows(), (int64_t)c.cols()};
+    o.r.resize((size_t)c.size());
+    for (Eigen::Index j = 0; j < c.cols(); ++j)
+      for (Eigen::Index i = 0; i < c.rows(); ++i)
+        o.r[(size_t)(j * c.rows() + i)] = c(i, j);
+    return o;
   }
 
   // Bind and execute one graph-kernel CALL over materialized inputs. Shared
@@ -1047,10 +1150,13 @@ class MirInterp {
       }
     }
     activity &= spec.activity_mask;
-    const uint8_t variant =
+    uint8_t variant =
         spec.opcode == OP_POW
             ? mir::pow_zero_base_law(e.args[0], e.args[1], !e.args[1].data_only)
             : 0;
+    if (!std::is_same_v<T, double> && spec.opcode == OP_VARIANCE &&
+        e.args[0].unsized.depth == 1 && !e.args[0].data_only)
+      variant = kVarianceOfVarArray;
     Value o;
     std::vector<int> idata;
     if (layout.groups >= 0)
@@ -1377,11 +1483,15 @@ class MirInterp {
     std::vector<int> listed;
     if (index.kind == mir::Expr::IndexBetween ||
         index.kind == mir::Expr::IndexUpfrom) {
-      first = as_int(index.args[0]);
-      const long last = index.kind == mir::Expr::IndexBetween
-                            ? as_int(index.args[1])
-                            : extent;
-      count = last >= first ? static_cast<int64_t>(last) - first + 1 : 0;
+      // The nominal size, negative for `lo:` past extent + 1; the
+      // positions are checked below, after the size.
+      const RangeSelection range = resolve_range_selector(
+          SelectorSite::Array, extent, as_int(index.args[0]),
+          index.kind == mir::Expr::IndexBetween
+              ? std::optional<int64_t>(as_int(index.args[1]))
+              : std::nullopt);
+      first = static_cast<long>(range.first);
+      count = range.count;
     } else if (index.kind == mir::Expr::IndexMulti) {
       const Value positions = eval(index.args[0]);
       if (!positions.is_int)
@@ -1539,22 +1649,62 @@ class MirInterp {
     }
   }
 
-  // Stan Math's label for a multi, range or open-ended selector at dimension
-  // `dim` of the read `e`; `upper` picks the end of a range. Null where the
-  // container is a matrix and the generic message stays.
-  static const char* selector_read_label(const mir::Expr& e, size_t dim,
-                                         mir::Expr::Kind index,
-                                         bool upper = false) {
+  // Stan Math's label for a multi-index selector at dimension `dim` of the
+  // read `e`. Null where the container is a matrix and the generic message
+  // stays.
+  static const char* multi_read_label(const mir::Expr& e, size_t dim) {
     const mir::UnsizedView& base = e.args[0].unsized;
     if (dim < base.depth || base.leaf == mir::UnsizedLeaf::Unknown ||
         base.leaf == mir::UnsizedLeaf::Int ||
         base.leaf == mir::UnsizedLeaf::Real)
       return "array[..., ...] index";
     if (base.leaf == mir::UnsizedLeaf::Matrix) return nullptr;
-    if (index == mir::Expr::IndexMulti) return "vector[multi] indexing";
-    if (index == mir::Expr::IndexUpfrom) return "vector[min] indexing";
-    return upper ? "vector[min_max] max indexing"
-                 : "vector[min_max] min indexing";
+    return "vector[multi] indexing";
+  }
+
+  // The site of dimension `dim` of the read `e`, for Stan's range rules.
+  static SelectorSite read_site(const mir::Expr& e, size_t dim) {
+    const mir::UnsizedView& base = e.args[0].unsized;
+    if (dim < base.depth) return SelectorSite::Array;
+    if (base.leaf == mir::UnsizedLeaf::Vector ||
+        base.leaf == mir::UnsizedLeaf::RowVector)
+      return SelectorSite::Vector;
+    if (base.leaf == mir::UnsizedLeaf::Matrix)
+      return dim == base.depth ? SelectorSite::MatrixRow
+                               : SelectorSite::MatrixColumn;
+    return SelectorSite::Array;
+  }
+
+  // The site of dimension `dim` of the assigned variable `name`, when its
+  // declared shape is known.
+  std::optional<SelectorSite> assign_site(const std::string& name,
+                                          size_t dim) const {
+    const auto it = assign_shape_.find(name);
+    if (it == assign_shape_.end() || it->second.leaf == AssignLeaf::None)
+      return std::nullopt;
+    return selector_site(dim, it->second.array_levels,
+                         it->second.leaf == AssignLeaf::Matrix);
+  }
+
+  // A `lo:hi` or `lo:` selector over `extent` positions, resolved by Stan's
+  // rule for `site` and raising Stan's error. In a probe, an error marks
+  // the probe failed and returns an empty selection.
+  RangeSelection range_selection(const mir::Expr& index, int64_t extent,
+                                 SelectorSite site, bool assign,
+                                 const std::string& raw) {
+    const bool upfrom = index.kind == mir::Expr::IndexUpfrom;
+    const RangeSelection selection = resolve_range_selector(
+        site, extent, as_int(index.args[0]),
+        upfrom ? std::nullopt : std::optional<int64_t>(as_int(index.args[1])));
+    if (selection.ok()) return selection;
+    if (probe_) {
+      probe_failed_ = true;
+      return RangeSelection{};
+    }
+    const RangeSelectorError error =
+        range_selector_error(selection, site, upfrom, assign, extent);
+    reject(error.out_of_range ? MessageError::OutOfRange : MessageError::Domain,
+           error.message, raw);
   }
 
   static double val(const T& x) { return stan::math::value_of(x); }
@@ -2032,8 +2182,7 @@ class MirInterp {
       r.dims = {(int64_t)n};
       for (size_t k = 0; k < n; ++k) {
         const long p = k < ix.i.size() ? ix.i[k] : (long)val(ix.r.at(k));
-        bounds(p, (int64_t)base.r.size(), e,
-               selector_read_label(e, 0, mir::Expr::IndexMulti));
+        bounds(p, (int64_t)base.r.size(), e, multi_read_label(e, 0));
         if (probe_failed_) return r;
         r.r.push_back(base.r.at((size_t)(p - 1)));
         if (base.is_int) r.i.push_back(base.i.at((size_t)(p - 1)));
@@ -2043,19 +2192,12 @@ class MirInterp {
     // Between subrange of a 1-D value: v[a:b].
     if (e.args.size() == 2 && e.args[1].kind == mir::Expr::IndexBetween &&
         base.dims.size() <= 1) {
-      const long a = as_int(e.args[1].args[0]);
-      const long b = as_int(e.args[1].args[1]);
-      if (b >= a) {
-        bounds(a, (int64_t)base.r.size(), e,
-               selector_read_label(e, 0, mir::Expr::IndexBetween));
-        if (probe_failed_) return r;
-        bounds(b, (int64_t)base.r.size(), e,
-               selector_read_label(e, 0, mir::Expr::IndexBetween, true));
-        if (probe_failed_) return r;
-      }
+      const RangeSelection range = range_selection(
+          e.args[1], (int64_t)base.r.size(), read_site(e, 0), false, e.raw);
+      if (probe_failed_) return r;
       r.is_int = base.is_int;
-      r.dims = {b >= a ? b - a + 1 : 0};  // b < a is an empty range
-      for (long k = a; k <= b; ++k) {
+      r.dims = {range.count};
+      for (int64_t k = range.first; k < range.first + range.count; ++k) {
         r.r.push_back(base.r.at(k - 1));
         if (base.is_int) r.i.push_back(base.i.at(k - 1));
       }
@@ -2065,20 +2207,15 @@ class MirInterp {
     if (e.args.size() == 3 && e.args[1].kind == mir::Expr::IndexSingle &&
         e.args[2].kind == mir::Expr::IndexBetween && base.dims.size() == 2) {
       const long i = as_int(e.args[1].args[0]);
-      const long a = as_int(e.args[2].args[0]);
-      const long b = as_int(e.args[2].args[1]);
       const int64_t R = base.dims[0];
       bounds(i, R, e);
       if (probe_failed_) return r;
-      if (b >= a) {
-        bounds(a, base.dims[1], e);
-        if (probe_failed_) return r;
-        bounds(b, base.dims[1], e);
-        if (probe_failed_) return r;
-      }
+      const RangeSelection range = range_selection(
+          e.args[2], base.dims[1], read_site(e, 1), false, e.raw);
+      if (probe_failed_) return r;
       r.is_int = base.is_int;
-      r.dims = {b >= a ? b - a + 1 : 0};  // b < a is an empty range
-      for (long j = a; j <= b; ++j) {
+      r.dims = {range.count};
+      for (int64_t j = range.first; j < range.first + range.count; ++j) {
         r.r.push_back(base.r.at((j - 1) * R + (i - 1)));
         if (base.is_int) r.i.push_back(base.i.at((j - 1) * R + (i - 1)));
       }
@@ -2087,21 +2224,20 @@ class MirInterp {
     // X[a:b, j] on a matrix / 2-D array: rows a..b of column j.
     if (e.args.size() == 3 && e.args[1].kind == mir::Expr::IndexBetween &&
         e.args[2].kind == mir::Expr::IndexSingle && base.dims.size() == 2) {
-      const long a = as_int(e.args[1].args[0]);
-      const long b = as_int(e.args[1].args[1]);
       const long j = as_int(e.args[2].args[0]);
       const int64_t R = base.dims[0];
       bounds(j, base.dims[1], e);
       if (probe_failed_) return r;
-      if (b >= a) {
-        bounds(a, R, e);
-        if (probe_failed_) return r;
-        bounds(b, R, e);
-        if (probe_failed_) return r;
-      }
+      // Stan selects a matrix column first and indexes it as a vector.
+      const SelectorSite site = read_site(e, 0) == SelectorSite::MatrixRow
+                                    ? SelectorSite::Vector
+                                    : read_site(e, 0);
+      const RangeSelection range =
+          range_selection(e.args[1], R, site, false, e.raw);
+      if (probe_failed_) return r;
       r.is_int = base.is_int;
-      r.dims = {b >= a ? b - a + 1 : 0};  // b < a is an empty range
-      for (long k = a; k <= b; ++k) {
+      r.dims = {range.count};
+      for (int64_t k = range.first; k < range.first + range.count; ++k) {
         r.r.push_back(base.r.at((j - 1) * R + (k - 1)));
         if (base.is_int) r.i.push_back(base.i.at((j - 1) * R + (k - 1)));
       }
@@ -2137,27 +2273,18 @@ class MirInterp {
             const long i = k < positions.i.size()
                                ? positions.i[k]
                                : static_cast<long>(val(positions.r.at(k)));
-            bounds(i, extent, e, selector_read_label(e, d, index.kind));
+            bounds(i, extent, e, multi_read_label(e, d));
             if (probe_failed_) return r;
             selected[d].push_back(i - 1);
           }
-        } else if (index.kind == mir::Expr::IndexBetween) {
-          const long lo = as_int(index.args[0]);
-          const long hi = as_int(index.args[1]);
-          if (hi >= lo) {
-            bounds(lo, extent, e, selector_read_label(e, d, index.kind));
-            if (probe_failed_) return r;
-            bounds(hi, extent, e, selector_read_label(e, d, index.kind, true));
-            if (probe_failed_) return r;
-          }
-          selected[d].reserve(static_cast<size_t>(hi >= lo ? hi - lo + 1 : 0));
-          for (long i = lo; i <= hi; ++i) selected[d].push_back(i - 1);
-        } else if (index.kind == mir::Expr::IndexUpfrom) {
-          const long lo = as_int(index.args[0]);
-          bounds(lo, extent, e, selector_read_label(e, d, index.kind));
+        } else if (index.kind == mir::Expr::IndexBetween ||
+                   index.kind == mir::Expr::IndexUpfrom) {
+          const RangeSelection range =
+              range_selection(index, extent, read_site(e, d), false, e.raw);
           if (probe_failed_) return r;
-          selected[d].reserve(static_cast<size_t>(extent - lo + 1));
-          for (long i = lo; i <= extent; ++i) selected[d].push_back(i - 1);
+          selected[d].reserve(static_cast<size_t>(range.count));
+          for (int64_t k = 0; k < range.count; ++k)
+            selected[d].push_back(range.first - 1 + k);
         } else {
           supported = false;
           break;
@@ -2580,7 +2707,7 @@ class MirInterp {
     }
     if (e.name == "Modulo__") {
       const long x = as_int(e.args[0]), y = as_int(e.args[1]);
-      const long q = stan::math::modulus((int)x, (int)y);
+      const long q = int_arith(IntOp::Mod, (int)x, (int)y);
       r.is_int = true;
       r.i = {(int)q};
       r.r = {T((double)q)};
@@ -2791,10 +2918,10 @@ class MirInterp {
     }
     if ((e.name == "PMinus__" || e.name == "minus") && e.args.size() == 1 &&
         mir::is_unsized(e, mir::UnsizedLeaf::Int)) {
-      const long x = as_int(e.args[0]);
+      const int x = int_negate((int)as_int(e.args[0]));
       r.is_int = true;
-      r.i = {(int)(-x)};
-      r.r = {T((double)(-x))};
+      r.i = {x};
+      r.r = {T((double)x)};
       return r;
     }
     if (e.name == "PPlus__" || (e.name == "plus" && e.args.size() == 1))
@@ -2815,56 +2942,55 @@ class MirInterp {
                                      v.r.at((size_t)j);
       return o;
     }
-    if (e.name == "gp_exp_quad_cov" && e.args.size() == 3) {
-      // K(i,j) = alpha^2 exp(-|x_i - x_j|^2 / (2 rho^2)); x is array[N]
-      // real or array[N] vector[D] in Fortran storage.
-      Value x = eval(e.args[0]);
-      const T alpha = eval(e.args[1]).r.at(0);
-      const T rho = eval(e.args[2]).r.at(0);
-      const int64_t N = x.dims.size() == 2 ? x.dims[0] : (int64_t)x.r.size();
-      const int64_t D = x.dims.size() == 2 ? x.dims[1] : 1;
-      const T a2 = alpha * alpha;
-      const T inv2r2 = T(1.0) / (T(2.0) * rho * rho);
-      Value o;
-      o.dims = {N, N};
-      o.r.resize((size_t)(N * N));
-      for (int64_t j = 0; j < N; ++j)
-        for (int64_t i = 0; i < N; ++i) {
-          T sq = T(0.0);
-          for (int64_t d = 0; d < D; ++d) {
-            const T diff =
-                x.r.at((size_t)(i + N * d)) - x.r.at((size_t)(j + N * d));
-            sq += diff * diff;
-          }
-          o.r[(size_t)(j * N + i)] = a2 * stan::math::exp(-sq * inv2r2);
-        }
-      return o;
-    }
+    if (const std::optional<GpCov> gp = gp_cov_family(e.name);
+        gp && (int)e.args.size() == 2 + gp_cov_hyperparameters(*gp))
+      return gp_cross_cov(e, *gp);
     if (const std::optional<GpCov> gp = gp_cov_family(e.name);
         gp && (int)e.args.size() == 1 + gp_cov_hyperparameters(*gp)) {
       Value x = eval(e.args[0]);
       const T sigma = eval(e.args[1]).r.at(0);
-      const T length_scale = eval(e.args[2]).r.at(0);
+      const Value rho = eval(e.args[2]);
       const int64_t N = x.dims.size() == 2 ? x.dims[0] : (int64_t)x.r.size();
       const int64_t D = x.dims.size() == 2 ? x.dims[1] : 1;
+      // array[] real is the per-dimension overload, whatever its length.
+      const bool per_dimension =
+          e.args[2].unsized.depth == 1 || rho.r.size() != 1;
+      Value o;
+      o.dims = {N, N};
+      o.r.resize((size_t)(N * N));
+      if (*gp == kGpExpQuad && !per_dimension) {
+        // K(i,j) = alpha^2 exp(-|x_i - x_j|^2 / (2 rho^2)); x is array[N]
+        // real or array[N] vector[D] in Fortran storage.
+        const T a2 = sigma * sigma;
+        const T inv2r2 = T(1.0) / (T(2.0) * rho.r.at(0) * rho.r.at(0));
+        for (int64_t j = 0; j < N; ++j)
+          for (int64_t i = 0; i < N; ++i) {
+            T sq = T(0.0);
+            for (int64_t d = 0; d < D; ++d) {
+              const T diff =
+                  x.r.at((size_t)(i + N * d)) - x.r.at((size_t)(j + N * d));
+              sq += diff * diff;
+            }
+            o.r[(size_t)(j * N + i)] = a2 * stan::math::exp(-sq * inv2r2);
+          }
+        return o;
+      }
       using Vec = Eigen::Matrix<T, Eigen::Dynamic, 1>;
       std::vector<Vec> pts((size_t)N, Vec((Eigen::Index)D));
       for (int64_t n = 0; n < N; ++n)
         for (int64_t d = 0; d < D; ++d)
           pts[(size_t)n]((Eigen::Index)d) = x.r.at((size_t)(n + N * d));
       Eigen::Matrix<T, Eigen::Dynamic, Eigen::Dynamic> c;
-      if (*gp == kGpPeriodic)
-        c = stan::math::gp_periodic_cov(pts, sigma, length_scale,
+      if (*gp == kGpPeriodic) {
+        if (per_dimension)
+          fail(e.name + ": the length scale must be a scalar", e.raw);
+        c = stan::math::gp_periodic_cov(pts, sigma, rho.r.at(0),
                                         eval(e.args[3]).r.at(0));
-      else if (*gp == kGpMatern32)
-        c = stan::math::gp_matern32_cov(pts, sigma, length_scale);
-      else if (*gp == kGpMatern52)
-        c = stan::math::gp_matern52_cov(pts, sigma, length_scale);
-      else
-        c = stan::math::gp_exponential_cov(pts, sigma, length_scale);
-      Value o;
-      o.dims = {N, N};
-      o.r.resize((size_t)(N * N));
+      } else if (per_dimension) {
+        c = gp_family_cov(*gp, pts, sigma, rho.r);
+      } else {
+        c = gp_family_cov(*gp, pts, sigma, rho.r.at(0));
+      }
       for (int64_t j = 0; j < N; ++j)
         for (int64_t i = 0; i < N; ++i) o.r[(size_t)(j * N + i)] = c(i, j);
       return o;
@@ -2883,39 +3009,37 @@ class MirInterp {
         return r;
       }
       if constexpr (std::is_same_v<T, double>) {
-        const mir::Expr& operand = e.args[0];
-        if (mir::eigen_leaf(operand) && operand.unsized.depth == 0) {
-          ExpressionLayout layout = mir::source_expression_layout(operand);
-          const mir::Expr* base = &operand;
-          if (base->kind == mir::Expr::Indexed && !base->args.empty() &&
-              base->args[0].unsized.depth > 0)
-            base = &base->args[0];
-          CallableTransformSpec transform;
-          if (base->kind == mir::Expr::FunApp &&
-              callable_transform(base->name, &transform))
-            layout = ExpressionLayout::direct();
-          if (layout.packet_access()) {
-            if (a.r.empty())
-              r.r = {0.0};
-            else if (layout.direct_access() && layout.element_offset != 0)
-              r.r = {reduce_phased(a.r.data(), (int64_t)a.r.size(),
-                                   layout.element_offset,
-                                   Eigen::internal::scalar_sum_op<double>())};
-            else {
-              const Eigen::Map<const Eigen::VectorXd> input(a.r.data(),
-                                                            a.r.size());
-              r.r = {input
-                         .unaryExpr(
-                             Eigen::internal::core_cast_op<double, double>())
-                         .sum()};
-            }
-            return r;
-          }
+        const auto grouping = eigen_sum_grouping(e.args[0]);
+        if (grouping && grouping->first != SumGrouping::InOrder) {
+          r.r = {sum_grouped(a.r.data(), (int64_t)a.r.size(), grouping->first,
+                             grouping->second)};
+          return r;
         }
       }
       const BuiltinSpec* reduction = reduction_builtin_spec(e.name, 1);
       if (reduction == nullptr)
         fail("sum: missing reduction descriptor", e.raw);
+      std::vector<Value> values;
+      values.push_back(std::move(a));
+      return builtin_kernel_eval(e, *reduction, std::move(values));
+    }
+    // mean is the grouped sum over n, as Eigen's mean() computes it for the
+    // container Stan Math receives: in order for autodiff values, and for
+    // data the grouping of the Eigen view or, for a std::vector, packets.
+    if (e.name == "mean" && e.args.size() == 1) {
+      Value a = eval(e.args[0]);
+      if constexpr (std::is_same_v<T, double>) {
+        stan::math::check_nonzero_size("mean", "m", a.r);
+        const auto grouping = eigen_sum_grouping(e.args[0]).value_or(
+            std::pair<SumGrouping, int64_t>{SumGrouping::Packet, 0});
+        r.r = {sum_grouped(a.r.data(), (int64_t)a.r.size(), grouping.first,
+                           grouping.second) /
+               static_cast<double>(a.r.size())};
+        return r;
+      }
+      const BuiltinSpec* reduction = reduction_builtin_spec(e.name, 1);
+      if (reduction == nullptr)
+        fail("mean: missing reduction descriptor", e.raw);
       std::vector<Value> values;
       values.push_back(std::move(a));
       return builtin_kernel_eval(e, *reduction, std::move(values));

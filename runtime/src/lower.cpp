@@ -3,6 +3,7 @@
 #include "build_id.hpp"
 #include "lower_work.hpp"
 #include "lower_worker.hpp"
+#include "pass_util.hpp"
 #include <stanli/debug_switch.hpp>
 #include <stanli/gp_cov_fusion.hpp>
 #include <stanli/target_sums.hpp>
@@ -58,7 +59,8 @@ Lowering::Lowering(const DataMap& d, PrepTrace& p, PassDumper& dump_to,
                std::make_shared<ShapeInterner>(*prepared_context.shapes)) {
   const auto env_copy_time = prep.start();
   copy_named(td.env(), prepared_context.environment, &prepared_context.names);
-  omitted_data = prepared_context.omitted_data;
+  count_data_copy(td.env());
+  zero_size_data = prepared_context.zero_size_data;
   int_env = prepared_context.integers;
   copy_named(decls, prepared_context.declarations, &prepared_context.names);
   prepared_names = prepared_context.names;
@@ -70,10 +72,11 @@ Lowering::Lowering(Lowering& parent, RegionTrialTag,
                parent.td_rng,
                std::make_shared<ShapeInterner>(*parent.shape_pool)) {
   compile_options = parent.compile_options;
-  omitted_data = parent.omitted_data;
+  zero_size_data = parent.zero_size_data;
   fun_defs = parent.fun_defs;
   copy_named(decls, parent.decls, names);
   copy_named(td.env(), parent.td.env(), names);
+  count_data_copy(td.env());
   copy_named(int_env, parent.int_env, names);
   if (!names)
     int_locals = parent.int_locals;
@@ -88,8 +91,8 @@ Lowering::Lowering(Lowering& parent, RegionTrialTag,
 PreparedContext Lowering::prepared_context() {
   if (!data_prepared)
     throw std::logic_error("lowering has not prepared model data");
-  return {td_rng, shape_pool,   td.env(),      int_env_data,
-          decls,  omitted_data, prepared_names};
+  return {td_rng, shape_pool,     td.env(),      int_env_data,
+          decls,  zero_size_data, prepared_names};
 }
 Lowering Lowering::fork_region_trial(const std::set<std::string>* names) {
   return Lowering(*this, RegionTrialTag{}, names);
@@ -148,51 +151,16 @@ void Lowering::observe_indexed_rhs(const mir::Expr& rhs, const Val& v) {
     // graph values and deliberately do not acquire a compile-time binding.
   }
 }
-// CmdStan's var_context validates every declared dimension against the
-// supplied values before it reads one, and throws std::invalid_argument
-// naming the variable and both shapes. Without the same check the short
-// side is read past its end, and a host that tells bad data from a
-// broken model by the exception type sees the wrong answer. Only the
-// element count is compared: JSON carries a nested shape but stanc has
-// already flattened the read, and a declaration whose extents multiply
-// out to the supplied count is the shape the reader would produce.
+// CmdStan checks every data variable's dims before it reads one.
 void Lowering::validate_data_dims(const std::string& name,
                                   const mir::SizedType& t) {
-  const DataMap::Entry* supplied = data_entry(name);
-  if (!supplied) return;
-  const DataMap::Entry& en = *supplied;
-  // A declared-int variable must arrive integer-typed, as CmdStan's
-  // var_context requires (JSON 1.0 is not an int there either). Without
-  // this the entry binds as typeless reals and the failure surfaces at
-  // whatever consumer touches it first, e.g. the gather index guard.
-  if ((t.base == "SInt" || (t.base == "SArray" && t.elem_base == "SInt")) &&
-      !en.is_int)
-    throw std::invalid_argument(
-        "int variable contained non-int values; processing stage=data "
-        "initialization; variable name=" +
-        name + "; base type=int");
-  const int64_t found = (int64_t)std::max(en.r.size(), en.i.size());
+  if (!data.has(name)) return;
   const std::vector<int64_t> declared = sized_dims(t);
-  int64_t want = 1;
-  for (int64_t d : declared) {
+  for (int64_t d : declared)
     if (d < 0) fail("negative extent for data " + name, t.raw);
-    want *= d;
-  }
-  if (want == found) return;
-  const auto tuple = [](const std::vector<int64_t>& dims) {
-    std::string s = "(";
-    for (size_t k = 0; k < dims.size(); ++k) {
-      if (k) s += ',';
-      s += std::to_string(dims[k]);
-    }
-    return s + ")";
-  };
-  throw std::invalid_argument(
-      "mismatch in dimension declared and found in context; processing "
-      "stage=data initialization; variable name=" +
-      name + "; position=0; dims declared=" + tuple(declared) +
-      "; dims found=" +
-      tuple(en.dims.empty() ? std::vector<int64_t>{found} : en.dims));
+  check_declared_dims(
+      VarStage::Data, name, declared, data.at(name),
+      t.base == "SInt" || (t.base == "SArray" && t.elem_base == "SInt"));
 }
 void Lowering::scan_rebuild(const mir::Stmt& s, RebuildShape& shape) {
   switch (s.kind) {
@@ -278,7 +246,7 @@ struct ExtentScope {
   ~ExtentScope() { flag = false; }
 };
 }  // namespace
-void Lowering::omit_zero_size(const std::string& name,
+void Lowering::bind_zero_size(const std::string& name,
                               const mir::SizedType& type) {
   if (type.dims.empty()) return;
   std::vector<int64_t> dims;
@@ -293,9 +261,9 @@ void Lowering::omit_zero_size(const std::string& name,
   if (size != 0) return;
   if (type.base == "SInt" ||
       (type.base == "SArray" && type.elem_base == "SInt"))
-    omitted_data.set_int_array(name, {}, std::move(dims));
+    zero_size_data.set_int_array(name, {}, std::move(dims));
   else
-    omitted_data.set_real_array(name, {}, std::move(dims));
+    zero_size_data.set_real_array(name, {}, std::move(dims));
 }
 void Lowering::bind_data(const mir::Program& p) {
   std::set<std::string> input_names;
@@ -305,7 +273,7 @@ void Lowering::bind_data(const mir::Program& p) {
     input_names.insert(name);
     // A tuple's leaf is read under its CmdStan key.
     const std::string& key = mir::detail::data_key(p, name);
-    if (!data_entry(key)) omit_zero_size(key, type);
+    bind_zero_size(key, type);
     if (!data_entry(key)) {
       all_inputs_bound = false;
       continue;
@@ -1033,6 +1001,10 @@ void Lowering::run_passes(const std::vector<int>& roots, const PassPlan& plan) {
   // `target +=` can hand them over one by one, for reroll to vectorize.
   // First, so that every pass configuration sees the same terms.
   if (!in_write_array) split_target_sums(g, out.fills, target_terms, roots);
+  // A slot that `target +=` added k times becomes one term times k here,
+  // whichever passes run, so that switching a pass off does not change how
+  // the target is summed.
+  scale_repeated_terms(g, out.fills, target_terms);
   const std::vector<int> update_roots = roots_with_terms();
   fuse_gp_diagonal_updates(g, update_roots);
   const auto inplace_time = prep.start();
@@ -1065,6 +1037,8 @@ void Lowering::run_passes(const std::vector<int>& roots, const PassPlan& plan) {
         rerolled.regions, rerolled.list_steps, false, 0,
         rerolled.candidate_steps, rerolled.row_steps, &rerolled,
         rerolled.term_steps);
+  const bool lane_report = debug_env("STANLI_LANE_REPORT") != nullptr;
+  if (lane_report) print_lane_declines(rerolled.declines, "reroll", prep_graph);
   // Re-roll can replace many element writes with copying slice stores, and
   // may have replaced target terms with vector reductions: rebuild the
   // implicit-root set before giving those new ops the same last-use proof
@@ -1099,6 +1073,8 @@ void Lowering::run_passes(const std::vector<int>& roots, const PassPlan& plan) {
     trace("partition", partition_time, roots, PrepTrace::Extra::Partition,
           parted.groups, parted.lanes, false, 0, parted.declined,
           parted.list_steps, nullptr, parted.term_steps);
+    if (lane_report)
+      print_lane_declines(parted.declines, "partition", prep_graph);
     // Same proof the slice stores re-roll makes get: rebuilt from the
     // terms partition just replaced.
     const std::vector<int> post_partition_roots = roots_with_terms();
@@ -1149,6 +1125,13 @@ CompiledModel::WriteArray Lowering::run_write_array(const mir::Program& p) {
   // did not recognize still folds away with both pinned on.
   int_env["emit_transformed_parameters__"] = 1;
   int_env["emit_generated_quantities__"] = 1;
+  const std::function<void(const mir::Stmt&)> sizes = [&](const mir::Stmt& s) {
+    if (s.kind == mir::Stmt::Decl)
+      for (const mir::Expr& d : s.decl_type.dims)
+        mir::collect_names(d, &write_array_size_names);
+    for (const mir::Stmt& child : s.body) sizes(child);
+  };
+  for (const mir::Stmt& s : p.generate_quantities) sizes(s);
   CompiledModel::WriteArray wa;
   DumpOnThrow guard{*this};
   const auto lower_time = prep.start();
@@ -1189,6 +1172,7 @@ CompiledModel::WriteArray Lowering::run_write_array(const mir::Program& p) {
   prep.graph(prep_graph, "lower", lower_time, g, out.fills, target_terms.size(),
              out.views.size(), PrepTrace::Extra::Truncated,
              wa.truncated.has_value());
+  prep.work(prep_graph);
   dump("lower", roots);
 
   run_passes(roots, kWriteArrayPasses);
@@ -1250,6 +1234,7 @@ CompiledModel Lowering::run(const mir::Program& p) {
   }
   prep.graph(prep_graph, "lower", lower_time, g, out.fills, target_terms.size(),
              out.views.size());
+  prep.work(prep_graph);
   dump("lower", {});
   // Jacobian terms and constrained-parameter views are read straight out
   // of the arena, so no op consumes them and the pass cannot infer them.
@@ -1469,7 +1454,7 @@ class WriteArrayLowering {
         data_, trace_, dumper_, "write_array",
         PreparedContext{log_prob.td_rng, log_prob.shape_pool, no_environment,
                         log_prob.int_env_data, no_declarations,
-                        log_prob.omitted_data, log_prob.prepared_names});
+                        log_prob.zero_size_data, log_prob.prepared_names});
     const auto select_time = trace_.start();
     // Moved, not copied: log_prob is done with them, and finish() moves
     // them back.

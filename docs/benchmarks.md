@@ -519,6 +519,21 @@ fallback are in
 [`benchmark-points.json.gz`](internal/artifacts/benchmark-points.json.gz).
 Both engines read the same vectors. The tables mark fallback models with †.
 
+Each entry also records the Stanli build id and C ABI version of the library
+that ran its reference run. These two values are provenance and nothing
+compares them with the build under test. The file mixes builds on purpose:
+`tools/gen_benchmark_points.py --missing` runs only new or changed models with
+the current build and keeps every other entry. The ABI version counts changes
+to the C function signatures, and the points are plain lists of doubles that
+every build reads the same way, so an entry stays usable after the ABI number
+moves. What can make an entry wrong is a changed model source or data, which
+the loader rejects through the two hashes, or a changed number of parameters,
+which the timing drivers reject. A newer sampler would draw different points
+and take a somewhat different number of gradients. That moves the total
+sampling estimate for the model. It does not move the gradient comparison,
+because both engines evaluate the same points. Rerun a model's reference run
+with `--models` when a change to NUTS or adaptation should move its count.
+
 ### Gradient time
 
 Each engine builds its model and evaluates every point once outside the
@@ -821,10 +836,18 @@ model with each revision's own compiler, prepares it with each revision's
 runtime, and selects these models:
 
 - Every model whose prepared program differs: the MIR, the `dump_ops` op list
-  or the `dump_islands` output.
-- Every model that runs an opcode named with `--opcodes`. Name each opcode
+  of the log-density graph or of the `write_array` graph (`dump_ops
+  --write-array`; each list includes the ops inside each retained loop body),
+  or the `dump_islands` output. Some models keep their retained loops only in
+  the `write_array` graph, for example `covid19imperial_v2`,
+  `covid19imperial_v3` and `iohmm_reg`.
+- Every model that runs an opcode named with `--opcodes` in either graph or
+  an island. Name each opcode
   whose kernel the change edits. A kernel change leaves the program as it
   was, and a tool cannot tell reliably which opcodes a source change touches.
+  Opcodes match by exact name. A retained loop runs some ops under their
+  `_DYNAMIC` names, for example `MATRIX_EXP_DYNAMIC` in the ctsem models, so
+  name those as well.
 - Every model whose preparation gets slower by more than 2% or 5 ms. The
   tool times preparation for every model in both revisions, one process at a
   time with the revisions alternating, and keeps the best of three. A pass
@@ -836,16 +859,34 @@ runtime, and selects these models:
 The controls catch speed changes that come from the binary alone. For
 example, PR #600 inserted an opcode in the middle of the opcode list, which
 renumbered the opcodes after it. `i319_pois_re` got 3.4% slower with an
-identical program. The controls cover different kinds and sizes of model:
+identical program. The controls cover different kinds and sizes of model.
+The last column is the spread of the paired gradient speedup in the
+[published run](../output/corpus-performance/README.md): the median absolute
+deviation of the paired speedup, as a fraction of the speedup:
 
-| Model | Why it is a control |
-| --- | --- |
-| `i319_pois_re` | brms Poisson model with random effects; slowed in PR #600 with an identical program |
-| `arma11` | short scalar time-series loop; also flagged in PR #600 with an identical program |
-| `eight_schools_noncentered` | tiny model, where fixed per-gradient costs dominate |
-| `hmm_example` | hidden Markov model with a forward-algorithm loop |
-| `one_comp_mm_elim_abs` | ODE solver |
-| `gpcm_latent_reg_irt` | 530 parameters and large data |
+| Model | Why it is a control | Spread |
+| --- | --- | ---: |
+| `i319_pois_re` | brms Poisson model with random effects; slowed in PR #600 with an identical program | 0.70% |
+| `sw_ar` | brms autoregressive model; a short loop in which each step reads the previous residuals | 0.46% |
+| `eight_schools_noncentered` | tiny model, where fixed per-gradient costs dominate | 0.51% |
+| `hmm_example` | hidden Markov model with a forward-algorithm loop | 0.93% |
+| `one_comp_mm_elim_abs` | ODE solver | 1.46% |
+| `gpcm_latent_reg_irt` | 530 parameters and large data | 0.41% |
+| `cm_lba2` | cogmod model that runs as a region map | 0.20% |
+| `mlumr_survival_mspline_relaxed` | mlumr model with two retained loops (`OP_LOOP`) | 0.24% |
+| `hierarchical_gp` | Gaussian process covariance with Cholesky factors, 933 parameters | 0.04% |
+| `kronecker_gp` | dense linear algebra: symmetric eigendecomposition and matrix products | 0.41% |
+| `oncobayes2_blrm_exnex_combo3` | oncobayes2 model: CRAN package code with `multi_normal_cholesky` | 0.31% |
+
+A control is only useful if its own timing is steadier than the shift it has
+to expose. The first version of this table used `arma11`, a short scalar
+time-series loop. It has the largest spread of the 362 timed models, 7.6%
+against a median of 0.62%, so it could not show a 2% to 4% change. `sw_ar`
+replaces it with a model of the same kind and a spread of 0.46%. The new rows
+fill the paths that no earlier control reached: the region map, retained
+loops, Gaussian processes, dense linear algebra and a CRAN package. Each new
+control has a spread below 0.5%, and `tests/test_bench_select.py` fails if
+any control's spread in the published run exceeds 1.5%.
 
 `OUT/selection.json` holds the evidence: build identities, counts, each
 changed model with a one-line summary of its opcode changes, the models that

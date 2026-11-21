@@ -79,11 +79,11 @@ int main() {
   CompiledModel synthetic;
   auto region = std::make_shared<IslandProg>();
   region->native_adj = true;
-  const Kernel* softmax = find_kernel(OP_SOFTMAX);
+  const Kernel* log_softmax = find_kernel(OP_LOG_SOFTMAX);
   Program::Call call;
-  call.opcode = OP_SOFTMAX;
-  call.forward = softmax->forward;
-  call.backward = softmax->backward;
+  call.opcode = OP_LOG_SOFTMAX;
+  call.forward = log_softmax->forward;
+  call.backward = log_softmax->backward;
   call.out_len = 2;
   region->calls.push_back(call);
   region->code.emplace_back(Program::CALL, 0, 0);
@@ -165,6 +165,8 @@ int main() {
   // One registry entry supplies ordinary graph calls, retained-loop calls,
   // and register CALL instructions without a model-level MIR fallback.
   for (int mode : {0, 1, 2, 3, 4}) {
+    if ((mode == 1 || mode == 2 || mode == 4) && !debug_switches_available())
+      continue;
     auto inputs =
         DataMap::from_json(slurp("tests/fixtures/hypergeometric_1f0.json"));
     if (mode == 0) {
@@ -254,7 +256,8 @@ int main() {
   compile_model(source, data);
   test_unsetenv("STANLI_EXECUTION_REPORT");
   set_diagnostic_sink(nullptr);
-  check(!diagnostics.empty(), "environment opt-in emits a manifest");
+  if (debug_switches_available())
+    check(!diagnostics.empty(), "environment opt-in emits a manifest");
   check(execution_report(observed) == execution_report(model),
         "diagnostics preserve structure");
   Executor a(std::move(model.graph)), b(std::move(observed.graph));

@@ -8,13 +8,15 @@
 // Multi-normal takes a mean plus a square covariance or Cholesky factor and
 // produces a
 // vector, and dirichlet takes one concentration vector and produces a
-// same-length simplex draw. The stream is evaluation state, not graph/model
-// state, so callers can interleave independent chains through one compiled
-// model without sharing or resetting a stream.
+// same-length simplex draw. A LibraryRng variant calls one Stan Math RNG
+// with vector and matrix arguments. The stream is evaluation state, not
+// graph/model state, so callers can interleave independent chains through one
+// compiled model without sharing or resetting a stream.
 #include <stanli/graph.hpp>
 #include <stanli/optable.hpp>
 #include <stanli/wa_interp.hpp>
 
+#include <algorithm>
 #include <cstddef>
 #include <stdexcept>
 
@@ -55,6 +57,24 @@ void rng_fwd(KernelCtx& ctx) {
     dirichlet_rng_draw(ctx.in[0].data, static_cast<size_t>(ctx.in[0].len),
                        ctx.out.data, static_cast<size_t>(ctx.out.len),
                        *ctx.eval_state->wa_rng);
+    return;
+  }
+  if (const LibraryRngSpec* spec = library_rng_spec(ctx.variant)) {
+    // idata holds each argument's rows and columns.
+    if (ctx.n_in != spec->arity || ctx.n_idata != 2 * spec->arity)
+      throw std::logic_error("malformed library RNG op");
+    RngArgument args[3]{};
+    for (int k = 0; k < ctx.n_in; ++k)
+      args[k] = {ctx.in[k].data, static_cast<size_t>(ctx.in[k].len),
+                 spec->args[k] == RngArgumentKind::Real ||
+                     spec->args[k] == RngArgumentKind::Int,
+                 static_cast<size_t>(ctx.idata[2 * k]),
+                 static_cast<size_t>(ctx.idata[2 * k + 1])};
+    const RngDraw draw =
+        library_rng_draw(*spec, args, spec->arity, *ctx.eval_state->wa_rng);
+    if ((int64_t)draw.values.size() != ctx.out.len)
+      throw std::logic_error("library RNG output size mismatch");
+    std::copy(draw.values.begin(), draw.values.end(), ctx.out.data);
     return;
   }
   const ScalarRng family = static_cast<ScalarRng>(ctx.variant);

@@ -44,7 +44,7 @@ test_that("native within-chain reductions reach sampling and gradients", {
   expect_equal(small$reduce_sum_count, 0L)
   expect_gt(length(small$reduce_sum_fallbacks), 0)
   wrapper <- expect_silent(cstan_model(reduce_source)$sample(data=data, chains=1,
-      iter_warmup=10, iter_sampling=5, threads_per_chain=2, refresh=0))
+      iter_warmup=150, iter_sampling=5, threads_per_chain=2, refresh=0))
   expect_equal(wrapper$stanli_fit()$model$reduce_sum_count, 1L)
   expect_equal(wrapper$stanli_fit()$model$threads_per_chain, 2)
 })
@@ -54,7 +54,7 @@ test_that("sampling uses the thread count the model was built with", {
   skip_without_threads()
   data <- list(N=100000L, y=seq(-1, 2, length.out=100000))
   m <- stanli_model(code=reduce_source, data=data, threads_per_chain=2)
-  args <- list(chains=1, warmup=10, samples=5, refresh=0, max_depth=5)
+  args <- list(chains=1, warmup=150, samples=5, refresh=0, max_depth=5)
   kept <- expect_silent(do.call(sample_model, c(list(m), args)))
   expect_equal(kept$model$threads_per_chain, 2)
   expect_true(identical(kept$model$ptr, m$ptr))

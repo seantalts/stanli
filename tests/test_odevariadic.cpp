@@ -494,7 +494,7 @@ int main() {
       fixture_spec(oracle_cm.graph, OdeSpec::RK45);
   expect_true("oracle fixture exposes a modern rk45 rhs",
               oracle_rk45_spec != nullptr);
-  if (oracle_rk45_spec)
+  if (oracle_rk45_spec && debug_switches_available())
     expect_true("inverse selector disables direct RK at lowering",
                 !oracle_rk45_spec->direct_rk_enabled);
 

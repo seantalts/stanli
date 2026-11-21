@@ -20,6 +20,11 @@ struct DynamicIndexSpec {
     // -1 keeps count fixed. Multi reads an explicit logical count; Range
     // reads its inclusive runtime endpoint and derives max(0, hi-lo+1).
     int64_t count_input_offset = -1;
+    // A Range written `lo:`, whose empty selection Stan still checks: on a
+    // vector or matrix axis lo must be in range, and on an array axis the
+    // size extent - lo + 1 must not be negative (resolve_range_selector).
+    bool upfrom = false;
+    bool array_axis = false;
     // KernelCtx input descriptor containing each runtime field. Existing
     // hand-built and packed descriptors use input 1 for every field. Native
     // structured lowering may instead bind common-rank selector values

@@ -18,7 +18,6 @@ extern SEXP stanli_r_thread_safe(void);
 extern SEXP stanli_r_build_id(void);
 extern SEXP stanli_r_bridgestan_data(SEXP, SEXP, SEXP);
 extern SEXP stanli_r_n_unconstrained(SEXP);
-extern SEXP stanli_r_column_names(SEXP);
 extern SEXP stanli_r_warnings(SEXP);
 extern SEXP stanli_r_transformed_data_rng(SEXP);
 extern SEXP stanli_r_grad(SEXP, SEXP);
@@ -27,13 +26,11 @@ extern SEXP stanli_r_model_whiten(SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP,
                                   SEXP, SEXP);
 extern SEXP stanli_r_param_blocks(SEXP);
 extern SEXP stanli_r_parameter_annotations(SEXP);
-extern SEXP stanli_r_sparse_factor_new(SEXP, SEXP, SEXP, SEXP, SEXP);
-extern SEXP stanli_r_sparse_factor_get(SEXP, SEXP);
-extern SEXP stanli_r_sparse_factor_lowrank(SEXP, SEXP, SEXP);
+extern SEXP stanli_r_laplace_whiten(SEXP, SEXP, SEXP, SEXP);
 extern SEXP stanli_r_unconstrain_inits(SEXP, SEXP);
 extern SEXP stanli_r_pathfinder_inits(SEXP, SEXP, SEXP, SEXP, SEXP);
 extern SEXP stanli_r_check_sample_options(SEXP);
-extern SEXP stanli_r_sample(SEXP, SEXP, SEXP, SEXP, SEXP, SEXP);
+extern SEXP stanli_r_sample(SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP);
 extern SEXP stanli_r_sampler_columns(void);
 extern SEXP stanli_r_summary(SEXP, SEXP);
 extern SEXP stanli_r_diagnose(SEXP, SEXP, SEXP, SEXP, SEXP);
@@ -64,7 +61,6 @@ static const R_CallMethodDef CallEntries[] = {
     {"stanli_r_build_id", (DL_FUNC)&stanli_r_build_id, 0},
     {"stanli_r_bridgestan_data", (DL_FUNC)&stanli_r_bridgestan_data, 3},
     {"stanli_r_n_unconstrained", (DL_FUNC)&stanli_r_n_unconstrained, 1},
-    {"stanli_r_column_names", (DL_FUNC)&stanli_r_column_names, 1},
     {"stanli_r_warnings", (DL_FUNC)&stanli_r_warnings, 1},
     {"stanli_r_transformed_data_rng", (DL_FUNC)&stanli_r_transformed_data_rng,
      1},
@@ -74,15 +70,12 @@ static const R_CallMethodDef CallEntries[] = {
     {"stanli_r_param_blocks", (DL_FUNC)&stanli_r_param_blocks, 1},
     {"stanli_r_parameter_annotations", (DL_FUNC)&stanli_r_parameter_annotations,
      1},
-    {"stanli_r_sparse_factor_new", (DL_FUNC)&stanli_r_sparse_factor_new, 5},
-    {"stanli_r_sparse_factor_get", (DL_FUNC)&stanli_r_sparse_factor_get, 2},
-    {"stanli_r_sparse_factor_lowrank", (DL_FUNC)&stanli_r_sparse_factor_lowrank,
-     3},
+    {"stanli_r_laplace_whiten", (DL_FUNC)&stanli_r_laplace_whiten, 4},
     {"stanli_r_unconstrain_inits", (DL_FUNC)&stanli_r_unconstrain_inits, 2},
     {"stanli_r_pathfinder_inits", (DL_FUNC)&stanli_r_pathfinder_inits, 5},
     {"stanli_r_check_sample_options", (DL_FUNC)&stanli_r_check_sample_options,
      1},
-    {"stanli_r_sample", (DL_FUNC)&stanli_r_sample, 6},
+    {"stanli_r_sample", (DL_FUNC)&stanli_r_sample, 7},
     {"stanli_r_sampler_columns", (DL_FUNC)&stanli_r_sampler_columns, 0},
     {"stanli_r_summary", (DL_FUNC)&stanli_r_summary, 2},
     {"stanli_r_diagnose", (DL_FUNC)&stanli_r_diagnose, 5},

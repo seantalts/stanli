@@ -171,7 +171,7 @@ test_that("sample_cstan refuses unsupported options before preparing a model", {
 test_that("zero-output models expose lp and diagnostics through native adapters", {
   skip_without_runtime()
   fit <- sample_cstan("model { target += 0; }",chains=1,iter_warmup=0,
-                      iter_sampling=5,seed=10,refresh=0)
+                      iter_sampling=5,seed=10,refresh=0,adapt_engaged=FALSE)
   expect_identical(posterior::variables(fit$draws()),"lp__")
   expect_equal(dim(fit$draws()),c(5,1,1))
   expect_equal(dim(fit$sampler_diagnostics()),c(5,1,6))

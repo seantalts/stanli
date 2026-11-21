@@ -13,12 +13,15 @@
 // each is stated where it is used.
 #include <stanli/capi.h>
 
+#include <chrono>
 #include <cmath>
 #include <cstdio>
 #include <cstring>
 #include <fstream>
+#include <functional>
 #include <sstream>
 #include <string>
+#include <thread>
 #include <vector>
 
 namespace {
@@ -325,6 +328,420 @@ void test_optimize_options(stanli_model* m) {
   expect("optimize rejects a negative init_radius",
          rc != 0 &&
              std::string(err) == "init_radius must be a finite number >= 0");
+}
+
+stanli_model* from_stan(const char* code) {
+  if (!stanli_has_embedded_stanc()) return nullptr;
+  char err[4096]{};
+  stanli_model* m = stanli_model_new_from_stan_with_opts(code, "{}", nullptr,
+                                                         err, sizeof err);
+  if (m == nullptr) {
+    ++failures;
+    std::printf("FAIL compiling a test model: %s\n", err);
+  }
+  return m;
+}
+
+// CmdStan's optimize draws the row at the mode from the stream that chose
+// the start, create_rng(seed, chain_id), as fixed_param draws its first row.
+void test_optimize_generated_quantities_stream() {
+  stanli_model* m = from_stan(
+      "parameters { real mu; } model { mu ~ normal(0, 1); }\n"
+      "generated quantities { real y = normal_rng(0, 1); }\n");
+  if (m == nullptr) return;
+  const auto y_at_mode = [m](uint32_t seed, int chain_id) {
+    stanli_optimize_opts o;
+    stanli_optimize_opts_init(&o);
+    o.seed = seed;
+    o.chain_id = chain_id;
+    double q = 0, lp = 0, values[2] = {0, 0};
+    char err[4096]{};
+    const int rc = stanli_optimize(m, &o, &q, values, &lp, err, sizeof err);
+    expect(std::string("optimize runs: ") + err, rc == 0);
+    return values[1];
+  };
+  const auto y_fixed_param = [m](uint32_t seed, int chain_id) {
+    stanli_fixed_param_opts o;
+    stanli_fixed_param_opts_init(&o);
+    o.seed = seed;
+    o.chains = 1;
+    o.chain_id = chain_id;
+    o.samples = 1;
+    double values[2] = {0, 0};
+    char err[4096]{};
+    const int rc =
+        stanli_fixed_param(m, &o, values, nullptr, nullptr, nullptr, nullptr,
+                           nullptr, nullptr, err, sizeof err);
+    expect(std::string("fixed_param runs: ") + err, rc == 0);
+    return values[1];
+  };
+  const double y5 = y_at_mode(5, 1);
+  expect("optimize generated quantities repeat for one seed",
+         y_at_mode(5, 1) == y5);
+  expect("optimize generated quantities follow the seed",
+         y_at_mode(6, 1) != y5);
+  expect("optimize generated quantities follow the chain id",
+         y_at_mode(5, 2) != y5);
+  for (int chain_id : {1, 2})
+    expect("optimize draws from the (seed, chain_id) stream of fixed_param",
+           y_at_mode(5, chain_id) == y_fixed_param(5, chain_id));
+  // A supplied start still moves the stream on by one draw per parameter,
+  // as CmdStan's initialize does; fixed_param runs that initialize itself.
+  {
+    const double start = 0.25;
+    stanli_optimize_opts o;
+    stanli_optimize_opts_init(&o);
+    o.seed = 5;
+    o.init = &start;
+    double q = 0, lp = 0, values[2] = {0, 0};
+    char err[4096]{};
+    stanli_optimize(m, &o, &q, values, &lp, err, sizeof err);
+    stanli_fixed_param_opts f;
+    stanli_fixed_param_opts_init(&f);
+    f.seed = 5;
+    f.chains = 1;
+    f.samples = 1;
+    f.inits = &start;
+    double row[2] = {0, 0};
+    stanli_fixed_param(m, &f, row, nullptr, nullptr, nullptr, nullptr, nullptr,
+                       nullptr, err, sizeof err);
+    expect("a supplied start leaves optimize on fixed_param's stream",
+           values[1] == row[1] && row[0] == start);
+  }
+  double q = 0.3, row[2];
+  stanli_wa_row(m, &q, row);
+  expect("optimize ignores the model's own stream", y_at_mode(5, 1) == y5);
+  stanli_model_free(m);
+}
+
+// Each options struct has one check, which its entry point applies first,
+// with CmdStan's argument rules and one wording.
+template <class Opts>
+void expect_refused(const char* what, int (*check)(const Opts*, char*, size_t),
+                    void (*init)(Opts*), void (*mutate)(Opts&),
+                    const std::string& message,
+                    const std::function<int(const Opts&, char*, size_t)>& run) {
+  Opts o;
+  init(&o);
+  char err[4096]{};
+  expect(std::string(what) + ": defaults pass",
+         check(&o, err, sizeof err) == 0);
+  mutate(o);
+  err[0] = '\0';
+  expect(
+      std::string(what) + ": check says '" + message + "', got '" + err + "'",
+      check(&o, err, sizeof err) != 0 && err == message);
+  err[0] = '\0';
+  const int rc = run(o, err, sizeof err);
+  expect(std::string(what) + ": entry point says '" + message + "', got '" +
+             err + "'",
+         rc != 0 && err == message);
+}
+
+void test_option_checks(stanli_model* m) {
+  const int64_t n = stanli_n_unconstrained(m);
+  std::vector<double> q((size_t)n), values(100000), lp(100000);
+  double one_lp = 0;
+  const auto optimize = [&](const stanli_optimize_opts& o, char* err,
+                            size_t len) {
+    return stanli_optimize(m, &o, q.data(), values.data(), &one_lp, err, len);
+  };
+  using O = stanli_optimize_opts;
+  const auto opt = [&](const char* what, void (*mutate)(O&),
+                       const std::string& message) {
+    expect_refused<O>(what, stanli_optimize_opts_check,
+                      stanli_optimize_opts_init, mutate, message, optimize);
+  };
+  opt(
+      "optimize chain_id", [](O& o) { o.chain_id = -1; },
+      "chain_id must be an integer >= 0");
+  opt(
+      "optimize iter", [](O& o) { o.iter = 0; },
+      "iter must be an integer >= 1");
+  opt(
+      "optimize history_size", [](O& o) { o.history_size = 0; },
+      "history_size must be an integer >= 1");
+  opt(
+      "optimize init_alpha", [](O& o) { o.init_alpha = 0; },
+      "init_alpha must be a finite number > 0");
+  opt(
+      "optimize tol_obj", [](O& o) { o.tol_obj = -1; },
+      "tol_obj must be a finite number > 0");
+  opt(
+      "optimize tol_rel_obj", [](O& o) { o.tol_rel_obj = 0; },
+      "tol_rel_obj must be a finite number > 0");
+  opt(
+      "optimize tol_grad", [](O& o) { o.tol_grad = 0; },
+      "tol_grad must be a finite number > 0");
+  opt(
+      "optimize tol_rel_grad", [](O& o) { o.tol_rel_grad = 0; },
+      "tol_rel_grad must be a finite number > 0");
+  opt(
+      "optimize tol_param", [](O& o) { o.tol_param = 0; },
+      "tol_param must be a finite number > 0");
+  opt(
+      "optimize init_radius", [](O& o) { o.init_radius = -1; },
+      "init_radius must be a finite number >= 0");
+
+  using F = stanli_fixed_param_opts;
+  const auto fixed = [&](const F& o, char* err, size_t len) {
+    return stanli_fixed_param(m, &o, values.data(), nullptr, nullptr, nullptr,
+                              nullptr, nullptr, nullptr, err, len);
+  };
+  const auto fp = [&](const char* what, void (*mutate)(F&),
+                      const std::string& message) {
+    expect_refused<F>(what, stanli_fixed_param_opts_check,
+                      stanli_fixed_param_opts_init, mutate, message, fixed);
+  };
+  fp(
+      "fixed_param chains", [](F& o) { o.chains = 0; },
+      "chains must be an integer >= 1");
+  fp(
+      "fixed_param chain_id", [](F& o) { o.chain_id = -1; },
+      "chain_id must be an integer >= 0");
+  fp(
+      "fixed_param samples", [](F& o) { o.samples = -1; },
+      "samples must be an integer >= 0");
+  fp(
+      "fixed_param thin", [](F& o) { o.thin = 0; },
+      "thin must be an integer >= 1");
+  fp(
+      "fixed_param init_radius", [](F& o) { o.init_radius = -1; },
+      "init_radius must be a finite number >= 0");
+  fp(
+      "fixed_param refresh", [](F& o) { o.refresh = -1; },
+      "refresh must be an integer >= 0");
+
+  using L = stanli_laplace_opts;
+  const auto laplace = [&](const L& o, char* err, size_t len) {
+    return stanli_laplace_sample(m, &o, q.data(), values.data(), nullptr,
+                                 nullptr, nullptr, nullptr, nullptr, nullptr,
+                                 nullptr, err, len);
+  };
+  expect_refused<L>(
+      "laplace draws", stanli_laplace_opts_check, stanli_laplace_opts_init,
+      [](L& o) { o.draws = 0; }, "draws must be an integer >= 1", laplace);
+  expect_refused<L>(
+      "laplace refresh", stanli_laplace_opts_check, stanli_laplace_opts_init,
+      [](L& o) { o.refresh = -1; }, "refresh must be an integer >= 0", laplace);
+
+  using P = stanli_pathfinder_opts;
+  const auto path = [&](const P& o, char* err, size_t len) {
+    int64_t rows = 0;
+    return stanli_pathfinder(m, &o, values.data(), nullptr, nullptr, nullptr,
+                             &rows, nullptr, nullptr, nullptr, nullptr, nullptr,
+                             err, len);
+  };
+  const auto pf = [&](const char* what, void (*mutate)(P&),
+                      const std::string& message) {
+    expect_refused<P>(what, stanli_pathfinder_opts_check,
+                      stanli_pathfinder_opts_init, mutate, message, path);
+  };
+  pf(
+      "pathfinder chain_id", [](P& o) { o.chain_id = -1; },
+      "chain_id must be an integer >= 0");
+  pf(
+      "pathfinder num_paths", [](P& o) { o.num_paths = 0; },
+      "num_paths must be an integer >= 1");
+  pf(
+      "pathfinder num_draws", [](P& o) { o.num_draws = 0; },
+      "num_draws must be an integer >= 1");
+  pf(
+      "pathfinder num_elbo_draws", [](P& o) { o.num_elbo_draws = 0; },
+      "num_elbo_draws must be an integer >= 1");
+  pf(
+      "pathfinder max_lbfgs_iters", [](P& o) { o.max_lbfgs_iters = 0; },
+      "max_lbfgs_iters must be an integer >= 1");
+  pf(
+      "pathfinder history_size", [](P& o) { o.history_size = 0; },
+      "history_size must be an integer >= 1");
+  pf(
+      "pathfinder init_alpha", [](P& o) { o.init_alpha = 0; },
+      "init_alpha must be a finite number > 0");
+  pf(
+      "pathfinder tol_obj", [](P& o) { o.tol_obj = 0; },
+      "tol_obj must be a finite number > 0");
+  pf(
+      "pathfinder init_radius", [](P& o) { o.init_radius = -1; },
+      "init_radius must be a finite number >= 0");
+  pf(
+      "pathfinder refresh", [](P& o) { o.refresh = -1; },
+      "refresh must be an integer >= 0");
+
+  using V = stanli_variational_opts;
+  const auto advi = [&](const V& o, char* err, size_t len) {
+    return stanli_variational(m, &o, nullptr, values.data(), nullptr, nullptr,
+                              nullptr, nullptr, nullptr, nullptr, nullptr, err,
+                              len);
+  };
+  const auto va = [&](const char* what, void (*mutate)(V&),
+                      const std::string& message) {
+    expect_refused<V>(what, stanli_variational_opts_check,
+                      stanli_variational_opts_init, mutate, message, advi);
+  };
+  va(
+      "variational chain_id", [](V& o) { o.chain_id = -1; },
+      "chain_id must be an integer >= 0");
+  va(
+      "variational algorithm", [](V& o) { o.algorithm = 9; },
+      "algorithm must be STANLI_ADVI_MEANFIELD or STANLI_ADVI_FULLRANK");
+  va(
+      "variational iter", [](V& o) { o.iter = 0; },
+      "iter must be an integer >= 1");
+  va(
+      "variational grad_samples", [](V& o) { o.grad_samples = 0; },
+      "grad_samples must be an integer >= 1");
+  va(
+      "variational elbo_samples", [](V& o) { o.elbo_samples = 0; },
+      "elbo_samples must be an integer >= 1");
+  va(
+      "variational eta", [](V& o) { o.eta = 0; },
+      "eta must be a finite number > 0");
+  va(
+      "variational adapt_iter", [](V& o) { o.adapt_iter = 0; },
+      "adapt_iter must be an integer >= 1");
+  va(
+      "variational tol_rel_obj", [](V& o) { o.tol_rel_obj = 0; },
+      "tol_rel_obj must be a finite number > 0");
+  va(
+      "variational eval_elbo", [](V& o) { o.eval_elbo = 0; },
+      "eval_elbo must be an integer >= 1");
+  va(
+      "variational output_samples", [](V& o) { o.output_samples = 0; },
+      "output_samples must be an integer >= 1");
+  va(
+      "variational init_radius", [](V& o) { o.init_radius = -1; },
+      "init_radius must be a finite number >= 0");
+
+  std::vector<double> inits((size_t)(4 * n));
+  char err[4096]{};
+  expect("pathfinder inits refuse chain_id -1",
+         stanli_pathfinder_inits(m, 1, -1, 4, 1000, 25, 5, 2.0, inits.data(),
+                                 nullptr, nullptr, err, sizeof err) != 0 &&
+             std::string(err) == "chain_id must be an integer >= 0");
+}
+
+// CmdStan accepts id=0 and uses its stream; nothing turns 0 into 1.
+// The reference values are CmdStan 2.40's `optimize random seed=S id=I` on
+// this model (y in output.csv).
+void test_optimize_chain_ids() {
+  stanli_model* m = from_stan(
+      "parameters { real mu; } model { mu ~ normal(0, 1); }\n"
+      "generated quantities { real y = normal_rng(0, 1); }\n");
+  if (m == nullptr) return;
+  const auto y_at_mode = [m](uint32_t seed, int chain_id) {
+    stanli_optimize_opts o;
+    stanli_optimize_opts_init(&o);
+    o.seed = seed;
+    o.chain_id = chain_id;
+    double q = 0, lp = 0, values[2] = {0, 0};
+    char err[4096]{};
+    const int rc = stanli_optimize(m, &o, &q, values, &lp, err, sizeof err);
+    expect(std::string("optimize runs: ") + err, rc == 0);
+    return values[1];
+  };
+  expect_near("CmdStan seed 5 id 1", y_at_mode(5, 1), -1.4395515, 5e-8);
+  expect_near("CmdStan seed 5 id 2", y_at_mode(5, 2), -0.14566454, 5e-9);
+  expect_near("CmdStan seed 6 id 1", y_at_mode(6, 1), 0.59328452, 5e-9);
+  expect("chain id 0 is its own stream", y_at_mode(5, 0) != y_at_mode(5, 1));
+  stanli_model_free(m);
+}
+
+// CmdStan validates a supplied start for optimize as for sampling: one try,
+// and a start with no finite log density is refused.
+void test_optimize_validates_init() {
+  stanli_model* m = from_stan(
+      "parameters { real<lower=0> s; } model { target += log(s - 1); }\n");
+  if (m == nullptr) return;
+  stanli_optimize_opts o;
+  stanli_optimize_opts_init(&o);
+  const double init = std::log(0.5);
+  o.init = &init;
+  double q = 0, lp = 0, value = 0;
+  char err[4096]{};
+  const int rc = stanli_optimize(m, &o, &q, &value, &lp, err, sizeof err);
+  expect(std::string("optimize refuses a start outside the support: ") + err,
+         rc != 0 && std::string(err).find("initialization failed: the "
+                                          "supplied unconstrained init") == 0);
+  stanli_model_free(m);
+}
+
+// A poll that asks to stop on its (k + 1)-th call. Each call takes longer
+// than the 100 ms between polls, so a run that keeps going is asked again at
+// its next opportunity.
+struct StopAfter {
+  int k = 0;
+  int calls = 0;
+};
+
+int stop_after(void* user) {
+  auto* s = static_cast<StopAfter*>(user);
+  std::this_thread::sleep_for(std::chrono::milliseconds(110));
+  return s->calls++ >= s->k ? 1 : 0;
+}
+
+int never_stop(void* user) {
+  ++static_cast<StopAfter*>(user)->calls;
+  return 0;
+}
+
+// Optimize, Pathfinder inits and the Hessian stop when the poll says so.
+void test_interruptible_estimates() {
+  // A long narrow valley: L-BFGS needs many iterations and the Hessian many
+  // gradients, so neither finishes between two polls.
+  stanli_model* m = from_stan(
+      "parameters { vector[200] x; }\n"
+      "model { for (i in 2:200) target += -100 * square(x[i] - square(x[i - "
+      "1])) - square(1 - x[i - 1]); }\n");
+  if (m == nullptr) return;
+  const int64_t n = 200;
+  std::vector<double> q((size_t)n), hess((size_t)(n * n)), values((size_t)n),
+      inits((size_t)(4 * n));
+  double lp = 0;
+  char err[4096]{};
+  stanli_optimize_opts o;
+  stanli_optimize_opts_init(&o);
+  o.tol_obj = o.tol_rel_obj = o.tol_grad = o.tol_rel_grad = o.tol_param =
+      1e-300;
+  o.iter = 100000;
+  for (int k : {0, 2}) {
+    StopAfter stop{k};
+    int interrupted = 0;
+    const int rc = stanli_optimize_with_poll(m, &o, q.data(), values.data(),
+                                             &lp, stop_after, &stop,
+                                             &interrupted, err, sizeof err);
+    expect("optimize stops on request after " + std::to_string(k) + " polls",
+           rc == 0 && interrupted == 1 && stop.calls == k + 1);
+    stop = StopAfter{k};
+    interrupted = 0;
+    const int prc = stanli_pathfinder_inits_with_poll(
+        m, 1, 1, 4, 1000, 25, 5, 2.0, inits.data(), nullptr, nullptr,
+        stop_after, &stop, &interrupted, err, sizeof err);
+    expect("pathfinder inits stop on request after " + std::to_string(k) +
+               " polls",
+           prc == 0 && interrupted == 1 && stop.calls == k + 1);
+    stop = StopAfter{k};
+    interrupted = 0;
+    const int hrc = stanli_hessian_with_poll(m, q.data(), &lp, nullptr,
+                                             hess.data(), stop_after, &stop,
+                                             &interrupted, err, sizeof err);
+    expect("hessian stops on request after " + std::to_string(k) + " polls",
+           hrc == 0 && interrupted == 1 && stop.calls == k + 1);
+  }
+  // A poll that never asks to stop changes nothing.
+  o.iter = 50;
+  std::vector<double> plain((size_t)n), polled((size_t)n);
+  double lp_plain = 0, lp_polled = 0;
+  StopAfter count;
+  int interrupted = 1;
+  stanli_optimize(m, &o, plain.data(), values.data(), &lp_plain, err,
+                  sizeof err);
+  stanli_optimize_with_poll(m, &o, polled.data(), values.data(), &lp_polled,
+                            never_stop, &count, &interrupted, err, sizeof err);
+  expect("a poll that never stops leaves optimize alone",
+         plain == polled && lp_plain == lp_polled && interrupted == 0 &&
+             count.calls >= 1);
+  stanli_model_free(m);
 }
 
 void test_laplace(stanli_model* m) {
@@ -649,8 +1066,8 @@ void test_variational(stanli_model* m) {
   rc = stanli_variational(m, &o, nullptr, again.data(), nullptr, nullptr,
                           nullptr, nullptr, nullptr, nullptr, nullptr, err,
                           sizeof err);
-  expect("variational reports Stan's own argument check",
-         rc != 0 && std::strstr(err, "ELBO") != nullptr);
+  expect("variational checks elbo_samples before Stan does",
+         rc != 0 && std::string(err) == "elbo_samples must be an integer >= 1");
   o.elbo_samples = 100;
   o.iter = 10000;
   int asked = 0, interrupted = 0;
@@ -767,17 +1184,207 @@ void test_optimize_rejected_mode() {
   stanli_model_free(m);
 }
 
+// A binding may call any entry point from a thread of its own, one that
+// has never evaluated a model. Each must work there as on the main thread.
+void test_algorithms_on_a_new_thread(stanli_model* m) {
+  const auto on_new_thread = [](const std::function<int(char*)>& call) {
+    char err[4096]{};
+    int rc = -1;
+    std::thread([&] { rc = call(err); }).join();
+    return rc == 0 ? std::string() : std::string(err) + " ";
+  };
+  std::vector<double> q(3), values((size_t)(400 * kWidth));
+  std::vector<double> lp(400), lq(400), path(400);
+  const std::string optimize = on_new_thread([&](char* err) {
+    stanli_optimize_opts o;
+    stanli_optimize_opts_init(&o);
+    double mode_lp = 0;
+    return stanli_optimize(m, &o, q.data(), values.data(), &mode_lp, err, 4096);
+  });
+  expect("optimize on a new thread " + optimize, optimize.empty());
+  const std::string inits = on_new_thread([&](char* err) {
+    std::vector<double> starts(3 * 2);
+    return stanli_pathfinder_inits(m, 1, 1, 2, 1000, 25, 5, 2.0, starts.data(),
+                                   nullptr, nullptr, err, 4096);
+  });
+  expect("pathfinder_inits on a new thread " + inits, inits.empty());
+  const std::string laplace = on_new_thread([&](char* err) {
+    stanli_laplace_opts o;
+    stanli_laplace_opts_init(&o);
+    o.draws = 400;
+    return stanli_laplace_sample(m, &o, q.data(), values.data(), lp.data(),
+                                 lq.data(), nullptr, nullptr, nullptr, nullptr,
+                                 nullptr, err, 4096);
+  });
+  expect("laplace on a new thread " + laplace, laplace.empty());
+  const std::string pathfinder = on_new_thread([&](char* err) {
+    stanli_pathfinder_opts o;
+    stanli_pathfinder_opts_init(&o);
+    o.num_draws = 400;
+    int64_t rows = 0;
+    return stanli_pathfinder(m, &o, values.data(), lp.data(), lq.data(),
+                             path.data(), &rows, nullptr, nullptr, nullptr,
+                             nullptr, nullptr, err, 4096);
+  });
+  expect("pathfinder on a new thread " + pathfinder, pathfinder.empty());
+  const std::string advi = on_new_thread([&](char* err) {
+    stanli_variational_opts o;
+    stanli_variational_opts_init(&o);
+    o.output_samples = 400;
+    std::vector<double> mean((size_t)kWidth);
+    return stanli_variational(m, &o, mean.data(), values.data(), lp.data(),
+                              lq.data(), nullptr, nullptr, nullptr, nullptr,
+                              nullptr, err, 4096);
+  });
+  expect("variational on a new thread " + advi, advi.empty());
+  const std::string fixed = on_new_thread([&](char* err) {
+    stanli_fixed_param_opts o;
+    stanli_fixed_param_opts_init(&o);
+    o.chains = 1;
+    o.samples = 400;
+    return stanli_fixed_param(m, &o, values.data(), nullptr, nullptr, nullptr,
+                              nullptr, nullptr, nullptr, err, 4096);
+  });
+  expect("fixed_param on a new thread " + fixed, fixed.empty());
+}
+
+// Stan's algorithms reject a point only on a domain error; fatal_error()
+// ends the run. stanli's run-time error for a zero-size local that a branch
+// left empty is that kind too. Every algorithm starts at mu = 0, where v is
+// assigned, and moves towards the mode at mu = -3, where it is not.
+void test_fatal_errors_end_algorithms() {
+  const char* sources[] = {
+      "parameters { real mu; }\n"
+      "model {\n  vector[0] v;\n  if (mu > -0.5) v = rep_vector(0, 3);\n"
+      "  mu ~ normal(-3, 1);\n  target += sum(v);\n}\n",
+      "parameters { real mu; }\n"
+      "model {\n  if (mu < -0.5) fatal_error(\"mu is below -0.5\");\n"
+      "  mu ~ normal(-3, 1);\n}\n"};
+  const char* names[] = {"v was not assigned", "mu is below -0.5"};
+  for (int k = 0; k < 2; ++k) {
+    stanli_model* m = from_stan(sources[k]);
+    if (m == nullptr) return;
+    const std::string what = k == 0 ? "unassigned local" : "fatal_error";
+    const auto names_it = [&](const char* err) {
+      return std::strstr(err, names[k]) != nullptr;
+    };
+    const double start = 0.0;
+    char err[4096]{};
+
+    stanli_sample_opts so;
+    stanli_sample_opts_init(&so);
+    so.chains = 1;
+    so.warmup = 200;
+    so.samples = 200;
+    so.inits = &start;
+    std::vector<double> draws(200);
+    const int failed = stanli_sample_multi_metric(
+        m, &so, nullptr, 0, draws.data(), nullptr, nullptr, nullptr, nullptr,
+        nullptr, nullptr, nullptr, nullptr, err, sizeof err);
+    expect(what + ": NUTS stops with the message: " + err,
+           failed != 0 && names_it(err));
+
+    err[0] = '\0';
+    const int walnuts = stanli_sample_walnuts_stats_init(
+        m, 1, 1, 200, 200, 0, 2, &start, draws.data(), nullptr, nullptr,
+        nullptr, err, sizeof err);
+    expect(what + ": WALNUTS stops with the message: " + err,
+           walnuts != 0 && names_it(err));
+
+    err[0] = '\0';
+    stanli_optimize_opts oo;
+    stanli_optimize_opts_init(&oo);
+    oo.init = &start;
+    double q = 0, lp = 0;
+    std::vector<double> row((size_t)stanli_n_output_columns(m));
+    const int optimized =
+        stanli_optimize(m, &oo, &q, row.data(), &lp, err, sizeof err);
+    expect(what + ": optimize stops with the message: " + err,
+           optimized != 0 && names_it(err));
+
+    err[0] = '\0';
+    stanli_pathfinder_opts po;
+    stanli_pathfinder_opts_init(&po);
+    po.inits = &start;
+    std::vector<double> rows((size_t)stanli_pathfinder_max_draws(&po) *
+                             (size_t)stanli_n_output_columns(m));
+    int64_t n_draws = 0;
+    const int pathfinder = stanli_pathfinder(
+        m, &po, rows.data(), nullptr, nullptr, nullptr, &n_draws, nullptr,
+        nullptr, nullptr, nullptr, nullptr, err, sizeof err);
+    expect(what + ": Pathfinder stops with the message: " + err,
+           pathfinder != 0 && names_it(err));
+
+    err[0] = '\0';
+    stanli_variational_opts vo;
+    stanli_variational_opts_init(&vo);
+    vo.init = &start;
+    vo.output_samples = 10;
+    std::vector<double> mean((size_t)stanli_n_output_columns(m));
+    std::vector<double> vrows(10 * mean.size());
+    const int advi = stanli_variational(
+        m, &vo, mean.data(), vrows.data(), nullptr, nullptr, nullptr, nullptr,
+        nullptr, nullptr, nullptr, err, sizeof err);
+    expect(what + ": ADVI stops with the message: " + err,
+           advi != 0 && names_it(err));
+
+    err[0] = '\0';
+    stanli_laplace_opts lo;
+    stanli_laplace_opts_init(&lo);
+    lo.draws = 10;
+    const double mode = -3.0;
+    std::vector<double> lrows(10 * mean.size());
+    const int laplace = stanli_laplace_sample(
+        m, &lo, &mode, lrows.data(), nullptr, nullptr, nullptr, nullptr,
+        nullptr, nullptr, nullptr, err, sizeof err);
+    expect(what + ": Laplace stops with the message: " + err,
+           laplace != 0 && names_it(err));
+    stanli_model_free(m);
+  }
+
+  // A model that never reaches the unassigned path samples as the same
+  // model without the local does, draw for draw.
+  const char* same[] = {
+      "parameters { real mu; }\n"
+      "model {\n  vector[0] v;\n  if (mu > -1e300) v = rep_vector(0, 3);\n"
+      "  mu ~ normal(0, 1);\n  target += sum(v);\n}\n",
+      "parameters { real mu; }\nmodel { mu ~ normal(0, 1); }\n"};
+  std::vector<double> runs[2];
+  for (int k = 0; k < 2; ++k) {
+    stanli_model* m = from_stan(same[k]);
+    if (m == nullptr) return;
+    stanli_sample_opts so;
+    stanli_sample_opts_init(&so);
+    so.chains = 1;
+    so.warmup = 200;
+    so.samples = 200;
+    runs[k].assign(200, 0.0);
+    char err[4096]{};
+    expect(
+        std::string("a model that keeps v assigned samples: ") + err,
+        stanli_sample_multi_metric(m, &so, nullptr, 0, runs[k].data(), nullptr,
+                                   nullptr, nullptr, nullptr, nullptr, nullptr,
+                                   nullptr, nullptr, err, sizeof err) == 0);
+    stanli_model_free(m);
+  }
+  expect("a model that keeps v assigned has the same draws",
+         runs[0] == runs[1]);
+}
+
 int main() {
+  test_fatal_errors_end_algorithms();
   stanli_model* m = load("alg_gauss");
   if (m != nullptr) {
     expect("alg_gauss width", stanli_wa_n_columns(m) == kWidth);
     expect("alg_gauss parameters", stanli_n_unconstrained(m) == 3);
     test_fixed_param(m);
     test_optimize_options(m);
+    test_option_checks(m);
     test_laplace(m);
     test_pathfinder(m);
     test_variational(m);
     test_hessian(m);
+    test_algorithms_on_a_new_thread(m);
     // The algorithms borrow the model's executor; it must still sample.
     std::vector<double> draws(200 * 3);
     char err[4096]{};
@@ -789,6 +1396,10 @@ int main() {
   }
   test_noparam();
   test_optimize_rejected_mode();
+  test_optimize_generated_quantities_stream();
+  test_interruptible_estimates();
+  test_optimize_chain_ids();
+  test_optimize_validates_init();
   if (failures) {
     std::printf("%d failures\n", failures);
     return 1;

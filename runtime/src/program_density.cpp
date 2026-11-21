@@ -25,7 +25,7 @@ namespace {
 // Density ids are indices into the list, and this enum is what makes that
 // true of the switch labels below as well: same list, same order.
 enum : int {
-#define STANLI_PD_ENUM(opc, fn, arity, tier) kId_##fn,
+#define STANLI_PD_ENUM(opc, fn, ...) kId_##fn,
   STANLI_SCALAR_DENSITY_LIST(STANLI_PD_ENUM)
       STANLI_SCALAR_CDF_LIST(STANLI_PD_ENUM)
 #undef STANLI_PD_ENUM
@@ -35,11 +35,10 @@ struct Entry {
   const char* name;
   uint16_t opcode;
   int arity;
-  int tier;
 };
 
 constexpr Entry kDensities[] = {
-#define STANLI_PD_ENTRY(opc, fn, arity, tier) {#fn, opc, arity, tier},
+#define STANLI_PD_ENTRY(opc, fn, arity, ...) {#fn, opc, arity},
     STANLI_SCALAR_DENSITY_LIST(STANLI_PD_ENTRY)
         STANLI_SCALAR_CDF_LIST(STANLI_PD_ENTRY)
 #undef STANLI_PD_ENTRY
@@ -151,8 +150,8 @@ int program_density_id_by_opcode(uint16_t opcode) {
   // densities. Generate direct dispatch from the registry so a miss does
   // not scan every probability function for every speculative partition.
   switch (opcode) {
-#define STANLI_PD_OPCODE(opc, fn, arity, tier) \
-  case opc:                                    \
+#define STANLI_PD_OPCODE(opc, fn, ...) \
+  case opc:                            \
     return kId_##fn;
     STANLI_SCALAR_DENSITY_LIST(STANLI_PD_OPCODE)
     STANLI_SCALAR_CDF_LIST(STANLI_PD_OPCODE)
@@ -171,9 +170,9 @@ T program_density(int id, const T* args) {
         [](const auto&... x) { return stan::math::fn<false>(x...); }, args);
     STANLI_SCALAR_DENSITY_LIST(STANLI_PD_CASE)
 #undef STANLI_PD_CASE
-#define STANLI_PCDF_CASE(opc, fn, arity, tier) \
-  case kId_##fn:                               \
-    return call_with<arity>(                   \
+#define STANLI_PCDF_CASE(opc, fn, arity) \
+  case kId_##fn:                         \
+    return call_with<arity>(             \
         [](const auto&... x) { return stan::math::fn(x...); }, args);
     STANLI_SCALAR_CDF_LIST(STANLI_PCDF_CASE)
 #undef STANLI_PCDF_CASE
@@ -219,9 +218,9 @@ bool program_density_partials(int id, unsigned mask, const double* args,
     break;
     STANLI_SCALAR_DENSITY_LIST(STANLI_PD_PARTIALS)
 #undef STANLI_PD_PARTIALS
-#define STANLI_PCDF_PARTIALS(opc, fn, arity, tier)                        \
+#define STANLI_PCDF_PARTIALS(opc, fn, arity)                              \
   case kId_##fn:                                                          \
-    with_mask<arity, tier>(mask, [&](auto m) {                            \
+    with_mask<arity, 0>(mask, [&](auto m) {                               \
       record_probability_call([&] {                                       \
         return call_rvar<arity, m.value>(                                 \
             [](const auto&... x) { return stan::math::fn(x...); }, args); \

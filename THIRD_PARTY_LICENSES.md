@@ -97,3 +97,26 @@ as test inputs. Each directory's `licenses/` holds the license text.
 - `tests/ecoensemble/`: EcoEnsemble 1.2.0, GPL (>= 3), by Michael A. Spence,
   James A. Martindale, Michael J. Thomson, Thomas I. J. Bartos and Luke E. K.
   Broadbent. The model has no `#include` and is copied as published.
+
+Also in the repository, not in the binary: `tests/examplemodels/` holds 23
+programs from stan-dev/example-models at commit `e5b7d9e2`, unchanged, with
+their data. The repository's README places the examples under the new BSD
+license unless a directory says otherwise; the `BPA/` directory carries
+BSD-3-Clause, Copyright (c) 2016 Hiroki Itô, and `jupyter/sum-to-zero/` carries
+BSD-3-Clause for its code, Copyright (c) 2018-2022 Stan Development Team and
+their assignees. The license texts are in `tests/examplemodels/licenses/`.
+
+Also in the repository, not in the binary: `tests/stanguide/` holds six code
+blocks from the Stan User's Guide (stan-dev/docs at commit `b07b2a99`, whose
+`LICENSE` puts the code under BSD-3-Clause, Copyright (c) 2018-2026 Stan
+Development Team and their assignees, and the text under CC BY-ND 4.0). Only
+code is used. `tools/gen_stanguide_models.py` extracts it, with the edits listed
+in `tests/stanguide/README.md`. One data file is derived from the explosion
+dates in the R package boot (License "Unlimited"). The BSD text is in
+`tests/stanguide/licenses/`.
+
+- `tests/hbayesdm/`: hBayesDM 2.0.1, GPL-3, by Woo-Young Ahn, Nate Haines and Lei Zhang with contributions from Jinwoo Jeong, Harhim Park, Jaeyeong Yang and Jethro Lee. The four models have no `#include` and are copied as published.
+
+- `tests/bmgarch/`: bmgarch 2.1.0, GPL (>= 3), by Philippe Rast and Stephen Martin. The two models' `#include` lines are replaced by the text of the files they name; nothing else is edited.
+- `tests/walker/`: walker 1.0.10, GPL (>= 3), by Jouni Helske. The two models have no `#include` and are copied as published.
+- `tests/bayesdfa/`: bayesdfa 1.3.4, GPL (>= 3), by Eric J. Ward, Sean C. Anderson, Luis A. Damiano, Michael J. Malick and Philina A. English, with contributors. The model has no `#include` and is copied as published.

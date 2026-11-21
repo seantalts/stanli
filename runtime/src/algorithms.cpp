@@ -8,8 +8,6 @@
 #include <stan/services/optimize/laplace_sample.hpp>
 #include <stan/services/sample/fixed_param.hpp>
 
-#include <cmath>
-
 namespace stanli {
 
 namespace {
@@ -21,19 +19,11 @@ bool refuse(AlgorithmResult& out, bool bad, const char* message) {
   return true;
 }
 
-bool bad_radius(double r) { return !std::isfinite(r) || r < 0; }
-
 }  // namespace
 
 AlgorithmResult run_fixed_param(Executor& ex, const AlgorithmHost& host,
                                 const FixedParamConfig& cfg) {
   AlgorithmResult out;
-  if (refuse(out, cfg.samples < 0, "samples must be nonnegative") ||
-      refuse(out, cfg.thin < 1, "thin must be positive") ||
-      refuse(out, bad_radius(cfg.init_radius),
-             "init_radius must be finite and nonnegative"))
-    return out;
-
   const detail::ServiceHooks hooks{&host.names, host.row, host.poll};
   detail::ServiceModel model(ex, hooks);
   detail::SinkLogger logger(host.log);
@@ -63,8 +53,7 @@ AlgorithmResult run_laplace(Executor& ex, const AlgorithmHost& host,
              "laplace without the Jacobian is not available: stanli folds "
              "the Jacobian terms into the graph at lowering time. Pass "
              "jacobian = true with a mode found the same way.") ||
-      refuse(out, mode == nullptr, "laplace needs a mode") ||
-      refuse(out, cfg.draws < 1, "draws must be positive"))
+      refuse(out, mode == nullptr, "laplace needs a mode"))
     return out;
 
   const detail::ServiceHooks hooks{&host.names, host.row, host.poll};
@@ -96,12 +85,6 @@ AlgorithmResult run_laplace(Executor& ex, const AlgorithmHost& host,
 AlgorithmResult run_variational(Executor& ex, const AlgorithmHost& host,
                                 const VariationalConfig& cfg) {
   AlgorithmResult out;
-  if (refuse(out, bad_radius(cfg.init_radius),
-             "init_radius must be finite and nonnegative") ||
-      refuse(out, cfg.adapt_engaged && cfg.adapt_iter < 1,
-             "adapt_iter must be positive"))
-    return out;
-
   const detail::ServiceHooks hooks{&host.names, host.row, host.poll};
   detail::ServiceModel model(ex, hooks);
   detail::SinkLogger logger(host.log);

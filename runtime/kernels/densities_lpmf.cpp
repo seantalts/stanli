@@ -10,7 +10,7 @@
 namespace stanli {
 namespace dens {
 
-STANLI_LPMF_FWD(poisson_log_fwd, poisson_log_lpmf, 1)
+STANLI_LPMF_FWD(poisson_log_recorded_fwd, poisson_log_lpmf, 1)
 STANLI_LPMF_FWD(bernoulli_logit_recorded_fwd, bernoulli_logit_lpmf, 1)
 STANLI_LPMF_FWD(poisson_fwd, poisson_lpmf, 1)
 STANLI_LPMF_FWD(neg_binomial_2_fwd, neg_binomial_2_lpmf, 2)
@@ -83,105 +83,109 @@ inline double bernoulli_logit_partial(int y, double theta) {
   return sign;
 }
 
-// The hot summed/vector shape needs Eigen's packet exp and reduction order to
-// stay bitwise with Stan Math. Its one partial column is also exactly the size
-// of ntheta, so use that existing scratch as the temporary and then overwrite
-// it with the finished partials. Compared with the recorder path this removes
-// both the ntheta allocation and the recorder edge/partial allocation.
-void bernoulli_logit_vector_fwd(KernelCtx& ctx) {
-  static constexpr const char* function = "bernoulli_logit_lpmf";
-  static constexpr double cutoff = 20.0;
-  const Desc& theta = ctx.in[0];
-  const Eigen::Map<const Eigen::VectorXi> y(
-      ctx.idata, static_cast<Eigen::Index>(ctx.n_idata));
-  const Eigen::Map<const Eigen::VectorXd> theta_vec(theta.data, theta.len);
+// Stan Math's bernoulli_logit_lpmf body over arrays: f receives the
+// per-element terms and then the partials, as Eigen expressions of
+// z = sign * theta and exp(-z). The expressions hold temporaries, so they
+// are only valid inside f.
+template <typename S, typename Z, typename E, typename F>
+void with_bernoulli_logit_terms(const S& signs, const Z& z, const E& exp_m_z,
+                                F&& f) {
+  constexpr double cutoff = 20.0;
+  f((z > cutoff)
+        .select(-exp_m_z, (z < -cutoff).select(z, -stan::math::log1p(exp_m_z))),
+    (z > cutoff)
+        .select(signs * exp_m_z,
+                (z >= -cutoff)
+                    .select(stan::math::promote_scalar<double>(signs * exp_m_z /
+                                                               (exp_m_z + 1)),
+                            stan::math::promote_scalar<double>(signs))));
+}
 
-  stan::math::check_consistent_sizes(function, "Random variable", y,
-                                     "Probability parameter", theta_vec);
-  std::fill_n(ctx.scratch, static_cast<size_t>(theta.len + 1), 0.0);
-  if (stan::math::size_zero(y, theta_vec)) {
-    ctx.out.data[0] = 0.0;
-    return;
+// The vector shapes need Eigen's packet exp and reduction order to stay
+// bitwise with Stan Math. Summed is one lp over a vector theta. Its one
+// partial column is exactly the size of z, so that scratch holds z first and
+// the finished partials after, which removes both the z allocation and the
+// recorder edge. The elementwise form leaves the reduction off: out[i] is
+// element i's lp, and theta may be one value for every element. Calling Stan
+// Math once per element costs about four times as much, and a partitioned
+// width-W lane presents thousands of elements at once.
+template <bool Summed>
+void bernoulli_logit_array_fwd(KernelCtx& ctx) {
+  static constexpr const char* function = "bernoulli_logit_lpmf";
+  const Desc& theta = ctx.in[0];
+  const Eigen::Index n =
+      static_cast<Eigen::Index>(Summed ? ctx.n_idata : ctx.out.len);
+  const Eigen::Map<const Eigen::VectorXi> y(ctx.idata, n);
+  Eigen::ArrayXd broadcast;
+  if constexpr (Summed) {
+    const Eigen::Map<const Eigen::VectorXd> theta_vec(theta.data, theta.len);
+    stan::math::check_consistent_sizes(function, "Random variable", y,
+                                       "Probability parameter", theta_vec);
+    std::fill_n(ctx.scratch, static_cast<size_t>(theta.len + 1), 0.0);
+    if (stan::math::size_zero(y, theta_vec)) {
+      ctx.out.data[0] = 0.0;
+      return;
+    }
+  } else {
+    std::fill_n(ctx.scratch, static_cast<size_t>(2 * n), 0.0);
   }
   stan::math::check_bounded(function, "n", y, 0, 1);
-  decltype(auto) theta_val = stan::math::to_ref(
-      stan::math::as_value_column_array_or_scalar(theta_vec));
+  if (!Summed && theta.len == 1) broadcast.setConstant(n, theta.data[0]);
+  const Eigen::Map<const Eigen::ArrayXd> theta_val(
+      !Summed && theta.len == 1 ? broadcast.data() : theta.data, n);
   stan::math::check_not_nan(function, "Logit transformed probability parameter",
                             theta_val);
   if (bernoulli_drop_propto(ctx)) {
-    ctx.out.data[0] = 0.0;
+    Eigen::Map<Eigen::ArrayXd>(ctx.out.data, Summed ? 1 : n).setZero();
     return;
   }
 
   const auto& n_col = stan::math::as_column_vector_or_scalar(y);
   const auto& n_double = stan::math::value_of_rec(n_col);
   const auto signs = 2 * stan::math::as_array_or_scalar(n_double) - 1;
-  Eigen::Map<Eigen::ArrayXd> ntheta(ctx.scratch, theta.len);
-  ntheta = signs * theta_val;
-  Eigen::ArrayXd exp_m_ntheta = stan::math::exp(-ntheta);
-  ctx.out.data[0] = stan::math::sum(
-      (ntheta > cutoff)
-          .select(-exp_m_ntheta,
-                  (ntheta < -cutoff)
-                      .select(ntheta, -stan::math::log1p(exp_m_ntheta))));
-
-  if (!bernoulli_arg_active(ctx)) {
-    ntheta.setZero();
-    return;
+  const bool active = bernoulli_arg_active(ctx);
+  if constexpr (Summed) {
+    Eigen::Map<Eigen::ArrayXd> z(ctx.scratch, n);
+    z = signs * theta_val;
+    const Eigen::ArrayXd exp_m_z = stan::math::exp(-z);
+    with_bernoulli_logit_terms(signs, z, exp_m_z,
+                               [&](const auto& terms, const auto& partials) {
+                                 ctx.out.data[0] = stan::math::sum(terms);
+                                 if (active)
+                                   z = partials;
+                                 else
+                                   z.setZero();
+                               });
+    if (active) ctx.scratch[n] = 1.0;
+  } else {
+    const Eigen::ArrayXd z = signs * theta_val;
+    const Eigen::ArrayXd exp_m_z = stan::math::exp(-z);
+    with_bernoulli_logit_terms(
+        signs, z, exp_m_z, [&](const auto& terms, const auto& partials) {
+          Eigen::Map<Eigen::ArrayXd>(ctx.out.data, n) = terms;
+          if (!active) return;
+          Eigen::Map<Eigen::ArrayXd>(ctx.scratch, n) = partials;
+          Eigen::Map<Eigen::ArrayXd>(ctx.scratch + n, n).setConstant(1.0);
+        });
   }
-  ntheta =
-      (ntheta > cutoff)
-          .select(signs * exp_m_ntheta,
-                  (ntheta >= -cutoff)
-                      .select(stan::math::promote_scalar<double>(
-                                  signs * exp_m_ntheta / (exp_m_ntheta + 1)),
-                              stan::math::promote_scalar<double>(signs)));
-  ctx.scratch[theta.len] = 1.0;
 }
 
-// The same expression with the reduction left off: out[i] is element i's lp.
-// The per-element arm of bernoulli_native_fwd calls Stan Math once per
-// element, which costs about four times as much per element as this does,
-// and a partitioned width-W lane presents thousands of them at once.
-void bernoulli_logit_elt_vector_fwd(KernelCtx& ctx) {
-  static constexpr const char* function = "bernoulli_logit_lpmf";
-  static constexpr double cutoff = 20.0;
-  const Desc& theta = ctx.in[0];
-  const Eigen::Index n = static_cast<Eigen::Index>(ctx.out.len);
-  const Eigen::Map<const Eigen::VectorXi> y(ctx.idata, n);
-  std::fill_n(ctx.scratch, static_cast<size_t>(2 * n), 0.0);
+// Stan Math adds the terms of a vector theta in one running sum. Add them
+// pairwise instead: a merged loop of scalar calls presents thousands at once.
+double bernoulli_vector_value(const Eigen::Map<const Eigen::VectorXi>& y,
+                              const Desc& theta, bool drop) {
+  static constexpr const char* function = "bernoulli_lpmf";
+  const Eigen::Map<const Eigen::VectorXd> theta_vec(theta.data, theta.len);
+  stan::math::check_consistent_sizes(function, "Random variable", y,
+                                     "Probability parameter", theta_vec);
   stan::math::check_bounded(function, "n", y, 0, 1);
-  Eigen::ArrayXd theta_val(n);
-  if (theta.len == 1)
-    theta_val.setConstant(theta.data[0]);
-  else
-    theta_val = Eigen::Map<const Eigen::ArrayXd>(theta.data, n);
-  stan::math::check_not_nan(function, "Logit transformed probability parameter",
-                            theta_val);
-  Eigen::Map<Eigen::ArrayXd> out(ctx.out.data, n);
-  if (bernoulli_drop_propto(ctx)) {
-    out.setZero();
-    return;
-  }
-
-  const auto& n_col = stan::math::as_column_vector_or_scalar(y);
-  const auto& n_double = stan::math::value_of_rec(n_col);
-  const Eigen::ArrayXd signs = 2 * stan::math::as_array_or_scalar(n_double) - 1;
-  const Eigen::ArrayXd ntheta = signs * theta_val;
-  const Eigen::ArrayXd exp_m_ntheta = stan::math::exp(-ntheta);
-  out = (ntheta > cutoff)
-            .select(-exp_m_ntheta,
-                    (ntheta < -cutoff)
-                        .select(ntheta, -stan::math::log1p(exp_m_ntheta)));
-  if (!bernoulli_arg_active(ctx)) return;
-  Eigen::Map<Eigen::ArrayXd>(ctx.scratch, n) =
-      (ntheta > cutoff)
-          .select(signs * exp_m_ntheta,
-                  (ntheta >= -cutoff)
-                      .select(stan::math::promote_scalar<double>(
-                                  signs * exp_m_ntheta / (exp_m_ntheta + 1)),
-                              stan::math::promote_scalar<double>(signs)));
-  Eigen::Map<Eigen::ArrayXd>(ctx.scratch + n, n).setConstant(1.0);
+  stan::math::check_bounded(function, "Probability parameter", theta_vec, 0.0,
+                            1.0);
+  if (drop || y.size() == 0) return 0.0;
+  return pairwise_sum(0, theta.len, [&](int64_t i) {
+    return y[i] == 1 ? std::log(theta.data[i])
+                     : stan::math::log1m(theta.data[i]);
+  });
 }
 
 template <bool Logit>
@@ -207,7 +211,9 @@ void bernoulli_native_fwd(KernelCtx& ctx) {
 
   const Eigen::Map<const Eigen::VectorXi> y(
       ctx.idata, static_cast<Eigen::Index>(ctx.n_idata));
-  ctx.out.data[0] = bernoulli_value<Logit>(y, theta, drop);
+  ctx.out.data[0] = !Logit && theta.len > kPairwiseBlock
+                        ? bernoulli_vector_value(y, theta, drop)
+                        : bernoulli_value<Logit>(y, theta, drop);
   std::fill_n(ctx.scratch, static_cast<size_t>(theta.len + 1), 0.0);
 
   // Both functions return a literal zero before constructing their partials
@@ -248,6 +254,49 @@ void bernoulli_native_fwd(KernelCtx& ctx) {
 
 }  // namespace
 
+// Stan Math's vector poisson_log_lpmf forms sum(n * alpha) - sum(exp(alpha)),
+// two sums that can cancel to a much smaller lp. With a vector of log rates,
+// form each observation's term first and add the terms pairwise. The checks
+// and the partials are Stan Math's.
+void poisson_log_fwd(KernelCtx& ctx) {
+  const Desc& alpha = ctx.in[0];
+  const DensityMode mode = density_mode(ctx);
+  if (mode.elementwise || alpha.len <= kPairwiseBlock) {
+    poisson_log_recorded_fwd(ctx);
+    return;
+  }
+  static constexpr const char* function = "poisson_log_lpmf";
+  const Eigen::Map<const Eigen::VectorXi> n(
+      ctx.idata, static_cast<Eigen::Index>(ctx.n_idata));
+  const Eigen::Map<const Eigen::ArrayXd> alpha_val(alpha.data, alpha.len);
+  stan::math::check_consistent_sizes(function, "Random variable", n,
+                                     "Log rate parameter", alpha_val);
+  stan::math::check_nonnegative(function, "Random variable", n);
+  stan::math::check_not_nan(function, "Log rate parameter", alpha_val);
+  std::fill_n(ctx.scratch, static_cast<size_t>(alpha.len + 1), 0.0);
+  ctx.out.data[0] = 0.0;
+  const bool active = mode.is_active(0);
+  if (alpha.len == 0 || (mode.propto && !active)) return;
+  for (int64_t i = 0; i < alpha.len; ++i) {
+    if (alpha.data[i] == stan::math::INFTY ||
+        (alpha.data[i] == stan::math::NEGATIVE_INFTY && n[i] != 0)) {
+      ctx.out.data[0] = stan::math::LOG_ZERO;
+      return;
+    }
+  }
+  const Eigen::ArrayXd exp_alpha = stan::math::exp(alpha_val);
+  ctx.out.data[0] = pairwise_sum(0, alpha.len, [&](int64_t i) {
+    double term = n[i] * alpha.data[i];
+    term -= exp_alpha[i];
+    if (!mode.propto) term -= stan::math::lgamma(n[i] + 1.0);
+    return term;
+  });
+  if (!active) return;
+  Eigen::Map<Eigen::ArrayXd>(ctx.scratch, alpha.len) =
+      n.array().cast<double>() - exp_alpha;
+  ctx.scratch[alpha.len] = 1.0;
+}
+
 void bernoulli_fwd(KernelCtx& ctx) { bernoulli_native_fwd<false>(ctx); }
 void bernoulli_logit_fwd(KernelCtx& ctx) {
   // A scalar theta against vector y contracts its lane partials with Eigen's
@@ -259,11 +308,11 @@ void bernoulli_logit_fwd(KernelCtx& ctx) {
     return;
   }
   if (!density_mode(ctx).elementwise && ctx.in[0].len > 1) {
-    bernoulli_logit_vector_fwd(ctx);
+    bernoulli_logit_array_fwd<true>(ctx);
     return;
   }
   if (density_mode(ctx).elementwise && ctx.out.len > 1) {
-    bernoulli_logit_elt_vector_fwd(ctx);
+    bernoulli_logit_array_fwd<false>(ctx);
     return;
   }
   bernoulli_native_fwd<true>(ctx);
@@ -449,16 +498,16 @@ void beta_binomial_fwd(KernelCtx& ctx) {
 // two integer groups and so live beside the unpacker rather than with the
 // other cdfs. No propto form and no elementwise one, exactly as the
 // one-group int cdfs in densities_cdf_b.cpp: cdf_fwd is what says so.
-#define STANLI_DEFINE_TWO_INT_CDF_FWD(code, fn, nreal, tier)               \
-  void fn##_fwd_gen(KernelCtx& ctx) {                                      \
-    const IntGroups groups = binomial_groups(ctx);                         \
-    with_int_group(groups.group[0], [&](const auto& n) {                   \
-      with_int_group(groups.group[1], [&](const auto& N) {                 \
-        cdf_fwd<nreal, tier & STANLI_DENSITY_FULL_MASKS>(                  \
-            ctx,                                                           \
-            [&](const auto&... a) { return stan::math::fn(n, N, a...); }); \
-      });                                                                  \
-    });                                                                    \
+#define STANLI_DEFINE_TWO_INT_CDF_FWD(code, fn, nreal)     \
+  void fn##_fwd_gen(KernelCtx& ctx) {                      \
+    const IntGroups groups = binomial_groups(ctx);         \
+    with_int_group(groups.group[0], [&](const auto& n) {   \
+      with_int_group(groups.group[1], [&](const auto& N) { \
+        cdf_fwd<nreal>(ctx, [&](const auto&... a) {        \
+          return stan::math::fn(n, N, a...);               \
+        });                                                \
+      });                                                  \
+    });                                                    \
   }
 STANLI_TWO_INT_CDF_LIST(STANLI_DEFINE_TWO_INT_CDF_FWD)
 #undef STANLI_DEFINE_TWO_INT_CDF_FWD

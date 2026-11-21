@@ -34,11 +34,13 @@ inline double seq_sum(const double* p, int64_t n) {
 // and the only two the callable `*_constrain(x, bounds)` functions can be
 // given. Reading it through a 0/1 stride keeps one code path for both, and
 // on the shared path every operation is the one the scalar-bound code did,
-// in the same order, so the declaration transforms stay bitwise.
+// in the same order, so the declaration transforms stay bitwise. A bound of
+// zero elements belongs to a container of zero elements, so it varies too:
+// there is no element 0 to share.
 struct Bound {
   const double* p;
   int64_t stride;
-  explicit Bound(const Desc& a) : p(a.data), stride(a.len > 1 ? 1 : 0) {}
+  explicit Bound(const Desc& a) : p(a.data), stride(a.len != 1 ? 1 : 0) {}
   double operator[](int64_t i) const { return p[i * stride]; }
   bool varies() const { return stride != 0; }
 };
@@ -329,8 +331,8 @@ void clu_bwd_inf(KernelCtx& ctx, int64_t n, const double* x, const double* il,
 // transform one-sided, and stan-math checks nothing; per-element bounds are
 // checked elementwise unless the shared one is infinite.
 void check_lub_bounds(const Bound& lb, const Bound& ub, int64_t n) {
-  if (lb[0] == kNegInf && !lb.varies()) return;
-  if (ub[0] == kPosInf && !ub.varies()) return;
+  if (!lb.varies() && lb[0] == kNegInf) return;
+  if (!ub.varies() && ub[0] == kPosInf) return;
   const bool varies = lb.varies() || ub.varies();
   for (int64_t i = 0; i < (varies ? n : 1); ++i)
     if (!(lb[i] < ub[i]))
@@ -353,8 +355,8 @@ void clu_fwd(KernelCtx& ctx) {
   // enough that only hoisting it by hand keeps a parameter block at one
   // call rather than one per element.
   const bool varies = lb.varies() || ub.varies();
-  const double diff0 = ub[0] - lb[0];
-  const double log_diff0 = std::log(diff0);
+  const double diff0 = varies ? 0.0 : ub[0] - lb[0];
+  const double log_diff0 = varies ? 0.0 : std::log(diff0);
   double jac = 0.0;
   for (int64_t i = 0; i < n; ++i) {
     const double nax = -std::abs(x[i]);
@@ -376,7 +378,7 @@ void clu_bwd(KernelCtx& ctx) {
     return;
   }
   const bool varies = lb.varies() || ub.varies();
-  const double diff0 = ub[0] - lb[0];
+  const double diff0 = varies ? 0.0 : ub[0] - lb[0];
   if (ctx.in_adj[0].data) {
     for (int64_t i = 0; i < n; ++i)
       ctx.in_adj[0].data[i] +=
@@ -630,6 +632,9 @@ void structured_fwd(KernelCtx& ctx) {
   ctx.out2.data[0] = lp;
 }
 
+// rev/constraint/simplex_constrain.hpp: the softmax pullback with the
+// Jacobian term, then internal::sum_to_zero_vector_backprop's loop, written
+// out so that z_adj needs no vector of its own.
 void simplex_bwd_batch(KernelCtx& ctx, int64_t b, int64_t inner_raw,
                        int64_t inner_con) {
   const double* res = ctx.out.data + b * inner_con;
@@ -737,6 +742,18 @@ void structured_bwd(KernelCtx& ctx) {
       simplex_bwd_batch(ctx, b, inner_raw, inner_con);
     return;
   }
+  if constexpr (K == StructuredKind::SumToZero) {
+    // Volume preserving: the Jacobian term has no adjoint.
+    Eigen::VectorXd z_adj(inner_con);
+    for (int64_t b = 0; b < nb; ++b) {
+      z_adj = Eigen::Map<const Eigen::VectorXd>(
+          ctx.out_adj_vec.data + b * inner_con, inner_con);
+      Eigen::Map<Eigen::VectorXd> y_adj(ctx.in_adj[0].data + b * inner_raw,
+                                        inner_raw);
+      stan::math::internal::sum_to_zero_vector_backprop(y_adj, z_adj);
+    }
+    return;
+  }
   if constexpr (K == StructuredKind::Ordered ||
                 K == StructuredKind::PositiveOrdered) {
     for (int64_t b = 0; b < nb; ++b)
@@ -813,13 +830,14 @@ void register_structured(uint16_t opcode) {
 // Written natively rather than replayed because this is the modern
 // non-centering idiom (`vector<offset=mu, multiplier=tau>[J] theta`), so
 // mu and sigma are usually parameters themselves and it sits on the hot
-// path. Each of mu and sigma is length 1 (broadcast) or length n.
+// path. Each of mu and sigma is length 1 (broadcast) or length n, which may
+// be 0.
 void offset_mult_fwd(KernelCtx& ctx) {
   const int64_t n = ctx.in[0].len;
   const double* x = ctx.in[0].data;
   const double* mu = ctx.in[1].data;
   const double* sg = ctx.in[2].data;
-  const bool mu_v = ctx.in[1].len > 1, sg_v = ctx.in[2].len > 1;
+  const bool mu_v = ctx.in[1].len != 1, sg_v = ctx.in[2].len != 1;
   check_offset_multiplier(ctx.in[1], ctx.in[2], matrix_rows(ctx));
   for (int64_t i = 0; i < n; ++i)
     ctx.out.data[i] = std::fma(sg[sg_v ? i : 0], x[i], mu[mu_v ? i : 0]);
@@ -839,7 +857,7 @@ void offset_mult_bwd(KernelCtx& ctx) {
   const double* x = ctx.in[0].data;
   const double* sg = ctx.in[2].data;
   const double* dout = ctx.out_adj_vec.data;
-  const bool mu_v = ctx.in[1].len > 1, sg_v = ctx.in[2].len > 1;
+  const bool mu_v = ctx.in[1].len != 1, sg_v = ctx.in[2].len != 1;
   if (ctx.in_adj[0].data)
     for (int64_t i = 0; i < n; ++i)
       ctx.in_adj[0].data[i] += dout[i] * sg[sg_v ? i : 0];

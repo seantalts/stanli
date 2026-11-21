@@ -28,6 +28,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <ostream>
+#include <stdexcept>
 #include <type_traits>
 #include <utility>
 #include <vector>
@@ -186,6 +187,13 @@ inline void record_probability_call(F&& f) {
   for (int k = 0; k < sink::kMaxEdges; ++k)
     if (s->buf[k] != nullptr)
       std::fill_n(s->buf[k], static_cast<std::size_t>(s->len[k]), 0.0);
+}
+
+// Out of line, so that the recorder's emit keeps one branch for the check
+// and the compiler still inlines it into each density's backward.
+[[noreturn, gnu::cold, gnu::noinline]] inline void throw_partials_size() {
+  throw std::logic_error(
+      "recorder: an operand's size does not match its partials slot");
 }
 
 }  // namespace stanli
@@ -445,7 +453,11 @@ class partials_propagator<stanli::rvar, void, Ops...> {
     using E = std::tuple_element_t<I, decltype(edges_)>;
     if constexpr (rt_has_emit<E>::value) {
       auto& e = std::get<I>(edges_);
-      if (s->buf[I] != nullptr && e.size() == s->len[I]) e.emit(s->buf[I]);
+      if (s->buf[I] == nullptr) return;
+      // A skipped edge would leave the previous gradient's partials in the
+      // slot.
+      if (e.size() != s->len[I]) stanli::throw_partials_size();
+      e.emit(s->buf[I]);
     }
   }
 

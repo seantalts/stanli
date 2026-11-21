@@ -67,6 +67,9 @@ struct RngArgument {
   const double* data;
   size_t size;
   bool scalar;
+  // The shape of a matrix argument to a library RNG.
+  size_t rows = 0;
+  size_t cols = 0;
 };
 void container_rng_draw(ScalarRng family, const RngArgument* args, size_t nargs,
                         double* output, size_t output_size, WaRng& rng);
@@ -80,6 +83,14 @@ void multi_normal_rng_draw(const double* location, size_t location_size,
                            bool cholesky = false);
 void dirichlet_rng_draw(const double* alpha, size_t alpha_size, double* output,
                         size_t output_size, WaRng& rng);
+// One library RNG draw, column-major, with the shape Stan Math returned.
+struct RngDraw {
+  std::vector<double> values;
+  int64_t rows = 0;
+  int64_t cols = 0;
+};
+RngDraw library_rng_draw(const LibraryRngSpec& spec, const RngArgument* args,
+                         size_t nargs, WaRng& rng);
 
 // The interpreter's RNG vocabulary: every `_rng` spelling an interpreted
 // section can draw, evaluated with `in` and advancing `rng`. One function

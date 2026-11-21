@@ -24,6 +24,10 @@ CMDSTAN = {
     "propto_var_local_branch": ((0.99919999999999998, 0.04), ("none",)),
     "while_recursive_udf": ((0.047069457298039678, -1.1567364324509919),
                             ("none", "o1")),
+    "container_early_returns": ((15.459199999999999, 33.539999999999999),
+                                ("none", "o1")),
+    "return_arm_changes_condition": ((5.1992000000000003, -4.96),
+                                     ("none", "o1")),
 }
 
 

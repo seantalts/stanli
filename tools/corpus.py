@@ -40,6 +40,15 @@ NOTES = {
         "As for dogs, merging Bernoulli terms changes their reduction "
         "order and can change final rounding. The primary point need "
         "not have the largest deviation of the three probes.",
+    "examplemodels_gp_fit_multi_output":
+        "The covariance of 101 points 0.04 apart with a 1e-9 jitter has "
+        "condition number 5.6e10 at point 0, with 89 of its 101 eigenvalues "
+        "at the jitter. Against an 80-digit evaluation at point 0 the log "
+        "density is 7.3e-9 off on macOS arm64, in stanli and CmdStan alike, "
+        "and the gradient of log(rho) is 6.6e-8 off; Linux x86-64 measured "
+        "that gradient 3.9e-7 from the arm64 recording. Moving log(rho) by "
+        "2.4e-15 moves the arm64 log density by up to 1.1e-8 and the "
+        "gradient by up to 6.2e-7.",
     "kronecker_gp":
         "lp matches CmdStan to 1e-13 and 436/438 gradients match; the two "
         "that flow through eigenvectors_sym differ by 0.7%. The covariance "
@@ -49,6 +58,15 @@ NOTES = {
         "~1e16. Every component op (eigen decomposition, transpose, matrix "
         "product, the whole chain with one operand held constant) matches "
         "CmdStan bitwise in isolation.",
+    "stanguide_ode_adjoint":
+        "With the guide's adjoint call and tolerances of 1e-6, stanli and "
+        "CmdStan differ by 3.9e-6 and 3.3e-6 relative at the first two "
+        "points and agree to 3.8e-14 at the third. With every tolerance at "
+        "1e-11 the two agree to 5e-11 and 9e-11 at the first two points. "
+        "Against that tight-tolerance solution at the first point, the log "
+        "density is off by 3.0e-6 in both engines, the first gradient entry "
+        "by 4.0e-6 in stanli and 1.5e-5 in CmdStan, and the second by 4.0e-5 "
+        "in stanli and 4.4e-5 in CmdStan (absolute differences).",
     "tuple_array_params":
         "At the third point the gradient of grid[1, 2].1's free value is "
         "1 - x - x^2 * sum(v^2) / 9 with x = 1 and v = (1/3, 1/3, 1/3), "

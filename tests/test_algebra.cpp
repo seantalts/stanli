@@ -178,8 +178,9 @@ int main() {
     expect_close("gradient after value-only solve " + std::to_string(i),
                  grad2[i], grad[i]);
 
-  expect_true("algebra fixture retains interpreted write_array",
-              cm.write_array && cm.write_array->interp);
+  if (debug_switches_available())
+    expect_true("algebra fixture retains interpreted write_array",
+                cm.write_array && cm.write_array->interp);
   if (cm.write_array && cm.write_array->interp) {
     WaRng rng(1234);
     const std::vector<double> row =

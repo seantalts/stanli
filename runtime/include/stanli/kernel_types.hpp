@@ -109,6 +109,20 @@ struct DensityMode {
   }
 };
 
+// How OP_SUM_VEC and OP_MEAN add their terms; the op's variant holds it.
+// InOrder is how Matrix<var>, std::vector and strided Eigen views reduce.
+// Packet is Eigen's packet grouping for a container whose first element is
+// aligned; Phased is the same for a view that starts `offset` elements into
+// one. Pairwise is for the sums that re-roll and partition build from a
+// loop's target terms, which no Stan expression fixes the order of. None of
+// them depends on the address of the slot.
+enum class SumGrouping : uint8_t {
+  InOrder = 0,
+  Packet = 1,
+  Phased = 2,
+  Pairwise = 3
+};
+
 // Op::variant of OP_ODE, OP_ODE_ADJOINT, OP_DAE and OP_QUADRATURE: bit k says
 // in[k] is autodiff. Runtime-control inputs are never active.
 struct SolverActivity {

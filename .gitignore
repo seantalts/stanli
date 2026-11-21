@@ -79,6 +79,12 @@ tests/rbioacc/*.hpp
 tests/beeguts/*.hpp
 tests/hdbayes/*.hpp
 tests/ecoensemble/*.hpp
+tests/examplemodels/*.hpp
+tests/stanguide/*.hpp
+tests/bayesdfa/*.hpp
+tests/walker/*.hpp
+tests/bmgarch/*.hpp
+tests/hbayesdm/*.hpp
 
 # Compiler output beside generated teaching fixtures.
 tests/rethinking/*.hpp

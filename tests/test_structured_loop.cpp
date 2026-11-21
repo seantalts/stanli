@@ -1645,9 +1645,9 @@ struct ScopedKernelOverride {
 
   ScopedKernelOverride(uint16_t opcode, Kernel replacement)
       : opcode(opcode), saved(*find_kernel(opcode)) {
-    register_kernel(opcode, replacement);
+    kernel(opcode) = replacement;
   }
-  ~ScopedKernelOverride() { register_kernel(opcode, saved); }
+  ~ScopedKernelOverride() { kernel(opcode) = saved; }
 };
 
 static int inactive_workspace_calls = 0;
@@ -1915,7 +1915,8 @@ static void integer_result_tests() {
             [&] {
               (void)evaluate(
                   retry,
-                  static_cast<double>(std::numeric_limits<int32_t>::max()), 1);
+                  static_cast<double>(std::numeric_limits<int32_t>::max()) + 1,
+                  1);
             },
             "integer arithmetic exceeds Stan integer range"),
         "integer arithmetic exception is preserved");
@@ -1925,7 +1926,7 @@ static void integer_result_tests() {
 
   Executor division_retry(outer(imported_integer_output_plan(3)));
   check(throws<std::domain_error>([&] { (void)evaluate(division_retry, 4, 0); },
-                                  "integer division by zero"),
+                                  "divide: denominator is 0"),
         "integer division exception is preserved");
   close(evaluate(division_retry, 4, 2).value, 2,
         "integer division retry value");
@@ -5149,9 +5150,8 @@ static void compiled_recording_tests() {
   test_unsetenv("STANLI_STRUCTURED_COMPILED_RECORDING");
 }
 
-static int data_recording_custom_calls = 0;
+// A forward that is not the registered kernel's, as an extension would install.
 static void data_recording_custom_index(KernelCtx& ctx) {
-  ++data_recording_custom_calls;
   find_kernel(OP_INDEX_DYNAMIC)->forward(ctx);
 }
 
@@ -5193,7 +5193,6 @@ static void data_recording_tests() {
     const auto graph = outer(plan, {1, 1}, {3, 1});
     test_setenv("STANLI_STRUCTURED_FRAMES", "1");
     Executor candidate = diagnosed_executor(graph);
-    Executor baseline(graph);
     test_unsetenv("STANLI_STRUCTURED_FRAMES");
     test_setenv("STANLI_NO_STRUCTURED_REPLAY", "1");
     Executor tree(graph);
@@ -5201,24 +5200,17 @@ static void data_recording_tests() {
     test_setenv("STANLI_STRUCTURED_COMPILED_RECORDING", "1");
     for (int step = 0; step < 6; ++step) {
       const double values[] = {5, step < 4 ? -2.0 : 3.0, 7};
-      for (auto* ex : {&candidate, &baseline, &tree}) {
+      for (auto* ex : {&candidate, &tree}) {
         std::copy_n(values, 3, ex->value_ptr(2));
         ex->value_ptr(3)[0] = 3;
       }
       const double cutoff = step < 2 ? 0 : 6;
       const auto expected = evaluate(tree, .25, cutoff);
-      test_setenv("STANLI_STRUCTURED_DATA_RECORDING", "0");
-      data_recording_custom_calls = 0;
-      const auto flat = evaluate(baseline, .25, cutoff);
-      const int calls = data_recording_custom_calls;
-      test_setenv("STANLI_STRUCTURED_DATA_RECORDING", "1");
-      data_recording_custom_calls = 0;
       stanli_test::StdoutCapture capture(stderr);
       const auto actual = evaluate(candidate, .25, cutoff);
       const auto diagnostics = capture.finish();
       check(
-          std::memcmp(&actual, &expected, sizeof(Evaluation)) == 0 &&
-              std::memcmp(&actual, &flat, sizeof(Evaluation)) == 0,
+          std::memcmp(&actual, &expected, sizeof(Evaluation)) == 0,
           "data recording preserves values and gradients across guard changes");
       if (step == 0) {
         check(reported_field(diagnostics, "data_branches=") ==
@@ -5236,27 +5228,20 @@ static void data_recording_tests() {
                                             : 0),
               "data recording executes only with proven constant live inputs");
       }
-      if (mode == 3)
-        check(data_recording_custom_calls == calls,
-              "data recording preserves custom-kernel execution");
     }
-    for (auto* ex : {&candidate, &baseline, &tree}) {
+    for (auto* ex : {&candidate, &tree}) {
       ex->value_ptr(3)[0] = 4;
-      test_setenv("STANLI_STRUCTURED_DATA_RECORDING",
-                  ex == &candidate ? "1" : "0");
       check(throws<std::out_of_range>([&] { (void)evaluate(*ex, .25, 0); },
                                       "structured index out of range"),
             "data recording preserves a later-iteration index failure");
       ex->value_ptr(3)[0] = 3;
     }
     const auto expected = evaluate(tree, -.5, 0);
-    test_setenv("STANLI_STRUCTURED_DATA_RECORDING", "1");
     const auto retried = evaluate(candidate, -.5, 0);
     check(std::memcmp(&expected, &retried, sizeof(Evaluation)) == 0,
           "data recording retries after a partially evaluated block");
   }
   test_unsetenv("STANLI_STRUCTURED_COMPILED_RECORDING");
-  test_unsetenv("STANLI_STRUCTURED_DATA_RECORDING");
 }
 
 static void data_branch_entry_tests() {
@@ -5308,14 +5293,14 @@ static void data_branch_entry_tests() {
     plan->prepare();
     const auto graph = outer(plan, {1, 1}, {5});
     test_setenv("STANLI_STRUCTURED_FRAMES", "1");
-    Executor candidate = diagnosed_executor(graph), baseline(graph);
+    Executor candidate = diagnosed_executor(graph);
     test_unsetenv("STANLI_STRUCTURED_FRAMES");
     test_setenv("STANLI_NO_STRUCTURED_REPLAY", "1");
     Executor tree(graph);
     test_unsetenv("STANLI_NO_STRUCTURED_REPLAY");
     test_setenv("STANLI_STRUCTURED_COMPILED_RECORDING", "1");
     for (int step = 0; step < 4; ++step) {
-      for (auto* ex : {&candidate, &baseline, &tree})
+      for (auto* ex : {&candidate, &tree})
         for (int i = 0; i < 5; ++i)
           ex->value_ptr(2)[i] = (i + (step >= 2)) % 2 == 0;
       const double theta_value = step % 2 == 0 ? .25 : -.5;
@@ -5325,14 +5310,10 @@ static void data_branch_entry_tests() {
             "branch-entry fixture visits the expected targets");
       close(expected.gradient[0], count,
             "branch-entry fixture has the expected gradient");
-      test_setenv("STANLI_STRUCTURED_DATA_RECORDING", "0");
-      const auto flat = evaluate(baseline, theta_value, 0);
-      test_setenv("STANLI_STRUCTURED_DATA_RECORDING", "1");
       stanli_test::StdoutCapture capture(stderr);
       const auto actual = evaluate(candidate, theta_value, 0);
       const auto diagnostics = capture.finish();
-      check(std::memcmp(&actual, &expected, sizeof(Evaluation)) == 0 &&
-                std::memcmp(&actual, &flat, sizeof(Evaluation)) == 0,
+      check(std::memcmp(&actual, &expected, sizeof(Evaluation)) == 0,
             "fused data branches preserve independent control-flow entries");
       if (step == 0)
         check(reported_field(diagnostics, "data_branches=") ==
@@ -5341,7 +5322,6 @@ static void data_branch_entry_tests() {
     }
   }
   test_unsetenv("STANLI_STRUCTURED_COMPILED_RECORDING");
-  test_unsetenv("STANLI_STRUCTURED_DATA_RECORDING");
 }
 
 static void conditional_data_recording_tests() {
@@ -5377,7 +5357,7 @@ static void conditional_data_recording_tests() {
   plan->prepare();
   const auto graph = outer(plan, {1, 1}, {12, 1});
   test_setenv("STANLI_STRUCTURED_FRAMES", "1");
-  Executor candidate = diagnosed_executor(graph), baseline(graph);
+  Executor candidate = diagnosed_executor(graph);
   test_unsetenv("STANLI_STRUCTURED_FRAMES");
   test_setenv("STANLI_NO_STRUCTURED_REPLAY", "1");
   Executor tree(graph);
@@ -5386,27 +5366,21 @@ static void conditional_data_recording_tests() {
   bool specialized = false;
   for (int n : {0, 1, 12, 12, 0, 12}) {
     for (int sign : {1, -1}) {
-      for (auto* ex : {&candidate, &baseline, &tree}) {
+      for (auto* ex : {&candidate, &tree}) {
         for (int i = 0; i < 12; ++i) ex->value_ptr(2)[i] = sign * (i + 2);
         ex->value_ptr(3)[0] = n;
       }
       for (double choose_value : {1.0, 0.0, 0.0, 1.0}) {
         const auto expected = evaluate(tree, -.25, choose_value);
-        test_setenv("STANLI_STRUCTURED_DATA_RECORDING", "0");
-        const auto flat = evaluate(baseline, -.25, choose_value);
-        test_setenv("STANLI_STRUCTURED_DATA_RECORDING", "1");
         stanli_test::StdoutCapture capture(stderr);
         const auto actual = evaluate(candidate, -.25, choose_value);
         const auto diagnostics = capture.finish();
         specialized |= reported_field(diagnostics, "data_kernels=") == 4;
-        check(std::memcmp(&actual, &expected, sizeof(Evaluation)) == 0 &&
-                  std::memcmp(&actual, &flat, sizeof(Evaluation)) == 0,
+        check(std::memcmp(&actual, &expected, sizeof(Evaluation)) == 0,
               "conditional data instructions preserve initial reads and "
               "guarded assignments");
         double value_only = 0;
-        for (auto* ex : {&tree, &baseline, &candidate}) {
-          test_setenv("STANLI_STRUCTURED_DATA_RECORDING",
-                      ex == &candidate ? "1" : "0");
+        for (auto* ex : {&tree, &candidate}) {
           ex->params_data()[0] = .75;
           ex->params_data()[1] = 1 - choose_value;
           const double value = ex->forward_value_only();
@@ -5423,7 +5397,6 @@ static void conditional_data_recording_tests() {
   check(specialized,
         "conditional constancy fixture exercises data instructions");
   test_unsetenv("STANLI_STRUCTURED_COMPILED_RECORDING");
-  test_unsetenv("STANLI_STRUCTURED_DATA_RECORDING");
 }
 
 static void mutable_data_recording_tests() {
@@ -5463,28 +5436,24 @@ static void mutable_data_recording_tests() {
     plan->prepare();
     const auto graph = outer(plan, {1, 1}, {2, 1});
     test_setenv("STANLI_STRUCTURED_FRAMES", "1");
-    Executor candidate = diagnosed_executor(graph), baseline(graph);
+    Executor candidate = diagnosed_executor(graph);
     test_unsetenv("STANLI_STRUCTURED_FRAMES");
     test_setenv("STANLI_NO_STRUCTURED_REPLAY", "1");
     Executor tree(graph);
     test_unsetenv("STANLI_NO_STRUCTURED_REPLAY");
     bool checked_proof = false;
     for (int n : {0, 1, 12, 12, 2}) {
-      for (auto* ex : {&candidate, &baseline, &tree}) {
+      for (auto* ex : {&candidate, &tree}) {
         ex->value_ptr(2)[0] = -3;
         ex->value_ptr(2)[1] = 7;
         ex->value_ptr(3)[0] = n;
       }
       for (double beta_value : {.25, -.5, .25}) {
         const auto expected = evaluate(tree, .5, beta_value);
-        test_setenv("STANLI_STRUCTURED_DATA_RECORDING", "0");
-        const auto flat = evaluate(baseline, .5, beta_value);
-        test_setenv("STANLI_STRUCTURED_DATA_RECORDING", "1");
         stanli_test::StdoutCapture capture(stderr);
         const auto actual = evaluate(candidate, .5, beta_value);
         const auto diagnostics = capture.finish();
-        check(std::memcmp(&actual, &expected, sizeof(Evaluation)) == 0 &&
-                  std::memcmp(&actual, &flat, sizeof(Evaluation)) == 0,
+        check(std::memcmp(&actual, &expected, sizeof(Evaluation)) == 0,
               "data recorder tracks in-place writes across cells and frames");
         if (n > 0 && !checked_proof) {
           check(
@@ -5496,7 +5465,6 @@ static void mutable_data_recording_tests() {
       }
     }
   }
-  test_unsetenv("STANLI_STRUCTURED_DATA_RECORDING");
 }
 
 static std::shared_ptr<StructuredLoop> prepared_index_plan(
@@ -5583,14 +5551,14 @@ static void prepared_index_tests() {
           outer(prepared_index_plan(rank, matrix, mode, 0, late), {1, 1},
                 {int64_t{1} << rank, rank + 1, rank + 1, 1});
       test_setenv("STANLI_STRUCTURED_FRAMES", "1");
-      Executor candidate = diagnosed_executor(graph), baseline(graph);
+      Executor candidate = diagnosed_executor(graph);
       test_unsetenv("STANLI_STRUCTURED_FRAMES");
       test_setenv("STANLI_NO_STRUCTURED_REPLAY", "1");
       Executor tree(graph);
       test_unsetenv("STANLI_NO_STRUCTURED_REPLAY");
       for (int step = 0; step < 6; ++step) {
         const int trips = step == 0 ? 0 : 12;
-        for (auto* ex : {&candidate, &baseline, &tree}) {
+        for (auto* ex : {&candidate, &tree}) {
           prepared_index_inputs(*ex, rank, mode, trips);
           // Changes physical bindings inside a recording and import values
           // between recordings. Mode 2 also visits a logically empty read.
@@ -5602,14 +5570,10 @@ static void prepared_index_tests() {
         const double theta = step == 1 || step == 3 ? -.25 : .25;
         const double beta = step == 5 ? 100 : .5;
         const auto expected = evaluate(tree, theta, beta);
-        test_setenv("STANLI_STRUCTURED_PREPARED_INDEX", "0");
-        const auto flat = evaluate(baseline, theta, beta);
-        test_setenv("STANLI_STRUCTURED_PREPARED_INDEX", "1");
         stanli_test::StdoutCapture capture(stderr);
         const auto actual = evaluate(candidate, theta, beta);
         const auto diagnostics = capture.finish();
-        check(std::memcmp(&actual, &expected, sizeof(Evaluation)) == 0 &&
-                  std::memcmp(&actual, &flat, sizeof(Evaluation)) == 0,
+        check(std::memcmp(&actual, &expected, sizeof(Evaluation)) == 0,
               "prepared point reads preserve rank, aliases, guards and retry");
         if (trips &&
             diagnostics.find("recording_proofs:") != std::string::npos) {
@@ -5630,7 +5594,6 @@ static void prepared_index_tests() {
       }
     }
   }
-  test_unsetenv("STANLI_STRUCTURED_PREPARED_INDEX");
 }
 
 static void prepared_index_failure_tests() {
@@ -5649,32 +5612,28 @@ static void prepared_index_failure_tests() {
     const auto graph = outer(prepared_index_plan(rank, true, 0, malformed),
                              {1, 1}, {8, 4, 4, 1});
     test_setenv("STANLI_STRUCTURED_FRAMES", "1");
-    Executor candidate = diagnosed_executor(graph), baseline(graph);
+    Executor candidate = diagnosed_executor(graph);
     test_unsetenv("STANLI_STRUCTURED_FRAMES");
     test_setenv("STANLI_NO_STRUCTURED_REPLAY", "1");
     Executor tree(graph);
     test_unsetenv("STANLI_NO_STRUCTURED_REPLAY");
-    for (auto* ex : {&candidate, &baseline, &tree})
+    for (auto* ex : {&candidate, &tree})
       prepared_index_inputs(*ex, rank, 0, 12);
-    test_setenv("STANLI_STRUCTURED_PREPARED_INDEX", "1");
     check(outcome(candidate, -.25).empty(),
           "untaken malformed index does not fail during recording compilation");
     for (double bad :
          {0.0, -1.0, 1.5, 3.0, std::numeric_limits<double>::infinity(),
           std::numeric_limits<double>::quiet_NaN()}) {
-      for (auto* ex : {&candidate, &baseline, &tree}) {
+      for (auto* ex : {&candidate, &tree}) {
         prepared_index_inputs(*ex, rank, 0, 12);
         ex->value_ptr(4)[2] = bad;
       }
       const auto expected = outcome(tree, .25);
-      test_setenv("STANLI_STRUCTURED_PREPARED_INDEX", "0");
-      const auto flat = outcome(baseline, .25);
-      test_setenv("STANLI_STRUCTURED_PREPARED_INDEX", "1");
       const auto actual = outcome(candidate, .25);
-      check(!expected.empty() && actual == expected && actual == flat,
+      check(!expected.empty() && actual == expected,
             "prepared indices preserve first-use and later-iteration errors");
       if (!malformed) {
-        for (auto* ex : {&candidate, &baseline, &tree})
+        for (auto* ex : {&candidate, &tree})
           prepared_index_inputs(*ex, rank, 0, 12);
         const auto expected_retry = evaluate(tree, .25, .5);
         const auto actual_retry = evaluate(candidate, .25, .5);
@@ -5684,7 +5643,6 @@ static void prepared_index_failure_tests() {
       }
     }
   }
-  test_unsetenv("STANLI_STRUCTURED_PREPARED_INDEX");
 }
 
 static void prepared_iterator_tests() {
@@ -5747,26 +5705,22 @@ static void prepared_iterator_tests() {
     plan->prepare();
     const auto graph = outer(plan, {1, 1}, {1, 1});
     test_setenv("STANLI_STRUCTURED_FRAMES", "1");
-    Executor candidate = diagnosed_executor(graph), baseline(graph);
+    Executor candidate = diagnosed_executor(graph);
     test_unsetenv("STANLI_STRUCTURED_FRAMES");
     test_setenv("STANLI_NO_STRUCTURED_REPLAY", "1");
     Executor tree(graph);
     test_unsetenv("STANLI_NO_STRUCTURED_REPLAY");
     for (int trips : {0, 1, 12, 12, 2}) {
-      for (auto* ex : {&candidate, &baseline, &tree}) {
+      for (auto* ex : {&candidate, &tree}) {
         ex->value_ptr(2)[0] = trips;
         ex->value_ptr(3)[0] = trips == 2 ? 0 : 4;
       }
       for (double theta : {.25, -.25, .25}) {
         const auto expected = evaluate(tree, theta, 2);
-        test_setenv("STANLI_STRUCTURED_PREPARED_ITERATOR", "0");
-        const auto flat = evaluate(baseline, theta, 2);
-        test_setenv("STANLI_STRUCTURED_PREPARED_ITERATOR", "1");
         stanli_test::StdoutCapture capture(stderr);
         const auto actual = evaluate(candidate, theta, 2);
         const auto diagnostics = capture.finish();
-        check(std::memcmp(&actual, &expected, sizeof(Evaluation)) == 0 &&
-                  std::memcmp(&actual, &flat, sizeof(Evaluation)) == 0,
+        check(std::memcmp(&actual, &expected, sizeof(Evaluation)) == 0,
               "prepared iterators preserve re-entry, guards, zero trips and "
               "break/continue");
         if (trips && diagnostics.find("recording_proofs:") != std::string::npos)
@@ -5777,7 +5731,6 @@ static void prepared_iterator_tests() {
       }
     }
   }
-  test_unsetenv("STANLI_STRUCTURED_PREPARED_ITERATOR");
 }
 
 static void frame_layout_tests() {
@@ -5835,27 +5788,20 @@ static void frame_layout_tests() {
     const auto graph = outer(plan, {1, 1}, {6});
     test_setenv("STANLI_STRUCTURED_FRAMES", "1");
     Executor candidate = diagnosed_executor(graph);
-    test_setenv("STANLI_NO_STRUCTURED_FRAME_LAYOUT", "1");
-    Executor baseline = diagnosed_executor(graph);
-    test_unsetenv("STANLI_NO_STRUCTURED_FRAME_LAYOUT");
     test_unsetenv("STANLI_STRUCTURED_FRAMES");
     test_setenv("STANLI_NO_STRUCTURED_REPLAY", "1");
     Executor tree(graph);
     test_unsetenv("STANLI_NO_STRUCTURED_REPLAY");
     for (int step = 0; step < 4; ++step) {
-      for (auto* ex : {&candidate, &baseline, &tree})
+      for (auto* ex : {&candidate, &tree})
         for (int i = 0; i < 6; ++i)
           ex->value_ptr(2)[i] = (i / 2 + step / 2) % 2 == 0;
       const double theta_value = step % 2 ? -.5 : .25;
       const auto expected = evaluate(tree, theta_value, 2);
-      stanli_test::StdoutCapture baseline_capture(stderr);
-      const auto flat = evaluate(baseline, theta_value, 2);
-      const auto base_diagnostics = baseline_capture.finish();
       stanli_test::StdoutCapture capture(stderr);
       const auto actual = evaluate(candidate, theta_value, 2);
       const auto diagnostics = capture.finish();
-      check(std::memcmp(&actual, &expected, sizeof(Evaluation)) == 0 &&
-                std::memcmp(&actual, &flat, sizeof(Evaluation)) == 0,
+      check(std::memcmp(&actual, &expected, sizeof(Evaluation)) == 0,
             "checked layouts preserve alias splits, merges and index geometry");
       if (step == 0) {
         const auto attempts = reported_field(diagnostics, "layout_attempts=");
@@ -5869,8 +5815,6 @@ static void frame_layout_tests() {
                       attempts, matches);
         check(exercised,
               "layout fixtures exercise both successful binding and refusal");
-        check(reported_field(base_diagnostics, "layout_attempts=") == 0,
-              "layout-disabled comparator uses canonical encoding only");
       }
       candidate.run_forward_only();
       const auto repeated = evaluate(candidate, theta_value, 2);
@@ -5944,11 +5888,8 @@ static void frame_clone_tests() {
           "recorded clone replays its first gradient without recording");
     check(same(evaluate(*chain, .25, 2), expected),
           "copy of an unused recorded copy relocates every binding again");
-    test_setenv("STANLI_NO_STRUCTURED_FRAME_CLONE", "1");
-    auto refused = copy(*source, false);
-    test_unsetenv("STANLI_NO_STRUCTURED_FRAME_CLONE");
-    check(same(evaluate(*refused, .25, 2), expected),
-          "disabled recorded cloning retains the fresh-recording fallback");
+    check(same(evaluate(*cold, .25, 2), expected),
+          "a refused clone records afresh");
 
     // Mutating and destroying the source cannot invalidate the copied tape.
     source->value_ptr(2)[1] = -3;
@@ -8479,9 +8420,6 @@ int main() {
     invariant_gradient_order_test();
     test_unsetenv(flag);
   }
-  test_setenv("STANLI_NO_STRUCTURED_INVARIANT_PRIMALS", "1");
-  invariant_gradient_order_test();
-  test_unsetenv("STANLI_NO_STRUCTURED_INVARIANT_PRIMALS");
   inplace_import_base_tests();
   inplace_promotion_tests();
   inplace_duplicate_position_tests();

@@ -61,6 +61,19 @@ void expect_near(const std::string& what, double got, double want) {
   std::printf("FAIL %s: got %.17g want %.17g\n", what.c_str(), got, want);
 }
 
+// A model from Stan source, or null when this build has no embedded stanc.
+stanli_model* from_stan(const char* code, const char* data = "{}") {
+  if (!stanli_has_embedded_stanc()) return nullptr;
+  char err[8192]{};
+  stanli_model* m = stanli_model_new_from_stan_with_opts(code, data, nullptr,
+                                                         err, sizeof err);
+  if (m == nullptr) {
+    ++failures;
+    std::printf("FAIL compiling a test model: %s\n", err);
+  }
+  return m;
+}
+
 void expect_names(const char* fixture, const std::string& data,
                   const std::vector<std::string>& expected,
                   const std::vector<double>& q = {},
@@ -114,6 +127,49 @@ void expect_names(const char* fixture, const std::string& data,
   stanli_model_free(model);
 }
 
+// A JSON document of CmdStan's shape for the columns `names` (`m.2.1`) and
+// their values, in CSV order: each variable nested with its first index
+// outermost, as CmdStan's JSON reader requires of a starting value.
+std::string nested_json(const std::vector<std::string>& names,
+                        const std::vector<double>& values) {
+  struct Var {
+    std::vector<int64_t> dims;
+    std::vector<double> values;
+  };
+  std::vector<std::string> order;
+  std::map<std::string, Var> vars;
+  for (size_t i = 0; i < names.size(); ++i) {
+    std::stringstream parts(names[i]);
+    std::string base, index;
+    std::getline(parts, base, '.');
+    if (!vars.count(base)) order.push_back(base);
+    Var& v = vars[base];
+    for (size_t d = 0; std::getline(parts, index, '.'); ++d) {
+      if (v.dims.size() <= d) v.dims.push_back(0);
+      v.dims[d] = std::max<int64_t>(v.dims[d], std::stoll(index));
+    }
+    v.values.push_back(values[i]);
+  }
+  const std::function<std::string(const Var&, size_t, int64_t, int64_t)> nest =
+      [&](const Var& v, size_t d, int64_t at, int64_t stride) {
+        char buf[32];
+        if (d == v.dims.size()) {
+          std::snprintf(buf, sizeof buf, "%.17g", v.values[(size_t)at]);
+          return std::string(buf);
+        }
+        std::string out = "[";
+        for (int64_t k = 0; k < v.dims[d]; ++k)
+          out += (k ? ", " : "") +
+                 nest(v, d + 1, at + k * stride, stride * v.dims[d]);
+        return out + "]";
+      };
+  std::string json = "{";
+  for (size_t i = 0; i < order.size(); ++i)
+    json +=
+        (i ? ", \"" : "\"") + order[i] + "\": " + nest(vars[order[i]], 0, 0, 1);
+  return json + "}";
+}
+
 // stanli_unconstrain_inits, checked by round trip against the model's own
 // forward direction: constrain a free point through stanli_wa_row, feed the
 // constrained values back as JSON, and require the original free point.
@@ -146,34 +202,11 @@ void expect_unconstrain_inits_round_trip() {
 
   // Rebuild the document from the CSV names, which carry each parameter's
   // shape in their indices.
-  std::vector<std::string> flat;
+  std::vector<std::string> names;
   for (int64_t i = 0; i < n_cols; ++i)
-    flat.emplace_back(stanli_wa_column_name(model, i));
-  std::map<std::string, std::vector<double>> by_name;
-  std::vector<std::string> order;
-  for (size_t i = 0; i < flat.size() && i < row.size(); ++i) {
-    const std::string base = flat[i].substr(0, flat[i].find('.'));
-    if (by_name.find(base) == by_name.end()) order.push_back(base);
-    by_name[base].push_back(row[i]);
-  }
-  std::string json = "{";
-  for (size_t i = 0; i < order.size(); ++i) {
-    const std::vector<double>& v = by_name[order[i]];
-    char buf[32];
-    json += (i ? ", " : "") + ("\"" + order[i] + "\": ");
-    if (v.size() == 1) {
-      std::snprintf(buf, sizeof buf, "%.17g", v[0]);
-      json += buf;
-    } else {
-      json += "[";
-      for (size_t k = 0; k < v.size(); ++k) {
-        std::snprintf(buf, sizeof buf, "%.17g", v[k]);
-        json += (k ? ", " : "") + std::string(buf);
-      }
-      json += "]";
-    }
-  }
-  json += "}";
+    names.emplace_back(stanli_wa_column_name(model, i));
+  names.resize(std::min(names.size(), row.size()));
+  const std::string json = nested_json(names, row);
 
   std::vector<double> back((size_t)n, 0.0);
   if (stanli_unconstrain_inits(model, json.c_str(), back.data(), err,
@@ -325,6 +358,29 @@ void expect_runtime_bound_rejected() {
         "FAIL C API write_array accepted transformed value below bound\n");
   }
   stanli_model_free(model);
+}
+
+// The C API reads data through the same shape check as CmdStan: a 3x2
+// matrix given as two rows of three is rejected, with the variable and both
+// shapes in the message.
+void expect_transposed_data_rejected() {
+  const std::string mir = slurp("tests/fixtures/gqconst.tmir.sexp");
+  char err[8192]{};
+  stanli_model* model = stanli_model_new_with_opts(
+      mir.c_str(), R"({"rectangular":[[1,2,3],[4,5,6]]})", nullptr, err,
+      sizeof err);
+  if (model != nullptr) {
+    ++failures;
+    std::printf("FAIL C API accepted a transposed matrix\n");
+    stanli_model_free(model);
+    return;
+  }
+  if (std::strstr(err,
+                  "variable name=rectangular; position=0; dims "
+                  "declared=(3,2); dims found=(2,3)") == nullptr) {
+    ++failures;
+    std::printf("FAIL C API shape error: %s\n", err);
+  }
 }
 
 void expect_compiled_scalar_rng() {
@@ -1057,11 +1113,16 @@ void expect_sampling_messages() {
   int rc = 1;
   collect_message(quiet, [&] { rc = run(0); });
   expect_true("quiet run succeeds", rc == 0);
-  expect_true("refresh 0 prints no sampler messages", quiet.messages.empty());
+  // As in CmdStan, refresh controls only the progress lines: rejection
+  // notices and adaptation warnings are printed either way.
+  expect_true("refresh 0 still reports rejected proposals",
+              !quiet.messages.empty());
   const std::vector<double> quiet_draws = draws;
 
   MessageCapture loud;
   collect_message(loud, [&] { rc = run(100); });
+  expect_true("refresh changes no sampler message",
+              loud.messages == quiet.messages);
   expect_true("refresh run succeeds", rc == 0);
   expect_true("messages leave the draws bitwise unchanged",
               draws == quiet_draws);
@@ -1208,9 +1269,14 @@ void expect_captured_messages() {
   expect_true("capture: threaded sample succeeds", rc == 0);
   const std::string sampled = seen_during_poll + take_messages();
   const size_t lines = count_substring(sampled, "\n");
-  expect_true(
-      "every chain's prints arrive whole",
-      lines > 0 && count_substring(sampled, "drawing at x = ") == lines);
+  // Each line is one whole print or one line of a sampler notice.
+  bool whole = count_substring(sampled, "drawing at x = ") > 0;
+  std::istringstream sampled_lines(sampled);
+  for (std::string line; std::getline(sampled_lines, line);)
+    whole = whole && (line.empty() || line.rfind("Chain [", 0) == 0 ||
+                      (line.rfind("drawing at x = ", 0) == 0 &&
+                       count_substring(line, "drawing") == 1));
+  expect_true("every chain's prints arrive whole", lines > 0 && whole);
   expect_true("held text ends on a line boundary",
               !sampled.empty() && sampled.back() == '\n');
   stanli_model_free(printer);
@@ -1411,10 +1477,11 @@ void expect_walnuts_chain_and_stats() {
                                                fixed_stats.data(), nullptr,
                                                nullptr, err, sizeof err) == 0);
   expect_true("explicit init changes the chain", fixed != one);
-  expect_true("walnuts rejects chain_id 0",
+  expect_true("walnuts rejects chain_id -1",
               stanli_sample_walnuts_stats_init(
-                  model, 31, 0, warmup, samples, 0, 2, nullptr, one.data(),
-                  nullptr, nullptr, nullptr, err, sizeof err) != 0);
+                  model, 31, -1, warmup, samples, 0, 2, nullptr, one.data(),
+                  nullptr, nullptr, nullptr, err, sizeof err) != 0 &&
+                  std::string(err) == "chain_id must be an integer >= 0");
   stanli_model_free(model);
 }
 
@@ -1446,16 +1513,18 @@ void expect_sample_options_validated() {
       {"max_depth = 0", [](stanli_sample_opts& o) { o.max_depth = 0; },
        "max_depth must be an integer >= 1"},
       {"delta = 0", [](stanli_sample_opts& o) { o.delta = 0.0; },
-       "delta must be between 0 and 1"},
+       "delta must be a number >= 0.1 and < 1"},
+      {"delta = 0.05", [](stanli_sample_opts& o) { o.delta = 0.05; },
+       "delta must be a number >= 0.1 and < 1"},
       {"delta = 1", [](stanli_sample_opts& o) { o.delta = 1.0; },
-       "delta must be between 0 and 1"},
+       "delta must be a number >= 0.1 and < 1"},
       {"delta = 1.5", [](stanli_sample_opts& o) { o.delta = 1.5; },
-       "delta must be between 0 and 1"},
+       "delta must be a number >= 0.1 and < 1"},
       {"delta = NaN",
        [](stanli_sample_opts& o) {
          o.delta = std::numeric_limits<double>::quiet_NaN();
        },
-       "delta must be between 0 and 1"},
+       "delta must be a number >= 0.1 and < 1"},
       {"init_radius < 0", [](stanli_sample_opts& o) { o.init_radius = -1.0; },
        "init_radius must be a finite number >= 0"},
       {"init_radius = Inf",
@@ -1463,8 +1532,8 @@ void expect_sample_options_validated() {
          o.init_radius = std::numeric_limits<double>::infinity();
        },
        "init_radius must be a finite number >= 0"},
-      {"chain_id = 0", [](stanli_sample_opts& o) { o.chain_id = 0; },
-       "chain_id must be an integer >= 1"},
+      {"chain_id < 0", [](stanli_sample_opts& o) { o.chain_id = -1; },
+       "chain_id must be an integer >= 0"},
   };
   for (const Case& c : cases) {
     stanli_sample_opts opts;
@@ -1496,10 +1565,52 @@ void expect_sample_options_validated() {
   err[0] = '\0';
   expect_true("default options pass the check",
               stanli_sample_opts_check(&ok, err, sizeof err) == 0);
+  ok.chain_id = 0;
+  ok.delta = 0.1;
+  expect_true("chain id 0 and delta 0.1 pass the check, as in CmdStan",
+              stanli_sample_opts_check(&ok, err, sizeof err) == 0);
   ok.warmup = 0;
   ok.samples = 0;
   expect_true("zero warmup and zero samples pass the check",
               stanli_sample_opts_check(&ok, err, sizeof err) == 0);
+
+  // CmdStan refuses num_warmup=0 while adaptation is engaged.
+  ok.chains = 1;
+  ok.samples = 5;
+  stanli_metric_opts metric;
+  stanli_metric_opts_init(&metric);
+  err[0] = '\0';
+  const char* no_warmup =
+      "warmup must be an integer >= 1 when adaptation is engaged; set "
+      "adapt_engaged to 0 to sample without warmup";
+  expect_true("sample check refuses warmup 0 with adaptation",
+              stanli_sample_check(&ok, &metric, err, sizeof err) != 0 &&
+                  std::string(err) == no_warmup);
+  expect_true("sample check refuses warmup 0 with default adaptation",
+              stanli_sample_check(&ok, nullptr, err, sizeof err) != 0);
+  std::vector<double> draws((size_t)(5 * stanli_n_unconstrained(model)));
+  err[0] = '\0';
+  expect_true(
+      "sampling refuses warmup 0 with adaptation",
+      stanli_sample_multi_metric(model, &ok, &metric, 0, draws.data(), nullptr,
+                                 nullptr, nullptr, nullptr, nullptr, nullptr,
+                                 nullptr, nullptr, err, sizeof err) == -1 &&
+          std::string(err) == no_warmup);
+  metric.adapt_engaged = 0;
+  expect_true("warmup 0 without adaptation passes",
+              stanli_sample_check(&ok, &metric, err, sizeof err) == 0 &&
+                  stanli_sample_multi_metric(
+                      model, &ok, &metric, 0, draws.data(), nullptr, nullptr,
+                      nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, err,
+                      sizeof err) == 0);
+  metric.adapt_engaged = 1;
+  metric.metric = 7;
+  expect_true("sample check refuses an unknown metric",
+              stanli_sample_check(&ok, &metric, err, sizeof err) != 0 &&
+                  std::string(err) ==
+                      "metric must be STANLI_METRIC_UNIT, "
+                      "STANLI_METRIC_DIAG or "
+                      "STANLI_METRIC_DENSE");
   stanli_model_free(model);
 }
 
@@ -1747,8 +1858,8 @@ void expect_interpreter_policy(const char* fixture,
     listed = listed || std::string(stanli_interpreter_fallback(model, i))
                                .find(expected_reason) != std::string::npos;
   expect_true(tag + " the reason is a listed fallback", listed);
-  expect_eq((tag + " out of range fallback").c_str(),
-            stanli_interpreter_fallback(model, -1), "");
+  expect_true(tag + " out of range fallback",
+              stanli_interpreter_fallback(model, -1) == nullptr);
   expect_true(tag + " warning names the build: " + text,
               text.find(stanli_build_id()) != std::string::npos);
   stanli_model_free(model);
@@ -2606,6 +2717,7 @@ void test_fast_math_options() {
 // quantities as chains that each have a copy. Output depends only on the
 // draw and the chain's RNG, not on which draws the executor ran before.
 void test_shared_write_array_executor() {
+  SKIP_WITHOUT_DEBUG_SWITCHES();
   char err[4096]{};
   const std::string mir = slurp("tests/fixtures/gqrng_vector.tmir.sexp");
   stanli_model* model = stanli_model_new_with_opts(mir.c_str(), R"({"K":4})",
@@ -2641,6 +2753,79 @@ void test_shared_write_array_executor() {
   expect_true("shared write_array: draws match", shared_draws == copied_draws);
   expect_true("shared write_array: generated quantities match",
               shared_values == copied_values);
+  stanli_model_free(model);
+}
+
+// Every stored row that sampling writes through write_array agrees with its
+// own draw, in every build: sigma is the draw's constrained value, the
+// deterministic columns have their known values, and the normal_rng column
+// is standard normal in units of sigma. A row computed from another draw's
+// executor state shows up as a wrong sigma.
+void test_sampled_write_array_rows_match_draws() {
+  char err[4096]{};
+  const std::string mir = slurp("tests/fixtures/gqrng.tmir.sexp");
+  stanli_model* model = stanli_model_new_with_opts(mir.c_str(), R"({"N":3})",
+                                                   nullptr, err, sizeof err);
+  expect_true("sampled write_array: model builds", model != nullptr);
+  if (model == nullptr) return;
+  stanli_sample_opts opts;
+  stanli_sample_opts_init(&opts);
+  opts.seed = 11;
+  opts.chains = 4;
+  opts.warmup = 100;
+  opts.samples = 100;
+  opts.num_threads = stanli_thread_safe() ? 4 : 1;
+  const int64_t rows = opts.chains * stanli_n_stored_draws(&opts);
+  const int64_t n = stanli_n_unconstrained(model);
+  const int64_t w = stanli_wa_n_columns(model);
+  expect_true("sampled write_array: sigma, yrep, crep, branchy and p",
+              n == 1 && w == 5);
+  if (n != 1 || w != 5) {
+    stanli_model_free(model);
+    return;
+  }
+  std::vector<double> draws((size_t)(rows * n)), values((size_t)(rows * w));
+  const int rc = stanli_sample_multi_metric(
+      model, &opts, nullptr, 0, draws.data(), nullptr, values.data(), nullptr,
+      nullptr, nullptr, nullptr, nullptr, nullptr, err, sizeof err);
+  expect_true(std::string("sampled write_array: sampling succeeds: ") + err,
+              rc == 0);
+  double z_sum = 0, z_sum_sq = 0, crep_sum = 0;
+  for (int64_t r = 0; r < rows; ++r) {
+    const double sigma = std::exp(draws[(size_t)r]);
+    const double* row = &values[(size_t)(r * w)];
+    expect_near("sampled write_array: sigma is exp of the draw", row[0], sigma);
+    const double z = row[1] / sigma;
+    z_sum += z;
+    z_sum_sq += z * z;
+    expect_true("sampled write_array: crep is a binomial count",
+                row[2] == std::floor(row[2]) && row[2] >= 0 && row[2] <= 3);
+    crep_sum += row[2];
+    expect_true("sampled write_array: branchy follows sigma",
+                row[3] == (row[0] > 1 ? 1.0 : 0.0));
+    expect_true("sampled write_array: p is 6", row[4] == 6.0);
+  }
+  const double mean = z_sum / (double)rows;
+  const double variance = z_sum_sq / (double)rows - mean * mean;
+  expect_true("sampled write_array: yrep over sigma has mean near 0",
+              std::abs(mean) < 0.5);
+  expect_true("sampled write_array: yrep over sigma has variance near 1",
+              variance > 0.5 && variance < 1.7);
+  expect_true("sampled write_array: crep averages near 1.5",
+              std::abs(crep_sum / (double)rows - 1.5) < 0.4);
+
+  // A caller that wants only the output rows passes no draws buffer, and
+  // gets the same rows and sampler columns.
+  std::vector<double> stats((size_t)(rows * STANLI_N_SAMPLER_COLS)),
+      values_only((size_t)(rows * w)), stats_only(stats.size());
+  stanli_sample_multi_metric(
+      model, &opts, nullptr, 0, draws.data(), stats.data(), values.data(),
+      nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, err, sizeof err);
+  const int rc_only = stanli_sample_multi_metric(
+      model, &opts, nullptr, 0, nullptr, stats_only.data(), values_only.data(),
+      nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, err, sizeof err);
+  expect_true(std::string("sampling without a draws buffer: ") + err,
+              rc_only == 0 && values_only == values && stats_only == stats);
   stanli_model_free(model);
 }
 
@@ -2715,6 +2900,165 @@ Compilation compile(const std::string& code, const char* filename) {
   return out;
 }
 
+// A starting value's shape follows CmdStan's rule for inits, which differs
+// from its rule for data: the dims must match exactly, and an empty value
+// does not stand in for a zero-size parameter of another rank. A zero-size
+// parameter may be left out. Each expected message is the one CmdStan 2.38
+// printed for the same document.
+void expect_init_shapes_follow_cmdstan() {
+  if (!stanli_has_embedded_stanc()) return;
+  const Compilation c = compile(
+      "parameters { real s; matrix[2, 3] P; array[2] vector[3] av;"
+      "  tuple(real, vector[2]) tp; array[2] tuple(real, vector[2]) atp;"
+      "  vector[0] z; matrix[0, 3] Z; array[0] vector[3] a0;"
+      "  array[2] vector[0] a20; }\n"
+      "model { s ~ normal(0, 1); to_vector(P) ~ normal(0, 1); }\n",
+      "init_shapes.stan");
+  char err[8192]{};
+  stanli_model* model = c.ok
+                            ? stanli_model_new_with_opts(
+                                  c.mir.c_str(), "{}", nullptr, err, sizeof err)
+                            : nullptr;
+  if (model == nullptr) {
+    ++failures;
+    std::printf("FAIL init shape model: %s %s\n", c.error.c_str(), err);
+    return;
+  }
+  const std::map<std::string, std::string> base = {
+      {"s", "0.5"},
+      {"P", "[[1, 2, 3], [4, 5, 6]]"},
+      {"av", "[[1, 2, 3], [4, 5, 6]]"},
+      {"tp", R"({"1": 0.1, "2": [0.2, 0.3]})"},
+      {"atp", R"([{"1": 0.1, "2": [0.2, 0.3]}, {"1": 0.4, "2": [0.5, 0.6]}])"}};
+  const std::string stage = "processing stage=parameter initialization; ";
+  const std::string ndims =
+      "mismatch in number dimensions declared and found in context; " + stage;
+  const std::string dim =
+      "mismatch in dimension declared and found in context; " + stage;
+  struct Case {
+    const char* name;
+    std::map<std::string, std::string> change;
+    std::string want;  // empty: accepted
+  };
+  const std::vector<Case> cases = {
+      {"ok", {}, ""},
+      {"an int for a real", {{"s", "1"}, {"P", "[[1, 2, 3], [4, 5, 6]]"}}, ""},
+      {"a flat matrix",
+       {{"P", "[1, 2, 3, 4, 5, 6]"}},
+       ndims + "variable name=P; dims declared=(2,3); dims found=(6)"},
+      {"a transposed matrix",
+       {{"P", "[[1, 2], [3, 4], [5, 6]]"}},
+       dim + "variable name=P; position=0; dims declared=(2,3); dims "
+             "found=(3,2)"},
+      {"a short matrix",
+       {{"P", "[[1, 2, 3]]"}},
+       dim + "variable name=P; position=0; dims declared=(2,3); dims "
+             "found=(1,3)"},
+      {"a scalar as a list",
+       {{"s", "[0.5]"}},
+       ndims + "variable name=s; dims declared=(); dims found=(1)"},
+      {"a flat array of vectors",
+       {{"av", "[1, 2, 3, 4, 5, 6]"}},
+       ndims + "variable name=av; dims declared=(2,3); dims found=(6)"},
+      {"a transposed array of vectors",
+       {{"av", "[[1, 2], [3, 4], [5, 6]]"}},
+       dim + "variable name=av; position=0; dims declared=(2,3); dims "
+             "found=(3,2)"},
+      {"a scalar tuple slot for a vector",
+       {{"tp", R"({"1": 0.1, "2": 0.2})"}},
+       ndims + "variable name=tp.2; dims declared=(2); dims found=()"},
+      {"a list tuple slot for a scalar",
+       {{"tp", R"({"1": [0.1], "2": [0.2, 0.3]})"}},
+       ndims + "variable name=tp.1; dims declared=(); dims found=(1)"},
+      {"a short slot in an array of tuples",
+       {{"atp", R"([{"1": 0.1, "2": [0.2]}, {"1": 0.4, "2": [0.5]}])"}},
+       dim + "variable name=atp.2; position=1; dims declared=(2,2); dims "
+             "found=(2,1)"},
+      {"an empty vector[0]", {{"z", "[]"}}, ""},
+      {"a scalar for vector[0]",
+       {{"z", "1.0"}},
+       ndims + "variable name=z; dims declared=(0); dims found=()"},
+      {"an empty matrix[0, 3]",
+       {{"Z", "[]"}},
+       ndims + "variable name=Z; dims declared=(0,3); dims found=(0)"},
+      {"rows for matrix[0, 3]",
+       {{"Z", "[[], [], []]"}},
+       dim + "variable name=Z; position=0; dims declared=(0,3); dims "
+             "found=(3,0)"},
+      {"an empty array[0] vector[3]",
+       {{"a0", "[]"}},
+       ndims + "variable name=a0; dims declared=(0,3); dims found=(0)"},
+      {"an empty array[2] vector[0]",
+       {{"a20", "[]"}},
+       ndims + "variable name=a20; dims declared=(2,0); dims found=(0)"},
+      {"array[2] vector[0] nested", {{"a20", "[[], []]"}}, ""},
+  };
+  std::vector<double> q((size_t)stanli_n_unconstrained(model));
+  for (const Case& k : cases) {
+    std::map<std::string, std::string> doc = base;
+    for (const auto& [name, value] : k.change) doc[name] = value;
+    std::string json = "{";
+    for (const auto& [name, value] : doc)
+      json += (json.size() > 1 ? ", \"" : "\"") + name + "\": " + value;
+    json += "}";
+    err[0] = '\0';
+    const bool accepted =
+        stanli_unconstrain_inits(model, json.c_str(), q.data(), err,
+                                 sizeof err) == 0;
+    if (k.want.empty()
+            ? !accepted
+            : accepted || std::string(err).find(k.want) == std::string::npos) {
+      ++failures;
+      std::printf("FAIL init shape, %s: %s\n  got: %s\n  want: %s\n", k.name,
+                  accepted ? "accepted" : "refused", err,
+                  k.want.empty() ? "accepted" : k.want.c_str());
+    }
+  }
+  stanli_model_free(model);
+}
+
+// CmdStan evaluates a data-only expression in the model block on every
+// log density, so a print in an ODE right-hand side runs on every gradient
+// and never while the model is built. Preparation must not evaluate the
+// solve once and keep its value.
+void expect_callback_print_each_evaluation() {
+  if (!stanli_has_embedded_stanc()) return;
+  const Compilation c = compile(
+      "functions { vector rhs(real t, vector y, real k) {"
+      "  print(\"rhs called\"); return -k * y; } }\n"
+      "data { vector[1] y0; array[1] real ts; real k; }\n"
+      "parameters { real mu; }\n"
+      "model { vector[1] y = ode_rk45(rhs, y0, 0, ts, k)[1];"
+      "  mu ~ normal(y[1], 1); }\n",
+      "ode_print.stan");
+  stanli_capture_messages(1);
+  char err[8192]{};
+  stanli_model* model =
+      c.ok ? stanli_model_new_with_opts(c.mir.c_str(),
+                                        R"({"y0": [1], "ts": [0.1], "k": 1})",
+                                        nullptr, err, sizeof err)
+           : nullptr;
+  if (model == nullptr) {
+    stanli_capture_messages(0);
+    ++failures;
+    std::printf("FAIL ODE print model: %s %s\n", c.error.c_str(), err);
+    return;
+  }
+  expect_true("an ODE callback does not print while the model is built",
+              count_substring(take_messages(), "rhs called") == 0);
+  double q = 0.1, lp = 0, grad = 0;
+  size_t per_evaluation[2] = {0, 0};
+  for (size_t& n : per_evaluation) {
+    expect_true("ODE print model gradient",
+                stanli_grad(model, &q, &lp, &grad) == 0);
+    n = count_substring(take_messages(), "rhs called");
+  }
+  expect_true("an ODE callback prints on every evaluation",
+              per_evaluation[0] > 0 && per_evaluation[1] == per_evaluation[0]);
+  stanli_capture_messages(0);
+  stanli_model_free(model);
+}
+
 // Tuple names as CmdStan's generated constrained_param_names and
 // unconstrained_param_names spell them: ':' before a slot, '.' before an
 // index, a simplex's free values one fewer.
@@ -2771,6 +3115,56 @@ void test_tuple_names() {
     expect_near("tuple unconstrain q[" + std::to_string(i) + "]", back[i],
                 q[i]);
   bs_model_destruct(m);
+}
+
+// bs_param_constrain(include_tp = false, include_gq = false) runs neither the
+// model block nor generated quantities, as BridgeStan's write_array does
+// not, so a reject in either goes unseen at mu = 1 and mu = 0.5. (A point
+// where both reject, a transformed parameter out of bounds, and a model
+// block reject on the interpreter path still fail; BridgeStan would
+// succeed there.)
+void test_bridgestan_constrain_skips_blocks() {
+  if (!stanli_has_embedded_stanc()) return;
+  const Compilation c = compile(
+      "parameters { real mu; }\n"
+      "transformed parameters { real<lower=0> t = mu; }\n"
+      "model { if (mu > 0.4 && mu < 0.6) reject(\"m\"); mu ~ normal(0, 1); }\n"
+      "generated quantities { if (mu > 0.9) reject(\"x\"); }\n",
+      "skip_blocks.stan");
+  expect_true("skip-blocks model compiles: " + c.error, c.ok);
+  if (!c.ok) return;
+  for (bool interpreted : {false, true}) {
+    if (interpreted && !debug_switches_available()) continue;
+    if (interpreted) test_setenv("STANLI_WA_FORCE_INTERP", "1");
+    char message[256] = "";
+    char* payload = stanli_bridgestan_data(nullptr, c.mir.c_str(), "skip",
+                                           message, sizeof message);
+    char* err = nullptr;
+    bs_model* m = payload ? bs_model_construct(payload, 1, &err) : nullptr;
+    stanli_string_free(payload);
+    if (interpreted) test_unsetenv("STANLI_WA_FORCE_INTERP");
+    expect_true(std::string("skip-blocks model constructs: ") + message +
+                    (err ? err : ""),
+                m != nullptr);
+    bs_free_error_msg(err);
+    err = nullptr;
+    if (m == nullptr) continue;
+    const std::string tag = interpreted ? " (interpreter)" : " (graph)";
+    // The interpreter reads the parameters from the log_prob graph, so it
+    // still runs the model block.
+    for (double mu : {1.0, 0.5}) {
+      if (interpreted && mu == 0.5) continue;
+      double theta = 0;
+      const int rc =
+          bs_param_constrain(m, false, false, &mu, &theta, nullptr, &err);
+      expect_true("constrain without tp or gq at mu = " + std::to_string(mu) +
+                      tag + ": " + (err ? err : ""),
+                  rc == 0 && theta == mu);
+      bs_free_error_msg(err);
+      err = nullptr;
+    }
+    bs_model_destruct(m);
+  }
 }
 
 // An array of tuples as parameters, nested and constrained. The names, the
@@ -3252,8 +3646,495 @@ void test_sample_setup_error() {
   stanli_model_free(m);
 }
 
+// stanli_grad_err says why an evaluation failed: Stan's own message, and
+// whether the model rejected the point or could not be evaluated there.
+void test_grad_messages() {
+  stanli_model* m = from_stan(
+      "parameters { real x; }\n"
+      "model {\n"
+      "  array[2] real a = {1.0, 2.0};\n"
+      "  int i = 1;\n"
+      "  if (x < -1) i = 3;\n"
+      "  if (x > 1) reject(\"x is too big: \", x);\n"
+      "  target += a[i];\n"
+      "  x ~ normal(0, 1);\n"
+      "}\n");
+  if (m == nullptr) return;
+  double lp = 0, grad = 0;
+  char err[512] = "untouched";
+  double x = 0.5;
+  expect_true(
+      "grad_err succeeds inside the support",
+      stanli_grad_err(m, &x, &lp, &grad, err, sizeof err) == STANLI_EVAL_OK &&
+          std::string(err) == "untouched" && grad == -0.5);
+  x = 2.0;
+  int rc = stanli_grad_err(m, &x, &lp, nullptr, err, sizeof err);
+  expect_true(
+      std::string("grad_err reports a reject: ") + err,
+      rc == STANLI_EVAL_REJECTED &&
+          std::string(err).find("x is too big: 2") != std::string::npos &&
+          lp == -std::numeric_limits<double>::infinity());
+  x = -2.0;
+  rc = stanli_grad_err(m, &x, &lp, &grad, err, sizeof err);
+  expect_true(std::string("grad_err reports an index out of range: ") + err,
+              rc == STANLI_EVAL_FAILED &&
+                  std::string(err).find("index") != std::string::npos);
+  expect_true("stanli_grad keeps its return codes",
+              stanli_grad(m, &x, &lp, &grad) == 1);
+  stanli_model_free(m);
+
+  // Initialization retries only REJECTED points, so the checks that guard
+  // a model's support must all be domain errors, as in Stan.
+  const char* support[] = {
+      "parameters { real x; }\n"
+      "transformed parameters { real<lower=0> t = x; }\n"
+      "model { x ~ normal(0, 1); }\n",
+      "parameters { real x; } model { 1 ~ normal(0, x); }\n",
+      "parameters { real x; }\n"
+      "model { matrix[2, 2] S = [[1, x], [x, 1]];\n"
+      "  target += multi_normal_lpdf([0, 0]' | [0, 0]', S); }\n",
+      "parameters { real x; }\n"
+      "model { matrix[2, 2] S = [[1, x], [x, 1]];\n"
+      "  target += sum(cholesky_decompose(S)); }\n",
+      "parameters { real x; } model { target += lgamma(x) + log(x); }\n"};
+  for (const char* code : support) {
+    stanli_model* s = from_stan(code);
+    if (s == nullptr) continue;
+    x = -2.0;
+    const int status = stanli_grad_err(s, &x, &lp, &grad, err, sizeof err);
+    expect_true(
+        std::string("a support check is a rejection: ") + err + "\n" + code,
+        status == STANLI_EVAL_REJECTED ||
+            (status == STANLI_EVAL_OK && !std::isfinite(lp)));
+    stanli_model_free(s);
+  }
+}
+
+// A zero-size local takes the size of its first assignment. stanli gives it
+// one size when it compiles the model, so when a branch on a parameter makes
+// that assignment and does not run, a later read is an error that stops
+// the evaluation. Where the assignment ran, the values are CmdStan's
+// (log_prob method, jacobian=1).
+void test_branch_sized_locals() {
+  struct Case {
+    const char* name;
+    const char* body;
+    double lp_pos, grad_pos;  // CmdStan at mu = 0.5
+    // CmdStan at mu = -0.5; unset when stanli reports the local instead.
+    // In a function, the message names the local that stanc's inlining
+    // made of v.
+    bool neg_ok;
+    double lp_neg, grad_neg;
+  };
+  const Case cases[] = {
+      {"vector",
+       "model {\n  vector[0] v;\n  if (mu > 0) v = rep_vector(mu, 3);\n"
+       "  mu ~ normal(0, 1);\n  target += sum(v);\n}\n",
+       1.375, 2.5, false, 0, 0},
+      {"matrix",
+       "model {\n  matrix[0, 0] v;\n  if (mu > 0) v = rep_matrix(mu, 2, 3);\n"
+       "  mu ~ normal(0, 1);\n  target += sum(v);\n}\n",
+       2.875, 5.5, false, 0, 0},
+      {"row_vector",
+       "model {\n  row_vector[0] v;\n"
+       "  if (mu > 0) v = rep_row_vector(mu, 3);\n"
+       "  mu ~ normal(0, 1);\n  target += sum(v);\n}\n",
+       1.375, 2.5, false, 0, 0},
+      {"array",
+       "model {\n  array[0] real v;\n  if (mu > 0) v = {mu, 2 * mu};\n"
+       "  mu ~ normal(0, 1);\n  target += sum(v);\n}\n",
+       1.375, 2.5, false, 0, 0},
+      {"nested branch",
+       "model {\n  vector[0] v;\n  if (mu > -10) {\n"
+       "    if (mu > 0) v = rep_vector(mu, 2);\n  }\n"
+       "  mu ~ normal(0, 1);\n  target += sum(v);\n}\n",
+       0.875, 1.5, false, 0, 0},
+      {"for loop",
+       "model {\n  vector[0] v;\n  for (k in 1:2) {\n"
+       "    if (mu > 0) v = rep_vector(k * mu, 2);\n  }\n"
+       "  mu ~ normal(0, 1);\n  target += sum(v);\n}\n",
+       1.875, 3.5, false, 0, 0},
+      {"while loop",
+       "model {\n  real total = 0;\n  real k = 0;\n  while (k < 2 + mu) {\n"
+       "    vector[0] v;\n    if (mu > 0) v = rep_vector(mu, 2);\n"
+       "    total += sum(v);\n    k += 1;\n  }\n"
+       "  mu ~ normal(0, 1);\n  target += total;\n}\n",
+       2.875, 5.5, false, 0, 0},
+      {"function", "model { mu ~ normal(0, 1); target += f(mu); }\n", 1.375,
+       2.5, false, 0, 0},
+      {"size",
+       "model {\n  vector[0] v;\n  if (mu > 0) v = rep_vector(mu, 3);\n"
+       "  mu ~ normal(0, 1);\n  target += size(v);\n}\n",
+       2.875, -0.5, false, 0, 0},
+      // CmdStan raises an index error here; stanli names the local.
+      {"element write",
+       "model {\n  vector[0] v;\n  if (mu > 0) v = rep_vector(mu, 3);\n"
+       "  v[1] = 2 * mu;\n  mu ~ normal(0, 1);\n  target += sum(v);\n}\n",
+       1.875, 3.5, false, 0, 0},
+      // Read only where the assignment ran: valid on both sides.
+      {"read inside the branch",
+       "model {\n  vector[0] v;\n  if (mu > 0) v = rep_vector(mu, 3);\n"
+       "  mu ~ normal(0, 1);\n  if (mu > 0) target += sum(v);\n}\n",
+       1.375, 2.5, true, -0.125, 0.5},
+      {"both arms assign",
+       "model {\n  vector[0] v;\n"
+       "  if (mu > 0) v = rep_vector(mu, 3); else v = rep_vector(-mu, 3);\n"
+       "  mu ~ normal(0, 1);\n  target += sum(v);\n}\n",
+       1.375, 2.5, true, 1.375, -2.5},
+      // An earlier branch sizes v, so the second region gets v's status
+      // from the first; both of its arms assign v.
+      {"both arms assign after an earlier branch",
+       "model {\n  vector[0] v;\n  if (mu > 1) v = rep_vector(mu, 3);\n"
+       "  if (mu > 0) v = rep_vector(1, 3); else v = rep_vector(2, 3);\n"
+       "  mu ~ normal(0, 1);\n  target += sum(v);\n}\n",
+       2.875, -0.5, true, 5.875, 0.5},
+  };
+  for (const Case& c : cases) {
+    const std::string code =
+        std::string(
+            "functions {\n  real f(real mu) {\n    vector[0] v;\n"
+            "    if (mu > 0) v = rep_vector(mu, 3);\n"
+            "    return sum(v);\n  }\n}\n"
+            "parameters { real mu; }\n") +
+        c.body;
+    stanli_model* m = from_stan(code.c_str());
+    if (m == nullptr) continue;
+    double lp = 0, grad = 0;
+    char err[512]{};
+    double mu = 0.5;
+    int rc = stanli_grad_err(m, &mu, &lp, &grad, err, sizeof err);
+    expect_true(std::string(c.name) + ": assigned path evaluates: " + err,
+                rc == STANLI_EVAL_OK);
+    expect_near(std::string(c.name) + ": lp where the branch ran", lp,
+                c.lp_pos);
+    expect_near(std::string(c.name) + ": gradient where the branch ran", grad,
+                c.grad_pos);
+    mu = -0.5;
+    err[0] = '\0';
+    rc = stanli_grad_err(m, &mu, &lp, &grad, err, sizeof err);
+    if (c.neg_ok) {
+      expect_true(std::string(c.name) + ": other path evaluates: " + err,
+                  rc == STANLI_EVAL_OK);
+      expect_near(std::string(c.name) + ": lp where the branch did not run", lp,
+                  c.lp_neg);
+      expect_near(
+          std::string(c.name) + ": gradient where the branch did not run", grad,
+          c.grad_neg);
+    } else {
+      const std::string message(err);
+      expect_true(
+          std::string(c.name) +
+              ": an unassigned read stops the evaluation: " + message,
+          rc == STANLI_EVAL_FAILED &&
+              message.find(" was not assigned on this path") !=
+                  std::string::npos &&
+              (std::string(c.name) == "function" ||
+               message.find(": v was not assigned") != std::string::npos) &&
+              message.find("stanli does not support a local whose size "
+                           "depends on") != std::string::npos);
+    }
+    stanli_model_free(m);
+  }
+
+  // The read at the top of the loop is compiled for the empty v of the
+  // first trip, and the statement after it gives v three elements for the
+  // later trips. CmdStan gives lp 4.375 at mu = 0.5; stanli reports v.
+  stanli_model* m = from_stan(
+      "parameters { real mu; }\n"
+      "model {\n  vector[0] v;\n  real acc = 0;\n  real k = 0;\n"
+      "  while (k < mu + 3) {\n    acc += sum(v);\n"
+      "    if (mu > -100) v = rep_vector(mu, 3);\n    k += 1;\n  }\n"
+      "  mu ~ normal(0, 1);\n  target += acc;\n}\n");
+  if (m == nullptr) return;
+  double lp = 0, grad = 0, mu = 0.5;
+  char err[512]{};
+  const int rc = stanli_grad_err(m, &mu, &lp, &grad, err, sizeof err);
+  expect_true(std::string("a loop that sizes v after reading it: ") + err,
+              rc == STANLI_EVAL_FAILED &&
+                  std::string(err).find(
+                      ": v was assigned on an earlier trip of a loop") !=
+                      std::string::npos);
+  stanli_model_free(m);
+
+  // A loop over data that reads v: where it reads v only when mu > x[i],
+  // it never reads v at mu = -0.5, so both points are valid. CmdStan gives
+  // lp 18.25 at mu = 0.5 and -0.125 at mu = -0.5 for both bodies.
+  std::string data = "{\"N\": 50, \"x\": [0";
+  for (int i = 1; i < 50; ++i) data += ", " + std::to_string(0.01 * i);
+  data += "]}";
+  for (const bool guarded : {true, false}) {
+    m = from_stan(
+        (std::string("data { int N; vector[N] x; }\n"
+                     "parameters { real mu; }\n"
+                     "model {\n  vector[0] v;\n"
+                     "  if (mu > 0) v = rep_vector(mu, 3);\n"
+                     "  mu ~ normal(0, 1);\n  for (i in 1:N) ") +
+         (guarded ? "if (x[i] < mu) " : "") + "target += sum(v) * x[i];\n}\n")
+            .c_str(),
+        data.c_str());
+    if (m == nullptr) return;
+    const std::string what = guarded ? "loop, guarded read" : "loop";
+    mu = 0.5;
+    expect_true(
+        what + ": assigned path evaluates",
+        stanli_grad_err(m, &mu, &lp, &grad, err, sizeof err) == STANLI_EVAL_OK);
+    expect_near(what + ": lp where the branch ran", lp, 18.25);
+    expect_near(what + ": gradient where the branch ran", grad, 36.25);
+    mu = -0.5;
+    const int status = stanli_grad_err(m, &mu, &lp, &grad, err, sizeof err);
+    if (guarded) {
+      expect_true(what + ": other path evaluates: " + err,
+                  status == STANLI_EVAL_OK);
+      expect_near(what + ": lp where the branch did not run", lp, -0.125);
+    } else {
+      expect_true(what + ": an unassigned read stops the evaluation: " + err,
+                  status == STANLI_EVAL_FAILED &&
+                      std::string(err).find(": v was not assigned") !=
+                          std::string::npos);
+    }
+    stanli_model_free(m);
+  }
+
+  // Generated quantities: s is 1.5 where the branch runs, as in CmdStan.
+  m = from_stan(
+      "parameters { real mu; }\n"
+      "model { mu ~ normal(0, 1); }\n"
+      "generated quantities {\n  real s;\n  {\n    vector[0] v;\n"
+      "    if (mu > 0) v = rep_vector(mu, 3);\n    s = sum(v);\n  }\n}\n");
+  if (m == nullptr) return;
+  double row[2]{};
+  mu = 0.5;
+  expect_true("generated quantities where the branch ran",
+              stanli_wa_row(m, &mu, row) == 0 && row[1] == 1.5);
+  mu = -0.5;
+  expect_true("generated quantities stop where the branch did not run",
+              stanli_wa_row(m, &mu, row) != 0);
+  stanli_model_free(m);
+}
+
+// Every indexed accessor answers an index out of range the same way: null
+// for a string, STANLI_COMPILER_MESSAGE_NONE for a message kind.
+void test_out_of_range_accessors() {
+  stanli_model* m = from_stan(
+      "parameters { real x; } model { x ~ normal(0, 1); }\n"
+      "generated quantities { real y = x; }\n");
+  if (m == nullptr) return;
+  const int64_t n_messages = stanli_model_n_compiler_messages(m);
+  for (int64_t i : {(int64_t)-1, n_messages}) {
+    expect_true("model message kind out of range",
+                stanli_model_compiler_message_kind(m, i) ==
+                    STANLI_COMPILER_MESSAGE_NONE);
+    expect_true("model message out of range",
+                stanli_model_compiler_message(m, i) == nullptr);
+  }
+  for (int64_t i : {(int64_t)-1, stanli_wa_n_columns(m)})
+    expect_true("write_array column name out of range",
+                stanli_wa_column_name(m, i) == nullptr);
+  for (int64_t i : {(int64_t)-1, stanli_n_constrained(m)})
+    expect_true("constrained name out of range",
+                stanli_constrained_name(m, i) == nullptr);
+  for (int64_t i : {(int64_t)-1, stanli_n_interpreter_fallbacks(m)})
+    expect_true("interpreter fallback out of range",
+                stanli_interpreter_fallback(m, i) == nullptr);
+  for (int64_t i : {(int64_t)-1, stanli_n_reduce_sum_fallbacks(m)})
+    expect_true("reduce_sum fallback out of range",
+                stanli_reduce_sum_fallback(m, i) == nullptr);
+  for (int i : {-1, STANLI_N_SAMPLER_COLS})
+    expect_true("sampler column name out of range",
+                stanli_sampler_column_name(i) == nullptr);
+  stanli_model_free(m);
+
+  stanli_compilation* c =
+      stanli_compile_stan("parameters { real x; } model { x ~ normal(0, 1); }",
+                          nullptr, nullptr, 0, 0);
+  expect_true("compilation", c != nullptr);
+  if (c == nullptr) return;
+  for (int64_t i : {(int64_t)-1, stanli_compilation_n_messages(c)}) {
+    expect_true(
+        "compilation message kind out of range",
+        stanli_compilation_message_kind(c, i) == STANLI_COMPILER_MESSAGE_NONE);
+    expect_true("compilation message out of range",
+                stanli_compilation_message(c, i) == nullptr);
+  }
+  stanli_compilation_free(c);
+}
+
+// CmdStan's initialize retries a random start only when the model rejects
+// it with a domain error; any other error stops it at once.
+void test_init_retries_only_rejections() {
+  const char* msg =
+      "Unrecoverable error evaluating the log probability at "
+      "the initial value: ";
+  stanli_model* bad_index = from_stan(
+      "parameters { real x; }\n"
+      "model { array[2] real a = {1.0, 2.0}; int i = 3;\n"
+      "  if (x > 1e10) i = 1; target += a[i]; }\n");
+  stanli_model* rejects =
+      from_stan("parameters { real x; } model { reject(\"always\"); }\n");
+  if (bad_index == nullptr || rejects == nullptr) return;
+  stanli_sample_opts o;
+  stanli_sample_opts_init(&o);
+  o.chains = 1;
+  o.warmup = 10;
+  o.samples = 10;
+  std::vector<double> draws(10);
+  char err[4096]{};
+  int rc = stanli_sample_multi_metric(
+      bad_index, &o, nullptr, 0, draws.data(), nullptr, nullptr, nullptr,
+      nullptr, nullptr, nullptr, nullptr, nullptr, err, sizeof err);
+  expect_true(
+      std::string("an index error stops initialization at once: ") + err,
+      rc == 1 && std::string(err).find(msg) != std::string::npos &&
+          std::string(err).find("index") != std::string::npos);
+  rc = stanli_sample_multi_metric(rejects, &o, nullptr, 0, draws.data(),
+                                  nullptr, nullptr, nullptr, nullptr, nullptr,
+                                  nullptr, nullptr, nullptr, err, sizeof err);
+  expect_true(std::string("a reject is retried 100 times: ") + err,
+              rc == 1 &&
+                  std::string(err).find("no draw in 100 attempts") !=
+                      std::string::npos &&
+                  std::string(err).find("always") != std::string::npos);
+  stanli_model_free(bad_index);
+  stanli_model_free(rejects);
+}
+
+// capi.h: different models may be built and used on different threads at
+// once. Two threads each build, evaluate and sample their own model, and
+// get what a serial run gets. Run under ThreadSanitizer, this also checks
+// the library's shared state (lowering, the message sink, chain threads).
+void test_models_on_separate_threads() {
+  struct Job {
+    const char* mir;
+    const char* data;
+    std::vector<double> lp, values;
+  };
+  const auto run = [](Job& job) {
+    const std::string mir = slurp(job.mir);
+    char err[4096]{};
+    stanli_model* m = stanli_model_new_with_opts(mir.c_str(), job.data, nullptr,
+                                                 err, sizeof err);
+    if (m == nullptr) return;
+    const int64_t n = stanli_n_unconstrained(m);
+    std::vector<double> q((size_t)n), grad((size_t)n);
+    for (int k = 0; k < 50; ++k) {
+      for (int64_t i = 0; i < n; ++i) q[(size_t)i] = 0.01 * (double)(k + i);
+      double lp = 0;
+      stanli_grad(m, q.data(), &lp, grad.data());
+      job.lp.push_back(lp);
+    }
+    stanli_sample_opts o;
+    stanli_sample_opts_init(&o);
+    o.chains = 2;
+    o.warmup = 30;
+    o.samples = 30;
+    o.num_threads = stanli_thread_safe() ? 2 : 1;
+    const int64_t width = stanli_wa_n_columns(m) > 0 ? stanli_wa_n_columns(m)
+                                                     : stanli_n_constrained(m);
+    job.values.assign((size_t)(o.chains * stanli_n_stored_draws(&o) * width),
+                      0.0);
+    stanli_sample_multi_metric(m, &o, nullptr, 0, nullptr, nullptr,
+                               job.values.data(), nullptr, nullptr, nullptr,
+                               nullptr, nullptr, nullptr, err, sizeof err);
+    stanli_model_free(m);
+  };
+  Job serial[2] = {{"tests/fixtures/gqrng.tmir.sexp", R"({"N":3})", {}, {}},
+                   {"tests/fixtures/es.tmir.sexp", nullptr, {}, {}}};
+  const std::string es_data = slurp("tests/fixtures/es.json");
+  serial[1].data = es_data.c_str();
+  Job parallel[2] = {serial[0], serial[1]};
+  for (Job& job : serial) run(job);
+  std::thread a(run, std::ref(parallel[0])), b(run, std::ref(parallel[1]));
+  a.join();
+  b.join();
+  for (int j = 0; j < 2; ++j)
+    expect_true(
+        std::string("a model on its own thread matches a serial run: ") +
+            serial[j].mir,
+        !serial[j].lp.empty() && parallel[j].lp == serial[j].lp &&
+            !serial[j].values.empty() &&
+            same_bits(parallel[j].values, serial[j].values));
+}
+
+// The single-chain entry points check their arguments by the same rules.
+void test_single_chain_arguments() {
+  const std::string mir = slurp("tests/fixtures/es.tmir.sexp");
+  const std::string data = slurp("tests/fixtures/es.json");
+  char err[4096]{};
+  stanli_model* m = stanli_model_new_with_opts(mir.c_str(), data.c_str(),
+                                               nullptr, err, sizeof err);
+  if (m == nullptr) return;
+  std::vector<double> draws((size_t)(10 * stanli_n_unconstrained(m)));
+  expect_true("stream sampling checks delta",
+              stanli_sample_stream_stats_init(m, 1, 10, 10, 0.05, nullptr,
+                                              draws.data(), nullptr, nullptr,
+                                              nullptr, err, sizeof err) != 0 &&
+                  std::string(err) == "delta must be a number >= 0.1 and < 1");
+  expect_true("stream sampling checks samples",
+              stanli_sample_stream_stats_init(m, 1, 10, -1, 0.8, nullptr,
+                                              draws.data(), nullptr, nullptr,
+                                              nullptr, err, sizeof err) != 0 &&
+                  std::string(err) == "samples must be an integer >= 0");
+  expect_true(
+      "pathfinder checks the chain id",
+      stanli_run_pathfinder(m, 1, -1, 10, draws.data(), nullptr, nullptr,
+                            nullptr, nullptr, nullptr, err, sizeof err) != 0 &&
+          std::string(err) == "chain_id must be an integer >= 0");
+  expect_true(
+      "pathfinder checks num_draws",
+      stanli_run_pathfinder(m, 1, 1, 0, draws.data(), nullptr, nullptr, nullptr,
+                            nullptr, nullptr, err, sizeof err) != 0 &&
+          std::string(err) == "num_draws must be an integer >= 1");
+  stanli_model_free(m);
+}
+
+// The row every entry point writes has one definition in the C layer: the
+// write_array columns when the model has them, the constrained parameters
+// otherwise. Bindings read it from stanli_*output* instead of choosing.
+void test_output_columns() {
+  stanli_model* with_gq = from_stan(
+      "parameters { vector[2] b; } model { b ~ normal(0, 1); }\n"
+      "generated quantities { matrix[0, 2] w; real y = b[1]; }\n");
+  stanli_model* without =
+      from_stan("parameters { vector[2] b; } model { b ~ normal(0, 1); }\n");
+  if (with_gq == nullptr || without == nullptr) return;
+  for (stanli_model* m : {with_gq, without}) {
+    const bool wa = stanli_wa_n_columns(m) > 0;
+    const int64_t n = stanli_n_output_columns(m);
+    expect_true("output width is the row width",
+                n == (wa ? stanli_wa_n_columns(m) : stanli_n_constrained(m)));
+    for (int64_t i = 0; i < n; ++i)
+      expect_eq(
+          "output column name", stanli_output_column_name(m, i),
+          wa ? stanli_wa_column_name(m, i) : stanli_constrained_name(m, i));
+    expect_true("output column name out of range",
+                stanli_output_column_name(m, n) == nullptr);
+    const int set =
+        wa ? STANLI_WRITE_ARRAY_COLUMNS : STANLI_CONSTRAINED_COLUMNS;
+    expect_true("output variables are the row's variables",
+                stanli_n_variables(m, STANLI_OUTPUT_COLUMNS) ==
+                    stanli_n_variables(m, set));
+    for (int64_t v = 0; v < stanli_n_variables(m, set); ++v)
+      expect_eq("output variable name",
+                stanli_variable_name(m, STANLI_OUTPUT_COLUMNS, v),
+                stanli_variable_name(m, set, v));
+  }
+  expect_true("the model with generated quantities has its columns",
+              stanli_n_output_columns(with_gq) == 3 &&
+                  std::string(stanli_output_column_name(with_gq, 2)) == "y");
+  stanli_model_free(with_gq);
+  stanli_model_free(without);
+}
+
 int main() {
+  test_output_columns();
+  test_single_chain_arguments();
+  test_models_on_separate_threads();
+  test_init_retries_only_rejections();
+  test_out_of_range_accessors();
+  test_grad_messages();
+  test_branch_sized_locals();
   test_shared_write_array_executor();
+  test_sampled_write_array_rows_match_draws();
   test_build_id_names_the_abi();
   test_o1_fallback_message();
   test_variables_and_layouts();
@@ -3261,6 +4142,7 @@ int main() {
   test_bridgestan_data();
   test_named_source_and_warnings();
   test_tuple_names();
+  test_bridgestan_constrain_skips_blocks();
   test_tuple_array_parameters();
   test_declaration_annotations();
   test_fast_math_options();
@@ -3276,6 +4158,8 @@ int main() {
                             "the ODE right-hand side rhs");
   test_interpreter_probe_failure();
   expect_unconstrain_inits_round_trip();
+  expect_init_shapes_follow_cmdstan();
+  expect_callback_print_each_evaluation();
   expect_parameterless_unconstrain();
   expect_parameterless_sampling();
 
@@ -3311,6 +4195,7 @@ int main() {
   expect_invalid_data_rejected();
   expect_runtime_bound_rejected();
   expect_compiled_scalar_rng();
+  expect_transposed_data_rejected();
   expect_pathfinder();
   expect_sampling_progress();
   expect_sampling_progress_counts();

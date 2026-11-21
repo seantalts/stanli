@@ -1,9 +1,10 @@
 // Shared machinery for the density kernel shards.
 //
 // One translation unit used to hold all of this and every instantiation
-// it drives: 227 list entries times every activity mask times both
-// shapes, which peaked at 7.6 GB of compiler memory and took most of an
-// hour on a CI runner while the other cores idled. The definitions now
+// it drives: every list entry times every activity mask times every
+// scalar-or-vector shape of its arguments, which peaked at 7.6 GB of
+// compiler memory and took most of an hour on a CI runner while the other
+// cores idled. The definitions now
 // live in densities_*.cpp, one shard per group, and this header is what
 // they share. Nothing here instantiates anything on its own.
 //
@@ -19,6 +20,7 @@
 
 #include <stanli/kernel_types.hpp>
 #include <stanli/optable.hpp>
+#include <stanli/pairwise_sum.hpp>
 #include <stanli/recorder.hpp>
 
 // The full prim aggregate, not per-density headers: densities call helpers
@@ -260,9 +262,9 @@ STANLI_NOINLINE inline void accumulate_partial(double* adj, double out_adj,
 // Partials for argument k live at scratch[sum of lens of args < k]. A scalar
 // argument paired with vector ones holds the already-summed partial.
 // Elementwise variant: column k is scratch[k * N .. k * N + N), each element
-// scaled by its own adjoint; a broadcast (len-1) argument sums its column,
-// descending to match the executor's reverse sweep over the scalar ops the
-// fused op replaces (bit-identical accumulation).
+// scaled by its own adjoint; a broadcast (len-1) argument sums its column.
+// A short column is added descending, as the executor's reverse sweep over
+// the scalar ops that the fused op replaces adds it; a long one pairwise.
 template <int NArgs>
 void density_bwd(KernelCtx& ctx) {
   const DensityMode mode = density_mode(ctx);
@@ -275,8 +277,10 @@ void density_bwd(KernelCtx& ctx) {
       const double* col = ctx.scratch + static_cast<int64_t>(k) * N;
       if (ctx.in_adj[k].len == 1 && N > 1) {
         double acc = 0;
-        for (int64_t n = N; n-- > 0;)
-          if (connected[n] != 0.0) acc += ctx.out_adj_vec.data[n] * col[n];
+        add_sum(acc, N, [&](int64_t j) {
+          const int64_t n = N - 1 - j;
+          return connected[n] != 0.0 ? ctx.out_adj_vec.data[n] * col[n] : 0.0;
+        });
         ctx.in_adj[k].data[0] += acc;
       } else {
         for (int64_t n = 0; n < N; ++n)
@@ -388,7 +392,7 @@ int64_t density_scratch(const Op& op, const Slot* slots) {
 // from being instantiated for 75 functions that will never use it. It is
 // not merely wasted code: some cdfs do not survive being handed a bare
 // scalar rvar where their vector overload expects a container.
-template <int NArgs, int Tier, typename F>
+template <int NArgs, typename F>
 void cdf_fwd(KernelCtx& ctx, F&& f) {
   // Cannot happen today -- reroll.cpp opts densities into the fusion by
   // opcode and cdfs are in neither list -- but the failure if it ever did
@@ -396,16 +400,15 @@ void cdf_fwd(KernelCtx& ctx, F&& f) {
   // so instead. The branch costs nothing next to an incomplete beta.
   if (density_mode(ctx).elementwise)
     throw std::runtime_error("cdf: elementwise variant not implemented");
-  // Tier here never carries the propto bit, so the first lambda is never
-  // instantiated; it exists to satisfy the shared signature.
-  density_fwd_sum<NArgs, Tier, 0>(
+  // Tier 0: no propto family, so the first lambda is never instantiated; it
+  // exists to satisfy the shared signature.
+  density_fwd_sum<NArgs, 0, 0>(
       ctx, [](const auto&...) { return 0.0; }, std::forward<F>(f));
 }
 
-#define STANLI_DEFINE_CDF_FWD(code, fn, n, tier)                     \
-  void fn##_fwd_gen(KernelCtx& ctx) {                                \
-    cdf_fwd<n, tier & STANLI_DENSITY_FULL_MASKS>(                    \
-        ctx, [](const auto&... a) { return stan::math::fn(a...); }); \
+#define STANLI_DEFINE_CDF_FWD(code, fn, n)                                  \
+  void fn##_fwd_gen(KernelCtx& ctx) {                                       \
+    cdf_fwd<n>(ctx, [](const auto&... a) { return stan::math::fn(a...); }); \
   }
 
 // Integer-outcome cdfs. Same as above with the count read from idata,
@@ -415,21 +418,20 @@ void cdf_fwd(KernelCtx& ctx, F&& f) {
 // overload: identical value/partial arithmetic, without allocating Eigen
 // temporaries for its incomplete-gamma expression. Other CDFs and broadcast
 // shapes retain their separately verified container instantiations.
-#define STANLI_DEFINE_INT_CDF_FWD(code, fn, nreal, tier)                 \
-  void fn##_fwd_gen(KernelCtx& ctx) {                                    \
-    if constexpr (code == OP_POISSON_LCDF) {                             \
-      if (ctx.n_idata == 1 && ctx.in[0].len == 1) {                      \
-        cdf_fwd<nreal, tier & STANLI_DENSITY_FULL_MASKS>(                \
-            ctx, [&](const auto&... a) {                                 \
-              return stan::math::fn(ctx.idata[0], a...);                 \
-            });                                                          \
-        return;                                                          \
-      }                                                                  \
-    }                                                                    \
-    Eigen::Map<const Eigen::VectorXi> y(                                 \
-        ctx.idata, static_cast<Eigen::Index>(ctx.n_idata));              \
-    cdf_fwd<nreal, tier & STANLI_DENSITY_FULL_MASKS>(                    \
-        ctx, [&](const auto&... a) { return stan::math::fn(y, a...); }); \
+#define STANLI_DEFINE_INT_CDF_FWD(code, fn, nreal)                             \
+  void fn##_fwd_gen(KernelCtx& ctx) {                                          \
+    if constexpr (code == OP_POISSON_LCDF) {                                   \
+      if (ctx.n_idata == 1 && ctx.in[0].len == 1) {                            \
+        cdf_fwd<nreal>(ctx, [&](const auto&... a) {                            \
+          return stan::math::fn(ctx.idata[0], a...);                           \
+        });                                                                    \
+        return;                                                                \
+      }                                                                        \
+    }                                                                          \
+    Eigen::Map<const Eigen::VectorXi> y(                                       \
+        ctx.idata, static_cast<Eigen::Index>(ctx.n_idata));                    \
+    cdf_fwd<nreal>(ctx,                                                        \
+                   [&](const auto&... a) { return stan::math::fn(y, a...); }); \
   }
 
 // Declarations of everything the shards define, so registration in

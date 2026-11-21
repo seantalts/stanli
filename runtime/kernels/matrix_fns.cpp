@@ -57,29 +57,46 @@ using VarM = Eigen::Matrix<stan::math::var, -1, -1>;
 // ---- gp_*_cov(x, alpha, rho[, period]) ------------------------------------
 // in = {x (data, N*D), alpha, rho, then the period for kGpPeriodic};
 // idata = {N, D}; out = N*N column-major. x as array[N] real is D == 1;
-// array[N] vector[D] flattens array-major. The variant selects the
-// covariance function. An optional scalar input after the hyperparameters
-// adds to each diagonal in increasing source order, on this same tape.
-std::vector<VecD> gp_points(const KernelCtx& ctx) {
-  const int64_t N = ctx.idata[0], D = ctx.idata[1];
-  std::vector<VecD> pts(N, VecD(D));
+// array[N] vector[D] flattens array-major. The variant is a GpCovMode: the
+// covariance function, whether rho holds one length scale per dimension
+// (D values) instead of one, and whether the call is the cross form. An
+// optional scalar input after the hyperparameters adds to each diagonal in
+// increasing source order, on this same tape.
+//
+// The cross form gp_*_cov(x1, x2, alpha, rho[, period]) has
+// in = {x1 (N1*D), x2 (N2*D), alpha, rho[, period]}, idata = {N1, D, N2} and
+// out = N1*N2 column-major.
+template <typename T = double>
+std::vector<Eigen::Matrix<T, -1, 1>> gp_points(const KernelCtx& ctx,
+                                               int input = 0) {
+  const int64_t D = ctx.idata[1];
+  const int64_t N = input == 0 ? ctx.idata[0] : ctx.idata[2];
+  std::vector<Eigen::Matrix<T, -1, 1>> pts(N, Eigen::Matrix<T, -1, 1>(D));
   for (int64_t n = 0; n < N; ++n)
-    for (int64_t d = 0; d < D; ++d) pts[n](d) = ctx.in[0].data[n * D + d];
+    for (int64_t d = 0; d < D; ++d) pts[n](d) = ctx.in[input].data[n * D + d];
   return pts;
 }
-template <typename P, typename S>
-auto gp_cov_call(uint8_t variant, const P& pts, const S& sigma,
-                 const S& length_scale) {
-  switch (variant) {
+// L is a scalar length scale, or a std::vector of one per dimension. P is
+// one location array (the square form) or two (the cross form).
+template <typename S, typename L, typename... P>
+auto gp_cov_call(GpCov family, const S& sigma, const L& length_scale,
+                 const P&... pts) {
+  using Result = Eigen::Matrix<stan::return_type_t<P..., S, L>, -1, -1>;
+  switch (family) {
     case kGpMatern32:
-      return stan::math::gp_matern32_cov(pts, sigma, length_scale);
+      return Result(stan::math::gp_matern32_cov(pts..., sigma, length_scale));
     case kGpMatern52:
-      return stan::math::gp_matern52_cov(pts, sigma, length_scale);
+      return Result(stan::math::gp_matern52_cov(pts..., sigma, length_scale));
     case kGpExponential:
-      return stan::math::gp_exponential_cov(pts, sigma, length_scale);
+      return Result(
+          stan::math::gp_exponential_cov(pts..., sigma, length_scale));
     default:
-      return stan::math::gp_exp_quad_cov(pts, sigma, length_scale);
+      return Result(stan::math::gp_exp_quad_cov(pts..., sigma, length_scale));
   }
+}
+template <typename T>
+std::vector<T> gp_length_scales(const Desc& rho) {
+  return std::vector<T>(rho.data, rho.data + rho.len);
 }
 // Stan Math uses its periodic matrix callback only when both the length scale
 // and the period are var. CmdStan passes a data argument as double, so pass
@@ -100,35 +117,116 @@ VarM gp_periodic_fixed(const KernelCtx& ctx, const std::vector<VecD>& pts,
   return stan::math::gp_periodic_cov(pts, sigma, ctx.in[2].data[0],
                                      ctx.in[3].data[0]);
 }
+// The cross form has no upstream matrix callback, so its value and every
+// adjoint come from Stan Math's prim functions. Inactive locations stay
+// double, as CmdStan passes them.
+template <typename T, typename... P>
+Eigen::Matrix<T, -1, -1> gp_cross_call(GpCovMode mode, const T& sigma,
+                                       const std::vector<T>& length_scales,
+                                       const T& period, const P&... pts) {
+  if (mode.family == kGpPeriodic)
+    return stan::math::gp_periodic_cov(pts..., sigma, length_scales[0], period);
+  if (mode.per_dimension)
+    return gp_cov_call(mode.family, sigma, length_scales, pts...);
+  return gp_cov_call(mode.family, sigma, length_scales[0], pts...);
+}
+void gp_cross_fwd(KernelCtx& ctx) {
+  const GpCovMode mode = GpCovMode::of(ctx.variant);
+  const double period = mode.family == kGpPeriodic ? ctx.in[4].data[0] : 0.0;
+  const MatD c = gp_cross_call(mode, ctx.in[2].data[0],
+                               gp_length_scales<double>(ctx.in[3]), period,
+                               gp_points(ctx, 0), gp_points(ctx, 1));
+  MapM(ctx.out.data, c.rows(), c.cols()) = c;
+}
+void gp_cross_bwd(KernelCtx& ctx) {
+  const GpCovMode mode = GpCovMode::of(ctx.variant);
+  const int64_t N1 = ctx.idata[0], N2 = ctx.idata[2];
+  if (N1 == 0 || N2 == 0) return;
+  using stan::math::var;
+  stan::math::nested_rev_autodiff nested;
+  var sigma = ctx.in[2].data[0];
+  std::vector<var> length_scales = gp_length_scales<var>(ctx.in[3]);
+  var period = mode.family == kGpPeriodic ? ctx.in[4].data[0] : 0.0;
+  std::vector<VarV> x1, x2;
+  const auto seed = [&](const VarM& covariance) {
+    stan::math::grad(
+        stan::math::sum(stan::math::elt_multiply(
+                            covariance, CMapM(ctx.out_adj_vec.data, N1, N2)))
+            .vi_);
+  };
+  const auto with_x2 = [&](const auto& first) {
+    if (ctx.in_adj[1].data) {
+      x2 = gp_points<var>(ctx, 1);
+      seed(gp_cross_call(mode, sigma, length_scales, period, first, x2));
+    } else {
+      seed(gp_cross_call(mode, sigma, length_scales, period, first,
+                         gp_points(ctx, 1)));
+    }
+  };
+  if (ctx.in_adj[0].data) {
+    x1 = gp_points<var>(ctx, 0);
+    with_x2(x1);
+  } else {
+    with_x2(gp_points(ctx, 0));
+  }
+  const auto harvest = [&](int input, const std::vector<VarV>& pts) {
+    if (!ctx.in_adj[input].data) return;
+    const int64_t D = ctx.idata[1];
+    for (size_t n = 0; n < pts.size(); ++n)
+      for (int64_t d = 0; d < D; ++d)
+        ctx.in_adj[input].data[n * D + d] += pts[n](d).adj();
+  };
+  harvest(0, x1);
+  harvest(1, x2);
+  if (ctx.in_adj[2].data) ctx.in_adj[2].data[0] += sigma.adj();
+  if (ctx.in_adj[3].data)
+    for (size_t d = 0; d < length_scales.size(); ++d)
+      ctx.in_adj[3].data[d] += length_scales[d].adj();
+  if (mode.family == kGpPeriodic && ctx.in_adj[4].data)
+    ctx.in_adj[4].data[0] += period.adj();
+}
 void gp_cov_fwd(KernelCtx& ctx) {
   const int64_t N = ctx.idata[0];
+  const GpCovMode mode = GpCovMode::of(ctx.variant);
+  if (mode.cross) {
+    gp_cross_fwd(ctx);
+    return;
+  }
   auto pts = gp_points(ctx);
-  MatD c =
-      ctx.variant == kGpPeriodic
-          ? MatD(stan::math::gp_periodic_cov(
-                pts, ctx.in[1].data[0], ctx.in[2].data[0], ctx.in[3].data[0]))
-          : gp_cov_call(ctx.variant, pts, ctx.in[1].data[0], ctx.in[2].data[0]);
-  if (gp_cov_has_jitter(ctx.variant, ctx.n_in)) {
-    const double jitter = ctx.in[gp_cov_jitter_input(ctx.variant)].data[0];
+  const double sigma = ctx.in[1].data[0];
+  MatD c = mode.family == kGpPeriodic
+               ? MatD(stan::math::gp_periodic_cov(pts, sigma, ctx.in[2].data[0],
+                                                  ctx.in[3].data[0]))
+           : mode.per_dimension
+               ? gp_cov_call(mode.family, sigma,
+                             gp_length_scales<double>(ctx.in[2]), pts)
+               : gp_cov_call(mode.family, sigma, ctx.in[2].data[0], pts);
+  if (gp_cov_has_jitter(mode, ctx.n_in)) {
+    const double jitter = ctx.in[gp_cov_jitter_input(mode.family)].data[0];
     for (int64_t i = 0; i < N; ++i) c(i, i) += jitter;
   }
   MapM(ctx.out.data, N, N) = c;
 }
 void gp_cov_replay_bwd(KernelCtx& ctx) {
-  const bool periodic = ctx.variant == kGpPeriodic;
-  const bool has_jitter = gp_cov_has_jitter(ctx.variant, ctx.n_in);
-  const int jitter_input = gp_cov_jitter_input(ctx.variant);
+  const GpCovMode mode = GpCovMode::of(ctx.variant);
+  const bool periodic = mode.family == kGpPeriodic;
+  const bool has_jitter = gp_cov_has_jitter(mode, ctx.n_in);
+  const int jitter_input = gp_cov_jitter_input(mode.family);
   if (!ctx.in_adj[0].data) {
     // Fixed locations need no distance derivatives. Keep the hyperparameters
     // and the weighted matrix reduction on the same Stan Math tape; only the
     // inactive geometry stays double. Active locations retain the full path.
     stan::math::nested_rev_autodiff nested;
     stan::math::var sigma = ctx.in[1].data[0], rho = ctx.in[2].data[0];
+    std::vector<stan::math::var> rhos;
+    if (mode.per_dimension) rhos = gp_length_scales<stan::math::var>(ctx.in[2]);
     stan::math::var period;
     if (periodic) period = ctx.in[3].data[0];
     VarM covariance =
         periodic ? gp_periodic_fixed(ctx, gp_points(ctx), sigma, rho, period)
-                 : VarM(gp_cov_call(ctx.variant, gp_points(ctx), sigma, rho));
+        : mode.per_dimension
+            ? gp_cov_call(mode.family, sigma, rhos, gp_points(ctx))
+            : gp_cov_call(mode.family, sigma, rho, gp_points(ctx));
     const int64_t n = ctx.idata[0];
     if (n == 0) return;
     stan::math::var jitter;
@@ -140,7 +238,13 @@ void gp_cov_replay_bwd(KernelCtx& ctx) {
         covariance, CMapM(ctx.out_adj_vec.data, n, n)));
     stan::math::grad(objective.vi_);
     if (ctx.in_adj[1].data) ctx.in_adj[1].data[0] += sigma.adj();
-    if (ctx.in_adj[2].data) ctx.in_adj[2].data[0] += rho.adj();
+    if (ctx.in_adj[2].data) {
+      if (mode.per_dimension)
+        for (size_t d = 0; d < rhos.size(); ++d)
+          ctx.in_adj[2].data[d] += rhos[d].adj();
+      else
+        ctx.in_adj[2].data[0] += rho.adj();
+    }
     if (periodic && ctx.in_adj[3].data) ctx.in_adj[3].data[0] += period.adj();
     if (has_jitter && ctx.in_adj[jitter_input].data)
       ctx.in_adj[jitter_input].data[0] += jitter.adj();
@@ -150,15 +254,19 @@ void gp_cov_replay_bwd(KernelCtx& ctx) {
   // adjoints flow back too. nary_bwd copies back whatever input carries an
   // adjoint slot, so a data x simply contributes nothing here.
   const int64_t N = ctx.idata[0], D = ctx.idata[1];
-  const uint8_t variant = ctx.variant;
   nary_bwd(ctx, [&](std::vector<VarV>& xs) {
     std::vector<VarV> pts(N, VarV(D));
     for (int64_t n = 0; n < N; ++n)
       for (int64_t d = 0; d < D; ++d) pts[n](d) = xs[0](n * D + d);
-    VarM covariance = periodic
-                          ? VarM(stan::math::gp_periodic_cov(
-                                pts, xs[1](0), xs[2](0), xs[3](0)))
-                          : VarM(gp_cov_call(variant, pts, xs[1](0), xs[2](0)));
+    VarM covariance =
+        periodic ? VarM(stan::math::gp_periodic_cov(pts, xs[1](0), xs[2](0),
+                                                    xs[3](0)))
+        : mode.per_dimension
+            ? gp_cov_call(mode.family, xs[1](0),
+                          std::vector<stan::math::var>(
+                              xs[2].data(), xs[2].data() + xs[2].size()),
+                          pts)
+            : gp_cov_call(mode.family, xs[1](0), xs[2](0), pts);
     if (has_jitter)
       for (int64_t i = 0; i < N; ++i) covariance(i, i) += xs[jitter_input](0);
     return covariance;
@@ -170,10 +278,15 @@ void gp_cov_replay_bwd(KernelCtx& ctx) {
 // for nearly singular covariances: it amplifies rounding in hypergradients.
 // See stan/math/rev/fun/gp_exp_quad_cov.hpp for the reference callback.
 void gp_cov_bwd(KernelCtx& ctx) {
+  const GpCovMode mode = GpCovMode::of(ctx.variant);
+  if (mode.cross) {
+    gp_cross_bwd(ctx);
+    return;
+  }
   const double sigma = ctx.in[1].data[0], rho = ctx.in[2].data[0];
-  if (ctx.variant != kGpExpQuad || gp_cov_has_jitter(ctx.variant, ctx.n_in) ||
-      ctx.in_adj[0].data || !std::isnormal(sigma * sigma) ||
-      !std::isnormal(rho * rho * rho)) {
+  if (mode.family != kGpExpQuad || mode.per_dimension ||
+      gp_cov_has_jitter(mode, ctx.n_in) || ctx.in_adj[0].data ||
+      !std::isnormal(sigma * sigma) || !std::isnormal(rho * rho * rho)) {
     gp_cov_replay_bwd(ctx);
     return;
   }
@@ -1988,7 +2101,32 @@ double wiener_select(KernelCtx& ctx, unsigned active, WienerPass pass,
   static constexpr Eval table[] = {&wiener_eval<Scalar, Mask>...};
   return table[active](ctx, pass);
 }
+// Stan Math checks every argument before it returns 0 for an empty one. When
+// the others have length 1, wiener_load spreads them to length 0 and Stan
+// Math sees no value to check, so check them here in its order.
+void wiener_check_beside_empty(const KernelCtx& ctx) {
+  bool empty = false;
+  for (int k = 0; k < 5; ++k) {
+    if (ctx.in[k].len > 1) return;
+    empty = empty || ctx.in[k].len == 0;
+  }
+  if (!empty) return;
+  constexpr const char* fn = "wiener_lpdf";
+  const auto value = [&](int k, auto check) {
+    if (ctx.in[k].len == 1) check(ctx.in[k].data[0]);
+  };
+  namespace sm = stan::math;
+  value(0, [](double y) { sm::check_positive(fn, "Random variable", y); });
+  value(1, [](double a) {
+    sm::check_positive_finite(fn, "Boundary separation", a);
+  });
+  value(2,
+        [](double t) { sm::check_positive_finite(fn, "Nondecision time", t); });
+  value(3, [](double w) { sm::check_bounded(fn, "A-priori bias", w, 0, 1); });
+  value(4, [](double v) { sm::check_finite(fn, "Drift rate", v); });
+}
 double wiener_run(KernelCtx& ctx, unsigned active, WienerPass pass) {
+  wiener_check_beside_empty(ctx);
   const auto masks = std::make_integer_sequence<unsigned, 32>{};
   return wiener_extent(ctx) == 1
              ? wiener_select<true>(ctx, active, pass, masks)
@@ -2481,7 +2619,7 @@ double tail_visit(KernelCtx& ctx, F&& f, const A&... a) {
   return value;
 }
 
-#define STANLI_TAIL_CDF_KERNEL(code, fn, nreal, tier)                        \
+#define STANLI_TAIL_CDF_KERNEL(code, fn, nreal)                              \
   template <bool Grad>                                                       \
   double fn##_eval(KernelCtx& ctx) {                                         \
     stan::math::nested_rev_autodiff nested;                                  \
@@ -2499,7 +2637,7 @@ STANLI_TAIL_CDF_LIST(STANLI_TAIL_CDF_KERNEL)
 // The integer outcome rides in idata as one whole group, the way the
 // other integer-outcome cdfs read theirs; the lowering has already
 // replicated a language-level scalar to the lane count.
-#define STANLI_TAIL_INT_CDF_KERNEL(code, fn, nreal, tier)                    \
+#define STANLI_TAIL_INT_CDF_KERNEL(code, fn, nreal)                          \
   template <bool Grad>                                                       \
   double fn##_eval(KernelCtx& ctx) {                                         \
     stan::math::nested_rev_autodiff nested;                                  \
@@ -2549,7 +2687,7 @@ void register_matrix_kernels() {
   register_kernel(
       OP_WIENER_PACKED_LPDF,
       Kernel{wiener_packed_fwd, wiener_packed_bwd, wiener_packed_scratch});
-#define STANLI_REGISTER_TAIL_CDF(code, fn, nreal, tier) \
+#define STANLI_REGISTER_TAIL_CDF(code, fn, nreal) \
   register_kernel(code, Kernel{fn##_fwd, fn##_bwd, nullptr});
   STANLI_TAIL_CDF_LIST(STANLI_REGISTER_TAIL_CDF)
   STANLI_TAIL_INT_CDF_LIST(STANLI_REGISTER_TAIL_CDF)

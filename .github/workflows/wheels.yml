@@ -317,6 +317,12 @@ jobs:
       - name: Build tooling
         run: python3 -m pip install --upgrade pip setuptools wheel
 
+      # tests/test_hp_reference.py skips its 80-digit reference classes
+      # without mpmath. The Tests step below sets STANLI_REQUIRE_MPMATH, which
+      # turns that skip into a failure.
+      - name: Install mpmath
+        run: python3 -m pip install mpmath==1.3.0
+
 
       # Everything fetch.sh pulls is pinned by a git SHA, so these two source
       # trees are a pure function of the script. Compiler products under
@@ -597,6 +603,8 @@ jobs:
       # generated signature models alone are ~280 s of work, which -j2
       # served in 150 s on a 4-core runner.
       - name: Tests
+        env:
+          STANLI_REQUIRE_MPMATH: '1'
         run: |
           cores=$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 2)
           echo "runner: $cores cores, testing -j$cores"
@@ -604,9 +612,10 @@ jobs:
 
       # build-rel is the shipped configuration: no Stan Math kernels for the
       # fused densities and no developer switches, so ctest there skips the
-      # tests labeled debug_switches. This builds the same sources with both
-      # kept, to run the differential tests, the STANLI_NO_FUSED_DENSITY
-      # oracle and the switch tests. One platform is enough.
+      # cases that need a switch and disables the tests that have none left.
+      # This builds the same sources with both kept, to run the differential
+      # tests, the STANLI_NO_FUSED_DENSITY oracle and the switch tests. One
+      # platform is enough.
       - name: Differential tests against Stan Math
         if: matrix.plat == 'manylinux_2_28_x86_64'
         run: |
@@ -2178,6 +2187,44 @@ jobs:
             test "$R_RESULT" = skipped
             test "$STANC_WINDOWS_RESULT" = skipped
             test "$WINDOWS_COMPILER_RESULT" = skipped
+          fi
+
+  # Nothing else tells anyone that main went red after a merge: the ASan job
+  # stayed red for 12 hours across three merges. This keeps one open issue per
+  # workflow while main is red, and closes it on the next run where nothing
+  # failed. A cancelled job neither opens nor closes it.
+  main-status:
+    name: report main status
+    if: always() && github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    needs: [changes, static_checks, no-stdio, build, windows, asan, tsan, wasm,
+            wasm-webr, browser-compiler, r-tests, r-platform-tests,
+            stanc-windows, windows-compiler, pages, dev-runtime-release]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      issues: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      RESULTS: ${{ toJSON(needs) }}
+      RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+    steps:
+      - name: Open, update or close the issue
+        run: |
+          title="main is red: $GITHUB_WORKFLOW"
+          failed=$(jq -r 'to_entries[] | select(.value.result == "failure") | .key' <<<"$RESULTS" | paste -sd, -)
+          cancelled=$(jq -r 'to_entries[] | select(.value.result == "cancelled") | .key' <<<"$RESULTS")
+          number=$(gh issue list --state open --limit 100 --json number,title |
+                   jq -r --arg t "$title" '.[] | select(.title == $t) | .number' | head -n 1)
+          if [ -n "$failed" ]; then
+            body="Failed: $failed. Commit $GITHUB_SHA, run $RUN_URL"
+            if [ -n "$number" ]; then
+              gh issue comment "$number" --body "$body"
+            else
+              gh issue create --title "$title" --body "$body"
+            fi
+          elif [ -n "$number" ] && [ -z "$cancelled" ]; then
+            gh issue close "$number" --comment "Nothing failed in $RUN_URL (commit $GITHUB_SHA)."
           fi
 
   # The public demo: web/ plus the runtime and compiler artifacts, deployed

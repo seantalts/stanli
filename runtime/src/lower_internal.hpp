@@ -31,6 +31,7 @@
 #include <stanli/quadrature.hpp>
 #include <stanli/reroll.hpp>
 #include <stanli/builtin_registry.hpp>
+#include "lower_work.hpp"
 #include <stanli/structured_check.hpp>
 #include <stanli/wa_interp.hpp>
 
@@ -84,6 +85,7 @@ struct PrepTrace {
     Regions,
     Truncated,
     MirBytes,
+    Work,
   };
 
   struct Row {
@@ -120,6 +122,21 @@ struct PrepTrace {
   }
 
   bool enabled() const { return enabled_; }
+
+  // Counts of lowering work that do not depend on the clock, for tests that
+  // check how preparation grows with the size of a model. Trial lowerings
+  // share their parent's trace, so their work is counted too.
+  int64_t lowered_statements = 0;
+  int64_t copied_data_bytes = 0;
+  void work(const char* graph) {
+    if (!enabled_) return;
+    Row& r = next();
+    r.graph = graph;
+    r.stage = "lower_work";
+    r.extra = Extra::Work;
+    r.a = lowered_statements;
+    r.b = copied_data_bytes;
+  }
 
   Time start() const { return enabled_ ? Clock::now() : Time{}; }
 
@@ -240,6 +257,10 @@ struct PrepTrace {
           break;
         case Extra::MirBytes:
           field("mir_bytes", r.a);
+          break;
+        case Extra::Work:
+          field("statements", r.a);
+          field("copied_data_bytes", r.b);
           break;
         case Extra::None:
           break;
@@ -493,6 +514,9 @@ struct DeclView {
   bool int_array = false;
   bool deferred_shape = false;
   std::vector<int> runtime_dims;
+  // A runtime-control region chose this local's size, which may come from
+  // a branch that did not run.
+  bool sized_by_region = false;
 };
 
 // A lifetime-bound view of the prepared facts handed from the completed
@@ -505,7 +529,7 @@ struct PreparedContext {
   const std::map<std::string, DataMap::Entry>& environment;
   const std::map<std::string, long>& integers;
   const std::map<std::string, DeclView>& declarations;
-  const DataMap& omitted_data;
+  const DataMap& zero_size_data;
   const std::set<std::string>& names;
 };
 
@@ -568,7 +592,7 @@ struct Lowering {
   struct LoweredArgument {
     struct Cache {
       std::optional<DataMap::Entry> owned_pure_value;
-      // Observations live in Lowering::observations, whose std::map entries
+      // Observations live in Lowering::observations, whose entries
       // remain stable while a call is lowered. Do not duplicate their
       // vector-owned payload merely to memoize the lookup here.
       const DataMap::Entry* borrowed_pure_value = nullptr;
@@ -762,6 +786,7 @@ struct Lowering {
     DirichletRng,
     CategoricalRng,
     ScalarRng,
+    LibraryRng,
     Density,
     CallableTransform,
     Elementwise,
@@ -823,10 +848,14 @@ struct Lowering {
     return query == "cols" ? 1 : 0;
   }
   const DataMap& data;
-  DataMap omitted_data;
+  // The empty value of each data variable whose declared size is zero.
+  // CmdStan reads no elements for such a variable, so it may be left out or
+  // given any value with no elements, and this binding wins over the value
+  // supplied.
+  DataMap zero_size_data;
   const DataMap::Entry* data_entry(const std::string& name) const {
+    if (zero_size_data.has(name)) return &zero_size_data.at(name);
     if (data.has(name)) return &data.at(name);
-    if (omitted_data.has(name)) return &omitted_data.at(name);
     return nullptr;
   }
   std::shared_ptr<ShapeInterner> shape_pool;
@@ -891,18 +920,31 @@ struct Lowering {
   // -1 means the entire runtime logical extent, excluding unused capacity.
   // Only bounded output reductions consume that stronger shape-aware proof.
   std::map<int, int64_t> int_initialized_prefix;
-  std::map<uint64_t, int> const_cache;
+  // By bit pattern. An unrolled loop over data makes one constant per data
+  // value, so this holds millions of entries for a large loop.
+  std::unordered_map<uint64_t, int> const_cache;
   struct ObservationKey {
     int slot;
     SlotInfo si;
-    bool operator<(const ObservationKey& b) const {
-      return std::tie(slot, si.kind, si.shape, si.rows, si.cols) <
+    bool operator==(const ObservationKey& b) const {
+      return std::tie(slot, si.kind, si.shape, si.rows, si.cols) ==
              std::tie(b.slot, b.si.kind, b.si.shape, b.si.rows, b.si.cols);
+    }
+  };
+  struct ObservationHash {
+    size_t operator()(const ObservationKey& k) const {
+      size_t h = std::hash<int>()(k.slot);
+      for (const size_t part :
+           {static_cast<size_t>(k.si.kind), static_cast<size_t>(k.si.shape),
+            static_cast<size_t>(k.si.rows), static_cast<size_t>(k.si.cols)})
+        h = h * 1000003u ^ part;
+      return h;
     }
   };
   // Interpreter-native semantic values. Graph fills use a different physical
   // order for arrays, so compile-time observation must never reuse them.
-  std::map<ObservationKey, DataMap::Entry> observations;
+  std::unordered_map<ObservationKey, DataMap::Entry, ObservationHash>
+      observations;
   std::vector<KnownOutput> known_outputs;
   std::vector<int> target_terms;
   std::vector<int> jac_slots;
@@ -980,6 +1022,9 @@ struct Lowering {
   std::set<const mir::Stmt*> write_array_int_loops;
   std::set<const mir::Stmt*> write_array_unrolled_loops;
   bool write_array_unroll_int_loops = false;
+  // The names that a declared size in write_array reads. A loop that
+  // assigns one of them is unrolled on the first attempt.
+  std::set<std::string> write_array_size_names;
   // Which output variable each FnWriteParam writes, and which section of
   // write_array the statement being lowered belongs to.
   mir::OutputCursor output_cursor;
@@ -1161,35 +1206,21 @@ struct Lowering {
       reject(MessageError::OutOfRange,
              index_out_of_range_message(stan_label, n, i), raw);
   }
-  // A range with hi < lo is empty and never reads, whatever the endpoints.
-  void check_range(int64_t lo, int64_t hi, int64_t n, const char* what,
-                   const std::string& raw) {
-    if (hi >= lo && (lo < 1 || hi > n))
-      fail(std::string(what) + ": range [" + std::to_string(lo) + ", " +
-               std::to_string(hi) + "] out of bounds for size " +
-               std::to_string(n),
-           raw);
-  }
-  struct StaticRange {
-    int64_t lo, hi;
-  };
   static bool is_range(const mir::Expr& ix) {
     return ix.kind == mir::Expr::IndexBetween ||
            ix.kind == mir::Expr::IndexUpfrom;
   }
-  std::optional<StaticRange> static_range(const mir::Expr& ix, int64_t extent) {
-    if (ix.kind == mir::Expr::IndexBetween)
-      return StaticRange{eval_int(ix.args[0]), eval_int(ix.args[1])};
-    if (ix.kind == mir::Expr::IndexUpfrom)
-      return StaticRange{eval_int(ix.args[0]), extent};
-    if (ix.kind == mir::Expr::IndexAll) return StaticRange{1, extent};
-    return std::nullopt;
-  }
+  // A range selector (or `:`) over bind-time constants, resolved by Stan's
+  // rule for its site, with Stan's error when the selection runs.
+  RangeSelection range_selection(const mir::Expr& ix, int64_t extent,
+                                 SelectorSite site, const std::string& raw,
+                                 bool assign = false);
   // Every index the lowering sees is a bind-time constant, so what CmdStan
   // bounds-checks at runtime is checked here instead.
   std::vector<int64_t> index_positions(const mir::Expr& ix, int64_t extent,
-                                       const char* what,
-                                       const std::string& raw);
+                                       SelectorSite site, const char* what,
+                                       const std::string& raw,
+                                       bool assign = false);
 
   int const_slot(double v) {
     uint64_t bits;
@@ -1625,7 +1656,7 @@ struct Lowering {
 
   void bind_data(const mir::Program& p);
   void report_missing_data(const mir::Program& p);
-  void omit_zero_size(const std::string& name, const mir::SizedType& type);
+  void bind_zero_size(const std::string& name, const mir::SizedType& type);
 
   // Lazily materialize an env value as a data slot when log_prob uses it.
   int env_slot(const std::string& name);
@@ -1674,6 +1705,9 @@ struct Lowering {
     // the authority on shape when the outside declaration was zero-size
     // and the region's assignment sized it.
     std::vector<Range> out_views;
+    // The live-outs whose empty status also leaves the region, as indices
+    // into out_names; the status registers follow the target's.
+    std::vector<size_t> out_empty_status;
     bool has_target = false;  // the region contributed to the target
     // A print or reject is observable even when every data live-out is empty,
     // so an emitter must not treat the region as having nothing to produce.
@@ -1688,6 +1722,18 @@ struct Lowering {
                   const std::function<bool(const mir::Stmt&)>& stop);
   static bool while_sizes_from_loop_state(const mir::Stmt& s);
   std::optional<Flow> unroll_while(const mir::Stmt& s);
+  // Runs `unroll`, which lowers `loop` trip by trip. A branch that this
+  // finds to be decided at run time, and that holds a break or continue of
+  // `loop`, cannot be a region of its own, because the jump's target is
+  // outside it. Lowering then starts the loop again as one region.
+  struct LoopControlInBranch : CompileError {
+    LoopControlInBranch()
+        : CompileError(
+              "runtime-control region: break or continue outside a loop") {}
+  };
+  std::optional<Flow> unroll_or_region(
+      const mir::Stmt& loop,
+      const std::function<std::optional<Flow>()>& unroll);
   // A while inside a while being unrolled belongs to the same compile-time
   // execution: leaving it as a loop puts the outer counter in a register
   // and undoes the unroll around it.
@@ -1760,6 +1806,15 @@ struct Lowering {
     });
     for (const auto& k : s.body) assigned_names(k, out);
   }
+  // Every name `s` can bind: its declarations, loop variables and
+  // assignment targets.
+  static void bound_names(const mir::Stmt& s, std::set<std::string>* out) {
+    if (s.kind == mir::Stmt::Decl) out->insert(s.decl_id);
+    if (s.kind == mir::Stmt::For) out->insert(s.loopvar);
+    mir::for_each_assigned(s,
+                           [&](const std::string& name) { out->insert(name); });
+    for (const auto& k : s.body) bound_names(k, out);
+  }
   // The subset of those that resolve outside `s`. Lowering's scope keeps a
   // block's locals after the block ends, so a name `s` declares for itself
   // can match a stale outer binding; within its declaration's block it is
@@ -1823,13 +1878,6 @@ struct Lowering {
     }
     return true;
   }
-  // Remove a return at the lexical end of a statement arm, preserving every
-  // statement that precedes it.  This is the structured form used by UDFs
-  // such as ctsem's mcalc: each arm returns, but one arm first updates a local
-  // matrix.  The updates can lower as an ordinary statement island and the
-  // two returned expressions can then join through a ternary value island.
-  static bool peel_terminal_return(mir::Stmt* s, mir::Expr* value);
-
   // Data-only operands of a retained call are folded while the Program is
   // compiled, as their graph counterparts are.
   DataMap::Entry program_constant(ProgramCompiler& c, const mir::Expr& arg,
@@ -2196,6 +2244,8 @@ struct Lowering {
 
   Val lower_categorical_rng(const mir::Expr& e, CallArguments& actuals);
 
+  Val lower_library_rng(const mir::Expr& e, CallArguments& actuals,
+                        const LibraryRngSpec& spec);
   Val lower_scalar_rng(const mir::Expr& e, CallArguments& actuals,
                        ScalarRng family);
 
@@ -2370,7 +2420,17 @@ struct Lowering {
   // static scalar type and SlotInfo in `scope`; this registry is needed only
   // before first binding.
   std::map<std::string, DeclView> decls;
+  // A container that a region gave its size in a branch that may not have
+  // run: the slot holding its empty status, 1 while it is empty. A later
+  // region reads the status; the first read in graph code checks it.
+  std::map<std::string, int> empty_status_slots;
+  // Raises an error at run time if `name` is still empty here.
+  void require_assigned(const std::string& name);
 
+  void count_data_copy(const std::map<std::string, DataMap::Entry>& env) {
+    if (prep.enabled())
+      prep.copied_data_bytes += static_cast<int64_t>(data_payload_bytes(env));
+  }
   std::vector<std::pair<std::string, std::optional<DataMap::Entry>>> td_journal;
   void td_erase(const std::string& name) {
     auto it = td.env().find(name);
@@ -2545,7 +2605,8 @@ struct Lowering {
       s.int_locals.emplace_back(name, int_locals.count(name) > 0);
     return s;
   }
-  void wa_restore(WaSnapshot& s) {
+  // Puts back the named values only; the graph keeps what was added since.
+  void wa_restore_names(WaSnapshot& s) {
     restore_named(scope, s.scope);
     restore_named(decls, s.decls);
     restore_named(int_env, s.int_env);
@@ -2556,11 +2617,234 @@ struct Lowering {
       else
         int_locals.erase(name);
     }
+  }
+  void wa_restore(WaSnapshot& s) {
+    wa_restore_names(s);
     wa_rollback(s);
   }
-#include "lower_structured_loop.inc"
+  // Isolated structured candidates reuse expression lowering, typed views and
+  // the ordinary kernel vocabulary.
+  using RegionNode = StructuredLoop::Node;
+  RegionNode* region_current = nullptr;
+  // Puts region_current back when a scope ends. A refused candidate throws out
+  // of a child node that is a local of the frame being unwound, and lowering
+  // can catch the refusal and go on.
+  struct RegionRestore {
+    RegionNode*& current;
+    RegionNode* const saved = current;
+    ~RegionRestore() { current = saved; }
+  };
+  size_t region_emitted = 0;
+  std::map<std::string, Val> region_cells;
+  std::map<std::string, IntRange> region_analysis_ints;
+  int region_control_depth = 0;
+  bool region_control_active = false;
+  // Set once the region retains a branch or while loop whose condition depends
+  // on a parameter. Replay checks each such decision and records again when one
+  // changes between executions.
+  bool region_parameter_control = false;
+  unsigned structured_outer_depth = 0;
+  bool region_unreachable = false;
+  std::set<std::string> region_unsized_unagreed;
+  // Where each local that the structured region declares is declared: its
+  // statement list and its index there.
+  std::map<std::string, std::pair<const std::vector<mir::Stmt>*, size_t>>
+      region_decl_sites;
+  std::map<std::pair<const mir::Expr*, std::string>, std::optional<RealRange>>
+      region_enumerated_cache;
+
+  // These limits govern only newly admitted output blocks. Existing retained
+  // loops keep their selection policy. Weighted elements/visits bound work and
+  // recording proxies; they are not a promise about total process RSS.
+  bool bounded_output = false;
+  uint64_t bounded_output_elements = 0, bounded_output_weighted_elements = 0;
+  uint64_t bounded_output_visits = 0, bounded_output_multiplier = 1;
+  bool bounded_output_dynamic = false;
+
+  // A deliberately small, closed grammar: dynamic containers never escape or
+  // reach a consumer whose logical-length behavior has not been audited here.
+  // This scan mutates no lowering state and invokes no interpreter probes.
+  bool bounded_output_candidate(const mir::Stmt& root,
+                                std::set<std::string>* references);
+
+  // A refusal-only check for a nested container's unavoidable update slot.
+  // Follow straight-line integer definitions and declaration-time shapes, then
+  // the same maximum trip counts used by bounded lowering. Unknown control or
+  // ranges defer to the ordinary isolated trial; this never admits a program.
+  bool bounded_nested_update_over_budget(const mir::Stmt& root);
+
+  // Matches ostream's default floating-point formatting.
+  static std::string fmt_g(double v);
+
+  void region_flush();
+  void region_append(RegionNode node);
+
+  // A small data-only UDF can determine a shape exactly even though the
+  // retained numerical region cannot fold the surrounding control. Probe it
+  // under a hard statement budget so shape discovery cannot turn a compact
+  // loop into an unbounded preparation-time replay.
+  std::optional<DataMap::Entry> region_bounded_data_value(const mir::Expr& e);
+
+  std::optional<int64_t> region_bounded_data_integer(const mir::Expr& e);
+
+  void region_alias(int dst, int src);
+
+  // Evaluate a data-only scalar over the finite integer ranges currently in
+  // scope.  This keeps reusable loop analysis compact: it visits the data
+  // points, but never emits or unrolls the numerical loop body.
+  std::optional<RealRange> region_enumerated_data_range(const mir::Expr& e);
+
+  std::optional<RealRange> region_real_range(const mir::Expr& e);
+
+  // Number of scalar elements per outer entry for the bounded, rectangular
+  // real-array contract. Inner extents are fixed; no padding occurs within an
+  // entry. The outer logical extent remains distinct from total element count.
+  std::optional<int64_t> bounded_outer_width(const Val& value);
+
+  std::optional<IntRange> region_range(const mir::Expr& e);
+  void region_forget(const std::string& name);
+  Val region_cell(const std::string& name);
+  void region_prepare_cells(const mir::Stmt& s);
+  // A zero-size or unsized local takes its shape from its first whole
+  // assignment; branch arms that assign it share one cell, sized from the
+  // static shape they agree on. A nonzero size is refused unless every
+  // path assigns the local before reading it or leaving.
+  bool deferred_unsized(const std::string& name) const;
+  bool region_size_deferred(const std::string& name, const mir::Stmt& s);
+  // A reusable body must account for every iteration, not just the incoming
+  // values. Compute a conservative fixed point over source dependencies before
+  // selecting kernels, and discard first-iteration integer observations.
+  bool region_depends(const mir::Expr& e, const std::set<std::string>& active);
+  std::set<std::string> region_dependencies(const mir::Stmt& s);
+  // A carried integer that a counted loop only ever increments, by amounts
+  // that do not depend on anything the loop writes, stays within its range
+  // on entry widened by the trip count times the largest steps. Each
+  // increment counts as optional, which covers branches, break and continue.
+  // Sets the range and returns true when that proof applies.
+  bool region_counted_range(const mir::Stmt& loop, const std::string& name,
+                            const std::vector<std::string>& writes);
+  void region_widen_carried(const mir::Stmt& s,
+                            const std::set<std::string>& active);
+  void region_assign(const std::string& name, Val value,
+                     std::optional<IntRange> range = {},
+                     std::optional<RealRange> real_range = {});
+
+  void region_refine_condition(const mir::Expr& e, bool truth);
+
+  // Compile a fixed-shape indexed access; values of selectors stay runtime.
+  Val region_index(const Val& base, const std::vector<mir::Expr>& selectors,
+                   mir::UnsizedView result_view, const Val* rhs = nullptr);
+  static bool region_nested_return(const mir::Stmt& s, bool control = false);
+  // Resolve a pure boolean from any observed data subexpression.  The MIR
+  // interpreter can only evaluate the complete expression, so an unknown
+  // loop counter in `counter > 0 && disabled == 0` otherwise hides the
+  // constant-false RHS and makes us compile an unreachable arm.
+  std::optional<bool> region_static_truth(const mir::Expr& e);
+
+  std::optional<Val> region_expr(const mir::Expr& e);
+
+  static const std::map<std::string, int>& runtime_comparisons();
+  static const std::map<std::string, int>& runtime_int_arithmetic();
+  static bool runtime_scalar_form(const mir::Expr& e);
+
+  bool write_array_unregioned() const;
+  bool runtime_only(const mir::Expr& e);
+  bool runtime_int_expression(const mir::Expr& e);
+  bool runtime_selector(const mir::Expr& index);
+  std::optional<long> static_int(const mir::Expr& e);
+  void bind_runtime_int(const std::string& name, const mir::Expr& e,
+                        const std::string& raw);
+
+  // These kernels also serve consumers outside a retained region. Integer
+  // identity and dependence do not imply that a value is known at prepare.
+  std::optional<Val> lower_runtime_scalar(const mir::Expr& e);
+
+  // An integer guard supplies an upper bound only when every non-exiting
+  // iteration has an unconditional positive update and the endpoint is
+  // invariant.
+  std::optional<int64_t> region_while_capacity(const mir::Stmt& s,
+                                               std::string* proven_counter);
+  // A complete iteration must write a[i] on every path. Other writes may
+  // overwrite those elements, but cannot escape the union of all written
+  // ranges. This proves initialization of the live extent, without executing
+  // the body during preparation or changing its runtime control/evaluation
+  // order.
+  void region_prove_bounded_int_fill(const mir::Stmt& loop, int64_t capacity);
+
+  // A retained loop or branch stays open while its body lowers, so a return
+  // has no way out through it.
+  void lower_region_body(const std::vector<mir::Stmt>& body);
+
+  Flow lower_region_stmt(const mir::Stmt& s);
+  static bool region_condition_data(const mir::Expr& e);
+  bool region_runtime_control(const mir::Stmt& root) const;
+
+  static bool same_mir_expr(const mir::Expr& a, const mir::Expr& b);
+  // Whether an iteration of `loop`, or of a loop inside it, can read what an
+  // earlier iteration wrote: a name from outside the loop is assigned in the
+  // body and read other than at an index, shared with every write of it,
+  // that depends on the loop variable. Names in `scratch` count as local to
+  // `loop` itself but not to the loops inside it. `inner_answers` holds what
+  // was found for the loops inside, so a deep nest is not asked again at
+  // every level.
+  static bool loop_carries_value(
+      const mir::Stmt& loop, const std::set<std::string>* scratch = nullptr,
+      std::map<const mir::Stmt*, bool>* inner_answers = nullptr);
+  // Names from outside `loop` that each iteration overwrites in full before it
+  // reads them, so none holds a value from one iteration to the next. A full
+  // write is a whole assignment, or a loop over 1..n whose only statement
+  // assigns x[k] where x has n elements, as in a mixture's
+  // `for (k in 1:K) ps[k] = ...; target += log_sum_exp(ps);`.
+  std::set<std::string> loop_scratch_names(const mir::Stmt& loop);
+  // loop_carries_value, except that scratch arrays carry nothing.
+  bool loop_carries_dependence(const mir::Stmt& loop);
+  // Unrolling pays when later passes fold the copies of the body into fewer,
+  // wider operations. A value carried between iterations leaves a serial
+  // chain they cannot fold, and once the write_array graph is this large each
+  // unrolled operation costs several times more per draw than it does in a
+  // small graph, while a retained loop replays at a flat cost per iteration.
+  // covid19imperial's generated quantities unroll to 587k operations; with
+  // them retained a draw is 2.6x faster.
+  static constexpr size_t kRetainWriteArrayLoopOps = size_t{1} << 16;
+  bool write_array_loop_retained(const mir::Stmt& s, int64_t lo, int64_t hi);
+  // log_prob has the same problem on a much larger scale. Each unrolled
+  // operation costs about 6 ns per gradient in a small graph and 15 ns once
+  // the graph passes 1M operations, from cache pressure on the 336-byte
+  // KernelCtx that each one carries, while a retained loop replays at about
+  // 10 ns per instruction. The two break even between 384k and 576k raw
+  // operations, and a loop is kept only when it is itself large.
+  static constexpr size_t kRetainLoopGraphOps = size_t{1} << 19;
+  static constexpr size_t kRetainLoopOps = size_t{1} << 14;
+  static constexpr size_t kRetainLoopOpsPerTrip = 32;
+  // A retained loop's integers exist only at run time, too late for a later
+  // declaration that a count kept by the loop sizes.
+  // With `among`, only an integer in that set counts.
+  static bool loop_assigns_outer_int(
+      const mir::Stmt& loop, const std::set<std::string>* among = nullptr);
+  bool log_prob_loop_may_retain(const mir::Stmt& s, int64_t trips);
+  bool log_prob_loop_retained(size_t loop_ops, int64_t trips) const;
+  bool region_auto_profitable(
+      const mir::Stmt& s,
+      std::optional<std::pair<int64_t, int64_t>> exact_bounds) const;
+  // Positive, deliberately narrow profitability evidence. Tiny scalar runs
+  // avoid region dispatch/version bookkeeping and expose the existing scalar
+  // fusion path, while duplicating only a bounded amount of compiler work.
+  // Merely fitting the expansion limit is NOT evidence for unrolling.
+  static bool region_scalar_expression(const mir::Expr& e);
+  static bool region_scalar_body(const mir::Stmt& s);
+  bool region_unroll_profitable(const mir::Stmt& s);
+  uint64_t region_cost(const mir::Stmt& s, uint64_t limit, unsigned depth = 0);
+
+  // `before_publish` runs once the candidate has passed every refusal, just
+  // before the loop is added to the graph.
+  bool try_lower_region(
+      const mir::Stmt& s,
+      std::optional<std::pair<int64_t, int64_t>> exact_bounds = std::nullopt,
+      const std::set<std::string>* output_references = nullptr,
+      const std::function<void()>& before_publish = {});
 
   Flow lower_stmt(const mir::Stmt& s) {
+    ++prep.lowered_statements;
     if (bounded_specialization &&
         ++specialization_steps > specialization_step_limit)
       throw SpecializationRefused{};

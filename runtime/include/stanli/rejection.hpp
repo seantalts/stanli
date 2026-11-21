@@ -19,6 +19,20 @@ inline bool is_internal_error(const std::exception& e) {
          dynamic_cast<const std::length_error*>(&e) == nullptr;
 }
 
+// What a model's fatal_error() throws, and what stanli throws for a
+// construct that it cannot evaluate at run time. Stan's algorithms reject a
+// point only on a domain error, so these end the run with their message
+// instead of rejecting the point.
+class FatalError : public std::runtime_error {
+ public:
+  using std::runtime_error::runtime_error;
+};
+
+// Whether an algorithm must pass `e` up rather than reject the point.
+inline bool ends_run(const std::exception& e) {
+  return is_internal_error(e) || dynamic_cast<const FatalError*>(&e) != nullptr;
+}
+
 }  // namespace stanli
 
 #endif

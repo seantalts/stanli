@@ -197,9 +197,9 @@ static void direct_and_island_calls() {
         without.forward = recompute_forward;
         without.backward = recompute_backward;
         without.scratch_size = nullptr;
-        register_kernel(OP_MDIVIDE_LEFT, without);
+        kernel(OP_MDIVIDE_LEFT) = without;
         Executor expected(call_graph(n, k, path));
-        register_kernel(OP_MDIVIDE_LEFT, original);
+        kernel(OP_MDIVIDE_LEFT) = original;
         Executor actual(call_graph(n, k, path));
         for (int point : {0, 1, 2, 0}) {
           check(identical(evaluate(actual, n, k, point),
@@ -226,13 +226,14 @@ int main() {
     for (int k : {1, 3})
       for (int rows : {0, 1, 33})
         for (bool frames : {false, true}) {
+          if (frames && !debug_switches_available()) continue;
           Kernel without = original;
           without.forward = recompute_forward;
           without.backward = recompute_backward;
           without.scratch_size = nullptr;
-          register_kernel(OP_MDIVIDE_LEFT, without);
+          kernel(OP_MDIVIDE_LEFT) = without;
           const Graph reference = graph(n, k, rows, k == 1);
-          register_kernel(OP_MDIVIDE_LEFT, original);
+          kernel(OP_MDIVIDE_LEFT) = original;
           const Graph candidate = graph(n, k, rows, k == 1);
           test_setenv("STANLI_STRUCTURED_FRAMES", frames ? "1" : "0");
           Executor expected(reference);
@@ -256,11 +257,11 @@ int main() {
               identical(evaluate(actual, n, k, 4), evaluate(expected, n, k, 4)),
               "copy leaves the original factor storage independent");
           const auto diagnostics = captured.finish();
-          if (frames && rows == 33)
+          if (frames && rows == 33 && debug_switches_available())
             check(diagnostics.find("stanli_structured frames:") !=
                       std::string::npos,
                   "factor lifetime check reaches numerical frames");
-          if (rows > 0) {
+          if (rows > 0 && debug_switches_available()) {
             // Frames return before the stream's respecialized counter is
             // printed. Count their completed recordings instead: the first
             // recording plus the two parameter-controlled branch changes.

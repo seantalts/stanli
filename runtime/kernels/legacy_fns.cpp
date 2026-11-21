@@ -6,6 +6,8 @@
 #include <stanli/legacy.hpp>
 #include <stanli/optable.hpp>
 #include <stanli/packet.hpp>
+// Kept after legacy.hpp: included first, Stan Math's headers do not compile.
+#include <stanli/adjoint_rules.hpp>
 
 #include <stdexcept>
 
@@ -59,13 +61,24 @@ void softmax_fwd(KernelCtx& ctx) {
   Eigen::Map<Eigen::VectorXd> out(ctx.out.data, ctx.out.len);
   out = stan::math::softmax(x);
 }
+// softmax of a vector, or of each vector in an array (grouped layout as in
+// grouped_unary).
 void softmax_bwd(KernelCtx& ctx) {
-  if (ctx.n_idata == 3) {
-    grouped_unary(
-        ctx, [](const auto& x) { return stan::math::softmax(x); }, true);
+  if (!ctx.in_adj[0].data) return;
+  if (ctx.n_idata != 3) {
+    softmax_rule(ctx.in[0].len, ctx.out.data, ctx.out_adj_vec.data,
+                 ctx.in_adj[0].data);
     return;
   }
-  legacy_bwd_vec_in(ctx, [](const auto& x) { return stan::math::softmax(x); });
+  const int64_t groups = ctx.idata[0], width = ctx.idata[1];
+  const bool interleaved = ctx.idata[2] != 0;
+  const double* out_adj =
+      ctx.out.len == 1 ? &ctx.out_adj : ctx.out_adj_vec.data;
+  for (int64_t g = 0; g < groups; ++g) {
+    const int64_t base = interleaved ? g : g * width;
+    softmax_rule(width, ctx.out.data + base, out_adj + base,
+                 ctx.in_adj[0].data + base, interleaved ? groups : 1);
+  }
 }
 
 // Multivariate density via nested replay: dirichlet_lpdf(theta | alpha).
@@ -123,9 +136,7 @@ double dirichlet_eval(KernelCtx& ctx) {
         lp = call(theta_arg, arg);
       });
   };
-  if (propto && !a0 && !a1) {
-    lp = 0.0;
-  } else if (a0) {
+  if (a0) {
     with_vectorized_argument(theta, theta_array, with_alpha);
   } else {
     with_vectorized_argument(theta_d, theta_array, with_alpha);
@@ -160,8 +171,11 @@ void dirichlet_fwd(KernelCtx& ctx) {
   s.len[1] = ctx.in[1].len;
   std::fill_n(ctx.scratch, s.len[0] + s.len[1], 0.0);
   if (propto && mask == 0) {
-    // Preserve the legacy all-data propto shortcut, including validation.
-    ctx.out.data[0] = 0.0;
+    // Every term drops, but Stan still checks the simplex and the
+    // concentrations.
+    ctx.out.data[0] = stan::math::dirichlet_lpdf<true>(
+        Eigen::Map<const Eigen::VectorXd>(ctx.in[0].data, ctx.in[0].len),
+        Eigen::Map<const Eigen::VectorXd>(ctx.in[1].data, ctx.in[1].len));
     return;
   }
   sink_scope active(s);
@@ -226,7 +240,7 @@ void register_legacy_kernels() {
   log_softmax.derivative_mechanism = "nested_tape";
   register_kernel(OP_LOG_SOFTMAX, log_softmax);
   Kernel softmax{softmax_fwd, softmax_bwd, nullptr};
-  softmax.derivative_mechanism = "nested_tape";
+  softmax.derivative_mechanism = "closed form";
   register_kernel(OP_SOFTMAX, softmax);
   register_kernel(OP_DIRICHLET_LPDF,
                   Kernel{dirichlet_fwd, dirichlet_bwd, sum_in_lens});

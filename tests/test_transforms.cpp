@@ -267,6 +267,73 @@ static void test_out2_is_result() {
   expect_eq("out2 result grad", grad, 1.0);
 }
 
+// A zero-size container with zero-size bounds, offsets or multipliers.
+// Stan applies the transform to no elements: the value is empty and the
+// jacobian is 0. Each zero-size buffer points at a poisoned neighbour (a
+// lower bound above the upper one, a negative multiplier, a NaN offset), so
+// a kernel that reads element 0 anyway fails the check, and each adjoint
+// buffer at a sentinel, so a write to element 0 shows.
+static void run_zero_size_case(const std::string& tag, uint16_t opcode,
+                               int lb_len, int ub_len) {
+  using namespace stanli;
+  double x = 0.4, out = -7.0, jac = -7.0, scratch[2] = {0, 0};
+  double lb[1] = {1.0}, ub[1] = {0.0};
+  if (opcode == OP_CONSTRAIN_OFFSET_MULT) {
+    lb[0] = std::numeric_limits<double>::quiet_NaN();
+    ub[0] = -1.0;
+  }
+  // A scalar bound has to be valid: Stan checks it even for no elements.
+  if (lb_len == 1) lb[0] = opcode == OP_CONSTRAIN_OFFSET_MULT ? 0.5 : -1.0;
+  if (ub_len == 1) ub[0] = 2.0;
+  double x_adj = 0.125, lb_adj = 0.125, ub_adj = 0.125, dout = 5.0;
+  KernelCtx ctx;
+  ctx.n_in =
+      opcode == OP_CONSTRAIN_LOWER || opcode == OP_CONSTRAIN_UPPER ? 2 : 3;
+  ctx.in[0] = {&x, 0};
+  ctx.in[1] = {opcode == OP_CONSTRAIN_UPPER ? ub : lb,
+               opcode == OP_CONSTRAIN_UPPER ? ub_len : lb_len};
+  ctx.in[2] = {ub, ub_len};
+  ctx.out = {&out, 0};
+  ctx.out2 = {&jac, 1};
+  ctx.scratch = scratch;
+  const Kernel& k = *find_kernel(opcode);
+  try {
+    k.forward(ctx);
+  } catch (const std::exception& error) {
+    ++failures;
+    std::printf("FAIL %s forward threw: %s\n", tag.c_str(), error.what());
+    return;
+  }
+  expect_eq(tag + " jacobian", jac, 0.0);
+  expect_eq(tag + " value untouched", out, -7.0);
+  ctx.in_adj[0] = {&x_adj, 0};
+  ctx.in_adj[1] = {&lb_adj, ctx.in[1].len};
+  ctx.in_adj[2] = {&ub_adj, ctx.in[2].len};
+  ctx.out_adj_vec = {&dout, 0};
+  ctx.out2_adj = 1.0;
+  k.backward(ctx);
+  expect_eq(tag + " x adjoint untouched", x_adj, 0.125);
+  // A scalar bound collects the sum over no elements, which is zero.
+  expect_eq(tag + " first bound adjoint", lb_adj, 0.125);
+  expect_eq(tag + " second bound adjoint", ub_adj, 0.125);
+}
+
+static void run_zero_size_cumsum() {
+  using namespace stanli;
+  double x = 0.4, out = -7.0, x_adj = 0.125, dout = 5.0;
+  KernelCtx ctx;
+  ctx.n_in = 1;
+  ctx.in[0] = {&x, 0};
+  ctx.out = {&out, 0};
+  const Kernel& k = *find_kernel(OP_CUMSUM);
+  k.forward(ctx);
+  expect_eq("cumsum empty value untouched", out, -7.0);
+  ctx.in_adj[0] = {&x_adj, 0};
+  ctx.out_adj_vec = {&dout, 0};
+  k.backward(ctx);
+  expect_eq("cumsum empty adjoint untouched", x_adj, 0.125);
+}
+
 int main() {
   const double xs[3] = {0.3, -1.2, 2.0};
   const double x1[1] = {0.7};
@@ -372,6 +439,23 @@ int main() {
     run_mixed_lu_case("lu scalar upper mixed inf" + j, 3, xr, 3, lo_mixed, 1,
                       hi_shared, jacobian, true);
   }
+
+  using stanli::OP_CONSTRAIN_LOWER, stanli::OP_CONSTRAIN_UPPER,
+      stanli::OP_CONSTRAIN_LU, stanli::OP_CONSTRAIN_OFFSET_MULT;
+  run_zero_size_case("lower empty", OP_CONSTRAIN_LOWER, 0, 0);
+  run_zero_size_case("lower empty scalar", OP_CONSTRAIN_LOWER, 1, 0);
+  run_zero_size_case("upper empty", OP_CONSTRAIN_UPPER, 0, 0);
+  run_zero_size_case("upper empty scalar", OP_CONSTRAIN_UPPER, 0, 1);
+  run_zero_size_case("lu empty", OP_CONSTRAIN_LU, 0, 0);
+  run_zero_size_case("lu empty scalar lower", OP_CONSTRAIN_LU, 1, 0);
+  run_zero_size_case("lu empty scalar upper", OP_CONSTRAIN_LU, 0, 1);
+  run_zero_size_case("lu empty scalars", OP_CONSTRAIN_LU, 1, 1);
+  run_zero_size_case("offset multiplier empty", OP_CONSTRAIN_OFFSET_MULT, 0, 0);
+  run_zero_size_case("offset empty scalar multiplier", OP_CONSTRAIN_OFFSET_MULT,
+                     0, 1);
+  run_zero_size_case("multiplier empty scalar offset", OP_CONSTRAIN_OFFSET_MULT,
+                     1, 0);
+  run_zero_size_cumsum();
 
   return finish("test_transforms");
 }

@@ -21,6 +21,8 @@ int main(int argc, char** argv) {
     if (!input) throw std::runtime_error("could not open model MIR");
     const std::string mir((std::istreambuf_iterator<char>(input)),
                           std::istreambuf_iterator<char>());
+    // stdout carries the CSV, so the run's notices go to stderr.
+    stanli_capture_messages(1);
     char err[8192] = {};
     std::unique_ptr<stanli_model, decltype(&stanli_model_free)> model(
         stanli_model_new_with_opts(mir.c_str(), "{}", nullptr, err, sizeof err),
@@ -55,6 +57,10 @@ int main(int argc, char** argv) {
                                    nullptr, nullptr, nullptr, nullptr, nullptr,
                                    err, sizeof err) != 0)
       throw std::runtime_error(err);
+    if (char* notices = stanli_take_messages()) {
+      std::cerr << notices;
+      stanli_string_free(notices);
+    }
 
     // Round-trip every double so the Python comparison remains bitwise,
     // including signed zero; rejected output rows retain their NaNs.

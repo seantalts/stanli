@@ -253,8 +253,10 @@ namespace stanli {
 // The last field is the instantiation tier, two independent bits over
 // what CmdStan gets for free by instantiating only the one combination
 // your model uses. A density instantiates stan-math's template once per
-// activity mask, twice for propto, and again for the elementwise form --
-// 4 * 2^N, about 630 KB of object for a 3-argument density.
+// activity mask and per scalar-or-vector shape of its arguments, for propto
+// and again for the full form, then once per mask for each of those in the
+// elementwise form: about 2 * 4^N + 2 * 2^N copies for N arguments, and about
+// 630 KB of object for a 3-argument density.
 //
 //   bit 1 (2): instantiate the propto family. Term-dropping is keyed on
 //              the argument TYPES, so propto only means anything with the
@@ -270,21 +272,21 @@ namespace stanli {
 //
 // So: 3 is the whole ladder, for the densities models lean on; 2 keeps
 // exact propto lp and pays the collapse only on an explicit
-// `target += foo_lpdf(...)`; 1 is fast but constant-shifted lp; 0 is two
-// instantiations, about 40 KB, and is how the long tail gets to exist at
-// all.
+// `target += foo_lpdf(...)`; 1 is fast but constant-shifted lp; 0 binds every
+// argument as autodiff for the full form only, 2^N shapes plus one
+// elementwise copy, and is how the long tail gets to exist at all.
 #define STANLI_DENSITY_FULL_MASKS 1
 #define STANLI_DENSITY_PROPTO 2
 // The sub-lists are the shard boundaries. Each one is a translation unit
 // (densities_*.cpp), because the instantiations are what make this
-// expensive to compile: the tier-3 distributions below expand to 4 * 2^N
-// copies of a stan-math template each, and one file holding all of them
+// expensive to compile: the tier-3 distributions below expand to about
+// 2 * 4^N copies of a stan-math template each, and one file holding all of them
 // peaked at 7.6 GB of compiler memory. Splitting is the only lever, since
 // the instantiations themselves are the product.
 //
 // Balance them by COST, not by count. A tier-3 four-argument density is
-// worth about eight tier-2 two-argument ones, which is why COMMON_A holds
-// six entries and REST_A holds seven.
+// worth about eight tier-2 two-argument ones, which is why the lists differ
+// in length.
 #define STANLI_SCALAR_DENSITY_LIST_COMMON_A(X) \
   X(OP_NORMAL_LPDF, normal_lpdf, 3, 3)         \
   X(OP_CAUCHY_LPDF, cauchy_lpdf, 3, 3)         \
@@ -345,19 +347,20 @@ namespace stanli {
 // Distribution functions: cdf, lcdf, lccdf. Same shape as an lpdf --
 // real arguments, partials through ops_partials -- with one difference:
 // there is no propto form to instantiate, because a cumulative
-// probability has no terms to drop. So the tier field here only ever
-// carries bit 0.
+// probability has no terms to drop. So these lists have no tier field:
+// every entry gets the one all-active binding, as tier 0 does for a density.
 //
-// Every one of them is at 0, and that is measured rather than assumed.
+// That is measured rather than assumed.
 // These are not cheap functions the way an lpdf is: they pull in
 // inc_beta, grad_reg_inc_gamma and friends, so an instantiation runs
 // about 30 KB. Giving the thirteen common distributions the mask
 // dispatch (2^N instantiations each) cost 4.8 MB of the library on its
-// own -- more than the whole rest of this list. At 0 the 72 functions
-// together cost 2.2 MB. The price is that data arguments bind as
+// own -- more than the whole rest of this list. With one binding the 72
+// functions together cost 2.2 MB. The price is that data arguments bind as
 // recorder scalars and their partials are computed and dropped, which on
 // a function called once per truncation bound is not where the time
-// goes. Raise one to 1 if a profile ever says otherwise.
+// goes. If a profile ever says otherwise, give the cdf forward a mask
+// dispatch for that function.
 //
 // This is what truncation runs on. `y ~ normal(mu, sigma) T[a, b]` is
 // lowered by stanc3 into the density minus log_diff_exp of the two
@@ -374,86 +377,86 @@ namespace stanli {
 // like that would change the value and leave the partials describing the
 // old one. rvar has no arithmetic operators precisely so this fails to
 // compile instead.
-#define STANLI_SCALAR_CDF_LIST_A(X)                              \
-  X(OP_BETA_CDF, beta_cdf, 3, 0)                                 \
-  X(OP_BETA_LCCDF, beta_lccdf, 3, 0)                             \
-  X(OP_BETA_LCDF, beta_lcdf, 3, 0)                               \
-  X(OP_BETA_PROPORTION_LCCDF, beta_proportion_lccdf, 3, 0)       \
-  X(OP_BETA_PROPORTION_LCDF, beta_proportion_lcdf, 3, 0)         \
-  X(OP_CAUCHY_CDF, cauchy_cdf, 3, 0)                             \
-  X(OP_CAUCHY_LCCDF, cauchy_lccdf, 3, 0)                         \
-  X(OP_CAUCHY_LCDF, cauchy_lcdf, 3, 0)                           \
-  X(OP_CHI_SQUARE_CDF, chi_square_cdf, 2, 0)                     \
-  X(OP_CHI_SQUARE_LCCDF, chi_square_lccdf, 2, 0)                 \
-  X(OP_CHI_SQUARE_LCDF, chi_square_lcdf, 2, 0)                   \
-  X(OP_DOUBLE_EXPONENTIAL_CDF, double_exponential_cdf, 3, 0)     \
-  X(OP_DOUBLE_EXPONENTIAL_LCCDF, double_exponential_lccdf, 3, 0) \
-  X(OP_DOUBLE_EXPONENTIAL_LCDF, double_exponential_lcdf, 3, 0)   \
-  X(OP_EXP_MOD_NORMAL_CDF, exp_mod_normal_cdf, 4, 0)             \
-  X(OP_EXP_MOD_NORMAL_LCCDF, exp_mod_normal_lccdf, 4, 0)         \
-  X(OP_EXP_MOD_NORMAL_LCDF, exp_mod_normal_lcdf, 4, 0)           \
-  X(OP_EXPONENTIAL_CDF, exponential_cdf, 2, 0)                   \
-  X(OP_EXPONENTIAL_LCCDF, exponential_lccdf, 2, 0)               \
-  X(OP_EXPONENTIAL_LCDF, exponential_lcdf, 2, 0)                 \
-  X(OP_FRECHET_CDF, frechet_cdf, 3, 0)                           \
-  X(OP_FRECHET_LCCDF, frechet_lccdf, 3, 0)                       \
-  X(OP_FRECHET_LCDF, frechet_lcdf, 3, 0)                         \
-  X(OP_GAMMA_CDF, gamma_cdf, 3, 0)                               \
-  X(OP_GAMMA_LCCDF, gamma_lccdf, 3, 0)                           \
-  X(OP_GAMMA_LCDF, gamma_lcdf, 3, 0)                             \
-  X(OP_GUMBEL_CDF, gumbel_cdf, 3, 0)                             \
-  X(OP_GUMBEL_LCCDF, gumbel_lccdf, 3, 0)                         \
-  X(OP_GUMBEL_LCDF, gumbel_lcdf, 3, 0)                           \
-  X(OP_INV_CHI_SQUARE_CDF, inv_chi_square_cdf, 2, 0)             \
-  X(OP_INV_CHI_SQUARE_LCCDF, inv_chi_square_lccdf, 2, 0)         \
-  X(OP_INV_CHI_SQUARE_LCDF, inv_chi_square_lcdf, 2, 0)           \
-  X(OP_INV_GAMMA_CDF, inv_gamma_cdf, 3, 0)                       \
-  X(OP_INV_GAMMA_LCCDF, inv_gamma_lccdf, 3, 0)                   \
-  X(OP_INV_GAMMA_LCDF, inv_gamma_lcdf, 3, 0)                     \
-  X(OP_LOGISTIC_CDF, logistic_cdf, 3, 0)                         \
-  X(OP_LOGISTIC_LCCDF, logistic_lccdf, 3, 0)                     \
-  X(OP_LOGISTIC_LCDF, logistic_lcdf, 3, 0)
+#define STANLI_SCALAR_CDF_LIST_A(X)                           \
+  X(OP_BETA_CDF, beta_cdf, 3)                                 \
+  X(OP_BETA_LCCDF, beta_lccdf, 3)                             \
+  X(OP_BETA_LCDF, beta_lcdf, 3)                               \
+  X(OP_BETA_PROPORTION_LCCDF, beta_proportion_lccdf, 3)       \
+  X(OP_BETA_PROPORTION_LCDF, beta_proportion_lcdf, 3)         \
+  X(OP_CAUCHY_CDF, cauchy_cdf, 3)                             \
+  X(OP_CAUCHY_LCCDF, cauchy_lccdf, 3)                         \
+  X(OP_CAUCHY_LCDF, cauchy_lcdf, 3)                           \
+  X(OP_CHI_SQUARE_CDF, chi_square_cdf, 2)                     \
+  X(OP_CHI_SQUARE_LCCDF, chi_square_lccdf, 2)                 \
+  X(OP_CHI_SQUARE_LCDF, chi_square_lcdf, 2)                   \
+  X(OP_DOUBLE_EXPONENTIAL_CDF, double_exponential_cdf, 3)     \
+  X(OP_DOUBLE_EXPONENTIAL_LCCDF, double_exponential_lccdf, 3) \
+  X(OP_DOUBLE_EXPONENTIAL_LCDF, double_exponential_lcdf, 3)   \
+  X(OP_EXP_MOD_NORMAL_CDF, exp_mod_normal_cdf, 4)             \
+  X(OP_EXP_MOD_NORMAL_LCCDF, exp_mod_normal_lccdf, 4)         \
+  X(OP_EXP_MOD_NORMAL_LCDF, exp_mod_normal_lcdf, 4)           \
+  X(OP_EXPONENTIAL_CDF, exponential_cdf, 2)                   \
+  X(OP_EXPONENTIAL_LCCDF, exponential_lccdf, 2)               \
+  X(OP_EXPONENTIAL_LCDF, exponential_lcdf, 2)                 \
+  X(OP_FRECHET_CDF, frechet_cdf, 3)                           \
+  X(OP_FRECHET_LCCDF, frechet_lccdf, 3)                       \
+  X(OP_FRECHET_LCDF, frechet_lcdf, 3)                         \
+  X(OP_GAMMA_CDF, gamma_cdf, 3)                               \
+  X(OP_GAMMA_LCCDF, gamma_lccdf, 3)                           \
+  X(OP_GAMMA_LCDF, gamma_lcdf, 3)                             \
+  X(OP_GUMBEL_CDF, gumbel_cdf, 3)                             \
+  X(OP_GUMBEL_LCCDF, gumbel_lccdf, 3)                         \
+  X(OP_GUMBEL_LCDF, gumbel_lcdf, 3)                           \
+  X(OP_INV_CHI_SQUARE_CDF, inv_chi_square_cdf, 2)             \
+  X(OP_INV_CHI_SQUARE_LCCDF, inv_chi_square_lccdf, 2)         \
+  X(OP_INV_CHI_SQUARE_LCDF, inv_chi_square_lcdf, 2)           \
+  X(OP_INV_GAMMA_CDF, inv_gamma_cdf, 3)                       \
+  X(OP_INV_GAMMA_LCCDF, inv_gamma_lccdf, 3)                   \
+  X(OP_INV_GAMMA_LCDF, inv_gamma_lcdf, 3)                     \
+  X(OP_LOGISTIC_CDF, logistic_cdf, 3)                         \
+  X(OP_LOGISTIC_LCCDF, logistic_lccdf, 3)                     \
+  X(OP_LOGISTIC_LCDF, logistic_lcdf, 3)
 
-#define STANLI_SCALAR_CDF_LIST_B(X)                                        \
-  X(OP_LOGLOGISTIC_CDF, loglogistic_cdf, 3, 0)                             \
-  X(OP_LOGNORMAL_CDF, lognormal_cdf, 3, 0)                                 \
-  X(OP_LOGNORMAL_LCCDF, lognormal_lccdf, 3, 0)                             \
-  X(OP_LOGNORMAL_LCDF, lognormal_lcdf, 3, 0)                               \
-  X(OP_NORMAL_CDF, normal_cdf, 3, 0)                                       \
-  X(OP_NORMAL_LCDF, normal_lcdf, 3, 0)                                     \
-  X(OP_PARETO_CDF, pareto_cdf, 3, 0)                                       \
-  X(OP_PARETO_LCCDF, pareto_lccdf, 3, 0)                                   \
-  X(OP_PARETO_LCDF, pareto_lcdf, 3, 0)                                     \
-  X(OP_PARETO_TYPE_2_CDF, pareto_type_2_cdf, 4, 0)                         \
-  X(OP_PARETO_TYPE_2_LCCDF, pareto_type_2_lccdf, 4, 0)                     \
-  X(OP_PARETO_TYPE_2_LCDF, pareto_type_2_lcdf, 4, 0)                       \
-  X(OP_RAYLEIGH_CDF, rayleigh_cdf, 2, 0)                                   \
-  X(OP_RAYLEIGH_LCCDF, rayleigh_lccdf, 2, 0)                               \
-  X(OP_RAYLEIGH_LCDF, rayleigh_lcdf, 2, 0)                                 \
-  X(OP_SCALED_INV_CHI_SQUARE_CDF, scaled_inv_chi_square_cdf, 3, 0)         \
-  X(OP_SCALED_INV_CHI_SQUARE_LCCDF, scaled_inv_chi_square_lccdf, 3, 0)     \
-  X(OP_SCALED_INV_CHI_SQUARE_LCDF, scaled_inv_chi_square_lcdf, 3, 0)       \
-  X(OP_SKEW_NORMAL_CDF, skew_normal_cdf, 4, 0)                             \
-  X(OP_SKEW_NORMAL_LCCDF, skew_normal_lccdf, 4, 0)                         \
-  X(OP_SKEW_NORMAL_LCDF, skew_normal_lcdf, 4, 0)                           \
-  X(OP_STD_NORMAL_CDF, std_normal_cdf, 1, 0)                               \
-  X(OP_SKEW_DOUBLE_EXPONENTIAL_CDF, skew_double_exponential_cdf, 4, 0)     \
-  X(OP_SKEW_DOUBLE_EXPONENTIAL_LCDF, skew_double_exponential_lcdf, 4, 0)   \
-  X(OP_SKEW_DOUBLE_EXPONENTIAL_LCCDF, skew_double_exponential_lccdf, 4, 0) \
-  X(OP_STD_NORMAL_LCDF, std_normal_lcdf, 1, 0)                             \
-  X(OP_STUDENT_T_CDF, student_t_cdf, 4, 0)                                 \
-  X(OP_STUDENT_T_LCCDF, student_t_lccdf, 4, 0)                             \
-  X(OP_STUDENT_T_LCDF, student_t_lcdf, 4, 0)                               \
-  X(OP_UNIFORM_CDF, uniform_cdf, 3, 0)                                     \
-  X(OP_UNIFORM_LCCDF, uniform_lccdf, 3, 0)                                 \
-  X(OP_UNIFORM_LCDF, uniform_lcdf, 3, 0)                                   \
-  X(OP_WEIBULL_CDF, weibull_cdf, 3, 0)                                     \
-  X(OP_WEIBULL_LCCDF, weibull_lccdf, 3, 0)                                 \
-  X(OP_WEIBULL_LCDF, weibull_lcdf, 3, 0)
+#define STANLI_SCALAR_CDF_LIST_B(X)                                     \
+  X(OP_LOGLOGISTIC_CDF, loglogistic_cdf, 3)                             \
+  X(OP_LOGNORMAL_CDF, lognormal_cdf, 3)                                 \
+  X(OP_LOGNORMAL_LCCDF, lognormal_lccdf, 3)                             \
+  X(OP_LOGNORMAL_LCDF, lognormal_lcdf, 3)                               \
+  X(OP_NORMAL_CDF, normal_cdf, 3)                                       \
+  X(OP_NORMAL_LCDF, normal_lcdf, 3)                                     \
+  X(OP_PARETO_CDF, pareto_cdf, 3)                                       \
+  X(OP_PARETO_LCCDF, pareto_lccdf, 3)                                   \
+  X(OP_PARETO_LCDF, pareto_lcdf, 3)                                     \
+  X(OP_PARETO_TYPE_2_CDF, pareto_type_2_cdf, 4)                         \
+  X(OP_PARETO_TYPE_2_LCCDF, pareto_type_2_lccdf, 4)                     \
+  X(OP_PARETO_TYPE_2_LCDF, pareto_type_2_lcdf, 4)                       \
+  X(OP_RAYLEIGH_CDF, rayleigh_cdf, 2)                                   \
+  X(OP_RAYLEIGH_LCCDF, rayleigh_lccdf, 2)                               \
+  X(OP_RAYLEIGH_LCDF, rayleigh_lcdf, 2)                                 \
+  X(OP_SCALED_INV_CHI_SQUARE_CDF, scaled_inv_chi_square_cdf, 3)         \
+  X(OP_SCALED_INV_CHI_SQUARE_LCCDF, scaled_inv_chi_square_lccdf, 3)     \
+  X(OP_SCALED_INV_CHI_SQUARE_LCDF, scaled_inv_chi_square_lcdf, 3)       \
+  X(OP_SKEW_NORMAL_CDF, skew_normal_cdf, 4)                             \
+  X(OP_SKEW_NORMAL_LCCDF, skew_normal_lccdf, 4)                         \
+  X(OP_SKEW_NORMAL_LCDF, skew_normal_lcdf, 4)                           \
+  X(OP_STD_NORMAL_CDF, std_normal_cdf, 1)                               \
+  X(OP_SKEW_DOUBLE_EXPONENTIAL_CDF, skew_double_exponential_cdf, 4)     \
+  X(OP_SKEW_DOUBLE_EXPONENTIAL_LCDF, skew_double_exponential_lcdf, 4)   \
+  X(OP_SKEW_DOUBLE_EXPONENTIAL_LCCDF, skew_double_exponential_lccdf, 4) \
+  X(OP_STD_NORMAL_LCDF, std_normal_lcdf, 1)                             \
+  X(OP_STUDENT_T_CDF, student_t_cdf, 4)                                 \
+  X(OP_STUDENT_T_LCCDF, student_t_lccdf, 4)                             \
+  X(OP_STUDENT_T_LCDF, student_t_lcdf, 4)                               \
+  X(OP_UNIFORM_CDF, uniform_cdf, 3)                                     \
+  X(OP_UNIFORM_LCCDF, uniform_lccdf, 3)                                 \
+  X(OP_UNIFORM_LCDF, uniform_lcdf, 3)                                   \
+  X(OP_WEIBULL_CDF, weibull_cdf, 3)                                     \
+  X(OP_WEIBULL_LCCDF, weibull_lccdf, 3)                                 \
+  X(OP_WEIBULL_LCDF, weibull_lcdf, 3)
 
-#define STANLI_REFLECTED_CDF_LIST(X)     \
-  X(OP_NORMAL_LCCDF, normal_lccdf, 3, 0) \
-  X(OP_STD_NORMAL_LCCDF, std_normal_lccdf, 1, 0)
+#define STANLI_REFLECTED_CDF_LIST(X)  \
+  X(OP_NORMAL_LCCDF, normal_lccdf, 3) \
+  X(OP_STD_NORMAL_LCCDF, std_normal_lccdf, 1)
 
 #define STANLI_SCALAR_CDF_LIST(X) \
   STANLI_SCALAR_CDF_LIST_A(X)     \
@@ -468,23 +471,23 @@ namespace stanli {
 // Not every discrete cdf fits: discrete_range is integers all the way
 // down, so those three keep waiting for a layout rather than a list line.
 // The binomials carry a second int group and have their own list below.
-#define STANLI_INT_CDF_LIST(X)                                 \
-  X(OP_BERNOULLI_CDF, bernoulli_cdf, 1, 0)                     \
-  X(OP_BERNOULLI_LCCDF, bernoulli_lccdf, 1, 0)                 \
-  X(OP_BERNOULLI_LCDF, bernoulli_lcdf, 1, 0)                   \
-  X(OP_BETA_NEG_BINOMIAL_CDF, beta_neg_binomial_cdf, 3, 0)     \
-  X(OP_BETA_NEG_BINOMIAL_LCCDF, beta_neg_binomial_lccdf, 3, 0) \
-  X(OP_BETA_NEG_BINOMIAL_LCDF, beta_neg_binomial_lcdf, 3, 0)   \
-  X(OP_NEG_BINOMIAL_CDF, neg_binomial_cdf, 2, 0)               \
-  X(OP_NEG_BINOMIAL_LCCDF, neg_binomial_lccdf, 2, 0)           \
-  X(OP_NEG_BINOMIAL_LCDF, neg_binomial_lcdf, 2, 0)             \
-  X(OP_NEG_BINOMIAL_2_CDF, neg_binomial_2_cdf, 2, 0)           \
-  X(OP_POISSON_CDF, poisson_cdf, 1, 0)                         \
-  X(OP_POISSON_LCCDF, poisson_lccdf, 1, 0)                     \
-  X(OP_POISSON_LCDF, poisson_lcdf, 1, 0)                       \
-  X(OP_YULE_SIMON_CDF, yule_simon_cdf, 1, 0)                   \
-  X(OP_YULE_SIMON_LCCDF, yule_simon_lccdf, 1, 0)               \
-  X(OP_YULE_SIMON_LCDF, yule_simon_lcdf, 1, 0)
+#define STANLI_INT_CDF_LIST(X)                              \
+  X(OP_BERNOULLI_CDF, bernoulli_cdf, 1)                     \
+  X(OP_BERNOULLI_LCCDF, bernoulli_lccdf, 1)                 \
+  X(OP_BERNOULLI_LCDF, bernoulli_lcdf, 1)                   \
+  X(OP_BETA_NEG_BINOMIAL_CDF, beta_neg_binomial_cdf, 3)     \
+  X(OP_BETA_NEG_BINOMIAL_LCCDF, beta_neg_binomial_lccdf, 3) \
+  X(OP_BETA_NEG_BINOMIAL_LCDF, beta_neg_binomial_lcdf, 3)   \
+  X(OP_NEG_BINOMIAL_CDF, neg_binomial_cdf, 2)               \
+  X(OP_NEG_BINOMIAL_LCCDF, neg_binomial_lccdf, 2)           \
+  X(OP_NEG_BINOMIAL_LCDF, neg_binomial_lcdf, 2)             \
+  X(OP_NEG_BINOMIAL_2_CDF, neg_binomial_2_cdf, 2)           \
+  X(OP_POISSON_CDF, poisson_cdf, 1)                         \
+  X(OP_POISSON_LCCDF, poisson_lccdf, 1)                     \
+  X(OP_POISSON_LCDF, poisson_lcdf, 1)                       \
+  X(OP_YULE_SIMON_CDF, yule_simon_cdf, 1)                   \
+  X(OP_YULE_SIMON_LCCDF, yule_simon_lccdf, 1)               \
+  X(OP_YULE_SIMON_LCDF, yule_simon_lcdf, 1)
 
 // The binomials: an outcome group AND a trials group, so idata is the
 // IntGroups (density_layout.hpp) their lpmfs already write rather than raw
@@ -495,13 +498,13 @@ namespace stanli {
 // scalar group is flagged as one and stan-math broadcasts it, which is what
 // keeps `binomial_lcdf(n | N, theta)` with a bare int `n` from arriving as
 // a size-1 container.
-#define STANLI_TWO_INT_CDF_LIST(X)                     \
-  X(OP_BETA_BINOMIAL_CDF, beta_binomial_cdf, 2, 0)     \
-  X(OP_BETA_BINOMIAL_LCCDF, beta_binomial_lccdf, 2, 0) \
-  X(OP_BETA_BINOMIAL_LCDF, beta_binomial_lcdf, 2, 0)   \
-  X(OP_BINOMIAL_CDF, binomial_cdf, 1, 0)               \
-  X(OP_BINOMIAL_LCCDF, binomial_lccdf, 1, 0)           \
-  X(OP_BINOMIAL_LCDF, binomial_lcdf, 1, 0)
+#define STANLI_TWO_INT_CDF_LIST(X)                  \
+  X(OP_BETA_BINOMIAL_CDF, beta_binomial_cdf, 2)     \
+  X(OP_BETA_BINOMIAL_LCCDF, beta_binomial_lccdf, 2) \
+  X(OP_BETA_BINOMIAL_LCDF, beta_binomial_lcdf, 2)   \
+  X(OP_BINOMIAL_CDF, binomial_cdf, 1)               \
+  X(OP_BINOMIAL_LCCDF, binomial_lccdf, 1)           \
+  X(OP_BINOMIAL_LCDF, binomial_lcdf, 1)
 
 // The distribution functions that cannot go through the recorder at all,
 // whatever list they are put on. These build their result with arithmetic
@@ -519,14 +522,14 @@ namespace stanli {
 // its scalar type and costs a tape per gradient call. Field 3 is the
 // count of REAL arguments; the int list carries one integer group on top
 // of that, exactly as STANLI_INT_CDF_LIST does.
-#define STANLI_TAIL_CDF_LIST(X)                \
-  X(OP_VON_MISES_CDF, von_mises_cdf, 3, 0)     \
-  X(OP_VON_MISES_LCCDF, von_mises_lccdf, 3, 0) \
-  X(OP_VON_MISES_LCDF, von_mises_lcdf, 3, 0)
+#define STANLI_TAIL_CDF_LIST(X)             \
+  X(OP_VON_MISES_CDF, von_mises_cdf, 3)     \
+  X(OP_VON_MISES_LCCDF, von_mises_lccdf, 3) \
+  X(OP_VON_MISES_LCDF, von_mises_lcdf, 3)
 
-#define STANLI_TAIL_INT_CDF_LIST(X)                      \
-  X(OP_NEG_BINOMIAL_2_LCCDF, neg_binomial_2_lccdf, 2, 0) \
-  X(OP_NEG_BINOMIAL_2_LCDF, neg_binomial_2_lcdf, 2, 0)
+#define STANLI_TAIL_INT_CDF_LIST(X)                   \
+  X(OP_NEG_BINOMIAL_2_LCCDF, neg_binomial_2_lccdf, 2) \
+  X(OP_NEG_BINOMIAL_2_LCDF, neg_binomial_2_lcdf, 2)
 
 // A unary may either always chain, chain only away from zero (abs), or be
 // disconnected.  Disconnected is not the same as multiplying by a zero
@@ -619,12 +622,13 @@ inline void div_partials(double u, double b, double out, double* da,
 // seed formulas can round differently. The final field owns topology.
 //
 // These are cheap in a way densities are not. A density instantiates
-// stan-math's template once per activity mask, twice for propto and again
-// for the elementwise form -- 4 * 2^N per distribution, about 630 KB of
-// object each. An entry here costs about 5 KB, because the pullback delta is
-// written out rather than obtained by instantiating an autodiff template.
-// fn_sweep.py checks every one against CmdStan, which is what makes
-// hand-written derivatives safe to write at this rate.
+// stan-math's template once per activity mask and argument shape, for propto
+// and for the full form, and again for the elementwise form: about
+// 2 * 4^N + 2 * 2^N per distribution, about 630 KB of object each. An entry
+// here costs about 5 KB, because the pullback delta is written out rather than
+// obtained by instantiating an autodiff template. fn_sweep.py checks every one
+// against CmdStan, which is what makes hand-written derivatives safe to write
+// at this rate.
 #define STANLI_SCALAR_UNARY_LIST(X)                                            \
   X(OP_LGAMMA, lgamma, stan::math::lgamma(x), seed* stan::math::digamma(x),    \
     UnaryTopology::Chained)                                                    \
@@ -776,8 +780,9 @@ inline void div_partials(double u, double b, double out, double* da,
 
 // Every opcode list, in enum order, named once. The enum and the name
 // table both expand this, so a list added to one cannot be forgotten in
-// the other. PLAIN takes (name), DENSITY takes (code, fn, n, m), UNARY
-// takes (code, fn, value, delta, topology).
+// the other. PLAIN takes (name), DENSITY takes (code, fn, n) and, for a
+// density but not a distribution function, the tier, UNARY takes (code, fn,
+// value, delta, topology).
 #define STANLI_ALL_OPCODES(PLAIN, DENSITY, UNARY) \
   STANLI_OPCODE_LIST(PLAIN)                       \
   STANLI_SCALAR_DENSITY_LIST(DENSITY)             \
@@ -792,7 +797,7 @@ inline void div_partials(double u, double b, double out, double* da,
 enum Opcode : uint16_t {
   OP_NONE_ = 0,
 #define STANLI_OPCODE_ENUM(name) name,
-#define STANLI_DENSITY_ENUM(code, fn, n, m) code,
+#define STANLI_DENSITY_ENUM(code, fn, ...) code,
 #define STANLI_UNARY_ENUM(code, fn, value, delta, topology) code,
   STANLI_ALL_OPCODES(STANLI_OPCODE_ENUM, STANLI_DENSITY_ENUM, STANLI_UNARY_ENUM)
 #undef STANLI_OPCODE_ENUM
@@ -989,6 +994,11 @@ constexpr bool is_effectful_op(uint16_t opcode) {
 // tooling only; never on a hot path.
 const char* opcode_name(uint16_t opcode);
 
+// OP_VARIANCE's variant: the argument is a std::vector<var> in CmdStan (an
+// autodiff array), for which Stan Math names the empty argument "v" where
+// its Eigen overloads say "m".
+inline constexpr uint8_t kVarianceOfVarArray = 1;
+
 // OP_GP_COV's variant selects the covariance function.
 enum GpCov : uint8_t {
   kGpExpQuad,
@@ -1007,17 +1017,46 @@ inline std::optional<GpCov> gp_cov_family(std::string_view name) {
   return std::nullopt;
 }
 
-// OP_GP_COV's inputs are the locations, then this many scalar
-// hyperparameters (sigma, the length scale and, for the periodic kernel, the
-// period), then an optional scalar that adds to every diagonal entry.
-inline int gp_cov_hyperparameters(uint8_t variant) {
-  return variant == kGpPeriodic ? 3 : 2;
+// OP_GP_COV's variant byte: the covariance function, whether the length
+// scale is an array with one entry per input dimension (Stan Math's
+// std::vector overloads, which divide each dimension by its own scale), and
+// whether the call is the cross-covariance form with a second location
+// array. Only the exp-quad, Matern and exponential functions have the
+// per-dimension form.
+struct GpCovMode {
+  GpCov family = kGpExpQuad;
+  bool per_dimension = false;
+  bool cross = false;
+
+  static constexpr uint8_t kPerDimensionBit = 1u << 7;
+  static constexpr uint8_t kCrossBit = 1u << 6;
+
+  constexpr uint8_t byte() const {
+    return (uint8_t)(family | (per_dimension ? kPerDimensionBit : 0u) |
+                     (cross ? kCrossBit : 0u));
+  }
+  static constexpr GpCovMode of(uint8_t byte) {
+    return {(GpCov)(byte & ~(kPerDimensionBit | kCrossBit)),
+            (byte & kPerDimensionBit) != 0, (byte & kCrossBit) != 0};
+  }
+};
+
+// OP_GP_COV's inputs are the locations (one array, or two for the cross
+// form), then this many hyperparameters (sigma, the length scale and, for
+// the periodic kernel, the period), then, for the square form only, an
+// optional scalar that adds to every diagonal entry. Each hyperparameter is
+// one input; a per-dimension length scale is one input of D values.
+inline int gp_cov_hyperparameters(GpCov family) {
+  return family == kGpPeriodic ? 3 : 2;
 }
-inline int gp_cov_jitter_input(uint8_t variant) {
-  return 1 + gp_cov_hyperparameters(variant);
+inline int gp_cov_first_hyperparameter(GpCovMode mode) {
+  return mode.cross ? 2 : 1;
 }
-inline bool gp_cov_has_jitter(uint8_t variant, int n_in) {
-  return n_in > gp_cov_jitter_input(variant);
+inline int gp_cov_jitter_input(GpCov family) {
+  return 1 + gp_cov_hyperparameters(family);
+}
+inline bool gp_cov_has_jitter(GpCovMode mode, int n_in) {
+  return !mode.cross && n_in > gp_cov_jitter_input(mode.family);
 }
 
 struct Kernel {
@@ -1060,8 +1099,10 @@ inline int64_t sum_in_lens(const Op& op, const Slot* slots) {
   return t;
 }
 
+// The table entry itself. Tests assign through it to swap a kernel.
 Kernel& kernel(uint16_t opcode);
-// Called from ensure_registered() in executor.cpp.
+// Called from ensure_registered() in executor.cpp. Throws std::logic_error
+// if the opcode already has a kernel.
 void register_kernel(uint16_t opcode, Kernel k);
 
 // The registered kernel for an opcode, or null. Registers the built-in

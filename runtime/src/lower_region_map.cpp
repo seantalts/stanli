@@ -38,7 +38,16 @@ class ParameterControl {
   const Defs& defs_;
   std::set<std::string> visited_;
 
+  // An extent (rows, size, ...) of a parameter is fixed by the data, so a
+  // loop bound or branch that reads only extents is data control.
+  static bool shape_query(const mir::Expr& e) {
+    return e.kind == mir::Expr::FunApp && e.args.size() == 1 &&
+           (e.name == "FnLength" ||
+            shaped_builtin_spec(e.name, 1, BuiltinShapePolicy::ShapeQuery));
+  }
+
   static bool dependent(const mir::Expr& e, const Env* env) {
+    if (shape_query(e)) return false;
     switch (e.kind) {
       case mir::Expr::Var:
         return env ? env->count(e.name) != 0 : !e.data_only;
@@ -291,7 +300,7 @@ bool Lowering::lower_region_map(const mir::Stmt& s, long lo, long hi) {
     return false;
   };
   if (structured_outer_depth != 1) return false;
-  if (hi - lo + 1 < 32) return refuse("trip count below 32");
+  if (hi - lo + 1 < 2) return refuse("fewer than two iterations");
   if (!ParameterControl(fun_defs)(s))
     return refuse("no parameter-dependent control");
   if (target_scale != 1.0) return refuse("enclosing target scaling");

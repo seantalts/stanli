@@ -286,8 +286,7 @@ std::vector<std::vector<double>> run_nuts_with(Executor& ex,
           "the continued step size must be positive and finite");
     q = Eigen::Map<const Eigen::VectorXd>(cfg.resume->q.data(), n);
   } else {
-    initialize_point(ex, rng, cfg.init_radius, cfg.init, q.data(),
-                     FixedInitPolicy::Validate);
+    initialize_point(ex, rng, cfg.init_radius, cfg.init, q.data());
   }
   sampler.seed(q);
 
@@ -445,8 +444,7 @@ std::vector<double> cmdstan_init_point(Executor& ex, uint32_t seed,
                                        const double* init) {
   stan::rng_t rng = stan::services::util::create_rng(seed, chain_id);
   std::vector<double> q((size_t)ex.n_params());
-  initialize_point(ex, rng, init_radius, init, q.data(),
-                   FixedInitPolicy::Validate);
+  initialize_point(ex, rng, init_radius, init, q.data());
   return q;
 }
 

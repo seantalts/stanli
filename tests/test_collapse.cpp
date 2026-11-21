@@ -1677,6 +1677,7 @@ static void test_left_alone() {
                 c.report.terms.size() == 1 && c.report.terms[0].rows == 4 &&
                     refused(c.report.terms[0], "too few repeated rows"));
   }
+  SKIP_WITHOUT_DEBUG_SWITCHES();
   {
     test_setenv("STANLI_NO_COLLAPSE", "1");
     const Model m = counts_by_group(kWide);

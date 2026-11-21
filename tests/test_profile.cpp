@@ -53,8 +53,7 @@ static void replacement_add_backward(stanli::KernelCtx& ctx) {
 static void test_bound_kernel_survives_post_bind_override() {
   using namespace stanli;
   const Kernel saved = *find_kernel(OP_ADD_N);
-  register_kernel(OP_ADD_N,
-                  Kernel{bound_add_forward, bound_add_backward, nullptr});
+  kernel(OP_ADD_N) = Kernel{bound_add_forward, bound_add_backward, nullptr};
 
   Graph g;
   const int a = g.add_slot(1, true);
@@ -68,8 +67,8 @@ static void test_bound_kernel_survives_post_bind_override() {
 
   // The executor has already bound the original pair. A later registry write
   // must not make profiling run a different forward or reverse function.
-  register_kernel(OP_ADD_N, Kernel{replacement_add_forward,
-                                   replacement_add_backward, nullptr});
+  kernel(OP_ADD_N) =
+      Kernel{replacement_add_forward, replacement_add_backward, nullptr};
   double grad[2];
   const double unprofiled = ex.gradient(grad);
   expect_true("bound forward before profile", unprofiled == 2.2);
@@ -88,7 +87,7 @@ static void test_bound_kernel_survives_post_bind_override() {
   expect_true("bound override is profiled",
               calls_for(ex.profile_report(), "OP_ADD_N") == 100);
 
-  register_kernel(OP_ADD_N, saved);
+  kernel(OP_ADD_N) = saved;
 }
 
 int main() {

@@ -908,6 +908,34 @@ static void test_multi_normal_rng_kernel_contract() {
     }
   }
 }
+// Stan Math reads past the end of an empty concentration vector and of a
+// log_omegas matrix with no columns. Both draws must reject without touching
+// the stream.
+static void test_empty_rng_arguments_reject() {
+  using namespace stanli;
+  const auto expect_rejection = [](const char* label, const char* want,
+                                   auto&& draw) {
+    WaRng got(611), untouched(611);
+    const RngException error = capture_rng_exception([&] { draw(got); });
+    if (error.kind != 1 || error.message.find(want) == std::string::npos ||
+        got.gen()() != untouched.gen()()) {
+      ++failures;
+      std::printf("FAIL %s: kind %d message '%s'\n", label, error.kind,
+                  error.message.c_str());
+    }
+  };
+  expect_rejection("empty dirichlet_rng", "dirichlet_rng", [](WaRng& rng) {
+    dirichlet_rng_draw(nullptr, 0, nullptr, 0, rng);
+  });
+  const LibraryRngSpec* hmm = library_rng_spec("hmm_latent_rng");
+  const double gamma[] = {0.9, 0.2, 0.1, 0.8};
+  const double rho[] = {0.5, 0.5};
+  const RngArgument args[] = {{nullptr, 0, false, 2, 0},
+                              {gamma, 4, false, 2, 2},
+                              {rho, 2, false, 2, 1}};
+  expect_rejection("hmm_latent_rng without columns", "hmm_latent_rng",
+                   [&](WaRng& rng) { library_rng_draw(*hmm, args, 3, rng); });
+}
 }  // namespace
 
 int main() {
@@ -929,6 +957,7 @@ int main() {
     test_categorical_rng_helper_contract();
     test_multi_normal_rng_helper_contract();
     test_multi_normal_rng_kernel_contract();
+    test_empty_rng_arguments_reject();
   } catch (const std::exception& e) {
     std::fprintf(stderr, "FAIL %s\n", e.what());
     return 1;

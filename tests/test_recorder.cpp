@@ -7,6 +7,7 @@
 
 #include <stan/math.hpp>
 #include <cmath>
+#include <stdexcept>
 #include <limits>
 #include <cstdio>
 #include <vector>
@@ -156,7 +157,9 @@ int main() {
   expect_eq("null-buf d/dmu", gmu_null, vmu.adj());
   expect_eq("null-buf d/dsigma", gsig_null, vsig.adj());
 
-  // Recorder path 4: len[0] mismatched with the operand size.
+  // Recorder path 4: len[0] mismatched with the operand size. Skipping the
+  // edge would leave the previous gradient's partials in the slot, so the
+  // recorder throws and writes nothing past the slot.
   double gy_mismatch[5] = {111, 222, 333, 999, 888};
   double gmu_mm = 0, gsig_mm = 0;
   {
@@ -170,12 +173,15 @@ int main() {
     stanli::active_sink() = &s;
     Eigen::Matrix<rvar, -1, 1> ry4(N);
     for (int i = 0; i < N; ++i) ry4(i) = rvar(ys[i]);
-    stan::math::normal_lpdf<false>(ry4, rvar(0.25), rvar(1.4));
+    bool refused = false;
+    try {
+      stan::math::normal_lpdf<false>(ry4, rvar(0.25), rvar(1.4));
+    } catch (const std::logic_error&) {
+      refused = true;
+    }
     stanli::active_sink() = nullptr;
-    expect_eq("mismatch value", s.value, vlp.val());
+    expect_eq("mismatch refused", refused ? 1.0 : 0.0, 1.0);
   }
-  expect_eq("mismatch d/dmu", gmu_mm, vmu.adj());
-  expect_eq("mismatch d/dsigma", gsig_mm, vsig.adj());
   expect_eq("mismatch canary[3]", gy_mismatch[3], 999.0);
   expect_eq("mismatch canary[4]", gy_mismatch[4], 888.0);
 

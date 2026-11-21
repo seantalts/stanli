@@ -70,6 +70,12 @@ paths and hashes in raw records unchanged.
 | [Model from BeeGUTS](../../tests/beeguts/README.md) | Fixture scope, provenance or test workflow. |
 | [Models from hdbayes](../../tests/hdbayes/README.md) | Fixture scope, provenance or test workflow. |
 | [Model from EcoEnsemble](../../tests/ecoensemble/README.md) | Fixture scope, provenance or test workflow. |
+| [Model from bayesdfa](../../tests/bayesdfa/README.md) | Fixture scope, provenance or test workflow. |
+| [Models from walker](../../tests/walker/README.md) | Fixture scope, provenance or test workflow. |
+| [Models from bmgarch](../../tests/bmgarch/README.md) | Fixture scope, provenance or test workflow. |
+| [Models from hBayesDM](../../tests/hbayesdm/README.md) | Fixture scope, provenance or test workflow. |
+| [Models from stan-dev/example-models](../../tests/examplemodels/README.md) | Fixture scope, provenance or test workflow. |
+| [Programs from the Stan User's Guide](../../tests/stanguide/README.md) | Fixture scope, provenance or test workflow. |
 | [Compiler producer fixtures](../../tests/compiler/README.md) | Fixture scope, provenance or test workflow. |
 | [Stan teaching-model corpus for Stanli](../../tests/educational/IMPORT_README.md) | Fixture scope, provenance or test workflow. |
 | [Models from Aalto Stan lessons](../../tests/educational/README.md) | Fixture scope, provenance or test workflow. |
@@ -80,6 +86,8 @@ paths and hashes in raw records unchanged.
 | [Models from rethinking](../../tests/rethinking/README.md) | Fixture scope, provenance or test workflow. |
 | [stanc3 test models against CmdStan](../../tests/stanc3_good/README.md) | Fixture scope, provenance or test workflow. |
 | [Lowering regressions](../../tests/regressions/README.md) | Fixture scope, provenance or test workflow. |
+| [2026-11-20 · Build options that no CI job builds](../../notes/validation/audit-2026-11-20-unbuilt-options.md) | AVX2 kernels, `STANLI_ISA`, UBSan and native no-thread builds: definition, users and what to do. |
+| [2026-11-20 · Where stanli is less accurate than CmdStan](../../notes/validation/audit-2026-11-20-accuracy-vs-cmdstan.md) | The 27 ledger entries farther from the 80-digit value than CmdStan: 25 from the summation order of merged loops, the fixes proposed, and the scoring tools. |
 
 ## Execution research
 
@@ -186,12 +194,15 @@ paths and hashes in raw records unchanged.
 | [2026-09-20 · Remaining ctsem architecture results](../../notes/performance/2026-09-20-ctsem-remaining-architecture.md) | Dated results, proof limits and linked evidence. |
 | [2026-09-20 · ctsem solve-kernel results after PR392](../../notes/performance/2026-09-20-ctsem-solve-kernels.md) | Dated results, proof limits and linked evidence. |
 | [2026-10-25 · ctsem data-loop memo results](../../notes/performance/2026-10-25-ctsem-data-loop-memo.md) | Dated results, proof limits and linked evidence. |
+| [2026-11-20 · Data-loop memo and frame instances: which models reach them](../../notes/performance/audit-2026-11-20-loop-memo-instances.md) | Corpus reach and instruction counts for both mechanisms; the prepared timing experiment that would decide whether they stay. |
 
 ## Compiler and preparation
 
 | Document | Contents / use |
 | --- | --- |
 | [2026-10-15 · General runtime fixes](../../notes/performance/2026-10-15-general-runtime-fixes.md) | Baseline-ISA registry storage and ADD_N binding; rejected constant sharing and benchmark evidence. |
+| [2026-11-20 · Audit questions that need a decision](../../notes/performance/audit-2026-11-20-open-questions.md) | Lane cost-model constant whose comment and arithmetic disagree; two readings, no decision yet. |
+| [2026-11-20 · Lowering a large explicit loop](../../notes/performance/audit-2026-11-20-explicit-loop-lowering.md) | Counts and profile shares for an unrolled loop over rows; what is left for a design decision. |
 | [Stanli portable MIR v3](../../compiler/portable_ir/SCHEMA.md) | Portable MIR producer/consumer format and compatibility contract. |
 | [2026-08-06 · Elementwise-lp densities and batched mixture kernels](archive/plans/2026-08-06-elementwise-lp.md) | Historical plan or digest; read final disposition first. |
 | [2026-08-06 · Perf Phase 2 Plan](archive/plans/2026-08-06-perf-phase2.md) | Historical plan or digest; read final disposition first. |
@@ -241,6 +252,7 @@ paths and hashes in raw records unchanged.
 | [2026-09-21 · Issue 374: retained evidence and next measurement](../../notes/performance/2026-09-21-issue-374-triage.md) | Dated results, proof limits and linked evidence. |
 | [2026-09-22 · Full-range slice regression](../../notes/performance/2026-09-22-identity-slice.md) | Dated results, proof limits and linked evidence. |
 | [2026-09-22 · Intel macOS oracle for kronecker_gp](../../notes/performance/2026-09-22-intel-oracle.md) | Dated results, proof limits and linked evidence. |
+| [2026-11-20 · Why reroll and partition decline lanes](../../notes/performance/2026-11-20-lane-declines.md) | Dated results, proof limits and linked evidence. |
 
 ## Parallel reductions
 

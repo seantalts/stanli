@@ -116,23 +116,25 @@ bool Lowering::while_sizes_from_loop_state(const mir::Stmt& s) {
 // where the guard stopped being decidable, leaving the rest of the loop to
 // the caller.
 std::optional<Lowering::Flow> Lowering::unroll_while(const mir::Stmt& s) {
-  for (long trip = 0; trip < kWhileUnrollLimit; ++trip) {
-    bool open = false;
-    if (auto evaluated = try_eval_pure(s.cond)) {
-      open = evaluated->r.at(0) != 0.0;
-    } else {
-      try {
-        open = eval_int(s.cond) != 0;
-      } catch (const CompileError&) {
-        return std::nullopt;
+  return unroll_or_region(s, [&]() -> std::optional<Flow> {
+    for (long trip = 0; trip < kWhileUnrollLimit; ++trip) {
+      bool open = false;
+      if (auto evaluated = try_eval_pure(s.cond)) {
+        open = evaluated->r.at(0) != 0.0;
+      } else {
+        try {
+          open = eval_int(s.cond) != 0;
+        } catch (const CompileError&) {
+          return std::nullopt;
+        }
       }
+      if (!open) return Flow::Next;
+      const Flow flow = lower_stmts(s.body);
+      if (flow == Flow::Break) return Flow::Next;
+      if (flow == Flow::Return) return flow;
     }
-    if (!open) return Flow::Next;
-    const Flow flow = lower_stmts(s.body);
-    if (flow == Flow::Break) return Flow::Next;
-    if (flow == Flow::Return) return flow;
-  }
-  return std::nullopt;
+    return std::nullopt;
+  });
 }
 // Both control scans run before the block is lowered, but loop bounds and
 // conditions later in the block can depend on scalar-int locals established
@@ -354,6 +356,29 @@ static bool has_loop_control(const mir::Stmt& s) {
   if (s.kind == mir::Stmt::For || s.kind == mir::Stmt::While) return false;
   return std::any_of(s.body.begin(), s.body.end(), has_loop_control);
 }
+// The scan before an unroll can find a branch decided where lowering finds
+// it undecided, for example when a local that the scan evaluates lives in
+// the graph. Lowering's own answer is the one that counts.
+std::optional<Lowering::Flow> Lowering::unroll_or_region(
+    const mir::Stmt& loop, const std::function<std::optional<Flow>()>& unroll) {
+  if (!std::any_of(loop.body.begin(), loop.body.end(), has_loop_control))
+    return unroll();
+  std::set<std::string> mentioned, written;
+  mir::collect_names(loop, &mentioned);
+  if (loop.kind == mir::Stmt::For) mentioned.insert(loop.loopvar);
+  std::vector<std::string> assigned;
+  assigned_names(loop, &assigned);
+  collect_loop_locals(loop, &written);
+  written.insert(assigned.begin(), assigned.end());
+  WaSnapshot before = wa_snapshot(mentioned, &written);
+  try {
+    return unroll();
+  } catch (const LoopControlInBranch&) {
+  }
+  wa_restore(before);
+  lower_runtime_ifelse(loop);
+  return Flow::Next;
+}
 // A Break/Continue selected by a runtime condition cannot be lowered as a
 // standalone conditional island: its jump target belongs to the enclosing
 // loop. Promote that whole loop to the necessity island instead. Nested
@@ -446,24 +471,6 @@ void Lowering::forget_runtime_ints(const mir::Stmt& s) {
   if (!writes_int || decided_statically(s)) return;
   visit_assigned(s, [&](const std::string& n) { scan_erase_int(n); });
 }
-// Remove a return at the lexical end of a statement arm, preserving every
-// statement that precedes it.  This is the structured form used by UDFs
-// such as ctsem's mcalc: each arm returns, but one arm first updates a local
-// matrix.  The updates can lower as an ordinary statement island and the
-// two returned expressions can then join through a ternary value island.
-bool Lowering::peel_terminal_return(mir::Stmt* s, mir::Expr* value) {
-  if (s->kind == mir::Stmt::Return) {
-    if (!s->has_init) return false;
-    *value = s->rhs;
-    s->kind = mir::Stmt::Skip;
-    s->body.clear();
-    return true;
-  }
-  if ((s->kind == mir::Stmt::Block || s->kind == mir::Stmt::SList) &&
-      !s->body.empty())
-    return peel_terminal_return(&s->body.back(), value);
-  return false;
-}
 void Lowering::configure_island_compiler(ProgramCompiler& c,
                                          IslandProg& prog_ref,
                                          IslandRegion& region,
@@ -553,8 +560,36 @@ void Lowering::configure_island_compiler(ProgramCompiler& c,
       prog->ins.push_back(IslandProg::LiveIn{r->reg, (int)len});
       reg->in_slots.push_back(slot);
     }
+    if (const auto dl = decls.find(name);
+        dl != decls.end() && dl->second.sized_by_region)
+      c.region_sized.insert(name);
     return true;
   };
+  c.bind_empty_status = [this, &c, prog, reg](const std::string& name,
+                                              int* status) {
+    const auto found = empty_status_slots.find(name);
+    if (found == empty_status_slots.end()) return false;
+    *status = c.alloc(1);
+    prog->ins.push_back(IslandProg::LiveIn{*status, 1});
+    reg->in_slots.push_back(found->second);
+    return true;
+  };
+  // A container that comes into the region empty, or with the empty status
+  // of an earlier region, is bound before the region's first branch, so
+  // that every path through the region knows it.
+  for (const std::string& name : names) {
+    const auto bound = scope.find(name);
+    if (bound == scope.end() || bound->second.slot < 0 || c.reals.count(name) ||
+        c.ints.count(name) ||
+        (!empty_status_slots.count(name) &&
+         g.slots[bound->second.slot].len != 0))
+      continue;
+    Range r;
+    if (c.bind_outer(name, &r)) {
+      c.reals[name] = r;
+      c.extern_bound.insert(name);
+    }
+  }
 }
 void Lowering::finalize_island_program(IslandProg& prog, bool native,
                                        bool keep_every_clear,
@@ -712,6 +747,11 @@ void Lowering::lower_island(const mir::Stmt* s, const mir::Expr* e,
         reg->has_target = true;
         prog->out_regs.push_back(target_reg);
       }
+      for (size_t k = 0; k < reg->out_names.size(); ++k) {
+        if (reg->out_is_int[k] || !c.may_be_empty(reg->out_names[k])) continue;
+        reg->out_empty_status.push_back(k);
+        prog->out_regs.push_back(c.empty_status_register(reg->out_names[k]));
+      }
       // An integer the region folded is one this lowering holds a copy
       // of, and the copy is a compile-time constant every later size,
       // index and read would keep using. The region compiler folds only
@@ -842,6 +882,8 @@ void Lowering::emit_island(const std::shared_ptr<IslandProg>& prog,
 // `if (<not known while building the graph>) ... else ...`
 void Lowering::lower_runtime_ifelse(const mir::Stmt& s) {
   if (structured_unroll_depth > 0) throw SpecializationRefused{};
+  if (s.kind == mir::Stmt::IfElse && has_loop_control(s))
+    throw LoopControlInBranch{};
   IslandRegion reg;
   std::shared_ptr<IslandProg> prog;
   Range ignored;
@@ -852,13 +894,35 @@ void Lowering::lower_runtime_ifelse(const mir::Stmt& s) {
   std::vector<int> out_lens;
   for (const Range& v : reg.out_views) out_lens.push_back(v.len);
   if (reg.has_target) out_lens.push_back(1);
+  out_lens.insert(out_lens.end(), reg.out_empty_status.size(), 1);
+  const auto region_view = [&](size_t k) {
+    const Range& out_view = reg.out_views[k];
+    if (out_view.kind == ViewKind::Array)
+      return array_view(out_view.dims, out_view.leaf);
+    SlotInfo si;
+    si.rows = out_view.rows;
+    si.cols = out_view.cols;
+    si.kind = out_view.kind;
+    return si;
+  };
   // Nothing to carry out and no target to accumulate: every live-out is
   // zero-width, so the region has no observable effect and its values
   // keep the empty shape they already have outside. A `target +=` would
   // have put its own register here, so this cannot drop one -- and a
   // print()/reject() have no live-out by design, so it cannot either.
-  if (prog->out_regs.empty() && !reg.out_names.empty() && !reg.has_effect)
+  // An unsized local that the region assigned only empty values still
+  // takes their shape, so a later read sees an empty container.
+  if (prog->out_regs.empty() && !reg.out_names.empty() && !reg.has_effect) {
+    for (size_t k = 0; k < reg.out_names.size(); ++k) {
+      auto dl = decls.find(reg.out_names[k]);
+      if (dl != decls.end() && dl->second.deferred_shape) {
+        dl->second.si = region_view(k);
+        dl->second.deferred_shape = false;
+        dl->second.sized_by_region = true;
+      }
+    }
     return;
+  }
   std::vector<int> out_slots;
   emit_island(prog, reg, out_lens, &out_slots);
   // Later statements read the island's results, not the old values.
@@ -894,19 +958,12 @@ void Lowering::lower_runtime_ifelse(const mir::Stmt& s) {
     if (!shaped_outside) {
       // The outside declaration was zero-size, which Stan's assignment
       // resizes; the region's registers carry the real shape.
-      const Range& out_view = reg.out_views[k];
-      if (out_view.kind == ViewKind::Array) {
-        si = array_view(out_view.dims, out_view.leaf);
-      } else {
-        si = SlotInfo{};
-        si.rows = out_view.rows;
-        si.cols = out_view.cols;
-        si.kind = out_view.kind;
-      }
+      si = region_view(k);
       auto dl = decls.find(name);
       if (dl != decls.end()) {
         dl->second.len = reg.out_views[k].len;
         dl->second.si = si;
+        dl->second.sized_by_region = true;
       }
     }
     // Runtime regions conservatively return parameter-dependent live-outs;
@@ -917,7 +974,29 @@ void Lowering::lower_runtime_ifelse(const mir::Stmt& s) {
     // Its value is now known only at run time, as with an integer above.
     td_erase(name);
   }
-  if (reg.has_target) push_target_term(out_slots.back());
+  for (const std::string& name : reg.out_names) empty_status_slots.erase(name);
+  size_t next = reg.out_views.size();
+  if (reg.has_target) push_target_term(out_slots[next++]);
+  for (size_t k : reg.out_empty_status)
+    empty_status_slots[reg.out_names[k]] = out_slots[next++];
+}
+void Lowering::require_assigned(const std::string& name) {
+  if (empty_status_slots.empty()) return;
+  const auto found = empty_status_slots.find(name);
+  if (found == empty_status_slots.end()) return;
+  IslandRegion reg;
+  reg.in_slots.push_back(found->second);
+  reg.has_effect = true;
+  // Graph code runs on every path, so after this check it is assigned.
+  empty_status_slots.erase(found);
+  auto prog = std::make_shared<IslandProg>();
+  ProgramCompiler c{*prog, fun_defs};
+  const int status = c.alloc(1);
+  prog->ins.push_back(IslandProg::LiveIn{status, 1});
+  c.emit_empty_check(name, status);
+  finalize_island_program(*prog, !in_write_array, false, true);
+  std::vector<int> out_slots;
+  emit_island(prog, reg, {}, &out_slots);
 }
 // `<not known while building the graph> ? a : b`
 Lowering::Val Lowering::lower_runtime_ternary(const mir::Expr& e) {
@@ -1255,6 +1334,7 @@ void Lowering::assign_plain(const mir::Stmt& s) {
 }
 Lowering::Val Lowering::assign_value(const std::string& lhs, Val rhs,
                                      const std::string& raw) {
+  empty_status_slots.erase(lhs);
   auto old = scope.find(lhs);
   if (old != scope.end()) {
     const int64_t len = g.slots[old->second.slot].len;
@@ -1418,6 +1498,7 @@ void Lowering::lower_simple_stmt(const mir::Stmt& s) {
         return;
       }
       if (!s.lhs_idx.empty()) {
+        require_assigned(s.lhs);
         const auto bound = scope.find(s.lhs);
         const auto declared = decls.find(s.lhs);
         if (bound == scope.end() && declared == decls.end())
@@ -1520,9 +1601,12 @@ void Lowering::lower_simple_stmt(const mir::Stmt& s) {
             selected.reserve(s.lhs_idx.size());
             drops.reserve(s.lhs_idx.size());
             for (size_t d = 0; d < s.lhs_idx.size(); ++d) {
-              selected.push_back(index_positions(s.lhs_idx[d],
-                                                 shape.dimensions[d],
-                                                 "assignment index", s.raw));
+              selected.push_back(index_positions(
+                  s.lhs_idx[d], shape.dimensions[d],
+                  selector_site(
+                      d, shape.array_depth,
+                      function_leaf(shape) == FunctionContainerKind::Matrix),
+                  "assignment index", s.raw, true));
               drops.push_back(s.lhs_idx[d].kind == mir::Expr::IndexSingle);
             }
             try {
@@ -2192,8 +2276,8 @@ Lowering::Flow Lowering::lower_stmt_impl(const mir::Stmt& s) {
       // it unrolls to, so unroll it and roll back if it should be kept.
       const int64_t trips = hi - lo + 1;
       std::optional<WaSnapshot> before_unroll;
+      std::set<std::string> mentioned, written;
       if (log_prob_loop_may_retain(s, trips)) {
-        std::set<std::string> mentioned, written;
         mir::collect_names(s, &mentioned);
         mentioned.insert(s.loopvar);
         std::vector<std::string> assigned;
@@ -2203,7 +2287,7 @@ Lowering::Flow Lowering::lower_stmt_impl(const mir::Stmt& s) {
         before_unroll = wa_snapshot(mentioned, &written);
       }
       const size_t ops_before = g.ops.size();
-      if (const auto flow = unroll()) return *flow;
+      if (const auto flow = unroll_or_region(s, unroll)) return *flow;
       const size_t loop_ops = g.ops.size() - ops_before;
       if (diagnostics)
         emit_diagnostic("stanli_structured unrolled loop=" + s.loopvar +
@@ -2212,20 +2296,24 @@ Lowering::Flow Lowering::lower_stmt_impl(const mir::Stmt& s) {
                         " ops=" + std::to_string(g.ops.size()) + " delta=" +
                         std::to_string(loop_ops) + carry_diagnostic);
       if (before_unroll && log_prob_loop_retained(loop_ops, trips)) {
-        wa_restore(*before_unroll);
+        // The trial sees the names as they were before the loop. Only an
+        // accepted trial rolls the unroll back, so a refused one keeps it.
+        WaSnapshot unrolled = wa_snapshot(mentioned, &written);
+        WaSnapshot before_names = *before_unroll;
+        wa_restore_names(before_names);
         bool kept = false;
         {
           const StructuredMode old_policy = structured_policy;
           structured_policy = StructuredMode::Prefer;
           const ScopeExit leave{[&] { structured_policy = old_policy; }};
-          kept = try_lower_region(s, std::pair<int64_t, int64_t>{lo, hi});
+          kept = try_lower_region(s, std::pair<int64_t, int64_t>{lo, hi},
+                                  nullptr, [&] { wa_restore(*before_unroll); });
         }
         if (diagnostics)
           emit_diagnostic(std::string("stanli_structured large loop ") +
-                          (kept ? "retained" : "unrolled again") +
+                          (kept ? "retained" : "kept unrolled") +
                           " loop=" + s.loopvar);
-        if (!kept)
-          if (const auto flow = unroll()) return *flow;
+        if (!kept) wa_restore_names(unrolled);
       }
       int_env.erase(s.loopvar);
       return Flow::Next;
@@ -2282,28 +2370,6 @@ Lowering::Flow Lowering::lower_stmt_impl(const mir::Stmt& s) {
       if (known) {
         const size_t arm = c ? 0 : 1;
         return arm < s.body.size() ? lower_stmt(s.body[arm]) : Flow::Next;
-      }
-      if (udf_depth > 0 && s.body.size() == 2) {
-        mir::Stmt effects = s;
-        mir::Expr then_value, else_value;
-        if (peel_terminal_return(&effects.body[0], &then_value) &&
-            peel_terminal_return(&effects.body[1], &else_value)) {
-          std::vector<std::string> assigned;
-          assigned_names(effects, &assigned);
-          if (!assigned.empty() || has_target_pe(effects) ||
-              stmt_effectful(effects))
-            lower_runtime_ifelse(effects);
-
-          mir::Expr choice;
-          choice.kind = mir::Expr::TernaryIf;
-          choice.args = {s.cond, then_value, else_value};
-          choice.unsized = then_value.unsized;
-          choice.data_only =
-              s.cond.data_only && then_value.data_only && else_value.data_only;
-          choice.raw = s.raw;
-          return_value = lower_expr(choice);
-          return Flow::Return;
-        }
       }
       // Data-only or not, an unfoldable condition compiles to an island.
       // Data-only says the MIR adlevel is DataOnly, not that the values are

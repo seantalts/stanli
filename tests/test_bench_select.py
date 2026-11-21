@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Selection of the corpus models that a compiler-pipeline change must time."""
+import csv
 import pathlib
 import sys
 import unittest
@@ -19,9 +20,21 @@ NEW_OPS = """slots=9 ops=3 result=8
     2 SET_SLICE_STRIDED_INPLACE v=00 out=s3(len6) in=s3(l6),s1(l2)
 """
 
+LOOP_OPS = """slots=7 ops=2 result=6
+    0 LOOP       v=00 out=s3(len2) in=s0(l1,P),s2(l1)
+          body slots=9 ops=3 outputs=s3
+              seq
+                  while cond=s6
+                      seq
+                        0 COMPARE    v=02 out=s6(len1) in=s1(l1),s5(l1) storage=transient active=0
+                       10 MATRIX_EXP v=00 out=s21(len4) in=s20(l4) idata=[2] storage=retained active=1
+                          alias dst=s19 src=s21
+    1 INDEX      v=00 out=s4(len1) in=s3(l2) idata=[0]
+"""
 
-def program(ops=OPS, islands="graph: 3 ops, 9 slots\n", mir="aa"):
-    return dict(mir=mir, ops=ops, islands=islands)
+
+def program(ops=OPS, islands="graph: 3 ops, 9 slots\n", mir="aa", wa_ops=OPS):
+    return dict(mir=mir, ops=ops, wa_ops=wa_ops, islands=islands)
 
 
 class OpcodeTests(unittest.TestCase):
@@ -42,6 +55,16 @@ class OpcodeTests(unittest.TestCase):
         self.assertEqual(select.used_opcodes("slots=1 ops=0 result=0\n", ["OP_LGAMMA"],
                                              islands), ["LGAMMA"])
 
+    def test_opcodes_inside_a_retained_loop_body_count(self):
+        self.assertEqual(select.opcode_counts(LOOP_OPS),
+                         {"LOOP": 1, "COMPARE": 1, "MATRIX_EXP": 1, "INDEX": 1})
+        self.assertEqual(select.used_opcodes(LOOP_OPS, ["OP_MATRIX_EXP", "OP_ADD"]),
+                         ["MATRIX_EXP"])
+
+    def test_control_lines_of_a_loop_body_are_not_opcodes(self):
+        self.assertNotIn("while", select.opcode_counts(LOOP_OPS))
+        self.assertNotIn("alias", select.opcode_counts(LOOP_OPS))
+
     def test_opcode_names_come_from_the_op_table(self):
         table = "  X(OP_ADD_N)                         \\\n  X(OP_CATEGORICAL)   \\\n"
         self.assertEqual(select.table_opcodes(table), {"ADD_N", "CATEGORICAL"})
@@ -55,6 +78,36 @@ class ChangeTests(unittest.TestCase):
         self.assertEqual(select.program_change(program(), program(ops=NEW_OPS)),
                          "ops 3 -> 3: -CONCAT2 x2, -TRANSPOSE, +REP_MAT, "
                          "+SET_SLICE_STRIDED_INPLACE x2")
+
+    def test_a_change_only_inside_a_loop_body_is_a_program_change(self):
+        replaced = LOOP_OPS.replace("MATRIX_EXP", "QUAD_FORM_SYM")
+        self.assertEqual(select.program_change(program(LOOP_OPS), program(replaced)),
+                         "ops 4 -> 4: -MATRIX_EXP, +QUAD_FORM_SYM")
+        moved = LOOP_OPS.replace("storage=retained", "storage=transient")
+        self.assertEqual(select.program_change(program(LOOP_OPS), program(moved)),
+                         "ops 4 -> 4: same opcodes, different operands")
+
+    def test_a_change_only_in_the_write_array_graph_is_a_program_change(self):
+        replaced = LOOP_OPS.replace("MATRIX_EXP", "QUAD_FORM_SYM")
+        self.assertEqual(select.program_change(program(wa_ops=LOOP_OPS),
+                                               program(wa_ops=replaced)),
+                         "write_array ops 4 -> 4: -MATRIX_EXP, +QUAD_FORM_SYM")
+        self.assertEqual(select.program_change(program(wa_ops=""), program()),
+                         "write_array ops 0 -> 3: +CONCAT2 x2, +TRANSPOSE")
+        both = select.program_change(program(), program(ops=NEW_OPS, wa_ops=NEW_OPS))
+        self.assertTrue(both.startswith("ops 3 -> 3: "), both)
+        self.assertIn("; write_array ops 3 -> 3: ", both)
+
+    def test_opcodes_used_only_by_the_write_array_count(self):
+        self.assertEqual(select.program_opcodes(program(wa_ops=LOOP_OPS),
+                                                ["OP_MATRIX_EXP", "OP_ADD"]),
+                         ["MATRIX_EXP"])
+
+    def test_a_model_without_a_write_array_graph_dumps_nothing(self):
+        self.assertEqual(select.write_array_ops(1, "", "model has no write_array graph\n"),
+                         ("", None))
+        self.assertEqual(select.write_array_ops(0, OPS, ""), (OPS, None))
+        self.assertEqual(select.write_array_ops(1, "", "boom\n"), (None, "exit 1"))
 
     def test_operand_and_island_and_mir_differences_are_reported(self):
         moved = OPS.replace("s1(l2),s2", "s2(l2),s1")
@@ -72,6 +125,33 @@ class PreparationTests(unittest.TestCase):
         self.assertTrue(select.prep_regressed(0.010, 0.0151))
         self.assertFalse(select.prep_regressed(1.0, 1.019))
         self.assertTrue(select.prep_regressed(1.0, 1.021))
+
+
+SUMMARY = REPO / "output/corpus-performance/benchmark-summary.tsv"
+MAX_SPREAD = 0.015
+
+
+def relative_spread(summary):
+    with open(summary, newline="") as stream:
+        return {row["model"]: float(row["paired_speedup_mad"]) / float(row["paired_speedup"])
+                for row in csv.DictReader(stream, delimiter="\t") if row["paired_speedup"]}
+
+
+class ControlTests(unittest.TestCase):
+    def test_the_control_set_is_pinned(self):
+        self.assertEqual(select.CONTROLS, (
+            "i319_pois_re", "sw_ar", "eight_schools_noncentered", "hmm_example",
+            "one_comp_mm_elim_abs", "gpcm_latent_reg_irt", "cm_lba2",
+            "mlumr_survival_mspline_relaxed", "hierarchical_gp", "kronecker_gp",
+            "oncobayes2_blrm_exnex_combo3"))
+
+    def test_every_control_is_quiet_in_the_published_run(self):
+        if not SUMMARY.exists():
+            self.skipTest("no published corpus run")
+        spread = relative_spread(SUMMARY)
+        for name in select.CONTROLS:
+            self.assertIn(name, spread)
+            self.assertLessEqual(spread[name], MAX_SPREAD, name)
 
 
 class SelectionTests(unittest.TestCase):

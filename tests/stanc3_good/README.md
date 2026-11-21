@@ -14,7 +14,9 @@ unconstrained points (`eval_point` variants 0 to 4 in
   seed Stan's generator with `create_rng(1234, 0)` at each point),
 - and, where CmdStan throws, its error message: stanli has to throw at the
   same point with a message containing CmdStan's (paths, numbers and the
-  `Exception:` prefix removed).
+  `Exception:` prefix removed). When nothing is left of CmdStan's message
+  after that, stanli's message has to be empty as well: CmdStan returning
+  NaN does not agree with stanli throwing.
 
 Values agree when `|a - b| / max(1, |a|, |b|) <= 1e-9`; NaN agrees with
 NaN, and an infinity only with the same infinity.

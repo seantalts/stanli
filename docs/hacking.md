@@ -227,7 +227,11 @@ The tools you will reach for most:
   For compile timing, use `graph=compile stage=total`: the enclosing driver
   call also includes emitting the buffered profile rows.
 - [`dump_ops`](../tools/dump_ops.cpp): print the op list a model
-  lowered to. Usually the first thing to look at.
+  lowered to. Usually the first thing to look at. Under each `LOOP` op it
+  prints the loop body: the ops in control order, indented, in the same line
+  format and with their storage class, between lines that show the `for`,
+  `while`, `if` and `alias` structure. It prints the log density graph; pass
+  `--write-array` after the op limit for the generated-quantities graph.
 - `dump_ops model.tmir.sexp data.json --execution-json`: JSON describing the
   final selected graph, nested register calls, structured sites, solver
   callback admission, write-array fallback and constrained initialization.
@@ -808,9 +812,10 @@ tool variables such as `STANLI_JOBS` and `STANLI_PROFILE` are not. CMake's
 `STANLI_DEBUG_SWITCHES` compiles them in. It defaults to OFF, which is what
 the wheels, the R runtime and the browser builds ship: there a set switch is
 ignored, with a one-time notice. `tools/dev_setup.sh` configures both of its
-builds ON. Tests that set a switch carry the CTest label `debug_switches` and
-are disabled in an OFF build; `ctest -L debug_switches` runs them in an ON
-build. `STANLI_NO_INTERPRETER`, `STANLI_ISA`, `STANLI_NO_FUSED_DENSITY` and
+builds ON. Tests that set a switch carry the CTest label `debug_switches`. In
+an OFF build a case that needs a switch skips itself and the rest of the test
+runs; tests where no case can run are disabled. `ctest -L debug_switches` runs
+them all in an ON build. See [TESTING.md](../TESTING.md#developer-switches). `STANLI_NO_INTERPRETER`, `STANLI_ISA`, `STANLI_NO_FUSED_DENSITY` and
 `STANLI_NO_O1_FALLBACK` are not developer switches and work in every build.
 
 `tools/build_jobs.sh` caps parallelism by CPU count and usable RAM: 4 GiB
@@ -835,7 +840,10 @@ That is the 119 runnable posteriordb posteriors, the lowering
 regressions in [`tests/regressions/`](../tests/regressions/README.md), the brms
 output in [`tests/brms/`](../tests/brms/README.md), cogmod's custom
 brms families in [`tests/cogmod/`](../tests/cogmod/README.md), ctsem's
-state-space template in [`tests/ctsem/`](../tests/ctsem/README.md), and
+state-space template in [`tests/ctsem/`](../tests/ctsem/README.md),
+programs from stan-dev/example-models in
+[`tests/examplemodels/`](../tests/examplemodels/README.md), programs from the
+Stan User's Guide in [`tests/stanguide/`](../tests/stanguide/README.md), and
 models from CRAN packages, one directory per package (such as
 [`tests/oncobayes2/`](../tests/oncobayes2/README.md)), listed in
 `CRAN_PACKAGES` in [`tools/corpus_inventory.py`](../tools/corpus_inventory.py). It is the

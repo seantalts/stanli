@@ -779,7 +779,10 @@ std::optional<Lowering::Val> Lowering::try_lower_parallel_reduce_sum(
           fixed_partition ? chunk * grain : count * chunk / total;
       const int64_t last = fixed_partition ? std::min(count, first + grain)
                                            : count * (chunk + 1) / total;
-      Lowering trial = fork_region_trial();
+      // The partial sum sees only its arguments, bound below, so the chunk
+      // needs none of the caller's names or data.
+      const std::set<std::string> no_names;
+      Lowering trial = fork_region_trial(&no_names);
       trial.compile_options.reduce_sum_threads = 1;
       trial.structured_policy = StructuredMode::Off;
       std::vector<int> imported;

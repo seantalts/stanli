@@ -183,7 +183,9 @@ bool same_double_bytes(const std::vector<double>& a,
 }
 
 // Evaluates write_array at q on the graph and on its forced interpreter with
-// equal seeds; the rows must match bitwise. Returns the graph row.
+// equal seeds; the rows must match bitwise. A build without developer
+// switches attaches no interpreter, and then only the graph runs. Returns the
+// graph row.
 std::vector<double> cross_checked_row(const stanli::CompiledModel& cm,
                                       stanli::Executor& pex,
                                       stanli::Executor& wex,
@@ -195,6 +197,16 @@ std::vector<double> cross_checked_row(const stanli::CompiledModel& cm,
   stanli::WaRng graph_rng(seed);
   wex.run_forward_only(stanli::EvalState{&graph_rng});
   std::vector<double> row = read_row(cm.write_array->columns, wex);
+  if (!cm.write_array->interp) {
+    if (debug_switches_available()) {
+      ++failures;
+      std::printf("FAIL %s: no interpreter attached\n", what.c_str());
+    } else {
+      std::printf("SKIP %s interpreter comparison: needs developer switches\n",
+                  what.c_str());
+    }
+    return row;
+  }
   stanli::WaRng interp_rng(seed);
   if (!same_double_bytes(row, cm.write_array->interp->eval(
                                   cm.constrained_env(pex), interp_rng))) {
@@ -1176,6 +1188,7 @@ const stanli::StructuredLoop* find_retained_loop(const stanli::Graph& g) {
 // OP_LOOP, and its rows match the forced interpreter at three points.
 void expect_retained_write_array_loop(const std::string& stem,
                                       const stanli::DataMap& data) {
+  SKIP_WITHOUT_DEBUG_SWITCHES();
   using namespace stanli;
   const std::string text = slurp("tests/fixtures/" + stem + ".tmir.sexp");
 
@@ -1244,6 +1257,7 @@ stanli::DataMap alternating_y(int n) {
 // the default automatic policy. write_array has to retain the same loop
 // rather than fall back to the per-draw interpreter.
 void test_write_array_retained_loop() {
+  SKIP_WITHOUT_DEBUG_SWITCHES();
   expect_retained_write_array_loop("structured_wa_region", alternating_y(32));
 }
 
@@ -1354,6 +1368,7 @@ void test_write_array_reused_values() {
 }
 
 void test_write_array_carried_loop() {
+  SKIP_WITHOUT_DEBUG_SWITCHES();
   using namespace stanli;
   const std::string text =
       slurp("tests/fixtures/structured_wa_carried.tmir.sexp");
@@ -1423,6 +1438,7 @@ void test_write_array_carried_loop() {
 // sibling forced the whole block through one register-program island
 // before write_array tried the loop as its own region.
 void test_write_array_block_order() {
+  SKIP_WITHOUT_DEBUG_SWITCHES();
   stanli::DataMap data = alternating_y(32);
   data.set_int("lim", 3);
   data.set_int_array("whenmat", std::vector<int>(40, 1), {8, 5});
@@ -1434,6 +1450,7 @@ void test_write_array_block_order() {
 // (scalar or vector-length) and draw one element at a time from the same
 // stream order the interpreter's vectorized fallback uses.
 void test_write_array_vector_rng() {
+  SKIP_WITHOUT_DEBUG_SWITCHES();
   using namespace stanli;
   const int k = 4;
   DataMap data;
@@ -1496,6 +1513,7 @@ size_t retained_rng_loops(const stanli::Graph& g) {
 // later execution repeated or skipped would shift every later value.
 void expect_rng_loop_parity(const std::string& label, int pad,
                             const char* structured, size_t want_loops) {
+  SKIP_WITHOUT_DEBUG_SWITCHES();
   using namespace stanli;
   const int n = 40, k = 3;
   DataMap data;
@@ -1549,6 +1567,7 @@ void expect_rng_loop_parity(const std::string& label, int pad,
 }
 
 void test_write_array_rng_loops() {
+  SKIP_WITHOUT_DEBUG_SWITCHES();
   expect_rng_loop_parity("wa_rng_loops prefer", 0, "1", 5);
   expect_rng_loop_parity("wa_rng_loops auto", 20000, nullptr, 5);
 }
@@ -1559,6 +1578,7 @@ void test_write_array_rng_loops() {
 // recording it again.
 void expect_replayed_write_array_loops(const std::string& stem,
                                        std::ptrdiff_t want) {
+  SKIP_WITHOUT_DEBUG_SWITCHES();
   using namespace stanli;
   const int n = 64;
   const std::string text = slurp("tests/fixtures/" + stem + ".tmir.sexp");
@@ -1624,6 +1644,7 @@ void expect_replayed_write_array_loops(const std::string& stem,
 // vector with only its first element set) and updates it with a value that
 // depends on mu. The import holds the same bits on every draw.
 void test_write_array_data_start() {
+  SKIP_WITHOUT_DEBUG_SWITCHES();
   expect_replayed_write_array_loops("structured_wa_data_start", 4);
 }
 
@@ -1631,6 +1652,7 @@ void test_write_array_data_start() {
 // inner index against the outer one. Their decisions are the same on every
 // draw. A third loop branches on mu * x[n] and stays unrolled.
 void test_write_array_data_branch() {
+  SKIP_WITHOUT_DEBUG_SWITCHES();
   expect_replayed_write_array_loops("structured_wa_data_branch", 2);
 }
 
@@ -1639,6 +1661,7 @@ void test_write_array_data_branch() {
 // lay out those declarations, so write_array is lowered again with both loops
 // unrolled. The third loop carries only a real and stays retained.
 void test_write_array_counted_size() {
+  SKIP_WITHOUT_DEBUG_SWITCHES();
   expect_replayed_write_array_loops("structured_wa_counted_size", 1);
 }
 
@@ -1647,6 +1670,7 @@ void test_write_array_counted_size() {
 // comparison is a graph value, and its range has to be the one value it can
 // take for the declaration to have a fixed size.
 void test_write_array_compare_size() {
+  SKIP_WITHOUT_DEBUG_SWITCHES();
   using namespace stanli;
   DataMap data;
   data.set_int("N", 40);
@@ -1694,6 +1718,7 @@ void test_write_array_compare_size() {
 void expect_bounded_output(const std::string& fixture,
                            const stanli::DataMap& data, bool compiled,
                            bool early_refusal = false) {
+  SKIP_WITHOUT_DEBUG_SWITCHES();
   using namespace stanli;
   const std::string text = slurp("tests/fixtures/" + fixture + ".tmir.sexp");
   ExecutionTrace normal_trace, disabled_trace;
@@ -1798,6 +1823,7 @@ void expect_bounded_output(const std::string& fixture,
 }
 
 void test_write_array_bounded_blocks() {
+  SKIP_WITHOUT_DEBUG_SWITCHES();
   using namespace stanli;
   DataMap partial;
   partial.set_int("K", 3);
@@ -1953,6 +1979,7 @@ void test_write_array_bounded_blocks() {
 // whole-loop island rather than per-iteration unrolling: with the fix the
 // op count does not grow with N, and it did before it.
 void test_write_array_selected_loop_refused() {
+  SKIP_WITHOUT_DEBUG_SWITCHES();
   using namespace stanli;
   const std::string text =
       slurp("tests/fixtures/gq_selected_loop_refused.tmir.sexp");
@@ -2062,6 +2089,7 @@ void test_write_array_selected_loop_overflow() {
 // engines name it that way; the graph lowers the value like any other
 // expression.
 void test_constant_folded_gq_column() {
+  SKIP_WITHOUT_DEBUG_SWITCHES();
   using namespace stanli;
   DataMap data;
   data.set_real_array("rectangular", {1.0, 2.0, 3.0, 4.0, 5.0, 6.0}, {3, 2});
@@ -2093,10 +2121,54 @@ void test_constant_folded_gq_column() {
   }
 }
 
+// mean() groups its sum the way Stan Math's Eigen reduction does, so the
+// result does not depend on where the slot sits. CmdStan gives lp 51.75 and
+// these generated quantities at this data: a strided row adds in order
+// (0.25), contiguous data in packets (0.5), and an autodiff value in order.
+void test_mean_grouping() {
+  using namespace stanli;
+  DataMap data = DataMap::from_json_file("tests/fixtures/mean_grouping.json");
+  const std::string text = slurp("tests/fixtures/mean_grouping.tmir.sexp");
+  test_setenv("STANLI_WA_FORCE_INTERP", "1");
+  CompiledModel cm = compile_model(text, data);
+  test_unsetenv("STANLI_WA_FORCE_INTERP");
+  if (!cm.write_array || cm.write_array->truncated.has_value()) {
+    ++failures;
+    std::printf("FAIL mean_grouping did not compile completely\n");
+    return;
+  }
+  Executor pex(cm.graph);
+  cm.bind(pex);
+  pex.params_data()[0] = 0.1;
+  double grad = 1.0;
+  const double lp = pex.gradient(&grad);
+  if (lp != 51.75 || grad != 0.0) {
+    ++failures;
+    std::printf("FAIL mean_grouping lp %.17g grad %.17g\n", lp, grad);
+  }
+  Executor wex(std::move(cm.write_array->graph));
+  cm.write_array->bind(wex);
+  const std::vector<double> row =
+      cross_checked_row(cm, pex, wex, {0.1}, 1, "mean_grouping");
+  const std::vector<double> want{0.5, 0.5, 0.5, 0.25, 0.5};
+  if (row.size() != 18) {
+    ++failures;
+    std::printf("FAIL mean_grouping row: got %zu values\n", row.size());
+    return;
+  }
+  for (size_t k = 0; k < want.size(); ++k)
+    if (row[13 + k] != want[k]) {
+      ++failures;
+      std::printf("FAIL mean_grouping gq %zu: %.17g, CmdStan %.17g\n", k,
+                  row[13 + k], want[k]);
+    }
+}
+
 // A zero-size output before a folded one: its loop writes nothing, so
 // naming the folded write "the variable after the last one written" calls
 // it z. The writes' widths against output_vars name it w.
 void test_constant_folded_gq_after_empty_output() {
+  SKIP_WITHOUT_DEBUG_SWITCHES();
   using namespace stanli;
   DataMap data;
   data.set_int("N", 0);
@@ -3929,8 +4001,8 @@ void test_gq_reduction_lowering_guards() {
   std::string empty = base;
   if (replace_reduction_after(empty, prod_call, vector_node, empty_vector,
                               "empty product"))
-    expect_reduction_interp(empty, "",
-                            "empty dynamic product stays interpreted");
+    expect_compiled(empty, reduction_data(),
+                    "empty dynamic product lowers to Stan's 1");
 
   const std::string segment =
       "((pattern\n"
@@ -4326,8 +4398,14 @@ void test_gq_reduction_lowering_guards() {
       } catch (const std::exception&) {
       }
     };
-    expect_invalid_range(0, 1, "out of bounds", "low OOB range assignment");
-    expect_invalid_range(5, 6, "out of bounds", "high OOB range assignment");
+    expect_invalid_range(0, 1,
+                         "array[multi, ...] assign: accessing element out of "
+                         "range. index 0 out of range",
+                         "low OOB range assignment");
+    expect_invalid_range(5, 6,
+                         "array[multi, ...] assign: accessing element out of "
+                         "range. index 6 out of range",
+                         "high OOB range assignment");
     expect_invalid_range(4, 4, "width mismatch",
                          "range assignment RHS width mismatch");
 
@@ -4341,8 +4419,11 @@ void test_gq_reduction_lowering_guards() {
     } else {
       matrix_rows.replace(lhs_z, std::string("(LVariable z)").size(),
                           "(LVariable partial_matrix)");
-      expect_reduction_interp(matrix_rows, "out of bounds",
-                              "out-of-bounds row-range assignment falls back");
+      expect_reduction_interp(
+          matrix_rows,
+          "array[multi, ...] assign: accessing element out of range. index 4 "
+          "out of range",
+          "out-of-bounds row-range assignment falls back");
     }
   }
 }
@@ -4541,6 +4622,7 @@ void test_runtime_int_sum_redeclaration_shadowing() {
 // argument is the enclosing loop variable, which is how brms lays out the
 // upper triangle of a group-level correlation matrix.
 void test_choose_index_gq() {
+  SKIP_WITHOUT_DEBUG_SWITCHES();
   using namespace stanli;
   DataMap data;
   data.set_int("M", 4);
@@ -4583,6 +4665,7 @@ void test_choose_index_gq() {
 // puts on every correlated group-level effect, so the interpreter meets it
 // whenever the rest of the section sends the graph home.
 void test_interpreted_lkj() {
+  SKIP_WITHOUT_DEBUG_SWITCHES();
   using namespace stanli;
   DataMap data = DataMap::from_json_file("tests/fixtures/gqlkj.json");
   const std::string text = slurp("tests/fixtures/gqlkj.tmir.sexp");
@@ -4701,6 +4784,7 @@ void test_runtime_control_write_array() {
 }
 
 void test_integer_rng_control() {
+  SKIP_WITHOUT_DEBUG_SWITCHES();
   using namespace stanli;
   for (int n : {0, 1, 9}) {
     DataMap data;
@@ -4809,6 +4893,7 @@ void test_integer_rng_control() {
 // Check compiled selection as well as values: the MIR comparison alone would
 // otherwise allow the complete output block to fall back unnoticed.
 void test_integer_expressions() {
+  SKIP_WITHOUT_DEBUG_SWITCHES();
   using namespace stanli;
   const std::string source =
       slurp("tests/fixtures/gq_integer_expressions.tmir.sexp");
@@ -4945,6 +5030,7 @@ int main() {
   test_interpreted_lkj();
   test_constant_folded_gq_column();
   test_constant_folded_gq_after_empty_output();
+  test_mean_grouping();
   test_categorical_rng_lowering_guards();
   test_compiled_categorical_rng();
   test_categorical_rng_empty_vector();

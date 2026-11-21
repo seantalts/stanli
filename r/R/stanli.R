@@ -77,7 +77,9 @@ read_utf8_file <- function(path) {
 #'   array of any rank is written with its first index outermost, so a
 #'   matrix is an array of rows; an unnamed list is an array of its elements,
 #'   which is how to pass `array[K] matrix[N, M]`, `array[K] vector[N]` and
-#'   arrays of them. Zero-length extents are kept.
+#'   arrays of them. Zero-length extents are kept. A length-1 R vector
+#'   with no `dim` goes out as a scalar, as in rstan, so give a `vector[1]`
+#'   or `array[1]` as `array(x, 1)`.
 #' @param mir Transformed MIR text, for a build without the embedded
 #'   compiler. Rarely needed.
 #' @param threads_per_chain Positive thread count for eligible native `reduce_sum`
@@ -409,7 +411,9 @@ log_prob_grad <- function(model, q) {
 #'   matrix.
 #' @export
 log_prob_hessian <- function(model, q) {
-  .Call("stanli_r_hessian", model$ptr, as.double(q))
+  res <- .Call("stanli_r_hessian", model$ptr, as.double(q))
+  algorithm_interrupt(res, "Hessian evaluation")
+  res
 }
 
 #' Names of a model's parameters
@@ -439,9 +443,10 @@ parameter_names <- function(model, scalars = FALSE) {
 #' Unless `partial = TRUE`, every declared parameter must appear, at its
 #' declared size. A missing,
 #' unknown, wrong-length, or out-of-support value is an error naming the
-#' parameter. Containers are listed in Stan's own serialization order (the
-#' first index fastest, the order a CSV column carries) and may be nested or
-#' flat -- the declaration owns the shape either way.
+#' parameter. Each value has its declared shape, as CmdStan requires of a
+#' starting value: a matrix as an R matrix, and a `vector[1]` as
+#' `array(x, 1)`. A flat vector for a matrix is an error. A zero-size
+#' parameter may be left out.
 #'
 #' The result is what `sample_model(init = )` and `optimize_model(init = )`
 #' take, so unconstraining is a step per starting point rather than a second
@@ -507,6 +512,26 @@ preserve_random_seed <- function(expr) {
   expr
 }
 
+# A tuple's slots, named as the runtime names them (`g.2:1.3`), as CmdStan's
+# JSON nests one value: an array of tuples is a list of its elements, first
+# index outermost, and each tuple a list keyed "1", "2", ....
+tuple_init_value <- function(slots) {
+  steps <- lapply(names(slots), function(name) unlist(lapply(tuple_steps(name),
+    function(step) if (startsWith(step, "["))
+      paste0("[", strsplit(gsub("\\[|\\]", "", step), ",")[[1L]], "]")
+    else step)))
+  build <- function(entries, depth) {
+    if (length(entries) == 1L && length(steps[[entries]]) < depth)
+      return(slots[[entries]])
+    keys <- vapply(entries, function(i) steps[[i]][depth], "")
+    unique_keys <- unique(keys)
+    unique_keys <- unique_keys[order(as.integer(gsub("\\[|\\]", "", unique_keys)))]
+    out <- lapply(unique_keys, function(k) build(entries[keys == k], depth + 1L))
+    if (startsWith(unique_keys[1L], "[")) out else stats::setNames(out, unique_keys)
+  }
+  build(seq_along(slots), 1L)
+}
+
 complete_partial_inits <- function(model, values, init_radius, seed) {
   check_start_names(values)
   if (length(init_radius) != 1L || !is.numeric(init_radius) ||
@@ -514,7 +539,6 @@ complete_partial_inits <- function(model, values, init_radius, seed) {
     stop("init_radius must be finite and nonnegative", call. = FALSE)
   variables <- runtime_variables(model$ptr, parameters = TRUE)
   columns <- variable_columns(variables)
-  values <- lapply(values, function(value) if (is.array(value)) as.vector(value) else value)
   if (all(variable_base(names(variables)) %in% names(values))) return(values)
   if (!identical(columns, utils::head(model$columns, length(columns))))
     stop("this model's outputs do not begin with its parameters; partial ",
@@ -531,10 +555,18 @@ complete_partial_inits <- function(model, values, init_radius, seed) {
                        length(columns))
   declared <- column_variables(variables)
   filled <- split(drawn, factor(declared, levels = names(variables)))
+  # Each drawn value in its declared shape, which CmdStan requires of a
+  # starting value. A zero-size parameter is left out: [] cannot give the
+  # shape of one with two or more dimensions.
+  filled <- Map(function(value, dims) {
+    if (length(dims) && prod(dims) == 0) NULL
+    else if (length(dims)) array(value, dim = dims) else value
+  }, filled, variables)
+  filled <- filled[!vapply(filled, is.null, logical(1))]
   bases <- variable_base(names(filled))
   filled <- lapply(stats::setNames(nm = unique(bases)), function(base) {
     slots <- filled[bases == base]
-    if (identical(names(slots), base)) slots[[1L]] else nest_tuple_slots(slots)
+    if (identical(names(slots), base)) slots[[1L]] else tuple_init_value(slots)
   })
   filled[intersect(names(values), names(filled))] <-
     values[intersect(names(values), names(filled))]
@@ -597,7 +629,12 @@ complete_partial_inits <- function(model, values, init_radius, seed) {
 #'   `report` only the time each chain took.
 #' @param refresh Print a progress update every `refresh` transitions within
 #'   each phase, plus the first and last transition of the phase. Set to 0 to
-#'   suppress all automatic sampling output.
+#'   suppress the progress lines and the timing and sampler-problem summaries.
+#'   The sampler's own notices (a rejected proposal, too few warmup iterations
+#'   to adapt) print whatever `refresh` is, as in CmdStan.
+#' @param show_messages `FALSE` drops those notices, and with them anything
+#'   the model itself prints, during sampling. `TRUE` (the default) shows them.
+#'   It does not apply with `fixed_param = TRUE`, which has no sampler notices.
 #' @param metric The metric: `"diag_e"` (the default), `"dense_e"` or
 #'   `"unit_e"`, as in CmdStan.
 #' @param inv_metric Optional starting inverse metric. For `"diag_e"`, a
@@ -611,14 +648,12 @@ complete_partial_inits <- function(model, values, init_radius, seed) {
 #' @param step_size Optional initial step size, a single positive number used
 #'   by every chain. `NULL` uses 1, as CmdStan does. With adaptation on it is
 #'   the starting point of the step size search and of dual averaging.
-#' @param adapt_engaged `TRUE` (the default) adapts the step size and, unless
+#' @param adapt_engaged `TRUE` adapts the step size and, unless
 #'   `metric = "unit_e"`, the metric during warmup. `FALSE` runs no adaptation:
 #'   `warmup` iterations are ordinary transitions and `inv_metric` and
-#'   `step_size` are used as given. With `warmup = 0` and `adapt_engaged =
-#'   TRUE`, stanli still runs Stan's initial step size search, as Stan's
-#'   adaptive sampler does, so the step size in use differs from `step_size`.
-#'   To use a supplied step size exactly, set `adapt_engaged = FALSE`, as with
-#'   CmdStanR.
+#'   `step_size` are used as given. The default, `NULL`, means `TRUE` unless
+#'   `warmup = 0`, which then runs at exactly `step_size`; an explicit
+#'   `adapt_engaged = TRUE` with `warmup = 0` is an error, as in CmdStan.
 #' @param adapt_metric `TRUE` (the default) adapts the metric during warmup
 #'   when `adapt_engaged` is `TRUE`. `FALSE` adapts only the step size and
 #'   keeps `inv_metric` (the identity when `NULL`) as given. It has no effect
@@ -649,8 +684,8 @@ sample_model <- function(model, chains = 4, seed = 1, warmup = 1000,
                          threads_per_chain = NULL, fixed_param = FALSE,
                          metric = c("diag_e", "dense_e", "unit_e"),
                          inv_metric = NULL, step_size = NULL,
-                         adapt_engaged = TRUE, adapt_metric = TRUE,
-                         chain_id = 1L) {
+                         adapt_engaged = NULL, adapt_metric = TRUE,
+                         chain_id = 1L, show_messages = TRUE) {
   threads_per_chain <- run_threads(model, threads_per_chain, "sample_model")
   cstan_integer(seed, "seed", 0)
   check_chain_id(chain_id, chains)
@@ -666,13 +701,16 @@ sample_model <- function(model, chains = 4, seed = 1, warmup = 1000,
     init_radius = sampler_number(init_radius, "init_radius"))
   stanfit_flag(fixed_param, "fixed_param")
   metric <- match.arg(metric)
-  stanfit_flag(adapt_engaged, "adapt_engaged")
+  if (!is.null(adapt_engaged)) stanfit_flag(adapt_engaged, "adapt_engaged")
   stanfit_flag(adapt_metric, "adapt_metric")
+  stanfit_flag(show_messages, "show_messages")
   check_step_size(step_size)
   if (fixed_param && (metric != "diag_e" || !is.null(inv_metric) ||
-                      !is.null(step_size) || !adapt_engaged || !adapt_metric))
+                      !is.null(step_size) || isFALSE(adapt_engaged) ||
+                      !adapt_metric))
     stop("metric, inv_metric, step_size, adapt_engaged and adapt_metric do ",
          "not apply with fixed_param = TRUE", call. = FALSE)
+  if (is.null(adapt_engaged)) adapt_engaged <- opts$warmup != 0L
   if (fixed_param && !is.null(pathfinder_init))
     stop("pathfinder_init does not apply with fixed_param = TRUE",
          call. = FALSE)
@@ -699,6 +737,7 @@ sample_model <- function(model, chains = 4, seed = 1, warmup = 1000,
   if (!is.null(pathfinder_init)) {
     init <- .Call("stanli_r_pathfinder_inits", model$ptr, as.integer(seed),
                   as.integer(chains), unname(pathfinder_init), chain_id)
+    algorithm_interrupt(init, "Pathfinder initialization")
   }
   init_vec <- numeric(0)
   if (!is.null(init)) {
@@ -715,7 +754,7 @@ sample_model <- function(model, chains = 4, seed = 1, warmup = 1000,
                                 adapt_metric, as.integer(chains),
                                 model$n_unconstrained)
   res <- .Call("stanli_r_sample", model$ptr, opts, init_vec, refresh,
-               metric_opts, NULL)
+               metric_opts, NULL, show_messages)
   algorithm_interrupt(res, "sampling")
   run <- nuts_arrays(res, model)
   nchain <- res$chains
@@ -785,7 +824,9 @@ append_draws <- function(a, b) {
 #' @param fit A `stanli_fit` from [sample_model()].
 #' @param samples Further transitions per chain, before thinning.
 #' @param refresh Print a progress update every `refresh` transitions; the
-#'   numbering continues from the fit's transitions. 0 is silent.
+#'   numbering continues from the fit's transitions. 0 prints no progress.
+#' @param show_messages `FALSE` drops the sampler's notices and the model's own
+#'   output, as in [sample_model()].
 #' @param parallel_chains Chains to run at once. Defaults to all of them.
 #' @param threads_per_chain Deprecated, as in [sample_model()]: the run uses
 #'   the thread count of the fit's model. Another count gives a warning of
@@ -801,14 +842,14 @@ append_draws <- function(a, b) {
 #' @export
 sample_more <- function(fit, samples = 1000, refresh = 100,
                         parallel_chains = NULL, threads_per_chain = NULL,
-                        ...) {
+                        show_messages = TRUE, ...) {
   if (!inherits(fit, "stanli_fit"))
     stop("fit must be a stanli_fit from sample_model()", call. = FALSE)
   extra <- names(list(...))
   if (length(extra) > 0L)
     stop("sample_more() continues the fit's chains with the fit's settings, ",
-         "so only samples, refresh, parallel_chains and threads_per_chain ",
-         "can be given; got ", paste(extra, collapse = ", "), call. = FALSE)
+         "so only samples, refresh, show_messages, parallel_chains and ",
+         "threads_per_chain can be given; got ", paste(extra, collapse = ", "), call. = FALSE)
   require_nuts_fit(fit, "sample_more()")
   if (identical(fit$sampler_backend, "nutpie"))
     stop("this fit has no resume record: sample_nutpie() fits cannot be ",
@@ -820,6 +861,7 @@ sample_more <- function(fit, samples = 1000, refresh = 100,
       !is.finite(refresh) || refresh < 0 || refresh != floor(refresh) ||
       refresh > .Machine$integer.max)
     stop("refresh must be a single nonnegative integer", call. = FALSE)
+  stanfit_flag(show_messages, "show_messages")
   model <- fit$model
   threads_per_chain <- run_threads(model, threads_per_chain, "sample_more")
   load_runtime()
@@ -835,7 +877,7 @@ sample_more <- function(fit, samples = 1000, refresh = 100,
     fit$metric, if (fit$metric == "unit_e") NULL else fit$inv_metric, NULL,
     FALSE, TRUE, as.integer(fit$chains), model$n_unconstrained)
   res <- .Call("stanli_r_sample", model$ptr, opts, numeric(0),
-               as.integer(refresh), metric_opts, fit$resume)
+               as.integer(refresh), metric_opts, fit$resume, show_messages)
   algorithm_interrupt(res, "sampling")
   run <- nuts_arrays(res, model)
   out <- fit
@@ -1057,6 +1099,7 @@ optimize_model <- function(model, seed = 1, iter = 2000, init = NULL,
   opts <- list(as.integer(seed), iter, TRUE, init_radius)
   init_vec <- if (is.null(init)) numeric(0) else as.double(init)
   r <- .Call("stanli_r_optimize", model$ptr, opts, init_vec)
+  algorithm_interrupt(r, "optimization")
   names(r$values) <- model$columns
   r
 }

@@ -1,5 +1,5 @@
 // STANLI-LIT: PASS
-// STANLI-LIT-EXPECT: COMPILE_FAIL integer division by zero
+// STANLI-LIT-EXPECT: COMPILE_FAIL divide: denominator is 0
 // STANLI-LIT-DATA: {"z": 0}
 data {
   int z;

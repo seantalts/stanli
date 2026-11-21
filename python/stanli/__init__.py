@@ -7,6 +7,7 @@ compilation on this machine.
 """
 import base64
 import ctypes
+import functools
 from collections.abc import Mapping
 import json
 import math
@@ -44,7 +45,14 @@ _COMPILER_WARNING = 0
 _COMPILER_O1_FALLBACK = 1
 # The column sets of stanli_n_variables.
 _CONSTRAINED_COLUMNS = 0
-_WRITE_ARRAY_COLUMNS = 1
+_OUTPUT_COLUMNS = 2
+# stanli_eval_status in capi.h, as the start of an error message.
+_EVAL_FAILURE = {
+    1: "the log density rejected this point",
+    2: "log density evaluation failed at this point",
+    3: "log density evaluation failed inside stanli at this point (this is "
+       "a bug in stanli; please report it)",
+}
 
 
 class O1FallbackWarning(RuntimeWarning):
@@ -66,8 +74,7 @@ def _experimental(feature, advice):
     if feature in _experimental_notified:
         return
     _experimental_notified.add(feature)
-    warnings.warn(f"{feature} is experimental. {advice}",
-                  ExperimentalWarning, stacklevel=3)
+    _warn_caller(f"{feature} is experimental. {advice}", ExperimentalWarning)
 
 
 _LAPLACE_WHITENING_ADVICE = (
@@ -218,18 +225,18 @@ def _load_lib():
     lib.stanli_model_free.argtypes = [ctypes.c_void_p]
     lib.stanli_n_unconstrained.restype = ctypes.c_int64
     lib.stanli_n_unconstrained.argtypes = [ctypes.c_void_p]
-    lib.stanli_grad.restype = ctypes.c_int
-    lib.stanli_grad.argtypes = [ctypes.c_void_p,
-                                ctypes.POINTER(ctypes.c_double),
-                                ctypes.POINTER(ctypes.c_double),
-                                ctypes.POINTER(ctypes.c_double)]
-    lib.stanli_hessian.restype = ctypes.c_int
-    lib.stanli_hessian.argtypes = [ctypes.c_void_p,
-                                   ctypes.POINTER(ctypes.c_double),
-                                   ctypes.POINTER(ctypes.c_double),
-                                   ctypes.POINTER(ctypes.c_double),
-                                   ctypes.POINTER(ctypes.c_double),
-                                   ctypes.c_char_p, ctypes.c_size_t]
+    lib.stanli_grad_err.restype = ctypes.c_int
+    lib.stanli_grad_err.argtypes = [ctypes.c_void_p,
+                                    ctypes.POINTER(ctypes.c_double),
+                                    ctypes.POINTER(ctypes.c_double),
+                                    ctypes.POINTER(ctypes.c_double),
+                                    ctypes.c_char_p, ctypes.c_size_t]
+    lib.stanli_hessian_with_poll.restype = ctypes.c_int
+    lib.stanli_hessian_with_poll.argtypes = [
+        ctypes.c_void_p, ctypes.POINTER(ctypes.c_double),
+        ctypes.POINTER(ctypes.c_double), ctypes.POINTER(ctypes.c_double),
+        ctypes.POINTER(ctypes.c_double), _SamplePollCallback, ctypes.c_void_p,
+        ctypes.POINTER(ctypes.c_int), ctypes.c_char_p, ctypes.c_size_t]
     lib.stanli_model_whiten.restype = ctypes.c_void_p
     lib.stanli_model_whiten.argtypes = [
         ctypes.c_void_p, ctypes.POINTER(ctypes.c_double), ctypes.c_int64,
@@ -248,10 +255,6 @@ def _load_lib():
     lib.stanli_unconstrain_inits.argtypes = [ctypes.c_void_p, ctypes.c_char_p,
                                              ctypes.POINTER(ctypes.c_double),
                                              ctypes.c_char_p, ctypes.c_size_t]
-    lib.stanli_n_constrained.restype = ctypes.c_int64
-    lib.stanli_n_constrained.argtypes = [ctypes.c_void_p]
-    lib.stanli_constrained_name.restype = ctypes.c_char_p
-    lib.stanli_constrained_name.argtypes = [ctypes.c_void_p, ctypes.c_int64]
     lib.stanli_n_param_blocks.restype = ctypes.c_int64
     lib.stanli_n_param_blocks.argtypes = [ctypes.c_void_p]
     lib.stanli_param_block_name.restype = ctypes.c_char_p
@@ -322,10 +325,6 @@ def _load_lib():
     lib.stanli_take_messages.argtypes = []
     lib.stanli_build_id.restype = ctypes.c_char_p
     lib.stanli_build_id.argtypes = []
-    lib.stanli_wa_n_columns.restype = ctypes.c_int64
-    lib.stanli_wa_n_columns.argtypes = [ctypes.c_void_p]
-    lib.stanli_wa_column_name.restype = ctypes.c_char_p
-    lib.stanli_wa_column_name.argtypes = [ctypes.c_void_p, ctypes.c_int64]
     lib.stanli_warnings.restype = ctypes.c_char_p
     lib.stanli_warnings.argtypes = [ctypes.c_void_p]
     lib.stanli_transformed_data_rng.restype = ctypes.c_int
@@ -354,11 +353,12 @@ def _load_lib():
         _SampleProgressCallback, ctypes.c_void_p, _SamplePollCallback,
         ctypes.c_void_p, ctypes.POINTER(ctypes.c_int),
         ctypes.POINTER(_SampleReport), ctypes.c_char_p, ctypes.c_size_t]
-    lib.stanli_pathfinder_inits.restype = ctypes.c_int
-    lib.stanli_pathfinder_inits.argtypes = [
+    lib.stanli_pathfinder_inits_with_poll.restype = ctypes.c_int
+    lib.stanli_pathfinder_inits_with_poll.argtypes = [
         ctypes.c_void_p, ctypes.c_uint32, ctypes.c_int, ctypes.c_int,
         ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_double,
         ctypes.POINTER(ctypes.c_double), ctypes.c_void_p, ctypes.c_void_p,
+        _SamplePollCallback, ctypes.c_void_p, ctypes.POINTER(ctypes.c_int),
         ctypes.c_char_p, ctypes.c_size_t]
     lib.stanli_summary_stats.restype = ctypes.c_int
     lib.stanli_summary_stats.argtypes = [ctypes.POINTER(ctypes.c_double),
@@ -366,13 +366,15 @@ def _load_lib():
                                          ctypes.c_int64,
                                          ctypes.POINTER(ctypes.c_double)]
     lib.stanli_optimize_opts_init.argtypes = [ctypes.POINTER(_OptimizeOpts)]
-    lib.stanli_optimize.restype = ctypes.c_int
-    lib.stanli_optimize.argtypes = [ctypes.c_void_p,
-                                    ctypes.POINTER(_OptimizeOpts),
-                                    ctypes.POINTER(ctypes.c_double),
-                                    ctypes.POINTER(ctypes.c_double),
-                                    ctypes.POINTER(ctypes.c_double),
-                                    ctypes.c_char_p, ctypes.c_size_t]
+    lib.stanli_optimize_opts_check.restype = ctypes.c_int
+    lib.stanli_optimize_opts_check.argtypes = [ctypes.POINTER(_OptimizeOpts),
+                                               ctypes.c_char_p, ctypes.c_size_t]
+    lib.stanli_optimize_with_poll.restype = ctypes.c_int
+    lib.stanli_optimize_with_poll.argtypes = [
+        ctypes.c_void_p, ctypes.POINTER(_OptimizeOpts),
+        ctypes.POINTER(ctypes.c_double), ctypes.POINTER(ctypes.c_double),
+        ctypes.POINTER(ctypes.c_double), _SamplePollCallback, ctypes.c_void_p,
+        ctypes.POINTER(ctypes.c_int), ctypes.c_char_p, ctypes.c_size_t]
     lib.stanli_diagnose_text.restype = ctypes.c_int64
     lib.stanli_diagnose_text.argtypes = [ctypes.POINTER(ctypes.c_double),
                                          ctypes.c_int64, ctypes.c_int64,
@@ -396,8 +398,11 @@ _lib = _load_lib()
 _lib.stanli_capture_messages(1)
 
 
-def _flush_messages():
-    """Write the runtime's queued messages to the current sys.stdout."""
+def _flush_messages(show=True):
+    """Write the runtime's queued messages to the current sys.stdout.
+
+    With show false the messages are taken and dropped.
+    """
     p = _lib.stanli_take_messages()
     if not p:
         return
@@ -405,6 +410,8 @@ def _flush_messages():
         text = ctypes.cast(p, ctypes.c_char_p).value.decode("utf-8", "replace")
     finally:
         _lib.stanli_string_free(p)
+    if not show:
+        return
     out = sys.stdout
     if out is not None:
         out.write(text)
@@ -414,12 +421,15 @@ def _flush_messages():
 class _native_output:
     """Delivers the runtime's printed messages when a native call ends."""
 
+    def __init__(self, show=True):
+        self.show = show
+
     def __enter__(self):
         return self
 
     def __exit__(self, exc_type, *_rest):
         try:
-            _flush_messages()
+            _flush_messages(self.show)
         except Exception:
             if exc_type is None:
                 raise
@@ -602,16 +612,17 @@ class _InterruptWatch:
     and the poll simply never fires.
     """
 
-    def __init__(self):
+    def __init__(self, show_messages=True):
         self.tripped = False
         self.previous = None
         self.flush_error = None
+        self.show_messages = show_messages
         self.poll = _SamplePollCallback(self._poll)
 
     def _poll(self, _user):
         if self.flush_error is None:
             try:
-                _flush_messages()
+                _flush_messages(self.show_messages)
             except BaseException as exc:  # ctypes cannot propagate it
                 self.flush_error = exc
         return 1 if self.tripped else 0
@@ -634,6 +645,23 @@ class _InterruptWatch:
         if callable(previous) and previous is not signal.default_int_handler:
             previous(signal.SIGINT, None)
         raise KeyboardInterrupt
+
+
+def _interruptible(call):
+    """call(poll, interrupted) for a native entry point that takes a poll.
+
+    Raises KeyboardInterrupt when Ctrl-C stopped the call, else returns
+    what the call returned.
+    """
+    interrupted = ctypes.c_int(0)
+    watch = _InterruptWatch()
+    with watch, _native_output():
+        rc = call(watch.poll, ctypes.byref(interrupted))
+    if interrupted.value:
+        watch.raise_interrupt()
+    if watch.flush_error is not None:
+        raise watch.flush_error
+    return rc
 
 
 _PATHFINDER_INIT_DEFAULTS = {
@@ -703,9 +731,8 @@ def _compiler_command(model_path: pathlib.Path, include_paths=(),
     return [str(portable), *flags, str(model_path)]
 
 
-def _warn_compile(text, category=RuntimeWarning):
-    """Report compiler warnings once, attributed to the first caller outside
-    this package."""
+def _warn_caller(text, category=RuntimeWarning):
+    """Warn, attributed to the first caller outside this package."""
     if not text:
         return
     level, frame = 1, sys._getframe(1)
@@ -716,7 +743,7 @@ def _warn_compile(text, category=RuntimeWarning):
 
 def _warn_compiler_messages(kinds_and_texts):
     for kind, text in kinds_and_texts:
-        _warn_compile(text, O1FallbackWarning if kind == _COMPILER_O1_FALLBACK
+        _warn_caller(text, O1FallbackWarning if kind == _COMPILER_O1_FALLBACK
                       else RuntimeWarning)
 
 
@@ -1500,7 +1527,7 @@ _CONTINUE_FIXED = {
     "chains": 4, "seed": 1, "warmup": 1000, "delta": 0.8, "max_depth": 10,
     "thin": 1, "save_warmup": False, "inits": None, "init_radius": 2.0,
     "pathfinder_init": None, "metric": "diag_e", "inv_metric": None,
-    "step_size": None, "adapt_engaged": True, "adapt_metric": True,
+    "step_size": None, "adapt_engaged": None, "adapt_metric": True,
 }
 
 
@@ -1515,8 +1542,8 @@ def _continue_settings(fit, given):
     if passed:
         raise ValueError(
             "continue_from continues the fit's chains with the fit's "
-            "settings, so only samples, refresh, parallel_chains and "
-            "threads_per_chain can be given; got " + ", ".join(passed))
+            "settings, so only samples, refresh, show_messages, "
+            "parallel_chains and threads_per_chain can be given; got " + ", ".join(passed))
     records = getattr(fit, "_resume", None)
     if not records or len(records) != fit.n_chains:
         raise ValueError(
@@ -1543,6 +1570,19 @@ def _continued_fit(old, new):
     fit.warmup_seconds = old.warmup_seconds.copy()
     fit.sampling_seconds = old.sampling_seconds + new.sampling_seconds
     return fit
+
+
+def _one_call_at_a_time(method):
+    """Hold the Model's lock for the call.
+
+    The C API allows one evaluating call per handle at a time, and a run
+    can rebuild the model and free the old handle.
+    """
+    @functools.wraps(method)
+    def call(self, *args, **kwargs):
+        with self._lock:
+            return method(self, *args, **kwargs)
+    return call
 
 
 def _threads_per_chain(value):
@@ -1603,6 +1643,7 @@ class Model:
                  seed=1, threads_per_chain=1, include_paths=None,
                  fast_math=False, allow_interpreter=True,
                  _parallel_write_array="auto"):
+        self._lock = threading.RLock()
         threads_per_chain = _threads_per_chain(threads_per_chain)
         if _parallel_write_array not in _PARALLEL_WRITE_ARRAY:
             raise ValueError("_parallel_write_array must be one of "
@@ -1644,7 +1685,7 @@ class Model:
         self._threads_per_chain = threads_per_chain
         self.n_unconstrained = _lib.stanli_n_unconstrained(m)
         self.constrained_names = _variable_columns(
-            self._column_shapes(False))
+            self._column_shapes(_CONSTRAINED_COLUMNS))
 
     def _construct(self, seed, threads_per_chain):
         mir, stan_code, data_json = self._source
@@ -1728,6 +1769,7 @@ class Model:
         return bridgestan.StanModel(runtime_path(), self.bridgestan_data(name),
                                     **kw)
 
+    @_one_call_at_a_time
     def whiten(self, q_hat, perm, L, lowrank=None):
         """EXPERIMENTAL. A new Model over whitened coordinates z.
 
@@ -1793,6 +1835,7 @@ class Model:
                                  f"shape ({n},) and B, W of shape ({n}, k)")
             lowrank = (c.copy(), B.copy(), W.copy())
         out = Model.__new__(Model)
+        out._lock = threading.RLock()
         out._fast_math = self._fast_math
         out._label = self._label
         out._source = self._source
@@ -1826,17 +1869,20 @@ class Model:
         return self._threads_per_chain
 
     @property
+    @_one_call_at_a_time
     def reduce_sum_count(self):
         """Number of retained native parallel reductions in the prepared graph."""
         return _lib.stanli_reduce_sum_count(self._handle)
 
     @property
+    @_one_call_at_a_time
     def reduce_sum_fallbacks(self):
         """Graph-lowering refusal reasons; opaque runtime regions are not inventoried."""
         m = self._handle
         return [_lib.stanli_reduce_sum_fallback(m, i).decode()
                 for i in range(_lib.stanli_n_reduce_sum_fallbacks(m))]
 
+    @_one_call_at_a_time
     def _prepare_run(self, seed, threads_per_chain=None):
         # threads_per_chain is given only by sample()'s deprecated argument.
         if threads_per_chain is None:
@@ -1853,6 +1899,7 @@ class Model:
             _lib.stanli_model_free(self._m)
             self._m = None
 
+    @_one_call_at_a_time
     def log_prob_grad(self, q):
         """log density (jacobian included) and gradient at unconstrained q."""
         q = np.ascontiguousarray(q, dtype=np.float64)
@@ -1861,16 +1908,19 @@ class Model:
                              f"{self.n_unconstrained} unconstrained parameters")
         lp = ctypes.c_double()
         grad = np.empty(self.n_unconstrained)
+        err = ctypes.create_string_buffer(4096)
         with _native_output():
-            rc = _lib.stanli_grad(self._handle, _dptr(q), ctypes.byref(lp),
-                                  _dptr(grad))
-        if rc != 0:
+            status = _lib.stanli_grad_err(self._handle, _dptr(q),
+                                          ctypes.byref(lp), _dptr(grad), err,
+                                          len(err))
+        if status != 0:
             # The gradient buffer is uninitialized on failure; never let a
             # caller see it.
-            raise RuntimeError("log density evaluation failed at this point "
-                               "(domain error in a distribution or function)")
+            raise RuntimeError(f"{_EVAL_FAILURE[status]}: "
+                               f"{err.value.decode(errors='replace')}")
         return lp.value, grad
 
+    @_one_call_at_a_time
     def log_prob_hessian(self, q):
         """log density, gradient and Hessian at unconstrained q.
 
@@ -1888,14 +1938,16 @@ class Model:
         grad = np.empty(n)
         hess = np.empty((n, n))
         err = ctypes.create_string_buffer(4096)
-        with _native_output():
-            rc = _lib.stanli_hessian(self._handle, _dptr(q), ctypes.byref(lp),
-                                     _dptr(grad), _dptr(hess), err, len(err))
+        rc = _interruptible(lambda poll, interrupted: (
+            _lib.stanli_hessian_with_poll(
+                self._handle, _dptr(q), ctypes.byref(lp), _dptr(grad),
+                _dptr(hess), poll, None, interrupted, err, len(err))))
         if rc != 0:
             raise RuntimeError("Hessian evaluation failed at this point: "
                                + err.value.decode(errors="replace"))
         return lp.value, grad, hess
 
+    @_one_call_at_a_time
     def unconstrain(self, values):
         """Starting values on the CONSTRAINED scale, as the free vector.
 
@@ -1904,9 +1956,10 @@ class Model:
         declared size; a missing, unknown, wrong-length, or out-of-support
         value raises naming the parameter.
 
-        Containers are listed in Stan's own serialization order -- the first
-        index fastest, the order a CSV column carries -- and may be nested or
-        flat; the declaration owns the shape either way.
+        Each value has its declared shape, as CmdStan requires of a starting
+        value: a numpy array of that shape, or lists nested first index
+        outermost. A flat list for a matrix, or a transposed one, raises.
+        A zero-size parameter may be left out.
 
         The result is what `sample(inits=...)`, `optimize(init=...)`, and
         `log_prob_grad` all take, so unconstraining is a step you do once per
@@ -1923,6 +1976,7 @@ class Model:
             raise ValueError(err.value.decode())
         return q
 
+    @_one_call_at_a_time
     def _unconstrained_layout(self):
         """[(parameter name, unconstrained entries)] in vector order.
 
@@ -1934,23 +1988,16 @@ class Model:
                 for i in range(_lib.stanli_n_param_blocks(self._handle))]
 
     def _column_names(self):
-        """The CSV columns for a draw, and whether write_array supplies them.
+        """The CSV columns of a draw: the row every entry point writes."""
+        return _variable_columns(self._column_shapes(_OUTPUT_COLUMNS))
 
-        Every column CmdStan would write when the model has a generated
-        quantities section; the constrained parameters otherwise.
-        """
-        if _lib.stanli_wa_n_columns(self._handle) > 0:
-            return _variable_columns(self._column_shapes(True)), True
-        return list(self.constrained_names), False
-
-    def _column_variables(self, write_array):
+    def _column_variables(self):
         """The declared variables behind _column_names, from the runtime."""
-        return _variables_from_shapes(self._column_shapes(write_array))
+        return _variables_from_shapes(self._column_shapes(_OUTPUT_COLUMNS))
 
-    def _column_shapes(self, write_array):
-        """The runtime's (CmdStan name, dims) behind _column_names."""
+    def _column_shapes(self, which):
+        """The runtime's (CmdStan name, dims) for one set of columns."""
         m = self._m
-        which = _WRITE_ARRAY_COLUMNS if write_array else _CONSTRAINED_COLUMNS
         shapes = []
         for i in range(_lib.stanli_n_variables(m, which)):
             dims = tuple(_lib.stanli_variable_dim(m, which, i, k) for k in
@@ -1959,6 +2006,7 @@ class Model:
                            dims))
         return shapes
 
+    @_one_call_at_a_time
     def parameter_annotations(self):
         """The declaration annotations on each parameter.
 
@@ -1981,6 +2029,7 @@ class Model:
                     for k in range(count)]
         return found
 
+    @_one_call_at_a_time
     def optimize(self, *, seed=1, iter=2000, jacobian=True, init=None,
                  init_radius=2.0):
         """The mode by L-BFGS -- the same optimizer CmdStan's `optimize` runs.
@@ -1997,28 +2046,24 @@ class Model:
         returning the other quantity -- the two differ for any
         constrained parameter, which is most models.
         """
-        seed = _seed_arg(seed)
-        iter = _int_arg("iter", iter)
-        init_radius = _real_arg("init_radius", init_radius)
-        if iter < 1:
-            raise ValueError("iter must be an integer >= 1")
-        if not (math.isfinite(init_radius) and init_radius >= 0):
-            raise ValueError("init_radius must be a finite number >= 0")
+        opts = _OptimizeOpts()
+        _lib.stanli_optimize_opts_init(ctypes.byref(opts))
+        opts.seed = _seed_arg(seed)
+        opts.iter = _int_arg("iter", iter)
+        opts.jacobian = 1
+        opts.init_radius = _real_arg("init_radius", init_radius)
+        err = ctypes.create_string_buffer(4096)
+        if _lib.stanli_optimize_opts_check(ctypes.byref(opts), err, len(err)):
+            raise ValueError(err.value.decode())
         if init is not None:
             _reject_named_start("init", init)
-        self._prepare_run(seed)
+        self._prepare_run(opts.seed)
         if not jacobian:
             raise NotImplementedError(
                 "stanli folds the Jacobian into the graph at lowering "
                 "time, so the penalized maximum likelihood (CmdStan's "
                 "jacobian=0) is not available; optimize() returns the "
                 "posterior mode")
-        opts = _OptimizeOpts()
-        _lib.stanli_optimize_opts_init(ctypes.byref(opts))
-        opts.seed = seed
-        opts.iter = iter
-        opts.jacobian = 1
-        opts.init_radius = init_radius
         init_arr = None
         if init is not None:
             init_arr = np.ascontiguousarray(init, dtype=np.float64)
@@ -2028,16 +2073,15 @@ class Model:
                     f"unconstrained scale, got {init_arr.shape}")
             opts.init = _dptr(init_arr)
 
-        names, write_array = self._column_names()
-        variables = self._column_variables(write_array)
+        names = self._column_names()
+        variables = self._column_variables()
         q = np.empty(self.n_unconstrained)
         vals = np.empty(len(names))
         lp = ctypes.c_double()
-        err = ctypes.create_string_buffer(4096)
-        with _native_output():
-            rc = _lib.stanli_optimize(self._handle, ctypes.byref(opts),
-                                      _dptr(q), _dptr(vals), ctypes.byref(lp),
-                                      err, len(err))
+        rc = _interruptible(lambda poll, interrupted: (
+            _lib.stanli_optimize_with_poll(
+                self._handle, ctypes.byref(opts), _dptr(q), _dptr(vals),
+                ctypes.byref(lp), poll, None, interrupted, err, len(err))))
         del init_arr
         if rc != 0:
             raise RuntimeError(f"optimize failed: {err.value.decode()}")
@@ -2047,12 +2091,13 @@ class Model:
         out.lp = lp.value
         return out
 
+    @_one_call_at_a_time
     def sample(self, *, chains=4, seed=1, warmup=1000, samples=1000,
                delta=0.8, max_depth=10, thin=1, save_warmup=False,
                inits=None, init_radius=2.0, pathfinder_init=None,
-               parallel_chains=None, refresh=100, threads_per_chain=None,
-               metric="diag_e", inv_metric=None, step_size=None,
-               adapt_engaged=True, adapt_metric=True, continue_from=None):
+               parallel_chains=None, refresh=100, show_messages=True,
+               threads_per_chain=None, metric="diag_e", inv_metric=None, step_size=None,
+               adapt_engaged=None, adapt_metric=True, continue_from=None):
         """NUTS draws as a Fit.
 
         Four chains by default, because R-hat needs more than one and a
@@ -2101,11 +2146,11 @@ class Model:
         list of one array per chain such as `fit.inv_metric`. None starts from
         the identity. "unit_e" takes none. `step_size` is the initial step
         size (default 1). `adapt_engaged=False` runs no adaptation, so the
-        metric and step size stay as given. With warmup under 150 Stan does
-        not adapt the metric and a supplied one is kept, as in CmdStan. With
-        `adapt_engaged=True` and `warmup=0` Stan still runs its initial step
-        size search, so use `adapt_engaged=False` to run at exactly `step_size`.
-        `adapt_metric=False` with `adapt_engaged=True` adapts only the step
+        metric and step size stay as given. The default, None, means True
+        unless `warmup=0`, which then runs at exactly `step_size`; an explicit
+        `adapt_engaged=True` with `warmup=0` is an error, as in CmdStan. With
+        warmup under 150 Stan does not adapt the metric and a supplied one is
+        kept, as in CmdStan. `adapt_metric=False` with `adapt_engaged=True` adapts only the step
         size and keeps `inv_metric` (the identity if None) unchanged; it has
         no effect with "unit_e" or `adapt_engaged=False`.
 
@@ -2116,8 +2161,11 @@ class Model:
         `adapt_engaged=False`.
 
         `refresh` is the number of transitions between CmdStan-shaped
-        progress updates. The default is 100; zero disables all automatic
-        progress, timing, and sampler-problem output. Reporting only observes
+        progress updates. The default is 100; zero disables the automatic
+        progress, timing, and sampler-problem summaries. The sampler's own
+        notices (a rejected proposal, too few warmup iterations to adapt) print
+        whatever `refresh` is, as in CmdStan. `show_messages=False` drops them,
+        and with them anything the model itself prints. Reporting only observes
         the run and does not change draws, sampler statistics, or RNG streams.
 
         `continue_from=fit` runs `samples` more transitions of each of the
@@ -2128,9 +2176,9 @@ class Model:
         the run a single call with the summed `samples` would have made,
         bitwise, generated quantities included, when the model has the same
         `threads_per_chain` as the run that made the fit. Only `samples`,
-        `refresh`, `parallel_chains` and the deprecated `threads_per_chain`
-        can be given with it; the other settings come from the fit. The model
-        and data must be the ones that made the fit.
+        `refresh`, `show_messages`, `parallel_chains` and the deprecated
+        `threads_per_chain` can be given with it; the other settings come
+        from the fit. The model and data must be the ones that made the fit.
 
         Columns are every column CmdStan's CSV would carry -- constrained
         parameters, transformed parameters, generated quantities, with RNG
@@ -2158,12 +2206,12 @@ class Model:
             threads_per_chain = self.threads_per_chain
         threads_per_chain = _threads_per_chain(threads_per_chain)
         if threads_per_chain != self.threads_per_chain:
-            warnings.warn(
+            _warn_caller(
                 f"passing threads_per_chain to sample() is deprecated. This "
                 f"call rebuilds the model for {threads_per_chain} threads, "
                 f"and the model keeps that count. Build the model with "
                 f"Model(..., threads_per_chain={threads_per_chain}) instead.",
-                DeprecationWarning, stacklevel=2)
+                DeprecationWarning)
         seed = _seed_arg(seed)
         if inits is not None:
             _reject_named_start("inits", inits)
@@ -2171,10 +2219,13 @@ class Model:
             raise ValueError(
                 f"metric must be one of {', '.join(_METRICS)}, got {metric!r}")
         step_size_value = _check_step_size(step_size)
-        if not isinstance(adapt_engaged, (bool, np.bool_)):
-            raise TypeError("adapt_engaged must be a bool")
+        if adapt_engaged is not None and not isinstance(
+                adapt_engaged, (bool, np.bool_)):
+            raise TypeError("adapt_engaged must be a bool or None")
         if not isinstance(adapt_metric, (bool, np.bool_)):
             raise TypeError("adapt_metric must be a bool")
+        if not isinstance(show_messages, (bool, np.bool_)):
+            raise TypeError("show_messages must be a bool")
         if isinstance(refresh, (bool, np.bool_)):
             raise TypeError("refresh must be a nonnegative integer")
         try:
@@ -2192,6 +2243,8 @@ class Model:
         opts.seed = seed
         opts.chains = _int_arg("chains", chains)
         opts.warmup = _int_arg("warmup", warmup)
+        if adapt_engaged is None:
+            adapt_engaged = opts.warmup != 0
         opts.samples = _int_arg("samples", samples)
         opts.thin = _int_arg("thin", thin)
         opts.delta = _real_arg("delta", delta)
@@ -2219,12 +2272,12 @@ class Model:
             pf = _pathfinder_init_options(pathfinder_init)
             init_arr = np.empty((opts.chains, self.n_unconstrained))
             err = ctypes.create_string_buffer(4096)
-            with _native_output():
-                rc = _lib.stanli_pathfinder_inits(
+            rc = _interruptible(lambda poll, interrupted: (
+                _lib.stanli_pathfinder_inits_with_poll(
                     self._handle, opts.seed, opts.chain_id, opts.chains,
                     pf["num_iterations"], pf["num_elbo_draws"],
                     pf["history_size"], pf["init_radius"], _dptr(init_arr),
-                    None, None, err, len(err))
+                    None, None, poll, None, interrupted, err, len(err))))
             if rc != 0:
                 raise RuntimeError(
                     f"Pathfinder initialization failed: {err.value.decode()}")
@@ -2277,10 +2330,9 @@ class Model:
         opts.resume_out = ctypes.addressof(resume_out)
 
         n_stored = _lib.stanli_n_stored_draws(ctypes.byref(opts))
-        raw = np.empty((opts.chains, n_stored, self.n_unconstrained))
         stats = np.empty((opts.chains, n_stored, _N_SAMPLER_COLS))
-        names, write_array = self._column_names()
-        variables = self._column_variables(write_array)
+        names = self._column_names()
+        variables = self._column_variables()
         out = np.empty((opts.chains, n_stored, len(names)))
         reports = (_SampleReport * opts.chains)()
         err = ctypes.create_string_buffer(4096)
@@ -2294,7 +2346,7 @@ class Model:
                 if callback_errors:
                     return
                 try:
-                    _flush_messages()
+                    _flush_messages(show_messages)
                     _print_sample_progress(chain_id, iteration, total,
                                            is_warmup, n_divergent,
                                            n_max_treedepth, opts.max_depth)
@@ -2307,11 +2359,11 @@ class Model:
             progress_cb = _SampleProgressCallback(progress)
 
         interrupted = ctypes.c_int(0)
-        watch = _InterruptWatch()
-        with watch, _native_output():
+        watch = _InterruptWatch(show_messages)
+        with watch, _native_output(show_messages):
             failed = _lib.stanli_sample_multi_metric(
                 self._handle, ctypes.byref(opts), ctypes.byref(metric_opts),
-                refresh, _dptr(raw), _dptr(stats), _dptr(out), progress_cb,
+                refresh, None, _dptr(stats), _dptr(out), progress_cb,
                 None, watch.poll, None, ctypes.byref(interrupted), reports,
                 err, len(err))
         del init_arr, inv_metric_arr

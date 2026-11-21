@@ -1,4 +1,6 @@
+#include <stanli/builtin_registry.hpp>
 #include <stanli/debug_switch.hpp>
+#include <stanli/int_arith.hpp>
 #include <stanli/structured_loop.hpp>
 #include <stanli/message_sink.hpp>
 #include <stanli/optable.hpp>
@@ -376,9 +378,8 @@ void classify(StructuredLoop& p) {
       // own adjoint and reverse call, preserving the order of contributions
       // to shared inputs. Stateful/scratch-bearing kernels keep full calls.
       const Kernel* k = find_kernel(op.opcode);
-      if (debug_env("STANLI_NO_STRUCTURED_INVARIANT_PRIMALS") || op.out2 >= 0 ||
-          op.dyn_lengths || n.kernel_scratch || !k || k->make_state ||
-          n.forward != k->forward || n.backward != k->backward)
+      if (op.out2 >= 0 || op.dyn_lengths || n.kernel_scratch || !k ||
+          k->make_state || n.forward != k->forward || n.backward != k->backward)
         return;
     }
     for (int loop : enclosing) {
@@ -515,34 +516,16 @@ int64_t integer(double x) {
   return static_cast<int64_t>(x);
 }
 void int_forward(KernelCtx& c) {
-  const int64_t a = integer(c.in[0].data[0]);
-  const int64_t b = c.n_in > 1 ? integer(c.in[1].data[0]) : 0;
-  int64_t v;
-  switch (c.variant) {
-    case 0:
-      v = a + b;
-      break;
-    case 1:
-      v = a - b;
-      break;
-    case 2:
-      v = a * b;
-      break;
-    case 3:
-      if (b == 0) throw std::domain_error("integer division by zero");
-      v = a / b;
-      break;
-    case 4:
-      if (b == 0) throw std::domain_error("integer remainder by zero");
-      v = a % b;
-      break;
-    case 5:
-      v = -a;
-      break;
-    default:
-      throw std::logic_error("invalid integer arithmetic variant");
-  }
-  c.out.data[0] = static_cast<double>(integer(static_cast<double>(v)));
+  const int a = static_cast<int>(integer(c.in[0].data[0]));
+  const int b = c.n_in > 1 ? static_cast<int>(integer(c.in[1].data[0])) : 0;
+  static constexpr IntOp kOps[] = {IntOp::Add, IntOp::Sub, IntOp::Mul,
+                                   IntOp::Div, IntOp::Mod};
+  if (c.variant == 5)
+    c.out.data[0] = int_negate(a);
+  else if (c.variant < 5)
+    c.out.data[0] = int_arith(kOps[c.variant], a, b);
+  else
+    throw std::logic_error("invalid integer arithmetic variant");
 }
 
 // The tail past the logical extent is never read; zero keeps it defined.
@@ -754,6 +737,16 @@ IndexRuntime validate_index(const DynamicIndexSpec& p, const KernelCtx& c,
         (axis.kind == DynamicIndexSpec::Axis::Single && axis.count != 1) ||
         (axis.kind == DynamicIndexSpec::Axis::All && axis.count != axis.extent))
       index_fault("invalid structured index shape");
+    if (axis.kind == DynamicIndexSpec::Axis::Range && axis.upfrom) {
+      const double lo = selector->data[axis.input_offset];
+      if (!std::isfinite(lo) || std::trunc(lo) != lo ||
+          std::fabs(lo) > std::numeric_limits<int32_t>::max() ||
+          !resolve_range_selector(
+               axis.array_axis ? SelectorSite::Array : SelectorSite::Vector,
+               logical_extent, static_cast<int64_t>(lo), std::nullopt)
+               .ok())
+        index_out_of_range();
+    }
     // Validate selectors even when a different axis makes the result empty.
     if (axis.kind == DynamicIndexSpec::Axis::All ||
         (axis.kind == DynamicIndexSpec::Axis::Range && count == 0))
@@ -1596,8 +1589,6 @@ struct LoopState : KernelState {
   std::unique_ptr<FrameTape> frames;
   bool frame_mode = false;
   bool frame_auto = false;
-  bool frame_layout = debug_env("STANLI_NO_STRUCTURED_FRAME_LAYOUT") == nullptr;
-  bool frame_clone = debug_env("STANLI_NO_STRUCTURED_FRAME_CLONE") == nullptr;
   bool frame_instance =
       debug_env("STANLI_NO_STRUCTURED_FRAME_INSTANCE") == nullptr;
   const double* initial = nullptr;

@@ -421,9 +421,8 @@ bool gen_adjoint(IslandProg& p, bool keep_every_clear) {
   // vars copies a POINTER, so every later read of either register lands on
   // one adjoint in tape order. Giving the copy its own cell and adding the
   // total back at the copy would be the same derivative grouped
-  // differently, which shows up as a last-bit disagreement on exactly the
-  // models islands were built for (iohmm_reg copies a 1,500-element state
-  // vector per step).
+  // differently, which shows up as a last-bit disagreement in programs that
+  // copy a long state vector on every step.
   auto aliasable = [&](const Program::Instr& I, int i) {
     if (I.code != Program::MOV && I.code != Program::MOVR) return false;
     const int len = I.code == Program::MOV ? 1 : I.len;

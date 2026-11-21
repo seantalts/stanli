@@ -10,6 +10,7 @@ sample_more(
   refresh = 100,
   parallel_chains = NULL,
   threads_per_chain = NULL,
+  show_messages = TRUE,
   ...
 )
 }
@@ -19,7 +20,10 @@ sample_more(
 \item{samples}{Further transitions per chain, before thinning.}
 
 \item{refresh}{Print a progress update every `refresh` transitions; the
-numbering continues from the fit's transitions. 0 is silent.}
+numbering continues from the fit's transitions. 0 prints no progress.}
+
+\item{show_messages}{`FALSE` drops the sampler's notices and the model's own
+output, as in [sample_model()].}
 
 \item{parallel_chains}{Chains to run at once. Defaults to all of them.}
 

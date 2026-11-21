@@ -3,8 +3,10 @@
 // accumulation shapes (see constrain.cpp for why: packet math vs libm).
 // Shape dispatch is runtime: len==1 broadcasts.
 #include <stanli/builtin_registry.hpp>
+#include <stanli/extrema_grouping.hpp>
 #include <stanli/graph.hpp>
 #include <stanli/optable.hpp>
+#include <stanli/pairwise_sum.hpp>
 
 #include <stan/math/prim.hpp>
 
@@ -31,6 +33,16 @@ inline MapA dx_a(KernelCtx& ctx, int i) {
 }
 inline bool scal(const KernelCtx& ctx, int i) { return ctx.in[i].len == 1; }
 
+// The backward of add, sub and mul runs once per scalar op, millions of
+// times per gradient in some models. Each handles a scalar output itself and
+// calls an out-of-line function for vectors, so that the scalar case needs
+// no stack frame for the vector case's sums.
+#if defined(_MSC_VER) && !defined(__clang__)
+#define STANLI_VECTOR_CASE __declspec(noinline)
+#else
+#define STANLI_VECTOR_CASE __attribute__((noinline))
+#endif
+
 // ---- binaries --------------------------------------------------------------
 void add_fwd(KernelCtx& ctx) {
   if (scal(ctx, 0) && scal(ctx, 1))
@@ -42,11 +54,16 @@ void add_fwd(KernelCtx& ctx) {
   else
     out_a(ctx) = in_a(ctx, 0) + in_a(ctx, 1);
 }
-// Scalar-broadcast adjoints accumulate ascending, directly into the
-// accumulator: the rev overloads' reverse callbacks loop coefficients in
-// ascending order (measured against add(var, Matrix<var>); a local Eigen
-// sum added once differs by 1 ULP).
+// A broadcast scalar's adjoint adds the vector's adjoints with add_sum. When
+// a pass merges a loop into this op the sum has thousands of terms, and a
+// plain loop loses more accuracy than CmdStan's one call per element does.
+STANLI_VECTOR_CASE void add_bwd_vector(KernelCtx& ctx);
 void add_bwd(KernelCtx& ctx) {
+  if (ctx.out.len != 1 || ctx.variant) return add_bwd_vector(ctx);
+  for (int k = 0; k < 2; ++k)
+    if (ctx.in_adj[k].data) ctx.in_adj[k].data[0] += ctx.out_adj;
+}
+void add_bwd_vector(KernelCtx& ctx) {
   if (ctx.variant) {
     const int original = ctx.variant == kAddTransposeRight ? 0 : 1;
     if (!ctx.in_adj[original].data) return;
@@ -66,8 +83,8 @@ void add_bwd(KernelCtx& ctx) {
       if (ctx.out.len == 1) {
         ctx.in_adj[k].data[0] += ctx.out_adj;
       } else {
-        for (int64_t i = 0; i < ctx.out.len; ++i)
-          ctx.in_adj[k].data[0] += ctx.out_adj_vec.data[i];
+        add_sum(ctx.in_adj[k].data[0], ctx.out.len,
+                [&](int64_t i) { return ctx.out_adj_vec.data[i]; });
       }
     } else {
       dx_a(ctx, k) += dout_a(ctx);
@@ -85,14 +102,20 @@ void sub_fwd(KernelCtx& ctx) {
   else
     out_a(ctx) = in_a(ctx, 0) - in_a(ctx, 1);
 }
+STANLI_VECTOR_CASE void sub_bwd_vector(KernelCtx& ctx);
 void sub_bwd(KernelCtx& ctx) {
+  if (ctx.out.len != 1) return sub_bwd_vector(ctx);
+  if (ctx.in_adj[0].data) ctx.in_adj[0].data[0] += ctx.out_adj;
+  if (ctx.in_adj[1].data) ctx.in_adj[1].data[0] -= ctx.out_adj;
+}
+void sub_bwd_vector(KernelCtx& ctx) {
   if (ctx.in_adj[0].data) {
     if (scal(ctx, 0)) {
       if (ctx.out.len == 1) {
         ctx.in_adj[0].data[0] += ctx.out_adj;
       } else {
-        for (int64_t i = 0; i < ctx.out.len; ++i)
-          ctx.in_adj[0].data[0] += ctx.out_adj_vec.data[i];
+        add_sum(ctx.in_adj[0].data[0], ctx.out.len,
+                [&](int64_t i) { return ctx.out_adj_vec.data[i]; });
       }
     } else {
       dx_a(ctx, 0) += dout_a(ctx);
@@ -103,8 +126,8 @@ void sub_bwd(KernelCtx& ctx) {
       if (ctx.out.len == 1) {
         ctx.in_adj[1].data[0] -= ctx.out_adj;
       } else {
-        for (int64_t i = 0; i < ctx.out.len; ++i)
-          ctx.in_adj[1].data[0] -= ctx.out_adj_vec.data[i];
+        add_sum(ctx.in_adj[1].data[0], ctx.out.len,
+                [&](int64_t i) { return -ctx.out_adj_vec.data[i]; });
       }
     } else {
       dx_a(ctx, 1) -= dout_a(ctx);
@@ -129,15 +152,17 @@ void fma_bwd(KernelCtx& ctx) {
   const auto adj = [&](int64_t i) {
     return ctx.out.len == 1 ? ctx.out_adj : ctx.out_adj_vec.data[i];
   };
-  for (int k = 0; k < 2; ++k) {
+  for (int k = 0; k < 3; ++k) {
     if (!ctx.in_adj[k].data) continue;
-    const int other = 1 - k;
-    for (int64_t i = 0; i < ctx.out.len; ++i)
-      ctx.in_adj[k].data[ctx.in[k].len == 1 ? 0 : i] += adj(i) * v(other, i);
+    const auto term = [&](int64_t i) {
+      return k == 2 ? adj(i) : adj(i) * v(1 - k, i);
+    };
+    if (ctx.in[k].len == 1 && ctx.out.len > 1)
+      add_sum(ctx.in_adj[k].data[0], ctx.out.len, term);
+    else
+      for (int64_t i = 0; i < ctx.out.len; ++i)
+        ctx.in_adj[k].data[i] += term(i);
   }
-  if (ctx.in_adj[2].data)
-    for (int64_t i = 0; i < ctx.out.len; ++i)
-      ctx.in_adj[2].data[ctx.in[2].len == 1 ? 0 : i] += adj(i);
 }
 
 void mul_fwd(KernelCtx& ctx) {
@@ -150,19 +175,21 @@ void mul_fwd(KernelCtx& ctx) {
   else
     out_a(ctx) = in_a(ctx, 0) * in_a(ctx, 1);  // elt_multiply
 }
+STANLI_VECTOR_CASE void mul_bwd_vector(KernelCtx& ctx);
 void mul_bwd(KernelCtx& ctx) {
+  if (ctx.out.len != 1) return mul_bwd_vector(ctx);
+  if (ctx.in_adj[0].data)
+    ctx.in_adj[0].data[0] += ctx.out_adj * ctx.in[1].data[0];
+  if (ctx.in_adj[1].data)
+    ctx.in_adj[1].data[0] += ctx.out_adj * ctx.in[0].data[0];
+}
+void mul_bwd_vector(KernelCtx& ctx) {
   const bool s0 = scal(ctx, 0), s1 = scal(ctx, 1);
-  if (ctx.out.len == 1) {
-    if (ctx.in_adj[0].data)
-      ctx.in_adj[0].data[0] += ctx.out_adj * ctx.in[1].data[0];
-    if (ctx.in_adj[1].data)
-      ctx.in_adj[1].data[0] += ctx.out_adj * ctx.in[0].data[0];
-    return;
-  }
   if (ctx.in_adj[0].data) {
     if (s0) {
-      for (int64_t i = 0; i < ctx.out.len; ++i)
-        ctx.in_adj[0].data[0] += ctx.out_adj_vec.data[i] * ctx.in[1].data[i];
+      add_sum(ctx.in_adj[0].data[0], ctx.out.len, [&](int64_t i) {
+        return ctx.out_adj_vec.data[i] * ctx.in[1].data[i];
+      });
     } else if (s1) {
       dx_a(ctx, 0) += dout_a(ctx) * ctx.in[1].data[0];
     } else {
@@ -171,8 +198,9 @@ void mul_bwd(KernelCtx& ctx) {
   }
   if (ctx.in_adj[1].data) {
     if (s1) {
-      for (int64_t i = 0; i < ctx.out.len; ++i)
-        ctx.in_adj[1].data[0] += ctx.out_adj_vec.data[i] * ctx.in[0].data[i];
+      add_sum(ctx.in_adj[1].data[0], ctx.out.len, [&](int64_t i) {
+        return ctx.out_adj_vec.data[i] * ctx.in[0].data[i];
+      });
     } else if (s0) {
       dx_a(ctx, 1) += dout_a(ctx) * ctx.in[0].data[0];
     } else {
@@ -425,7 +453,7 @@ void cumsum_fwd(KernelCtx& ctx) {
   }
 }
 void cumsum_bwd(KernelCtx& ctx) {
-  if (!ctx.in_adj[0].data) return;
+  if (!ctx.in_adj[0].data || ctx.out.len == 0) return;
   if (ctx.out.len == 1) {
     ctx.in_adj[0].data[0] += ctx.out_adj;
     return;
@@ -581,7 +609,15 @@ void logitv_bwd(KernelCtx& ctx) {
   }
 }
 
-void mean_fwd(KernelCtx& ctx) { ctx.out.data[0] = in_a(ctx, 0).mean(); }
+// mean = sum / n, the sum grouped like OP_SUM_VEC's (the variant), which is
+// what Eigen's mean() computes for the container Stan Math was given.
+void mean_fwd(KernelCtx& ctx) {
+  const int64_t n = ctx.in[0].len;
+  stan::math::check_nonzero_size("mean", "m", in_a(ctx, 0));
+  ctx.out.data[0] = sum_grouped(ctx.in[0].data, n, (SumGrouping)ctx.variant,
+                                ctx.n_idata > 0 ? ctx.idata[0] : 0) /
+                    static_cast<double>(n);
+}
 void mean_bwd(KernelCtx& ctx) {
   if (!ctx.in_adj[0].data) return;
   const double d = ctx.out_adj / static_cast<double>(ctx.in[0].len);
@@ -594,6 +630,11 @@ void mean_bwd(KernelCtx& ctx) {
 template <bool StdDev>
 void dispersion_fwd(KernelCtx& ctx) {
   const int64_t n = ctx.in[0].len;
+  stan::math::check_nonzero_size(StdDev ? "sd" : "variance",
+                                 StdDev                              ? "x"
+                                 : ctx.variant & kVarianceOfVarArray ? "v"
+                                                                     : "m",
+                                 in_a(ctx, 0));
   if (n == 1) {
     ctx.out.data[0] = 0.0;
     ctx.scratch[0] = 0.0;
