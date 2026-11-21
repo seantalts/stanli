@@ -260,15 +260,42 @@ _REGROUPED_ADJOINT = ("adjoint sums regrouped by vectorized random-effect "
                       "loops; checked against a 60-digit reference")
 # brms centres each predictor column on its mean in transformed data. The
 # gradient entry of a centred predictor's coefficient is a sum over rows of
-# the centred column times a residual, which cancels: in sw_binomial and
-# sw_negbinomial the terms add up to 37 to 1,240 times the result, and one
-# rounding per term is 23 to 1,110 ULP of the entry. Stanli's compensated
+# the centred column times a residual, which cancels. Stanli's compensated
 # mean gives centred data closer to the exact centring than CmdStan's (whose
 # mean and centred column are those of stanli without compensation, checked
-# with CmdStan on sw_negbinomial), and the entries then move by hundreds of
-# their own ULP either way. Against the largest gradient entry, stanli is at
-# most 5 ULP from CmdStan, and both engines are within 8.8 ULP of the
-# 80-digit gradient (tools/hp; sw_re_slope's 8.7 is the same for both).
+# with CmdStan on sw_negbinomial), and the entries then move by several to
+# hundreds of their own ULP either way, as each platform's own rounding of
+# the cancelling sum also does.
+#
+# The rule: a brms fixture whose transformed data centres a predictor on a
+# mean of more than 32 rows (which stanli adds with compensation) measures its
+# gradient against the largest entry when, at point 0 or 1, the entry of a
+# centred coefficient cancels so far that one rounding per term is at least 5
+# ULP of the entry, half the per-element limit. The 50-digit interpreter
+# measures it from d lp / d Xc[i, j] = b[j] * s[i] (point 2 has b = 0 and is
+# not measured): of the 105 fixtures that centre, 79 have this property, with
+# terms that add up to 6.7 to 17,951 times the entry and one rounding per
+# term 5.2 to 12,904 ULP of it. Ten of them were already measured this way
+# for their regrouped adjoints, and s2_wiener (below) cannot be measured.
+# The others that centre stay per element: 21 cancel less, s2_invgaussian
+# has no 50-digit measure, and three centre fewer than 33 rows, where the
+# mean is unchanged.
+#
+# sw_mv_rescor and sw_student show why the rule cannot be "failed on macOS":
+# both stayed within 10 ULP there, and on Linux x86-64 grad[4] at point 1 and
+# grad[1] at point 0 (terms 10.6 and 21.8 times the entry, 8.9 and 15.1 ULP
+# per rounding) were 14 and 16 ULP from CmdStan, while stanli was 4.9 and 9.1
+# and CmdStan 9.1 and 6.9 ULP from the 80-digit value, and both were within
+# 0.6 ULP of it against the largest entry.
+#
+# Against the largest entry, stanli is at most 7 ULP from CmdStan on macOS.
+# Where the 80-digit gradient decides (64 of these fixtures), stanli is
+# closer to it than CmdStan in 21, farther in 6 (by at most 3.5 ULP, in
+# s2_fcor) and the same in 37. In four censored or truncated fixtures
+# (s2_cens_interval, s2_weights_trunc, sw_cens, sw_trunc) both engines are
+# 1e9 ULP or more from it: Stan Math's normal_lcdf and normal_lccdf form their
+# partials from Abramowitz and Stegun's approximation 7.1.26. i319_pois_re2
+# has only directional 80-digit derivatives.
 _CENTRED_GRADIENT = ("gradient entries of mean-centred predictors cancel; "
                      "checked against an 80-digit reference")
 GRADIENT_AGAINST_LARGEST = {
@@ -280,11 +307,24 @@ GRADIENT_AGAINST_LARGEST = {
 }
 GRADIENT_AGAINST_LARGEST.update({
     name: _CENTRED_GRADIENT for name in (
-        "s2_cumulative_cauchit", "s2_custom_vreal", "sw_ar", "sw_binomial",
-        "sw_exgaussian", "sw_gaussian", "sw_hurdle_gamma", "sw_hurdle_pois",
-        "sw_ma", "sw_mixture", "sw_mv_norescor", "sw_negbinomial",
-        "sw_poisson", "sw_re_negbin", "sw_re_pois", "sw_re_slope",
-        "sw_vonmises", "sw_zi_binomial", "sw_zi_negbin", "sw_zi_poisson")
+        "i319_gauss_re", "i319_negbin_fixed", "i319_negbin_re",
+        "i319_pois_fixed", "i319_pois_re", "i319_pois_re2", "i320_sratio_cs",
+        "i320_sratio_plain", "s2_ar_cov", "s2_car_icar", "s2_categorical_re",
+        "s2_cens_interval", "s2_cosy", "s2_cox", "s2_cumulative_cauchit",
+        "s2_custom_vreal", "s2_discrete_weibull", "s2_dist_sigma_re",
+        "s2_fcor", "s2_gev", "s2_hurdle_cumulative", "s2_index_mi",
+        "s2_mixture_theta", "s2_mv_shared_re", "s2_rate", "s2_sar",
+        "s2_sar_error", "s2_unstr", "s2_weights_trunc", "s2_zi_beta",
+        "s2_zoi_beta", "sw_acat", "sw_acat_cs", "sw_ar", "sw_arma",
+        "sw_bernoulli", "sw_binomial", "sw_categorical", "sw_cratio",
+        "sw_cratio_cs", "sw_cumulative", "sw_cumulative_cs", "sw_dist_sigma",
+        "sw_exgaussian", "sw_gaussian", "sw_hurdle_gamma",
+        "sw_hurdle_lognormal", "sw_hurdle_pois", "sw_lognormal", "sw_ma",
+        "sw_mi", "sw_mixture", "sw_mv_norescor", "sw_mv_rescor",
+        "sw_negbinomial", "sw_poisson", "sw_re_gauss", "sw_re_negbin",
+        "sw_re_pois", "sw_re_slope", "sw_sratio", "sw_student", "sw_trunc",
+        "sw_vonmises", "sw_weights", "sw_zi_binomial", "sw_zi_negbin",
+        "sw_zi_poisson")
 })
 # The same centring, in two models that the 80-digit reference cannot judge.
 # s2_wiener: tools/hp has no wiener density, so only the part that changed is
