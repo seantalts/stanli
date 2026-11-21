@@ -422,7 +422,10 @@ class MirInterp {
             e.i.clear();
             for (const T& v : e.r) e.i.push_back((int)val(v));
           }
-        } else if (const DataMap::Entry* dp = data_lookup(st.decl_id)) {
+        } else if (const DataMap::Entry* dp =
+                       udf_depth_ == 0 ? data_lookup(st.decl_id) : nullptr) {
+          // A data block declaration. A function's local of the same name
+          // is a new variable.
           e = from_entry(*dp);
         } else if (st.decl_type.base == "SInt" ||
                    st.decl_type.base == "SReal") {
