@@ -1,10 +1,11 @@
 """Preparation work must not grow with the wrong part of a model.
 
-Each case prepares two sizes of one model shape and reads the lowering's work
-counters (`stanli_prep ... stage=lower_work`, printed under
-STANLI_PROFILE_PREP=1): the statements it lowered and the bytes of data it
-copied. The counters do not depend on the clock, so the bounds are exact
-consequences of the algorithm, not timer noise.
+Each case prepares two sizes of one model shape and reads work counters that
+STANLI_PROFILE_PREP=1 prints: how many statements lowering processed and how
+many bytes of data it copied (`stage=lower_work`), and how many lane steps
+reroll took (`stage=reroll ... lane_steps`). The counters do not depend on
+the clock, so the bounds are exact consequences of the algorithm, not timer
+noise.
 
   test_prep_work.py BENCH_GRAD STANC STANLI_RUN
 """
@@ -18,6 +19,8 @@ from pathlib import Path
 
 WORK = re.compile(r"stanli_prep graph=(\S+) stage=lower_work ns=\d+ "
                   r"statements=(\d+) copied_data_bytes=(\d+)")
+REROLL = re.compile(r"stanli_prep graph=(\S+) stage=reroll ns=\d+ .*?"
+                    r"lane_steps=(\d+)")
 
 
 def work(bench, stanc, directory, name, source, data):
@@ -34,11 +37,14 @@ def work(bench, stanc, directory, name, source, data):
     run = subprocess.run([bench, str(sexp), str(data_path), "--prep",
                           "--parallel-wa=off"],
                          check=True, capture_output=True, text=True, env=env)
-    rows, lowerings = {}, {}
+    rows, lowerings, lane_steps = {}, {}, {}
     for graph, statements, copied in WORK.findall(run.stdout + run.stderr):
         rows[graph] = (int(statements), int(copied))
         lowerings[graph] = lowerings.get(graph, 0) + 1
+    for graph, steps in REROLL.findall(run.stdout + run.stderr):
+        lane_steps[graph] = int(steps)
     rows["lowerings"] = lowerings
+    rows["lane_steps"] = lane_steps
     if "log_prob" not in rows:
         raise RuntimeError(f"{name}: no lower_work row in\n{run.stderr}")
     return rows
@@ -253,8 +259,36 @@ def check_write_array_lowered_once(measure):
     return []
 
 
+def rng_draws(n):
+    """generated quantities that store one scalar draw per element of a
+    vector of n elements."""
+    source = """data { int N; }
+parameters { real theta; }
+model { theta ~ normal(0, 1); }
+generated quantities {
+  vector[N] yrep;
+  for (n in 1:N) yrep[n] = normal_rng(theta, 1);
+}
+"""
+    return source, {"N": n}
+
+
+def check_reroll_rng_draws(measure):
+    small_n, large_n = 2000, 4000
+    small = measure("rng_small", *rng_draws(small_n))["lane_steps"]
+    large = measure("rng_large", *rng_draws(large_n))["lane_steps"]
+    small, large = small["write_array"], large["write_array"]
+    print(f"reroll over scalar draws: {small} lane steps for {small_n} "
+          f"draws, {large} for {large_n}")
+    if large > 3 * small:
+        return [f"twice the draws made reroll take {large / small:.1f} times "
+                f"the lane steps"]
+    return []
+
+
 CASES = [check_ifs_in_retained_loop, check_calls_in_retained_loop,
-         check_refused_retention, check_write_array_lowered_once]
+         check_refused_retention, check_write_array_lowered_once,
+         check_reroll_rng_draws]
 RUN_CASES = [check_reduce_sum_beside_data]
 
 
