@@ -44,18 +44,23 @@ let prune_portable_procedures (mir : Middle.Program.Typed.t) =
   let roots =
     List.fold_left (List.fold_left referenced_stmt) Function_names.empty
       [mir.prepare_data; mir.log_prob; mir.generate_quantities; mir.transform_inits] in
-  let rec closure names =
-    let next =
-      List.fold_left
-        (fun acc (fn : Middle.Stmt.Located.t Middle.Program.fun_def) ->
-          if Function_names.mem fn.fdname names then
-            match fn.fdbody with
-            | Some body -> referenced_stmt acc body
-            | None -> acc
-          else acc)
-        names mir.functions_block in
-    if Function_names.equal names next then names else closure next in
-  let reachable = closure roots in
+  let bodies = Hashtbl.create 16 in
+  List.iter
+    (fun (fn : Middle.Stmt.Located.t Middle.Program.fun_def) ->
+      Option.iter (Hashtbl.add bodies fn.fdname) fn.fdbody)
+    mir.functions_block;
+  (* Each reached name's bodies are read once. *)
+  let rec closure reached = function
+    | [] -> reached
+    | name :: rest when Function_names.mem name reached -> closure reached rest
+    | name :: rest ->
+        let found =
+          List.fold_left referenced_stmt Function_names.empty
+            (Hashtbl.find_all bodies name) in
+        closure
+          (Function_names.add name reached)
+          (List.rev_append (Function_names.elements found) rest) in
+  let reachable = closure Function_names.empty (Function_names.elements roots) in
   { mir with
     reverse_mode_log_prob= []
   ; unconstrain_array= []
