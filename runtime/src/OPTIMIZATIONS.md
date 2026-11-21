@@ -1755,9 +1755,7 @@ switch acts when the variable is set to any value, including an empty value or
 `0`, and the developer switches work only in a build configured with
 `-DSTANLI_DEBUG_SWITCHES=ON` (see the top of this file). Three variables are
 read with `getenv` directly and work in every build: `STANLI_NO_INTERPRETER`,
-`STANLI_NO_FUSED_DENSITY` and `STANLI_ISA`. A fourth that works in every build,
-`STANLI_NO_O1_FALLBACK`, is read by the OCaml compiler
-(`compiler/ocaml/stanli_pipeline.ml`). The runtime does not read it.
+`STANLI_NO_FUSED_DENSITY` and `STANLI_ISA`.
 
 Graph passes:
 

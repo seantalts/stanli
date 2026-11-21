@@ -68,7 +68,7 @@ repeatedly below.
 ```
 model.stan + data.json
   |  stanc3 parse/typecheck/Stan-Math transform (upstream OCaml)
-  v  stanli-owned budgeted O1 + vectorize_loops policy (typed OCaml)
+  v  stanli-owned O1 + vectorize_loops policy (typed OCaml)
 compiler/ocaml/stanli_pipeline.ml + portable_mir.ml
   |  canonical compact portable MIR v3
   v
@@ -99,26 +99,23 @@ Step by step:
    branch. It parses and typechecks with the same code CmdStan uses.
    [`stanli_pipeline.ml`](../compiler/ocaml/stanli_pipeline.ml) owns stanli's
    optimization policy: upstream O1 plus the separately selected upstream
-   `vectorize_loops` pass. Before O1's dataflow passes, it isolates function
-   inlining and measures the maximum statement-depth cost of any procedure.
-   It first computes a lower bound on that cost without inlining, so a
-   program whose functions call each other many levels deep falls back
-   before inlining makes it exponentially large. A cost over 20,000 uses the untouched transformed O0 MIR and reports an
-   O1 fallback notice, separate from the warnings (`O1FallbackWarning` in
-   Python, a `stanli_o1_fallback` condition in R, `o1Fallback` in the npm
-   package); `STANLI_NO_O1_FALLBACK=1` restores unconditional O1 for an A/B
-   compiler run. This avoids known pathological O1 behavior without a timeout,
-   compiler-thread cancellation, or partial-output recovery. It passes the
-   selected typed MIR value to
+   `vectorize_loops` pass. Every model gets O1, without O1's function
+   inlining: user function calls stay calls in the MIR. The runtime inlines
+   every call itself when it lowers the model. It knows the data then, so an
+   argument that is data makes the matching formal data in the body, as the
+   `data` qualifier would. Three O1 passes that change no portable MIR
+   (`optimize_soa`, `allow_uninitialized_decls` and `block_fixing`) are off.
+   The pipeline passes the selected typed MIR value to
    [`portable_mir.ml`](../compiler/ocaml/portable_mir.ml), which encodes the
    runtime's consumed slice. [`compiler/native/`](../compiler/native/) is the
    callback linked into native libraries; [`compiler/js/`](../compiler/js/)
    exports the same pipeline through js_of_ocaml and provides the CLI entry
    point cross-built for Windows as `stanli-compile.exe`. The CLI prints MIR
    on stdout and messages for people on stderr; with `--messages-json PATH`
-   it also writes `{"warnings": [...], "o1_fallback": null or "..."}` to
-   PATH, which the Python, R and native-tool callers read. The JavaScript
-   export returns the same notice in an `o1_fallback` field.
+   it also writes `{"warnings": [...]}` to PATH, which the Python, R and
+   native-tool callers read. `--passes none` gives the unoptimized MIR and
+   `--passes LIST` runs only the named passes, for comparing the optimizer
+   with unoptimized output.
 
    One of the fork's commits fixes integer folding. Upstream's partial
    evaluator folds with the host OCaml `int` width (63 bits natively and 32
@@ -815,8 +812,8 @@ ignored, with a one-time notice. `tools/dev_setup.sh` configures both of its
 builds ON. Tests that set a switch carry the CTest label `debug_switches`. In
 an OFF build a case that needs a switch skips itself and the rest of the test
 runs; tests where no case can run are disabled. `ctest -L debug_switches` runs
-them all in an ON build. See [Tests that need developer switches](#tests-that-need-developer-switches). `STANLI_NO_INTERPRETER`, `STANLI_ISA`, `STANLI_NO_FUSED_DENSITY` and
-`STANLI_NO_O1_FALLBACK` are not developer switches and work in every build.
+them all in an ON build. See [Tests that need developer switches](#tests-that-need-developer-switches). `STANLI_NO_INTERPRETER`, `STANLI_ISA` and `STANLI_NO_FUSED_DENSITY` are not
+developer switches and work in every build.
 
 `tools/build_jobs.sh` caps parallelism by CPU count and usable RAM: 4 GiB
 per concurrent Stan Math compile on macOS and Windows, 6 GiB elsewhere,
