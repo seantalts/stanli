@@ -443,12 +443,15 @@ void effectful_int_udf(const std::string& stem, const std::string& what) {
 
 // O1 inlines the direct call, so the effect arrives as a print statement;
 // routing it through a second UDF keeps it a UserDefined call that lowering
-// meets as a compile-time int demand. Neither may run the effect while
-// compiling.
+// meets as a compile-time int demand. The unoptimized fixtures keep both
+// calls. None may run the effect while compiling.
 void test_effectful_int_udf_is_not_observed() {
   effectful_int_udf("viewc_effectful_int_udf", "inlined effectful int UDF");
   effectful_int_udf("viewc_effectful_int_udf_nested",
                     "uninlined effectful int UDF");
+  effectful_int_udf("viewc_effectful_int_udf_o0", "effectful int UDF call");
+  effectful_int_udf("viewc_effectful_int_udf_nested_o0",
+                    "nested effectful int UDF call");
 }
 
 void test_data_size_effect_runs_once() {

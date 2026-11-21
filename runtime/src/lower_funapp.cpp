@@ -192,6 +192,11 @@ std::vector<int> Lowering::int_arg_values(LoweredArgument& actual) {
     if (int_env.count(oc.name)) return {static_cast<int>(int_env[oc.name])};
   }
   if (oc.kind == mir::Expr::LitInt) return {static_cast<int>(oc.lit_i)};
+  // The graph runs the effects of the argument on every evaluation, and its
+  // value may still be known now.
+  if (expr_effectful(oc))
+    if (const DataMap::Entry* en = actual.observation(); en && ints(*en))
+      return en->i;
   if (oc.kind == mir::Expr::Indexed ||
       (oc.kind == mir::Expr::FunApp && oc.unsized.depth > 0)) {
     // May be a slice (y[i] on a 2-D array yields a whole row), so

@@ -1166,12 +1166,30 @@ Lowering::Val Lowering::lower_expr_impl(const mir::Expr& e) {
                          {checked_immediate(a.off, "indexed offset"),
                           checked_immediate(a.stride, "indexed stride")}),
               ExpressionLayout::scalar());
-        if (a.len == 1)
-          return with_layout(
+        if (a.len == 1) {
+          const Val v = with_layout(
               emit_value(OP_INDEX, {base}, 1,
                          indexed_view(base.si, n_idx, 1, e.unsized),
                          {checked_immediate(a.off, "indexed offset")}),
               ExpressionLayout::scalar());
+          // An element of a known integer array is known. The observation
+          // keeps the first index fastest.
+          const DataMap::Entry* be = observation(base);
+          if (be && be->is_int && be->i.size() == be->r.size() &&
+              n_idx == D.size() && !mat) {
+            size_t from = 0, stride = 1;
+            for (size_t d = 0; d < n_idx; ++d) {
+              from += (size_t)ix[d] * stride;
+              stride *= (size_t)D[d];
+            }
+            DataMap::Entry en;
+            en.is_int = true;
+            en.i = {be->i.at(from)};
+            en.r = {(double)en.i[0]};
+            observe(v, std::move(en));
+          }
+          return v;
+        }
         // One whole matrix out of the array keeps its shape, so a later
         // index on it can take the column-major paths above.
         SlotInfo si = indexed_view(base.si, n_idx, a.len, e.unsized);

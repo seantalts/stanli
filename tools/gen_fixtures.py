@@ -62,6 +62,8 @@ O0_FIXTURES = {
     "udf_void_names",
     "udf_void_return_in_branch",
     "udf_void_statements",
+    "viewc_effectful_int_udf_nested_o0",
+    "viewc_effectful_int_udf_o0",
     "wa_target_lp",
     "wa_tp_lp_refused",
     "whileloop",
