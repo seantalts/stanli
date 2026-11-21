@@ -452,6 +452,8 @@ void test_effectful_int_udf_is_not_observed() {
   effectful_int_udf("viewc_effectful_int_udf_o0", "effectful int UDF call");
   effectful_int_udf("viewc_effectful_int_udf_nested_o0",
                     "nested effectful int UDF call");
+  effectful_int_udf("viewc_effectful_int_local_o0",
+                    "int local from an effectful call");
 }
 
 void test_data_size_effect_runs_once() {

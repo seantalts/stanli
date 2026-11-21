@@ -1920,6 +1920,17 @@ std::optional<long> Lowering::static_int(const mir::Expr& e) {
 void Lowering::bind_runtime_int(const std::string& name, const mir::Expr& e,
                                 const std::string& raw) {
   Val v = lower_expr(e);
+  // The graph runs the effects of the initializer, and its value may still
+  // be known now.
+  if (const DataMap::Entry* en = observation(v);
+      en && en->is_int && en->i.size() == 1 && expr_effectful(e)) {
+    scope.erase(name);
+    decls.erase(name);
+    td_erase(name);
+    int_locals.insert(name);
+    int_env[name] = en->i[0];
+    return;
+  }
   SlotInfo expected;
   expected.param_free = v.si.param_free;
   require_binding(v, 1, expected, name, raw);
