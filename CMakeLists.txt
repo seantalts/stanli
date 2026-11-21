@@ -1839,12 +1839,12 @@ list(APPEND STANLI_DEBUG_SWITCH_TESTS
   test_prep_profile_reroll_dispositions test_write_array_semantics
   hypergeometric_1f0_register_reference
   hypergeometric_1f0_structured_reference callback_geometry
-  test_run_rng test_ctsem_engine test_data_loop_memo)
+  test_run_rng test_ctsem_engine test_data_loop_memo test_prep_work)
 list(APPEND STANLI_DEBUG_SWITCH_ONLY_TESTS
   test_region_map test_structured_loop test_cross_path
   test_wa_parallel_switches test_pass_dump_switches
   test_prep_profile_reroll_dispositions test_ctsem_engine
-  test_data_loop_memo)
+  test_data_loop_memo test_prep_work)
 foreach(_stanli_switch_test IN LISTS STANLI_DEBUG_SWITCH_TESTS)
   if(TEST ${_stanli_switch_test})
     set_property(TEST ${_stanli_switch_test} APPEND PROPERTY

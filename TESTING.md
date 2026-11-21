@@ -594,19 +594,20 @@ only if its checks hold without it. Some cases that compare a run with and
 without a switch are like that today: they pass by comparing the default with
 itself, and only an ON build tests them.
 
-Eight tests and the 22 cogmod runs of the cross-path matrix
+Nine tests and the 22 cogmod runs of the cross-path matrix
 (`test_cross_path_cm_*`) are disabled in an OFF build, because almost every
 case in them needs a switch. They are in `STANLI_DEBUG_SWITCH_ONLY_TESTS`, and CTest
 reports `Not Run (Disabled)`: `test_cross_path`, `test_structured_loop`,
 `test_region_map`, `test_wa_parallel_switches`, `test_pass_dump_switches`,
-`test_prep_profile_reroll_dispositions`, `test_ctsem_engine` and
-`test_data_loop_memo`. An OFF build registers 578 tests and runs 548 of them.
+`test_prep_profile_reroll_dispositions`, `test_prep_work`, `test_ctsem_engine`
+and `test_data_loop_memo`. An OFF build on macOS registers 704 tests and runs
+673 of them.
 
 CI runs CTest in the shipped OFF `build-rel/` on every platform, so the
 switch-free cases of the pass, lowering, write_array and sampler-parity tests
 run on macOS, Linux aarch64 and Windows x64 as well. The manylinux job's
 differential step builds ON and runs `ctest -L debug_switches`, which is
-where the skipped cases and the eight disabled tests run. Locally:
+where the skipped cases and the nine disabled tests run. Locally:
 
 ```sh
 cmake -B build -DSTANLI_DEBUG_SWITCHES=ON
