@@ -1248,7 +1248,131 @@ void test_algorithms_on_a_new_thread(stanli_model* m) {
   expect("fixed_param on a new thread " + fixed, fixed.empty());
 }
 
+// Stan's algorithms reject a point only on a domain error; fatal_error()
+// ends the run. stanli's run-time error for a zero-size local that a branch
+// left empty is that kind too. Every algorithm starts at mu = 0, where v is
+// assigned, and moves towards the mode at mu = -3, where it is not.
+void test_fatal_errors_end_algorithms() {
+  const char* sources[] = {
+      "parameters { real mu; }\n"
+      "model {\n  vector[0] v;\n  if (mu > -0.5) v = rep_vector(0, 3);\n"
+      "  mu ~ normal(-3, 1);\n  target += sum(v);\n}\n",
+      "parameters { real mu; }\n"
+      "model {\n  if (mu < -0.5) fatal_error(\"mu is below -0.5\");\n"
+      "  mu ~ normal(-3, 1);\n}\n"};
+  const char* names[] = {"v was not assigned", "mu is below -0.5"};
+  for (int k = 0; k < 2; ++k) {
+    stanli_model* m = from_stan(sources[k]);
+    if (m == nullptr) return;
+    const std::string what = k == 0 ? "unassigned local" : "fatal_error";
+    const auto names_it = [&](const char* err) {
+      return std::strstr(err, names[k]) != nullptr;
+    };
+    const double start = 0.0;
+    char err[4096]{};
+
+    stanli_sample_opts so;
+    stanli_sample_opts_init(&so);
+    so.chains = 1;
+    so.warmup = 200;
+    so.samples = 200;
+    so.inits = &start;
+    std::vector<double> draws(200);
+    const int failed = stanli_sample_multi_metric(
+        m, &so, nullptr, 0, draws.data(), nullptr, nullptr, nullptr, nullptr,
+        nullptr, nullptr, nullptr, nullptr, err, sizeof err);
+    expect(what + ": NUTS stops with the message: " + err,
+           failed != 0 && names_it(err));
+
+    err[0] = '\0';
+    const int walnuts = stanli_sample_walnuts_stats_init(
+        m, 1, 1, 200, 200, 0, 2, &start, draws.data(), nullptr, nullptr,
+        nullptr, err, sizeof err);
+    expect(what + ": WALNUTS stops with the message: " + err,
+           walnuts != 0 && names_it(err));
+
+    err[0] = '\0';
+    stanli_optimize_opts oo;
+    stanli_optimize_opts_init(&oo);
+    oo.init = &start;
+    double q = 0, lp = 0;
+    std::vector<double> row((size_t)stanli_n_output_columns(m));
+    const int optimized =
+        stanli_optimize(m, &oo, &q, row.data(), &lp, err, sizeof err);
+    expect(what + ": optimize stops with the message: " + err,
+           optimized != 0 && names_it(err));
+
+    err[0] = '\0';
+    stanli_pathfinder_opts po;
+    stanli_pathfinder_opts_init(&po);
+    po.inits = &start;
+    std::vector<double> rows((size_t)stanli_pathfinder_max_draws(&po) *
+                             (size_t)stanli_n_output_columns(m));
+    int64_t n_draws = 0;
+    const int pathfinder = stanli_pathfinder(
+        m, &po, rows.data(), nullptr, nullptr, nullptr, &n_draws, nullptr,
+        nullptr, nullptr, nullptr, nullptr, err, sizeof err);
+    expect(what + ": Pathfinder stops with the message: " + err,
+           pathfinder != 0 && names_it(err));
+
+    err[0] = '\0';
+    stanli_variational_opts vo;
+    stanli_variational_opts_init(&vo);
+    vo.init = &start;
+    vo.output_samples = 10;
+    std::vector<double> mean((size_t)stanli_n_output_columns(m));
+    std::vector<double> vrows(10 * mean.size());
+    const int advi = stanli_variational(
+        m, &vo, mean.data(), vrows.data(), nullptr, nullptr, nullptr, nullptr,
+        nullptr, nullptr, nullptr, err, sizeof err);
+    expect(what + ": ADVI stops with the message: " + err,
+           advi != 0 && names_it(err));
+
+    err[0] = '\0';
+    stanli_laplace_opts lo;
+    stanli_laplace_opts_init(&lo);
+    lo.draws = 10;
+    const double mode = -3.0;
+    std::vector<double> lrows(10 * mean.size());
+    const int laplace = stanli_laplace_sample(
+        m, &lo, &mode, lrows.data(), nullptr, nullptr, nullptr, nullptr,
+        nullptr, nullptr, nullptr, err, sizeof err);
+    expect(what + ": Laplace stops with the message: " + err,
+           laplace != 0 && names_it(err));
+    stanli_model_free(m);
+  }
+
+  // A model that never reaches the unassigned path samples as the same
+  // model without the local does, draw for draw.
+  const char* same[] = {
+      "parameters { real mu; }\n"
+      "model {\n  vector[0] v;\n  if (mu > -1e300) v = rep_vector(0, 3);\n"
+      "  mu ~ normal(0, 1);\n  target += sum(v);\n}\n",
+      "parameters { real mu; }\nmodel { mu ~ normal(0, 1); }\n"};
+  std::vector<double> runs[2];
+  for (int k = 0; k < 2; ++k) {
+    stanli_model* m = from_stan(same[k]);
+    if (m == nullptr) return;
+    stanli_sample_opts so;
+    stanli_sample_opts_init(&so);
+    so.chains = 1;
+    so.warmup = 200;
+    so.samples = 200;
+    runs[k].assign(200, 0.0);
+    char err[4096]{};
+    expect(
+        std::string("a model that keeps v assigned samples: ") + err,
+        stanli_sample_multi_metric(m, &so, nullptr, 0, runs[k].data(), nullptr,
+                                   nullptr, nullptr, nullptr, nullptr, nullptr,
+                                   nullptr, nullptr, err, sizeof err) == 0);
+    stanli_model_free(m);
+  }
+  expect("a model that keeps v assigned has the same draws",
+         runs[0] == runs[1]);
+}
+
 int main() {
+  test_fatal_errors_end_algorithms();
   stanli_model* m = load("alg_gauss");
   if (m != nullptr) {
     expect("alg_gauss width", stanli_wa_n_columns(m) == kWidth);

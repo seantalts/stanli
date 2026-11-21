@@ -40,7 +40,7 @@ class ExecutorModel {
       try {
         return ex_->forward();
       } catch (const std::exception& e) {
-        if (is_internal_error(e)) throw;
+        if (ends_run(e)) throw;
         return -std::numeric_limits<double>::infinity();
       }
     } else {
@@ -55,7 +55,7 @@ class ExecutorModel {
       try {
         value = ex_->gradient(grad);
       } catch (const std::exception& e) {
-        if (is_internal_error(e)) throw;
+        if (ends_run(e)) throw;
         // Rejected point (domain error in a kernel): -inf with no gradient,
         // which the sampler treats as a divergence.
         return T(-std::numeric_limits<double>::infinity());
@@ -175,7 +175,7 @@ inline void gradient<stanli::ExecutorModel>(const stanli::ExecutorModel& model,
   try {
     f = ex.gradient(grad_f.data());
   } catch (const std::exception& e) {
-    if (stanli::is_internal_error(e)) throw;
+    if (stanli::ends_run(e)) throw;
     logger.error(
         "Informational Message: The current Metropolis proposal "
         "is about to be rejected because of the following issue:");

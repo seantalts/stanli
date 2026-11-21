@@ -13,6 +13,7 @@
 #include <walnutpie/walnuts.hpp>
 
 #include <cmath>
+#include <exception>
 #include <limits>
 #include <random>
 #include <stdexcept>
@@ -38,7 +39,7 @@ struct ExecLogpGrad {
     try {
       logp = ex->gradient(grad.data());
     } catch (const std::exception& e) {
-      if (is_internal_error(e)) throw;
+      if (ends_run(e)) throw;
       logp = -std::numeric_limits<double>::infinity();
     }
     // walnutpie assumes the density throws or is finite: its acceptance
@@ -92,11 +93,16 @@ struct CollectHandler {
     if (*observe) (*observe)(samp_i, false, q.data());
     ++samp_i;
   }
+  // walnutpie treats a throwing density as logp = -inf, which rejects the
+  // point as NUTS does. An error that ends the run cannot leave walnutpie's
+  // noexcept wrapper, so it is kept here and thrown after the transition.
+  std::exception_ptr fatal;
   void on_logp_exception(const Eigen::VectorXd& /*q*/,
-                         const std::exception& /*e*/) noexcept {
-    // walnutpie already treats a throwing density as logp = -inf, which
-    // is the same "reject this point" semantics NUTS gets from stan's
-    // samplers; nothing further to do.
+                         const std::exception& e) noexcept {
+    if (!fatal && ends_run(e)) fatal = std::current_exception();
+  }
+  void rethrow_fatal() const {
+    if (fatal) std::rethrow_exception(fatal);
   }
 };
 
@@ -192,13 +198,19 @@ std::vector<std::vector<double>> run_walnuts(Executor& ex,
           .build();
   walnutpie::AdaptiveWalnuts<ExecLogpGrad, std::mt19937_64, CollectHandler>
       adaptive(rng, handler, logp_grad, init_cfg, warmup_cfg, sampling_cfg);
-  for (int i = 0; i < cfg.warmup; ++i) adaptive();
+  for (int i = 0; i < cfg.warmup; ++i) {
+    adaptive();
+    handler.rethrow_fatal();
+  }
 
   // sampler() freezes the adapted step size, mass matrix, and micro-step
   // floor, and fires on_warmup_complete; the draws it produces are the
   // Markov chain.
   auto sampler = adaptive.sampler();
-  for (int i = 0; i < cfg.samples; ++i) sampler();
+  for (int i = 0; i < cfg.samples; ++i) {
+    sampler();
+    handler.rethrow_fatal();
+  }
 
   return draws;
 }
