@@ -4758,12 +4758,15 @@ int main() {
     Eigen::Matrix<var, -1, 1> x(5);
     for (int k = 0; k < 5; ++k) x(k) = q[k];
     var t = q[5];
-    var acc = stan::math::sum(stan::math::pow(x, 2)) +
-              stan::math::sum(stan::math::pow(x, 0.5)) +
-              stan::math::sum(stan::math::pow(x, -1)) +
-              stan::math::sum(stan::math::pow(x, -2.0)) +
-              stan::math::sum(stan::math::pow(x, -0.5)) +
-              stan::math::sum(stan::math::pow(x, 1));
+    // One statement per term: in a single expression C++ leaves the order of
+    // the operands open, and GCC on x86-64 puts them on the tape right to
+    // left, which sums each gradient in another order.
+    var acc = stan::math::sum(stan::math::pow(x, 2));
+    acc += stan::math::sum(stan::math::pow(x, 0.5));
+    acc += stan::math::sum(stan::math::pow(x, -1));
+    acc += stan::math::sum(stan::math::pow(x, -2.0));
+    acc += stan::math::sum(stan::math::pow(x, -0.5));
+    acc += stan::math::sum(stan::math::pow(x, 1));
     for (double e : {1.0, 3.0, 2.0, 0.5}) acc += stan::math::pow(t, e);
     acc.grad();
     expect_eq("pow data exponent lp", lp, acc.val());
