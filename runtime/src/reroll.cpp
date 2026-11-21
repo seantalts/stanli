@@ -923,6 +923,8 @@ RerollStats reroll(Graph& g,
 
   std::vector<Op> result;
   result.reserve(g.ops.size());
+  // Positions of a candidate's element stores, with each one's index stride.
+  std::vector<std::pair<int, int64_t>> marching;
   size_t i = 0;
   while (i < g.ops.size()) {
     bool rewrote = false;
@@ -949,8 +951,10 @@ RerollStats reroll(Graph& g,
       // An element store whose index stops marching after a few lanes ends
       // any region at that lane, so count no further. Without this bound a
       // run that fuses in blocks (a column-major fill, one row per block) is
-      // counted and classified to its end again at every block.
-      int64_t store_run = std::numeric_limits<int64_t>::max();
+      // counted and classified to its end again at every block. Counting
+      // checks each store only at the lanes that it reaches, so a long run
+      // that never fuses is not read to its end at every start.
+      marching.clear();
       for (int p = 0; p < P; ++p) {
         const Op& s0 = g.ops[i + (size_t)p];
         const size_t s1 = i + (size_t)p + (size_t)P;
@@ -958,28 +962,31 @@ RerollStats reroll(Graph& g,
             !is_element_store(g.ops[s1]) || g.ops[s1].in[0] != s0.in[0])
           continue;
         const int64_t stride = g.ops[s1].idata[0] - s0.idata[0];
-        if (stride < 1) continue;
-        int64_t run = 2;
-        for (size_t u = s1 + (size_t)P; u < g.ops.size(); u += (size_t)P) {
-          ++st.lane_steps;
-          const Op& s = g.ops[u];
-          if (!is_element_store(s) || s.in[0] != s0.in[0] ||
-              s.idata[0] != s0.idata[0] + run * stride)
-            break;
-          ++run;
-        }
-        store_run = std::min(store_run, run);
+        if (stride >= 1) marching.push_back({p, stride});
       }
-      const int64_t max_lanes = store_run >= kMinLanes
-                                    ? store_run
-                                    : std::numeric_limits<int64_t>::max();
+      const auto stores_march = [&](int64_t lane) {
+        for (const auto& [p, stride] : marching) {
+          ++st.lane_steps;
+          const Op& s0 = g.ops[i + (size_t)p];
+          const Op& s = g.ops[i + (size_t)p + (size_t)lane * P];
+          if (!is_element_store(s) || s.in[0] != s0.in[0] ||
+              s.idata[0] != s0.idata[0] + lane * stride)
+            return false;
+        }
+        return true;
+      };
 
       // Count template-matching lanes. A pair that fails fails at every start
-      // that compares it, so the scan for P resumes after it.
+      // that compares it, so the scan for P resumes after it. A store run
+      // that ends before kMinLanes lanes does not bound the count.
       int64_t L = 1;
       size_t mismatch = npos;
-      while (mismatch == npos && L < max_lanes &&
-             i + ((size_t)L + 1) * P <= g.ops.size()) {
+      bool store_bound = !marching.empty();
+      while (mismatch == npos && i + ((size_t)L + 1) * P <= g.ops.size()) {
+        if (store_bound && L >= 2 && !stores_march(L)) {
+          if (L >= kMinLanes) break;
+          store_bound = false;
+        }
         for (int p = 0; p < P; ++p) {
           ++st.lane_steps;
           const size_t a = i + (size_t)p, b = a + (size_t)L * P;
