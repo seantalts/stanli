@@ -103,6 +103,7 @@ struct PrepTrace {
     int64_t c = 0;
     int64_t d = 0;
     int64_t term_steps = 0;
+    int64_t lane_steps = 0;
     int64_t packed_rows = 0;
     int64_t term_density = 0;
     int64_t element_density = 0;
@@ -177,6 +178,7 @@ struct PrepTrace {
     r.d = d;
     r.term_steps = term_steps;
     if (dispositions) {
+      r.lane_steps = dispositions->lane_steps;
       r.packed_rows = dispositions->packed_rows;
       r.term_density = dispositions->term_density;
       r.element_density = dispositions->element_density;
@@ -235,6 +237,7 @@ struct PrepTrace {
           field("row_steps", r.d);
           field("list_steps", r.b);
           field("candidate_steps", r.c);
+          field("lane_steps", r.lane_steps);
           field("term_steps", r.term_steps);
           field("packed_rows", r.packed_rows);
           field("term_density", r.term_density);
