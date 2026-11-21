@@ -777,7 +777,19 @@ class MirInterp {
           fail("target += is not available in " + where_, st.raw);
         // write_array runs without the Jacobian.
         if (st.jacobian) return;
-        for (const T& term : eval(st.target).r) *target_sink_ += term;
+        {
+          const Value terms = eval(st.target);
+          if constexpr (std::is_same_v<T, double>) {
+            // A long container adds its compensated sum, as OP_SUM_VEC does
+            // on the graph and in the register program.
+            const auto n = static_cast<int64_t>(terms.r.size());
+            if (n > kPlainSumMax) {
+              *target_sink_ += compensated_sum(terms.r.data(), n);
+              return;
+            }
+          }
+          for (const T& term : terms.r) *target_sink_ += term;
+        }
         return;
       default:
         fail("unsupported statement", st.raw);

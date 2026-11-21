@@ -11,6 +11,7 @@
 #include <stanli/mir_prog.hpp>
 #include <stanli/ode_prog.hpp>
 
+#include <algorithm>
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
@@ -1306,6 +1307,80 @@ void test_dynamic_vector_program() {
   }
 }
 
+// A real sum of more than kPlainSumMax registers calls OP_SUM_VEC's
+// compensated sum, as the graph does; a shorter one stays a chain of ADDs in
+// order. Both forms keep an adjoint of one for every term.
+void test_program_long_sum() {
+  using Var = stan::math::var;
+  using stanli::Program;
+  using stanli::ProgramCompiler;
+  using stanli::Range;
+  using stanli::ViewKind;
+  for (const int n : {static_cast<int>(stanli::kPlainSumMax),
+                      static_cast<int>(stanli::kPlainSumMax) + 1}) {
+    Program p;
+    std::map<std::string, const FunDef*> functions;
+    ProgramCompiler pc{p, functions};
+    Range values{pc.alloc(n), n};
+    values.kind = ViewKind::Vector;
+    pc.reals["values"] = values;
+    const Range result = pc.expr(fun("sum", {var("values", kVector)}, kReal));
+    p.out_regs = {result.reg};
+    const bool long_sum = n > stanli::kPlainSumMax;
+    const bool calls = std::any_of(p.code.begin(), p.code.end(),
+                                   [](const Program::Instr& instr) {
+                                     return instr.code == Program::CALL;
+                                   });
+    const std::string at = " n=" + std::to_string(n);
+    if (calls != long_sum) {
+      ++failures;
+      std::printf("FAIL program sum%s: %s\n", at.c_str(),
+                  long_sum ? "no kernel call" : "unexpected kernel call");
+    }
+    // Pairs of x and nearly -x, so that a plain sum loses digits.
+    std::vector<double> x(n);
+    for (int i = 0; i < n; ++i)
+      x[i] = i % 2        ? -x[i - 1] + 0.001 * i
+             : i + 1 == n ? 0.5
+                          : 1e8 * (1.0 + 0.37 * i);
+    double in_order = 0.0, hi = 0.0, lo = 0.0;
+    for (double v : x) {
+      in_order += v;
+      const double s = hi + v, b = s - hi;
+      lo += (hi - (s - b)) + (v - b);
+      hi = s;
+    }
+    const double want = long_sum ? hi + lo : in_order;
+    stan::math::nested_rev_autodiff nested;
+    std::vector<double> reg(p.n_regs);
+    std::vector<Var> vr(p.n_regs), vin;
+    for (int i = 0; i < n; ++i) {
+      reg[values.reg + i] = x[i];
+      vin.emplace_back(x[i]);
+      vr[values.reg + i] = vin.back();
+    }
+    stanli::run_program(p, reg);
+    stanli::run_program(p, vr);
+    vr[p.out_regs[0]].grad();
+    bool adjoints = true;
+    for (const Var& v : vin) adjoints = adjoints && v.adj() == 1.0;
+    // The double-double reference is within one ULP of the exact sum.
+    const auto close = [&](double got) {
+      return long_sum
+                 ? std::abs(got - want) <=
+                       std::nextafter(std::abs(want), INFINITY) - std::abs(want)
+                 : got == want;
+    };
+    if (!close(reg[p.out_regs[0]]) || !close(vr[p.out_regs[0]].val()) ||
+        !adjoints) {
+      ++failures;
+      std::printf("FAIL program sum%s: double %.17g var %.17g want %.17g%s\n",
+                  at.c_str(), reg[p.out_regs[0]], vr[p.out_regs[0]].val(), want,
+                  adjoints ? "" : ", adjoints differ from 1");
+    }
+  }
+}
+
 void test_runtime_remainder_and_identity_index() {
   stanli::Program p;
   std::map<std::string, const FunDef*> functions;
@@ -1356,6 +1431,7 @@ int main() {
   test_builtin_activity();
   test_constant_fill_bits();
   test_dynamic_vector_program();
+  test_program_long_sum();
   test_runtime_remainder_and_identity_index();
   test_constant_probes();
   test_return_without_function_scope();

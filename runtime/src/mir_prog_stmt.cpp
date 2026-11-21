@@ -1350,10 +1350,17 @@ ProgramCompiler::Path ProgramCompiler::compile_stmt_folded(const mir::Stmt& s) {
       // so all this does is accumulate.
       if (target_reg < 0) bail("target += is not available in this region");
       const Range v = expr(s.target);
-      // `target += e` for a container adds `sum(e)`. Accumulating the
-      // elements in ascending order is that sum, and it is the order
+      // `target += e` for a container adds `sum(e)`. Up to kPlainSumMax
+      // elements, accumulating them in ascending order is the order that
       // OP_SUM_VEC uses on the graph side, so the two paths agree to the
-      // bit. A scalar is the one-element case of the same loop.
+      // bit. A longer container takes OP_SUM_VEC's compensated sum. A scalar
+      // is the one-element case of the loop.
+      if (v.len > kPlainSumMax) {
+        const Range total =
+            kernel_call(OP_SUM_VEC, {v}, Range{0, 1}, 0, 0x1, {}, {}, "target");
+        emit(Program::ADD, target_reg, target_reg, total.reg);
+        return Path::Open;
+      }
       for (int k = 0; k < v.len; ++k)
         emit(Program::ADD, target_reg, target_reg, v.reg + k);
       return Path::Open;

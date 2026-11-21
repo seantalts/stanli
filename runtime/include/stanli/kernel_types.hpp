@@ -115,7 +115,8 @@ struct DensityMode {
 // aligned; Phased is the same for a view that starts `offset` elements into
 // one. Pairwise is for the sums that re-roll and partition build from a
 // loop's target terms, which no Stan expression fixes the order of. None of
-// them depends on the address of the slot.
+// them depends on the address of the slot. A sum of more than kPlainSumMax
+// terms with any grouping but Pairwise is compensated (compensated_sum).
 enum class SumGrouping : uint8_t {
   InOrder = 0,
   Packet = 1,

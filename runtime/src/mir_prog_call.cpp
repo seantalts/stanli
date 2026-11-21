@@ -1696,10 +1696,14 @@ Range ProgramCompiler::fun(const mir::Expr& e) {
     }
     if (e.name == "sum") {
       if (a.len == 0) return {konst(0.0), 1};
+      const bool integer = mir::is_unsized(e, mir::UnsizedLeaf::Int);
+      // A long real sum takes OP_SUM_VEC's compensated sum, as on the graph.
+      if (!integer && a.len > kPlainSumMax)
+        return kernel_call(OP_SUM_VEC, {a}, Range{0, 1}, 0, 0x1, {}, {},
+                           e.name);
       const int r = alloc(1);
       emit(Program::MOV, r, a.reg);
-      const auto add = mir::is_unsized(e, mir::UnsizedLeaf::Int) ? Program::IADD
-                                                                 : Program::ADD;
+      const auto add = integer ? Program::IADD : Program::ADD;
       for (int i = 1; i < a.len; ++i) emit(add, r, r, a.reg + i);
       return {r, 1};
     }
