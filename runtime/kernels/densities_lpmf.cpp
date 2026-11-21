@@ -142,7 +142,7 @@ void bernoulli_logit_array_fwd(KernelCtx& ctx) {
 
   const auto& n_col = stan::math::as_column_vector_or_scalar(y);
   const auto& n_double = stan::math::value_of_rec(n_col);
-  const Eigen::ArrayXd signs = 2 * stan::math::as_array_or_scalar(n_double) - 1;
+  const auto signs = 2 * stan::math::as_array_or_scalar(n_double) - 1;
   const bool active = bernoulli_arg_active(ctx);
   if constexpr (Summed) {
     Eigen::Map<Eigen::ArrayXd> z(ctx.scratch, n);
