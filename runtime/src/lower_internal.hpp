@@ -953,6 +953,16 @@ struct Lowering {
   std::vector<int> jac_slots;
   std::vector<int> extra_roots;
   std::map<std::string, const mir::FunDef*> fun_defs;
+  // A user function as one call sees it: a formal whose argument is data is
+  // data in the body, as if it had the `data` qualifier, so the call lowers
+  // as its inlined body would. Null when no formal changes. One copy per
+  // function and set of data formals; lowering keeps each copy in the graph.
+  std::shared_ptr<mir::FunDef> call_site_def(
+      const mir::FunDef& f, const std::vector<mir::Expr>& args) const;
+  mutable std::map<std::pair<const mir::FunDef*, std::vector<bool>>,
+                   std::shared_ptr<mir::FunDef>>
+      call_site_defs;
+  std::set<const mir::FunDef*> pooled_call_site_defs;
   // The program's tuple input and output variables, or null.
   const mir::detail::TupleInterface* tuples = nullptr;
   // The tuple leaf a variable is, or null.

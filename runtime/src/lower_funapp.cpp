@@ -662,7 +662,47 @@ std::vector<mir::Stmt> single_exit_body(const mir::FunDef& f,
   return out;
 }
 
+// Mark e as stanc would if the formals in `data` had the `data` qualifier: a
+// Var of such a formal is data, and so is an expression whose operands are
+// all data. Returns whether e is data.
+bool mark_data(mir::Expr& e, const std::set<std::string>& data) {
+  bool operands = !e.args.empty();
+  for (mir::Expr& a : e.args) operands = mark_data(a, data) && operands;
+  if (!e.data_only && e.kind == mir::Expr::Var)
+    e.data_only = data.count(e.name) != 0;
+  else if (!e.data_only && operands && e.kind != mir::Expr::Unsupported)
+    e.data_only = true;
+  return e.data_only || e.kind == mir::Expr::IndexAll;
+}
+
+void mark_data(mir::Stmt& s, const std::set<std::string>& data) {
+  for (mir::Expr* e : {&s.init, &s.rhs, &s.target, &s.lower, &s.upper, &s.cond})
+    mark_data(*e, data);
+  for (auto* list : {&s.read_dims, &s.lhs_idx, &s.fn_args, &s.decl_type.dims})
+    for (mir::Expr& e : *list) mark_data(e, data);
+  for (mir::Stmt& child : s.body) mark_data(child, data);
+}
+
 }  // namespace
+
+std::shared_ptr<mir::FunDef> Lowering::call_site_def(
+    const mir::FunDef& f, const std::vector<mir::Expr>& args) const {
+  std::vector<bool> mask(f.arg_names.size());
+  std::set<std::string> data;
+  for (size_t i = 0; i < mask.size() && i < args.size(); ++i)
+    if (args[i].data_only && f.arg_views[i].leaf != mir::UnsizedLeaf::Int &&
+        !(i < f.arg_data_only.size() && f.arg_data_only[i])) {
+      mask[i] = true;
+      data.insert(f.arg_names[i]);
+    }
+  if (data.empty()) return nullptr;
+  auto& def = call_site_defs[{&f, std::move(mask)}];
+  if (!def) {
+    def = std::make_shared<mir::FunDef>(f);
+    for (mir::Stmt& s : def->body) mark_data(s, data);
+  }
+  return def;
+}
 
 // Inline a user-defined function at its call site: arguments are lowered
 // in the caller's scope, bound under the parameter names in a shadowed
@@ -674,7 +714,10 @@ Lowering::Val Lowering::lower_call_udf(const mir::Expr& e,
                                        std::vector<Val>* results) {
   auto it = fun_defs.find(mir::function_key(e));
   if (it == fun_defs.end()) fail("unknown function " + e.name, e.raw);
-  const mir::FunDef& f = *it->second;
+  const auto specialized = call_site_def(*it->second, e.args);
+  if (specialized && pooled_call_site_defs.insert(specialized.get()).second)
+    g.udata_pool.push_back(specialized);
+  const mir::FunDef& f = specialized ? *specialized : *it->second;
   if ((f.results.size() > 1) != (results != nullptr))
     fail(e.name + (results ? " does not return several values"
                            : " returns several values; only a MultiAssign "

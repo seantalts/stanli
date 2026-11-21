@@ -838,7 +838,7 @@ match. [`tests/cross_path_ledger.json`](tests/cross_path_ledger.json) lists
 the exceptions, each with a cause and a bound in ULP. A full run fails if an
 entry excuses nothing.
 
-The ledger has <!--gen:testing_cross_entries-->58<!--/gen--> entries. Most allow 1 to 10 ULP
+The ledger has <!--gen:testing_cross_entries-->60<!--/gen--> entries. Most allow 1 to 10 ULP
 for sums that the region map and the lane passes add in a different order.
 Two `cm_rdm` entries allow 2,526 ULP on Windows for a rounding difference
 there.

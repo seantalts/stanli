@@ -1389,6 +1389,49 @@ static void test_udf_call_int_index() {
   stan::math::recover_memory();
 }
 
+// A call that stanc kept, with data bound to a formal that has no `data`
+// qualifier, lowers to the same ops as the same body written in the model.
+// The index case reads the data matrix inside the function; the branch case
+// tests a real formal bound to data. The call still gives each argument a
+// slot, so in the branch case one constant that no op reads is extra.
+static void test_udf_data_actual(const std::string& name, bool same_slots) {
+  using namespace stanli;
+  const std::string base = "tests/fixtures/udf_data_actual_" + name;
+  const DataMap data = DataMap::from_json(slurp(base + "_o0.json"));
+  CompiledModel call, inlined;
+  try {
+    call = compile_model(slurp(base + "_o0.tmir.sexp"), data);
+    inlined = compile_model(slurp(base + "_inline_o0.tmir.sexp"), data);
+  } catch (const std::exception& error) {
+    check(false, "udf data actual " + name + " compile: " + error.what());
+    return;
+  }
+  const auto opcodes = [](const CompiledModel& cm) {
+    std::vector<uint16_t> out;
+    for (const Op& op : cm.graph.ops) out.push_back(op.opcode);
+    return out;
+  };
+  check(opcodes(call) == opcodes(inlined),
+        "udf data actual " + name + ": call and inlined ops match (" +
+            std::to_string(call.graph.ops.size()) + " vs " +
+            std::to_string(inlined.graph.ops.size()) + ")");
+  if (same_slots)
+    check(same_graph_structure(call, inlined),
+          "udf data actual " + name + ": call and inlined graphs match");
+  for (double q : {0.4, -1.3}) {
+    double lp[2], grad[2];
+    CompiledModel* models[2] = {&call, &inlined};
+    for (int k = 0; k < 2; ++k) {
+      Executor ex(models[k]->graph);
+      models[k]->bind(ex);
+      ex.params_data()[0] = q;
+      lp[k] = ex.gradient(&grad[k]);
+    }
+    expect_ulp("udf data actual " + name + " lp", lp[0], lp[1], 0);
+    expect_ulp("udf data actual " + name + " grad", grad[0], grad[1], 0);
+  }
+}
+
 // User functions stanc did not inline, under `~`. CmdStan instantiates an
 // `_lp` function and an `_lupdf` call with the caller's propto__, and the
 // body with the actual argument types, so the data-bound sigma is a double
@@ -9759,6 +9802,8 @@ int main() {
   test_udf_guard_returns();
   test_udf_call_int_size();
   test_udf_call_int_index();
+  test_udf_data_actual("index", true);
+  test_udf_data_actual("branch", false);
   test_udf_lp_propto();
   test_repeated_target_terms();
   test_inplace_copy_then_store();

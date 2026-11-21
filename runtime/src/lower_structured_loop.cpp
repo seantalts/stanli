@@ -2745,7 +2745,7 @@ bool Lowering::region_condition_data(const mir::Expr& e) {
 }
 
 bool Lowering::region_runtime_control(const mir::Stmt& root) const {
-  std::set<std::string> visited;
+  std::set<const mir::FunDef*> visited;
   std::function<bool(const mir::Stmt&, unsigned)> statement;
   std::function<bool(const mir::Expr&, unsigned)> expression =
       [&](const mir::Expr& e, unsigned depth) {
@@ -2758,11 +2758,15 @@ bool Lowering::region_runtime_control(const mir::Stmt& root) const {
           return true;
         if (e.kind == mir::Expr::FunApp &&
             e.fn_lib == mir::Expr::Lib::UserDefined) {
-          const std::string key = mir::function_key(e);
-          const auto found = fun_defs.find(key);
-          if (found != fun_defs.end() && visited.insert(key).second)
-            for (const auto& body : found->second->body)
-              if (statement(body, depth + 1)) return true;
+          const auto found = fun_defs.find(mir::function_key(e));
+          if (found != fun_defs.end()) {
+            const auto specialized = call_site_def(*found->second, e.args);
+            const mir::FunDef* f =
+                specialized ? specialized.get() : found->second;
+            if (visited.insert(f).second)
+              for (const auto& body : f->body)
+                if (statement(body, depth + 1)) return true;
+          }
         }
         for (const auto& argument : e.args)
           if (expression(argument, depth + 1)) return true;
