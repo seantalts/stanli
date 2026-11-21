@@ -153,6 +153,9 @@ ILL_CONDITIONED = {
                    "covariances whose smallest pivot is 1.8e-12",
     "sw_gp": "cholesky_decompose of a jittered exp-quad covariance whose "
              "smallest pivot is 1.1e-12",
+    "examplemodels_gp_fit_multi_output":
+        "cholesky_decompose of an exp-quad covariance of 101 points with a "
+        "1e-9 jitter, condition number 5.6e10 at point 0",
 }
 # About 4x the largest gradient deviation measured against the arm64
 # recording on another platform: 3.58e-7 for s2_gp_by_gr on macOS x86-64
@@ -163,6 +166,17 @@ ILL_CONDITIONED = {
 # The Linux x86-64 CmdStan recording is within 5.7e-11 of the arm64 one on
 # lp and 1.6e-16 on write_array for all three models.
 ILL_CONDITIONED_GATE = 1.5e-6
+# ILL_CONDITIONED models whose log density is held to its own gate as well,
+# because the likelihood reads the ill-conditioned factor. For
+# examplemodels_gp_fit_multi_output, 89 of the covariance's 101 eigenvalues
+# sit at the jitter. At point 0, against an 80-digit evaluation, the macOS
+# arm64 log density (stanli and CmdStan alike) is 7.3e-9 off and grad[1]
+# 6.6e-8 off; Linux x86-64 measured grad[1] 3.9e-7 from the arm64 recording.
+# Moving log(rho) by up to 2.4e-15 on arm64 moves the log density by up to
+# 1.1e-8 and the gradient by up to 6.2e-7 (point 1) from the recording; Stan
+# Math's true change over that step is below 1e-14. The lp gate is about 4x
+# the largest of these.
+ILL_CONDITIONED_LP_GATE = {"examplemodels_gp_fit_multi_output": 5e-8}
 
 @dataclasses.dataclass(frozen=True)
 class Mismatch:
@@ -200,6 +214,11 @@ class Floored:
     indices: frozenset
     gate: float
     reason: str
+    # The gate of index 0, the log density, where it differs from `gate`.
+    lp_gate: float = None
+
+    def gate_of(self, index):
+        return self.lp_gate if index == 0 and self.lp_gate else self.gate
 
 
 def floored_outputs(model, pt, default):
@@ -207,8 +226,10 @@ def floored_outputs(model, pt, default):
     if "values" not in pt:
         return None
     if model in ILL_CONDITIONED:
-        return Floored(frozenset(range(1, len(pt["values"]))),
-                       gate_for(model, pt, default), ILL_CONDITIONED[model])
+        lp_gate = ILL_CONDITIONED_LP_GATE.get(model)
+        return Floored(frozenset(range(0 if lp_gate else 1, len(pt["values"]))),
+                       gate_for(model, pt, default), ILL_CONDITIONED[model],
+                       lp_gate and max(lp_gate, default))
     if pt.get("status") == "MISMATCH":
         mismatch = MISMATCH_OUTPUTS[model]
         return Floored(frozenset(mismatch.indices), gate_for(model, pt, default),
@@ -1146,15 +1167,19 @@ def check_point(model, stan, dj, check_bin, point, pt, timeout, no_wa,
     if floored:
         held = [i for i in floored.indices if i < len(rv)]
         fworst = max([pair_dev(rv[i], gv[i])[0] for i in held] or [0.0])
-        if fworst >= floored.gate:
-            return ("GATE", fworst, 0, len(rv),
-                    f"point {point}: {fworst:.2e} over "
-                    f"{', '.join(density_label(i, opts) for i in held)}, "
-                    f"allowed {floored.gate:.1e} ({floored.reason})")
+        for i in held:
+            dev = pair_dev(rv[i], gv[i])[0]
+            if dev >= floored.gate_of(i):
+                return ("GATE", dev, 0, len(rv),
+                        f"point {point}: {dev:.2e} at "
+                        f"{density_label(i, opts)}, allowed "
+                        f"{floored.gate_of(i):.1e} ({floored.reason})")
         if fworst >= WA_MAX_REL and notes is not None:
+            lp_gate = (f", lp {floored.lp_gate:.1e}" if floored.lp_gate
+                       else "")
             notes.append(f"FLOORED {model} point {point}: {fworst:.2e} over "
-                         f"{len(held)} values allowed {floored.gate:.1e} "
-                         f"({floored.reason})")
+                         f"{len(held)} values allowed {floored.gate:.1e}"
+                         f"{lp_gate} ({floored.reason})")
         scored = [rv[i] if i in floored.indices else v for i, v in enumerate(gv)]
     if fast_math:
         worst, worst_ulp = fast_dev(rv, scored)[0], fast_dev(rv, gv)[1]

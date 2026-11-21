@@ -69,7 +69,10 @@ CI enforces:
 - The [ULP gate](#the-ulp-gate) on every value of every corpus replay, on the
   platforms that the ledger has measured (macOS arm64 today).
 - Limits from measured deviations for the ill-conditioned models
-  (`ILL_CONDITIONED`: 1.5e-6 scaled error on gradient entries only) and for
+  (`ILL_CONDITIONED`: 1.5e-6 scaled error on gradient entries, and on the
+  log density only for a model in `ILL_CONDITIONED_LP_GATE`, today
+  `examplemodels_gp_fit_multi_output` at 5e-8, whose covariance has
+  condition number 5.6e10 at point 0) and for
   the values that `MISMATCH_OUTPUTS` names at the points recorded as
   MISMATCH (`gate_for`: 4 times the recorded deviation, and at least the
   entry's own floor). These are two `kronecker_gp` gradient entries, with a

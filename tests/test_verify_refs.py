@@ -410,6 +410,22 @@ class CheckModelPointsTest(unittest.TestCase):
             self.assertEqual(self.run_check('echo "OK -3.50001 1 -2"')[1],
                              "GATE")
 
+    def test_an_ill_conditioned_log_density_keeps_its_own_limit(self):
+        lp_off = 'echo "OK -3.50000001 1 -2"'  # 2.9e-9 relative
+        with unittest.mock.patch.dict(ILL_CONDITIONED, {MODEL: "test"}):
+            self.assertEqual(self.run_check(lp_off)[1], "GATE")
+            with unittest.mock.patch.dict(verify_refs.ILL_CONDITIONED_LP_GATE,
+                                          {MODEL: 5e-8}):
+                self.assertEqual(self.run_check(lp_off)[1], "OK")
+                result = self.run_check('echo "OK -3.5000002 1 -2"')
+                self.assertEqual(result[1], "GATE")
+                self.assertIn("at lp, allowed 5.0e-08", result[5])
+                # The gradient keeps the ill-conditioned gradient gate.
+                self.assertEqual(
+                    self.run_check('echo "OK -3.5 1 -2.000001"')[1], "OK")
+                self.assertEqual(
+                    self.run_check('echo "OK -3.5 1 -2.00001"')[1], "GATE")
+
     def test_a_known_gap_may_refuse_the_model(self):
         gap = verify_refs.Gap(verify_refs.WHOLE_MODEL, "test gap")
         with unittest.mock.patch.dict(KNOWN_GAPS, {MODEL: gap}):
