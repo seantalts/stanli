@@ -3547,27 +3547,6 @@ void test_declaration_annotations() {
   stanli_model_free(b);
 }
 
-// A model past the structural budget compiles from O0 MIR, and the notice
-// comes back as its own kind of message.
-void test_o1_fallback_message() {
-  if (!stanli_has_embedded_stanc()) return;
-  std::string body;
-  for (int i = 0; i < 2100; ++i) body += "s += 1;\n";
-  std::string code = "parameters { real x; }\nmodel {\nreal s = 0;\n";
-  for (int d = 0; d < 9; ++d)
-    code += "for (i" + std::to_string(d) + " in 1:1) {\n";
-  code += body;
-  for (int d = 0; d < 9; ++d) code += "}\n";
-  code += "x ~ normal(s, 1);\n}\n";
-  const Compilation c = compile(code, nullptr);
-  expect_true("budget model compiles: " + c.error, c.ok);
-  bool found = false;
-  for (const auto& m : c.messages)
-    if (m.first == STANLI_COMPILER_O1_FALLBACK)
-      found = m.second.find("skipped O1") != std::string::npos;
-  expect_true("the O1 fallback is a typed message", found);
-}
-
 void test_variables_and_layouts() {
   const std::string mir = slurp("tests/fixtures/amatwa.tmir.sexp");
   char err[8192]{};
@@ -4136,7 +4115,6 @@ int main() {
   test_shared_write_array_executor();
   test_sampled_write_array_rows_match_draws();
   test_build_id_names_the_abi();
-  test_o1_fallback_message();
   test_variables_and_layouts();
   test_sample_setup_error();
   test_bridgestan_data();

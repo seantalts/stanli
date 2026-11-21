@@ -95,9 +95,6 @@ stanli::StancResult read_result(value res) {
   const value warnings = Field(res, 1);
   for (mlsize_t i = 0; i < Wosize_val(warnings); ++i)
     out.warnings.push_back(ocaml_string(Field(warnings, i)));
-  const value o1_fallback = Field(res, 2);
-  if (Is_some(o1_fallback))
-    out.o1_fallback = ocaml_string(Some_val(o1_fallback));
   return out;
 }
 

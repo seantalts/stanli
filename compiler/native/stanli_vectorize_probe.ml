@@ -61,8 +61,8 @@ let () =
   let compilation =
     Stanli_pipeline.compile_mir_with_passes
       ~passes:
-        { (Stanli_pipeline.selected_default_passes ~fast_math:!fast_math ()) with
-          vectorize_loops= vectorize }
+        { Stanli_pipeline.vectorize_loops= vectorize
+        ; partial_evaluation= !fast_math }
       ~model_name:"embedded_model" code
       ~include_source:
         (Frontend.Include_files.FileSystemPaths [Filename.dirname model]) in
@@ -70,10 +70,6 @@ let () =
     (fun warning ->
       Fmt.epr "%a@." (Frontend.Warnings.pp ?printed_filename:None ~code) warning)
     compilation.warnings;
-  List.iter
-    (fun diagnostic ->
-      prerr_endline (Stanli_pipeline.diagnostic_message diagnostic))
-    compilation.diagnostics;
   match compilation.result with
   | Error (Stanli_pipeline.Internal_error message)
    |Error (Stanli_pipeline.Unsupported message) ->

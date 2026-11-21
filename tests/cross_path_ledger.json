@@ -225,6 +225,22 @@
     "since": "2026-11-12"
   },
   {
+    "model": "cm_betadiscrete",
+    "quantity": "lp",
+    "pair": "default/no_partition",
+    "bound_ulp": 4,
+    "cause": "partition_lanes gathers the log(pzero) terms of the 19 rows with y == 0, which the runtime now inlines from the kept call to cogmod_betadiscrete_lpmf, into one LOGV and SUM_VEC (2,398 ops with the pass, 2,436 without), so lp adds those terms in a different grouping. Before the stanc3 inliner was turned off, the inlined body gave the pass no such group, and both paths had 2,436 ops. The gap is 1 to 4 ULP over the 13 cross-path points. Against an 80-digit mpmath reference at points 0 to 2, default's lp is off by 7.7e-16, 4.0e-16 and 4.0e-16 relative, and no_partition by 3.9e-16, 4.0e-16 and 6.1e-16, the same as CmdStan.",
+    "since": "2026-11-21"
+  },
+  {
+    "model": "cm_betadiscrete",
+    "quantity": "lp",
+    "pair": "default/passes_off",
+    "bound_ulp": 4,
+    "cause": "see lp default/no_partition on this model.",
+    "since": "2026-11-21"
+  },
+  {
     "model": "cm_rdm",
     "quantity": "grad[0]",
     "pair": "default/no_region_map",

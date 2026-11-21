@@ -166,7 +166,7 @@ for (const relative of ["tests/compiler/portable_fast_math.stan",
 }
 
 // The native CLI's --messages-json and the JavaScript result carry the same
-// messages: the warnings, and the O1 fallback notice in its own field.
+// warnings.
 function nativeMessages(code) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "stanli-messages-"));
   try {
@@ -192,9 +192,7 @@ const nativeWarning = nativeMessages(warningCode);
 if (portableWarning.errors || nativeWarning.status !== 0 ||
     portableWarning.warnings.length !== 1 ||
     JSON.stringify(trimmed(portableWarning.warnings)) !==
-        JSON.stringify(nativeWarning.messages.warnings) ||
-    portableWarning.o1_fallback !== null ||
-    nativeWarning.messages.o1_fallback !== null)
+        JSON.stringify(nativeWarning.messages.warnings))
   fail("JavaScript and native warnings differ: " +
        JSON.stringify([Array.from(portableWarning.warnings),
                        nativeWarning.messages]));
@@ -217,21 +215,6 @@ if (unknown.errors || unknown.warnings.length !== 1 ||
         JSON.stringify(nativeUnknown.messages.warnings))
   fail("@foo warnings differ: " + JSON.stringify([Array.from(unknown.warnings),
                                                   nativeUnknown.messages]));
-
-const budgetCode = "parameters { real x; }\nmodel {\nreal s = 0;\n" +
-    Array.from({length: 9}, (_, d) => `for (i${d} in 1:1) {\n`).join("") +
-    "s += 1;\n".repeat(2100) + "}\n".repeat(9) + "x ~ normal(s, 1);\n}\n";
-const portableBudget = compile("embedded_model", budgetCode);
-const nativeBudget = nativeMessages(budgetCode);
-if (portableBudget.errors || nativeBudget.status !== 0 ||
-    typeof portableBudget.o1_fallback !== "string" ||
-    !portableBudget.o1_fallback.includes("skipped O1") ||
-    portableBudget.o1_fallback !== nativeBudget.messages.o1_fallback ||
-    portableBudget.warnings.length !== 0 ||
-    nativeBudget.messages.warnings.length !== 0 ||
-    !nativeBudget.stderr.includes(portableBudget.o1_fallback))
-  fail("the O1 fallback notice differs: " +
-       JSON.stringify([portableBudget.o1_fallback, nativeBudget.messages]));
 
 const badCode = "parameters { real x } model {} ";
 const bad = compile("embedded_model", badCode);

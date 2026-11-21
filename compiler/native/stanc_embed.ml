@@ -9,9 +9,7 @@ let flag_fast_math = 2
 
 type embed_result =
   { outcome: (string, string) result  (** the portable MIR, or the error *)
-  ; warnings: string array
-  ; o1_fallback: string option
-        (** set when O1 was skipped for the structural budget *) }
+  ; warnings: string array }
 
 let compile_tmir ~model_only ~fast_math ~filename ~include_paths (code : string)
     : embed_result =
@@ -28,7 +26,6 @@ let compile_tmir ~model_only ~fast_math ~filename ~include_paths (code : string)
            String.trim
              (Fmt.str "%a" (Frontend.Warnings.pp ?printed_filename ~code) warning))
          compilation.warnings) in
-  let o1_fallback = Stanli_pipeline.o1_fallback compilation in
   let outcome =
     match compilation.result with
     | Error (Stanli_pipeline.Internal_error message)
@@ -37,7 +34,7 @@ let compile_tmir ~model_only ~fast_math ~filename ~include_paths (code : string)
     | Error (Stanli_pipeline.Frontend_error error) ->
         Error (Fmt.str "%a" (Frontend.Errors.pp ?printed_filename ~code) error)
     | Ok encoded -> Ok encoded in
-  {outcome; warnings; o1_fallback}
+  {outcome; warnings}
 
 let () =
   ignore (Thread.self ());

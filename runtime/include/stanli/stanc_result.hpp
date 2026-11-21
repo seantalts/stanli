@@ -7,13 +7,12 @@
 
 namespace stanli {
 
-// What the embedded stanc3 returns: the portable MIR or an error, the
-// compiler's warnings, and the O1 fallback notice when O1 was skipped.
+// What the embedded stanc3 returns: the portable MIR or an error, and the
+// compiler's warnings.
 struct StancResult {
   std::optional<std::string> mir;
   std::string error;
   std::vector<std::string> warnings;
-  std::optional<std::string> o1_fallback;
 };
 
 inline constexpr int kStancModelOnly = 1;

@@ -80,10 +80,8 @@ int main(int argc, char** argv) {
     std::cout << "PORTABLE from " << argv[6] << '\n';
     // stderr is for people; the messages file is what the caller reads.
     std::cerr << "text on stderr\n";
-    const bool o1 = std::string(argv[6]).find("budget") != std::string::npos;
     std::ofstream(fs::u8path(argv[5]))
-        << "{\"warnings\":[\"fake compiler warning\"],\"o1_fallback\":"
-        << (o1 ? "\"stanli compiler: skipped O1\"" : "null") << "}\n";
+        << "{\"warnings\":[\"fake compiler warning\"]}\n";
     return 0;
   }
   if (argc != 1) return 2;
@@ -119,15 +117,6 @@ int main(int argc, char** argv) {
            "stanli-compile argument shape");
     expect(portable.warnings.size() == 1 ? portable.warnings[0] : "(not one)",
            "fake compiler warning", "warnings from the messages file");
-    expect(portable.o1_fallback.value_or("(none)"), "(none)",
-           "no O1 fallback notice");
-
-    const fs::path budget = root / "budget model.stan";
-    std::ofstream(budget) << "model {}\n";
-    expect(
-        stanli::tooling::run_portable_compiler(beside.string(), budget.string())
-            .o1_fallback.value_or("(none)"),
-        "stanli compiler: skipped O1", "O1 fallback from the messages file");
 
     const fs::path bad = root / "bad model.stan";
     std::ofstream(bad) << "model { y ~ normal(0, 1); }\n";

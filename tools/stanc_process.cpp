@@ -361,8 +361,6 @@ class MessagesFile {
     const nlohmann::json messages = nlohmann::json::parse(text.str());
     for (const auto& warning : messages.at("warnings"))
       result.warnings.push_back(warning.get<std::string>());
-    const auto& o1 = messages.at("o1_fallback");
-    if (!o1.is_null()) result.o1_fallback = o1.get<std::string>();
   }
 
  private:

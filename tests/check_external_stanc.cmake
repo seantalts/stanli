@@ -28,7 +28,7 @@ if(NOT WIN32)
   file(WRITE "${fake}" "#!/bin/sh
 while [ $# -gt 1 ]; do
   if [ \"$1\" = --messages-json ]; then
-    printf '{\"warnings\":[],\"o1_fallback\":null}\\n' > \"$2\"
+    printf '{\"warnings\":[]}\\n' > \"$2\"
   fi
   shift
 done

@@ -149,14 +149,12 @@ char* stanli_stan_to_mir_with_opts(const char* stan_code,
                                    size_t include_path_count, int fast_math,
                                    char* err, size_t err_len);
 
-/* What the compiler says besides the MIR: a warning from stanc3, or the
- * notice that O1 was skipped because the model exceeds stanli's structural
- * budget (the model then runs from O0 MIR; STANLI_NO_O1_FALLBACK=1 forces
- * O1). */
+/* What the compiler says besides the MIR: a warning from stanc3. Value 1
+ * was a notice that O1 had been skipped; no release after 0.30.1 reports
+ * it. */
 typedef enum {
   STANLI_COMPILER_MESSAGE_NONE = -1, /* the index was out of range */
-  STANLI_COMPILER_WARNING = 0,
-  STANLI_COMPILER_O1_FALLBACK = 1
+  STANLI_COMPILER_WARNING = 0
 } stanli_compiler_message_kind;
 
 /* One compilation of Stan source, with the source file named in compiler

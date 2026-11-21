@@ -173,9 +173,8 @@ endif()
 # label (STANLI_DEBUG_SWITCH_TESTS below). In an OFF build a case that needs a
 # switch skips itself (tests/env_helpers.hpp), and a test whose every case
 # needs one is disabled (STANLI_DEBUG_SWITCH_ONLY_TESTS); tools/dev_setup.sh
-# configures ON. STANLI_NO_INTERPRETER, STANLI_ISA,
-# STANLI_NO_FUSED_DENSITY and STANLI_NO_O1_FALLBACK are not developer
-# switches.
+# configures ON. STANLI_NO_INTERPRETER, STANLI_ISA and
+# STANLI_NO_FUSED_DENSITY are not developer switches.
 option(STANLI_DEBUG_SWITCHES
   "Read the developer STANLI_* environment switches" OFF)
 if(NOT STANLI_DEBUG_SWITCHES)

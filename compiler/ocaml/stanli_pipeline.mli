@@ -4,54 +4,28 @@ type error =
   | Unsupported of string
       (** a construct stanli's compiler does not support *)
 
-(** [Before_inlining] means the estimate of the inlined cost, which never
-    exceeds the real cost, was already over the budget. *)
-type budget_check = Before_inlining | After_inlining
-
-type diagnostic =
-  | O1_budget_exceeded of
-      { checked: budget_check
-      ; cost: int
-      ; budget: int
-      ; statements: int
-      ; max_control_depth: int }
-
-val diagnostic_message : diagnostic -> string
-
 type 'a compilation =
   { result: ('a, error) result
-  ; warnings: Frontend.Warnings.t list
-  ; diagnostics: diagnostic list }
-
-val o1_fallback : 'a compilation -> string option
-(** The notice for an O1 pass skipped for the structural budget, if any. *)
+  ; warnings: Frontend.Warnings.t list }
 
 (** Source-level MIR passes added to upstream's stability-preserving O1 policy. *)
-type pass_selection =
-  { vectorize_loops: bool
-  ; partial_evaluation: bool
-  ; max_o1_statement_depth_cost: int option }
+type pass_selection = {vectorize_loops: bool; partial_evaluation: bool}
 
 val default_pass_selection : pass_selection
 (** The shipping selection: upstream O1 with stability preservation, without
-    partial evaluation, plus loop vectorization and one-time binding of
-    repeated scalar call arguments. A deterministic pre-dataflow
-    structural budget guards the dataflow passes. *)
+    partial evaluation or function inlining, plus loop vectorization. *)
 
-val selected_default_passes : ?fast_math:bool -> unit -> pass_selection
-(** The shipping selection with the explicit [STANLI_NO_O1_FALLBACK] override.
-    [fast_math] (default false) turns partial evaluation on. *)
+val production_settings :
+  pass_selection -> Analysis_and_optimization.Optimize.optimization_settings
+(** The upstream optimizer settings that the shipping selection runs. *)
 
 (** An explicit pass set that replaces the shipping policy, for testing the
     optimizer against unoptimized output. *)
 type pass_override =
-  | No_passes
-      (** The transformed O0 MIR that the structural budget fallback returns,
-          without its diagnostic. *)
-  | O1_without_fallback
-      (** The shipping selection with the structural budget turned off. *)
+  | No_passes  (** The transformed O0 MIR. *)
+  | Shipping  (** The shipping selection, as if no override were given. *)
   | Only of Analysis_and_optimization.Optimize.optimization_settings
-      (** These upstream settings with stability preserved and no budget. *)
+      (** These upstream settings with stability preserved. *)
 
 val pass_names : string list
 (** The [optimization_settings] field names that {!parse_pass_override}

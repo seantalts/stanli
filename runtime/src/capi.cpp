@@ -661,8 +661,6 @@ char* dup_string(const std::string& text) {
 std::vector<CompilerMessage> compiler_messages(const stanli::StancResult& r) {
   std::vector<CompilerMessage> out;
   for (const auto& w : r.warnings) out.push_back({STANLI_COMPILER_WARNING, w});
-  if (r.o1_fallback)
-    out.push_back({STANLI_COMPILER_O1_FALLBACK, *r.o1_fallback});
   return out;
 }
 }  // namespace

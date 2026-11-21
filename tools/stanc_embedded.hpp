@@ -12,12 +12,10 @@
 
 namespace stanli::tooling {
 
-// Print a compilation's warnings and O1 fallback notice to stderr and return
+// Print a compilation's warnings to stderr and return
 // its MIR, or throw CompileError with its error.
 inline std::string report_compilation(const stanli::StancResult& result) {
   for (const auto& w : result.warnings) std::fprintf(stderr, "%s\n", w.c_str());
-  if (result.o1_fallback)
-    std::fprintf(stderr, "%s\n", result.o1_fallback->c_str());
   if (!result.mir) {
     std::string message = result.error;
     while (!message.empty() && message.back() == '\n') message.pop_back();
