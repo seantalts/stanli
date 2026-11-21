@@ -34,6 +34,8 @@ O0_FIXTURES = {
     "paramcond_local_only",
     "region_map_cf_nested",
     "region_map_cf_variant_o0",
+    "region_map_kept_call_inline_o0",
+    "region_map_kept_call_o0",
     "reduce_sum_arguments",
     "region_constant_shadow",
     "region_local_shadow",

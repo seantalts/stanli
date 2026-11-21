@@ -1685,6 +1685,56 @@ void test_lane_cancellation_bitwise() {
   check(distinct.size() > 2, "cancellation lp varies across points");
 }
 
+// A call that stanc kept lowers to the program of its body written in the
+// loop, with the arguments bound to locals: the same instructions, and the
+// same lp and gradient bit for bit. The two programs number their registers
+// differently, so the lane region has to start on a 64-byte boundary in
+// both. cm_exwald's kept calls ran 1.2x slower at two benchmark points when
+// the region started 8 bytes off a 16-byte boundary.
+void test_kept_call_matches_inlined_body() {
+  const int n = 200;
+  CompiledModel call = compile_with("region_map_kept_call_o0", n);
+  CompiledModel body = compile_with("region_map_kept_call_inline_o0", n);
+  expect_mapped("kept call", call);
+  expect_mapped("body in the loop", body);
+  const auto& pc = map_payload(call);
+  const auto& pb = map_payload(body);
+  check(pc.lanes.active && pb.lanes.active, "kept call twins batch lanes");
+  const auto codes = [](const stanli::RegionMapProg& p) {
+    std::vector<int> out;
+    for (const auto& I : p.code) out.push_back((int)I.code);
+    out.push_back(-1);
+    for (const auto& I : p.adj.code) out.push_back((int)I.code);
+    return out;
+  };
+  check(codes(pc) == codes(pb),
+        "kept call and body in the loop compile to the same instructions");
+  Executor ec(call.graph), eb(body.graph);
+  call.bind(ec);
+  body.bind(eb);
+  for (const Params& p : spread_points(2)) {
+    const Eval a = evaluate(ec, p), b = evaluate(eb, p);
+    check(same_bits(a.lp, b.lp), "kept call lp bitwise");
+    for (size_t i = 0; i < a.grad.size(); ++i)
+      check(same_bits(a.grad[i], b.grad[i]), "kept call gradient bitwise");
+  }
+  for (const auto* p : {&pc, &pb}) {
+    const int64_t registers = (int64_t)p->n_regs + p->adj.n_regs;
+    std::vector<double> scratch(
+        (size_t)(registers + stanli::region_map_lane_cells(*p) + 8));
+    // Eight consecutive bases cover every offset from a 64-byte boundary.
+    for (int k = 0; k < 8; ++k) {
+      double* const base = scratch.data() + k;
+      const double* region = stanli::region_map_lane_region(*p, base);
+      check(reinterpret_cast<uintptr_t>(region) % 64 == 0,
+            "lane region starts on a 64-byte boundary from offset " +
+                std::to_string(k));
+      check(region >= base + registers && region < base + registers + 8,
+            "lane region follows the registers");
+    }
+  }
+}
+
 void test_lane_exceptions() {
   for (int n : {37, 64, 200}) {
     const std::string what = "region_map_oob N=" + std::to_string(n);
@@ -2419,6 +2469,7 @@ int main() {
   test_map_selection_follows_data_through_udfs();
   test_lane_flag_clear_segments();
   test_lane_cancellation_bitwise();
+  test_kept_call_matches_inlined_body();
   test_lane_exceptions();
   test_lane_duplicate_live_in();
   test_lane_copied_executors_interleaved();

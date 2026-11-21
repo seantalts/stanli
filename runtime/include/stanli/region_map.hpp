@@ -136,6 +136,9 @@ uint64_t region_map_tile_call_runs();
 std::string region_map_call_summary(const RegionMapProg& p);
 
 int64_t region_map_lane_cells(const RegionMapProg& p);
+// The lane plan's storage in a region map's scratch: after the registers,
+// on a 64-byte boundary.
+double* region_map_lane_region(const RegionMapProg& p, double* scratch);
 std::vector<char> region_map_clean_exempt_cells(const RegionMapProg& p);
 
 void region_map_lanes_forward(const RegionMapProg& p, KernelCtx& ctx,

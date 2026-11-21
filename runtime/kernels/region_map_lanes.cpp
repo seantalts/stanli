@@ -2330,12 +2330,24 @@ uint64_t region_map_lane_runs() {
   return lane_runs.load(std::memory_order_relaxed);
 }
 
+// Doubles per 64 bytes. The lane region starts on that boundary, so that
+// its rows load the same way whatever the register count before it.
+constexpr int64_t kLaneRegionAlignment = 8;
+
 int64_t region_map_lane_cells(const RegionMapProg& p) {
   if (!p.lanes.active) return 0;
   const auto& l = p.lanes;
   return l.storage + l.max_window +
          (int64_t)l.max_sites * (2 + kRegionMapTile) +
-         (int64_t)l.max_dynamic * kRegionMapTile + l.mask_cells;
+         (int64_t)l.max_dynamic * kRegionMapTile + l.mask_cells +
+         (kLaneRegionAlignment - 1);
+}
+
+double* region_map_lane_region(const RegionMapProg& p, double* scratch) {
+  constexpr uintptr_t bytes = kLaneRegionAlignment * sizeof(double);
+  const auto at =
+      reinterpret_cast<uintptr_t>(scratch + p.n_regs + p.adj.n_regs);
+  return reinterpret_cast<double*>((at + bytes - 1) & ~(bytes - 1));
 }
 
 static double* segment_masks(const RegionMapLanePlan& plan, double* region,
