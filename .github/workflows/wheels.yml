@@ -2290,6 +2290,11 @@ jobs:
         with:
           path: web/
 
+      # deploy-pages lists the run's artifacts, and the listing can lag an
+      # upload that finished a moment ago (actions/deploy-pages#451).
+      - name: Wait for the artifact listing
+        run: sleep 15
+
       - id: deployment
         uses: actions/deploy-pages@v4
 
