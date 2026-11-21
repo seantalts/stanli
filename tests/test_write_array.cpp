@@ -183,7 +183,9 @@ bool same_double_bytes(const std::vector<double>& a,
 }
 
 // Evaluates write_array at q on the graph and on its forced interpreter with
-// equal seeds; the rows must match bitwise. Returns the graph row.
+// equal seeds; the rows must match bitwise. A build without developer
+// switches attaches no interpreter, and then only the graph runs. Returns the
+// graph row.
 std::vector<double> cross_checked_row(const stanli::CompiledModel& cm,
                                       stanli::Executor& pex,
                                       stanli::Executor& wex,
@@ -195,6 +197,16 @@ std::vector<double> cross_checked_row(const stanli::CompiledModel& cm,
   stanli::WaRng graph_rng(seed);
   wex.run_forward_only(stanli::EvalState{&graph_rng});
   std::vector<double> row = read_row(cm.write_array->columns, wex);
+  if (!cm.write_array->interp) {
+    if (debug_switches_available()) {
+      ++failures;
+      std::printf("FAIL %s: no interpreter attached\n", what.c_str());
+    } else {
+      std::printf("SKIP %s interpreter comparison: needs developer switches\n",
+                  what.c_str());
+    }
+    return row;
+  }
   stanli::WaRng interp_rng(seed);
   if (!same_double_bytes(row, cm.write_array->interp->eval(
                                   cm.constrained_env(pex), interp_rng))) {
@@ -2120,8 +2132,7 @@ void test_mean_grouping() {
   test_setenv("STANLI_WA_FORCE_INTERP", "1");
   CompiledModel cm = compile_model(text, data);
   test_unsetenv("STANLI_WA_FORCE_INTERP");
-  if (!cm.write_array || !cm.write_array->interp ||
-      cm.write_array->truncated.has_value()) {
+  if (!cm.write_array || cm.write_array->truncated.has_value()) {
     ++failures;
     std::printf("FAIL mean_grouping did not compile completely\n");
     return;
