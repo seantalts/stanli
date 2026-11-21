@@ -48,6 +48,7 @@ import subprocess
 import sys
 import shutil
 import tempfile
+from fractions import Fraction
 
 from corpus_inventory import (CorpusCase, corpus_cases, local_cases, materialize_data,
                               source_digest)
@@ -1724,6 +1725,9 @@ class Corpus:
     scale_floor: float = 1.0
     strict: bool = True
     case_labels: bool = False
+    # A function of a model's reference giving the reference to replay
+    # against, or None for the recorded one.
+    reference: object = None
     # Recorded before references carried provenance; nothing ties them to
     # a pin until they are re-recorded.
     unpinned: bool = False
@@ -1758,6 +1762,34 @@ def signature_models(work):
             source = REPO / model["file"]
             models[source.stem] = (source, seed, (), model["source_sha256"])
     return models
+
+
+def signature_exact_lp(ref):
+    """ref with each point's log density replaced by the exact value of the
+    expression that a signature model adds, rounded once.
+
+    A signature model's lp is std_normal on the probe plus twice the sum of
+    its cases, -0.5 * sum(probe^2) + 2 * sum(t), and the recording keeps the
+    probe and every case value t in its write_array row. CmdStan adds the 360
+    to 1,440 case values in order, so its recorded lp carries the rounding of
+    that sum; the exact value of the same expression from the same recorded
+    doubles does not. A point without a row, or with a nonfinite case, keeps
+    CmdStan's lp."""
+    points = {}
+    for key, point in ref["points"].items():
+        wa = point.get("wa")
+        values = point.get("values")
+        if wa and values:
+            row = dict(zip(wa["names"].split(","), map(float, wa["values"])))
+            probe = [x for n, x in row.items() if n.startswith("probe.")]
+            cases = [x for n, x in row.items()
+                     if n.startswith("generated_quantities_result.")]
+            if all(math.isfinite(x) for x in probe + cases):
+                exact = (-Fraction(1, 2) * sum(Fraction(x) ** 2 for x in probe)
+                         + 2 * sum(map(Fraction, cases)))
+                point = dict(point, values=[float(exact)] + list(values[1:]))
+        points[key] = point
+    return dict(ref, points=points)
 
 
 def fixture_models(names):
@@ -1798,7 +1830,8 @@ CORPORA = {
         manifest_models(FUNCTIONS / "container_flow_manifest.json",
                         FUNCTIONS / "container_flow")),
     "signatures": Corpus(FUNCTIONS / "signature_references.json.gz",
-                         signature_models, case_labels=True),
+                         signature_models, case_labels=True,
+                         reference=signature_exact_lp),
     "fixtures": Corpus(FIXTURES / "references.json.gz", None, mir=True,
                        ulp=10),
     # Lowering rewrites that only stock stanc's --O1 MIR reaches, so these
@@ -1887,6 +1920,8 @@ def replay_corpus(name, selected, check_bin, stanc, jobs, timeout,
         def one(model):
             source, data, labels, *manifest = models[model]
             ref = refs[model]
+            if corpus.reference:
+                ref = corpus.reference(ref)
             drift = pin_drift(ref["recorded"], () if corpus.unpinned else
                               ("cmdstan", "stan", "math"))
             if drift or "data_sha256" not in ref:

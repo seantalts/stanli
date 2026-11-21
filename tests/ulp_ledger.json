@@ -924,7 +924,20 @@
      }
     }
    },
-   "signatures": {},
+   "signatures": {
+    "builtin_signatures_20": {
+     "lp": {
+      "bound": 20,
+      "reason": "measured on Darwin arm64; the lp is checked against the exact lp of the recorded probe and case values, and at point 0 it cancels: its parts add up to 28 times |lp|, and a plain sum of std_normal's 360 squares alone rounds by 40.0 ULP of lp; stanli is 19.5 and CmdStan's recorded lp 27.5 ULP from that exact value"
+     }
+    },
+    "builtin_signatures_24": {
+     "lp": {
+      "bound": 38,
+      "reason": "measured on Darwin arm64; the lp is checked against the exact lp of the recorded probe and case values, and at point 0 it cancels: its parts add up to 21 times |lp|, and a plain sum of std_normal's 360 squares alone rounds by 80.1 ULP of lp; stanli is 37.7 and CmdStan's recorded lp 45.7 ULP from that exact value"
+     }
+    }
+   },
    "sized_functions": {}
   }
  },
