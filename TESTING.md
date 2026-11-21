@@ -54,7 +54,15 @@ CI enforces:
   matrix product fuses multiply-adds on arm64 and not on x86-64 or MSVC.
   CmdStan built on arm64, with Eigen's kernel changed to round each product,
   matches stanli on Linux within 2 ULP. Against an 80-digit reference, the
-  largest gradient error is the same on both platforms.
+  largest gradient error is the same on both platforms. In the same way,
+  off the recording platform, the write_array variables listed in
+  `WRITE_ARRAY_AGAINST_LARGEST_OFF_PLATFORM` are measured in ULP of their
+  variable's largest value. Today that is `lk` in `gq_library_rng`, whose
+  `lkj_corr_rng` draws go through `tan`. macOS's `tan` is 0.97 ULP off at
+  one of its draws, and a correlation near 0.25, computed as 2 * beta - 1,
+  then differs by 16 ULP. Stan Math run on macOS with a correctly rounded
+  `tan` gives the Linux value exactly. Its `lk` values are then at most 3
+  ULP from the macOS reference, counted in ULP of 1, the largest entry.
 - A scaled error `|a-b| / max(|a|, |b|, 1)` below 1e-9 for every reference
   comparison. For a value below 1 in magnitude this is an absolute error of
   1e-9, so it does not prove a ULP bound.

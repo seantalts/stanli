@@ -1221,6 +1221,13 @@ def check_point(model, stan, dj, check_bin, point, pt, timeout, no_wa,
         n += len(wref)
         columns = names.split(",")
         wulps = write_array_ulps(columns, wref, wgot)
+        against = (WRITE_ARRAY_AGAINST_LARGEST_OFF_PLATFORM.get(model)
+                   if off_platform else None)
+        if against:
+            wulp = max([wulps.get(f"wa {c}", 0)
+                        if re.split(r"[.:]", c, maxsplit=1)[0] in against[0]
+                        else pair_dev(a, b, floor)[1]
+                        for c, a, b in zip(columns, wref, wgot)], default=0)
         record_ulps(measured, wulps)
         if ulp_entries is not None:
             labels = {f"wa {c}": (a, b) for c, a, b in zip(columns, wref, wgot)}
@@ -1604,6 +1611,22 @@ VALUE_ULP_LIMITS = {
 GRADIENT_AGAINST_LARGEST_OFF_PLATFORM = dict.fromkeys(
     ("multi_gp_rectangular", "propto_data_arguments", "propto_multi_gp"),
     "cancelling covariance gradient; Eigen's product fuses on arm64 only")
+
+# write_array variables that are measured in ULP of the variable's largest
+# CmdStan value, as the ULP ledger measures them, when replayed on a platform
+# other than the one the reference was recorded on. lkj_corr_rng draws each
+# correlation as 2 * beta - 1, and Boost's gamma sampler under beta_rng calls
+# tan. At one draw of this fixture macOS's tan is 0.97 ULP from the true
+# value, while Linux and Windows return the correctly rounded value. The
+# subtraction of 1 turns the 2 ULP that the beta draw then moves into 16 ULP
+# of a correlation near 0.25. Stan Math with a correctly rounded tan, run on macOS,
+# gives the Linux value exactly. Its lk values are then at most 3 ULP from
+# the macOS reference, counted in ULP of 1, the largest entry, and no other
+# output moves.
+WRITE_ARRAY_AGAINST_LARGEST_OFF_PLATFORM = {
+    "gq_library_rng": (("lk",), "lkj_corr_rng correlations depend on the "
+                                "platform's tan"),
+}
 
 
 @dataclasses.dataclass(frozen=True, eq=False)

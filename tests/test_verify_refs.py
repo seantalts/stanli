@@ -954,6 +954,32 @@ class CorpusOptionsTest(unittest.TestCase):
         listed.clear()
         self.assertEqual(run("Elsewhere x"), "ULP_GATE")
 
+    def test_listed_write_array_variables_use_their_largest_entry_off_platform(self):
+        # m.1 is 16 ULP from 0.25 and 4 ULP of m's largest entry, 1; s is a
+        # scalar with no larger entry to be measured against.
+        near = 0.25 + 16 * math.ulp(0.25)
+        pt = {**VALUES, "wa": {"names": "m.1,m.2,s",
+                               "values": ["0.25", "1", "0.25"]}}
+        listed = {MODEL: (("m",), "cause")}
+
+        def run(platform, s=0.25):
+            ref = {"recorded": {"platform": platform},
+                   "points": {str(p): pt for p in POINTS}}
+            body = ('if [ -n "$wa" ]; then echo "WANAMES m.1,m.2,s"; '
+                    f'echo "WAVALS {near!r} 1 {s!r}"; fi\necho "OK -3.5 1 -2"')
+            opts = verify_refs.Replay(self.SOURCE,
+                                      self.SOURCE.with_suffix(".json"), ulp=10)
+            with tempfile.TemporaryDirectory() as tmp, unittest.mock.patch.dict(
+                    verify_refs.WRITE_ARRAY_AGAINST_LARGEST_OFF_PLATFORM, listed):
+                return check_model(MODEL, ref, None, stub(tmp, body, wa=False),
+                                   pathlib.Path(tmp), 60, 1e-9, opts=opts)[1]
+
+        self.assertEqual(run(verify_refs.native_platform()), "ULP_GATE")
+        self.assertEqual(run("Elsewhere x"), "OK")
+        self.assertEqual(run("Elsewhere x", s=near), "ULP_GATE")
+        listed.clear()
+        self.assertEqual(run("Elsewhere x"), "ULP_GATE")
+
     def test_a_wider_value_limit_needs_its_independent_value(self):
         near = 1.0 + 12 * math.ulp(1.0)
         body = f'echo "OK -3.5 {near!r} -2"'
