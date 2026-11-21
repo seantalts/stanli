@@ -837,42 +837,6 @@ test_that("sampling never touches the caller's random stream", {
   })
 })
 
-o1_budget_code <- function() {
-  loops <- paste0("for (i", 1:9, " in 1:1) {", collapse = "\n")
-  paste("parameters { real x; }", "model {", "real s = 0;", loops,
-        strrep("s += 1;\n", 2100), strrep("}\n", 9),
-        "x ~ normal(s, 1);", "}", sep = "\n")
-}
-
-o1_notice <- function(expr) {
-  seen <- NULL
-  value <- withCallingHandlers(
-    expr,
-    stanli_o1_fallback = function(w) {
-      seen <<- c(seen, conditionMessage(w))
-      invokeRestart("muffleWarning")
-    })
-  list(value = value, seen = seen)
-}
-
-test_that("an O1 fallback is a classed warning", {
-  skip_without_runtime()
-  got <- o1_notice(stanli_model(code = o1_budget_code()))
-  expect_length(got$seen, 1)
-  expect_match(got$seen, "skipped O1", fixed = TRUE)
-  expect_s3_class(got$value, "stanli_model")
-})
-
-test_that("the stanli-compile executable reports the O1 fallback as a classed warning", {
-  compiler <- Sys.getenv("STANLI_TEST_PORTABLE_COMPILER")
-  skip_if(!nzchar(compiler) || !file.exists(compiler),
-          "STANLI_TEST_PORTABLE_COMPILER does not name a stanli-compile")
-  got <- o1_notice(stanli:::mir_from_binary(compiler, o1_budget_code()))
-  expect_length(got$seen, 1)
-  expect_match(got$seen, "skipped O1", fixed = TRUE)
-  expect_true(startsWith(got$value, "STANLI5:"))
-})
-
 test_that("a model's variables and columns come from the runtime", {
   skip_without_runtime()
   model <- stanli_model(code = "

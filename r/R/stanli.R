@@ -115,9 +115,7 @@ read_utf8_file <- function(path) {
 #'   reason, when part of the model has no compiled path and runs through
 #'   the much slower MIR interpreter; with `allow_interpreter = FALSE` (or the
 #'   environment variable `STANLI_NO_INTERPRETER` set) that is an error
-#'   instead. Either message is what to include in a bug report. When the
-#'   compiler skips O1 for a very large model, the warning has class
-#'   `stanli_o1_fallback`.
+#'   instead. Either message is what to include in a bug report.
 #' @export
 stanli_model <- function(file = NULL, code = NULL, data = NULL, mir = NULL,
                          seed = 1, threads_per_chain = 1, include_paths = NULL,

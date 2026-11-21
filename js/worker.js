@@ -18,16 +18,14 @@ function ensureStanc() {
     importScripts("stanli-compiler.js");
 }
 
-// The MIR, the compiler's warnings, and the O1 fallback notice (null unless
-// O1 was skipped for the structural budget). Throws on a compile error.
+// The MIR and the compiler's warnings. Throws on a compile error.
 function compileMir(code, fastMath) {
   ensureStanc();
   const sc = fastMath ? globalThis.stanli_compile_fast("embedded_model", code)
                       : globalThis.stanli_compile("embedded_model", code);
   if (sc.errors) throw new Error(Array.from(sc.errors).join("\n"));
   const warnings = Array.from(sc.warnings || [], String);
-  const o1Fallback = sc.o1_fallback == null ? null : String(sc.o1_fallback);
-  return { mir: String(sc.result), warnings, o1Fallback };
+  return { mir: String(sc.result), warnings };
 }
 
 // Reuse the native report (including rank-normalized R-hat and bulk/tail
@@ -237,7 +235,7 @@ onmessage = async (e) => {
       say("compiling Stan -> MIR (stanc3)");
       const sc = compileMir(req.code, !!req.fastMath);
       postMessage({ done: { mir: sc.mir, fastMath: !!req.fastMath,
-                            warnings: sc.warnings, o1Fallback: sc.o1Fallback,
+                            warnings: sc.warnings,
                             ms: { stanc: performance.now() - t0 } } });
       return;
     }
@@ -247,10 +245,9 @@ onmessage = async (e) => {
       return;
     }
     let mir = req.mir;
-    let o1Fallback = null;
     if (!mir) {
       say("compiling Stan -> MIR (stanc3)");
-      ({ mir, o1Fallback } = compileMir(req.code, !!req.fastMath));
+      ({ mir } = compileMir(req.code, !!req.fastMath));
     }
     const tStanc = performance.now();
 
@@ -399,7 +396,7 @@ onmessage = async (e) => {
     postMessage({
       done: {
         names, samples, generatedStart, pathfinder: pf,
-        fastMath: !!req.fastMath, o1Fallback,
+        fastMath: !!req.fastMath,
         sampler: pathfinder ? "pathfinder" : walnuts ? "walnuts" : "nuts",
         maxDepth: pathfinder ? null : 10,
         samplerStats: samplerStats ? samplerStats.buffer : null,

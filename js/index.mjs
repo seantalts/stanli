@@ -101,10 +101,8 @@ function fastMathOption(value) {
  *   multiply-add rewriting; numerics may differ from CmdStan in the last
  *   bits). Pass the same value to sample() together with the returned MIR.
  * @returns {Promise<{mir: string, fastMath: boolean, warnings: string[],
- *                    o1Fallback: string|null, ms: {stanc: number}}>}
- *   `warnings` are the compiler's warnings. `o1Fallback` is null, or the
- *   notice that the model exceeded the compiler's size budget for O1 and
- *   was compiled from unoptimized MIR (correct, possibly slower). */
+ *                    ms: {stanc: number}}>}
+ *   `warnings` are the compiler's warnings. */
 export function compile(opts) {
   return request({ cmd: "compile", code: opts.code,
                    fastMath: fastMathOption(opts.fastMath) }, opts);
@@ -174,7 +172,6 @@ function pathfinderInitOptions(value) {
  * @returns {Promise<{names: string[], samples: number, generatedStart: number,
  *                    columns: Object<string, Float64Array>,
  *                    exactLp: boolean, fastMath: boolean,
- *                    o1Fallback: string|null,
  *                    sampler: string, maxDepth: number|null,
  *                    samplerStats: Float64Array|null,
  *                    pathfinder?: {path: {iter, lp}[], khat: number,
@@ -188,7 +185,6 @@ function pathfinderInitOptions(value) {
  *   NUTS also returns post-warmup samplerStats in draw-major order:
  *   lp__, accept_stat__, stepsize__, treedepth__, n_leapfrog__,
  *   divergent__, energy__. Other methods return null for samplerStats.
- *   `o1Fallback` is as in compile(), and null when `mir` was given.
  */
 // JSON.stringify writes null for a non-finite number, which Stan's data
 // reader rejects. It takes these quoted tokens.

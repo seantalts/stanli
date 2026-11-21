@@ -102,22 +102,6 @@ bad <- compile_bundled(
 stopifnot(is.null(bad$result), length(bad$errors) > 0L,
           grepl("stanli_compile", bad$errors, fixed = TRUE))
 
-loops <- paste0("for (i", 1:9, " in 1:1) {", collapse = "\n")
-budget_source <- paste("parameters { real x; }", "model {", "real s = 0;",
-                       loops, strrep("s += 1;\n", 2100), strrep("}\n", 9),
-                       "x ~ normal(s, 1);", "}", sep = "\n")
-o1 <- NULL
-budget <- withCallingHandlers(
-  compile_bundled("budget_bundled", budget_source),
-  stanli_o1_fallback = function(w) {
-    o1 <<- c(o1, conditionMessage(w))
-    invokeRestart("muffleWarning")
-  })
-stopifnot(length(budget$errors) == 0L,
-          startsWith(budget$result, "STANLI5:"),
-          length(o1) == 1L, grepl("skipped O1", o1, fixed = TRUE),
-          !any(grepl("skipped O1", budget$warnings, fixed = TRUE)))
-
 if (!stanli_available())
   stop("the real stanli runtime is required for this check", call. = FALSE)
 

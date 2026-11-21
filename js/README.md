@@ -105,7 +105,7 @@ mode does no PSIS resampling.
 | Function | Does |
 | --- | --- |
 | `sample({code \| mir, data, seed, warmup, samples, delta, sampler, maxError, pathfinderInit, fastMath, onProgress, onLive})` | Compile (unless `mir` is given) and draw. Defaults: `seed` 1, `warmup` 1000, `samples` 1000, `delta` 0.8, `sampler` `"nuts"`. |
-| `compile({code, fastMath})` | Compile Stan source to portable MIR once, for reuse across `sample()` calls. Returns `{mir, warnings, o1Fallback}`; `o1Fallback` is null unless the model was too large for O1 and was compiled from unoptimized MIR. |
+| `compile({code, fastMath})` | Compile Stan source to portable MIR once, for reuse across `sample()` calls. Returns `{mir, warnings}`. |
 | `diagnose(fit \| fits)` | Text diagnostic report for NUTS fits. |
 | `diagnoseReport(fit \| fits)` | `{ text, failed, unavailable }`: the report and its verdict as counts. |
 | `preload({chains})` | Start loading the compiler and WASM runtime in the background. |

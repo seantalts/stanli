@@ -71,9 +71,7 @@ An object of class `stanli_model` whose `columns` name every
   reason, when part of the model has no compiled path and runs through
   the much slower MIR interpreter; with `allow_interpreter = FALSE` (or the
   environment variable `STANLI_NO_INTERPRETER` set) that is an error
-  instead. Either message is what to include in a bug report. When the
-  compiler skips O1 for a very large model, the warning has class
-  `stanli_o1_fallback`.
+  instead. Either message is what to include in a bug report.
 }
 \description{
 Compile a Stan model
