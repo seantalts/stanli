@@ -189,6 +189,13 @@ inline void record_probability_call(F&& f) {
       std::fill_n(s->buf[k], static_cast<std::size_t>(s->len[k]), 0.0);
 }
 
+// Out of line, so that the recorder's emit keeps one branch for the check
+// and the compiler still inlines it into each density's backward.
+[[noreturn, gnu::cold, gnu::noinline]] inline void throw_partials_size() {
+  throw std::logic_error(
+      "recorder: an operand's size does not match its partials slot");
+}
+
 }  // namespace stanli
 
 namespace stan {
@@ -449,9 +456,7 @@ class partials_propagator<stanli::rvar, void, Ops...> {
       if (s->buf[I] == nullptr) return;
       // A skipped edge would leave the previous gradient's partials in the
       // slot.
-      if (e.size() != s->len[I])
-        throw std::logic_error(
-            "recorder: an operand's size does not match its partials slot");
+      if (e.size() != s->len[I]) stanli::throw_partials_size();
       e.emit(s->buf[I]);
     }
   }
