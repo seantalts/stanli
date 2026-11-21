@@ -15,28 +15,14 @@
 
 #include <cmath>
 #include <cstdint>
+#include <limits>
+#include <string>
+#include <utility>
 #include <vector>
 
 using namespace stanli;
 
 namespace {
-
-// hi + lo carries the running sum to about 2^-106 relative.
-struct ExactSum {
-  double hi = 0.0, lo = 0.0;
-  void add(double x) {
-    const double s = hi + x;
-    const double b = s - hi;
-    lo += (hi - (s - b)) + (x - b);
-    hi = s;
-  }
-  void add_product(double a, double b) {
-    const double p = a * b;
-    add(p);
-    add(std::fma(a, b, -p));
-  }
-  double value() const { return hi + lo; }
-};
 
 constexpr int64_t kN = 5000;
 // Two ULP leaves room for the rounding of the result and of each product.
@@ -198,6 +184,106 @@ void test_merged_term_sum() {
   expect_ulp("pairwise SUM_VEC value", value, want.value(), kUlp);
 }
 
+// Terms that cancel: pairs of x and nearly -x with magnitudes up to 1e8, in a
+// fixed shuffled order, so that their sum is about 1e-8 of the largest term.
+std::vector<double> cancelling_terms(int64_t n) {
+  std::vector<double> x((size_t)n);
+  uint64_t state = 0x9e3779b97f4a7c15ull;
+  const auto next = [&state] {
+    state = state * 6364136223846793005ull + 1442695040888963407ull;
+    return (double)(state >> 11) / 9007199254740992.0;  // [0, 1)
+  };
+  for (int64_t i = 0; i < n; ++i)
+    x[(size_t)i] =
+        i % 2 ? -x[(size_t)i - 1] + (next() - 0.5) : 1e8 * (next() - 0.5);
+  for (int64_t i = n - 1; i > 0; --i)
+    std::swap(x[(size_t)i], x[(size_t)(next() * (double)(i + 1))]);
+  return x;
+}
+
+// sum() and mean() of more than kPlainSumMax values are compensated,
+// whatever the grouping that Stan Math would use: within one ULP of the
+// exact sum even when the terms cancel. Up to kPlainSumMax values keep Stan
+// Math's grouping.
+void test_sum_and_mean_values() {
+  for (const int64_t n :
+       {kPlainSumMax + 1, int64_t{46}, int64_t{750}, int64_t{3000}}) {
+    const std::vector<double> x = cancelling_terms(n);
+    ExactSum want;
+    for (double v : x) want.add(v);
+    const std::string at = " n=" + std::to_string(n);
+    for (const SumGrouping grouping :
+         {SumGrouping::InOrder, SumGrouping::Packet, SumGrouping::Phased})
+      expect_ulp("sum_grouped " + std::to_string((int)grouping) + at,
+                 sum_grouped(x.data(), n, grouping, 1), want.value(), 1);
+    for (const uint16_t opcode : {OP_SUM_VEC, OP_MEAN}) {
+      Graph g;
+      const int xs = g.add_slot(n, true), out = g.add_slot(1, false);
+      g.add_op(opcode, {xs}, out);
+      g.result_slot = out;
+      Executor ex(std::move(g));
+      for (int64_t i = 0; i < n; ++i) ex.param_ptr(xs)[i] = x[(size_t)i];
+      std::vector<double> grad((size_t)n);
+      const double value = ex.gradient(grad.data());
+      const bool mean = opcode == OP_MEAN;
+      expect_ulp((mean ? "mean" : "sum") + at, value,
+                 mean ? want.value() / (double)n : want.value(), 1);
+      expect_eq((mean ? "mean adjoint" : "sum adjoint") + at, grad[0],
+                mean ? 1.0 / (double)n : 1.0);
+    }
+  }
+  // The cutoff: 32 cancelling terms are added in order, bit for bit, and 33
+  // are compensated, where the plain sum is more than one ULP off.
+  for (const int64_t n : {kPlainSumMax, kPlainSumMax + 1}) {
+    const std::vector<double> x = cancelling_terms(n);
+    double in_order = 0.0;
+    for (double v : x) in_order += v;
+    ExactSum want;
+    for (double v : x) want.add(v);
+    const double got = sum_grouped(x.data(), n, SumGrouping::InOrder, 0);
+    const std::string at = " n=" + std::to_string(n);
+    expect_true("plain sum is off by more than one ULP" + at,
+                ulp_distance(in_order, want.value()) > 1);
+    if (n <= kPlainSumMax)
+      expect_eq("in order" + at, got, in_order);
+    else
+      expect_ulp("compensated" + at, got, want.value(), 1);
+  }
+}
+
+// Non-finite terms and zeros give what a plain sum gives.
+void test_compensated_sum_edges() {
+  const double inf = std::numeric_limits<double>::infinity();
+  const auto plain = [](const std::vector<double>& x) {
+    double s = 0.0;
+    for (double v : x) s += v;
+    return s;
+  };
+  std::vector<std::pair<std::string, std::vector<double>>> cases = {
+      {"empty", {}},
+      {"forty -0.0", std::vector<double>(40, -0.0)},
+      {"forty +0.0", std::vector<double>(40, 0.0)},
+      {"overflow", std::vector<double>(40, 1e308)},
+  };
+  std::vector<double> x(40, 1.0);
+  x[7] = inf;
+  cases.push_back({"one inf", x});
+  x[12] = -inf;
+  cases.push_back({"inf and -inf", x});
+  x.assign(40, 1.0);
+  x[13] = std::numeric_limits<double>::quiet_NaN();
+  cases.push_back({"nan", x});
+  for (const auto& [name, terms] : cases) {
+    const double got = compensated_sum(terms.data(), (int64_t)terms.size());
+    const double want = plain(terms);
+    if (std::isnan(want))
+      expect_eq_or_both_nan("compensated_sum " + name, got, want);
+    else
+      expect_true("compensated_sum " + name,
+                  got == want && std::signbit(got) == std::signbit(want));
+  }
+}
+
 // A summed integer-outcome density over kN observations, as re-roll and
 // partition emit for a loop of scalar calls. The value is held to the exact
 // sum of the scalar calls' values, which CmdStan adds one at a time. The
@@ -305,5 +391,7 @@ int main() {
   test_ordered_logistic_cutpoints();
   test_merged_term_sum();
   test_summed_densities();
+  test_sum_and_mean_values();
+  test_compensated_sum_edges();
   return finish("test_sum_accuracy");
 }

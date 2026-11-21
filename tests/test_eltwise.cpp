@@ -493,17 +493,27 @@ static void test_reduction_overloads() {
     const Kernel* sum = find_kernel(OP_SUM_VEC);
     ctx.n_in = 1;
     ctx.variant = 1;  // owning Eigen double input
+    // Up to 8 terms the sum is Stan Math's, bit for bit; a longer one is
+    // compensated and held to the exact sum.
+    const auto expect_sum = [n](const std::string& what, double got,
+                                const auto& terms) {
+      if (n <= kPlainSumMax) {
+        expect_eq_or_both_nan(what, got, stan::math::sum(terms));
+        return;
+      }
+      ExactSum want;
+      for (double v : terms) want.add(v);
+      expect_ulp(what, got, want.value(), 1);
+    };
     sum->forward(ctx);
-    Eigen::VectorXd owning = values.head(n);
-    expect_eq_or_both_nan("sum owning Eigen", output, stan::math::sum(owning));
+    expect_sum("sum owning Eigen", output, values.head(n));
     int offset = 1;
     ctx.in[0] = {values.data() + 1, n};
     ctx.variant = 2;
     ctx.idata = &offset;
     ctx.n_idata = 1;
     sum->forward(ctx);
-    expect_eq_or_both_nan("sum shifted Eigen", output,
-                          stan::math::sum(values.segment(1, n)));
+    expect_sum("sum shifted Eigen", output, values.segment(1, n));
   }
 }
 

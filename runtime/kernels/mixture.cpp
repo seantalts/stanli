@@ -8,6 +8,7 @@
 // take the in-place path.
 //
 // The partial forms are stan-math's own reverse-mode chains, written out.
+#include <stanli/extrema_grouping.hpp>
 #include <stanli/graph.hpp>
 #include <stanli/optable.hpp>
 
@@ -76,18 +77,15 @@ void lse_rows_bwd(KernelCtx& ctx) {
 
 // ---- plain sum over packed rows -------------------------------------------
 // The same packing, without the exponential: idata[0] = row width K, one
-// output per row. Each row accumulates ascending, so a row is bit-identical
-// to the OP_SUM_VEC a fused lane replaces.
+// output per row. Each row is summed as an in-order OP_SUM_VEC sums it, so a
+// row is bit-identical to the OP_SUM_VEC a fused lane replaces.
 void sum_rows_fwd(KernelCtx& ctx) {
   assert(ctx.n_idata == 1);
   const int64_t K = ctx.idata[0];
   assert(K > 0 && ctx.in[0].len == ctx.out.len * K);
-  for (int64_t r = 0; r < ctx.out.len; ++r) {
-    const double* row = ctx.in[0].data + r * K;
-    double acc = 0;
-    for (int64_t k = 0; k < K; ++k) acc += row[k];
-    ctx.out.data[r] = acc;
-  }
+  for (int64_t r = 0; r < ctx.out.len; ++r)
+    ctx.out.data[r] =
+        sum_grouped(ctx.in[0].data + r * K, K, SumGrouping::InOrder, 0);
 }
 
 void sum_rows_bwd(KernelCtx& ctx) {

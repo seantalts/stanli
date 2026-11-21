@@ -46,7 +46,8 @@ CI enforces:
   ledger.
 - 10 ULP per element for the brms fixtures, against CmdStan references
   recorded on the same platform (`ULP_LIMITS` in
-  [`tools/verify_refs.py`](tools/verify_refs.py)), and for the fixtures
+  [`tools/verify_refs.py`](tools/verify_refs.py)): on macOS arm64 and on
+  Linux x86-64, which has its own recording. The same holds for the fixtures
   corpus on every platform. Some models measure the gradient in ULP of its
   largest entry: those in `GRADIENT_AGAINST_LARGEST` on every platform, and
   those in `GRADIENT_AGAINST_LARGEST_OFF_PLATFORM` on platforms other than the
@@ -54,7 +55,14 @@ CI enforces:
   matrix product fuses multiply-adds on arm64 and not on x86-64 or MSVC.
   CmdStan built on arm64, with Eigen's kernel changed to round each product,
   matches stanli on Linux within 2 ULP. Against an 80-digit reference, the
-  largest gradient error is the same on both platforms. In the same way,
+  largest gradient error is the same on both platforms. A brms fixture that
+  centres a predictor on a mean of more than 32 rows is in
+  `GRADIENT_AGAINST_LARGEST` too when the gradient entry of a centred
+  coefficient cancels so far that one rounding per term is at least 5 ULP of
+  the entry (79 of the 105 that centre, measured with the 50-digit
+  interpreter). The compensated mean, and each platform's own rounding of the
+  cancelling sum, move such an entry by several to hundreds of its own ULP in
+  either direction. In the same way,
   off the recording platform, the write_array variables listed in
   `WRITE_ARRAY_AGAINST_LARGEST_OFF_PLATFORM` are measured in ULP of their
   variable's largest value. Today that is `lk` in `gq_library_rng`, whose
@@ -158,12 +166,27 @@ lists the values that need one.
 
 The reasons in the macOS arm64 section compare both engines with the 80-digit
 evaluator in [`tools/hp`](tools/hp/README.md) where it can score the value.
-Of the 154 main-corpus entries, it scores 89. stanli is at least as close to
-the true value as CmdStan in 61 of them, including 28 of the 31 lp entries.
+Of the 177 main-corpus entries, it scores 144. stanli is at least as close
+to the true value as CmdStan in 132 of them, including the 32 lp entries it
+can decide; it is farther in 6 and cannot decide 6.
 Entries whose reason says
 "stanli is farther from it than CmdStan" are open findings under the budgets
 above. Linux and Windows have no section yet, so pull request CI does not run
 this gate; record a section by running the commands above on that platform.
+
+`sum()` and `mean()` of more than 32 values do not keep the reference order:
+they add their terms with compensation (`compensated_sum` in
+[`runtime/include/stanli/pairwise_sum.hpp`](runtime/include/stanli/pairwise_sum.hpp)),
+and the sums that re-roll and partition build from a loop's terms add them
+pairwise. Both are held to the exact sum of the same doubles in
+[`tests/test_sum_accuracy.cpp`](tests/test_sum_accuracy.cpp), not to Stan
+Math's bits, and the values that moved away from CmdStan have ledger
+entries that compare both engines with the 80-digit value. The `signatures`
+corpus holds each model's lp to the exact value of its own expression,
+-0.5 * sum(probe^2) + 2 * sum(cases), formed from the recorded probe and case
+values and rounded once, instead of to CmdStan's in-order sum
+(`signature_exact_lp` in `tools/verify_refs.py`); a ULP_GATE message there
+calls that value "CmdStan".
 
 Kernels keep the reference summation order where practical, so the unit tests
 are stricter than the corpus check. A reordered matrix-vector

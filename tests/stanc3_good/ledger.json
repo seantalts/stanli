@@ -101,6 +101,12 @@
   "cause": "The model multiplies and adds containers whose sizes come from data and never match. stanli sees the sizes when it binds the data and refuses the model with Stan Math's message; CmdStan throws the same kind of error at every evaluation.",
   "status": "one_side_threw"
  },
+ "compiler-optimizations/mem_patterns/reductions_allowed.stan": {
+  "cause": "tp_matrix_aos_from_mix takes a branch on sum(soa_x) > 0 for a matrix of 50 values. At point 1 the values cancel exactly: their exact sum is 0, CmdStan's in-order sum is 6.9e-18, and stanli's compensated sum is 0, so CmdStan takes the first branch (aos_x + aos_y) and stanli the second (aos_y), which is the branch of the exact sum.",
+  "points": {
+   "1": "mismatch"
+  }
+ },
  "compiler-optimizations/partial-eval.stan": {
   "cause": "complex numbers are not supported yet (in variable z)",
   "status": "unsupported"

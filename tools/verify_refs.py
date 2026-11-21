@@ -48,6 +48,7 @@ import subprocess
 import sys
 import shutil
 import tempfile
+from fractions import Fraction
 
 from corpus_inventory import (CorpusCase, corpus_cases, local_cases, materialize_data,
                               source_digest)
@@ -248,10 +249,55 @@ ULP_LIMITS = {source.stem: 10 for source in (REPO / "tests" / "brms").glob("*.st
 # is 0.0 and CmdStan 16.0 scaled ULP from the true value.
 ULP_LIMITS.update(dict.fromkeys(("i320_pois_trunc_both", "i320_pois_trunc_ub"),
                                 16))
+# b_x_Intercept = Intercept - dot_product(means_X, b) takes the column mean of
+# 40 values, which stanli adds with compensation: at point 0 stanli is 3.9
+# and CmdStan 67.9 ULP from the 80-digit value, and stanli is 64 ULP from
+# CmdStan.
+ULP_LIMITS.update(dict.fromkeys(("s2_mi_lognormal", "s2_mi_trunc_lb"), 64))
 # Gradient ULP is measured against the largest gradient entry for these
 # fixtures; lp and write_array outputs keep per-element ULP.
 _REGROUPED_ADJOINT = ("adjoint sums regrouped by vectorized random-effect "
                       "loops; checked against a 60-digit reference")
+# brms centres each predictor column on its mean in transformed data. The
+# gradient entry of a centred predictor's coefficient is a sum over rows of
+# the centred column times a residual, which cancels. Stanli's compensated
+# mean gives centred data closer to the exact centring than CmdStan's (whose
+# mean and centred column are those of stanli without compensation, checked
+# with CmdStan on sw_negbinomial), and the entries then move by several to
+# hundreds of their own ULP either way, as each platform's own rounding of
+# the cancelling sum also does.
+#
+# The rule: a brms fixture whose transformed data centres a predictor on a
+# mean of more than 32 rows (which stanli adds with compensation) measures its
+# gradient against the largest entry when, at point 0 or 1, the entry of a
+# centred coefficient cancels so far that one rounding per term is at least 5
+# ULP of the entry, half the per-element limit. The 50-digit interpreter
+# measures it from d lp / d Xc[i, j] = b[j] * s[i] (point 2 has b = 0 and is
+# not measured): of the 105 fixtures that centre, 79 have this property, with
+# terms that add up to 6.7 to 17,951 times the entry and one rounding per
+# term 5.2 to 12,904 ULP of it. Ten of them were already measured this way
+# for their regrouped adjoints, and s2_wiener (below) cannot be measured.
+# The others that centre stay per element: 21 cancel less, s2_invgaussian
+# has no 50-digit measure, and three centre fewer than 33 rows, where the
+# mean is unchanged.
+#
+# sw_mv_rescor and sw_student show why the rule cannot be "failed on macOS":
+# both stayed within 10 ULP there, and on Linux x86-64 grad[4] at point 1 and
+# grad[1] at point 0 (terms 10.6 and 21.8 times the entry, 8.9 and 15.1 ULP
+# per rounding) were 14 and 16 ULP from CmdStan, while stanli was 4.9 and 9.1
+# and CmdStan 9.1 and 6.9 ULP from the 80-digit value, and both were within
+# 0.6 ULP of it against the largest entry.
+#
+# Against the largest entry, stanli is at most 7 ULP from CmdStan on macOS.
+# Where the 80-digit gradient decides (64 of these fixtures), stanli is
+# closer to it than CmdStan in 21, farther in 6 (by at most 3.5 ULP, in
+# s2_fcor) and the same in 37. In four censored or truncated fixtures
+# (s2_cens_interval, s2_weights_trunc, sw_cens, sw_trunc) both engines are
+# 1e9 ULP or more from it: Stan Math's normal_lcdf and normal_lccdf form their
+# partials from Abramowitz and Stegun's approximation 7.1.26. i319_pois_re2
+# has only directional 80-digit derivatives.
+_CENTRED_GRADIENT = ("gradient entries of mean-centred predictors cancel; "
+                     "checked against an 80-digit reference")
 GRADIENT_AGAINST_LARGEST = {
     name: _REGROUPED_ADJOINT for name in (
         "i320_pois_trunc_both", "i320_pois_trunc_ub", "s2_car",
@@ -259,6 +305,45 @@ GRADIENT_AGAINST_LARGEST = {
         "s2_mm_weights", "s2_mmc", "s2_multinomial", "sw_gamma",
         "sw_re_bern", "sw_skewnormal", "sw_weibull")
 }
+GRADIENT_AGAINST_LARGEST.update({
+    name: _CENTRED_GRADIENT for name in (
+        "i319_gauss_re", "i319_negbin_fixed", "i319_negbin_re",
+        "i319_pois_fixed", "i319_pois_re", "i319_pois_re2", "i320_sratio_cs",
+        "i320_sratio_plain", "s2_ar_cov", "s2_car_icar", "s2_categorical_re",
+        "s2_cens_interval", "s2_cosy", "s2_cox", "s2_cumulative_cauchit",
+        "s2_custom_vreal", "s2_discrete_weibull", "s2_dist_sigma_re",
+        "s2_fcor", "s2_gev", "s2_hurdle_cumulative", "s2_index_mi",
+        "s2_mixture_theta", "s2_mv_shared_re", "s2_rate", "s2_sar",
+        "s2_sar_error", "s2_unstr", "s2_weights_trunc", "s2_zi_beta",
+        "s2_zoi_beta", "sw_acat", "sw_acat_cs", "sw_ar", "sw_arma",
+        "sw_bernoulli", "sw_binomial", "sw_categorical", "sw_cratio",
+        "sw_cratio_cs", "sw_cumulative", "sw_cumulative_cs", "sw_dist_sigma",
+        "sw_exgaussian", "sw_gaussian", "sw_hurdle_gamma",
+        "sw_hurdle_lognormal", "sw_hurdle_pois", "sw_lognormal", "sw_ma",
+        "sw_mi", "sw_mixture", "sw_mv_norescor", "sw_mv_rescor",
+        "sw_negbinomial", "sw_poisson", "sw_re_gauss", "sw_re_negbin",
+        "sw_re_pois", "sw_re_slope", "sw_sratio", "sw_student", "sw_trunc",
+        "sw_vonmises", "sw_weights", "sw_zi_binomial", "sw_zi_negbin",
+        "sw_zi_poisson")
+})
+# The same centring, in two models that the 80-digit reference cannot judge.
+# s2_wiener: tools/hp has no wiener density, so only the part that changed is
+# measured: stanli's column mean is 0.10 ULP from the exact mean and CmdStan's
+# 1.90, and stanli's centred column is at most 0.55 ULP from the exact
+# centring, CmdStan's 1.90. The gradient is not checked against a true
+# value; against its largest entry stanli is 1 ULP from CmdStan.
+# sw_cens: Stan Math's normal_lcdf and normal_lccdf form their partials from
+# Abramowitz and Stegun's approximation 7.1.26, so both engines' gradients
+# are 2e-7 to 6e-7 relative from the true derivative of their own lp, which
+# itself agrees with the 80-digit value to 2e-16. Against its largest entry
+# stanli is 1 ULP from CmdStan.
+GRADIENT_AGAINST_LARGEST["s2_wiener"] = (
+    "gradient entries of mean-centred predictors cancel; no 80-digit "
+    "reference for wiener, the centred data is checked instead")
+GRADIENT_AGAINST_LARGEST["sw_cens"] = (
+    "gradient entries of mean-centred predictors cancel; Stan Math's "
+    "censored-normal partials are approximations to 2e-7, so the 80-digit "
+    "reference cannot decide")
 PLATFORM_REFS = {
     "Linux x86_64": REPO / "docs" / "internal" / "artifacts" / "corpus-refs-linux-x86_64.json.gz",
 }
@@ -1680,6 +1765,9 @@ class Corpus:
     scale_floor: float = 1.0
     strict: bool = True
     case_labels: bool = False
+    # A function of a model's reference giving the reference to replay
+    # against, or None for the recorded one.
+    reference: object = None
     # Recorded before references carried provenance; nothing ties them to
     # a pin until they are re-recorded.
     unpinned: bool = False
@@ -1714,6 +1802,34 @@ def signature_models(work):
             source = REPO / model["file"]
             models[source.stem] = (source, seed, (), model["source_sha256"])
     return models
+
+
+def signature_exact_lp(ref):
+    """ref with each point's log density replaced by the exact value of the
+    expression that a signature model adds, rounded once.
+
+    A signature model's lp is std_normal on the probe plus twice the sum of
+    its cases, -0.5 * sum(probe^2) + 2 * sum(t), and the recording keeps the
+    probe and every case value t in its write_array row. CmdStan adds the 360
+    to 1,440 case values in order, so its recorded lp carries the rounding of
+    that sum; the exact value of the same expression from the same recorded
+    doubles does not. A point without a row, or with a nonfinite case, keeps
+    CmdStan's lp."""
+    points = {}
+    for key, point in ref["points"].items():
+        wa = point.get("wa")
+        values = point.get("values")
+        if wa and values:
+            row = dict(zip(wa["names"].split(","), map(float, wa["values"])))
+            probe = [x for n, x in row.items() if n.startswith("probe.")]
+            cases = [x for n, x in row.items()
+                     if n.startswith("generated_quantities_result.")]
+            if all(math.isfinite(x) for x in probe + cases):
+                exact = (-Fraction(1, 2) * sum(Fraction(x) ** 2 for x in probe)
+                         + 2 * sum(map(Fraction, cases)))
+                point = dict(point, values=[float(exact)] + list(values[1:]))
+        points[key] = point
+    return dict(ref, points=points)
 
 
 def fixture_models(names):
@@ -1754,7 +1870,8 @@ CORPORA = {
         manifest_models(FUNCTIONS / "container_flow_manifest.json",
                         FUNCTIONS / "container_flow")),
     "signatures": Corpus(FUNCTIONS / "signature_references.json.gz",
-                         signature_models, case_labels=True),
+                         signature_models, case_labels=True,
+                         reference=signature_exact_lp),
     "fixtures": Corpus(FIXTURES / "references.json.gz", None, mir=True,
                        ulp=10),
     # Lowering rewrites that only stock stanc's --O1 MIR reaches, so these
@@ -1843,6 +1960,8 @@ def replay_corpus(name, selected, check_bin, stanc, jobs, timeout,
         def one(model):
             source, data, labels, *manifest = models[model]
             ref = refs[model]
+            if corpus.reference:
+                ref = corpus.reference(ref)
             drift = pin_drift(ref["recorded"], () if corpus.unpinned else
                               ("cmdstan", "stan", "math"))
             if drift or "data_sha256" not in ref:

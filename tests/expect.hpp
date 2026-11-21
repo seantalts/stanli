@@ -69,6 +69,24 @@ inline void expect_ulp(const std::string& what, double got, double want,
     report_mismatch(what, got, want, "over ulp budget");
 }
 
+// A reference for long sums: hi + lo carries the running sum to about 2^-106
+// relative, far below one ULP of the result.
+struct ExactSum {
+  double hi = 0.0, lo = 0.0;
+  void add(double x) {
+    const double s = hi + x;
+    const double b = s - hi;
+    lo += (hi - (s - b)) + (x - b);
+    hi = s;
+  }
+  void add_product(double a, double b) {
+    const double p = a * b;
+    add(p);
+    add(std::fma(a, b, -p));
+  }
+  double value() const { return hi + lo; }
+};
+
 // |got - want| within `max_ulp` spacings of the double at |scale|. Unlike
 // ulp_distance this does not count representable values, so it is the
 // looser check across a binade boundary below |scale|.

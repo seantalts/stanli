@@ -101,9 +101,13 @@ inline std::pair<SumGrouping, int64_t> sum_grouping(
   return {SumGrouping::Packet, 0};
 }
 
+// A short sum keeps the grouping, so it is bit for bit Stan Math's; a longer
+// one, except a pairwise sum, is compensated and close to the exact sum.
 inline double sum_grouped(const double* data, int64_t len, SumGrouping grouping,
                           int64_t offset) {
   if (len == 0) return 0.0;
+  if (len > kPlainSumMax && grouping != SumGrouping::Pairwise)
+    return compensated_sum(data, len);
   switch (grouping) {
     case SumGrouping::Phased:
       return reduce_phased(data, len, offset,

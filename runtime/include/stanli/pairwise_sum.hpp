@@ -20,6 +20,15 @@ namespace stanli {
 
 inline constexpr int64_t kPairwiseBlock = 8;
 
+// sum() and mean() of up to kPlainSumMax terms keep their plain grouping,
+// which is Stan Math's to the bit; longer ones are compensated
+// (compensated_sum). A compensated sum costs about seven operations per
+// term, so the cutoff gives up its accuracy on sums of up to 32 terms for
+// speed. Measured on arm64, 181 independent sums of 32 terms take 4.4 ns each
+// plain and 10.1 ns compensated, and a model that adds 181 sums of 11 terms
+// had a 1.14x slower gradient with the cutoff at 8.
+inline constexpr int64_t kPlainSumMax = 32;
+
 // The sum that pairwise_sum forms when log2(Blocks) halvings, and no fewer,
 // split every part of the range down to kPairwiseBlock terms or fewer. Each
 // of the Blocks blocks then has m or m + 1 terms. The blocks are added side
@@ -71,6 +80,48 @@ double pairwise_sum(int64_t begin, int64_t end, const Term& term) {
 
 inline double pairwise_sum(const double* x, int64_t n) {
   return pairwise_sum(0, n, [x](int64_t i) { return x[i]; });
+}
+
+// x[0] + ... + x[n - 1] with Neumaier's compensation, which keeps the exact
+// rounding error of every addition and adds the errors at the end. Knuth's
+// two-sum finds each error without Neumaier's comparison. Four lanes each
+// take every fourth term, and the lanes and their errors are combined the
+// same way at the end; written out, the lanes vectorize and the result does
+// not depend on the vector width. The result is within about
+// eps * |sum| + (n * eps)^2 * sum(|x|) of the exact sum (Ogita, Rump and
+// Oishi's Sum2): close to correctly rounded unless the terms cancel to
+// almost nothing. An infinite or NaN total is returned without its
+// correction, which would be NaN, so non-finite terms give what a plain sum
+// gives.
+inline double compensated_sum(const double* x, int64_t n) {
+  constexpr int kLanes = 4;
+  const auto two_sum = [](double a, double b, double& sum, double& error) {
+    sum = a + b;
+    const double b_part = sum - a;
+    error = (a - (sum - b_part)) + (b - b_part);
+  };
+  double sum[kLanes] = {}, error[kLanes] = {};
+  int64_t i = 0;
+  for (; i + kLanes <= n; i += kLanes) {
+    for (int j = 0; j < kLanes; ++j) {
+      double e;
+      two_sum(sum[j], x[i + j], sum[j], e);
+      error[j] += e;
+    }
+  }
+  for (int j = 0; i < n; ++i, ++j) {
+    double e;
+    two_sum(sum[j], x[i], sum[j], e);
+    error[j] += e;
+  }
+  for (int width = kLanes; width > 1; width /= 2) {
+    for (int j = 0; j < width / 2; ++j) {
+      double e;
+      two_sum(sum[2 * j], sum[2 * j + 1], sum[j], e);
+      error[j] = error[2 * j] + error[2 * j + 1] + e;
+    }
+  }
+  return std::isfinite(sum[0]) ? sum[0] + error[0] : sum[0];
 }
 
 // acc += term(0) + ... + term(n - 1). A short sum goes into acc one term at a
