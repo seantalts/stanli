@@ -172,8 +172,10 @@ void bernoulli_logit_array_fwd(KernelCtx& ctx) {
 
 // Stan Math adds the terms of a vector theta in one running sum. Add them
 // pairwise instead: a merged loop of scalar calls presents thousands at once.
+// The terms are stored in `terms` (theta.len values) first: adding stored
+// values pairwise is faster than forming each term inside the recursion.
 double bernoulli_vector_value(const Eigen::Map<const Eigen::VectorXi>& y,
-                              const Desc& theta, bool drop) {
+                              const Desc& theta, bool drop, double* terms) {
   static constexpr const char* function = "bernoulli_lpmf";
   const Eigen::Map<const Eigen::VectorXd> theta_vec(theta.data, theta.len);
   stan::math::check_consistent_sizes(function, "Random variable", y,
@@ -182,10 +184,10 @@ double bernoulli_vector_value(const Eigen::Map<const Eigen::VectorXi>& y,
   stan::math::check_bounded(function, "Probability parameter", theta_vec, 0.0,
                             1.0);
   if (drop || y.size() == 0) return 0.0;
-  return pairwise_sum(0, theta.len, [&](int64_t i) {
-    return y[i] == 1 ? std::log(theta.data[i])
-                     : stan::math::log1m(theta.data[i]);
-  });
+  for (int64_t i = 0; i < theta.len; ++i)
+    terms[i] =
+        y[i] == 1 ? std::log(theta.data[i]) : stan::math::log1m(theta.data[i]);
+  return pairwise_sum(terms, theta.len);
 }
 
 template <bool Logit>
@@ -212,7 +214,7 @@ void bernoulli_native_fwd(KernelCtx& ctx) {
   const Eigen::Map<const Eigen::VectorXi> y(
       ctx.idata, static_cast<Eigen::Index>(ctx.n_idata));
   ctx.out.data[0] = !Logit && theta.len > kPairwiseBlock
-                        ? bernoulli_vector_value(y, theta, drop)
+                        ? bernoulli_vector_value(y, theta, drop, ctx.scratch)
                         : bernoulli_value<Logit>(y, theta, drop);
   std::fill_n(ctx.scratch, static_cast<size_t>(theta.len + 1), 0.0);
 
@@ -285,13 +287,17 @@ void poisson_log_fwd(KernelCtx& ctx) {
     }
   }
   const Eigen::ArrayXd exp_alpha = stan::math::exp(alpha_val);
-  ctx.out.data[0] = pairwise_sum(0, alpha.len, [&](int64_t i) {
+  for (int64_t i = 0; i < alpha.len; ++i) {
     double term = n[i] * alpha.data[i];
     term -= exp_alpha[i];
     if (!mode.propto) term -= stan::math::lgamma(n[i] + 1.0);
-    return term;
-  });
-  if (!active) return;
+    ctx.scratch[i] = term;
+  }
+  ctx.out.data[0] = pairwise_sum(ctx.scratch, alpha.len);
+  if (!active) {
+    std::fill_n(ctx.scratch, static_cast<size_t>(alpha.len), 0.0);
+    return;
+  }
   Eigen::Map<Eigen::ArrayXd>(ctx.scratch, alpha.len) =
       n.array().cast<double>() - exp_alpha;
   ctx.scratch[alpha.len] = 1.0;
