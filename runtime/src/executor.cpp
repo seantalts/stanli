@@ -302,20 +302,20 @@ static void register_all_kernels() {
   register_whiten_kernel();
 }
 
-// A built-in opcode registered twice is a build defect. Stop here: a throw
-// would leave the table half filled and make the next call report the wrong
-// opcode.
+// A built-in opcode registered twice is a build defect. The registration
+// runs once, and every later call throws the same error: a second attempt
+// would start from a half-filled table and report the wrong opcode. The
+// runtime may not write to stderr or abort (tools/check_no_stdio.sh).
 static void ensure_registered() {
-  static const bool once = [] {
+  static const std::string error = []() -> std::string {
     try {
       register_all_kernels();
     } catch (const std::exception& e) {
-      std::fprintf(stderr, "stanli: %s\n", e.what());
-      std::abort();
+      return e.what();
     }
-    return true;
+    return {};
   }();
-  (void)once;
+  if (!error.empty()) throw std::logic_error(error);
 }
 
 void Graph::compact_idata() {

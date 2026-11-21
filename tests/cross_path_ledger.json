@@ -231,7 +231,7 @@
     "bound_ulp": 2526,
     "cause": "Windows x86_64 only: at point 2 the region map's grad[0] is -5.0571779386431782e-06 and the map-refused loop's is -5.0571779386410386e-06, an absolute gap of 2.1e-18. That is below one ULP of grad[1] (0.13, ULP 2.8e-17), so the 2526 ULP is cancellation in a near-zero component; grad[1] differs by 1 ULP. The two paths are bitwise on Linux and macOS at the same point, so one of the model's libm calls rounds differently between the paths under the Windows CRT; which call has not been isolated without a Windows machine.",
     "since": "2026-11-12",
-    "platform": "windows-x86_64"
+    "platform": "windows"
   },
   {
     "model": "cm_rdm",
@@ -240,7 +240,7 @@
     "bound_ulp": 1,
     "cause": "Windows x86_64 only: at point 2 the region map's grad[0] is -5.0571779386431782e-06 and the map-refused loop's is -5.0571779386410386e-06, an absolute gap of 2.1e-18. That is below one ULP of grad[1] (0.13, ULP 2.8e-17), so the 2526 ULP is cancellation in a near-zero component; grad[1] differs by 1 ULP. The two paths are bitwise on Linux and macOS at the same point, so one of the model's libm calls rounds differently between the paths under the Windows CRT; which call has not been isolated without a Windows machine.",
     "since": "2026-11-12",
-    "platform": "windows-x86_64"
+    "platform": "windows"
   },
   {
     "model": "cm_rdm",
@@ -249,7 +249,7 @@
     "bound_ulp": 2526,
     "cause": "STANLI_NO_NATIVE_ADJ refuses the region map, so it gives the same bits as default/no_region_map. See default/no_region_map.",
     "since": "2026-11-12",
-    "platform": "windows-x86_64"
+    "platform": "windows"
   },
   {
     "model": "cm_rdm",
@@ -258,7 +258,7 @@
     "bound_ulp": 1,
     "cause": "STANLI_NO_NATIVE_ADJ refuses the region map, so it gives the same bits as default/no_region_map. See default/no_region_map.",
     "since": "2026-11-12",
-    "platform": "windows-x86_64"
+    "platform": "windows"
   },
   {
     "model": "fast_math_cse",
@@ -368,11 +368,29 @@
   {
     "model": "higher_order_all_contexts",
     "quantity": "lp",
+    "pair": "default/no_cse",
+    "bound_ulp": 2,
+    "cause": "the same divergence as this entry's macos-arm64 twin, seen at 1 ULP on the Windows arm64 job on 2026-11-21; Linux and Windows x86-64 agree bitwise",
+    "since": "2026-11-21",
+    "platform": "windows-arm64"
+  },
+  {
+    "model": "higher_order_all_contexts",
+    "quantity": "lp",
     "pair": "default/passes_off",
     "bound_ulp": 2,
     "cause": "graph_total adds the same 35 higher-order calls that the gate > 0 block adds to target. split_target_sums (#586) turns graph_total's chain of additions into separate target terms, and CSE then merges each one with its identical copy into one term times 2 (#587). Without CSE the copies are added one at a time, so the sum and the gradient round differently. Measured at 13 points on macOS arm64: up to 1 ULP.",
     "since": "2026-11-18",
     "platform": "macos-arm64"
+  },
+  {
+    "model": "higher_order_all_contexts",
+    "quantity": "lp",
+    "pair": "default/passes_off",
+    "bound_ulp": 2,
+    "cause": "the same divergence as this entry's macos-arm64 twin, seen at 1 ULP on the Windows arm64 job on 2026-11-21; Linux and Windows x86-64 agree bitwise",
+    "since": "2026-11-21",
+    "platform": "windows-arm64"
   },
   {
     "model": "higher_order_all_contexts",
