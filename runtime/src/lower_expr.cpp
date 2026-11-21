@@ -1409,9 +1409,10 @@ Lowering::Val Lowering::lower_expr_impl(const mir::Expr& e) {
     }
     case mir::Expr::EOr:
     case mir::Expr::EAnd: {
+      // Like a ternary, the right operand runs only when the left one does
+      // not decide the value, so the region evaluates it.
       if (auto v = fold_const(e)) return *v;
-      if (runtime_only(e)) return lower_runtime_ternary(e);
-      fail("boolean operator on parameters unsupported", e.raw);
+      return lower_runtime_ternary(e);
     }
     default: {
       if (auto v = fold_const(e)) return *v;

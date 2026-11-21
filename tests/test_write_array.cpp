@@ -525,31 +525,26 @@ void test_write_array_target_lp() {
 }
 
 // The `~` statement adds a target term to the write_array graph before the
-// `||` on a parameter refuses, and the rollback must remove that term with
-// the slots it named. A stale term made CSE write past its slot tables,
-// which ASan reports and which crashed fuzz seeds 530 and 4962.
+// `||` on a parameter. That `||` used to refuse, and the rollback had to
+// remove the term with the slots it named: a stale term made CSE write past
+// its slot tables, which crashed fuzz seeds 530 and 4962. The `||` now
+// lowers, so the graph gives the row.
 void test_write_array_tp_lp_refused() {
   using namespace stanli;
   const std::string text = slurp("tests/fixtures/wa_tp_lp_refused.tmir.sexp");
   CompiledModel cm = compile_model(text, DataMap());
-  if (!cm.write_array || !cm.write_array->interp) {
-    ++failures;
-    std::printf("FAIL wa_tp_lp_refused: no interpreter for write_array\n");
-    return;
-  }
-  const std::string truncated = cm.write_array->truncated.value_or("");
-  if (truncated.find("transformed parameters") == std::string::npos) {
-    ++failures;
-    std::printf("FAIL wa_tp_lp_refused: truncated message is [%s]\n",
-                truncated.c_str());
-  }
-  std::map<std::string, DataMap::Entry> params;
-  params["p"].r = {0.25};
-  WaRng rng(1);
-  const std::vector<double> got = cm.write_array->interp->eval(params, rng);
-  if (got != std::vector<double>{0.25, 1, 1}) {
-    ++failures;
-    std::printf("FAIL wa_tp_lp_refused: row has %zu values\n", got.size());
+  if (!compiled_completely(cm, "wa_tp_lp_refused")) return;
+  Executor wex(std::move(cm.write_array->graph));
+  cm.write_array->bind(wex);
+  for (const double p : {0.25, 1.0, 3.0}) {
+    wex.params_data()[0] = p;
+    wex.run_forward_only();
+    const double outside = p < 0.5 || p > 2;
+    if (read_row(cm.write_array->columns, wex) !=
+        std::vector<double>{p, outside, outside}) {
+      ++failures;
+      std::printf("FAIL wa_tp_lp_refused: row at p = %g\n", p);
+    }
   }
 }
 
