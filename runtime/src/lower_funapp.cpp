@@ -517,11 +517,12 @@ bool non_tail_return(const mir::Stmt& s, bool tail) {
   }
 }
 
-// Each return assigns the result. With `leave`, it also breaks out of the
+// Each return assigns the results. With `leave`, it also breaks out of the
 // single pass. A return inside a loop also sets `exited`, and each loop that
 // holds one is followed by `if (exited) break;` so the break reaches the
 // single pass.
-mir::Stmt rewrite_returns(const mir::Stmt& s, const std::string& result,
+mir::Stmt rewrite_returns(const mir::Stmt& s,
+                          const std::vector<std::string>& results,
                           const std::string& exited, bool leave) {
   mir::Expr flag;
   flag.kind = mir::Expr::Var;
@@ -532,7 +533,7 @@ mir::Stmt rewrite_returns(const mir::Stmt& s, const std::string& result,
   if (s.kind != mir::Stmt::Return) {
     mir::Stmt out = s;
     for (auto& child : out.body)
-      child = rewrite_returns(child, result, exited, leave);
+      child = rewrite_returns(child, results, exited, leave);
     if (exited.empty() || !contains_return(s) ||
         (s.kind != mir::Stmt::For && s.kind != mir::Stmt::While))
       return out;
@@ -560,29 +561,53 @@ mir::Stmt rewrite_returns(const mir::Stmt& s, const std::string& result,
     set.rhs = std::move(one);
     block.body.push_back(std::move(set));
   }
-  if (s.has_init) {
-    mir::Stmt assign;
-    assign.kind = mir::Stmt::Assignment;
-    assign.lhs = result;
-    assign.rhs = s.rhs;
-    block.body.push_back(std::move(assign));
-  }
+  const auto assign = [&](const std::string& lhs, const mir::Expr& rhs) {
+    mir::Stmt assignment;
+    assignment.kind = mir::Stmt::Assignment;
+    assignment.lhs = lhs;
+    assignment.rhs = rhs;
+    block.body.push_back(std::move(assignment));
+  };
+  if (s.has_init) assign(results.at(0), s.rhs);
+  for (size_t k = 0; k < s.fn_args.size(); ++k)
+    assign(results.at(k), s.fn_args[k]);
   if (leave) block.body.push_back(std::move(exit));
   return block;
 }
 
 // stanc's inliner form: one pass of a loop, each return an assignment and a
-// break, then one return of the result. When every return is in tail
+// break, then one return of the results. When every return is in tail
 // position, nothing follows it, so the assignments need no loop.
 std::vector<mir::Stmt> single_exit_body(const mir::FunDef& f,
                                         const mir::Expr& call) {
-  // A shape error inside the body names this variable, so it reads as the
-  // function's result; Stan names cannot hold spaces.
-  const std::string result = "the result of " + f.name;
-  mir::Stmt decl;
-  decl.kind = mir::Stmt::Decl;
-  decl.decl_id = result;
-  decl.decl_type = mir::detail::unsized_declaration(call.unsized, "");
+  // A shape error inside the body names these variables, so they read as
+  // the function's results; Stan names cannot hold spaces.
+  std::vector<std::string> results;
+  std::vector<mir::Stmt> decls;
+  mir::Stmt ret;
+  ret.kind = mir::Stmt::Return;
+  const bool one_result = f.results.size() == 1;
+  for (size_t k = 0; k < f.results.size(); ++k) {
+    results.push_back(one_result ? "the result of " + f.name
+                                 : "part " + std::to_string(k + 1) +
+                                       " of the result of " + f.name);
+    mir::Stmt decl;
+    decl.kind = mir::Stmt::Decl;
+    decl.decl_id = results.back();
+    decl.decl_type = mir::detail::unsized_declaration(
+        one_result ? call.unsized : f.results[k], "");
+    decls.push_back(std::move(decl));
+    mir::Expr value;
+    value.kind = mir::Expr::Var;
+    value.name = results.back();
+    value.unsized = decls.back().decl_type.unsized;
+    if (one_result) {
+      ret.has_init = true;
+      ret.rhs = std::move(value);
+    } else {
+      ret.fn_args.push_back(std::move(value));
+    }
+  }
   mir::Expr one;
   one.kind = mir::Expr::LitInt;
   one.lit_i = 1;
@@ -600,20 +625,11 @@ std::vector<mir::Stmt> single_exit_body(const mir::FunDef& f,
   mir::Stmt body;
   body.kind = mir::Stmt::Block;
   for (const auto& st : f.body)
-    body.body.push_back(rewrite_returns(st, result, exited, !tail_only));
+    body.body.push_back(rewrite_returns(st, results, exited, !tail_only));
   pass.body.push_back(std::move(body));
-  mir::Expr value;
-  value.kind = mir::Expr::Var;
-  value.name = result;
-  value.unsized = call.unsized;
-  mir::Stmt ret;
-  ret.kind = mir::Stmt::Return;
-  ret.has_init = true;
-  ret.rhs = std::move(value);
   // A void function has no result to declare or return.
   const bool has_result = !f.results.empty();
-  std::vector<mir::Stmt> out;
-  if (has_result) out.push_back(std::move(decl));
+  std::vector<mir::Stmt> out = std::move(decls);
   if (looped) {
     mir::Stmt flag;
     flag.kind = mir::Stmt::Decl;
@@ -747,9 +763,8 @@ Lowering::Val Lowering::lower_call_udf(const mir::Expr& e,
     }
   }
   const std::vector<mir::Stmt>* body = &f.body;
-  if (f.results.size() <= 1 &&
-      (non_tail_return(f.body, true) ||
-       std::any_of(f.body.begin(), f.body.end(), return_in_branch))) {
+  if (non_tail_return(f.body, true) ||
+      std::any_of(f.body.begin(), f.body.end(), return_in_branch)) {
     auto rewritten =
         std::make_shared<std::vector<mir::Stmt>>(single_exit_body(f, e));
     g.udata_pool.push_back(rewritten);
