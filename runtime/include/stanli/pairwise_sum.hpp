@@ -20,16 +20,52 @@ namespace stanli {
 
 inline constexpr int64_t kPairwiseBlock = 8;
 
+// The sum that pairwise_sum forms when log2(Blocks) halvings, and no fewer,
+// split every part of the range down to kPairwiseBlock terms or fewer. Each
+// of the Blocks blocks then has m or m + 1 terms. The blocks are added side
+// by side rather than one after another, so that the processor can overlap
+// their additions, and no call separates them.
+template <int Blocks, typename Term>
+[[gnu::always_inline]] inline double pairwise_blocks(int64_t begin, int64_t end,
+                                                     const Term& term) {
+  int64_t start[Blocks + 1];
+  start[0] = begin;
+  start[Blocks] = end;
+  for (int step = Blocks; step > 1; step /= 2) {
+    for (int j = 0; j < Blocks; j += step)
+      start[j + step / 2] = start[j] + (start[j + step] - start[j]) / 2;
+  }
+  const int64_t m = (end - begin) / Blocks;
+  double sum[Blocks] = {};
+  for (int64_t t = 0; t < m; ++t) {
+    for (int j = 0; j < Blocks; ++j) sum[j] += term(start[j] + t);
+  }
+  for (int j = 0; j < Blocks; ++j)
+    if (start[j] + m < start[j + 1]) sum[j] += term(start[j] + m);
+  for (int width = Blocks; width > 1; width /= 2) {
+    for (int j = 0; j < width / 2; ++j) sum[j] = sum[2 * j] + sum[2 * j + 1];
+  }
+  return sum[0];
+}
+
 // term(begin) + ... + term(end - 1): blocks of up to kPairwiseBlock terms in
 // order, and the blocks pairwise.
 template <typename Term>
 double pairwise_sum(int64_t begin, int64_t end, const Term& term) {
-  if (end - begin <= kPairwiseBlock) {
+  const int64_t n = end - begin;
+  if (n <= kPairwiseBlock) {
     double sum = 0.0;
     for (int64_t i = begin; i < end; ++i) sum += term(i);
     return sum;
   }
-  const int64_t mid = begin + (end - begin) / 2;
+  // The halving reaches its blocks at one level for every n up to
+  // 8 * kPairwiseBlock except 17 and 33 to 35, which the recursion handles.
+  if (n <= 2 * kPairwiseBlock) return pairwise_blocks<2>(begin, end, term);
+  if (n <= 4 * kPairwiseBlock && n / 2 > kPairwiseBlock)
+    return pairwise_blocks<4>(begin, end, term);
+  if (n <= 8 * kPairwiseBlock && n / 4 > kPairwiseBlock)
+    return pairwise_blocks<8>(begin, end, term);
+  const int64_t mid = begin + n / 2;
   return pairwise_sum(begin, mid, term) + pairwise_sum(mid, end, term);
 }
 
