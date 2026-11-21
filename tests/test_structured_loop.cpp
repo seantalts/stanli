@@ -3376,9 +3376,12 @@ static void ragged_square_matvec_tests() {
 }
 
 // After stanc inlines a user function into the loop, a local sized by an
-// integer computed from a data argument needs a capacity from that data.
+// integer computed from a data argument needs a capacity from that data. A
+// call that stanc leaves in place needs the same capacity from its argument.
 static void udf_local_capacity_tests() {
   ragged_parity_tests("structured_udf_local_capacity", "udf local capacity");
+  ragged_parity_tests("structured_udf_local_capacity_o0",
+                      "udf call local capacity");
 }
 
 // When the inner extents differ on one trip, the retained product reports the

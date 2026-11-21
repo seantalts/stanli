@@ -42,6 +42,7 @@ O0_FIXTURES = {
     "structured_matrix_ops",
     "structured_refused_branch",
     "structured_sequence_local",
+    "structured_udf_local_capacity_o0",
     "structured_zero_matrix_udf",
     "trunc_param",
     "udf_branch_kernels",

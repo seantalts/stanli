@@ -691,6 +691,12 @@ Lowering::Val Lowering::lower_call_udf(const mir::Expr& e,
     if (!binds[i].is_int) {
       binds[i].v = actual.value();
       if (const DataMap::Entry* en = actual.observation()) binds[i].data = *en;
+      // The formal keeps the caller's proof of the integer's range, which
+      // can size the callee's runtime-sized locals.
+      if (region_current && mir::is_unsized(a, mir::UnsizedLeaf::Int) &&
+          !int_ranges.count(binds[i].v.slot))
+        if (const auto range = region_range(a))
+          set_int_range(binds[i].v, range->lo, range->hi);
     }
     if (!in_write_array && binds[i].formal_data_only && !binds[i].is_int &&
         (binds[i].v.autodiff || !binds[i].v.si.param_free))
