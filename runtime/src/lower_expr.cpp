@@ -236,6 +236,13 @@ long Lowering::eval_int(const mir::Expr& e) {
           if ((en = observation(bound->second)))
             all_single =
                 en->is_int ? en->i.size() == en->r.size() : en->i.empty();
+      // A computed base, such as the result of a user function call.
+      std::optional<DataMap::Entry> computed;
+      if (e.args[0].kind != mir::Expr::Var &&
+          (computed = try_eval_pure(e.args[0]))) {
+        en = &*computed;
+        all_single = en->is_int || en->i.empty();
+      }
       const size_t stored = !en ? 0 : en->is_int ? en->i.size() : en->r.size();
       for (size_t k = 1; all_single && k < e.args.size(); ++k)
         all_single = e.args[k].kind == mir::Expr::IndexSingle;

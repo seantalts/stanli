@@ -45,6 +45,7 @@ O0_FIXTURES = {
     "structured_zero_matrix_udf",
     "trunc_param",
     "udf_branch_kernels",
+    "udf_call_int_index",
     "udf_call_int_size",
     "udf_conditional_return",
     "udf_constant_branch",

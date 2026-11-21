@@ -1364,6 +1364,31 @@ static void test_udf_call_int_size() {
   stan::math::recover_memory();
 }
 
+// An element of an integer array that a user function returns, selected by
+// two indexes.
+static void test_udf_call_int_index() {
+  using namespace stanli;
+  CompiledModel cm;
+  try {
+    cm = compile_model(
+        slurp("tests/fixtures/udf_call_int_index.tmir.sexp"),
+        DataMap::from_json(slurp("tests/fixtures/udf_call_int_index.json")));
+  } catch (const std::exception& error) {
+    check(false, std::string("udf call int index compile: ") + error.what());
+    return;
+  }
+  stan::math::var q = 0.4;
+  stan::math::var lp = stan::math::normal_lpdf(q, 8, 1);
+  lp.grad();
+  Executor ex(cm.graph);
+  cm.bind(ex);
+  ex.params_data()[0] = 0.4;
+  double grad = 0;
+  expect_ulp("udf call int index lp", ex.gradient(&grad), lp.val(), 10);
+  expect_ulp("udf call int index grad", grad, q.adj(), 10);
+  stan::math::recover_memory();
+}
+
 // User functions stanc did not inline, under `~`. CmdStan instantiates an
 // `_lp` function and an `_lupdf` call with the caller's propto__, and the
 // body with the actual argument types, so the data-bound sigma is a double
@@ -9733,6 +9758,7 @@ int main() {
   test_region_constant_shadow();
   test_udf_guard_returns();
   test_udf_call_int_size();
+  test_udf_call_int_index();
   test_udf_lp_propto();
   test_repeated_target_terms();
   test_inplace_copy_then_store();
