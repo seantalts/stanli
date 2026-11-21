@@ -899,6 +899,169 @@ bool Lowering::deferred_unsized(const std::string& name) const {
   return bound == scope.end() || g.slots[bound->second.slot].len == 0;
 }
 
+namespace {
+
+bool reads_var(const mir::Expr& e, const std::string& name) {
+  if (e.kind == mir::Expr::Var && e.name == name) return true;
+  for (const auto& arg : e.args)
+    if (reads_var(arg, name)) return true;
+  return false;
+}
+
+// Follows the paths through statements for whether `name` has been assigned
+// whole. stanc's inlining guards an early return with integer flags that are
+// known while lowering, so each path also carries the flags that it set to
+// literals or tested; a condition on a known flag takes one arm. Paths that
+// differ only in what they have set are kept apart, up to a limit.
+struct AssignedPaths {
+  struct State {
+    bool assigned = false;
+    // Integers the path set or tested; an empty value means not known.
+    std::map<std::string, std::optional<long>> ints;
+    bool operator==(const State& o) const {
+      return assigned == o.assigned && ints == o.ints;
+    }
+  };
+  using States = std::vector<State>;
+  static constexpr size_t kMaxPaths = 64;
+  const std::string& name;
+  // An integer's value before the statements, if known.
+  std::function<std::optional<long>(const std::string&)> outer_int;
+  // A read of `name` where it may be unassigned, or more paths than the
+  // limit: either way the caller cannot rely on the assignment.
+  bool unsure = false;
+  // A break or continue that leaves the statements with `name` unassigned.
+  bool jumps_unassigned = false;
+  // The states at the breaks and continues of each enclosing loop.
+  std::vector<States> exits;
+
+  std::optional<long> int_value(const State& state, const mir::Expr& e) {
+    if (e.kind == mir::Expr::LitInt) return e.lit_i;
+    if (e.kind != mir::Expr::Var) return {};
+    const auto known = state.ints.find(e.name);
+    if (known != state.ints.end()) return known->second;
+    return outer_int(e.name);
+  }
+
+  void add(States* to, State state) {
+    if (std::find(to->begin(), to->end(), state) != to->end()) return;
+    if (to->size() == kMaxPaths) {
+      unsure = true;
+      return;
+    }
+    to->push_back(std::move(state));
+  }
+
+  // Only a name that a path or the outside knows needs an entry, which
+  // keeps paths that differ in other names equal.
+  void forget(const std::string& n, State* state) {
+    if (state->ints.count(n) || outer_int(n)) state->ints[n] = std::nullopt;
+  }
+
+  void forget_assigned(const mir::Stmt& st, State* state) {
+    mir::for_each_assigned(st, [&](const std::string& n) { forget(n, state); });
+    if (st.kind == mir::Stmt::Decl) forget(st.decl_id, state);
+    for (const auto& child : st.body) forget_assigned(child, state);
+  }
+
+  using Iter = std::vector<mir::Stmt>::const_iterator;
+  States visit_seq(Iter begin, Iter end, State state) {
+    States at{std::move(state)};
+    for (Iter it = begin; it != end && !at.empty() && !unsure; ++it) {
+      States next;
+      for (const State& path : at)
+        for (State& out : visit(*it, path)) add(&next, std::move(out));
+      at = std::move(next);
+    }
+    return at;
+  }
+
+  // The states where `st` falls through.
+  States visit(const mir::Stmt& st, State state) {
+    if (!state.assigned && st.kind != mir::Stmt::Block &&
+        st.kind != mir::Stmt::SList) {
+      bool reads = st.kind == mir::Stmt::Assignment && st.lhs == name &&
+                   !st.lhs_idx.empty();
+      mir::for_each_expr(
+          st, [&](const mir::Expr& e) { reads = reads || reads_var(e, name); });
+      unsure = unsure || reads;
+    }
+    switch (st.kind) {
+      case mir::Stmt::Decl:
+        forget(st.decl_id, &state);
+        return {state};
+      case mir::Stmt::Assignment:
+        if (st.lhs == name && st.lhs_idx.empty()) state.assigned = true;
+        if (st.lhs_idx.empty() && st.rhs.kind == mir::Expr::LitInt)
+          state.ints[st.lhs] = st.rhs.lit_i;
+        else
+          forget(st.lhs, &state);
+        return {state};
+      case mir::Stmt::Break:
+      case mir::Stmt::Continue:
+        if (exits.empty())
+          jumps_unassigned = jumps_unassigned || !state.assigned;
+        else
+          add(&exits.back(), std::move(state));
+        return {};
+      case mir::Stmt::Return:
+        return {};
+      case mir::Stmt::Block:
+      case mir::Stmt::SList:
+        return visit_seq(st.body.begin(), st.body.end(), std::move(state));
+      case mir::Stmt::IfElse: {
+        const auto arm = [&](size_t k, State taken) -> States {
+          if (st.cond.kind == mir::Expr::Var)
+            taken.ints[st.cond.name] = k == 0 ? 1 : 0;
+          if (k < st.body.size()) return visit(st.body[k], std::move(taken));
+          return {std::move(taken)};
+        };
+        if (const auto truth = int_value(state, st.cond))
+          return arm(*truth != 0 ? 0 : 1, std::move(state));
+        States out = arm(0, state);
+        for (State& next : arm(1, std::move(state))) add(&out, std::move(next));
+        return out;
+      }
+      case mir::Stmt::For:
+      case mir::Stmt::While: {
+        // A later trip starts with at least what the first one assigned,
+        // so the first trip finds every read of an unassigned value. The
+        // integers a trip sets are not known at the start of the next.
+        State entry = state;
+        if (st.kind == mir::Stmt::While) forget_assigned(st, &entry);
+        exits.emplace_back();
+        States leaving =
+            visit_seq(st.body.begin(), st.body.end(), std::move(entry));
+        for (State& exit : exits.back()) add(&leaving, std::move(exit));
+        exits.pop_back();
+        // Only a loop of one literal trip is certain to run its body.
+        const bool once = st.kind == mir::Stmt::For &&
+                          st.lower.kind == mir::Expr::LitInt &&
+                          st.upper.kind == mir::Expr::LitInt &&
+                          st.lower.lit_i == st.upper.lit_i;
+        if (once) return leaving;
+        forget_assigned(st, &state);
+        return {state};
+      }
+      default:
+        return {state};
+    }
+  }
+};
+
+void collect_decl_sites(
+    const mir::Stmt& st,
+    std::map<std::string, std::pair<const std::vector<mir::Stmt>*, size_t>>*
+        sites) {
+  for (size_t k = 0; k < st.body.size(); ++k) {
+    if (st.body[k].kind == mir::Stmt::Decl)
+      (*sites)[st.body[k].decl_id] = {&st.body, k};
+    collect_decl_sites(st.body[k], sites);
+  }
+}
+
+}  // namespace
+
 bool Lowering::region_size_deferred(const std::string& name,
                                     const mir::Stmt& s) {
   const auto declaration = decls.find(name);
@@ -925,6 +1088,32 @@ bool Lowering::region_size_deferred(const std::string& name,
   declaration->second.si = shape->si;
   declaration->second.deferred_shape = false;
   if (shape->len == 0) return true;
+  // The cell holds the assigned size from the start, so a path that reads
+  // the local before the assignment, or leaves without one, would read
+  // values that Stan's empty local does not have. The register program
+  // checks for those paths at run time.
+  AssignedPaths paths{name, [&](const std::string& n) -> std::optional<long> {
+                        const auto known = int_env.find(n);
+                        if (known == int_env.end()) return std::nullopt;
+                        return known->second;
+                      }};
+  bool unsafe = false;
+  if (const auto site = region_decl_sites.find(name);
+      site != region_decl_sites.end()) {
+    // Declared inside this region: the statements after the declaration
+    // are all that can read it, and leaving them leaves its scope.
+    const auto& body = *site->second.first;
+    (void)paths.visit_seq(body.begin() + site->second.second + 1, body.end(),
+                          {});
+    unsafe = paths.unsure;
+  } else {
+    const auto after = paths.visit(s, {});
+    unsafe = paths.unsure || paths.jumps_unassigned ||
+             std::any_of(after.begin(), after.end(),
+                         [](const auto& state) { return !state.assigned; });
+  }
+  if (unsafe)
+    fail("a zero-size local takes its size on only some paths: " + name);
   Val value{add_slot(shape->len, false), false, shape->si};
   out.fills.emplace_back(
       value.slot,
@@ -2937,6 +3126,15 @@ bool Lowering::try_lower_region(
     return refuse("enclosing target scaling needs a compatible region");
   if (contains_multi_assign(s))
     return refuse("a call returning several values");
+  if (!empty_status_slots.empty()) {
+    // The register program checks such a read where it runs.
+    std::set<std::string> names;
+    mir::collect_names(s, &names);
+    for (const std::string& name : names)
+      if (empty_status_slots.count(name))
+        return refuse("a read of " + name +
+                      ", which a branch on parameters may have left empty");
+  }
   if (output_references) {
     try {
       if (bounded_nested_update_over_budget(s))
@@ -3028,6 +3226,7 @@ bool Lowering::try_lower_region(
           candidate_names.push_back(name);
       if (output_references && candidate_names.empty())
         trial.fail("bounded output block has no external scalar result");
+      collect_decl_sites(s, &trial.region_decl_sites);
       trial.region_prepare_cells(s);
       switch (trial.lower_stmt(s)) {
         case Flow::Next:

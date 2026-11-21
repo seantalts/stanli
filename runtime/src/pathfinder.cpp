@@ -135,7 +135,7 @@ class PathCollector : public stan::callbacks::structured_writer {
     try {
       return ex_->forward();
     } catch (const std::exception& e) {
-      if (is_internal_error(e)) throw;
+      if (ends_run(e)) throw;
       return -std::numeric_limits<double>::infinity();
     }
   }

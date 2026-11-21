@@ -1705,6 +1705,9 @@ struct Lowering {
     // the authority on shape when the outside declaration was zero-size
     // and the region's assignment sized it.
     std::vector<Range> out_views;
+    // The live-outs whose empty status also leaves the region, as indices
+    // into out_names; the status registers follow the target's.
+    std::vector<size_t> out_empty_status;
     bool has_target = false;  // the region contributed to the target
     // A print or reject is observable even when every data live-out is empty,
     // so an emitter must not treat the region as having nothing to produce.
@@ -2417,6 +2420,12 @@ struct Lowering {
   // static scalar type and SlotInfo in `scope`; this registry is needed only
   // before first binding.
   std::map<std::string, DeclView> decls;
+  // A container that a region gave its size in a branch that may not have
+  // run: the slot holding its empty status, 1 while it is empty. A later
+  // region reads the status; the first read in graph code checks it.
+  std::map<std::string, int> empty_status_slots;
+  // Raises an error at run time if `name` is still empty here.
+  void require_assigned(const std::string& name);
 
   void count_data_copy(const std::map<std::string, DataMap::Entry>& env) {
     if (prep.enabled())
@@ -2637,6 +2646,10 @@ struct Lowering {
   unsigned structured_outer_depth = 0;
   bool region_unreachable = false;
   std::set<std::string> region_unsized_unagreed;
+  // Where each local that the structured region declares is declared: its
+  // statement list and its index there.
+  std::map<std::string, std::pair<const std::vector<mir::Stmt>*, size_t>>
+      region_decl_sites;
   std::map<std::pair<const mir::Expr*, std::string>, std::optional<RealRange>>
       region_enumerated_cache;
 
@@ -2694,7 +2707,8 @@ struct Lowering {
   void region_prepare_cells(const mir::Stmt& s);
   // A zero-size or unsized local takes its shape from its first whole
   // assignment; branch arms that assign it share one cell, sized from the
-  // static shape they agree on.
+  // static shape they agree on. A nonzero size is refused unless every
+  // path assigns the local before reading it or leaving.
   bool deferred_unsized(const std::string& name) const;
   bool region_size_deferred(const std::string& name, const mir::Stmt& s);
   // A reusable body must account for every iteration, not just the incoming

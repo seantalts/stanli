@@ -255,7 +255,11 @@ int stanli_grad(stanli_model* m, const double* q, double* lp, double* grad);
  * Stan's reject() and its argument checks refuse a point: CmdStan's samplers
  * reject the proposal and its initialization tries another point. FAILED is
  * any other error in evaluating the model, such as an index out of range;
- * CmdStan stops initialization at once on these. INTERNAL_ERROR is a failed
+ * CmdStan stops initialization at once on these. A FAILED evaluation from
+ * fatal_error(), or from a construct that stanli cannot evaluate at run time
+ * (a zero-size local that a branch on parameters left empty), also ends
+ * sampling, optimization and the other algorithms with its message, as
+ * fatal_error() does in Stan. INTERNAL_ERROR is a failed
  * check inside stanli itself, which is a bug worth reporting. */
 typedef enum {
   STANLI_EVAL_OK = 0,

@@ -3710,6 +3710,208 @@ void test_grad_messages() {
   }
 }
 
+// A zero-size local takes the size of its first assignment. stanli gives it
+// one size when it compiles the model, so when a branch on a parameter makes
+// that assignment and does not run, a later read is an error that stops
+// the evaluation. Where the assignment ran, the values are CmdStan's
+// (log_prob method, jacobian=1).
+void test_branch_sized_locals() {
+  struct Case {
+    const char* name;
+    const char* body;
+    double lp_pos, grad_pos;  // CmdStan at mu = 0.5
+    // CmdStan at mu = -0.5; unset when stanli reports the local instead.
+    // In a function, the message names the local that stanc's inlining
+    // made of v.
+    bool neg_ok;
+    double lp_neg, grad_neg;
+  };
+  const Case cases[] = {
+      {"vector",
+       "model {\n  vector[0] v;\n  if (mu > 0) v = rep_vector(mu, 3);\n"
+       "  mu ~ normal(0, 1);\n  target += sum(v);\n}\n",
+       1.375, 2.5, false, 0, 0},
+      {"matrix",
+       "model {\n  matrix[0, 0] v;\n  if (mu > 0) v = rep_matrix(mu, 2, 3);\n"
+       "  mu ~ normal(0, 1);\n  target += sum(v);\n}\n",
+       2.875, 5.5, false, 0, 0},
+      {"row_vector",
+       "model {\n  row_vector[0] v;\n"
+       "  if (mu > 0) v = rep_row_vector(mu, 3);\n"
+       "  mu ~ normal(0, 1);\n  target += sum(v);\n}\n",
+       1.375, 2.5, false, 0, 0},
+      {"array",
+       "model {\n  array[0] real v;\n  if (mu > 0) v = {mu, 2 * mu};\n"
+       "  mu ~ normal(0, 1);\n  target += sum(v);\n}\n",
+       1.375, 2.5, false, 0, 0},
+      {"nested branch",
+       "model {\n  vector[0] v;\n  if (mu > -10) {\n"
+       "    if (mu > 0) v = rep_vector(mu, 2);\n  }\n"
+       "  mu ~ normal(0, 1);\n  target += sum(v);\n}\n",
+       0.875, 1.5, false, 0, 0},
+      {"for loop",
+       "model {\n  vector[0] v;\n  for (k in 1:2) {\n"
+       "    if (mu > 0) v = rep_vector(k * mu, 2);\n  }\n"
+       "  mu ~ normal(0, 1);\n  target += sum(v);\n}\n",
+       1.875, 3.5, false, 0, 0},
+      {"while loop",
+       "model {\n  real total = 0;\n  real k = 0;\n  while (k < 2 + mu) {\n"
+       "    vector[0] v;\n    if (mu > 0) v = rep_vector(mu, 2);\n"
+       "    total += sum(v);\n    k += 1;\n  }\n"
+       "  mu ~ normal(0, 1);\n  target += total;\n}\n",
+       2.875, 5.5, false, 0, 0},
+      {"function", "model { mu ~ normal(0, 1); target += f(mu); }\n", 1.375,
+       2.5, false, 0, 0},
+      {"size",
+       "model {\n  vector[0] v;\n  if (mu > 0) v = rep_vector(mu, 3);\n"
+       "  mu ~ normal(0, 1);\n  target += size(v);\n}\n",
+       2.875, -0.5, false, 0, 0},
+      // CmdStan raises an index error here; stanli names the local.
+      {"element write",
+       "model {\n  vector[0] v;\n  if (mu > 0) v = rep_vector(mu, 3);\n"
+       "  v[1] = 2 * mu;\n  mu ~ normal(0, 1);\n  target += sum(v);\n}\n",
+       1.875, 3.5, false, 0, 0},
+      // Read only where the assignment ran: valid on both sides.
+      {"read inside the branch",
+       "model {\n  vector[0] v;\n  if (mu > 0) v = rep_vector(mu, 3);\n"
+       "  mu ~ normal(0, 1);\n  if (mu > 0) target += sum(v);\n}\n",
+       1.375, 2.5, true, -0.125, 0.5},
+      {"both arms assign",
+       "model {\n  vector[0] v;\n"
+       "  if (mu > 0) v = rep_vector(mu, 3); else v = rep_vector(-mu, 3);\n"
+       "  mu ~ normal(0, 1);\n  target += sum(v);\n}\n",
+       1.375, 2.5, true, 1.375, -2.5},
+      // An earlier branch sizes v, so the second region gets v's status
+      // from the first; both of its arms assign v.
+      {"both arms assign after an earlier branch",
+       "model {\n  vector[0] v;\n  if (mu > 1) v = rep_vector(mu, 3);\n"
+       "  if (mu > 0) v = rep_vector(1, 3); else v = rep_vector(2, 3);\n"
+       "  mu ~ normal(0, 1);\n  target += sum(v);\n}\n",
+       2.875, -0.5, true, 5.875, 0.5},
+  };
+  for (const Case& c : cases) {
+    const std::string code =
+        std::string(
+            "functions {\n  real f(real mu) {\n    vector[0] v;\n"
+            "    if (mu > 0) v = rep_vector(mu, 3);\n"
+            "    return sum(v);\n  }\n}\n"
+            "parameters { real mu; }\n") +
+        c.body;
+    stanli_model* m = from_stan(code.c_str());
+    if (m == nullptr) continue;
+    double lp = 0, grad = 0;
+    char err[512]{};
+    double mu = 0.5;
+    int rc = stanli_grad_err(m, &mu, &lp, &grad, err, sizeof err);
+    expect_true(std::string(c.name) + ": assigned path evaluates: " + err,
+                rc == STANLI_EVAL_OK);
+    expect_near(std::string(c.name) + ": lp where the branch ran", lp,
+                c.lp_pos);
+    expect_near(std::string(c.name) + ": gradient where the branch ran", grad,
+                c.grad_pos);
+    mu = -0.5;
+    err[0] = '\0';
+    rc = stanli_grad_err(m, &mu, &lp, &grad, err, sizeof err);
+    if (c.neg_ok) {
+      expect_true(std::string(c.name) + ": other path evaluates: " + err,
+                  rc == STANLI_EVAL_OK);
+      expect_near(std::string(c.name) + ": lp where the branch did not run", lp,
+                  c.lp_neg);
+      expect_near(
+          std::string(c.name) + ": gradient where the branch did not run", grad,
+          c.grad_neg);
+    } else {
+      const std::string message(err);
+      expect_true(
+          std::string(c.name) +
+              ": an unassigned read stops the evaluation: " + message,
+          rc == STANLI_EVAL_FAILED &&
+              message.find(" was not assigned on this path") !=
+                  std::string::npos &&
+              (std::string(c.name) == "function" ||
+               message.find(": v was not assigned") != std::string::npos) &&
+              message.find("stanli does not support a local whose size "
+                           "depends on") != std::string::npos);
+    }
+    stanli_model_free(m);
+  }
+
+  // The read at the top of the loop is compiled for the empty v of the
+  // first trip, and the statement after it gives v three elements for the
+  // later trips. CmdStan gives lp 4.375 at mu = 0.5; stanli reports v.
+  stanli_model* m = from_stan(
+      "parameters { real mu; }\n"
+      "model {\n  vector[0] v;\n  real acc = 0;\n  real k = 0;\n"
+      "  while (k < mu + 3) {\n    acc += sum(v);\n"
+      "    if (mu > -100) v = rep_vector(mu, 3);\n    k += 1;\n  }\n"
+      "  mu ~ normal(0, 1);\n  target += acc;\n}\n");
+  if (m == nullptr) return;
+  double lp = 0, grad = 0, mu = 0.5;
+  char err[512]{};
+  const int rc = stanli_grad_err(m, &mu, &lp, &grad, err, sizeof err);
+  expect_true(std::string("a loop that sizes v after reading it: ") + err,
+              rc == STANLI_EVAL_FAILED &&
+                  std::string(err).find(
+                      ": v was assigned on an earlier trip of a loop") !=
+                      std::string::npos);
+  stanli_model_free(m);
+
+  // A loop over data that reads v: where it reads v only when mu > x[i],
+  // it never reads v at mu = -0.5, so both points are valid. CmdStan gives
+  // lp 18.25 at mu = 0.5 and -0.125 at mu = -0.5 for both bodies.
+  std::string data = "{\"N\": 50, \"x\": [0";
+  for (int i = 1; i < 50; ++i) data += ", " + std::to_string(0.01 * i);
+  data += "]}";
+  for (const bool guarded : {true, false}) {
+    m = from_stan(
+        (std::string("data { int N; vector[N] x; }\n"
+                     "parameters { real mu; }\n"
+                     "model {\n  vector[0] v;\n"
+                     "  if (mu > 0) v = rep_vector(mu, 3);\n"
+                     "  mu ~ normal(0, 1);\n  for (i in 1:N) ") +
+         (guarded ? "if (x[i] < mu) " : "") + "target += sum(v) * x[i];\n}\n")
+            .c_str(),
+        data.c_str());
+    if (m == nullptr) return;
+    const std::string what = guarded ? "loop, guarded read" : "loop";
+    mu = 0.5;
+    expect_true(
+        what + ": assigned path evaluates",
+        stanli_grad_err(m, &mu, &lp, &grad, err, sizeof err) == STANLI_EVAL_OK);
+    expect_near(what + ": lp where the branch ran", lp, 18.25);
+    expect_near(what + ": gradient where the branch ran", grad, 36.25);
+    mu = -0.5;
+    const int status = stanli_grad_err(m, &mu, &lp, &grad, err, sizeof err);
+    if (guarded) {
+      expect_true(what + ": other path evaluates: " + err,
+                  status == STANLI_EVAL_OK);
+      expect_near(what + ": lp where the branch did not run", lp, -0.125);
+    } else {
+      expect_true(what + ": an unassigned read stops the evaluation: " + err,
+                  status == STANLI_EVAL_FAILED &&
+                      std::string(err).find(": v was not assigned") !=
+                          std::string::npos);
+    }
+    stanli_model_free(m);
+  }
+
+  // Generated quantities: s is 1.5 where the branch runs, as in CmdStan.
+  m = from_stan(
+      "parameters { real mu; }\n"
+      "model { mu ~ normal(0, 1); }\n"
+      "generated quantities {\n  real s;\n  {\n    vector[0] v;\n"
+      "    if (mu > 0) v = rep_vector(mu, 3);\n    s = sum(v);\n  }\n}\n");
+  if (m == nullptr) return;
+  double row[2]{};
+  mu = 0.5;
+  expect_true("generated quantities where the branch ran",
+              stanli_wa_row(m, &mu, row) == 0 && row[1] == 1.5);
+  mu = -0.5;
+  expect_true("generated quantities stop where the branch did not run",
+              stanli_wa_row(m, &mu, row) != 0);
+  stanli_model_free(m);
+}
+
 // Every indexed accessor answers an index out of range the same way: null
 // for a string, STANLI_COMPILER_MESSAGE_NONE for a message kind.
 void test_out_of_range_accessors() {
@@ -3930,6 +4132,7 @@ int main() {
   test_init_retries_only_rejections();
   test_out_of_range_accessors();
   test_grad_messages();
+  test_branch_sized_locals();
   test_shared_write_array_executor();
   test_sampled_write_array_rows_match_draws();
   test_build_id_names_the_abi();

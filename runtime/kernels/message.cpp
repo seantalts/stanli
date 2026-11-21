@@ -21,6 +21,7 @@
 #include <stanli/message_sink.hpp>
 #include <stanli/optable.hpp>
 #include <stanli/packet.hpp>
+#include <stanli/rejection.hpp>
 #include <stanli/program.hpp>
 #include <stanli/structured_check.hpp>
 
@@ -50,7 +51,7 @@ namespace stanli {
 void throw_message(MessageError error, const std::string& message) {
   switch (error) {
     case MessageError::Runtime:
-      throw std::runtime_error(message);
+      throw FatalError(message);
     case MessageError::InvalidArgument:
       throw std::invalid_argument(message);
     case MessageError::OutOfRange:

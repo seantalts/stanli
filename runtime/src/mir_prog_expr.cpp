@@ -23,7 +23,10 @@ Range ProgramCompiler::expr(const mir::Expr& e) {
       if (deferred_shapes.count(e.name))
         bail("unsized local read before its first assignment: " + e.name);
       auto it = reals.find(e.name);
-      if (it != reals.end()) return it->second;
+      if (it != reals.end()) {
+        require_assigned(e.name);
+        return it->second;
+      }
       auto known = known_int_arrays.find(e.name);
       if (known != known_int_arrays.end()) {
         auto dims = known_int_array_dims.find(e.name);
@@ -53,9 +56,10 @@ Range ProgramCompiler::expr(const mir::Expr& e) {
         return out;
       }
       Range ext;
-      if (bind_extern && bind_extern(e.name, &ext)) {
+      if (bind_outer(e.name, &ext)) {
         reals[e.name] = ext;
         extern_bound.insert(e.name);
+        require_assigned(e.name);
         return ext;
       }
       bail("unknown variable " + e.name);

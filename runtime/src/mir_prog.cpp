@@ -44,14 +44,15 @@ Range ProgramCompiler::declare(const std::string& name, int len, Range view,
   const std::vector<double> init((size_t)len, fill);
   emit_const(r.reg, init.data(), len);
   reals[name] = r;
+  if (len == 0) note_empty(name);
   return r;
 }
 
 void ProgramCompiler::finish() {
-  if (late_bound.empty() && hoisted_int_initializers.empty() &&
-      unused_int_resets.empty())
+  if (late_bound.empty() && hoisted_initializers.empty() &&
+      unused_markers.empty())
     return;
-  std::vector<Program::Instr> code = std::move(hoisted_int_initializers);
+  std::vector<Program::Instr> code = std::move(hoisted_initializers);
   for (const auto& [reg, len] : late_bound) {
     const std::vector<double> nan((size_t)len,
                                   std::numeric_limits<double>::quiet_NaN());
@@ -59,7 +60,7 @@ void ProgramCompiler::finish() {
   }
   // Preserve the existing cheap prepend for programs with no markers to
   // remove. They need only a constant jump offset, not a relocation map.
-  if (unused_int_resets.empty()) {
+  if (unused_markers.empty()) {
     const int n = static_cast<int>(code.size());
     for (auto& instr : p.code)
       if (instr.code == Program::JZ || instr.code == Program::JMP)
@@ -69,18 +70,19 @@ void ProgramCompiler::finish() {
     late_bound.clear();
     return;
   }
+  std::vector<char> unused(p.code.size(), 0);
+  for (int pc : unused_markers) unused[(size_t)pc] = 1;
   std::vector<int> pc_map(p.code.size() + 1);
   for (size_t pc = 0; pc < p.code.size(); ++pc) {
     pc_map[pc] = static_cast<int>(code.size());
-    if (!unused_int_resets.count(static_cast<int>(pc)))
-      code.push_back(p.code[pc]);
+    if (!unused[pc]) code.push_back(p.code[pc]);
   }
   pc_map.back() = static_cast<int>(code.size());
   for (auto& instr : code)
     if (instr.code == Program::JZ || instr.code == Program::JMP)
       instr.dst = pc_map.at(static_cast<size_t>(instr.dst));
   p.code = std::move(code);
-  unused_int_resets.clear();
+  unused_markers.clear();
   int_reset_at.clear();
   late_bound.clear();
 }

@@ -656,7 +656,7 @@ int bs_param_constrain(const bs_model* m, bool include_tp, bool include_gq,
         m->params_row(theta_unc, theta);
         return 0;
       } catch (const std::exception& e) {
-        if (stanli::is_internal_error(e)) throw;
+        if (stanli::ends_run(e)) throw;
       }
     }
     // The write_array graph has no prefix that stops before generated

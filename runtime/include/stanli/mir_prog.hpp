@@ -43,6 +43,7 @@
 #include <functional>
 #include <limits>
 #include <map>
+#include <memory>
 #include <optional>
 #include <set>
 #include <stdexcept>
@@ -164,11 +165,47 @@ struct ProgramCompiler {
   int return_while_base = 0;
   int inline_depth = 0;
   std::vector<std::string> inline_stack;
+  // A zero-size local takes the size of its first assignment, and the
+  // region gives it that size on every path. Where a branch on a run-time
+  // value made that assignment and did not run, Stan's local is still
+  // empty, so a read there raises an error instead of reading registers
+  // that hold no value.
+  struct PathFacts {
+    // Whether any path reaches this point. The others are empty if not.
+    bool reachable = false;
+    struct Known {
+      // The containers that are empty on some path to this point.
+      std::set<std::string> maybe_empty;
+      // Integers that every path set to the same literal. stanc's inlining
+      // guards each early return with such a flag, and a branch on a flag
+      // that is known not to run cannot leave a local empty.
+      std::map<std::string, long> flags;
+    };
+    // Shared between copies until one changes, because every branch and
+    // loop keeps a copy and most leave it as it was. Null when both are
+    // empty.
+    std::shared_ptr<Known> known;
+
+    const std::set<std::string>& maybe_empty() const;
+    const std::map<std::string, long>& flags() const;
+    void insert_empty(const std::string& name);
+    bool erase_empty(const std::string& name);
+    void set_flag(const std::string& name, long value);
+    void erase_flag(const std::string& name);
+    Known& edit();
+  };
   struct LoopFrame {
     std::vector<int> breaks;
     std::vector<int> continues;
     bool structured = false;
     int branch_depth = 0;
+    // The path facts where a run-time loop starts, and where its breaks and
+    // continues jump.
+    PathFacts at_start, at_break, at_continue;
+    size_t tracked_at_start = 0;
+    // The names that this run-time loop's body assigns whole. One that is
+    // empty where the loop starts may have another size on a later trip.
+    std::set<std::string> assigned;
   };
   std::vector<LoopFrame> loops;
   // A name that is neither a local nor a compile-time integer. The ODE
@@ -177,6 +214,12 @@ struct ProgramCompiler {
   // backing the name and records it as a live-in. Returning false means
   // "no such value", and the compile bails.
   std::function<bool(const std::string&, Range*)> bind_extern;
+  // The caller's empty status for an outside container that an earlier
+  // region sized in a branch: a register bound to it as a live-in.
+  // Returning false means the container has no such status.
+  std::function<bool(const std::string&, int*)> bind_empty_status;
+  // bind_extern, and the empty status of what it bound.
+  bool bind_outer(const std::string& name, Range* r);
   // One compile-time integer the region cannot reach on its own: a read
   // from a data array. The caller has the data interpreter that answers
   // sizes outside the region, and cint hands it a read whose indices are
@@ -230,15 +273,68 @@ struct ProgramCompiler {
   // Scalar integers are discovered as runtime values while compiling a
   // branch body, after its JZ is already in the stream. Their old value must
   // nevertheless be initialized before control reaches that jump so the
-  // untaken path preserves it.
-  std::vector<Program::Instr> hoisted_int_initializers;
+  // untaken path preserves it. The empty status of a container that came
+  // into the region empty starts here too.
+  std::vector<Program::Instr> hoisted_initializers;
   // A folded scalar local inside a repeated scope may later need storage.
   // Preserve its lexical position with a temporary marker, so loop backedges
   // can distinguish "before declaration" from "after declaration". finish()
   // removes unused markers; promoted locals replace theirs with a real fill.
   std::map<std::string, int> int_reset_at;
-  std::set<int> unused_int_resets;
+  // Marker positions that finish() removes: the integer resets above and
+  // the empty-status writes below that no check needed.
+  std::set<int> unused_markers;
   void mark_int_reset(const std::string& name);
+
+  static PathFacts join(const PathFacts& a, const PathFacts& b);
+  struct UnassignedLocals {
+    PathFacts path{true, nullptr};
+    // A register per container that holds 1 while it is empty and 0 once
+    // it is assigned. The first read that needs one allocates it.
+    std::map<std::string, int> empty_reg;
+    // Where each container without a register became empty or assigned:
+    // markers that become writes of the status if a register is allocated.
+    std::map<std::string, std::vector<std::pair<int, double>>> marks;
+    // Containers that came into the region empty, whose status starts at 1
+    // ahead of the program.
+    std::set<std::string> entered_empty;
+    // The containers above, in the order the region first saw them.
+    std::vector<std::string> tracked;
+  };
+  UnassignedLocals unassigned;
+  void note_empty(const std::string& name);
+  void note_assigned(const std::string& name);
+  // A container that came into the region empty from outside it.
+  void note_entered_empty(const std::string& name);
+  void write_empty_status(const std::string& name, double status);
+  int empty_status_register(const std::string& name);
+  // Whether `name` may be empty here although the region gave it a nonzero
+  // size.
+  bool may_be_empty(const std::string& name) const;
+  // The run-time check before a read of `name` where it may be empty.
+  void require_assigned(const std::string& name);
+  // Raises an error that names `name` when the `status` register is 1, or
+  // when it is 0 if `if_assigned`.
+  void emit_empty_check(const std::string& name, int status,
+                        bool if_assigned = false);
+  // A jump ends the current path: its target, if any, joins the facts, and
+  // no path reaches the code that follows the jump.
+  void jump_with_facts(PathFacts* target);
+  // After a branch or loop: a container first seen inside it, after the
+  // first `tracked_before`, is empty on the paths that skipped it.
+  void join_entered(size_t tracked_before);
+  bool is_tracked(const std::string& name) const;
+  // Before a run-time loop's body, and after it: the loop may run no trips,
+  // or leave from the end of a trip, a continue or a break.
+  void start_loop_facts();
+  void join_loop_exits();
+  // Forgets the flags that a loop body may change.
+  void forget_flags(const std::set<std::string>& written,
+                    const std::string& loopvar);
+  // Joins the facts at the jumps to here, and clears them.
+  void join_jumps(PathFacts* jumps);
+  // A declaration starts a new local of this name.
+  void forget_local(const std::string& name);
 
   static void assigned_names(const mir::Stmt& s, std::set<std::string>* names);
 
@@ -556,8 +652,10 @@ struct ProgramCompiler {
   // Ended follows a runtime function exit on every path through it; branch
   // and loop handlers still compile their other reachable paths. Returned
   // is a single unconditional return whose value is the frame's result; it
-  // needs no join, so nothing after it in the function is compiled.
-  enum class [[nodiscard]] Path { Open, Ended, Returned };
+  // needs no join, so nothing after it in the function is compiled. Break
+  // and Continue leave a trip of a loop that this compiler unrolls, from
+  // outside any run-time branch; the rest of the trip is not compiled.
+  enum class [[nodiscard]] Path { Open, Ended, Returned, Break, Continue };
   struct ReturnFrame {
     const std::vector<mir::Stmt>* body = nullptr;
     ReturnFrame* parent = nullptr;
@@ -586,9 +684,6 @@ struct ProgramCompiler {
   Range function_body(const std::vector<mir::Stmt>& body,
                       bool void_call = false,
                       std::vector<Range>* results = nullptr);
-
-  struct CompileBreak {};
-  struct CompileContinue {};
 
   int64_t sized_len(const mir::SizedType& t);
 
@@ -676,6 +771,9 @@ struct ProgramCompiler {
   Path compile_stmt(const mir::Stmt& s);
 
   Path compile_stmt_folded(const mir::Stmt& s);
+
+  // An if whose condition is known only at run time.
+  Path compile_runtime_if(const mir::Stmt& s);
 
   Range inline_call(const mir::FunDef& f, const std::vector<InlineArg>& args,
                     bool void_call = false, bool propto = true,

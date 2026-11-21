@@ -150,6 +150,7 @@ bool ProgramCompiler::static_view(const mir::Expr& e, Range* out) {
   if (deferred_shapes.count(e.name)) return false;
   auto rt = reals.find(e.name);
   if (rt != reals.end()) {
+    require_assigned(e.name);
     *out = rt->second;
     return true;
   }
@@ -176,9 +177,10 @@ bool ProgramCompiler::static_view(const mir::Expr& e, Range* out) {
   // An outside name: bind it the way expr() would. The binding is one
   // live-in whether it is the shape that is wanted or the value.
   Range ext;
-  if (bind_extern && bind_extern(e.name, &ext)) {
+  if (bind_outer(e.name, &ext)) {
     reals[e.name] = ext;
     extern_bound.insert(e.name);
+    require_assigned(e.name);
     *out = ext;
     return true;
   }

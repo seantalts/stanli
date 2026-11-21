@@ -565,6 +565,31 @@ void Lowering::configure_island_compiler(ProgramCompiler& c,
       c.region_sized.insert(name);
     return true;
   };
+  c.bind_empty_status = [this, &c, prog, reg](const std::string& name,
+                                              int* status) {
+    const auto found = empty_status_slots.find(name);
+    if (found == empty_status_slots.end()) return false;
+    *status = c.alloc(1);
+    prog->ins.push_back(IslandProg::LiveIn{*status, 1});
+    reg->in_slots.push_back(found->second);
+    return true;
+  };
+  // A container that comes into the region empty, or with the empty status
+  // of an earlier region, is bound before the region's first branch, so
+  // that every path through the region knows it.
+  for (const std::string& name : names) {
+    const auto bound = scope.find(name);
+    if (bound == scope.end() || bound->second.slot < 0 || c.reals.count(name) ||
+        c.ints.count(name) ||
+        (!empty_status_slots.count(name) &&
+         g.slots[bound->second.slot].len != 0))
+      continue;
+    Range r;
+    if (c.bind_outer(name, &r)) {
+      c.reals[name] = r;
+      c.extern_bound.insert(name);
+    }
+  }
 }
 void Lowering::finalize_island_program(IslandProg& prog, bool native,
                                        bool keep_every_clear,
@@ -722,6 +747,11 @@ void Lowering::lower_island(const mir::Stmt* s, const mir::Expr* e,
         reg->has_target = true;
         prog->out_regs.push_back(target_reg);
       }
+      for (size_t k = 0; k < reg->out_names.size(); ++k) {
+        if (reg->out_is_int[k] || !c.may_be_empty(reg->out_names[k])) continue;
+        reg->out_empty_status.push_back(k);
+        prog->out_regs.push_back(c.empty_status_register(reg->out_names[k]));
+      }
       // An integer the region folded is one this lowering holds a copy
       // of, and the copy is a compile-time constant every later size,
       // index and read would keep using. The region compiler folds only
@@ -864,6 +894,7 @@ void Lowering::lower_runtime_ifelse(const mir::Stmt& s) {
   std::vector<int> out_lens;
   for (const Range& v : reg.out_views) out_lens.push_back(v.len);
   if (reg.has_target) out_lens.push_back(1);
+  out_lens.insert(out_lens.end(), reg.out_empty_status.size(), 1);
   const auto region_view = [&](size_t k) {
     const Range& out_view = reg.out_views[k];
     if (out_view.kind == ViewKind::Array)
@@ -943,7 +974,29 @@ void Lowering::lower_runtime_ifelse(const mir::Stmt& s) {
     // Its value is now known only at run time, as with an integer above.
     td_erase(name);
   }
-  if (reg.has_target) push_target_term(out_slots.back());
+  for (const std::string& name : reg.out_names) empty_status_slots.erase(name);
+  size_t next = reg.out_views.size();
+  if (reg.has_target) push_target_term(out_slots[next++]);
+  for (size_t k : reg.out_empty_status)
+    empty_status_slots[reg.out_names[k]] = out_slots[next++];
+}
+void Lowering::require_assigned(const std::string& name) {
+  if (empty_status_slots.empty()) return;
+  const auto found = empty_status_slots.find(name);
+  if (found == empty_status_slots.end()) return;
+  IslandRegion reg;
+  reg.in_slots.push_back(found->second);
+  reg.has_effect = true;
+  // Graph code runs on every path, so after this check it is assigned.
+  empty_status_slots.erase(found);
+  auto prog = std::make_shared<IslandProg>();
+  ProgramCompiler c{*prog, fun_defs};
+  const int status = c.alloc(1);
+  prog->ins.push_back(IslandProg::LiveIn{status, 1});
+  c.emit_empty_check(name, status);
+  finalize_island_program(*prog, !in_write_array, false, true);
+  std::vector<int> out_slots;
+  emit_island(prog, reg, {}, &out_slots);
 }
 // `<not known while building the graph> ? a : b`
 Lowering::Val Lowering::lower_runtime_ternary(const mir::Expr& e) {
@@ -1281,6 +1334,7 @@ void Lowering::assign_plain(const mir::Stmt& s) {
 }
 Lowering::Val Lowering::assign_value(const std::string& lhs, Val rhs,
                                      const std::string& raw) {
+  empty_status_slots.erase(lhs);
   auto old = scope.find(lhs);
   if (old != scope.end()) {
     const int64_t len = g.slots[old->second.slot].len;
@@ -1444,6 +1498,7 @@ void Lowering::lower_simple_stmt(const mir::Stmt& s) {
         return;
       }
       if (!s.lhs_idx.empty()) {
+        require_assigned(s.lhs);
         const auto bound = scope.find(s.lhs);
         const auto declared = decls.find(s.lhs);
         if (bound == scope.end() && declared == decls.end())
