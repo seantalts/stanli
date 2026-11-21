@@ -454,6 +454,31 @@ let tuple_tests () =
   require (String.equal (encode pruned) (encode projected))
     "pruning renamed a tuple temporary or changed a split procedure"
 
+(* Partial evaluation fuses a real a * b + c into fma. An integer one stays
+   integer arithmetic, because fma returns a real. *)
+let fast_math_integer_test () =
+  let code = {|
+    data { int d; int i; int j; array[10] real x; }
+    parameters { real a; }
+    model { target += a * x[d * (i - 1) + j]; target += a * a + x[1]; }
+  |} in
+  let mir =
+    match Stanli_pipeline.compile_mir ~fast_math:true ~model_name:"fast_math_int" code with
+    | {result= Ok mir; _} -> mir
+    | {result= Error _; _} -> failwith "Stan source did not compile" in
+  let rec int_fma (e : Expr.Typed.t) =
+    (match e.pattern with
+     | Expr.Pattern.FunApp (Fun_kind.StanLib ("fma", _), _) ->
+         e.meta.type_ = UnsizedType.UInt
+     | _ -> false)
+    || Expr.Pattern.fold (fun found e -> found || int_fma e) false e.pattern in
+  let rec stmt (s : Stmt.Located.t) =
+    Stmt.Pattern.fold (fun found e -> found || int_fma e)
+      (fun found s -> found || stmt s) false s.pattern in
+  require (has_call "fma" mir) "fast_math=true did not fuse a real multiply-add";
+  require (not (List.exists stmt mir.Program.log_prob))
+    "fast_math=true turned an integer index into a real fma"
+
 let () =
   let builtin_sets = Lazy.force Stan_math_signatures.lazy_signatures_alist in
   let materialized () =
@@ -466,6 +491,7 @@ let () =
     "simple compilation forced unrelated built-in overloads";
   arithmetic_preservation_test ();
   fast_math_test ();
+  fast_math_integer_test ();
   repeated_scalar_argument_test ();
   inlining_effect_order_test ();
   tuple_tests ();
