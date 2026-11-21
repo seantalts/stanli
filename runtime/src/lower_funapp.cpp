@@ -114,10 +114,12 @@ unsigned Lowering::fun_effects(const std::string& name) {
 
   // Recursion is not itself an observable effect.  Walk the complete
   // reachable call graph for this query, treating an edge back into the
-  // active component as already being examined.  Do not memoize an
-  // intermediate node: in an effectful recursive component its answer can
-  // depend on statements that the outer frame has not visited yet.
-  std::set<std::string> visiting;
+  // active component as already being examined.  Memoize a node only when
+  // its walk reached no function above it on the active path: inside an
+  // effectful recursive component, a node's answer can depend on statements
+  // that an outer frame has not visited yet.
+  std::map<std::string, size_t> visiting;  // active path, name -> depth
+  size_t highest_reached = SIZE_MAX;
   std::function<unsigned(const std::string&)> visit_fun;
   std::function<unsigned(const mir::Expr&)> visit_expr;
   std::function<unsigned(const mir::Stmt&)> visit_stmt;
@@ -125,12 +127,21 @@ unsigned Lowering::fun_effects(const std::string& name) {
   visit_fun = [&](const std::string& called) -> unsigned {
     auto known = effectful_cache.find(called);
     if (known != effectful_cache.end()) return known->second;
-    if (!visiting.insert(called).second) return 0;
+    const size_t depth = visiting.size();
+    const auto [active, fresh] = visiting.emplace(called, depth);
+    if (!fresh) {
+      highest_reached = std::min(highest_reached, active->second);
+      return 0;
+    }
+    const size_t outer_reached = highest_reached;
+    highest_reached = SIZE_MAX;
     unsigned found = 0;
     auto f = fun_defs.find(called);
     if (f != fun_defs.end())
       for (const auto& s : f->second->body) found |= visit_stmt(s);
     visiting.erase(called);
+    if (highest_reached >= depth) effectful_cache[called] = found;
+    highest_reached = std::min(outer_reached, highest_reached);
     return found;
   };
 
@@ -174,9 +185,7 @@ unsigned Lowering::fun_effects(const std::string& name) {
     return found;
   };
 
-  const unsigned effects = visit_fun(name);
-  effectful_cache[name] = effects;
-  return effects;
+  return visit_fun(name);
 }
 // Integer argument of a density/pmf: values must be known at compile
 // time (int data, loop variables, or compile-time expressions).
