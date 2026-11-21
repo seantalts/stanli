@@ -226,23 +226,64 @@ bool ProgramCompiler::bind_outer(const std::string& name, Range* r) {
   if (bind_empty_status && bind_empty_status(name, &status)) {
     if (!is_tracked(name)) unassigned.tracked.push_back(name);
     unassigned.empty_reg[name] = status;
-    unassigned.path.maybe_empty.insert(name);
+    unassigned.path.insert_empty(name);
   } else if (r->len == 0) {
     note_entered_empty(name);
   }
   return true;
 }
 
+const std::set<std::string>& ProgramCompiler::PathFacts::maybe_empty() const {
+  static const std::set<std::string> none;
+  return known ? known->maybe_empty : none;
+}
+
+const std::map<std::string, long>& ProgramCompiler::PathFacts::flags() const {
+  static const std::map<std::string, long> none;
+  return known ? known->flags : none;
+}
+
+ProgramCompiler::PathFacts::Known& ProgramCompiler::PathFacts::edit() {
+  if (!known)
+    known = std::make_shared<Known>();
+  else if (known.use_count() > 1)
+    known = std::make_shared<Known>(*known);
+  return *known;
+}
+
+void ProgramCompiler::PathFacts::insert_empty(const std::string& name) {
+  if (!maybe_empty().count(name)) edit().maybe_empty.insert(name);
+}
+
+bool ProgramCompiler::PathFacts::erase_empty(const std::string& name) {
+  if (!maybe_empty().count(name)) return false;
+  edit().maybe_empty.erase(name);
+  return true;
+}
+
+void ProgramCompiler::PathFacts::set_flag(const std::string& name, long value) {
+  const auto& current = flags();
+  const auto found = current.find(name);
+  if (found == current.end() || found->second != value)
+    edit().flags[name] = value;
+}
+
+void ProgramCompiler::PathFacts::erase_flag(const std::string& name) {
+  if (flags().count(name)) edit().flags.erase(name);
+}
+
 ProgramCompiler::PathFacts ProgramCompiler::join(const PathFacts& a,
                                                  const PathFacts& b) {
   if (!a.reachable) return b;
-  if (!b.reachable) return a;
-  PathFacts out{true, a.maybe_empty, {}};
-  out.maybe_empty.insert(b.maybe_empty.begin(), b.maybe_empty.end());
-  for (const auto& [name, value] : a.flags) {
-    const auto other = b.flags.find(name);
-    if (other != b.flags.end() && other->second == value)
-      out.flags.emplace(name, value);
+  if (!b.reachable || a.known == b.known) return a;
+  PathFacts out{true, nullptr};
+  for (const auto& name : a.maybe_empty()) out.insert_empty(name);
+  for (const auto& name : b.maybe_empty()) out.insert_empty(name);
+  const auto& other = b.flags();
+  for (const auto& [name, value] : a.flags()) {
+    const auto found = other.find(name);
+    if (found != other.end() && found->second == value)
+      out.set_flag(name, value);
   }
   return out;
 }
@@ -252,7 +293,7 @@ void ProgramCompiler::note_entered_empty(const std::string& name) {
   unassigned.tracked.push_back(name);
   unassigned.entered_empty.insert(name);
   unassigned.marks[name];
-  unassigned.path.maybe_empty.insert(name);
+  unassigned.path.insert_empty(name);
 }
 
 void ProgramCompiler::write_empty_status(const std::string& name,
@@ -269,19 +310,16 @@ void ProgramCompiler::write_empty_status(const std::string& name,
 }
 
 void ProgramCompiler::note_empty(const std::string& name) {
-  unassigned.path.maybe_empty.insert(name);
+  unassigned.path.insert_empty(name);
   write_empty_status(name, 1.0);
 }
 
 void ProgramCompiler::note_assigned(const std::string& name) {
   // Where no path has the local empty, its status is already 0.
-  auto& maybe_empty = unassigned.path.maybe_empty;
-  if (maybe_empty.empty()) return;
-  const auto found = maybe_empty.find(name);
-  if (found == maybe_empty.end()) return;
+  if (!unassigned.path.maybe_empty().count(name)) return;
   const auto it = reals.find(name);
   if (it == reals.end() || it->second.len == 0) return;
-  maybe_empty.erase(found);
+  unassigned.path.erase_empty(name);
   write_empty_status(name, 0.0);
 }
 
@@ -305,13 +343,14 @@ int ProgramCompiler::empty_status_register(const std::string& name) {
 bool ProgramCompiler::may_be_empty(const std::string& name) const {
   const auto it = reals.find(name);
   return it != reals.end() && it->second.len != 0 &&
-         unassigned.path.reachable && unassigned.path.maybe_empty.count(name) &&
+         unassigned.path.reachable &&
+         unassigned.path.maybe_empty().count(name) &&
          (unassigned.empty_reg.count(name) || unassigned.marks.count(name));
 }
 
 void ProgramCompiler::require_assigned(const std::string& name) {
-  if (!unassigned.path.reachable) return;
-  auto& maybe_empty = unassigned.path.maybe_empty;
+  if (unassigned.tracked.empty() || !unassigned.path.reachable) return;
+  const auto& maybe_empty = unassigned.path.maybe_empty();
   const bool in_loop = runtime_for_depth || structured_while_depth;
   // Most reads have nothing to check; answer those without a lookup.
   if (maybe_empty.empty() && !in_loop) return;
@@ -321,7 +360,7 @@ void ProgramCompiler::require_assigned(const std::string& name) {
     if (!maybe_empty.count(name) || !is_tracked(name)) return;
     emit_empty_check(name, empty_status_register(name));
     // The paths that continue past the check have the local assigned.
-    maybe_empty.erase(name);
+    unassigned.path.erase_empty(name);
     return;
   }
   // The read was compiled for an empty local, which a later statement of
@@ -367,7 +406,7 @@ bool ProgramCompiler::is_tracked(const std::string& name) const {
 void ProgramCompiler::join_entered(size_t tracked_before) {
   if (!unassigned.path.reachable) return;
   for (size_t k = tracked_before; k < unassigned.tracked.size(); ++k)
-    unassigned.path.maybe_empty.insert(unassigned.tracked[k]);
+    unassigned.path.insert_empty(unassigned.tracked[k]);
 }
 
 void ProgramCompiler::start_loop_facts() {
@@ -385,9 +424,9 @@ void ProgramCompiler::join_loop_exits() {
 
 void ProgramCompiler::forget_flags(const std::set<std::string>& written,
                                    const std::string& loopvar) {
-  if (unassigned.path.flags.empty()) return;
-  unassigned.path.flags.erase(loopvar);
-  for (const std::string& name : written) unassigned.path.flags.erase(name);
+  if (unassigned.path.flags().empty()) return;
+  unassigned.path.erase_flag(loopvar);
+  for (const std::string& name : written) unassigned.path.erase_flag(name);
 }
 
 void ProgramCompiler::join_jumps(PathFacts* jumps) {
@@ -396,8 +435,8 @@ void ProgramCompiler::join_jumps(PathFacts* jumps) {
 }
 
 void ProgramCompiler::forget_local(const std::string& name) {
-  unassigned.path.maybe_empty.erase(name);
-  unassigned.path.flags.erase(name);
+  unassigned.path.erase_empty(name);
+  unassigned.path.erase_flag(name);
 }
 
 void ProgramCompiler::emit_assign_size_reject(const std::string& name,
@@ -531,8 +570,8 @@ ProgramCompiler::Path ProgramCompiler::compile_runtime_if(const mir::Stmt& s) {
   const size_t tracked_before = unassigned.tracked.size();
   std::optional<long> flag;
   if (s.cond.kind == mir::Expr::Var)
-    if (const auto known = before.flags.find(s.cond.name);
-        known != before.flags.end())
+    if (const auto known = before.flags().find(s.cond.name);
+        known != before.flags().end())
       flag = known->second;
   // An arm on a flag that is known not to run adds no path.
   if (flag && *flag == 0) unassigned.path = PathFacts{};
@@ -573,9 +612,9 @@ ProgramCompiler::Path ProgramCompiler::compile_stmt(const mir::Stmt& s) {
     note_assigned(s.lhs);
     // A folded integer's branches fold too; only a register needs a flag.
     if (s.rhs.kind == mir::Expr::LitInt && !given(s) && reals.count(s.lhs))
-      unassigned.path.flags[s.lhs] = s.rhs.lit_i;
-    else if (!unassigned.path.flags.empty())
-      unassigned.path.flags.erase(s.lhs);
+      unassigned.path.set_flag(s.lhs, s.rhs.lit_i);
+    else
+      unassigned.path.erase_flag(s.lhs);
   }
   return path;
 }
@@ -1140,7 +1179,7 @@ ProgramCompiler::Path ProgramCompiler::compile_stmt_folded(const mir::Stmt& s) {
         jump_with_facts(&loops.back().at_break);
         return Path::Open;
       }
-      throw CompileBreak{};
+      return Path::Break;
     case mir::Stmt::Continue:
       if (loops.empty()) bail("continue outside a loop");
       if (branch_depth > loops.back().branch_depth || loops.back().structured) {
@@ -1148,7 +1187,7 @@ ProgramCompiler::Path ProgramCompiler::compile_stmt_folded(const mir::Stmt& s) {
         jump_with_facts(&loops.back().at_continue);
         return Path::Open;
       }
-      throw CompileContinue{};
+      return Path::Continue;
     case mir::Stmt::For: {
       known_reals.erase(s.loopvar);
       long lo, hi;
@@ -1223,10 +1262,11 @@ ProgramCompiler::Path ProgramCompiler::compile_stmt_folded(const mir::Stmt& s) {
         Path path = Path::Open;
         ints[s.loopvar] = {static_cast<long>(v)};
         int_decl_at[s.loopvar] = {branch_depth, loops.size()};
-        try {
-          path = compile_body(s.body);
-        } catch (CompileContinue&) {
-        } catch (CompileBreak&) {
+        path = compile_body(s.body);
+        if (path == Path::Continue) {
+          path = Path::Open;
+        } else if (path == Path::Break) {
+          path = Path::Open;
           // A runtime continue earlier in this trip skips the break, so
           // the later trips stay reachable and the break becomes a jump.
           if (loops.back().continues.empty())

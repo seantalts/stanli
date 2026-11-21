@@ -43,6 +43,7 @@
 #include <functional>
 #include <limits>
 #include <map>
+#include <memory>
 #include <optional>
 #include <set>
 #include <stdexcept>
@@ -172,12 +173,26 @@ struct ProgramCompiler {
   struct PathFacts {
     // Whether any path reaches this point. The others are empty if not.
     bool reachable = false;
-    // The containers that are empty on some path to this point.
-    std::set<std::string> maybe_empty;
-    // Integers that every path set to the same literal. stanc's inlining
-    // guards each early return with such a flag, and a branch on a flag
-    // that is known not to run cannot leave a local empty.
-    std::map<std::string, long> flags;
+    struct Known {
+      // The containers that are empty on some path to this point.
+      std::set<std::string> maybe_empty;
+      // Integers that every path set to the same literal. stanc's inlining
+      // guards each early return with such a flag, and a branch on a flag
+      // that is known not to run cannot leave a local empty.
+      std::map<std::string, long> flags;
+    };
+    // Shared between copies until one changes, because every branch and
+    // loop keeps a copy and most leave it as it was. Null when both are
+    // empty.
+    std::shared_ptr<Known> known;
+
+    const std::set<std::string>& maybe_empty() const;
+    const std::map<std::string, long>& flags() const;
+    void insert_empty(const std::string& name);
+    bool erase_empty(const std::string& name);
+    void set_flag(const std::string& name, long value);
+    void erase_flag(const std::string& name);
+    Known& edit();
   };
   struct LoopFrame {
     std::vector<int> breaks;
@@ -273,7 +288,7 @@ struct ProgramCompiler {
 
   static PathFacts join(const PathFacts& a, const PathFacts& b);
   struct UnassignedLocals {
-    PathFacts path{true, {}, {}};
+    PathFacts path{true, nullptr};
     // A register per container that holds 1 while it is empty and 0 once
     // it is assigned. The first read that needs one allocates it.
     std::map<std::string, int> empty_reg;
@@ -637,8 +652,10 @@ struct ProgramCompiler {
   // Ended follows a runtime function exit on every path through it; branch
   // and loop handlers still compile their other reachable paths. Returned
   // is a single unconditional return whose value is the frame's result; it
-  // needs no join, so nothing after it in the function is compiled.
-  enum class [[nodiscard]] Path { Open, Ended, Returned };
+  // needs no join, so nothing after it in the function is compiled. Break
+  // and Continue leave a trip of a loop that this compiler unrolls, from
+  // outside any run-time branch; the rest of the trip is not compiled.
+  enum class [[nodiscard]] Path { Open, Ended, Returned, Break, Continue };
   struct ReturnFrame {
     const std::vector<mir::Stmt>* body = nullptr;
     ReturnFrame* parent = nullptr;
@@ -667,9 +684,6 @@ struct ProgramCompiler {
   Range function_body(const std::vector<mir::Stmt>& body,
                       bool void_call = false,
                       std::vector<Range>* results = nullptr);
-
-  struct CompileBreak {};
-  struct CompileContinue {};
 
   int64_t sized_len(const mir::SizedType& t);
 
