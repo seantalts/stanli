@@ -1906,9 +1906,14 @@ std::optional<Lowering::Val> Lowering::lower_eltwise_fn(
     Val c = actuals.at(2).value();
     const int64_t la = g.slots[a.slot].len, lb = g.slots[b.slot].len,
                   lc = g.slots[c.slot].len;
-    const int64_t n = std::max(la, std::max(lb, lc));
+    // A length-1 operand takes the length of the others, as in a binary
+    // operator, including a length of 0.
+    int64_t n = 1;
     for (int64_t l : {la, lb, lc})
-      if (l != n && l != 1) fail("fma: incompatible lengths", e.raw);
+      if (l != 1) {
+        if (n != 1 && l != n) fail("fma: incompatible lengths", e.raw);
+        n = l;
+      }
     // The shape of whichever operand carries one, like the binaries.
     SlotInfo si = shape_of(a, b);
     if (is_scalar(a) && is_scalar(b)) si = shape_of(a, c);
