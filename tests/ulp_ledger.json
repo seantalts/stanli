@@ -337,6 +337,12 @@
       "reason": "measured on Darwin arm64; cause not yet explained; the 80-digit run timed out"
      }
     },
+    "diamonds": {
+     "wa b_Intercept": {
+      "bound": 168,
+      "reason": "measured on Darwin arm64; b_Intercept = Intercept - dot_product(means_X, b) takes column means of 5,000 values, which stanli adds with compensation; at point 0 b_Intercept is 11.2 (stanli) and 179.2 (CmdStan) scaled ULP from the 80-digit value"
+     }
+    },
     "dogs": {
      "grad[2]": {
       "bound": 32,
@@ -421,24 +427,20 @@
     },
     "epinow2_estimate_infections": {
      "grad[15]": {
-      "bound": 37377,
+      "bound": 34157,
       "reason": "measured on Darwin arm64; the 14-day generation-time PMF tail loses 7 digits in double (FAST_HP_CHECKED in tools/verify_refs.py); both engines are 1.4e+07 (stanli) and 1.4e+07 (CmdStan) scaled ULP from the 80-digit gradient at point 0"
      },
      "grad[16]": {
-      "bound": 37374,
+      "bound": 34156,
       "reason": "measured on Darwin arm64; the 14-day generation-time PMF tail loses 7 digits in double (FAST_HP_CHECKED in tools/verify_refs.py); both engines are 5.8e+07 (stanli) and 5.8e+07 (CmdStan) scaled ULP from the 80-digit gradient at point 0"
      },
-     "grad[18]": {
-      "bound": 14,
-      "reason": "measured on Darwin arm64; the 14-day generation-time PMF tail loses 7 digits in double (FAST_HP_CHECKED in tools/verify_refs.py); both engines are 1.1e+06 (stanli) and 1.1e+06 (CmdStan) scaled ULP from the 80-digit gradient at point 0"
-     },
      "grad[4]": {
-      "bound": 14,
-      "reason": "measured on Darwin arm64; the 14-day generation-time PMF tail loses 7 digits in double (FAST_HP_CHECKED in tools/verify_refs.py); both engines are 2.0e+07 (stanli) and 2.0e+07 (CmdStan) scaled ULP from the 80-digit gradient at point 0"
+      "bound": 17,
+      "reason": "measured on Darwin arm64; the 14-day generation-time PMF tail loses 7 digits in double (FAST_HP_CHECKED in tools/verify_refs.py); both engines are 2.0e+07 (stanli) and 2.0e+07 (CmdStan) scaled ULP from the 80-digit gradient at point 0; stanli moved 17 scaled ULP from CmdStan when the mean of 35 log Rt terms began to be added with compensation"
      },
      "wa": {
-      "bound": 95,
-      "reason": "measured on Darwin arm64; measured on Darwin arm64; the 14-day generation-time PMF tail loses 7 digits in double and the renewal recursion carries the error to infections; at point 0 infections.56 is 61660893 (stanli) and 61660798 (CmdStan) scaled ULP from the 80-digit value, so stanli is 95 farther; the well-conditioned R is at most 4.4 (stanli) and 3.1 (CmdStan) scaled ULP from the 80-digit value; the value moved when mean began to group its terms as sum does; 9 wa values over 10"
+      "bound": 24,
+      "reason": "measured on Darwin arm64; the 14-day generation-time PMF tail loses 7 digits in double and the renewal recursion carries the error to infections; at point 0 infections.56 is 61660779 (stanli) and 61660798 (CmdStan) scaled ULP from the 80-digit value, so stanli is 19 closer; R centres log Rt on its mean over 35 values, which stanli adds with compensation, and is at most 2.4 (stanli) and 3.1 (CmdStan) scaled ULP from the 80-digit value; 9 wa values over 10"
      }
     },
     "epinow2_estimate_secondary": {
@@ -673,6 +675,12 @@
       "reason": "measured on Darwin arm64; cause not yet explained; the 80-digit evaluator covers lp and gradient only"
      }
     },
+    "mlumr_survival_relaxed": {
+     "wa rmst_diff_index": {
+      "bound": 16,
+      "reason": "measured on Darwin arm64; the restricted mean survival time averages S(t | eta) over 47 individuals at each grid time, a mean that stanli adds with compensation; at point 1 rmst_diff_index is 1.5 (stanli) and 14.5 (CmdStan) scaled ULP from the 80-digit value"
+     }
+    },
     "multi_occupancy": {
      "lp": {
       "bound": 24,
@@ -851,6 +859,18 @@
      "lp": {
       "bound": 95,
       "reason": "measured on Darwin arm64; 80-digit reference at point 2: stanli 13, CmdStan 82 scaled ULP from the true value; stanli is at least as close to it; the merged loop's sums are pairwise or compensated in stanli, while CmdStan adds one call at a time"
+     }
+    },
+    "s2_mi_lognormal": {
+     "wa b_x_Intercept": {
+      "bound": 64,
+      "reason": "measured on Darwin arm64; b_x_Intercept = Intercept - dot_product(means_X, b) takes the column mean of 40 values, which stanli adds with compensation; at point 0 b_x_Intercept is 3.9 (stanli) and 67.9 (CmdStan) scaled ULP from the 80-digit value"
+     }
+    },
+    "s2_mi_trunc_lb": {
+     "wa b_x_Intercept": {
+      "bound": 64,
+      "reason": "measured on Darwin arm64; b_x_Intercept = Intercept - dot_product(means_X, b) takes the column mean of 40 values, which stanli adds with compensation; at point 0 b_x_Intercept is 3.9 (stanli) and 67.9 (CmdStan) scaled ULP from the 80-digit value"
      }
     },
     "sesame_one_pred_a": {

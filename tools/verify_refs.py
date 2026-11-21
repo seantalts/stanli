@@ -248,10 +248,28 @@ ULP_LIMITS = {source.stem: 10 for source in (REPO / "tests" / "brms").glob("*.st
 # is 0.0 and CmdStan 16.0 scaled ULP from the true value.
 ULP_LIMITS.update(dict.fromkeys(("i320_pois_trunc_both", "i320_pois_trunc_ub"),
                                 16))
+# b_x_Intercept = Intercept - dot_product(means_X, b) takes the column mean of
+# 40 values, which stanli adds with compensation: at point 0 stanli is 3.9
+# and CmdStan 67.9 ULP from the 80-digit value, and stanli is 64 ULP from
+# CmdStan.
+ULP_LIMITS.update(dict.fromkeys(("s2_mi_lognormal", "s2_mi_trunc_lb"), 64))
 # Gradient ULP is measured against the largest gradient entry for these
 # fixtures; lp and write_array outputs keep per-element ULP.
 _REGROUPED_ADJOINT = ("adjoint sums regrouped by vectorized random-effect "
                       "loops; checked against a 60-digit reference")
+# brms centres each predictor column on its mean in transformed data. The
+# gradient entry of a centred predictor's coefficient is a sum over rows of
+# the centred column times a residual, which cancels: in sw_binomial and
+# sw_negbinomial the terms add up to 37 to 1,240 times the result, and one
+# rounding per term is 23 to 1,110 ULP of the entry. Stanli's compensated
+# mean gives centred data closer to the exact centring than CmdStan's (whose
+# mean and centred column are those of stanli without compensation, checked
+# with CmdStan on sw_negbinomial), and the entries then move by hundreds of
+# their own ULP either way. Against the largest gradient entry, stanli is at
+# most 5 ULP from CmdStan, and both engines are within 8.8 ULP of the
+# 80-digit gradient (tools/hp; sw_re_slope's 8.7 is the same for both).
+_CENTRED_GRADIENT = ("gradient entries of mean-centred predictors cancel; "
+                     "checked against an 80-digit reference")
 GRADIENT_AGAINST_LARGEST = {
     name: _REGROUPED_ADJOINT for name in (
         "i320_pois_trunc_both", "i320_pois_trunc_ub", "s2_car",
@@ -259,6 +277,32 @@ GRADIENT_AGAINST_LARGEST = {
         "s2_mm_weights", "s2_mmc", "s2_multinomial", "sw_gamma",
         "sw_re_bern", "sw_skewnormal", "sw_weibull")
 }
+GRADIENT_AGAINST_LARGEST.update({
+    name: _CENTRED_GRADIENT for name in (
+        "s2_cumulative_cauchit", "s2_custom_vreal", "sw_ar", "sw_binomial",
+        "sw_exgaussian", "sw_gaussian", "sw_hurdle_gamma", "sw_hurdle_pois",
+        "sw_ma", "sw_mixture", "sw_mv_norescor", "sw_negbinomial",
+        "sw_poisson", "sw_re_negbin", "sw_re_pois", "sw_re_slope",
+        "sw_vonmises", "sw_zi_binomial", "sw_zi_negbin", "sw_zi_poisson")
+})
+# The same centring, in two models that the 80-digit reference cannot judge.
+# s2_wiener: tools/hp has no wiener density, so only the part that changed is
+# measured: stanli's column mean is 0.10 ULP from the exact mean and CmdStan's
+# 1.90, and stanli's centred column is at most 0.55 ULP from the exact
+# centring, CmdStan's 1.90. The gradient is not checked against a true
+# value; against its largest entry stanli is 1 ULP from CmdStan.
+# sw_cens: Stan Math's normal_lcdf and normal_lccdf form their partials from
+# Abramowitz and Stegun's approximation 7.1.26, so both engines' gradients
+# are 2e-7 to 6e-7 relative from the true derivative of their own lp, which
+# itself agrees with the 80-digit value to 2e-16. Against its largest entry
+# stanli is 1 ULP from CmdStan.
+GRADIENT_AGAINST_LARGEST["s2_wiener"] = (
+    "gradient entries of mean-centred predictors cancel; no 80-digit "
+    "reference for wiener, the centred data is checked instead")
+GRADIENT_AGAINST_LARGEST["sw_cens"] = (
+    "gradient entries of mean-centred predictors cancel; Stan Math's "
+    "censored-normal partials are approximations to 2e-7, so the 80-digit "
+    "reference cannot decide")
 PLATFORM_REFS = {
     "Linux x86_64": REPO / "docs" / "internal" / "artifacts" / "corpus-refs-linux-x86_64.json.gz",
 }
