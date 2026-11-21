@@ -2442,6 +2442,8 @@ static void test_kernel_call_ops_carved(bool compact) {
 
 // More live-ins than Op::in holds: the carver packs the leading ones with a
 // CONCAT2 chain, as necessity islands do, and the gradient matches the ops.
+// The tanh chain is long enough that the island wins on the carver's cost
+// estimate, which charges for the chain, so no switch has to force it.
 static void test_packed_live_ins_carve(int n) {
   const std::string what = "livein" + std::to_string(n);
   Graph g;
@@ -2454,7 +2456,7 @@ static void test_packed_live_ins_carve(int n) {
     g.add_op(k % 2 ? OP_ADD : OP_MUL, {acc, ps[k]}, s);
     acc = s;
   }
-  for (int k = 0; k < 40; ++k) {
+  for (int k = 0; k < 200; ++k) {
     const int s = g.add_slot(1, false);
     g.add_op(OP_TANHV, {acc}, s);
     acc = s;
@@ -3242,8 +3244,6 @@ int main() {
   test_unsupported_op_splits();
   test_vector_op_joins_runs();
   test_wide_vector_op_joins_runs();
-  test_packed_live_ins_carve(7);
-  test_packed_live_ins_carve(12);
   test_six_live_ins_ok();
   test_packed_live_ins();
   test_input_windows();
@@ -3255,6 +3255,8 @@ int main() {
   test_density_mask_gradient_identical();
 
   test_unsetenv("STANLI_ISLAND_ALWAYS");
+  test_packed_live_ins_carve(7);
+  test_packed_live_ins_carve(12);
   test_wide_state_refused();
   test_vector_copies_carved();
   test_grouped_softmax_island_refusal();
