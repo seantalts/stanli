@@ -1,11 +1,9 @@
 #!/usr/bin/env python3
 """dump_ops prints the operations inside a retained loop, under the loop op."""
-import json
 import pathlib
 import re
 import subprocess
 import sys
-import tempfile
 import unittest
 
 REPO = pathlib.Path(__file__).resolve().parent.parent
@@ -14,14 +12,12 @@ import bench_select as select
 
 DUMP_OPS = None
 FIXTURE = REPO / "tests/fixtures/structured_matrix_ops.tmir.sexp"
+EMPTY_DATA = REPO / "tests/function_coverage/empty.json"
 BODY_OPS = ("MATRIX_EXP", "QUAD_FORM_SYM", "MDIVIDE_LEFT", "MDIVIDE_RIGHT_SPD", "CROSSPROD")
 
 
 def dump():
-    with tempfile.NamedTemporaryFile("w", suffix=".json") as data:
-        json.dump({}, data)
-        data.flush()
-        return subprocess.check_output([DUMP_OPS, FIXTURE, data.name, "1000"], text=True)
+    return subprocess.check_output([DUMP_OPS, FIXTURE, EMPTY_DATA, "1000"], text=True)
 
 
 class LoopBodyTests(unittest.TestCase):
