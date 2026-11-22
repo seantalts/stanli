@@ -112,8 +112,8 @@ and <!--gen:testing_values-->1,504,488<!--/gen--> values. CmdStan rejects <!--ge
 of the points.
 
 In <!--gen:testing_models_within-->333<!--/gen--> models, every value is within 10 ULP of
-CmdStan. The other <!--gen:testing_models_over-->81<!--/gen--> models have <!--gen:testing_entries-->175<!--/gen-->
-ledger entries. stanli is at least as close to the true value as CmdStan in <!--gen:testing_entries_stanli-->127<!--/gen-->
+CmdStan. The other <!--gen:testing_models_over-->81<!--/gen--> models have <!--gen:testing_entries-->177<!--/gen-->
+ledger entries. stanli is at least as close to the true value as CmdStan in <!--gen:testing_entries_stanli-->129<!--/gen-->
 of those entries. CmdStan is closer in <!--gen:testing_entries_cmdstan-->9<!--/gen-->. We
 cannot tell for the other <!--gen:testing_entries_unknown-->39<!--/gen-->.
 
@@ -590,7 +590,7 @@ table and those files disagree.
 | `rstanarm_polr` | rstanarm | 9 | 113 |  |  |  |  |  |  | 10 | CmdStan rejects point 2, and stanli must too |
 | `multinma_ndmm_mspline` | multinma | 62 | 956 |  |  |  |  |  |  | 10 |  |
 | `multinma_smoking_re` | multinma | 59 | 375 |  |  |  |  |  |  | 10 |  |
-| `epinow2_estimate_infections` | epinow2 | 24 | 352 | 1.4e6 | 1.4e6 | 1.6e6 | 1.6e6 | 5.4e5 | 5.4e5 | gradient 34,157, outputs 24 |  |
+| `epinow2_estimate_infections` | epinow2 | 24 | 352 | 1.4e6 | 1.4e6 | 1.6e6 | 1.6e6 | 5.4e5 | 5.4e5 | gradient 34,141, outputs 24 |  |
 | `epinow2_estimate_secondary` | epinow2 | 4 | 72 | 105 | 94.8 | 38.3 | 39.1 | 18.0 | 18.0 | lp 68, gradient 18 |  |
 | `mlumr_survival_mspline_relaxed` | mlumr | 32 | 1052 | 1.03 | 0.53 | 0.24 | 0.18 | 3.34 | 3.58 | outputs 128 |  |
 | `mlumr_survival_relaxed` | mlumr | 12 | 925 | 1.52 | 2.23 | 0.69 | 0.69 | 1.71 | 1.70 | outputs 16 |  |

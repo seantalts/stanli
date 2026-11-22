@@ -44,15 +44,24 @@ int main() {
   // activation decision used to price the feature.
   expect_true("destination forwarding does not activate a marginal island",
               island_count(cm.graph) == 0);
+  // CSE shares the loop's sum calls, and a shared call stays on the graph,
+  // which leaves no run long enough to carve. Without CSE the loop is one
+  // run, priced just above its ops.
+  test_setenv("STANLI_NO_CSE", "1", 1);
+  CompiledModel unshared = compile_model(mir, data);
   test_setenv("STANLI_ISLAND_ALWAYS", "1", 1);
   CompiledModel forced = compile_model(mir, data);
   test_setenv("STANLI_NO_PROGRAM_DEST_FORWARD", "1", 1);
   CompiledModel unforwarded = compile_model(mir, data);
   test_unsetenv("STANLI_NO_PROGRAM_DEST_FORWARD");
   test_unsetenv("STANLI_ISLAND_ALWAYS");
-  if (debug_switches_available())
+  test_unsetenv("STANLI_NO_CSE");
+  if (debug_switches_available()) {
+    expect_true("destination forwarding does not activate the unshared run",
+                island_count(unshared.graph) == 0);
     expect_true("marginal island remains available when forced",
                 island_count(forced.graph) == 1);
+  }
   auto island_instructions = [](const Graph& g) {
     size_t n = 0;
     for (const Op& op : g.ops)

@@ -496,14 +496,24 @@
     },
     "epinow2_estimate_infections": {
      "grad[15]": {
-      "bound": 34157,
+      "bound": 34141,
       "closer": "unknown",
       "reason": "measured on Darwin arm64; the 14-day generation-time PMF tail loses 7 digits in double (FAST_HP_CHECKED in tools/verify_refs.py); both engines are 1.4e+07 (stanli) and 1.4e+07 (CmdStan) scaled ULP from the 80-digit gradient at point 0"
      },
      "grad[16]": {
-      "bound": 34156,
+      "bound": 34141,
       "closer": "unknown",
       "reason": "measured on Darwin arm64; the 14-day generation-time PMF tail loses 7 digits in double (FAST_HP_CHECKED in tools/verify_refs.py); both engines are 5.8e+07 (stanli) and 5.8e+07 (CmdStan) scaled ULP from the 80-digit gradient at point 0"
+     },
+     "grad[17]": {
+      "bound": 31,
+      "closer": "stanli",
+      "reason": "measured on Darwin arm64; the 14-day generation-time PMF tail loses 7 digits in double (FAST_HP_CHECKED in tools/verify_refs.py); at point 0 stanli is 4.912e-7 and CmdStan 4.930e-7 from the 80-digit gradient; stanli moved from CmdStan, and closer to that value, when the island carver began to take ops whose value CSE shares"
+     },
+     "grad[18]": {
+      "bound": 34,
+      "closer": "stanli",
+      "reason": "measured on Darwin arm64; the 14-day generation-time PMF tail loses 7 digits in double (FAST_HP_CHECKED in tools/verify_refs.py); at point 0 stanli is 6.6248e-5 and CmdStan 6.6250e-5 from the 80-digit gradient; stanli moved from CmdStan, and closer to that value, when the island carver began to take ops whose value CSE shares"
      },
      "grad[4]": {
       "bound": 17,

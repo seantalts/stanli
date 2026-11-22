@@ -5,6 +5,7 @@
 #include "env_helpers.hpp"
 #include "graph_helpers.hpp"
 #include <stanli/compile.hpp>
+#include <stanli/cse.hpp>
 #include <stanli/graph.hpp>
 #include <stanli/graph_print.hpp>
 #include <stanli/island.hpp>
@@ -3206,6 +3207,297 @@ static void test_register_fill_alignment() {
     }
 }
 
+// lp and gradient, or nothing if the executor refuses the graph.
+static std::vector<double> try_run_grad(Graph g, const Fills& fills) {
+  try {
+    return run_grad(std::move(g), fills);
+  } catch (const std::exception& e) {
+    std::printf("  executor refused the graph: %s\n", e.what());
+    return {};
+  }
+}
+
+static bool same_bits(const std::vector<double>& a,
+                      const std::vector<double>& b) {
+  return !a.empty() && a.size() == b.size() &&
+         std::memcmp(a.data(), b.data(), a.size() * sizeof(double)) == 0;
+}
+
+static int count_shared(const Graph& g) {
+  int n = 0;
+  for (const Op& op : g.ops) n += op.primal_source >= 0;
+  return n;
+}
+
+// A recurrence that reads each element of a parameter vector twice per
+// step, as an HMM's forward step reads logA[t][i] once for each j. CSE
+// makes the first read of each element the shared op and the second its
+// copy, so a shared op comes every five ops. With `tail`, two more reads of
+// element 0 follow the target term, where no island reaches them.
+struct RepeatedReads {
+  Graph g;
+  Fills fills;
+  std::vector<int> terms;
+  int first_read = -1, tail_a = -1, tail_b = -1;
+};
+
+static RepeatedReads build_repeated_reads(bool tail) {
+  constexpr int kSteps = 16;
+  RepeatedReads r;
+  Graph& g = r.g;
+  const int p0 = g.add_slot(1, true), pv = g.add_slot(kSteps, true);
+  int acc = p0;
+  for (int t = 0; t < kSteps; ++t) {
+    const int first = g.add_slot(1, false), again = g.add_slot(1, false);
+    const int m = g.add_slot(1, false), a = g.add_slot(1, false);
+    const int next = g.add_slot(1, false);
+    g.add_op(OP_INDEX, {pv}, first, {t});
+    g.add_op(OP_MUL, {acc, first}, m);
+    g.add_op(OP_INDEX, {pv}, again, {t});
+    g.add_op(OP_ADD, {m, again}, a);
+    g.add_op(OP_TANHV, {a}, next);
+    if (t == 0) r.first_read = first;
+    acc = next;
+  }
+  const int lp = g.add_slot(1, false);
+  g.add_op(OP_ADD, {acc, p0}, lp);
+  r.terms = {lp};
+  if (tail) {
+    r.tail_a = g.add_slot(1, false);
+    r.tail_b = g.add_slot(1, false);
+    const int t1 = g.add_slot(1, false), t2 = g.add_slot(1, false);
+    g.add_op(OP_INDEX, {pv}, r.tail_a, {0});
+    g.add_op(OP_MUL, {r.tail_a, p0}, t1);
+    g.add_op(OP_INDEX, {pv}, r.tail_b, {0});
+    g.add_op(OP_MUL, {r.tail_b, lp}, t2);
+    r.terms.push_back(t1);
+    r.terms.push_back(t2);
+  }
+  testutil::reduce_into_result(g, r.terms);
+  return r;
+}
+
+static int count_opcode(const Graph& g, uint16_t oc) {
+  int n = 0;
+  for (const Op& op : g.ops) n += op.opcode == oc;
+  return n;
+}
+
+// A shared op does not end a run. The island recomputes each copy inside
+// it, which is what the graph without CSE does, so the two agree bit for
+// bit.
+static void test_shared_primals_carved() {
+  RepeatedReads plain = build_repeated_reads(false);
+  expect("no-CSE reference carved==1",
+         carve_islands(plain.g, plain.fills, plain.terms, {}) == 1);
+  const std::vector<double> want = run_grad(std::move(plain.g), plain.fills);
+
+  RepeatedReads r = build_repeated_reads(false);
+  const CseStats st = cse(r.g, r.fills, r.terms, {});
+  expect("repeated reads share primals",
+         st.primals_shared == 16 && st.ops_removed == 0);
+  expect("shared reads carved==1",
+         carve_islands(r.g, r.fills, r.terms, {}) == 1);
+  expect("one island holds the recurrence", count_opcode(r.g, OP_ISLAND) == 1);
+  expect("no sharing is left on the graph", count_shared(r.g) == 0);
+  const std::vector<double> got = try_run_grad(std::move(r.g), r.fills);
+  expect("shared reads bitwise against no CSE", same_bits(got, want));
+}
+
+// A shared op with a copy past the run stays on the graph, where that copy
+// still shares its value, and the run starts after it.
+static void test_shared_primal_with_later_copy_stays() {
+  RepeatedReads ref = build_repeated_reads(true);
+  const std::vector<double> want = run_grad(std::move(ref.g), ref.fills);
+
+  RepeatedReads r = build_repeated_reads(true);
+  const CseStats st = cse(r.g, r.fills, r.terms, {});
+  expect("tail reads share the first read", st.primals_shared == 18);
+  expect("tail run carved==1", carve_islands(r.g, r.fills, r.terms, {}) == 1);
+  bool first_on_graph = false, tail_a_shares = false, tail_b_shares = false;
+  for (const Op& op : r.g.ops) {
+    if (op.out == r.first_read)
+      first_on_graph = op.primal_source == r.first_read;
+    if (op.out == r.tail_a) tail_a_shares = op.primal_source == r.first_read;
+    if (op.out == r.tail_b) tail_b_shares = op.primal_source == r.first_read;
+  }
+  expect("first read stays on the graph", first_on_graph);
+  expect("tail reads share the first read", tail_a_shares && tail_b_shares);
+  expect("only the first read's group is shared", count_shared(r.g) == 3);
+  const std::vector<double> got = try_run_grad(std::move(r.g), r.fills);
+  expect("tail run sizes", got.size() == want.size());
+  for (size_t i = 0; i < want.size() && i < got.size(); ++i)
+    expect_close("tail run v" + std::to_string(i), got[i], want[i]);
+}
+
+// An op the island would run as a call to its graph kernel stays on the
+// graph when CSE shares it: the call costs what the op costs, and on the
+// graph a copy skips its forward. The native runs between the copies are
+// still carved.
+static void test_shared_calls_stay_on_graph() {
+  constexpr int kSegments = 3, kSegmentSteps = 12;
+  Graph g;
+  Fills fills;
+  const int p0 = g.add_slot(1, true), p1 = g.add_slot(1, true);
+  const int x = g.add_slot(1, false);
+  g.add_op(OP_EXPV, {p1}, x);
+  std::vector<int> lgammas;
+  int acc = p0;
+  for (int s = 0; s < kSegments; ++s) {
+    lgammas.push_back(g.add_slot(1, false));
+    g.add_op(OP_LGAMMA, {x}, lgammas.back());
+    const int joined = g.add_slot(1, false);
+    g.add_op(OP_ADD, {acc, lgammas.back()}, joined);
+    acc = joined;
+    for (int t = 0; t < kSegmentSteps; ++t) {
+      const int m = g.add_slot(1, false), a = g.add_slot(1, false);
+      const int next = g.add_slot(1, false);
+      g.add_op(OP_MUL, {acc, p1}, m);
+      g.add_op(OP_ADD, {m, p0}, a);
+      g.add_op(OP_TANHV, {a}, next);
+      acc = next;
+    }
+  }
+  const int lp = g.add_slot(1, false);
+  g.add_op(OP_ADD, {acc, p0}, lp);
+  g.result_slot = lp;
+  std::vector<int> terms{lp};
+
+  Graph ref = g;
+  const std::vector<double> want = run_grad(std::move(ref), fills);
+  const CseStats st = cse(g, fills, terms, {});
+  expect("lgamma copies share a primal", st.primals_shared == kSegments - 1);
+  const int carved = carve_islands(g, fills, terms, {});
+  expect("native runs carved", carved == kSegments);
+  int lgamma_ops = 0;
+  for (const Op& op : g.ops) {
+    if (op.opcode != OP_LGAMMA) continue;
+    ++lgamma_ops;
+    expect("lgamma keeps its shared primal", op.primal_source == lgammas[0]);
+  }
+  expect("every lgamma stays on the graph", lgamma_ops == kSegments);
+  const std::vector<double> got = try_run_grad(std::move(g), fills);
+  expect("shared calls sizes", got.size() == want.size());
+  for (size_t i = 0; i < want.size() && i < got.size(); ++i)
+    expect_close("shared calls v" + std::to_string(i), got[i], want[i]);
+}
+
+// A run that the liveness search splits: a scalar chain, a wide vector
+// update that stays on the graph, then a second scalar chain. The first
+// chain starts with a shared op whose copy sits in the wide part, so the
+// island takes the shared op and leaves the copy on the graph, where it
+// computes the value itself.
+static void test_split_run_reshares_primal() {
+  constexpr int kWidth = 120, kUpdates = 60, kChain = 40;
+  VectorBinaryGraph h;
+  Graph& g = h.g;
+  Fills& fills = h.fills;
+  const int slice_rhs = g.add_slot(2, true), q = g.add_slot(1, true);
+  const int vec = g.add_slot(kWidth, true), c = g.add_slot(1, false);
+  fills.emplace_back(c, std::vector<double>{0.7});
+  const int shared = g.add_slot(1, false);
+  g.add_op(OP_MUL, {q, c}, shared);
+  int t = shared;
+  for (int k = 0; k < kChain; ++k) {
+    const int m = g.add_slot(1, false);
+    g.add_op(OP_MUL, {t, q}, m);
+    t = g.add_slot(1, false);
+    g.add_op(OP_INV_LOGIT, {m}, t);
+  }
+  const int marker_a = g.add_slot(2, false);
+  fills.emplace_back(marker_a, std::vector<double>{0.3, 0.7});
+  const int marker_w = g.add_slot(2, false);
+  g.add_op(OP_ADD, {marker_a, marker_a}, marker_w);
+  const int marker_e = g.add_slot(1, false);
+  g.add_op(OP_INDEX, {marker_w}, marker_e, {0});
+  for (int k = 0; k < kUpdates; ++k)
+    g.add_op(OP_SET_SLICE_INPLACE, {vec, slice_rhs}, vec, {k % (kWidth - 2)});
+  const int copy = g.add_slot(1, false);
+  g.add_op(OP_MUL, {q, c}, copy);
+  const int reduced = g.add_slot(1, false);
+  g.add_op(OP_LOG_SUM_EXP, {vec}, reduced);
+  const int joined = g.add_slot(1, false);
+  g.add_op(OP_ADD, {reduced, copy}, joined);
+  int u = g.add_slot(1, false);
+  g.add_op(OP_ADD, {joined, t}, u);
+  for (int k = 0; k < kChain; ++k) {
+    const int m = g.add_slot(1, false);
+    g.add_op(OP_MUL, {u, q}, m);
+    u = g.add_slot(1, false);
+    g.add_op(OP_INV_LOGIT, {m}, u);
+  }
+  const int lp = g.add_slot(1, false);
+  g.add_op(OP_MUL, {u, marker_e}, lp);
+  g.result_slot = lp;
+  h.terms.push_back(lp);
+
+  Graph ref = g;
+  const std::vector<double> want = run_grad(std::move(ref), fills);
+  const CseStats st = cse(g, fills, h.terms, {});
+  expect("split run shares one primal", st.primals_shared == 1);
+  const int carved = carve_islands(g, fills, h.terms, {});
+  bool copy_leads = false, shared_on_graph = false;
+  for (const Op& op : g.ops) {
+    if (op.out == copy) copy_leads = op.primal_source == copy;
+    if (op.out == shared) shared_on_graph = true;
+  }
+  expect("split run carves both chains", carved == 2);
+  expect("shared op is in an island", !shared_on_graph);
+  expect("copy on the graph computes the value", copy_leads);
+  const std::vector<double> got = try_run_grad(std::move(g), fills);
+  expect("split run sizes", got.size() == want.size());
+  for (size_t i = 0; i < want.size() && i < got.size(); ++i)
+    expect_close("split run v" + std::to_string(i), got[i], want[i]);
+}
+
+// Each step reads element t and element t - 1, as a moving window does,
+// and one read of the last element follows the target term. Every step
+// boundary has a shared op with a copy in the next step, so the run is cut
+// only before the last element's first read.
+static void test_sliding_window_reads_carved() {
+  constexpr int kSteps = 16;
+  Graph g;
+  Fills fills;
+  const int p0 = g.add_slot(1, true), pv = g.add_slot(kSteps, true);
+  int acc = p0, last_read = -1;
+  for (int t = 1; t < kSteps; ++t) {
+    const int cur = g.add_slot(1, false), prev = g.add_slot(1, false);
+    const int m = g.add_slot(1, false), a = g.add_slot(1, false);
+    const int next = g.add_slot(1, false);
+    g.add_op(OP_INDEX, {pv}, cur, {t});
+    g.add_op(OP_MUL, {acc, cur}, m);
+    g.add_op(OP_INDEX, {pv}, prev, {t - 1});
+    g.add_op(OP_ADD, {m, prev}, a);
+    g.add_op(OP_TANHV, {a}, next);
+    last_read = cur;
+    acc = next;
+  }
+  const int lp = g.add_slot(1, false);
+  g.add_op(OP_ADD, {acc, p0}, lp);
+  const int tail = g.add_slot(1, false), t1 = g.add_slot(1, false);
+  g.add_op(OP_INDEX, {pv}, tail, {kSteps - 1});
+  g.add_op(OP_MUL, {tail, p0}, t1);
+  std::vector<int> terms{lp, t1};
+  testutil::reduce_into_result(g, terms);
+
+  Graph ref = g;
+  const std::vector<double> want = run_grad(std::move(ref), fills);
+  const CseStats st = cse(g, fills, terms, {});
+  expect("window reads share primals", st.primals_shared == 15);
+  expect("window recursion carved==1", carve_islands(g, fills, terms, {}) == 1);
+  bool last_on_graph = false, tail_shares = false;
+  for (const Op& op : g.ops) {
+    if (op.out == last_read) last_on_graph = op.primal_source == last_read;
+    if (op.out == tail) tail_shares = op.primal_source == last_read;
+  }
+  expect("last element's read stays on the graph", last_on_graph);
+  expect("tail read shares it", tail_shares);
+  const std::vector<double> got = try_run_grad(std::move(g), fills);
+  expect("window sizes", got.size() == want.size());
+  for (size_t i = 0; i < want.size() && i < got.size(); ++i)
+    expect_close("window v" + std::to_string(i), got[i], want[i]);
+}
+
 int main() {
   test_register_fill_alignment();
   test_fill_sink();
@@ -3283,6 +3575,11 @@ int main() {
   test_div_extreme_matches_graph_kernel();
   test_div_range_model_matches_uncarved();
   test_inplace_slice_cost_refuses_wide_state();
+  test_shared_primals_carved();
+  test_shared_primal_with_later_copy_stays();
+  test_sliding_window_reads_carved();
+  test_shared_calls_stay_on_graph();
+  test_split_run_reshares_primal();
   if (failures) {
     std::printf("%d failures\n", failures);
     return 1;
