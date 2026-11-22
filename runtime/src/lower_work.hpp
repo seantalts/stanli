@@ -52,8 +52,6 @@ class LoweringWork {
         if (it == ints_.end()) return std::nullopt;
         return it->second;
       }
-      case mir::Expr::Promotion:
-        return e.args.empty() ? std::nullopt : value(e.args[0]);
       case mir::Expr::FunApp: {
         if (e.args.size() == 1 && e.args[0].kind == mir::Expr::Var &&
             (e.name == "size" || e.name == "rows" ||

@@ -167,7 +167,6 @@ inline mir::Program check_program(const std::string& function,
     call = wrapped;
   }
   p.log_prob.push_back(target_pe(call));
-  p.has_transform_inits = true;
   return p;
 }
 

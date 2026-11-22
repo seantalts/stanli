@@ -22,16 +22,14 @@ headers such as `mir_prog.hpp`, which are in `runtime/include/stanli/`.
 
 ## Data input preload (`lower.cpp`, disable: `STANLI_NO_DATA_PRELOAD=1`)
 
-stanc's transformed MIR contains a small program that reconstructs each input
-from a flat `FnReadData` buffer. That is useful to generated C++, but redundant
-here: `DataMap` has already parsed the JSON into the same typed, column-major
-layout. Replaying the program is especially expensive for matrices because it
-performs one interpreted assignment per element.
+stanc's transformed MIR declares each input and reads it with one
+`FnReadData` statement. That is useful to generated C++, but redundant here:
+`DataMap` has already parsed the JSON into the same typed, column-major
+layout. Older stanc releases copied each container element by element from a
+flat buffer, which was especially expensive for matrices.
 
-Lowering therefore binds declared inputs directly and recognizes the statement
-and name envelope used by stanc's pinned hydration code: a direct
-scalar/vector load, or the generated flat-buffer container-copy loop. Anything
-with another statement kind, effect, data source, or written name still goes
+Lowering therefore binds declared inputs directly and skips those
+declarations and `FnReadData` statements. Every other statement still goes
 through the transformed-data interpreter. User-written transformed-data
 statements always run; `STANLI_NO_DATA_PRELOAD=1` remains the exact interpreter
 oracle for auditing future stanc output changes.

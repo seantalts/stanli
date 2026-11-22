@@ -162,74 +162,6 @@ void Lowering::validate_data_dims(const std::string& name,
       VarStage::Data, name, declared, data.at(name),
       t.base == "SInt" || (t.base == "SArray" && t.elem_base == "SInt"));
 }
-void Lowering::scan_rebuild(const mir::Stmt& s, RebuildShape& shape) {
-  switch (s.kind) {
-    case mir::Stmt::Block:
-    case mir::Stmt::SList:
-      for (const auto& k : s.body) scan_rebuild(k, shape);
-      return;
-    case mir::Stmt::For: {
-      std::set<std::string> bounds_reads;
-      data_reads(s.lower, bounds_reads);
-      data_reads(s.upper, bounds_reads);
-      if (!bounds_reads.empty()) shape.supported = false;
-      for (const auto& k : s.body) scan_rebuild(k, shape);
-      return;
-    }
-    case mir::Stmt::Decl: {
-      shape.decls.insert(s.decl_id);
-      if (!s.has_init) return;
-      std::set<std::string> reads;
-      data_reads(s.init, reads);
-      shape.reads.insert(reads.begin(), reads.end());
-      if (!reads.empty()) {
-        ++shape.loaders;
-        shape.loader_lhs = s.decl_id;
-      }
-      return;
-    }
-    case mir::Stmt::Assignment: {
-      shape.writes.insert(s.lhs);
-      std::set<std::string> reads;
-      data_reads(s.rhs, reads);
-      for (const auto& ix : s.lhs_idx) data_reads(ix, reads);
-      shape.reads.insert(reads.begin(), reads.end());
-      if (!reads.empty()) {
-        if (!s.lhs_idx.empty()) shape.supported = false;
-        ++shape.loaders;
-        shape.loader_lhs = s.lhs;
-      }
-      return;
-    }
-    default:
-      // A generated input rebuild has no effects, conditionals, target
-      // writes, validation calls, or returns. New statement kinds fall back
-      // to interpretation rather than guessing which children are safe.
-      shape.supported = false;
-      return;
-  }
-}
-bool Lowering::canonical_input_rebuild(const mir::Stmt& s,
-                                       const std::set<std::string>& inputs) {
-  if (s.kind != mir::Stmt::Block && s.kind != mir::Stmt::SList) return false;
-  RebuildShape shape;
-  scan_rebuild(s, shape);
-  if (!shape.supported || shape.loaders != 1 || shape.reads.size() != 1)
-    return false;
-  const std::string& input = *shape.reads.begin();
-  if (!inputs.count(input) || shape.loader_lhs.empty() ||
-      shape.loader_lhs == input || !shape.decls.count(shape.loader_lhs) ||
-      !shape.writes.count(input))
-    return false;
-  const auto allowed = [&](const std::string& name) {
-    return name == input || name == shape.loader_lhs || name == "pos__";
-  };
-  for (const auto& name : shape.decls)
-    if (!allowed(name)) return false;
-  for (const auto& name : shape.writes)
-    if (!allowed(name)) return false;
-  return true;
-}
 void Lowering::report_missing_data(const mir::Program& p) {
   std::string names;
   for (const auto& input : p.input_vars) {
@@ -376,18 +308,15 @@ void Lowering::bind_data(const mir::Program& p) {
         record(st.decl_id, st.decl_type);
       }
     }
-    // stanc's prepare_data first rebuilds every input from a flat
-    // FnReadData buffer. DataMap has already parsed that buffer into the
-    // same typed, column-major representation above. Replaying the
-    // canonical matrix reconstruction means one interpreted assignment
-    // per element (47 million for nn_rbm1bJ100) and used to dominate model
-    // preparation. FnReadData is compiler-internal and cannot occur in
-    // source transformed-data code, so a top-level statement containing it
-    // is input hydration, not user computation.
+    // stanc's prepare_data first declares every input and reads it with one
+    // FnReadData statement. DataMap has already parsed the data into the
+    // same typed, column-major representation above, so both are skipped.
+    // FnReadData is compiler-internal and cannot occur in source
+    // transformed-data code, so such a statement is input hydration, not
+    // user computation.
     if (use_prebound &&
         ((st.kind == mir::Stmt::Decl && input_names.count(st.decl_id)) ||
-         direct_input_load(st, input_names) ||
-         canonical_input_rebuild(st, input_names)))
+         direct_input_load(st, input_names)))
       continue;
     record_interpreter_event("prepare_data", "statement_entry");
     (void)td.exec(st);
@@ -1696,7 +1625,7 @@ CompiledModel compile_model(const std::string& mir_text, const DataMap& data,
     if (cm.write_array->truncated)
       add_interpreter_fallback(cm, *cm.write_array->truncated);
   }
-  if (prog->has_transform_inits) {
+  {
     // The inverse parameter transforms. Nothing is interpreted here: the
     // section runs only when a caller actually supplies constrained starting
     // values, so a model nobody inits by name never pays for a bound

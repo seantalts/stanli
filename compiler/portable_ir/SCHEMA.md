@@ -159,7 +159,7 @@ the common metadata suffix shown below.
 | 2 | `LitReal` | `f64 value` |
 | 3 | `LitStr` | `string value` |
 | 4 | `FunApp` | `u8 library`, `string name`, `u8 suffix`, `bool propto`, `list<Expr> args` |
-| 5 | `Promotion` | `list<Expr> args` |
+| 5 | `Promotion` | reserved: rejected, see below |
 | 6 | `Indexed` | `list<Expr> args` |
 | 7 | `TernaryIf` | `list<Expr> args` |
 | 8 | `EOr` | `list<Expr> args` |
@@ -188,9 +188,9 @@ tuples as `reduce_sum`'s sliced argument.
 
 For `LitInt`, the C++ compatibility field `Expr.lit` is reconstructed as the
 exact `double` conversion of the decoded `i32`; it is not redundantly encoded.
-The producer currently flattens stanc3 `Promotion` nodes into the promoted
-inner expression and sets `promoted`, matching the legacy structural mapping.
-Tag 5 remains defined for direct runtime inputs and validation coverage.
+The producer flattens stanc3 `Promotion` nodes into the promoted inner
+expression and sets `promoted`. No producer writes tag 5, and the decoder
+rejects it.
 
 The index kinds (11-15) occur only after the base of an `Indexed` expression
 and in an assignment's `lhs_indices`; their arities are validated after

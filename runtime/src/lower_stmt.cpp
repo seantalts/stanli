@@ -40,8 +40,7 @@ static bool bounded_while_guard(const mir::Expr& e) {
         "Less__",      "Leq__",     "Greater__", "Geq__",
         "Equals__",    "NEquals__", "min",       "max"};
     if (!scalar.count(e.name)) return false;
-  } else if (e.kind != E::Promotion && e.kind != E::EAnd && e.kind != E::EOr &&
-             e.kind != E::TernaryIf) {
+  } else if (e.kind != E::EAnd && e.kind != E::EOr && e.kind != E::TernaryIf) {
     return false;
   }
   for (const auto& a : e.args)

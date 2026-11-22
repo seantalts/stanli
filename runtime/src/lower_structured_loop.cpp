@@ -66,8 +66,7 @@ bool Lowering::bounded_output_candidate(const mir::Stmt& root,
           "PMinus__",  "PPlus__", "PNot__",   "Less__",   "Leq__",
           "Greater__", "Geq__",   "Equals__", "NEquals__"};
       if (!scalar_calls.count(e.name)) return false;
-    } else if (e.kind != mir::Expr::Promotion &&
-               e.kind != mir::Expr::TernaryIf && e.kind != mir::Expr::EAnd &&
+    } else if (e.kind != mir::Expr::TernaryIf && e.kind != mir::Expr::EAnd &&
                e.kind != mir::Expr::EOr)
       return false;
     for (const auto& arg : e.args)
@@ -242,8 +241,6 @@ bool Lowering::bounded_nested_update_over_budget(const mir::Stmt& root) {
     if (e.kind == mir::Expr::Var) {
       auto found = integers.find(e.name);
       if (found != integers.end()) return found->second;
-    } else if (e.kind == mir::Expr::Promotion && e.args.size() == 1) {
-      return self(self, e.args[0]);
     } else if (e.kind == mir::Expr::TernaryIf && e.args.size() == 3) {
       // Conditional refinement is deliberately outside this cheap check.
       if (local(local, e.args[0])) return {};
@@ -575,8 +572,6 @@ std::optional<RealRange> Lowering::region_real_range(const mir::Expr& e) {
   if (e.kind == mir::Expr::LitInt)
     return RealRange{double(e.lit_i), double(e.lit_i)};
   if (e.kind == mir::Expr::LitReal) return RealRange{e.lit, e.lit};
-  if (e.kind == mir::Expr::Promotion && e.args.size() == 1)
-    return region_real_range(e.args[0]);
   if (e.kind == mir::Expr::Var) {
     const auto value = scope.find(e.name);
     if (value != scope.end()) {
@@ -692,8 +687,6 @@ std::optional<IntRange> Lowering::region_range(const mir::Expr& e) {
   if (e.kind == mir::Expr::LitInt) return bounded(e.lit_i, e.lit_i);
   if (auto observed = region_bounded_data_integer(e))
     return bounded(*observed, *observed);
-  if (e.kind == mir::Expr::Promotion && e.args.size() == 1)
-    return region_range(e.args[0]);
   if (e.kind == mir::Expr::Var) {
     auto v = scope.find(e.name);
     if (v != scope.end()) {
@@ -2997,8 +2990,6 @@ bool Lowering::region_scalar_expression(const mir::Expr& e) {
     case mir::Expr::LitInt:
     case mir::Expr::LitReal:
       return true;
-    case mir::Expr::Promotion:
-      return e.args.size() == 1 && region_scalar_expression(e.args[0]);
     case mir::Expr::FunApp: {
       if (e.fn_lib != mir::Expr::Lib::StanLib) return false;
       const std::string& f = e.name;

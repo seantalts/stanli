@@ -307,9 +307,6 @@ long Lowering::eval_int(const mir::Expr& e) {
       if (e.args.size() != 2) fail("malformed logical size expression", e.raw);
       return eval_int(e.args[0]) != 0 && eval_int(e.args[1]) != 0;
     }
-    case mir::Expr::Promotion:
-      if (e.args.size() != 1) fail("malformed promoted size expression", e.raw);
-      return eval_int(e.args[0]);
     case mir::Expr::FunApp:
       if (const FunctionSpec* function = function_spec(e);
           function != nullptr && function->builtin() != nullptr &&
@@ -1633,8 +1630,6 @@ Lowering::StaticProbe<Lowering::StaticView> Lowering::try_static_view(
     }
     return {};
   }
-  if (e.kind == mir::Expr::Promotion && e.args.size() == 1)
-    return try_static_view(e.args[0]);
   if (e.kind == mir::Expr::FunApp) {
     if (e.name == "FnMakeRowVec" && !e.args.empty() &&
         std::all_of(e.args.begin(), e.args.end(), [](const mir::Expr& a) {

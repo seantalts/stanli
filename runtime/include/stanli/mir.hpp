@@ -106,6 +106,8 @@ struct Expr {
     LitReal,
     LitStr,
     FunApp,
+    // Wire tag 5. The compiler writes a promoted expression as itself with
+    // `promoted` set, and the decoder rejects this tag.
     Promotion,
     Indexed,
     TernaryIf,
@@ -131,7 +133,7 @@ struct Expr {
   // reference was.
   bool fn_propto = false;
   bool data_only = false;  // adlevel DataOnly
-  bool promoted = false;   // explicit MIR Promotion to this adlevel/type
+  bool promoted = false;   // stanc3 promoted it to this adlevel/type
   UnsizedView unsized;
   std::string name;  // Var name or FunApp function name
   // A user function call, or a Var naming one, that selects one overload of
@@ -141,7 +143,7 @@ struct Expr {
   long lit_i = 0;
   double lit = 0;
   std::string lit_s;
-  std::vector<Expr> args;  // FunApp args; Promotion inner; Indexed base+idx;
+  std::vector<Expr> args;  // FunApp args; Indexed base+idx;
                            // an index's bounds
   std::string raw;         // Unsupported diagnostics
 };
@@ -349,8 +351,6 @@ inline bool source_binary_elementwise(const std::string& name) {
 // newly admitted expression cannot acquire two different grouping rules.
 inline ExpressionLayout source_expression_layout(const Expr& e) {
   if (language_scalar(e)) return ExpressionLayout::scalar();
-  if (e.kind == Expr::Promotion && e.args.size() == 1)
-    return source_expression_layout(e.args[0]);
   if (e.kind == Expr::Var && reduction_container(e))
     return ExpressionLayout::direct();
   if (e.kind == Expr::FunApp && e.fn_lib == Expr::Lib::UserDefined &&
@@ -846,9 +846,6 @@ struct Program {
   // and emits one FnWriteParam per parameter carrying the transform to
   // invert. This is the inverse direction of the log_prob graph's
   // FnReadParam constrains, and the only place stanli can learn it.
-  // Presence is separate from content: a current parameterless model carries
-  // an explicitly empty section, while an older producer carries no section.
-  bool has_transform_inits = false;
   std::vector<Stmt> transform_inits;
   std::vector<FunDef> fun_defs;
   // The parameters, transformed parameters and generated quantities in

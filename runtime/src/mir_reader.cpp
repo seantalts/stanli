@@ -195,9 +195,8 @@ void validate_expression_shape(const Expr& e) {
     case Expr::Unsupported:
       if (!e.args.empty()) malformed("leaf expression argument list");
       break;
-    case Expr::Promotion:
-      if (e.args.size() != 1) malformed("Promotion expression arity");
-      break;
+    case Expr::Promotion:  // the decoder rejects its tag
+      malformed("Promotion expression");
     case Expr::Indexed:
       // args[0] is the base. stanc can retain a no-op Indexed wrapper with no
       // descriptors after transformations, so only the base is mandatory.

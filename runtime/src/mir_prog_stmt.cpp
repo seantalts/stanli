@@ -85,7 +85,6 @@ bool ProgramCompiler::invariant_for_bound(
     case mir::Expr::LitInt:
     case mir::Expr::LitReal:
       return true;
-    case mir::Expr::Promotion:
     case mir::Expr::TernaryIf:
     case mir::Expr::EAnd:
     case mir::Expr::EOr:

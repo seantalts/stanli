@@ -1635,37 +1635,14 @@ struct Lowering {
   // out to the supplied count is the shape the reader would produce.
   void validate_data_dims(const std::string& name, const mir::SizedType& t);
 
-  static void data_reads(const mir::Expr& e, std::set<std::string>& names) {
-    if (e.kind == mir::Expr::FunApp && e.fn_lib == mir::Expr::Lib::Internal &&
-        e.name == "FnReadData" && !e.args.empty() &&
-        e.args[0].kind == mir::Expr::LitStr)
-      names.insert(e.args[0].lit_s);
-    for (const auto& a : e.args) data_reads(a, names);
-  }
+  // The statement FnReadData(x, context__, "x"), with which stanc's
+  // prepare_data reads the input x.
   static bool direct_input_load(const mir::Stmt& s,
                                 const std::set<std::string>& inputs) {
-    if (mir::internal_name(s) == "FnReadData")
-      return s.fn_args.size() == 3 && s.fn_args[0].kind == mir::Expr::Var &&
-             inputs.count(s.fn_args[0].name);
-    if (s.kind != mir::Stmt::Assignment || !s.lhs_idx.empty() ||
-        !inputs.count(s.lhs))
-      return false;
-    std::set<std::string> reads;
-    data_reads(s.rhs, reads);
-    return reads.size() == 1 && *reads.begin() == s.lhs;
+    return mir::internal_name(s) == "FnReadData" && s.fn_args.size() == 3 &&
+           s.fn_args[0].kind == mir::Expr::Var &&
+           inputs.count(s.fn_args[0].name);
   }
-  struct RebuildShape {
-    bool supported = true;
-    int loaders = 0;
-    std::string loader_lhs;
-    std::set<std::string> reads;
-    std::set<std::string> decls;
-    std::set<std::string> writes;
-  };
-  static void scan_rebuild(const mir::Stmt& s, RebuildShape& shape);
-
-  static bool canonical_input_rebuild(const mir::Stmt& s,
-                                      const std::set<std::string>& inputs);
 
   void bind_data(const mir::Program& p);
   void report_missing_data(const mir::Program& p);

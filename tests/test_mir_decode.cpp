@@ -1616,7 +1616,7 @@ void check_structural_rejections() {
                "a call in index position");
 
   for (const auto& test : std::vector<std::pair<mir::Expr::Kind, const char*>>{
-           {mir::Expr::Promotion, "Promotion expression arity"},
+           {mir::Expr::Promotion, "expression tag 5 (Promotion)"},
            {mir::Expr::TernaryIf, "TernaryIf expression arity"},
            {mir::Expr::EOr, "EOr expression arity"},
            {mir::Expr::EAnd, "EAnd expression arity"}}) {
@@ -1806,8 +1806,7 @@ void check_v2_rejections() {
             empty.log_prob.empty() && empty.generate_quantities.empty() &&
             empty.fun_defs.empty() && empty.output_vars.empty(),
         "v2 empty program");
-  check(empty.has_transform_inits && empty.transform_inits.empty(),
-        "v3 empty transform_inits section");
+  check(empty.transform_inits.empty(), "v3 empty transform_inits section");
   check(empty_wire.find('\0') == std::string::npos,
         "v2 envelope is safe for C-string transports");
 
@@ -1848,8 +1847,7 @@ void check_v2_rejections() {
   inits.generate_quantities.push_back(constrained_write);
   const mir::Program decoded_inits = decode_program(write_v2(inits));
   check(
-      decoded_inits.has_transform_inits &&
-          decoded_inits.transform_inits.size() == 1 &&
+      decoded_inits.transform_inits.size() == 1 &&
           decoded_inits.transform_inits[0].write_transform.has_value() &&
           decoded_inits.transform_inits[0].write_transform->kind ==
               mir::Transform::Lower &&
