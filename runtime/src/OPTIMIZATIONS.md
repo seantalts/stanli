@@ -1295,6 +1295,26 @@ width, with length-1 operands broadcast, and a run that holds them is priced
 both whole and split at them. A call must have a single-number result, so any
 other op with a vector result still ends a run.
 
+CSE (above) can let copies of an op share its value. The carver used to
+leave the op that computes the shared value on the graph. A recursion that
+reads the same element several times, as `iohmm_reg`'s forward step reads
+`logA[t][i]` once for each j, has such an op every few ops. No run reached 32
+ops, the recursion stayed as graph ops, and CSE made `iohmm_reg` about 2x
+slower. Now a run takes shared ops too, and the island computes each copy
+again, which is what the graph without CSE does. A run stops before a shared
+op that has a copy after the run. That op stays on the graph, and the later
+copies keep sharing its value. Such a cut can still put a shared op in an
+island and leave some of its copies on the graph. The first of those copies
+then computes the value for the others. A shared op that the island could
+only run as a call to its graph kernel stays on the graph. The call costs what
+the graph op costs, while on the graph each copy skips its forward. Taking 29
+shared `lgamma` calls into one island made `epinow2_estimate_infections`
+1.06x slower. For the same reason the estimate charges a copy on the graph
+half an op, since it runs only its backward. A run that is mostly copies can
+then stay on the graph: 44,354 of the 68,252 ops in `ch14_m14_11`'s one run
+are copies, and its graph with CSE is faster than the island on an idle
+machine.
+
 A region with more distinct inputs than an op's six descriptors packs the
 leading ones with an `OP_CONCAT2` chain, as necessity lowering does, and
 the estimate charges each link as one op plus the elements it copies forward
