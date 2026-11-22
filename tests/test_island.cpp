@@ -3450,6 +3450,45 @@ static void test_split_run_reshares_primal() {
     expect_close("split run v" + std::to_string(i), got[i], want[i]);
 }
 
+// A chain that takes exp(p1) twice at every step. On the graph each copy
+// runs only its backward, so CSE leaves the chain cheaper than its island,
+// while without CSE the island wins.
+static Graph build_repeated_exp(std::vector<int>& terms) {
+  constexpr int kSteps = 24;
+  Graph g;
+  const int p0 = g.add_slot(1, true), p1 = g.add_slot(1, true);
+  int acc = p0;
+  for (int t = 0; t < kSteps; ++t) {
+    const int e = g.add_slot(1, false), m = g.add_slot(1, false);
+    const int again = g.add_slot(1, false), next = g.add_slot(1, false);
+    g.add_op(OP_EXPV, {p1}, e);
+    g.add_op(OP_MUL, {acc, e}, m);
+    g.add_op(OP_EXPV, {p1}, again);
+    g.add_op(OP_SUB, {m, again}, next);
+    acc = next;
+  }
+  const int lp = g.add_slot(1, false);
+  g.add_op(OP_ADD, {acc, p0}, lp);
+  g.result_slot = lp;
+  terms = {lp};
+  return g;
+}
+
+static void test_shared_copies_priced_at_half() {
+  Fills fills;
+  std::vector<int> plain_terms;
+  Graph plain = build_repeated_exp(plain_terms);
+  expect("chain without CSE carved",
+         carve_islands(plain, fills, plain_terms, {}) == 1);
+  std::vector<int> terms;
+  Graph g = build_repeated_exp(terms);
+  const CseStats st = cse(g, fills, terms, {});
+  expect("exp copies share a primal", st.primals_shared == 47);
+  expect("chain with shared copies stays on the graph",
+         carve_islands(g, fills, terms, {}) == 0);
+  expect("every exp stays shared", count_shared(g) == 48);
+}
+
 // Each step reads element t and element t - 1, as a moving window does,
 // and one read of the last element follows the target term. Every step
 // boundary has a shared op with a copy in the next step, so the run is cut
@@ -3580,6 +3619,7 @@ int main() {
   test_sliding_window_reads_carved();
   test_shared_calls_stay_on_graph();
   test_split_run_reshares_primal();
+  test_shared_copies_priced_at_half();
   if (failures) {
     std::printf("%d failures\n", failures);
     return 1;

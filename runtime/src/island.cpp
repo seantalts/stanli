@@ -713,7 +713,8 @@ struct Carver {
 
   // The graph's side of the estimate: what its ops move (an in-place
   // element update moves one element, not a vector) plus what each op
-  // costs to run.
+  // costs to run. A copy of a shared primal (cse.cpp) runs only the backward
+  // of the two sweeps, so it costs half.
   int64_t op_graph_cost(size_t u) const {
     const Op& op = g.ops[u];
     int64_t traffic;
@@ -725,7 +726,9 @@ struct Carver {
       traffic = g.slots[op.in[0]].len;
     else
       traffic = g.slots[op.out].len;
-    return traffic + graph_op_cost(op.opcode);
+    const int64_t cost = traffic + graph_op_cost(op.opcode);
+    return op.primal_source >= 0 && op.primal_source != op.out ? cost / 2
+                                                               : cost;
   }
 
   int64_t graph_cost(size_t i, size_t j) const {
