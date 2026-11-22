@@ -6,17 +6,22 @@ about eightfold; a quadratic cost would multiply it by sixty-four. The bound
 sits between the two, so it tolerates timer noise on a busy CI runner but not
 a per-statement copy of the lowering state.
 
-Compiling the models with stanc takes most of the time, and only the
-preparation timings need a quiet machine, so the script has two modes:
+Compiling the models takes most of the time, and only the preparation
+timings need a quiet machine, so the script has two modes:
 
-  test_prep_scaling.py compile STANC DIR   writes DIR/model<i>-<N>.sexp
-  test_prep_scaling.py time BENCH_GRAD DIR times preparation of each one
+  test_prep_scaling.py compile STANLI_CHECK DIR  writes DIR/model<i>-<N>.mir
+  test_prep_scaling.py time BENCH_GRAD DIR       times preparation of each one
+
+The models get the MIR fixtures' O1 passes (tools/gen_fixtures.py).
 """
 from concurrent.futures import ThreadPoolExecutor
 import shutil
 import subprocess
 import sys
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
+from gen_fixtures import O1_PASSES  # noqa: E402
 
 SMALL, LARGE = 400, 3200
 REPEATS = 5
@@ -63,10 +68,10 @@ MODELS = {
 
 
 def mir_path(directory, index, n):
-    return directory / f"model{index}-{n}.sexp"
+    return directory / f"model{index}-{n}.mir"
 
 
-def compile_models(stanc, directory):
+def compile_models(check, directory):
     directory = Path(directory)
     shutil.rmtree(directory, ignore_errors=True)
     directory.mkdir(parents=True)
@@ -76,11 +81,12 @@ def compile_models(stanc, directory):
         index, build, n = job
         stan = directory / f"model{index}-{n}.stan"
         stan.write_text(build(n))
-        mir = subprocess.run([stanc, "--O1", "--debug-optimized-mir", str(stan)],
-                             check=True, capture_output=True, text=True).stdout
+        mir = subprocess.run(
+            [check, "--emit-mir", str(stan), "--passes", O1_PASSES],
+            check=True, capture_output=True, text=True).stdout
         mir_path(directory, index, n).write_text(mir)
 
-    # stanc's optimizer is superlinear, so start the large models first.
+    # stanc3's optimizer is superlinear, so start the large models first.
     jobs = [(index, build, n) for n in (LARGE, SMALL)
             for index, build in enumerate(MODELS.values())]
     with ThreadPoolExecutor(max_workers=4) as pool:

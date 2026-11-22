@@ -106,9 +106,9 @@ These models are not in `tests/fixtures`, so the cross-path matrix does not
 run them: their model blocks sum many `read * p[k]` terms, and rerolling and
 constant folding regroup that sum by 1-2 ULP.
 
-CTest replays the grid through the embedded compiler and again through
-stock stanc (`--stanc`), and fails if any model falls back to the MIR
-interpreter. Regenerate and re-record with:
+CTest replays the grid through the embedded compiler, and again with the
+O1 passes of the MIR fixtures (`--fixture-passes`), and fails if any model
+falls back to the MIR interpreter. Regenerate and re-record with:
 
 ```sh
 python3 tools/gen_container_flow_models.py

@@ -13,13 +13,13 @@ struct CompileError : std::runtime_error {
   using std::runtime_error::runtime_error;
 };
 
-// Run stock stanc with the flags used by the command-line tools and return
-// its MIR stdout. A nonzero exit throws CompileError with stanc's stderr;
-// otherwise stderr (warnings) is copied to ours. Arguments are passed directly
-// to the child process: model and compiler paths are never interpreted by a
-// shell.
-std::string run_stanc_process(const std::string& stanc,
-                              const std::string& model);
+// Run `stanli_check --emit-mir model --passes passes` and return the
+// portable MIR it prints, for tests that compile a model with a chosen pass
+// list. A nonzero exit throws CompileError with its stderr; otherwise stderr
+// (warnings) is copied to ours. Arguments are passed directly to the child
+// process: model and executable paths are never interpreted by a shell.
+std::string run_emit_mir(const std::string& stanli_check,
+                         const std::string& model, const std::string& passes);
 
 // Run stanli-compile, the shipped pipeline as an executable, on one model.
 // The result holds the portable MIR it prints and the warnings it writes to

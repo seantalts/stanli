@@ -69,7 +69,7 @@ embedded compiler runs the same pipeline through the `stanli-compile`
 executable beside `stanli_check` or on `PATH`; a build with neither fails
 these tests rather than skipping them, and no generated MIR is checked into
 this directory. To test another compiler explicitly, run `stanli_check` by
-hand with `--stanli-compile PATH` or `--stanc PATH`.
+hand with `--stanli-compile PATH`.
 
 After configuring the ordinary native build, run the complete source-lit
 suite with the local build target:

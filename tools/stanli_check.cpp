@@ -17,11 +17,10 @@
 // The model is compiled by the embedded stanc3 pipeline, the same one
 // stanli_run and the language packages use. A build without the embedded
 // object runs that pipeline's executable, stanli-compile, found beside this
-// binary or on PATH. Three explicit alternatives, mutually exclusive:
+// binary or on PATH. Two explicit alternatives, mutually exclusive:
 //   --stanli-compile P  run the stanli-compile at P
-//   --stanc P           shell out to the stock stanc executable at P
-//   --mir P             read already-compiled MIR from P, keeping model.stan
-//                       as the report/ledger identity
+//   --mir P             read portable MIR from P, keeping model.stan as the
+//                       report/ledger identity
 // --fast-math compiles the model with per-model fast math: the stanli
 // compiler (embedded or stanli-compile) runs its fast-math rewrites and the
 // runtime is told fast math is on. --passes SPEC runs the given stanc3 passes
@@ -195,7 +194,7 @@ int main(int argc, char** argv) {
       if (std::string(argv[i]) == "--passes") passes = argv[++i];
     try {
       const std::string mir = stanli::tooling::compile_source(
-          "", "", argv[2], false, passes, /*model_only=*/false);
+          "", argv[2], false, passes, /*model_only=*/false);
       std::fwrite(mir.data(), 1, mir.size(), stdout);
       return 0;
     } catch (const std::exception& e) {
@@ -206,7 +205,7 @@ int main(int argc, char** argv) {
   if (argc < 3) {
     std::fprintf(stderr,
                  "usage: stanli_check model.stan data.json "
-                 "[--stanli-compile PATH | --stanc PATH | --mir PATH]\n"
+                 "[--stanli-compile PATH | --mir PATH]\n"
                  "       [--point N | --points N,N,...] [--sweep K] "
                  "[--columns] [--fast-math] [--passes SPEC]\n"
                  "       [--paths] [--cross [--cross-one lp|grad|wa] "
@@ -218,7 +217,6 @@ int main(int argc, char** argv) {
                  "       stanli_check --compiler\n");
     return 2;
   }
-  std::string stanc;
   std::string compiler;
   std::string mir_path;
   int variant = 0;
@@ -270,9 +268,13 @@ int main(int argc, char** argv) {
       status_path = argv[++i];
     else if (a == "--ledger" && i + 1 < argc)
       ledger_path = argv[++i];
-    else if (a == "--stanc" && i + 1 < argc)
-      stanc = argv[++i];
-    else if (a == "--stanli-compile" && i + 1 < argc)
+    else if (a == "--stanc") {
+      std::fprintf(stderr,
+                   "stanli_check: --stanc was removed; stanli reads only "
+                   "portable MIR from stanli-compile or the embedded "
+                   "compiler\n");
+      return 2;
+    } else if (a == "--stanli-compile" && i + 1 < argc)
       compiler = argv[++i];
     else if (a == "--mir" && i + 1 < argc)
       mir_path = argv[++i];
@@ -286,10 +288,10 @@ int main(int argc, char** argv) {
     } else if (a == "--sweep" && i + 1 < argc)
       sweep = std::atoi(argv[++i]);
   }
-  if (!stanc.empty() + !compiler.empty() + !mir_path.empty() > 1) {
+  if (!compiler.empty() && !mir_path.empty()) {
     std::fprintf(stderr,
-                 "stanli_check: --stanc, --stanli-compile and --mir are "
-                 "mutually exclusive\n");
+                 "stanli_check: --stanli-compile and --mir are mutually "
+                 "exclusive\n");
     return 2;
   }
   if ((!dump_stages.empty() || !dump_dir.empty() || !status_path.empty()) &&
@@ -312,8 +314,8 @@ int main(int argc, char** argv) {
 
   std::string mir;
   try {
-    mir = mir_path.empty() ? stanli::tooling::compile_source(
-                                 stanc, compiler, argv[1], fast_math, passes)
+    mir = mir_path.empty() ? stanli::tooling::compile_source(compiler, argv[1],
+                                                             fast_math, passes)
                            : read_mir(mir_path);
     if (mir.empty())
       throw std::runtime_error(mir_path.empty()

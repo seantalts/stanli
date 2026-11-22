@@ -137,8 +137,13 @@ def main() -> int:
                         type=pathlib.Path)
     parser.add_argument("--list-sources", action="store_true",
                         help="print the fixture sources and exit")
+    parser.add_argument("--o1-passes", action="store_true",
+                        help="print O1_PASSES and exit")
     parser.add_argument("--jobs", type=int, default=min(8, os.cpu_count() or 1))
     args = parser.parse_args()
+    if args.o1_passes:
+        print(O1_PASSES)
+        return 0
 
     source_dir = (REPO / args.source_dir).resolve()
     output_dir = (REPO / args.output_dir).resolve()

@@ -908,8 +908,8 @@ one graph dump per stage for diffing.
 [`tests/ulp_ledger.json`](../tests/ulp_ledger.json) lists every value that is
 more than 10 ULP from CmdStan ([TESTING.md](../TESTING.md#the-rule)). Its keys
 are the platform, then the corpus, then the model. The corpus is `main` or the
-name of a local corpus, with ` --stanc` added for a replay through stock
-stanc.
+name of a local corpus, with ` --fixture-passes` added for a replay that
+compiles with the O1 passes of the MIR fixtures.
 
 An entry covers one value, such as `lp`, `grad[3]` or `wa mu.2`. When a model
 has more than 8 such values of one kind, one `grad` or `wa` entry covers every
@@ -928,7 +928,7 @@ table in TESTING.md.
 The bounds come only from a tool run:
 
     tools/verify_refs.py deps/posteriordb --update-ulp-ledger
-    tools/verify_refs.py --corpus NAME [--stanc STANC] --update-ulp-ledger
+    tools/verify_refs.py --corpus NAME [--fixture-passes] --update-ulp-ledger
 
 The run writes nothing unless every model passes every gate, including the
 ledger's current bounds. It lowers an entry to the new measurement and

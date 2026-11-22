@@ -381,11 +381,11 @@ bool is_executable_file(const std::string& path) {
 
 }  // namespace
 
-std::string run_stanc_process(const std::string& stanc,
-                              const std::string& model) {
+std::string run_emit_mir(const std::string& stanli_check,
+                         const std::string& model, const std::string& passes) {
   std::string warnings;
-  std::string mir =
-      run_compiler(stanc, {"--O1", "--debug-optimized-mir", model}, warnings);
+  std::string mir = run_compiler(
+      stanli_check, {"--emit-mir", model, "--passes", passes}, warnings);
   if (!warnings.empty()) std::fprintf(stderr, "%s\n", warnings.c_str());
   return mir;
 }

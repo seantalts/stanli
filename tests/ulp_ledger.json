@@ -2,7 +2,7 @@
  "platforms": {
   "Darwin arm64": {
    "cmdstan_replay": {},
-   "cmdstan_replay --stanc": {},
+   "cmdstan_replay --fixture-passes": {},
    "container_flow": {
     "container_flow_rt_fn_amm": {
      "lp": {
@@ -12,7 +12,7 @@
      }
     }
    },
-   "container_flow --stanc": {
+   "container_flow --fixture-passes": {
     "container_flow_rt_fn_amm": {
      "lp": {
       "bound": 17,
@@ -1086,7 +1086,7 @@
      }
     }
    },
-   "oncobayes2 --stanc": {
+   "oncobayes2 --fixture-passes": {
     "oncobayes2_blrm_exnex_combo3": {
      "wa beta_EX_prob.2.2": {
       "bound": 14,

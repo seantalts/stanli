@@ -7,7 +7,7 @@ reroll took (`stage=reroll ... lane_steps`). The counters do not depend on
 the clock, so the bounds are exact consequences of the algorithm, not timer
 noise.
 
-  test_prep_work.py BENCH_GRAD STANC STANLI_RUN
+  test_prep_work.py BENCH_GRAD STANLI_CHECK STANLI_RUN
 """
 import json
 import os
@@ -17,24 +17,29 @@ import sys
 import tempfile
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
+from gen_fixtures import O1_PASSES  # noqa: E402
+
 WORK = re.compile(r"stanli_prep graph=(\S+) stage=lower_work ns=\d+ "
                   r"statements=(\d+) copied_data_bytes=(\d+)")
 REROLL = re.compile(r"stanli_prep graph=(\S+) stage=reroll ns=\d+ .*?"
                     r"lane_steps=(\d+)")
 
 
-def work(bench, stanc, directory, name, source, data):
-    """{graph: (statements, copied bytes)} for the last row of each graph."""
+def work(bench, check, directory, name, source, data):
+    """{graph: (statements, copied bytes)} for the last row of each graph.
+    The model gets the MIR fixtures' O1 passes (tools/gen_fixtures.py)."""
     stan = directory / f"{name}.stan"
     stan.write_text(source)
-    mir = subprocess.run([stanc, "--O1", "--debug-optimized-mir", str(stan)],
-                         check=True, capture_output=True, text=True).stdout
-    sexp = directory / f"{name}.sexp"
-    sexp.write_text(mir)
+    mir = subprocess.run(
+        [check, "--emit-mir", str(stan), "--passes", O1_PASSES],
+        check=True, capture_output=True, text=True).stdout
+    mir_path = directory / f"{name}.mir"
+    mir_path.write_text(mir)
     data_path = directory / f"{name}.json"
     data_path.write_text(json.dumps(data))
     env = dict(os.environ, STANLI_PROFILE_PREP="1")
-    run = subprocess.run([bench, str(sexp), str(data_path), "--prep",
+    run = subprocess.run([bench, str(mir_path), str(data_path), "--prep",
                           "--parallel-wa=off"],
                          check=True, capture_output=True, text=True, env=env)
     rows, lowerings, lane_steps = {}, {}, {}
@@ -50,16 +55,16 @@ def work(bench, stanc, directory, name, source, data):
     return rows
 
 
-def run_work(stanli_run, stanc, directory, name, source, data, *options):
+def run_work(stanli_run, directory, name, source, data, *options):
     """The same counters from stanli_run, which takes the threading options
-    that bench_grad does not."""
+    that bench_grad does not. It compiles with the shipping passes."""
     stan = directory / f"{name}.stan"
     stan.write_text(source)
     data_path = directory / f"{name}.json"
     data_path.write_text(json.dumps(data))
     env = dict(os.environ, STANLI_PROFILE_PREP="1")
-    run = subprocess.run([stanli_run, str(stan), str(data_path), "--stanc",
-                          stanc, "--warmup", "1", "--samples", "1", *options],
+    run = subprocess.run([stanli_run, str(stan), str(data_path),
+                          "--warmup", "1", "--samples", "1", *options],
                          check=True, capture_output=True, text=True, env=env)
     return {graph: (int(statements), int(copied))
             for graph, statements, copied in WORK.findall(run.stderr)}
@@ -292,16 +297,16 @@ CASES = [check_ifs_in_retained_loop, check_calls_in_retained_loop,
 RUN_CASES = [check_reduce_sum_beside_data]
 
 
-def main(bench, stanc, stanli_run):
+def main(bench, check, stanli_run):
     failures = []
     with tempfile.TemporaryDirectory() as scratch:
         directory = Path(scratch)
 
         def measure(name, source, data):
-            return work(bench, stanc, directory, name, source, data)
+            return work(bench, check, directory, name, source, data)
 
         def run_measure(name, source, data):
-            return run_work(stanli_run, stanc, directory, name, source, data,
+            return run_work(stanli_run, directory, name, source, data,
                             "--threads-per-chain", "4")
 
         for case in CASES:

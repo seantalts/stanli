@@ -15,9 +15,8 @@ function(expect_result label expected_code expected_line)
   endif()
 endfunction()
 
-expect_result("--stanc ${STANC}" 0 "OK " --stanc "${STANC}")
-expect_result("--stanc with a missing executable" 1 "COMPILE_FAIL "
-              --stanc "${work}/no-such-stanc")
+# Stock stanc's s-expression MIR is no longer read, so its flag is an error.
+expect_result("--stanc" 2 "" --stanc "${work}/stanc")
 expect_result("--stanli-compile with a missing executable" 1 "COMPILE_FAIL "
               --stanli-compile "${work}/no-such-stanli-compile")
 

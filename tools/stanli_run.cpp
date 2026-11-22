@@ -4,7 +4,7 @@
 //
 // Usage: stanli_run model.stan data.json [--seed N] [--warmup N]
 //        [--samples N] [--delta X] [--max-depth N]
-//        [--stanli-compile PATH | --stanc PATH]
+//        [--stanli-compile PATH]
 //        [--sampler-stats] [--chains N] [--num-threads N] [--threads-per-chain
 //        N] [--thin N]
 //        [--save-warmup] [--init-radius X] [--summary] [--timings]
@@ -23,7 +23,7 @@
 // Built with the stanc3 embed object this needs nothing else on the
 // machine: no C++ toolchain, no separate compiler binary. Without it,
 // stanli-compile is found beside the executable or on PATH. --stanli-compile
-// selects it explicitly; --stanc (or $STANC) selects stock stanc instead.
+// selects it explicitly.
 //
 // --sampler-stats prepends CmdStan's seven sampler columns (lp__,
 // accept_stat__, stepsize__, treedepth__, n_leapfrog__, divergent__,
@@ -56,7 +56,7 @@ int main(int argc, char** argv) {
         stderr,
         "usage: stanli_run model.stan data.json [--seed N] "
         "[--warmup N] [--samples N] [--delta X] "
-        "[--max-depth N] [--stanli-compile PATH | --stanc PATH] "
+        "[--max-depth N] [--stanli-compile PATH] "
         "[--sampler-stats] "
         "[--chains N] [--num-threads N] [--threads-per-chain N] [--thin N] "
         "[--save-warmup] [--init-radius X] [--summary] [--timings] "
@@ -65,7 +65,6 @@ int main(int argc, char** argv) {
     return 2;
   }
   std::string model = argv[1], datafile = argv[2];
-  std::string stanc;
   std::string compiler;
   stanli::NutsConfig cfg;
   cfg.seed = 1;
@@ -131,9 +130,13 @@ int main(int argc, char** argv) {
       cfg.thin = std::stoi(v);
     else if (k == "--init-radius")
       cfg.init_radius = std::stod(v);
-    else if (k == "--stanc")
-      stanc = v;
-    else if (k == "--stanli-compile")
+    else if (k == "--stanc") {
+      std::fprintf(stderr,
+                   "stanli_run: --stanc was removed; stanli reads only "
+                   "portable MIR from stanli-compile or the embedded "
+                   "compiler\n");
+      return 2;
+    } else if (k == "--stanli-compile")
       compiler = v;
   }
   if (threads_per_chain < 1) {
@@ -158,21 +161,11 @@ int main(int argc, char** argv) {
                  n_threads);
     n_threads = 1;
   }
-  if (const char* env = std::getenv("STANC")) {
-    if (*env) stanc = env;
-  }
-  if (!stanc.empty() && !compiler.empty()) {
-    std::fprintf(stderr,
-                 "stanli_run: --stanc (or STANC) and --stanli-compile are "
-                 "mutually exclusive\n");
-    return 2;
-  }
-
   try {
     using Clock = std::chrono::steady_clock;
     const auto timing_start = want_timings ? Clock::now() : Clock::time_point{};
     const std::string mir =
-        stanli::tooling::compile_source(stanc, compiler, model, fast_math);
+        stanli::tooling::compile_source(compiler, model, fast_math);
     if (mir.empty())
       throw std::runtime_error("the Stan compiler exited without output");
     stanli::DataMap data = stanli::DataMap::from_json_file(datafile);

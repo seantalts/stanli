@@ -2,8 +2,8 @@
 //   OK <lp> <g0> <g1> ...   / COMPILE_FAIL ... / EVAL_FAIL ...
 // EVAL_FAIL means evaluation threw; a nonfinite lp or gradient is a
 // value and gets printed, exactly as stanli_check and ref_driver do.
-// stanc runs natively (Node spawns the same pinned binary); the model
-// compiles and evaluates inside stanli.wasm. This is what lets
+// stanli's compiler runs natively (Node spawns a native stanli_check); the
+// model compiles and evaluates inside stanli.wasm. This is what lets
 // tools/verify_refs.py replay the corpus references against the browser
 // build: tools/wasm_check.sh adapts the argv.
 //
@@ -57,11 +57,13 @@ function evalPoint(i, variant) {
   }
 }
 
+// The MIR comes from stanli's compiler in a native build: $STANLI_CHECK, or
+// build/stanli_check.
 let mir;
 try {
-  mir = execFileSync(path.join(repo, "deps", "stanc3", "stanc"),
-                     ["--O1", "--debug-optimized-mir", model],
-                     { maxBuffer: 1 << 28, encoding: "utf8" });
+  mir = execFileSync(
+      process.env.STANLI_CHECK || path.join(repo, "build", "stanli_check"),
+      ["--emit-mir", model], { maxBuffer: 1 << 28, encoding: "utf8" });
 } catch (e) {
   compileFailed("stanc", String(e.message));
   console.log("COMPILE_FAIL stanc: " + String(e.message).split("\n")[0]);

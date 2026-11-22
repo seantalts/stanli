@@ -1968,7 +1968,13 @@ void test_data_early_return_unrolls() {
   }
 }
 
-#ifdef STANLI_TEST_STANC
+#ifdef STANLI_TEST_STANLI_CHECK
+// These compile with the MIR fixtures' O1 passes, which inline functions.
+std::string mir_of_file(const std::string& path) {
+  return stanli::tooling::run_emit_mir(STANLI_TEST_STANLI_CHECK, path,
+                                       STANLI_TEST_O1_PASSES);
+}
+
 struct CogmodExpectation {
   const char* stem;
   bool mapped;
@@ -2002,8 +2008,7 @@ void test_lane_cogmod() {
   };
   for (const CogmodExpectation& m : models) {
     const std::string stem = m.stem;
-    const std::string mir = stanli::tooling::run_stanc_process(
-        STANLI_TEST_STANC, "tests/cogmod/" + stem + ".stan");
+    const std::string mir = mir_of_file("tests/cogmod/" + stem + ".stan");
     const DataMap data =
         DataMap::from_json_file("tests/cogmod/" + stem + ".json");
     CompiledModel lanes = stanli::compile_model(mir, data);
@@ -2026,8 +2031,7 @@ std::string mir_of_source(const std::string& name, const std::string& source) {
                            "/" + name + "_" +
                            std::to_string(std::random_device{}()) + ".stan";
   std::ofstream(path) << source;
-  const std::string mir =
-      stanli::tooling::run_stanc_process(STANLI_TEST_STANC, path);
+  const std::string mir = mir_of_file(path);
   std::remove(path.c_str());
   return mir;
 }
@@ -2478,7 +2482,7 @@ int main() {
   test_lane_profile_counters();
   test_hoisted_shared_scalar_mixture();
   test_data_early_return_unrolls();
-#ifdef STANLI_TEST_STANC
+#ifdef STANLI_TEST_STANLI_CHECK
   test_lane_cogmod();
   test_every_unary_in_lanes();
   test_extent_bound_is_data_control();

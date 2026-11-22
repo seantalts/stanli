@@ -194,8 +194,8 @@ def compare_legacy_write_array(exe, check, stan, data):
     env["STANLI_WA_FORCE_INTERP"] = "1"
     for point in range(3):
         ref = run([exe, data, point])
-        got = run([check, stan, data, "--stanc", REPO / "deps/stanc3/stanc",
-                   "--point", point, "--wa-values"], env=env)
+        got = run([check, stan, data, "--point", point, "--wa-values"],
+                  env=env)
         rn = output_line(ref.stdout, "WANAMES")
         gn = output_line(got.stdout, "WANAMES")
         rv = output_line(ref.stdout, "WAVALS")
@@ -226,7 +226,7 @@ def sweep_one(case, cs, tmp, build, legacy=False):
         "x_r_arr": [], "x_i_arr": []}))
 
     check = REPO / build / "stanli_check"
-    ours = run([check, stan, data, "--stanc", REPO / "deps/stanc3/stanc"])
+    ours = run([check, stan, data])
     if "COMPILE_FAIL" in ours.stdout + ours.stderr:
         why = (ours.stdout + ours.stderr).strip().splitlines()[-1]
         return name, "unsupported", why[:80]
@@ -238,7 +238,7 @@ def sweep_one(case, cs, tmp, build, legacy=False):
         return name, "ref_fail", err
 
     worst, n_cmp, err = compare_points(exe, check, stan, data, reldiff,
-                                       REPO / "deps/stanc3/stanc", run=run)
+                                       run=run)
     if err:
         return (name,) + err
     if n_cmp == 0:

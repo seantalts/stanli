@@ -839,6 +839,17 @@ if(NOT _stanli_fixture_list_result EQUAL 0)
   message(FATAL_ERROR
     "Failed to enumerate MIR fixtures: ${_stanli_fixture_list_error}")
 endif()
+# The fixtures' O1 pass list, which tests that compile other models with the
+# same passes read.
+execute_process(
+  COMMAND ${STANLI_FIXTURE_PYTHON}
+          "${CMAKE_CURRENT_SOURCE_DIR}/tools/gen_fixtures.py" --o1-passes
+  RESULT_VARIABLE _stanli_o1_passes_result
+  OUTPUT_VARIABLE STANLI_FIXTURE_O1_PASSES
+  OUTPUT_STRIP_TRAILING_WHITESPACE)
+if(NOT _stanli_o1_passes_result EQUAL 0)
+  message(FATAL_ERROR "Failed to read the fixtures' O1 passes")
+endif()
 string(REPLACE "\r\n" "\n" _stanli_fixture_list_output
        "${_stanli_fixture_list_output}")
 string(REPLACE "\n" ";" STANLI_FIXTURE_SOURCES
@@ -1029,13 +1040,12 @@ add_test(NAME test_check_precompiled_mir_conflict
                  -DSTANLI_CHECK=$<TARGET_FILE:stanli_check>
                  -DSOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}
                  -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/check_mir_conflict.cmake)
-add_test(NAME test_check_external_stanc
+add_test(NAME test_check_external_compiler
          COMMAND ${CMAKE_COMMAND}
                  -DSTANLI_CHECK=$<TARGET_FILE:stanli_check>
                  -DSOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}
-                 -DWORK_DIR=${CMAKE_CURRENT_BINARY_DIR}/check_external_stanc
-                 -DSTANC=${STANLI_STANC_EXECUTABLE}
-                 -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/check_external_stanc.cmake)
+                 -DWORK_DIR=${CMAKE_CURRENT_BINARY_DIR}/check_external_compiler
+                 -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/check_external_compiler.cmake)
 file(GLOB STANLI_COGMOD_SOURCES
      "${CMAKE_CURRENT_SOURCE_DIR}/tests/cogmod/cm_*.stan")
 foreach(_stanli_cogmod_source IN LISTS STANLI_COGMOD_SOURCES)
@@ -1442,8 +1452,10 @@ endforeach()
 set_tests_properties(test_ode_prog PROPERTIES TIMEOUT 180)
 target_link_libraries(test_region_map PRIVATE stanli_stanc_process)
 target_include_directories(test_region_map PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_dependencies(test_region_map stanli_check)
 target_compile_definitions(test_region_map PRIVATE
-  STANLI_TEST_STANC="${STANLI_STANC_EXECUTABLE}")
+  STANLI_TEST_STANLI_CHECK="$<TARGET_FILE:stanli_check>"
+  STANLI_TEST_O1_PASSES="${STANLI_FIXTURE_O1_PASSES}")
 
 # The C ABI lives only in the shared library. Test it through that shipped
 # boundary rather than compiling capi.cpp into the C++ unit-test library.
@@ -1564,10 +1576,10 @@ if(Python3_Interpreter_FOUND)
                    $<TARGET_FILE:stanli_check>
            WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
   # Only the preparation timings need to run alone; compiling the models
-  # with stanc is most of the work and can share the machine.
+  # is most of the work and can share the machine.
   add_test(NAME test_prep_scaling_models
            COMMAND ${Python3_EXECUTABLE} tests/test_prep_scaling.py compile
-                   ${STANLI_STANC_EXECUTABLE}
+                   $<TARGET_FILE:stanli_check>
                    ${CMAKE_CURRENT_BINARY_DIR}/prep_scaling
            WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
   set_tests_properties(test_prep_scaling_models PROPERTIES
@@ -1581,23 +1593,23 @@ if(Python3_Interpreter_FOUND)
     RUN_SERIAL TRUE FIXTURES_REQUIRED prep_scaling_models)
   add_test(NAME test_prep_data_calls
            COMMAND ${Python3_EXECUTABLE} tests/test_prep_data_calls.py
-                   ${STANLI_STANC_EXECUTABLE} $<TARGET_FILE:bench_grad>
+                   $<TARGET_FILE:stanli_check> $<TARGET_FILE:bench_grad>
                    ${CMAKE_CURRENT_BINARY_DIR}/prep_data_calls
            WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
   set_tests_properties(test_prep_data_calls PROPERTIES RUN_SERIAL TRUE)
   add_test(NAME test_prep_loop_body
            COMMAND ${Python3_EXECUTABLE} tests/test_prep_loop_body.py
-                   $<TARGET_FILE:bench_grad> ${STANLI_STANC_EXECUTABLE}
+                   $<TARGET_FILE:bench_grad> $<TARGET_FILE:stanli_check>
            WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
   set_tests_properties(test_prep_loop_body PROPERTIES RUN_SERIAL TRUE)
   add_test(NAME test_prep_work
            COMMAND ${Python3_EXECUTABLE} tests/test_prep_work.py
-                   $<TARGET_FILE:bench_grad> ${STANLI_STANC_EXECUTABLE}
+                   $<TARGET_FILE:bench_grad> $<TARGET_FILE:stanli_check>
                    $<TARGET_FILE:stanli_run>
            WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
   add_test(NAME test_missing_data
            COMMAND ${Python3_EXECUTABLE} tests/test_missing_data.py
-                   $<TARGET_FILE:bench_grad> ${STANLI_STANC_EXECUTABLE}
+                   $<TARGET_FILE:bench_grad> $<TARGET_FILE:stanli_check>
            WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
   add_test(NAME test_corpus_reports
            COMMAND ${Python3_EXECUTABLE} tests/test_corpus_reports.py
@@ -1647,10 +1659,10 @@ if(Python3_Interpreter_FOUND)
            COMMAND ${Python3_EXECUTABLE} tools/verify_refs.py --corpus container_flow
                    --check $<TARGET_FILE:stanli_check>
            WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
-  add_test(NAME test_container_flow_reference_stanc
+  add_test(NAME test_container_flow_reference_fixture_passes
            COMMAND ${Python3_EXECUTABLE} tools/verify_refs.py --corpus container_flow
                    --check $<TARGET_FILE:stanli_check>
-                   --stanc ${STANLI_STANC_EXECUTABLE}
+                   --fixture-passes
            WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
   add_test(NAME test_stanc3_bad
            COMMAND ${Python3_EXECUTABLE} tools/check_stanc3_bad.py
@@ -1660,10 +1672,10 @@ if(Python3_Interpreter_FOUND)
            COMMAND ${Python3_EXECUTABLE} tools/verify_refs.py --corpus oncobayes2
                    --check $<TARGET_FILE:stanli_check>
            WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
-  add_test(NAME test_oncobayes2_reference_stanc
+  add_test(NAME test_oncobayes2_reference_fixture_passes
            COMMAND ${Python3_EXECUTABLE} tools/verify_refs.py --corpus oncobayes2
                    --check $<TARGET_FILE:stanli_check>
-                   --stanc ${STANLI_STANC_EXECUTABLE}
+                   --fixture-passes
            WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
   add_test(NAME test_builtin_signature_model_generation
            COMMAND ${Python3_EXECUTABLE}
@@ -1756,10 +1768,10 @@ if(Python3_Interpreter_FOUND)
            COMMAND ${Python3_EXECUTABLE} tools/verify_refs.py --corpus cmdstan_replay
                    --check $<TARGET_FILE:stanli_check>
            WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
-  add_test(NAME test_cmdstan_replay_stanc
+  add_test(NAME test_cmdstan_replay_fixture_passes
            COMMAND ${Python3_EXECUTABLE} tools/verify_refs.py --corpus cmdstan_replay
                    --check $<TARGET_FILE:stanli_check>
-                   --stanc ${STANLI_STANC_EXECUTABLE}
+                   --fixture-passes
            WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
   # Friendly local entry points. These deliberately invoke CTest rather than
   # duplicating discovery in a shell script, so a developer runs exactly the

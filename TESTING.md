@@ -638,12 +638,13 @@ CmdStan in the same way.
 | `sized_functions` | 5 models that call library functions at real sizes | `test_sized_functions_reference` |
 | `container_flow` | 66 models that write each container shape in each block and read it back | `test_container_flow_reference` |
 | `fixtures` | 63 models from `tests/fixtures` | `*_reference` |
-| `cmdstan_replay` | 14 models for rewrites that only stock stanc's `--O1` output reaches | `test_cmdstan_replay` |
+| `cmdstan_replay` | 14 models for rewrites that only inlined `--O1` output reaches | `test_cmdstan_replay` |
 | `oncobayes2` | the 3 OncoBayes2 models | `test_oncobayes2_reference` |
 
 CTest runs `container_flow`, `cmdstan_replay` and `oncobayes2` a second time
-with stock stanc as the compiler. Those are the `_stanc` CTests and the
-`--stanc` rows below.
+with the O1 passes of the MIR fixtures. Those passes inline functions, as
+stock stanc's O1 does. Those are the `_fixture_passes` CTests and the
+`--fixture-passes` rows below.
 
 These are all the values in the local corpora that have a ledger entry:
 
@@ -651,11 +652,11 @@ These are all the values in the local corpora that have a ledger entry:
 | corpus | model | value | limit |
 | --- | --- | --- | --- |
 | `container_flow` | `container_flow_rt_fn_amm` | `lp` | 17 (stanli closer) |
-| `container_flow --stanc` | `container_flow_rt_fn_amm` | `lp` | 17 (stanli closer) |
+| `container_flow --fixture-passes` | `container_flow_rt_fn_amm` | `lp` | 17 (stanli closer) |
 | `fixtures` | `nested_callback_contexts` | `grad[2]` | 16 (undecided) |
 | `fixtures` | `nested_callback_contexts_fallback` | `grad[2]` | 16 (undecided) |
 | `oncobayes2` | `oncobayes2_blrm_exnex_combo3` | `wa beta_EX_prob.2.2` | 14 (undecided) |
-| `oncobayes2 --stanc` | `oncobayes2_blrm_exnex_combo3` | `wa beta_EX_prob.2.2` | 14 (undecided) |
+| `oncobayes2 --fixture-passes` | `oncobayes2_blrm_exnex_combo3` | `wa beta_EX_prob.2.2` | 14 (undecided) |
 | `signatures` | `builtin_signatures_20` | `lp` | 20 (stanli closer) |
 | `signatures` | `builtin_signatures_24` | `lp` | 38 (stanli closer) |
 <!--/gen-->
