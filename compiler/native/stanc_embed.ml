@@ -11,11 +11,11 @@ type embed_result =
   { outcome: (string, string) result  (** the portable MIR, or the error *)
   ; warnings: string array }
 
-let compile_tmir ~model_only ~fast_math ~filename ~include_paths (code : string)
-    : embed_result =
+let compile_tmir ~model_only ~fast_math ?passes ~filename ~include_paths
+    (code : string) : embed_result =
   let printed_filename = if filename = "" then None else Some filename in
   let compilation =
-    Stanli_pipeline.compile_portable ~model_only ~fast_math
+    Stanli_pipeline.compile_portable ~model_only ~fast_math ?passes
       ~model_name:"embedded_model" code
       ~include_source:
         (Frontend.Include_files.FileSystemPaths (Array.to_list include_paths)) in
@@ -39,8 +39,15 @@ let compile_tmir ~model_only ~fast_math ~filename ~include_paths (code : string)
 let () =
   ignore (Thread.self ());
   Stdlib.Callback.register "stanc_compile"
-    (fun code include_paths filename flags ->
-      compile_tmir
-        ~model_only:(flags land flag_model_only <> 0)
-        ~fast_math:(flags land flag_fast_math <> 0)
-        ~filename ~include_paths code)
+    (fun code include_paths filename flags passes ->
+      let model_only = flags land flag_model_only <> 0 in
+      let fast_math = flags land flag_fast_math <> 0 in
+      (* [passes] is the CLI's --passes spec; "" selects the shipping passes. *)
+      if passes = "" then
+        compile_tmir ~model_only ~fast_math ~filename ~include_paths code
+      else
+        match Stanli_pipeline.parse_pass_override passes with
+        | Ok passes ->
+            compile_tmir ~model_only ~fast_math ~passes ~filename ~include_paths
+              code
+        | Error message -> {outcome= Error message; warnings= [||]})

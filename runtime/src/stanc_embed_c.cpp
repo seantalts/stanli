@@ -102,11 +102,14 @@ stanli::StancResult read_result(value res) {
 
 // Called with the OCaml runtime lock held. Root every allocation while building
 // the argument array: copying a later path may collect the earlier strings.
-static stanli::StancResult invoke_callback(
-    const value* fn, const char* stan_code, const char* filename,
-    const char* const* include_paths, size_t include_path_count, int flags) {
+static stanli::StancResult invoke_callback(const value* fn,
+                                           const char* stan_code,
+                                           const char* filename,
+                                           const char* const* include_paths,
+                                           size_t include_path_count, int flags,
+                                           const char* passes) {
   CAMLparam0();
-  CAMLlocal3(code, paths, name);
+  CAMLlocal4(code, paths, name, pass_spec);
   CAMLlocal2(res, flag_value);
   code = caml_copy_string(stan_code);
   paths = caml_alloc(include_path_count, 0);
@@ -114,8 +117,9 @@ static stanli::StancResult invoke_callback(
     Store_field(paths, i, caml_copy_string(include_paths[i]));
   name = caml_copy_string(filename != nullptr ? filename : "");
   flag_value = Val_int(flags);
-  value args[4] = {code, paths, name, flag_value};
-  res = caml_callbackN_exn(*fn, 4, args);
+  pass_spec = caml_copy_string(passes != nullptr ? passes : "");
+  value args[5] = {code, paths, name, flag_value, pass_spec};
+  res = caml_callbackN_exn(*fn, 5, args);
   stanli::StancResult out =
       Is_exception_result(res)
           ? error_result("embedded stanc callback raised an OCaml exception")
@@ -127,7 +131,8 @@ namespace stanli {
 
 StancResult embedded_stanc_compile(const char* stan_code, const char* filename,
                                    const char* const* include_paths,
-                                   size_t include_path_count, int flags) {
+                                   size_t include_path_count, int flags,
+                                   const char* passes) {
   if (stan_code == nullptr) return error_result("Stan source is null");
 
   std::lock_guard<std::mutex> serial(compile_mutex);
@@ -146,7 +151,7 @@ StancResult embedded_stanc_compile(const char* stan_code, const char* filename,
   }
 
   return invoke_callback(fn, stan_code, filename, include_paths,
-                         include_path_count, flags);
+                         include_path_count, flags, passes);
 }
 
 }  // namespace stanli

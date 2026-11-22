@@ -25,10 +25,14 @@ std::string run_stanc_process(const std::string& stanc,
 // The result holds the portable MIR it prints and the warnings it writes to
 // its --messages-json file. Errors and warnings
 // name the model by the path given here, as stanc does; failures throw
-// CompileError with the compiler's stderr.
+// CompileError with the compiler's stderr. A nonempty `passes` is
+// stanli-compile's --passes spec. `model_only` drops what only C++ needs,
+// such as unused functions.
 stanli::StancResult run_portable_compiler(const std::string& compiler,
                                           const std::string& model,
-                                          bool fast_math = false);
+                                          bool fast_math = false,
+                                          const std::string& passes = "",
+                                          bool model_only = true);
 
 // The directory holding the running executable.
 std::string executable_directory();

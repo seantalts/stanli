@@ -24,7 +24,13 @@
 //                       as the report/ledger identity
 // --fast-math compiles the model with per-model fast math: the stanli
 // compiler (embedded or stanli-compile) runs its fast-math rewrites and the
-// runtime is told fast math is on.
+// runtime is told fast math is on. --passes SPEC runs the given stanc3 passes
+// instead of the shipping ones (stanli-compile --passes: none, o1, or a
+// comma-separated list).
+//
+// stanli_check --emit-mir model.stan [--passes SPEC] prints the model's
+// portable MIR, with every function kept, and exits. The MIR test fixtures
+// are made this way.
 //
 // Two other modes, both stanli-against-itself rather than stanli against
 // CmdStan (tests/cross_path.hpp has the full account):
@@ -183,17 +189,32 @@ int main(int argc, char** argv) {
 #endif
     return 0;
   }
+  if (argc >= 3 && std::string(argv[1]) == "--emit-mir") {
+    std::string passes;
+    for (int i = 3; i + 1 < argc; ++i)
+      if (std::string(argv[i]) == "--passes") passes = argv[++i];
+    try {
+      const std::string mir = stanli::tooling::compile_source(
+          "", "", argv[2], false, passes, /*model_only=*/false);
+      std::fwrite(mir.data(), 1, mir.size(), stdout);
+      return 0;
+    } catch (const std::exception& e) {
+      std::fprintf(stderr, "%s\n", e.what());
+      return 1;
+    }
+  }
   if (argc < 3) {
     std::fprintf(stderr,
                  "usage: stanli_check model.stan data.json "
                  "[--stanli-compile PATH | --stanc PATH | --mir PATH]\n"
                  "       [--point N | --points N,N,...] [--sweep K] "
-                 "[--columns] [--fast-math]\n"
+                 "[--columns] [--fast-math] [--passes SPEC]\n"
                  "       [--paths] [--cross [--cross-one lp|grad|wa] "
                  "[--draw-variant N] [--cross-points N] [--cross-rel-tol T]\n"
                  "        [--cross-corpus] [--ledger PATH]]\n"
                  "       [--dump-passes=STAGES] [--dump-dir=DIR] "
                  "[--status-json PATH]\n"
+                 "       stanli_check --emit-mir model.stan [--passes SPEC]\n"
                  "       stanli_check --compiler\n");
     return 2;
   }
@@ -208,6 +229,7 @@ int main(int argc, char** argv) {
   bool paths_only = false;
   bool cross = false;
   bool fast_math = false;
+  std::string passes;
   std::string cross_one;
   std::string ledger_path = "tests/cross_path_ledger.json";
   int draw_variant = -1;
@@ -232,6 +254,8 @@ int main(int argc, char** argv) {
       cross = true;
     else if (a == "--fast-math")
       fast_math = true;
+    else if (a == "--passes" && i + 1 < argc)
+      passes = argv[++i];
     else if (a == "--cross-one" && i + 1 < argc)
       cross_one = argv[++i];
     else if (a == "--draw-variant" && i + 1 < argc)
@@ -288,8 +312,8 @@ int main(int argc, char** argv) {
 
   std::string mir;
   try {
-    mir = mir_path.empty() ? stanli::tooling::compile_source(stanc, compiler,
-                                                             argv[1], fast_math)
+    mir = mir_path.empty() ? stanli::tooling::compile_source(
+                                 stanc, compiler, argv[1], fast_math, passes)
                            : read_mir(mir_path);
     if (mir.empty())
       throw std::runtime_error(mir_path.empty()

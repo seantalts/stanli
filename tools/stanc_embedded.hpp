@@ -30,7 +30,9 @@ inline std::string report_compilation(const stanli::StancResult& result) {
 namespace stanli::tooling {
 
 inline stanli::StancResult embedded_stanc(const std::string& model,
-                                          bool fast_math = false) {
+                                          bool fast_math = false,
+                                          const std::string& passes = "",
+                                          bool model_only = true) {
   std::string src;
   {
     std::unique_ptr<FILE, int (*)(FILE*)> f(std::fopen(model.c_str(), "rb"),
@@ -43,7 +45,9 @@ inline stanli::StancResult embedded_stanc(const std::string& model,
   }
   return stanli::embedded_stanc_compile(
       src.c_str(), model.c_str(), nullptr, 0,
-      stanli::kStancModelOnly | (fast_math ? stanli::kStancFastMath : 0));
+      (model_only ? stanli::kStancModelOnly : 0) |
+          (fast_math ? stanli::kStancFastMath : 0),
+      passes.c_str());
 }
 
 }  // namespace stanli::tooling
@@ -53,22 +57,26 @@ namespace stanli::tooling {
 
 // Both native tools use the shipped pipeline by default. Stock stanc is an
 // explicit override only; a missing or broken portable compiler must fail.
+// `passes` and `model_only` are as for run_portable_compiler.
 inline std::string compile_source(const std::string& stanc,
                                   const std::string& compiler,
                                   const std::string& model,
-                                  bool fast_math = false) {
+                                  bool fast_math = false,
+                                  const std::string& passes = "",
+                                  bool model_only = true) {
   if (!stanc.empty()) {
-    if (fast_math)
+    if (fast_math || !passes.empty())
       throw std::runtime_error(
-          "--fast-math needs the stanli compiler; stock stanc is not "
-          "supported");
+          "--fast-math and --passes need the stanli compiler; stock stanc is "
+          "not supported");
     return run_stanc_process(stanc, model);
   }
   if (!compiler.empty())
     return report_compilation(
-        run_portable_compiler(compiler, model, fast_math));
+        run_portable_compiler(compiler, model, fast_math, passes, model_only));
 #ifdef STANLI_EMBED_STANC
-  return report_compilation(embedded_stanc(model, fast_math));
+  return report_compilation(
+      embedded_stanc(model, fast_math, passes, model_only));
 #else
   const std::string found = find_portable_compiler(executable_directory());
   if (found.empty())
@@ -76,7 +84,8 @@ inline std::string compile_source(const std::string& stanc,
         "this build does not embed stanc3 and no stanli-compile is beside "
         "the executable or on PATH; pass --stanli-compile PATH or --stanc "
         "PATH");
-  return report_compilation(run_portable_compiler(found, model, fast_math));
+  return report_compilation(
+      run_portable_compiler(found, model, fast_math, passes, model_only));
 #endif
 }
 

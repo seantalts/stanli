@@ -392,10 +392,14 @@ std::string run_stanc_process(const std::string& stanc,
 
 stanli::StancResult run_portable_compiler(const std::string& compiler,
                                           const std::string& model,
-                                          bool fast_math) {
+                                          bool fast_math,
+                                          const std::string& passes,
+                                          bool model_only) {
   const MessagesFile messages;
-  std::vector<std::string> args = {"--model-only"};
+  std::vector<std::string> args;
+  if (model_only) args.push_back("--model-only");
   if (fast_math) args.push_back("--fast-math");
+  if (!passes.empty()) args.insert(args.end(), {"--passes", passes});
   args.insert(args.end(), {"--filename", model, "--messages-json",
                            messages.string(), model});
   std::string human_text;
