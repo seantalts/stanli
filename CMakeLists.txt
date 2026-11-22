@@ -1258,7 +1258,7 @@ target_link_libraries(dump_function_specs PRIVATE stanli)
 
 # --- generated signature models --------------------------------------------
 # The builtin and density signature models are build products, like the
-# legacy MIR corpus above: they derive entirely from the pinned stanc's
+# MIR fixtures above: they derive entirely from the pinned stanc's
 # signature inventory and the registry dump. The committed manifests are the
 # reviewable coverage record and name every generated model, so the lit
 # entries below register at configure time before a fresh build has
