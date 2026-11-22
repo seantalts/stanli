@@ -1,5 +1,7 @@
 // MIR reader over the transformed-MIR sexp of eight schools, the sexp parser,
 // the MirInterp, and FnCheck semantics in MirInterp.
+#include "portable_mir_writer.hpp"
+
 #include <stanli/mir_decode.hpp>
 #include <stanli/mir.hpp>
 #include <stanli/mir_interp.hpp>
@@ -457,36 +459,18 @@ int main(int argc, char** argv) {
   for (const auto& s : p.log_prob) swalk(s);
   check(n_propto == 4, "4 propto lpdf calls");
 
-  // stanc3 prints the open-ended `x[4:]` index as Upfrom. Keep that node
-  // intact for the interpreter rather than turning the whole expression
-  // into Unsupported in the MIR reader.
+  // The open-ended `v[2:]` index decodes as an Upfrom node, which the
+  // interpreter keeps intact.
   {
-    const std::string upfrom_text = R"sexp(
-((input_vars ())
- (log_prob
-  (((pattern
-     (Assignment ((LVariable y) ()) (UArray UReal)
-      ((pattern
-        (Indexed
-         ((pattern (Var x))
-          (meta ((type_ (UArray UReal)) (loc <opaque>) (adlevel DataOnly))))
-         ((Upfrom
-           ((pattern (Lit Int 4))
-            (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly))))))))
-       (meta ((type_ (UArray UReal)) (loc <opaque>) (adlevel DataOnly))))))
-    (meta <opaque>)))))
-)sexp";
-    const mir::Program upfrom_program = stanli::decode_program(upfrom_text);
-    const mir::Expr* parsed = upfrom_program.log_prob.size() == 1
-                                  ? &upfrom_program.log_prob[0].rhs
-                                  : nullptr;
-    check(parsed && parsed->kind == mir::Expr::Indexed &&
-              parsed->args.size() == 2 &&
-              parsed->args[1].kind == stanli::mir::Expr::IndexUpfrom &&
-              parsed->args[1].args.size() == 1 &&
-              parsed->args[1].args[0].kind == mir::Expr::LitInt &&
-              parsed->args[1].args[0].lit_i == 4,
-          "MIR reader preserves an Upfrom index");
+    mir::Program upfrom_program =
+        stanli::decode_program(slurp("tests/fixtures/slice_upfrom_o0.mir"));
+    const mir::Expr* upfrom = stanli::portable_writer::find_expr(
+        upfrom_program,
+        [](const mir::Expr& e) { return e.kind == mir::Expr::IndexUpfrom; });
+    check(upfrom && upfrom->args.size() == 1 &&
+              upfrom->args[0].kind == mir::Expr::LitInt &&
+              upfrom->args[0].lit_i == 2,
+          "MIR decoder preserves an Upfrom index");
   }
 
   // A scalar broadcasts over the container's logical geometry, including a

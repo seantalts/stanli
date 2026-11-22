@@ -12,6 +12,8 @@
 #include "../runtime/src/x87_control.hpp"
 #include "../runtime/ext/bridgestan.h"
 
+#include "portable_mir_writer.hpp"
+
 #include <stanli/bridgestan_internal.hpp>
 #include <stanli/compile.hpp>
 #include <stanli/execution_report.hpp>
@@ -310,42 +312,49 @@ void test_deep_nesting(const std::vector<Fixture>& fixtures) {
 
   // Deeper than kInlineNesting, the model is lowered on the large stack, and
   // write_array stays there with it.
-  const std::string real =
-      "(meta ((type_ UReal) (loc <opaque>) (adlevel DataOnly)))";
-  const std::string read_mu =
-      "((pattern (FunApp (CompilerInternal (FnReadParam (constrain Identity) "
-      "(dims ()) (mem_pattern AoS))) ())) " +
-      real + ")";
-  const auto write = [&](const std::string& name) {
-    return "((pattern (NRFunApp (CompilerInternal (FnWriteParam "
-           "(unconstrain_opt ()) (var ((pattern (Var " +
-           name + ")) " + real + ")))) ())) (meta <opaque>))";
+  namespace mir = stanli::mir;
+  namespace pw = stanli::portable_writer;
+  const mir::UnsizedView real = pw::view(mir::UnsizedLeaf::Real);
+  const auto read_mu = [&](bool data_only) {
+    mir::Stmt mu = pw::declare("mu", "SReal");
+    mu.decl_data_only = data_only;
+    mu.has_init = true;
+    mu.init = pw::call("FnReadParam", real, {}, mir::Expr::Lib::Internal);
+    mu.init.data_only = data_only;
+    mu.read_transform = mir::Transform{};
+    return mu;
   };
-  std::string chain = "((pattern (Var mu)) " + real + ")";
+  const auto write = [&](const std::string& name) {
+    mir::Stmt s;
+    s.kind = mir::Stmt::NRFunApp;
+    s.fn_lib = mir::Expr::Lib::Internal;
+    s.fn_name = "FnWriteParam";
+    s.fn_args = {pw::var(name, real)};
+    return s;
+  };
+  mir::Expr chain = pw::var("mu", real);
   for (unsigned i = 0; i < stanli::kInlineNesting + 50; ++i)
-    chain = "((pattern (FunApp (StanLib sin FnPlain AoS) (" + chain + "))) " +
-            real + ")";
+    chain = pw::call("sin", real, {chain});
+  mir::Stmt g = pw::declare("g", "SReal");
+  g.has_init = true;
+  g.init = chain;
+  mir::Program program;
+  program.log_prob = {read_mu(false)};
+  program.generate_quantities = {read_mu(true), write("mu"), g, write("g")};
+  program.transformed_parameters_begin = 2;
+  program.generated_quantities_begin = 2;
+  for (const auto& [name, block] :
+       {std::pair{"mu", mir::OutputVar::Block::Parameters},
+        std::pair{"g", mir::OutputVar::Block::GeneratedQuantities}}) {
+    mir::OutputVar output;
+    output.name = name;
+    output.block = block;
+    output.type.base = "SReal";
+    program.output_vars.push_back(output);
+  }
   Fixture beyond;
   beyond.name = "beyond_inline_nesting";
-  beyond.mir =
-      "((functions_block ()) (input_vars ()) (prepare_data ())\n"
-      " (log_prob (((pattern (Decl (decl_adtype AutoDiffable) (decl_id mu) "
-      "(decl_type (Sized SReal)) (initialize (Assign " +
-      read_mu +
-      ")))) (meta <opaque>))))\n"
-      " (generate_quantities (((pattern (Decl (decl_adtype DataOnly) "
-      "(decl_id mu) (decl_type (Sized SReal)) (initialize (Assign " +
-      read_mu + ")))) (meta <opaque>)) " + write("mu") +
-      " ((pattern (Decl (decl_adtype DataOnly) (decl_id g) (decl_type (Sized "
-      "SReal)) (initialize (Assign " +
-      chain + ")))) (meta <opaque>)) " + write("g") +
-      "))\n"
-      " (output_vars ((mu <opaque> ((out_unconstrained_st SReal) "
-      "(out_constrained_st SReal) (out_block Parameters) (out_trans "
-      "Identity))) (g <opaque> ((out_unconstrained_st SReal) "
-      "(out_constrained_st SReal) (out_block GeneratedQuantities) (out_trans "
-      "Identity)))))\n"
-      " (prog_name deep) (prog_path deep.stan))\n";
+  beyond.mir = pw::write_v2(program);
   const Run beyond_seq = construct_sequential(beyond);
   expect(beyond_seq.has_write_array,
          "a model nested beyond kInlineNesting lowers: " + beyond_seq.text);

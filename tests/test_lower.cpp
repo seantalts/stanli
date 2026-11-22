@@ -8479,28 +8479,8 @@ int main() {
     // shared registry policy still evaluates them during model preparation.
     // In particular, Stan Math performs support checks before dropping an
     // all-data propto term: valid data becomes zero and invalid data throws.
-    const std::string hypergeometric_mir = R"(
-((functions_block ())
- (input_vars
-  ((n <opaque> SInt) (N <opaque> SInt) (a <opaque> SInt)
-   (b <opaque> SInt)))
- (prepare_data ())
- (log_prob
-  (((pattern
-     (TargetPE
-      ((pattern
-        (FunApp (StanLib hypergeometric_lpmf (FnLpmf true) AoS)
-         (((pattern (Var n))
-           (meta ((type_ UInt) (adlevel DataOnly))))
-          ((pattern (Var N))
-           (meta ((type_ UInt) (adlevel DataOnly))))
-          ((pattern (Var a))
-           (meta ((type_ UInt) (adlevel DataOnly))))
-          ((pattern (Var b))
-           (meta ((type_ UInt) (adlevel DataOnly)))))))
-       (meta ((type_ UReal) (adlevel DataOnly))))))
-    (meta <opaque>)))))
-)";
+    const std::string hypergeometric_mir =
+        slurp("tests/fixtures/hypergeometric_data_propto.mir");
 
     auto lower = [&](int n, int N, int a, int b) {
       DataMap d;
