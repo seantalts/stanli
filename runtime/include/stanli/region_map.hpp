@@ -73,6 +73,9 @@ struct RegionMapLanePlan {
     int32_t adj_in_cell[6] = {-1, -1, -1, -1, -1, -1};
     int32_t adj_out_cell = -1;
     TileCallKind tile = TileCallKind::None;
+    // An index read from shared cells: its adjoint takes one dynamic site
+    // per selected element instead of a row for every input cell.
+    bool index_sites = false;
   };
   struct Operands {
     int32_t dst = -1, a = -1, b = -1, c = -1;

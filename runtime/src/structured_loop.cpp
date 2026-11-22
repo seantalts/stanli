@@ -3427,6 +3427,16 @@ LoopState& require_state(KernelCtx& ctx) {
 }
 }  // namespace
 
+int64_t index_read_positions(const DynamicIndexSpec& spec, const KernelCtx& c,
+                             double* positions, int64_t stride) {
+  int64_t n = 0;
+  index_positions(spec, c, false, [&](int64_t i, int64_t at) {
+    positions[i * stride] = static_cast<double>(at);
+    n = i + 1;
+  });
+  return n;
+}
+
 void StructuredLoop::prepare() {
   initial_size = 0;
   for (auto& s : body.slots) {

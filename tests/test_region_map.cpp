@@ -1735,6 +1735,50 @@ void test_kept_call_matches_inlined_body() {
   }
 }
 
+// M[n] reads one row of a matrix that every lane shares. Its adjoint goes to
+// the two cells of that row. It used to go through accumulation rows for all
+// 2N cells of M in every tile, so the lane storage and the work per lane
+// grew with N.
+void test_shared_row_read_lanes() {
+  const Ref ref = [](const std::vector<var>& p, const Series& s,
+                     std::vector<int>* taken) {
+    var lp = 0;
+    for (size_t i = 0; i < s.y.size(); ++i) {
+      const var r1 = p[0] * s.x[i], r2 = p[1] + s.x[i];
+      const bool low = r1 < r2;
+      if (taken) taken->push_back(low);
+      lp += low ? -stan::math::square(s.y[i] - r1)
+                : -0.5 * stan::math::square(s.y[i] - r2) + p[1];
+    }
+    return lp;
+  };
+  int sites[2] = {0, 0};
+  int slot = 0;
+  for (int n : {64, 512}) {
+    const std::string what = "matrix row N=" + std::to_string(n);
+    CompiledModel cm = compile_with("region_map_matrix_row", n);
+    expect_mapped(what, cm);
+    check(map_calls(cm, stanli::OP_INDEX_DYNAMIC),
+          what + ": the row is a runtime index call");
+    const auto& p = map_payload(cm);
+    check(p.lanes.active, what + ": lane plan active");
+    sites[slot++] = p.lanes.max_sites;
+    check(p.lanes.max_sites < n, what + ": adjoint sites " +
+                                     std::to_string(p.lanes.max_sites) +
+                                     " below the matrix size");
+    const Series s = make_series(n);
+    Executor ex(cm.graph);
+    cm.bind(ex);
+    std::vector<std::vector<int>> taken(2);
+    const std::vector<Params> points = {{0.3, -0.5}, {1.5, 0.7}};
+    for (size_t k = 0; k < points.size(); ++k)
+      expect_eval(what + " point " + std::to_string(k), evaluate(ex, points[k]),
+                  reference(ref, s, points[k], &taken[k]));
+    check(flips(taken[0], taken[1]) > 0, what + ": points flip branches");
+  }
+  check(sites[0] == sites[1], "matrix row adjoint sites do not grow with N");
+}
+
 void test_lane_exceptions() {
   for (int n : {37, 64, 200}) {
     const std::string what = "region_map_oob N=" + std::to_string(n);
@@ -2474,6 +2518,7 @@ int main() {
   test_lane_flag_clear_segments();
   test_lane_cancellation_bitwise();
   test_kept_call_matches_inlined_body();
+  test_shared_row_read_lanes();
   test_lane_exceptions();
   test_lane_duplicate_live_in();
   test_lane_copied_executors_interleaved();

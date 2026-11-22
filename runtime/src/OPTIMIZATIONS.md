@@ -1198,7 +1198,10 @@ op adds the iteration terms in order and then adds that total to the rest of
 the target, which regroups the sum within the ULP policy. In the lane form,
 iterations that add into one shared adjoint cell (a scalar parameter that every
 iteration reads) log their additions, and the tile replays them in scalar
-order, so the lane gradient equals the scalar one bit for bit. The design, the
+order, so the lane gradient equals the scalar one bit for bit. An index read
+such as `M[n]` from a shared matrix logs one addition per selected cell. It
+used to log one per cell of `M`, which made a 572-row loop over a 572 x 3
+matrix about 40x slower than the unmapped loop. The design, the
 lane plan and the measurements are in
 [`notes/execution/2026-10-03-region-map-design.md`](../../notes/execution/2026-10-03-region-map-design.md),
 [`2026-10-02-region-map-lanes.md`](../../notes/execution/2026-10-02-region-map-lanes.md)
