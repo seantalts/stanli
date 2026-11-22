@@ -1165,8 +1165,13 @@ Lowering maps a loop when all of these hold (`lower_region_map.cpp`):
   300 dynamic-index calls per lane and a tile of about 616 KB, against 300
   islands of about 19 instructions.
 - The body branches on a parameter: an `if`, a ternary, an `&&` or `||`, or a
-  `while` whose condition depends on one, followed into user functions with each
-  argument's dependence taken from the call site.
+  `while` whose condition depends on one. A name from outside the loop depends
+  on a parameter when its lowered value does. A name declared in the loop or in
+  a called user function depends on one when a value assigned to it does, with
+  each argument's dependence taken from the call site. The MIR's AD level is
+  not used, because stanc3 marks `real t = x[n];` as autodiff although `t`
+  only holds data. Lowering decides a branch on data when it builds the graph,
+  and mapping such a loop made it about 14x slower.
 - Iterations are independent. Everything the body assigns is declared inside it,
   with one exception: a real declared outside may collect the terms, if the
   body only adds to it and never reads it. Nothing escapes with `break`,

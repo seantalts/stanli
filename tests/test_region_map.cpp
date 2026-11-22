@@ -2104,6 +2104,36 @@ void test_extent_bound_is_data_control() {
         "extent-controlled loops keep the unmapped graph");
 }
 
+// stanc3 types a real local or a transformed parameter as autodiff even when
+// it only ever holds data. A branch on one is decided when the graph is
+// built, so the map would only add work: about 14x per gradient on a loop
+// like the first one here.
+void test_data_valued_locals_are_data_control() {
+  const std::string mir =
+      mir_of_source("region_map_data_locals",
+                    "data { int N; vector[N] y; vector[N] x; }\n"
+                    "parameters { real a; real<lower=0> s; }\n"
+                    "transformed parameters { real c = 2; }\n"
+                    "model {\n"
+                    "  for (n in 1:N) {\n"
+                    "    real t = x[n];\n"
+                    "    if (t > 0) target += normal_lpdf(y[n] | a * t, s);\n"
+                    "    else target += cauchy_lpdf(y[n] | a, s);\n"
+                    "  }\n"
+                    "  for (n in 1:N)\n"
+                    "    if (c * x[n] < 1) target += -square(y[n] - a);\n"
+                    "}\n");
+  const DataMap data = make_data(64);
+  CompiledModel cm = stanli::compile_model(mir, data);
+  test_setenv("STANLI_REGION_MAP", "0", 1);
+  CompiledModel off = stanli::compile_model(mir, data);
+  test_unsetenv("STANLI_REGION_MAP");
+  check(count_opcode(cm, OP_REGION_MAP) == 0,
+        "loops branched on data-valued locals are not mapped");
+  check(histogram(cm) == histogram(off),
+        "loops branched on data-valued locals keep the unmapped graph");
+}
+
 // Input points for each unary in STANLI_PROGRAM_UNARY_LIST. The last point
 // of each row lies near an edge of the function's domain or range.
 std::vector<double> unary_points(const std::string& fn) {
@@ -2531,6 +2561,7 @@ int main() {
   test_lane_cogmod();
   test_every_unary_in_lanes();
   test_extent_bound_is_data_control();
+  test_data_valued_locals_are_data_control();
 #endif
   test_mode_policy();
   test_recompute_visits_taken_blocks();

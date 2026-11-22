@@ -145,22 +145,6 @@
     "since": "2026-11-12"
   },
   {
-    "model": "region_map_sinks",
-    "quantity": "grad[*]",
-    "pair": "default/no_native_adj",
-    "bound_ulp": 3,
-    "cause": "STANLI_NO_NATIVE_ADJ refuses the region map; see default/no_region_map on this fixture, which gives the same bits.",
-    "since": "2026-11-12"
-  },
-  {
-    "model": "region_map_sinks",
-    "quantity": "grad[*]",
-    "pair": "default/no_region_map",
-    "bound_ulp": 3,
-    "cause": "the region map accumulates the per-iteration gradient contributions in iteration order; with STANLI_REGION_MAP=0 the per-iteration regions accumulate through the graph's own reverse sweep. default/no_native_adj gives the same bits, because it refuses the map too.",
-    "since": "2026-11-12"
-  },
-  {
     "model": "wapar_heavy",
     "quantity": "grad[*]",
     "pair": "default/passes_off",
