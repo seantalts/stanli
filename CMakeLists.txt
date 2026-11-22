@@ -868,22 +868,6 @@ set(STANLI_FIXTURE_MANIFEST
     "${CMAKE_CURRENT_BINARY_DIR}/stanli_mir_fixture_sources.txt")
 file(GENERATE OUTPUT "${STANLI_FIXTURE_MANIFEST}"
      CONTENT "${STANLI_FIXTURE_MANIFEST_CONTENT}\n")
-set(_stanli_fixture_dependencies
-    ${STANLI_FIXTURE_SOURCES}
-    "${STANLI_FIXTURE_MANIFEST}"
-    "${CMAKE_CURRENT_SOURCE_DIR}/tools/gen_fixtures.py"
-    stanli_check)
-add_custom_command(
-  OUTPUT ${STANLI_MIR_FIXTURES}
-  COMMAND ${STANLI_FIXTURE_PYTHON}
-          "${CMAKE_CURRENT_SOURCE_DIR}/tools/gen_fixtures.py"
-          --stanli-check $<TARGET_FILE:stanli_check>
-  DEPENDS ${_stanli_fixture_dependencies}
-  WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
-  COMMENT "Generating ${STANLI_FIXTURE_COUNT} MIR fixtures"
-  VERBATIM)
-add_custom_target(stanli_mir_fixtures ALL
-                  DEPENDS ${STANLI_MIR_FIXTURES})
 
 # Pull-request validation uses Clang so its cheap test translation units can
 # link to the optimized runtime objects below. Shipped platform builds may use
@@ -1016,6 +1000,34 @@ if(NOT STANLI_EMBED_OBJECT)
       "test_function_models)")
   endif()
 endif()
+# The fixtures depend on the compiler and on stanli_check's way of calling
+# it, not on the runtime: a relink of stanli_check after a runtime edit does
+# not regenerate them. stanli_check is an ordering dependency only.
+set(_stanli_fixture_dependencies
+    ${STANLI_FIXTURE_SOURCES}
+    "${STANLI_FIXTURE_MANIFEST}"
+    "${CMAKE_CURRENT_SOURCE_DIR}/tools/gen_fixtures.py"
+    "${CMAKE_CURRENT_SOURCE_DIR}/tools/stanli_check.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/tools/stanc_embedded.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/tools/stanc_process.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/runtime/src/stanc_embed_c.cpp")
+if(STANLI_EMBED_OBJECT)
+  list(APPEND _stanli_fixture_dependencies "${STANLI_EMBED_OBJECT}")
+elseif(STANLI_PORTABLE_COMPILER)
+  list(APPEND _stanli_fixture_dependencies "${STANLI_PORTABLE_COMPILER}")
+endif()
+add_custom_command(
+  OUTPUT ${STANLI_MIR_FIXTURES}
+  COMMAND ${STANLI_FIXTURE_PYTHON}
+          "${CMAKE_CURRENT_SOURCE_DIR}/tools/gen_fixtures.py"
+          --stanli-check $<TARGET_FILE:stanli_check>
+  DEPENDS ${_stanli_fixture_dependencies}
+  WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
+  COMMENT "Generating ${STANLI_FIXTURE_COUNT} MIR fixtures"
+  VERBATIM)
+add_custom_target(stanli_mir_fixtures ALL
+                  DEPENDS ${STANLI_MIR_FIXTURES})
+add_dependencies(stanli_mir_fixtures stanli_check)
 add_executable(test_stanc_process tests/test_stanc_process.cpp)
 target_link_libraries(test_stanc_process PRIVATE stanli_stanc_process)
 add_test(NAME test_stanc_process COMMAND test_stanc_process)
