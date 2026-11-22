@@ -134,7 +134,7 @@ static void print_loop_body(const stanli::StructuredLoop& loop, int depth) {
 int main(int argc, char** argv) {
   if (argc < 3) {
     std::fprintf(stderr,
-                 "usage: dump_ops mir.sexp data.json [max_ops|-1 "
+                 "usage: dump_ops model.mir data.json [max_ops|-1 "
                  "summary [--write-array]|--execution-json [--forbid-mir] "
                  "[--execution-report]]\n");
     return 2;

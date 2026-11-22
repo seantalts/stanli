@@ -72,7 +72,7 @@ model.stan + data.json
 compiler/ocaml/stanli_pipeline.ml + portable_mir.ml
   |  canonical compact portable MIR v3
   v
-decode_program (compact portable MIR or legacy s-expression)
+decode_program (compact portable MIR)
   |  decoded into mir::Stmt / mir::Expr structs
   v
 lower.cpp
@@ -125,14 +125,14 @@ Step by step:
    runtime evaluation. The producer parity gate covers that no-fold path so
    the correction cannot silently disappear.
 
-2. **[`mir_decode.cpp`](../runtime/src/mir_decode.cpp) selects a decoder.**
+2. **[`mir_decode.cpp`](../runtime/src/mir_decode.cpp) decodes the MIR.**
    Native embedded compilation, the browser and R JavaScript compiler, and
-   `stanli-compile` emit the stanli-owned compact portable format. Stock
-   stanc's `--debug-optimized-mir` output, which the test fixtures and the
-   native tools' `--stanc PATH` use, is the legacy stanc3 s-expression. Both
-   decode into the same plain C++ structs (`mir::Stmt`, `mir::Expr`) and share name
-   resolution and validation. Anything they do not recognize is a loud error,
-   never a guess.
+   `stanli-compile` emit the stanli-owned compact portable format, and the
+   runtime reads nothing else. It decodes into plain C++ structs
+   (`mir::Stmt`, `mir::Expr`) and runs name resolution and validation
+   (`mir_reader.cpp`). Anything it does not recognize is a loud error, never
+   a guess. Stock stanc's `--debug-optimized-mir` s-expressions are refused
+   with a message that names the supported compilers.
 
    The Windows wheel keeps the compiler outside `stanli.dll`: it packages
    `stanli-compile.exe` as a short-lived subprocess, with no OCaml compiler
@@ -192,7 +192,7 @@ ones through every stage, op list and register programs included.
 | [`compiler/portable_ir/SCHEMA.md`](../compiler/portable_ir/SCHEMA.md), [`compiler/ocaml/`](../compiler/ocaml/) | The stanli-owned portable MIR contract, shared optimization policy, and typed-OCaml encoder. |
 | [`compiler/native/`](../compiler/native/), [`compiler/js/`](../compiler/js/) | Thin native callback, js_of_ocaml, and Windows CLI entry points around the shared OCaml pipeline. |
 | [`runtime/src/lower.cpp`](../runtime/src/lower.cpp) | Lowering: transformed MIR in, op graph out. |
-| [`runtime/src/mir_decode.cpp`](../runtime/src/mir_decode.cpp), [`portable_mir_reader.cpp`](../runtime/src/portable_mir_reader.cpp), [`mir_reader.cpp`](../runtime/src/mir_reader.cpp) | Dispatches compact portable MIR or legacy s-expressions into one MIR representation and runs their shared finalization. |
+| [`runtime/src/mir_decode.cpp`](../runtime/src/mir_decode.cpp), [`portable_mir_reader.cpp`](../runtime/src/portable_mir_reader.cpp), [`mir_reader.cpp`](../runtime/src/mir_reader.cpp) | Decodes compact portable MIR into the MIR representation, then resolves names and validates it. |
 | [`runtime/src/inplace.cpp`](../runtime/src/inplace.cpp), [`constfold.cpp`](../runtime/src/constfold.cpp), [`reroll.cpp`](../runtime/src/reroll.cpp), [`island.cpp`](../runtime/src/island.cpp) | The graph passes, in pipeline order. |
 | [`runtime/src/executor.cpp`](../runtime/src/executor.cpp) | Runs the op list. `STANLI_PROFILE=1` prints per-opcode time accounting. |
 | [`runtime/kernels/`](../runtime/kernels/) | The kernels: [`densities.cpp`](../runtime/kernels/densities.cpp), [`elementwise.cpp`](../runtime/kernels/elementwise.cpp), [`constrain.cpp`](../runtime/kernels/constrain.cpp), and friends. [`ode.cpp`](../runtime/kernels/ode.cpp) owns the canonical Stan Math solves and the direct all-double coupled RK path. [`matrix_fns.cpp`](../runtime/kernels/matrix_fns.cpp) and [`legacy_fns.cpp`](../runtime/kernels/legacy_fns.cpp) wrap stan-math functions that have no native kernel yet. |
@@ -264,8 +264,8 @@ The tools you will reach for most:
 - `STANLI_DUMP_PASSES=<dir>`: a developer switch read by anything that
   compiles a model. It writes the graph after every lowering pass to
   `<dir>/NN-<graph>-<stage>.txt`, numbered so `ls` sorts in pass order, plus
-  the input MIR document as `00-mir.sexp` (the shipped compilers write an
-  encoded `STANLI5:` document there rather than an S-expression). Diff two consecutive files to see exactly
+  the input MIR document as `00-mir.txt` (an encoded `STANLI5:` document).
+  Diff two consecutive files to see exactly
   what one pass did. A pass that throws still leaves
   `NN-<graph>-FAILED-after-<stage>.txt` with the graph it died on.
 
@@ -710,7 +710,7 @@ stanli::DataMap::Entry result = affine(args);  // {1.5, 4, 9}
 ```
 
 `Function::from_mir(mir, name)` skips source compilation for cached
-portable or legacy MIR and works in builds without embedded stanc.
+portable MIR and works in builds without embedded stanc.
 Arguments are matched by formal name. This surface evaluates pure,
 value-returning functions on doubles; `_lp`, void, RNG, and autodiff
 entry points are not part of it.
@@ -742,9 +742,8 @@ explicitly. With `--no-embed`, setup builds `stanli-compile` from the
 same pipeline and CMake copies it beside `stanli_check` and `stanli_run`,
 including in `cmake --install` deployments; keep those executables
 together when moving an installation. `--all` respects `--no-embed` in
-either order. The tools also accept `--stanli-compile PATH`, and use
-stock stanc only when asked with `--stanc PATH` (or `STANC` for
-`stanli_run`). `--conformance` stages the standalone compiler with the
+either order. The tools also accept `--stanli-compile PATH`.
+`--conformance` stages the standalone compiler with the
 Python library when embedding is disabled, and makes the differential
 Stan language sweep runnable locally; see
 [`harnesses/conformance/README.md`](../harnesses/conformance/README.md).

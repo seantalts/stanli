@@ -520,7 +520,7 @@ void copy_out(double* to, const std::vector<double>& from) {
 
 extern "C" {
 
-static stanli_model* model_new(const char* tmir_sexp, const char* data_json,
+static stanli_model* model_new(const char* mir_text, const char* data_json,
                                const stanli_model_opts& opts, char* err,
                                size_t err_len) {
   const uint32_t seed = opts.seed;
@@ -553,13 +553,13 @@ static stanli_model* model_new(const char* tmir_sexp, const char* data_json,
       default:
         throw std::invalid_argument("unknown parallel_write_array");
     }
-    m->cm = stanli::compile_model(tmir_sexp, data, seed, options);
+    m->cm = stanli::compile_model(mir_text, data, seed, options);
     data = stanli::DataMap();
     // Resume records name the posterior they continue: the program text, the
     // data text, fast_math, and the construction seed only when transformed
     // data drew from it (otherwise the seed changes nothing).
     Fnv1a hash;
-    hash.add_string(tmir_sexp);
+    hash.add_string(mir_text);
     hash.add_string(data_json);
     const unsigned char fast = fast_math ? 1 : 0;
     hash.add(&fast, 1);

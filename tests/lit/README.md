@@ -103,7 +103,7 @@ The corresponding JSON manifests under `tests/function_coverage/` record each
 tested, excluded, and missing stanc signature, including functions for which
 only some overloads are excluded. CTest checks that fixtures and manifests
 remain current. These generated models are source-only lit inputs: ordinary
-builds do not also materialize their legacy MIR under `tests/fixtures/`.
+builds do not also materialize their MIR under `tests/fixtures/`.
 
 For a single case, invoke the runner directly; `--discover` prints the current
 result without enforcing the checked-in expectation:

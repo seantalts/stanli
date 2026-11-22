@@ -7,8 +7,7 @@ field and it is not an API commitment from stanc3.
 The canonical producer in `compiler/ocaml/portable_mir.ml` consumes stanc3's
 `Middle.Program.Typed.t` after the Stan Math backend transform and stanli's
 selected optimization policy. The decoder constructs `stanli::mir::Program`
-directly, validates it, then runs the same overload and binding finalizer used
-by the legacy S-expression reader.
+directly, validates it, then runs the overload and binding finalizer.
 
 Version 5 is a canonical ASCII envelope around a compact, fixed-layout binary
 payload. The envelope crosses native callbacks, subprocess output, V8,
@@ -30,7 +29,8 @@ the tuple types of the model's inputs and outputs, each a typed field
 described below.
 None of the older versions is accepted by this runtime; a `STANLI<n>:`
 document of another version is rejected with a request to recompile the
-model. The legacy stanc3 S-expression reader remains a separate input path.
+model. It is the only MIR the runtime reads: the stanc3 S-expression reader
+was retired, and an S-expression input is rejected like any other text.
 
 ## Envelope and format detection
 
@@ -44,17 +44,16 @@ STANLI5:<base64 payload>
 RFC 4648 base64 using `A-Z`, `a-z`, `0-9`, `+`, and `/`, with required `=`
 padding. There is no whitespace, BOM, or final newline.
 
-The multi-format decoder dispatches as follows:
+The decoder dispatches as follows:
 
 1. An exact `STANLI5:` prefix selects this decoder.
 2. Any other `STANLI` prefix is a document of another version and is
-   rejected.
-3. Otherwise, after the four ASCII whitespace bytes are skipped, `(` selects
-   the legacy S-expression reader.
-4. Every other input is rejected.
+   rejected with a request to recompile the model.
+3. Every other input, stock stanc's S-expression MIR included, is rejected
+   with an error that names the compilers that write this format.
 
 Once the v5 prefix is seen, malformed base64 or a malformed payload is a hard
-v5 error. The decoder never retries another format.
+v5 error.
 
 Canonical base64 has exactly one spelling. Padding may occur only in the final
 quartet, and unused tail bits must be zero. A decoder rejects non-canonical

@@ -1605,6 +1605,10 @@ def _threads_per_chain(value):
 class Model:
     """A compiled (model, data) pair.
 
+    ``mir`` is portable MIR from ``stan_to_mir`` or stanli-compile, in place
+    of ``stan_file`` or ``stan_code``. Other text, such as stock stanc's
+    ``--debug-optimized-mir`` output, is refused.
+
     ``seed`` is the model-construction seed: RNG calls in transformed data
     draw from it once, here, the way CmdStan's generated constructor does,
     so the same seed reproduces the same transformed data. ``sample`` and

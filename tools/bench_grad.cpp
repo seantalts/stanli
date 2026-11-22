@@ -71,7 +71,7 @@ int benchmark_main(int argc, char** argv) {
   argv = kept.data();
   if (argc < 4) {
     std::fprintf(stderr,
-                 "usage: bench_grad mir.sexp data.json N|--prep|--timed "
+                 "usage: bench_grad model.mir data.json N|--prep|--timed "
                  "[--fast-math] [--parallel-wa=auto|off|force] [--warmup-ms N "
                  "--measure-ms N --points N | "
                  "--points-file PATH]\n");

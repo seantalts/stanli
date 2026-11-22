@@ -48,6 +48,13 @@ test_that("a model built from MIR needs no source file", {
   expect_s3_class(stanli_model(mir = mir), "stanli_model")
 })
 
+test_that("MIR that is not portable MIR is refused with the supported route", {
+  skip_without_runtime()
+  expect_error(
+    stanli_model(mir = "((functions_block ()) (input_vars ()) (log_prob ()))"),
+    "not portable MIR.*stanli-compile")
+})
+
 test_that("data variables left out are accepted when their declared size is zero", {
   skip_without_runtime()
   code <- paste("data { int N; array[N] real y; int K; vector[K] x; matrix[K, 2] M; }",

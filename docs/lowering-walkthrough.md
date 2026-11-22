@@ -734,33 +734,34 @@ models as `ex1.stan`, `ex2.stan` and `ex3.stan`. Save this data as
 ```
 
 Save `{"y": 0.7}` as `ex23.json`. Then produce the compiler tree once
-for each model:
+for each model, unoptimized as in this walkthrough (the same command for
+`ex2` and `ex3`):
 
 ```
-./deps/stanc3/stanc --debug-transformed-mir ex1.stan > ex1.sexp
+build-rel/stanli_check --emit-mir ex1.stan --passes none > ex1.mir
 ```
 
 Part 1:
 
 ```
-build-rel/dump_ops ex1.sexp ex1.json          # the op graph
+build-rel/dump_ops ex1.mir ex1.json          # the op graph
 build-rel/stanli_check ex1.stan ex1.json      # the receipts
 ```
 
 Part 2:
 
 ```
-build-rel/dump_ops     ex2.sexp ex23.json     # ISLAND + the normal path
-build-rel/dump_islands ex2.sexp ex23.json     # the jump program
+build-rel/dump_ops     ex2.mir ex23.json     # ISLAND + the normal path
+build-rel/dump_islands ex2.mir ex23.json     # the jump program
 build-rel/stanli_check ex2.stan ex23.json     # check it by hand
 ```
 
 Part 3:
 
 ```
-STANLI_NO_ISLAND=1     build-rel/dump_ops ex3.sexp ex23.json -1   # 113 ops
-STANLI_ISLAND_ALWAYS=1 build-rel/dump_ops ex3.sexp ex23.json      # 8 ops
-STANLI_ISLAND_ALWAYS=1 build-rel/dump_islands ex3.sexp ex23.json  # fwd + adjoint
+STANLI_NO_ISLAND=1     build-rel/dump_ops ex3.mir ex23.json -1   # 113 ops
+STANLI_ISLAND_ALWAYS=1 build-rel/dump_ops ex3.mir ex23.json      # 8 ops
+STANLI_ISLAND_ALWAYS=1 build-rel/dump_islands ex3.mir ex23.json  # fwd + adjoint
 STANLI_DEBUG_ISLAND=1  build-rel/stanli_check ex3.stan ex23.json  # the estimate
 build-rel/stanli_check ex3.stan ex23.json                         # receipts x3
 STANLI_ISLAND_ALWAYS=1 build-rel/stanli_check ex3.stan ex23.json

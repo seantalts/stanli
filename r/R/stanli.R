@@ -80,8 +80,10 @@ read_utf8_file <- function(path) {
 #'   arrays of them. Zero-length extents are kept. A length-1 R vector
 #'   with no `dim` goes out as a scalar, as in rstan, so give a `vector[1]`
 #'   or `array[1]` as `array(x, 1)`.
-#' @param mir Transformed MIR text, for a build without the embedded
-#'   compiler. Rarely needed.
+#' @param mir Portable MIR text from stanli's compiler, for example the
+#'   output of `stanli-compile` or Python's `stan_to_mir()`, for a build
+#'   without the embedded compiler. Rarely needed. Stock stanc's MIR is
+#'   refused.
 #' @param threads_per_chain Positive thread count for eligible native `reduce_sum`
 #'   calls. Defaults to 1. The model is compiled for this count, and
 #'   [sample_model()], optimization, the approximate methods and direct
@@ -159,7 +161,7 @@ stanli_model <- function(file = NULL, code = NULL, data = NULL, mir = NULL,
   if (!is_mir && !.Call("stanli_r_has_embedded_stanc")) {
     # A runtime without the embedded compiler needs the MIR handed to it.
     # The release builds embed stanc3; a source build and the Windows
-    # runtime do not, and ship a stanc binary beside the library instead.
+    # runtime do not, and ship stanli-compile beside the library instead.
     mir <- with_commit_note(stanc_mir(code, file = source_file))
     is_mir <- TRUE
   }

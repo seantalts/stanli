@@ -5,7 +5,6 @@
 #include <stanli/graph.hpp>
 #include <stanli/mir.hpp>
 #include <stanli/optable.hpp>
-#include <stanli/sexp.hpp>
 
 #include "stdout_capture.hpp"
 

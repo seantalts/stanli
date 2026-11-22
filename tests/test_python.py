@@ -2506,6 +2506,16 @@ def test_allow_interpreter_false_refuses_fallback_models():
     stanli.Model(stan_code=clean, allow_interpreter=False)
 
 
+def test_mir_that_is_not_portable_is_refused():
+    try:
+        stanli.Model(mir="((functions_block ()) (input_vars ()) (log_prob ()))",
+                     data={})
+    except Exception as e:  # noqa: BLE001 - the runtime's message is the test
+        assert "not portable MIR" in str(e) and "stan_to_mir" in str(e), e
+    else:
+        raise AssertionError("stock stanc MIR was accepted")
+
+
 def test_struct_mirrors_are_checked_against_the_runtime():
     stanli._check_layouts(stanli._lib)
 

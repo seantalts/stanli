@@ -18,7 +18,6 @@
 #include <stanli/mir_interp.hpp>
 #include <stanli/island.hpp>
 #include <stanli/ode_prog.hpp>
-#include <stanli/sexp.hpp>
 
 #include <stan/math.hpp>
 

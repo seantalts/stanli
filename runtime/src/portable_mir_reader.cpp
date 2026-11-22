@@ -730,7 +730,7 @@ Program read_portable_program(std::string_view bytes) {
   Program result = read_program(reader);
   reader.finish();
   validate_portable_program(result);
-  finalize_program(result, true);
+  finalize_program(result);
   return result;
 }
 

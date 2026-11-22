@@ -1,12 +1,12 @@
 // C++ representation of the slice of stanc3's transformed MIR that the graph
-// compiler consumes. Anything outside the slice is preserved as raw sexp text
-// in `raw` and surfaces as a clear compile error, never a miscompile.
+// compiler consumes, as the portable MIR decoder (mir_decode.hpp) builds it.
+// Anything outside the slice keeps the producer's description in `raw` and
+// surfaces as a clear compile error, never a miscompile.
 #ifndef STANLI_MIR_HPP
 #define STANLI_MIR_HPP
 
 #include <stanli/expression_layout.hpp>
 #include <stanli/optable.hpp>
-#include <stanli/sexp.hpp>
 
 #include <cstdint>
 #include <limits>
@@ -127,8 +127,8 @@ struct Expr {
     UserDefined
   } fn_lib = Lib::StanLib;
   FnSuffix fn_suffix = FnSuffix::Plain;
-  // (FnDist _ Unnormalized), or the older (FnLpdf true): the call was written
-  // `_lupdf`/`_lupmf`. On a callback Var, the reference was.
+  // The call was written `_lupdf`/`_lupmf`. On a callback Var, the
+  // reference was.
   bool fn_propto = false;
   bool data_only = false;  // adlevel DataOnly
   bool promoted = false;   // explicit MIR Promotion to this adlevel/type
@@ -657,9 +657,9 @@ struct Stmt {
   // FnWriteParam in transform_inits: the transform to INVERT, so that a
   // constrained value supplied by the user becomes a free one. write_array's
   // own FnWriteParam leaves this empty -- its value is constrained already.
-  // Both readers split this out of the one optional-transform slot the wire
-  // and the S-expression share with FnCheck, so consumers never have to ask
-  // which meaning a transform carries.
+  // The decoder splits this out of the one optional-transform slot the wire
+  // shares with FnCheck, so consumers never have to ask which meaning a
+  // transform carries.
   std::optional<Transform> write_transform;
   // For
   std::string loopvar;
@@ -1166,8 +1166,6 @@ class OutputCursor {
   size_t part_ = 0;      // the first part of vars_[next_] not all written
   std::optional<size_t> part_taken_;
 };
-
-Program read_program(const sexp::Node& root);
 
 }  // namespace mir
 }  // namespace stanli

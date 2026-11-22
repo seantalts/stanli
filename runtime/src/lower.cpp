@@ -1598,7 +1598,7 @@ CompiledModel compile_model(const std::string& mir_text, const DataMap& data,
                                        debug_env("STANLI_DUMP_STAGES"))
                           : PassDumper(options.dump_passes.c_str(),
                                        options.dump_stages.c_str());
-  if (dumper.enabled()) dumper.write("mir", "mir.sexp", mir_text);
+  if (dumper.enabled()) dumper.write("mir", "mir.txt", mir_text);
   const auto compile_time = prep.start();
   // Shared because the interpreted write_array fallback, when needed,
   // keeps the generate_quantities statements and UDF bodies alive for the

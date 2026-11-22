@@ -710,7 +710,6 @@ tests. To run the post-merge jobs on a branch, use
 | [compiler producer parity](#stan-language-coverage) | compact MIR bytes from the native, JavaScript and Windows compilers | each other, byte for byte | PR | numerical behavior |
 | stanc3 fuzzer ([`tools/fuzz_stanc`](tools/fuzz_stanc/README.md)) | random Stan programs compiled with and without stanc3's O1 passes: log density, gradient, `write_array`, printed output and errors at 3 points | each other | nightly, Linux x86-64 | programs that the generator cannot write |
 | Rethinking regeneration | the 62 Rethinking fixtures, regenerated from the book's code with pinned `rethinking` | the checked-in files, byte for byte | nightly, and pushes to `main` that touch them | |
-| MIR wire cost | compact MIR decode time and size on Eight Schools | legacy MIR. Each must be at most half | post-merge | other models |
 
 #### Samplers and algorithms
 
@@ -735,7 +734,6 @@ tests. To run the post-merge jobs on a branch, use
 | Windows dev setup | [`tools/dev_setup.sh`](tools/dev_setup.sh) on Windows, then CTest | the full suite on ARM64 (through `stanli-compile`), and six tests on x64 with the embedded compiler | pushes to `main`, on demand | the rest of the suite with the embedded compiler on x64 |
 | AddressSanitizer | the CTest suite, compiling through `stanli-compile` | no diagnostics | post-merge except release tags | a stale `vari` that points into reused arena memory |
 | ThreadSanitizer | `test_capi`, `test_pool`, `test_multichain`, `test_wa_parallel`, `test_wa_parallel_abi` and `test_wa_parallel_switches` | no diagnostics | post-merge except release tags | the other tests |
-| typed producer | portable MIR from the typed producer for three models | the legacy MIR of the same source | PR and post-merge, Linux x86-64 | other models |
 | bundled compiler | `r/inst/js/stanc.js`, and the compiler loaded in a browser worker, in webR and through V8 in R | a fresh build, byte for byte, and expected compile results | PR | |
 | Windows compiler | the Windows build of the compiler | expected results in `tests/test_windows_compiler.R`, and no integer folded past int32 | PR | |
 | R ABI | the ABI constants in the runtime and in the R bridge | each other | PR and pushes that touch the R paths | |
@@ -755,7 +753,7 @@ bayesplot, bridgesampling, loo, posterior, stanfit and the registration of
 the backend. It fails on any skip, failure, error or warning. The macOS and
 Windows R jobs run only that script.
 
-Three checks measure time and compare no numbers. They are the MIR wire cost,
+Two checks measure time and compare no numbers. They are
 `test_prep_scaling` and `test_prep_deep_expression_time`. Release tags also
 check the version strings, the runtime tarballs and the PyPI description.
 

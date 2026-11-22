@@ -29,8 +29,10 @@ arrays of them. Zero-length extents are kept. A length-1 R vector
 with no `dim` goes out as a scalar, as in rstan, so give a `vector[1]`
 or `array[1]` as `array(x, 1)`.}
 
-\item{mir}{Transformed MIR text, for a build without the embedded
-compiler. Rarely needed.}
+\item{mir}{Portable MIR text from stanli's compiler, for example the
+output of \code{stanli-compile} or Python's \code{stan_to_mir()}, for a build
+without the embedded compiler. Rarely needed. Stock stanc's MIR is
+refused.}
 
 \item{seed}{The model-construction seed: RNG calls in transformed data
 draw from it once, here, the way CmdStan's generated constructor does.

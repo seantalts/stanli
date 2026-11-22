@@ -3,7 +3,7 @@
 //   harnesses/diagnostics/structured_loop_carry_probe.cpp tests/tbb_stub.cpp \
 //   -Lbuild -lstanli_test_core -Wl,-rpath,"$PWD/build" \
 //   -o build/structured_loop_carry_probe
-// build/structured_loop_carry_probe model.mir.sexp data.json > plans.jsonl
+// build/structured_loop_carry_probe model.mir data.json > plans.jsonl
 #include <stanli/compile.hpp>
 #include <stanli/optable.hpp>
 #include <stanli/structured_loop.hpp>
