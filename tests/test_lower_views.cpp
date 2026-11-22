@@ -74,7 +74,7 @@ void run_case(const std::string& what, F&& f) {
 }
 
 std::string fixture(const std::string& stem) {
-  return slurp("tests/fixtures/" + stem + ".tmir.sexp");
+  return slurp("tests/fixtures/" + stem + ".mir");
 }
 
 int count_islands(const stanli::CompiledModel& model) {

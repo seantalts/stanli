@@ -229,7 +229,7 @@ The tools you will reach for most:
   format and with their storage class, between lines that show the `for`,
   `while`, `if` and `alias` structure. It prints the log density graph; pass
   `--write-array` after the op limit for the generated-quantities graph.
-- `dump_ops model.tmir.sexp data.json --execution-json`: JSON describing the
+- `dump_ops model.mir data.json --execution-json`: JSON describing the
   final selected graph, nested register calls, structured sites, solver
   callback admission, write-array fallback and constrained initialization.
   It also captures interpreter constructions and selected preparation probes.

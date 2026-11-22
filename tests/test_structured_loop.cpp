@@ -587,7 +587,7 @@ static void import_reference_tests() {
 }
 
 static std::string fixture_mir(const std::string& name) {
-  std::ifstream input("tests/fixtures/" + name + ".tmir.sexp");
+  std::ifstream input("tests/fixtures/" + name + ".mir");
   check(bool(input), "generated MIR fixture is readable");
   std::ostringstream text;
   text << input.rdbuf();

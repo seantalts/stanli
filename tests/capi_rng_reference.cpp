@@ -15,8 +15,7 @@
 int main(int argc, char** argv) {
   try {
     if (argc != 3)
-      throw std::runtime_error(
-          "usage: capi_rng_reference MODEL.tmir.sexp THREADS");
+      throw std::runtime_error("usage: capi_rng_reference MODEL.mir THREADS");
     std::ifstream input(argv[1], std::ios::binary);
     if (!input) throw std::runtime_error("could not open model MIR");
     const std::string mir((std::istreambuf_iterator<char>(input)),

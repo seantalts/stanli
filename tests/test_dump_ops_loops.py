@@ -11,7 +11,7 @@ sys.path.insert(0, str(REPO / "tools"))
 import bench_select as select
 
 DUMP_OPS = None
-FIXTURE = REPO / "tests/fixtures/structured_matrix_ops.tmir.sexp"
+FIXTURE = REPO / "tests/fixtures/structured_matrix_ops.mir"
 EMPTY_DATA = REPO / "tests/function_coverage/empty.json"
 BODY_OPS = ("MATRIX_EXP", "QUAD_FORM_SYM", "MDIVIDE_LEFT", "MDIVIDE_RIGHT_SPD", "CROSSPROD")
 

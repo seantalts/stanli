@@ -11,6 +11,7 @@
 // shared register compiler. Both values and weighted derivatives are checked.
 #include "expect.hpp"
 
+#include <stanli/mir_decode.hpp>
 #include <stanli/mir.hpp>
 #include <stanli/callback.hpp>
 #include <stanli/message_sink.hpp>
@@ -438,8 +439,8 @@ void check_mixed_seed(const stanli::RhsProgram& p, const char* label) {
 void check_interpreted_density_activity() {
   using namespace stanli;
   using stan::math::var;
-  const auto mir = mir::read_program(
-      sexp::parse(slurp("tests/fixtures/udf_lp_branch_propto.tmir.sexp")));
+  const auto mir =
+      stanli::decode_program(slurp("tests/fixtures/udf_lp_branch_propto.mir"));
   std::map<std::string, const mir::FunDef*> funs;
   for (const auto& f : mir.fun_defs) funs[f.name] = &f;
   const mir::FunDef& shifted = *funs.at("shifted_lpdf");
@@ -490,8 +491,8 @@ void check_interpreted_density_activity() {
 
 void check_matrix_callbacks() {
   using namespace stanli;
-  const auto mir = mir::read_program(
-      sexp::parse(slurp("tests/fixtures/matrix_callback_functions.tmir.sexp")));
+  const auto mir = stanli::decode_program(
+      slurp("tests/fixtures/matrix_callback_functions.mir"));
   std::map<std::string, const mir::FunDef*> funs;
   for (const auto& f : mir.fun_defs) funs[f.name] = &f;
   RhsArg active;
@@ -641,8 +642,8 @@ void check_matrix_callbacks() {
 
 void check_nested_callbacks() {
   using namespace stanli;
-  const auto mir = mir::read_program(
-      sexp::parse(slurp("tests/fixtures/matrix_callback_functions.tmir.sexp")));
+  const auto mir = stanli::decode_program(
+      slurp("tests/fixtures/matrix_callback_functions.mir"));
   std::map<std::string, const mir::FunDef*> funs;
   for (const auto& f : mir.fun_defs) funs[f.name] = &f;
   RhsArg active, data, integers;
@@ -749,8 +750,8 @@ void check_nested_callbacks() {
 
 void test_register_array_boundary() {
   using namespace stanli;
-  mir::Program mir = mir::read_program(
-      sexp::parse(slurp("tests/fixtures/viewa_program_arrays.tmir.sexp")));
+  mir::Program mir =
+      stanli::decode_program(slurp("tests/fixtures/viewa_program_arrays.mir"));
   std::map<std::string, const mir::FunDef*> funs;
   for (const auto& f : mir.fun_defs) funs[f.name] = &f;
 
@@ -791,7 +792,7 @@ int main() {
   using namespace stanli;
 
   mir::Program prog =
-      mir::read_program(sexp::parse(slurp("tests/fixtures/odefns.tmir.sexp")));
+      stanli::decode_program(slurp("tests/fixtures/odefns.mir"));
   std::map<std::string, const mir::FunDef*> funs;
   for (const auto& f : prog.fun_defs) funs[f.name] = &f;
 

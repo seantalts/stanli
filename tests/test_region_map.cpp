@@ -137,7 +137,7 @@ using Ref = std::function<var(const std::vector<var>&, const Series&,
                               std::vector<int>*)>;
 
 std::string fixture_mir(const std::string& stem) {
-  return slurp("tests/fixtures/" + stem + ".tmir.sexp");
+  return slurp("tests/fixtures/" + stem + ".mir");
 }
 
 CompiledModel compile_with(const std::string& stem, int n,
@@ -871,9 +871,9 @@ void test_call_partials_differ_per_iteration(bool recompute) {
   for (int i = 0; i < n; ++i) json << (i ? "," : "") << offsets[(size_t)i];
   json << "],\"z_data\":0.25}";
   if (recompute) test_setenv("STANLI_REGION_MAP_SAVE_LIMIT", "0", 1);
-  CompiledModel cm = stanli::compile_model(
-      slurp("tests/fixtures/hypergeometric_1f0.tmir.sexp"),
-      DataMap::from_json(json.str()));
+  CompiledModel cm =
+      stanli::compile_model(slurp("tests/fixtures/hypergeometric_1f0.mir"),
+                            DataMap::from_json(json.str()));
   if (recompute) test_unsetenv("STANLI_REGION_MAP_SAVE_LIMIT");
   expect_mapped("hypergeometric loop", cm);
   const auto& p = map_payload(cm);

@@ -1,5 +1,6 @@
 // MIR reader over the transformed-MIR sexp of eight schools, the sexp parser,
 // the MirInterp, and FnCheck semantics in MirInterp.
+#include <stanli/mir_decode.hpp>
 #include <stanli/mir.hpp>
 #include <stanli/mir_interp.hpp>
 #include <stanli/sexp.hpp>
@@ -332,13 +333,13 @@ static std::string slurp(const char* path) {
 
 int main(int argc, char** argv) {
   using namespace stanli;
-  const char* fix = argc > 1 ? argv[1] : "tests/fixtures/es.tmir.sexp";
+  const char* fix = argc > 1 ? argv[1] : "tests/fixtures/es.mir";
   const std::string text = slurp(fix);
   if (text.empty()) {
     std::printf("FAIL fixture missing: %s (run from repo root)\n", fix);
     return 1;
   }
-  mir::Program p = mir::read_program(sexp::parse(text));
+  mir::Program p = stanli::decode_program(text);
 
   // data block
   check(p.input_vars.size() == 3, "3 input vars");
@@ -475,8 +476,7 @@ int main(int argc, char** argv) {
        (meta ((type_ (UArray UReal)) (loc <opaque>) (adlevel DataOnly))))))
     (meta <opaque>)))))
 )sexp";
-    const mir::Program upfrom_program =
-        mir::read_program(sexp::parse(upfrom_text));
+    const mir::Program upfrom_program = stanli::decode_program(upfrom_text);
     const mir::Expr* parsed = upfrom_program.log_prob.size() == 1
                                   ? &upfrom_program.log_prob[0].rhs
                                   : nullptr;

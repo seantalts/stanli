@@ -93,7 +93,7 @@ static std::string slurp(const std::string& path) {
 // wrong number. Each replay now starts with an empty register file.
 static void test_branch_bound_live_out() {
   CompiledModel cm =
-      compile_model(slurp("tests/fixtures/branchudf.tmir.sexp"), DataMap());
+      compile_model(slurp("tests/fixtures/branchudf.mir"), DataMap());
   Executor ex(std::move(cm.graph));
   cm.bind(ex);
   const int64_t n = ex.n_params();
@@ -115,8 +115,7 @@ static void test_branch_bound_live_out() {
 // piecewise polynomial also gives independent values and derivatives.
 static void test_region_direct_output() {
   SKIP_WITHOUT_DEBUG_SWITCHES();
-  const std::string mir =
-      slurp("tests/fixtures/region_direct_output.tmir.sexp");
+  const std::string mir = slurp("tests/fixtures/region_direct_output.mir");
   for (int n : {0, 1, 5}) {
     const DataMap data =
         DataMap::from_json("{\"N\":" + std::to_string(n) + "}");
@@ -2207,7 +2206,7 @@ static void test_div_extreme_matches_graph_kernel() {
 // default carver picks this region up (checked below), and whether it does
 // must not change the gradient.
 static void test_div_range_model_matches_uncarved() {
-  const std::string mir = slurp("tests/fixtures/div_range_extreme.tmir.sexp");
+  const std::string mir = slurp("tests/fixtures/div_range_extreme.mir");
   const std::vector<double> point = {1e200, 1e200, 1e200, 1e200, 11.0};
 
   test_setenv("STANLI_NO_ISLAND", "1", 1);
@@ -2889,12 +2888,12 @@ static void test_while_lpmf_region_matches_flat() {
     return data;
   };
   CompiledModel region = compile_model(
-      slurp("tests/fixtures/while_lpmf_region.tmir.sexp"), observations());
+      slurp("tests/fixtures/while_lpmf_region.mir"), observations());
   // Also select the register-loop representation to compare workspace reuse
   // against fresh buffers while keeping its arithmetic grouping unchanged.
   test_setenv("STANLI_STRUCTURED_LOOPS", "0", 1);
   CompiledModel replay_region = compile_model(
-      slurp("tests/fixtures/while_lpmf_region.tmir.sexp"), observations());
+      slurp("tests/fixtures/while_lpmf_region.mir"), observations());
   test_unsetenv("STANLI_STRUCTURED_LOOPS");
   int proved = 0;
   for (const Op& op : replay_region.graph.ops) {
@@ -2919,7 +2918,7 @@ static void test_while_lpmf_region_matches_flat() {
     DataMap data = observations();
     data.set_int("reps", eta > 0 ? 3 : 2);
     CompiledModel flat =
-        compile_model(slurp("tests/fixtures/while_lpmf_flat.tmir.sexp"), data);
+        compile_model(slurp("tests/fixtures/while_lpmf_flat.mir"), data);
     Executor flat_ex(std::move(flat.graph));
     flat.bind(flat_ex);
 

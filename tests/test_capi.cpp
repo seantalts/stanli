@@ -5,7 +5,6 @@
 // carry row/column indices in column-major order. This test is intentionally
 // at the ABI boundary so a second flattening policy in capi.cpp cannot drift.
 #include "../runtime/ext/bridgestan.h"
-#include "categorical_check_mir.hpp"
 #include "env_helpers.hpp"
 
 #include <stanli/capi.h>
@@ -174,7 +173,7 @@ std::string nested_json(const std::vector<std::string>& names,
 // forward direction: constrain a free point through stanli_wa_row, feed the
 // constrained values back as JSON, and require the original free point.
 void expect_unconstrain_inits_round_trip() {
-  const std::string mir = slurp("tests/fixtures/initrt.tmir.sexp");
+  const std::string mir = slurp("tests/fixtures/initrt.mir");
   const std::string data = slurp("tests/fixtures/initrt.json");
   char err[8192]{};
   stanli_model* model = stanli_model_new_with_opts(mir.c_str(), data.c_str(),
@@ -258,7 +257,7 @@ void expect_unconstrain_inits_round_trip() {
 }
 
 void expect_parameterless_unconstrain() {
-  const std::string mir = slurp("tests/fixtures/view_gq_data_matrix.tmir.sexp");
+  const std::string mir = slurp("tests/fixtures/view_gq_data_matrix.mir");
   char err[8192]{};
   stanli_model* model = stanli_model_new_with_opts(
       mir.c_str(), R"({"M":[[1,2,3],[4,5,6]]})", nullptr, err, sizeof err);
@@ -279,7 +278,7 @@ void expect_parameterless_unconstrain() {
 // A model with no parameters has empty draw rows, so every row copy in the
 // samplers has a null source. UBSan traps memcpy from null even at size 0.
 void expect_parameterless_sampling() {
-  const std::string mir = slurp("tests/fixtures/view_gq_data_matrix.tmir.sexp");
+  const std::string mir = slurp("tests/fixtures/view_gq_data_matrix.mir");
   char err[8192]{};
   stanli_model* model = stanli_model_new_with_opts(
       mir.c_str(), R"({"M":[[1,2,3],[4,5,6]]})", nullptr, err, sizeof err);
@@ -314,7 +313,7 @@ void expect_parameterless_sampling() {
 }
 
 void expect_invalid_data_rejected() {
-  const std::string mir = slurp("tests/fixtures/newtrans.tmir.sexp");
+  const std::string mir = slurp("tests/fixtures/newtrans.mir");
   char err[8192]{};
   stanli_model* model = stanli_model_new_with_opts(
       mir.c_str(), R"({"m":0.3,"s":-1})", nullptr, err, sizeof err);
@@ -329,7 +328,7 @@ void expect_invalid_data_rejected() {
 }
 
 void expect_runtime_bound_rejected() {
-  const std::string mir = slurp("tests/fixtures/data_and_tp_checks.tmir.sexp");
+  const std::string mir = slurp("tests/fixtures/data_and_tp_checks.mir");
   char err[8192]{};
   stanli_model* model = stanli_model_new_with_opts(
       mir.c_str(),
@@ -364,7 +363,7 @@ void expect_runtime_bound_rejected() {
 // matrix given as two rows of three is rejected, with the variable and both
 // shapes in the message.
 void expect_transposed_data_rejected() {
-  const std::string mir = slurp("tests/fixtures/gqconst.tmir.sexp");
+  const std::string mir = slurp("tests/fixtures/gqconst.mir");
   char err[8192]{};
   stanli_model* model = stanli_model_new_with_opts(
       mir.c_str(), R"({"rectangular":[[1,2,3],[4,5,6]]})", nullptr, err,
@@ -384,7 +383,7 @@ void expect_transposed_data_rejected() {
 }
 
 void expect_compiled_scalar_rng() {
-  const std::string mir = slurp("tests/fixtures/gq_scalar_rng.tmir.sexp");
+  const std::string mir = slurp("tests/fixtures/gq_scalar_rng.mir");
   char err[8192]{};
   stanli_model* model =
       stanli_model_new_with_opts(mir.c_str(), "{}", nullptr, err, sizeof err);
@@ -424,7 +423,7 @@ void expect_compiled_scalar_rng() {
 // the climb. The statistics are test_pathfinder's job; what this pins is
 // that the shipped boundary hands all of it back.
 void expect_pathfinder() {
-  const std::string mir = slurp("tests/fixtures/es.tmir.sexp");
+  const std::string mir = slurp("tests/fixtures/es.mir");
   const std::string data = slurp("tests/fixtures/eight_schools.json");
   char err[8192]{};
   stanli_model* model = stanli_model_new_with_opts(mir.c_str(), data.c_str(),
@@ -546,7 +545,7 @@ int poll_keep_going(void* user) {
 // answer ends the run cleanly with the flag set, and a run whose poll never
 // stops it produces the same bytes as the plain sampler.
 void expect_interruptible_sampling() {
-  const std::string mir = slurp("tests/fixtures/gqconst.tmir.sexp");
+  const std::string mir = slurp("tests/fixtures/gqconst.mir");
   const char* data = R"({"rectangular":[[1,4],[2,5],[3,6]]})";
   char err[8192]{};
   stanli_model* model =
@@ -696,7 +695,7 @@ void expect_in_worker_write_array_on(const char* label, stanli_model* model,
 void expect_in_worker_write_array() {
   char err[8192]{};
   stanli_model* graph = stanli_model_new_with_opts(
-      slurp("tests/fixtures/gqconst.tmir.sexp").c_str(),
+      slurp("tests/fixtures/gqconst.mir").c_str(),
       R"({"rectangular":[[1,4],[2,5],[3,6]]})", nullptr, err, sizeof err);
   expect_true("in-worker write_array graph model builds", graph != nullptr);
   if (graph != nullptr) {
@@ -704,9 +703,7 @@ void expect_in_worker_write_array() {
     stanli_model_free(graph);
   }
 
-  const std::string interp_mir = categorical_write_array_mir(
-      slurp("tests/fixtures/cat.tmir.sexp"), "categorical_lpmf", false, false,
-      false, true);
+  const std::string interp_mir = slurp("tests/fixtures/cat_rng_outcome.mir");
   err[0] = '\0';
   stanli_model* interp = stanli_model_new_with_opts(
       interp_mir.c_str(), R"({"K":3,"y":2,"ys":[3,1,3]})", nullptr, err,
@@ -719,8 +716,8 @@ void expect_in_worker_write_array() {
   }
 
   stanli_model* random = stanli_model_new_with_opts(
-      slurp("tests/fixtures/gq_scalar_rng.tmir.sexp").c_str(), "{}", nullptr,
-      err, sizeof err);
+      slurp("tests/fixtures/gq_scalar_rng.mir").c_str(), "{}", nullptr, err,
+      sizeof err);
   expect_true("random compiled write_array model builds", random != nullptr);
   if (random) {
     expect_in_worker_write_array_on("random graph", random, true);
@@ -729,8 +726,8 @@ void expect_in_worker_write_array() {
 
   err[0] = '\0';
   stanli_model* reject = stanli_model_new_with_opts(
-      slurp("tests/fixtures/gq_row_reject.tmir.sexp").c_str(), "{}", nullptr,
-      err, sizeof err);
+      slurp("tests/fixtures/gq_row_reject.mir").c_str(), "{}", nullptr, err,
+      sizeof err);
   expect_true("in-worker write_array reject model builds", reject != nullptr);
   if (reject == nullptr) return;
   expect_true("in-worker write_array reject model has columns",
@@ -768,7 +765,7 @@ void expect_in_worker_write_array() {
 // The additive progress entry point must be the old sampler plus observation:
 // same bytes, caller-thread callbacks, exact refresh schedule and reports.
 void expect_sampling_progress() {
-  const std::string mir = slurp("tests/fixtures/gqconst.tmir.sexp");
+  const std::string mir = slurp("tests/fixtures/gqconst.mir");
   const char* data = R"({"rectangular":[[1,4],[2,5],[3,6]]})";
   char err[8192]{};
   stanli_model* quiet =
@@ -858,7 +855,7 @@ void expect_sampling_progress() {
 // max-treedepth counts, ending at the report's totals. A fixed step size of 5
 // diverges on this model; depth 1 saturates every tree.
 void expect_sampling_progress_counts() {
-  const std::string mir = slurp("tests/fixtures/gqconst.tmir.sexp");
+  const std::string mir = slurp("tests/fixtures/gqconst.mir");
   const char* data = R"({"rectangular":[[1,4],[2,5],[3,6]]})";
   for (const bool diverging : {true, false}) {
     const std::string label = diverging ? "divergent" : "saturating";
@@ -961,7 +958,7 @@ void capture_print_thread(const char*, size_t) {
 // worker starts).
 void expect_inits_run_in_parallel() {
   if (!stanli_thread_safe()) return;
-  const std::string mir = slurp("tests/fixtures/rejectprint.tmir.sexp");
+  const std::string mir = slurp("tests/fixtures/rejectprint.mir");
   const char* data = R"({"N":3,"lim":1.0})";
   char err[8192]{};
   stanli_model* model =
@@ -1081,7 +1078,7 @@ size_t count_containing(const MessageCapture& capture,
 }
 
 void expect_sampling_messages() {
-  const std::string mir = slurp("tests/fixtures/sample_reject.tmir.sexp");
+  const std::string mir = slurp("tests/fixtures/sample_reject.mir");
   char err[8192]{};
   stanli_model_opts model_opts;
   stanli_model_opts_init(&model_opts);
@@ -1221,7 +1218,7 @@ void expect_captured_messages() {
   stanli_capture_messages(1);
   char err[8192]{};
 
-  const std::string print_mir = slurp("tests/fixtures/rejectprint.tmir.sexp");
+  const std::string print_mir = slurp("tests/fixtures/rejectprint.mir");
   stanli_model* printer = stanli_model_new_with_opts(
       print_mir.c_str(), R"({"N":3,"lim":1.0})", nullptr, err, sizeof err);
   expect_true("capture: print model builds", printer != nullptr);
@@ -1281,8 +1278,7 @@ void expect_captured_messages() {
               !sampled.empty() && sampled.back() == '\n');
   stanli_model_free(printer);
 
-  const std::string reject_mir =
-      slurp("tests/fixtures/sample_reject.tmir.sexp");
+  const std::string reject_mir = slurp("tests/fixtures/sample_reject.mir");
   stanli_model* rejecting = stanli_model_new_with_opts(
       reject_mir.c_str(), "{\"y\":0.5,\"cutoff\":0}", nullptr, err, sizeof err);
   expect_true("capture: rejecting model builds", rejecting != nullptr);
@@ -1309,7 +1305,7 @@ void expect_captured_messages() {
 }
 
 void expect_sampling_warnings_api() {
-  const std::string mir = slurp("tests/fixtures/sample_reject.tmir.sexp");
+  const std::string mir = slurp("tests/fixtures/sample_reject.mir");
   char err[8192]{};
   stanli_model* model = stanli_model_new_with_opts(
       mir.c_str(), "{\"y\":0.5,\"cutoff\":-1e9}", nullptr, err, sizeof err);
@@ -1359,7 +1355,7 @@ void expect_sampling_warnings_api() {
 // Browser streaming must expose the same diagnostics as the existing
 // multi-chain API without changing any draw or callback-visible row.
 void expect_streaming_stats() {
-  const std::string mir = slurp("tests/fixtures/es.tmir.sexp");
+  const std::string mir = slurp("tests/fixtures/es.mir");
   const std::string data = slurp("tests/fixtures/es.json");
   char err[8192]{};
   auto* model = stanli_model_new_with_opts(mir.c_str(), data.c_str(), nullptr,
@@ -1432,7 +1428,7 @@ void expect_streaming_stats() {
 }
 
 void expect_walnuts_chain_and_stats() {
-  const std::string mir = slurp("tests/fixtures/es.tmir.sexp");
+  const std::string mir = slurp("tests/fixtures/es.mir");
   const std::string data = slurp("tests/fixtures/es.json");
   char err[8192]{};
   auto* model = stanli_model_new_with_opts(mir.c_str(), data.c_str(), nullptr,
@@ -1486,7 +1482,7 @@ void expect_walnuts_chain_and_stats() {
 }
 
 void expect_sample_options_validated() {
-  const std::string mir = slurp("tests/fixtures/es.tmir.sexp");
+  const std::string mir = slurp("tests/fixtures/es.mir");
   const std::string data = slurp("tests/fixtures/es.json");
   char err[8192]{};
   auto* model = stanli_model_new_with_opts(mir.c_str(), data.c_str(), nullptr,
@@ -1869,8 +1865,7 @@ void expect_interpreter_policy(const char* fixture,
 // transformed parameters or generated quantities. Construction fails rather
 // than returning a model whose draws silently lack them (#523).
 void test_interpreter_probe_failure() {
-  const std::string mir =
-      slurp("tests/fixtures/execution_rng_reject.tmir.sexp");
+  const std::string mir = slurp("tests/fixtures/execution_rng_reject.mir");
   char err[8192]{};
   stanli_model* model =
       stanli_model_new_with_opts(mir.c_str(), "{}", nullptr, err, sizeof err);
@@ -1887,7 +1882,7 @@ void test_interpreter_probe_failure() {
 // Null options build with seed 1; only the same construction seed reproduces
 // a model's transformed data.
 void test_transformed_data_seed() {
-  const std::string mir = slurp("tests/fixtures/tdrng.tmir.sexp");
+  const std::string mir = slurp("tests/fixtures/tdrng.mir");
   char err[8192]{};
   stanli_model* one =
       stanli_model_new_with_opts(mir.c_str(), "{}", nullptr, err, sizeof err);
@@ -1921,7 +1916,7 @@ void test_transformed_data_seed() {
   stanli_model_free(seeded);
   stanli_model_free(other);
   // Generated-quantities draws do not make a model seed-dependent.
-  const std::string gq = slurp("tests/fixtures/gq_scalar_rng.tmir.sexp");
+  const std::string gq = slurp("tests/fixtures/gq_scalar_rng.mir");
   stanli_model* gq_only =
       stanli_model_new_with_opts(gq.c_str(), "{}", nullptr, err, sizeof err);
   expect_true("generated-quantities-only RNG model construction",
@@ -1945,7 +1940,7 @@ void test_reduce_sum_threads() {
       invalid == nullptr &&
           std::string(err).find("threads_per_chain") != std::string::npos);
   stanli_model_free(invalid);
-  const std::string mir = slurp("tests/fixtures/reduce_sum_bindings.tmir.sexp");
+  const std::string mir = slurp("tests/fixtures/reduce_sum_bindings.mir");
   std::string data = "{\"N\":100000,\"y\":[0.5";
   for (int i = 1; i < 100000; ++i) data += ",0.5";
   data += "]}";
@@ -2197,7 +2192,7 @@ void expect_resume_matches_one_run(stanli_model* m, int metric, int threads,
 }
 
 void expect_resume() {
-  const std::string mir = slurp("tests/fixtures/resume_gq_rng.tmir.sexp");
+  const std::string mir = slurp("tests/fixtures/resume_gq_rng.mir");
   const char* data = R"({"N":5,"y":[0.3,-1.2,2.1,0.8,1.5]})";
   char err[8192]{};
   stanli_model* m =
@@ -2274,11 +2269,11 @@ void expect_resume() {
   }
 
   stanli_model* wider = stanli_model_new_with_opts(
-      slurp("tests/fixtures/gq_scalar_rng_container_guard.tmir.sexp").c_str(),
-      "{}", nullptr, err, sizeof err);
+      slurp("tests/fixtures/gq_scalar_rng_container_guard.mir").c_str(), "{}",
+      nullptr, err, sizeof err);
   stanli_model* narrower = stanli_model_new_with_opts(
-      slurp("tests/fixtures/gq_scalar_rng.tmir.sexp").c_str(), "{}", nullptr,
-      err, sizeof err);
+      slurp("tests/fixtures/gq_scalar_rng.mir").c_str(), "{}", nullptr, err,
+      sizeof err);
   expect_true("resume other models build",
               wider != nullptr && narrower != nullptr);
   if (wider != nullptr && narrower != nullptr) {
@@ -2344,8 +2339,8 @@ void expect_resume() {
 void expect_metric_options() {
   char err[8192]{};
   stanli_model* model = stanli_model_new_with_opts(
-      slurp("tests/fixtures/gq_scalar_rng_container_guard.tmir.sexp").c_str(),
-      "{}", nullptr, err, sizeof err);
+      slurp("tests/fixtures/gq_scalar_rng_container_guard.mir").c_str(), "{}",
+      nullptr, err, sizeof err);
   expect_true("metric model builds", model != nullptr);
   if (model == nullptr) return;
   const int64_t n = stanli_n_unconstrained(model);
@@ -2719,7 +2714,7 @@ void test_fast_math_options() {
 void test_shared_write_array_executor() {
   SKIP_WITHOUT_DEBUG_SWITCHES();
   char err[4096]{};
-  const std::string mir = slurp("tests/fixtures/gqrng_vector.tmir.sexp");
+  const std::string mir = slurp("tests/fixtures/gqrng_vector.mir");
   stanli_model* model = stanli_model_new_with_opts(mir.c_str(), R"({"K":4})",
                                                    nullptr, err, sizeof err);
   expect_true("shared write_array: model builds", model != nullptr);
@@ -2763,7 +2758,7 @@ void test_shared_write_array_executor() {
 // executor state shows up as a wrong sigma.
 void test_sampled_write_array_rows_match_draws() {
   char err[4096]{};
-  const std::string mir = slurp("tests/fixtures/gqrng.tmir.sexp");
+  const std::string mir = slurp("tests/fixtures/gqrng.mir");
   stanli_model* model = stanli_model_new_with_opts(mir.c_str(), R"({"N":3})",
                                                    nullptr, err, sizeof err);
   expect_true("sampled write_array: model builds", model != nullptr);
@@ -2837,7 +2832,7 @@ void test_build_id_names_the_abi() {
 }
 
 void test_bridgestan_data() {
-  const std::string mir = slurp("tests/fixtures/conj.tmir.sexp");
+  const std::string mir = slurp("tests/fixtures/conj.mir");
   const std::string conj = slurp("tests/fixtures/conj.json");
   const std::string data =
       "{\"__stanli\": {\"build_id\": \"old\"}, "
@@ -3548,7 +3543,7 @@ void test_declaration_annotations() {
 }
 
 void test_variables_and_layouts() {
-  const std::string mir = slurp("tests/fixtures/amatwa.tmir.sexp");
+  const std::string mir = slurp("tests/fixtures/amatwa.mir");
   char err[8192]{};
   stanli_model* m = stanli_model_new_with_opts(
       mir.c_str(), slurp("tests/fixtures/amatwa.json").c_str(), nullptr, err,
@@ -3599,7 +3594,7 @@ void test_variables_and_layouts() {
 // A run that cannot start says so with -1, distinct from a count of failed
 // chains.
 void test_sample_setup_error() {
-  const std::string mir = slurp("tests/fixtures/conj.tmir.sexp");
+  const std::string mir = slurp("tests/fixtures/conj.mir");
   char err[8192]{};
   stanli_model* m = stanli_model_new_with_opts(
       mir.c_str(), slurp("tests/fixtures/conj.json").c_str(), nullptr, err,
@@ -4016,8 +4011,8 @@ void test_models_on_separate_threads() {
                                nullptr, nullptr, nullptr, err, sizeof err);
     stanli_model_free(m);
   };
-  Job serial[2] = {{"tests/fixtures/gqrng.tmir.sexp", R"({"N":3})", {}, {}},
-                   {"tests/fixtures/es.tmir.sexp", nullptr, {}, {}}};
+  Job serial[2] = {{"tests/fixtures/gqrng.mir", R"({"N":3})", {}, {}},
+                   {"tests/fixtures/es.mir", nullptr, {}, {}}};
   const std::string es_data = slurp("tests/fixtures/es.json");
   serial[1].data = es_data.c_str();
   Job parallel[2] = {serial[0], serial[1]};
@@ -4036,7 +4031,7 @@ void test_models_on_separate_threads() {
 
 // The single-chain entry points check their arguments by the same rules.
 void test_single_chain_arguments() {
-  const std::string mir = slurp("tests/fixtures/es.tmir.sexp");
+  const std::string mir = slurp("tests/fixtures/es.mir");
   const std::string data = slurp("tests/fixtures/es.json");
   char err[4096]{};
   stanli_model* m = stanli_model_new_with_opts(mir.c_str(), data.c_str(),
@@ -4127,12 +4122,11 @@ int main() {
   test_source_include_paths();
   test_reduce_sum_threads();
   test_transformed_data_seed();
-  expect_interpreter_policy("tests/fixtures/wanames.tmir.sexp", nullptr);
-  expect_interpreter_policy("tests/fixtures/wa_literal_write.tmir.sexp",
-                            nullptr);
-  expect_interpreter_policy("tests/fixtures/interp_fallback_region.tmir.sexp",
+  expect_interpreter_policy("tests/fixtures/wanames.mir", nullptr);
+  expect_interpreter_policy("tests/fixtures/wa_literal_write.mir", nullptr);
+  expect_interpreter_policy("tests/fixtures/interp_fallback_region.mir",
                             "oversized shape");
-  expect_interpreter_policy("tests/fixtures/interp_fallback_ode.tmir.sexp",
+  expect_interpreter_policy("tests/fixtures/interp_fallback_ode.mir",
                             "the ODE right-hand side rhs");
   test_interpreter_probe_failure();
   expect_unconstrain_inits_round_trip();
@@ -4141,7 +4135,7 @@ int main() {
   expect_parameterless_unconstrain();
   expect_parameterless_sampling();
 
-  expect_names("tests/fixtures/wanames.tmir.sexp", "{}",
+  expect_names("tests/fixtures/wanames.mir", "{}",
                {
                    "s",
                    "v.1",
@@ -4157,7 +4151,7 @@ int main() {
   // Arrays are outer-major, while each matrix element is column-major.
   // This is the shape a flat "name.1 ... name.N" policy cannot represent.
   expect_names(
-      "tests/fixtures/amatwa.tmir.sexp", slurp("tests/fixtures/amatwa.json"),
+      "tests/fixtures/amatwa.mir", slurp("tests/fixtures/amatwa.json"),
       {"m.1.1.1", "m.2.1.1", "m.1.2.1", "m.2.2.1", "m.1.1.2", "m.2.1.2",
        "m.1.2.2", "m.2.2.2", "m.1.1.3", "m.2.1.3", "m.1.2.3", "m.2.2.3"},
       {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11},
@@ -4166,7 +4160,7 @@ int main() {
   // Generated Stan reads nested scalar arrays outer-first from q, while
   // constrained output is first-index-fast. The two orders are deliberately
   // different for this non-square declaration.
-  expect_names("tests/fixtures/viewa_scalar_column.tmir.sexp", "{}",
+  expect_names("tests/fixtures/viewa_scalar_column.mir", "{}",
                {"a.1.1", "a.2.1", "a.1.2", "a.2.2", "a.1.3", "a.2.3"},
                {1, 2, 3, 4, 5, 6}, {1, 4, 2, 5, 3, 6});
 

@@ -2,7 +2,7 @@ execute_process(
   COMMAND "${STANLI_CHECK}"
           "${SOURCE_DIR}/tests/fixtures/ar1.stan"
           "${SOURCE_DIR}/tests/fixtures/ar1.json"
-          --mir "${SOURCE_DIR}/tests/fixtures/ar1.tmir.sexp"
+          --mir "${SOURCE_DIR}/tests/fixtures/ar1.mir"
           --stanc ignored
   RESULT_VARIABLE result
   OUTPUT_VARIABLE output

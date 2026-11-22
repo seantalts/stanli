@@ -135,7 +135,7 @@ struct Fixture {
 
 std::vector<Fixture> load_fixtures() {
   std::vector<std::string> names;
-  const std::string suffix = ".tmir.sexp";
+  const std::string suffix = ".mir";
   for (const auto& e : fs::directory_iterator("tests/fixtures")) {
     const std::string p = e.path().filename().string();
     if (p.size() > suffix.size() &&
@@ -147,7 +147,7 @@ std::vector<Fixture> load_fixtures() {
   for (const std::string& name : names) {
     Fixture f;
     f.name = name;
-    f.mir = slurp("tests/fixtures/" + name + ".tmir.sexp");
+    f.mir = slurp("tests/fixtures/" + name + ".mir");
     const std::string json = "tests/fixtures/" + name + ".json";
     if (fs::exists(json)) {
       try {

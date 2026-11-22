@@ -114,7 +114,7 @@ double point(int64_t i) { return 0.3 - 0.17 * (double)(i % 5); }
 // quantities, and a write_array the graph can express end to end.
 void test_density_matches_executor() {
   using namespace stanli;
-  const std::string mir = slurp("tests/fixtures/conj.tmir.sexp");
+  const std::string mir = slurp("tests/fixtures/conj.mir");
 
   // The reference: the same model the ordinary way.
   DataMap data = DataMap::from_json_file("tests/fixtures/conj.json");
@@ -178,7 +178,7 @@ void test_density_matches_executor() {
 // All four flag combinations, against the column layout the fixture
 // declares: mu_c, sigma | prec | mu, sd_from_prec, resid.1..resid.50.
 void test_param_num_and_names() {
-  const std::string mir = slurp("tests/fixtures/conj.tmir.sexp");
+  const std::string mir = slurp("tests/fixtures/conj.mir");
   char* err = nullptr;
   bs_model* m =
       bs_model_from_mir(mir.c_str(), "tests/fixtures/conj.json", 1, &err);
@@ -220,7 +220,7 @@ void test_unc_names() {
 
   // Eight schools: a scalar, a bounded scalar, and a vector. The
   // unconstrained count matches the declared shape throughout.
-  const std::string es = slurp("tests/fixtures/es.tmir.sexp");
+  const std::string es = slurp("tests/fixtures/es.mir");
   bs_model* m = bs_model_from_mir(es.c_str(),
                                   "tests/fixtures/eight_schools.json", 1, &err);
   if (m == nullptr) {
@@ -237,7 +237,7 @@ void test_unc_names() {
   // A simplex[3] is THREE constrained values and TWO unconstrained ones,
   // so the declared dims cannot index the unconstrained vector; the names
   // fall back to flat 1..len.
-  const std::string simp = slurp("tests/fixtures/simp.tmir.sexp");
+  const std::string simp = slurp("tests/fixtures/simp.mir");
   bs_model* s = bs_model_from_mir(simp.c_str(), "{\"K\": 3}", 1, &err);
   if (s == nullptr) {
     fail(std::string("simp construct: ") + (err ? err : "(no message)"));
@@ -260,7 +260,7 @@ void test_unc_names() {
 // The graph write_array path, checked against the same graph run directly.
 void test_constrain_graph() {
   using namespace stanli;
-  const std::string mir = slurp("tests/fixtures/conj.tmir.sexp");
+  const std::string mir = slurp("tests/fixtures/conj.mir");
   DataMap data = DataMap::from_json_file("tests/fixtures/conj.json");
   CompiledModel cm = compile_model(mir, data);
   if (!cm.write_array || cm.write_array->columns.empty()) {
@@ -350,7 +350,7 @@ void test_constrain_graph() {
 // The interpreted write_array path: per-draw control flow, with the stream
 // owned by the caller's bs_rng.
 void test_constrain_interp() {
-  const std::string mir = slurp("tests/fixtures/gqrng.tmir.sexp");
+  const std::string mir = slurp("tests/fixtures/gqrng.mir");
   char* err = nullptr;
   // Data as a JSON LITERAL (another of the four `data` forms).
   bs_model* m = bs_model_from_mir(mir.c_str(), "{\"N\": 5}", 1, &err);
@@ -409,8 +409,8 @@ void test_constrain_interp() {
   // payload, so the whole section uses WaInterp; the categorical call must
   // remain available through BridgeStan.
   const std::string categorical = categorical_write_array_mir(
-      slurp("tests/fixtures/cat.tmir.sexp"), "categorical_logit_lpmf", false,
-      false, false, true);
+      slurp("tests/fixtures/cat.mir"), "categorical_logit_lpmf", false, false,
+      false, true);
   err = nullptr;
   m = bs_model_from_mir(categorical.c_str(), R"({"K":3,"y":2,"ys":[3,1,3]})",
                         1234, &err);
@@ -446,7 +446,7 @@ void test_constrain_interp() {
 // generated quantity. The fixture spans interpreter-only, graph-native,
 // container, broadcast and user-function RNG spellings.
 void test_transformed_data_rng() {
-  const std::string mir = slurp("tests/fixtures/tdrng.tmir.sexp");
+  const std::string mir = slurp("tests/fixtures/tdrng.mir");
   char* err = nullptr;
   bs_model* a = bs_model_from_mir(mir.c_str(), "{}", 7, &err);
   bs_model* b = bs_model_from_mir(mir.c_str(), "{}", 7, &err);
@@ -484,7 +484,7 @@ void test_transformed_data_rng() {
 }
 
 void test_constrain_compiled_rng() {
-  const std::string mir = slurp("tests/fixtures/gq_scalar_rng.tmir.sexp");
+  const std::string mir = slurp("tests/fixtures/gq_scalar_rng.mir");
   char* err = nullptr;
   bs_model* m = bs_model_from_mir(mir.c_str(), "{}", 1, &err);
   if (m == nullptr) {
@@ -534,7 +534,7 @@ void test_constrain_compiled_rng() {
 // integer `%` and `%/%`, and the two matrix solves. This pins that the
 // columns are all there and carry the right values.
 void test_constrain_operators() {
-  const std::string mir = slurp("tests/fixtures/gqops.tmir.sexp");
+  const std::string mir = slurp("tests/fixtures/gqops.mir");
   char* err = nullptr;
   bs_model* m =
       bs_model_from_mir(mir.c_str(), "tests/fixtures/gqops.json", 1, &err);
@@ -570,7 +570,7 @@ void test_constrain_operators() {
 }
 
 void test_unsupported() {
-  const std::string mir = slurp("tests/fixtures/es.tmir.sexp");
+  const std::string mir = slurp("tests/fixtures/es.mir");
   char* err = nullptr;
   bs_model* m = bs_model_from_mir(mir.c_str(),
                                   "tests/fixtures/eight_schools.json", 1, &err);
@@ -669,7 +669,7 @@ void test_unsupported() {
 }
 
 void test_initialize() {
-  const std::string mir = slurp("tests/fixtures/es.tmir.sexp");
+  const std::string mir = slurp("tests/fixtures/es.mir");
   char* err = nullptr;
   bs_model* m = bs_model_from_mir(mir.c_str(),
                                   "tests/fixtures/eight_schools.json", 1, &err);
@@ -757,7 +757,7 @@ void test_print_callback() {
   // rejectprint prints from transformed data (at construction, through the
   // MIR interpreter) and from the model block (at evaluation, through the
   // OP_PRINT kernel). Both have to arrive.
-  const std::string mir = slurp("tests/fixtures/rejectprint.tmir.sexp");
+  const std::string mir = slurp("tests/fixtures/rejectprint.mir");
   g_printed.clear();
   bs_model* m =
       bs_model_from_mir(mir.c_str(), "{\"N\": 3, \"lim\": 1.0}", 1, &err);
@@ -796,7 +796,7 @@ void test_print_callback() {
 }
 
 void test_necessity_effects() {
-  const std::string mir = slurp("tests/fixtures/necessity_effects.tmir.sexp");
+  const std::string mir = slurp("tests/fixtures/necessity_effects.mir");
   char* err = nullptr;
   expect_eq_int("necessity callback install",
                 bs_set_print_callback(&collect_print, &err), 0);
@@ -854,7 +854,7 @@ void test_necessity_effects() {
 // No parameters: theta_unc is null and the parameter buffer is empty, so
 // the copy into it must be skipped rather than made from a null pointer.
 void test_parameterless() {
-  const std::string mir = slurp("tests/fixtures/view_gq_data_matrix.tmir.sexp");
+  const std::string mir = slurp("tests/fixtures/view_gq_data_matrix.mir");
   char* err = nullptr;
   bs_model* m =
       bs_model_from_mir(mir.c_str(), R"({"M":[[1,2,3],[4,5,6]]})", 1234, &err);
@@ -930,7 +930,7 @@ void test_manifest() {
 // "__stanli", so the full bs_model_construct path is exercised
 // in-process here.
 void test_embedded_manifest() {
-  const std::string mir = slurp("tests/fixtures/conj.tmir.sexp");
+  const std::string mir = slurp("tests/fixtures/conj.mir");
   nlohmann::json root =
       nlohmann::json::parse(slurp("tests/fixtures/conj.json"));
   root["__stanli"] = {{"build_id", stanli::runtime_build_id()},
@@ -1058,7 +1058,7 @@ std::string base64_of(const std::vector<T>& v) {
 
 void check_whitened_bridge(const std::string& label, int64_t k) {
   using namespace stanli;
-  const std::string mir = slurp("tests/fixtures/conj.tmir.sexp");
+  const std::string mir = slurp("tests/fixtures/conj.mir");
   const std::string json = slurp("tests/fixtures/conj.json");
   const int64_t n = 2;
   const std::vector<double> q_hat = {5.9, -0.31};
@@ -1259,7 +1259,7 @@ void test_construct_errors() {
 
   // Data that is neither a path nor parseable JSON is the same story.
   err = nullptr;
-  const std::string mir = slurp("tests/fixtures/conj.tmir.sexp");
+  const std::string mir = slurp("tests/fixtures/conj.mir");
   m = bs_model_from_mir(mir.c_str(), "{not json", 1, &err);
   if (m != nullptr) {
     fail("bs_model_from_mir accepted malformed data JSON");
@@ -1273,7 +1273,7 @@ void test_construct_errors() {
   // density and write_array surfaces. Construction itself still succeeds.
   err = nullptr;
   const std::string runtime_mir =
-      slurp("tests/fixtures/data_and_tp_checks.tmir.sexp");
+      slurp("tests/fixtures/data_and_tp_checks.mir");
   m = bs_model_from_mir(
       runtime_mir.c_str(),
       R"({"d":0,"raw":0,"N":1,"M":1,"lo":[-10],"R":1,"C":1,"BR":1,"BC":1,"matrix_lo":[[-10]]})",
@@ -1299,7 +1299,7 @@ void test_construct_errors() {
   // Structured declaration checks use the same phase and error contract,
   // including arrays whose JSON storage interleaves their leaves.
   const std::string structured_mir =
-      slurp("tests/fixtures/structured_checks.tmir.sexp");
+      slurp("tests/fixtures/structured_checks.mir");
   const std::string structured_good =
       slurp("tests/fixtures/structured_checks.json");
   std::string structured_bad = structured_good;

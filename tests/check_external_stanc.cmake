@@ -32,7 +32,7 @@ while [ $# -gt 1 ]; do
   fi
   shift
 done
-exec cat \"${SOURCE_DIR}/tests/fixtures/ar1.tmir.sexp\"
+exec cat \"${SOURCE_DIR}/tests/fixtures/ar1.mir\"
 ")
   execute_process(COMMAND chmod +x "${fake}")
   expect_result("--stanli-compile ${fake}" 0 "OK " --stanli-compile "${fake}")

@@ -74,8 +74,7 @@ int count_opcode(const stanli::Graph& g, uint16_t opcode) {
 
 void argument_evaluation(bool parallel = false) {
   using namespace stanli;
-  const std::string mir =
-      slurp("tests/fixtures/reduce_sum_arguments.tmir.sexp");
+  const std::string mir = slurp("tests/fixtures/reduce_sum_arguments.mir");
   for (int in_td : {0, 1})
     for (int n : {0, 2})
       for (int grain : {0, 1})
@@ -155,9 +154,8 @@ void shapes_and_overloads(bool parallel = false) {
   CompileOptions options;
   options.reduce_sum_threads = parallel ? 4 : 1;
   options.reduce_sum_min_chunk_ns = 0;
-  CompiledModel cm =
-      compile_model(slurp("tests/fixtures/reduce_sum_shapes.tmir.sexp"),
-                    DataMap{}, 1, options);
+  CompiledModel cm = compile_model(
+      slurp("tests/fixtures/reduce_sum_shapes.mir"), DataMap{}, 1, options);
   if (parallel && thread_safe_build())
     expect_true("nested outer reduction retained",
                 count_opcode(cm.graph, OP_REDUCE_SUM) == 2);
@@ -191,8 +189,7 @@ void native_review_regressions() {
   options.reduce_sum_threads = 4;
   options.reduce_sum_min_chunk_ns = 0;
   ReduceExecutionContext team(4);
-  const auto discrete =
-      slurp("tests/fixtures/reduce_sum_native_discrete.tmir.sexp");
+  const auto discrete = slurp("tests/fixtures/reduce_sum_native_discrete.mir");
   auto data = DataMap::from_json("{\"N\":7,\"y\":[0,1,2,3,4,5,6]}");
   auto cm = compile_model(discrete, data, 1, options);
   expect_true("integer density two retained sites",
@@ -219,8 +216,7 @@ void native_review_regressions() {
     expect_true("integer normalized/propto oracle gradient",
                 std::abs(grad - (-b + 2 * (21 - 7 * std::exp(b)))) < 1e-11);
   }
-  const auto bounded =
-      slurp("tests/fixtures/reduce_sum_native_bounded.tmir.sexp");
+  const auto bounded = slurp("tests/fixtures/reduce_sum_native_bounded.mir");
   auto bc = compile_model(bounded, data, 1, options);
   expect_true("bounded specialization retains threading option",
               count_opcode(bc.graph, OP_REDUCE_SUM) == 1);
@@ -284,9 +280,8 @@ void native_lifecycle() {
   CompileOptions options;
   options.reduce_sum_threads = 4;
   options.reduce_sum_min_chunk_ns = 0;
-  auto cm =
-      compile_model(slurp("tests/fixtures/reduce_sum_parallel_probe.tmir.sexp"),
-                    data, 1, options);
+  auto cm = compile_model(slurp("tests/fixtures/reduce_sum_parallel_probe.mir"),
+                          data, 1, options);
   Executor ex(std::move(cm.graph));
   cm.bind(ex);
   ex.set_reduce_context(&team);
@@ -341,7 +336,7 @@ void native_lifecycle() {
 void native_corners() {
   using namespace stanli;
   if (!thread_safe_build()) return;
-  const auto mir = slurp("tests/fixtures/reduce_sum_native.tmir.sexp");
+  const auto mir = slurp("tests/fixtures/reduce_sum_native.mir");
   CompileOptions options;
   options.reduce_sum_threads = 4;
   options.reduce_sum_min_chunk_ns = 0;
@@ -417,12 +412,11 @@ void native_corners() {
       }
   // Existing normalized/propto spellings and transformed-data behavior.
   auto data = DataMap::from_json_file("tests/fixtures/reduce_sum.json");
-  auto cm = compile_model(slurp("tests/fixtures/reduce_sum.tmir.sexp"), data, 1,
-                          options);
+  auto cm =
+      compile_model(slurp("tests/fixtures/reduce_sum.mir"), data, 1, options);
   expect_true("propto retained calls",
               count_opcode(cm.graph, OP_REDUCE_SUM) > 0);
-  auto serial =
-      compile_model(slurp("tests/fixtures/reduce_sum.tmir.sexp"), data);
+  auto serial = compile_model(slurp("tests/fixtures/reduce_sum.mir"), data);
   const auto got = evaluate(cm), want = evaluate(serial);
   expect_true("parallel propto lp",
               std::abs(got.lp - want.lp) < 1e-10 * (1 + std::abs(want.lp)));
@@ -435,7 +429,7 @@ void native_corners() {
 void native_parallel() {
   using namespace stanli;
   if (!thread_safe_build()) return;
-  const auto mir = slurp("tests/fixtures/reduce_sum_parallel_probe.tmir.sexp");
+  const auto mir = slurp("tests/fixtures/reduce_sum_parallel_probe.mir");
   for (int n : {0, 1, 7, 257})
     for (int active : {0, 1})
       for (int kind : {0, 1}) {
@@ -537,7 +531,7 @@ Run evaluate_region_map(stanli::Executor& ex, int point) {
 void native_region_map() {
   using namespace stanli;
   if (!thread_safe_build()) return;
-  const auto mir = slurp("tests/fixtures/reduce_sum_region_map.tmir.sexp");
+  const auto mir = slurp("tests/fixtures/reduce_sum_region_map.mir");
   const auto whole = DataMap::from_json(region_map_data(0, 1, 256));
   CompileOptions options;
   options.reduce_sum_min_chunk_ns = 0;
@@ -649,7 +643,7 @@ void native_region_map() {
 void native_local_store() {
   using namespace stanli;
   if (!thread_safe_build()) return;
-  const auto mir = slurp("tests/fixtures/reduce_sum_local_store.tmir.sexp");
+  const auto mir = slurp("tests/fixtures/reduce_sum_local_store.mir");
   const auto data =
       DataMap::from_json_file("tests/fixtures/reduce_sum_local_store.json");
   CompileOptions options;
@@ -717,7 +711,7 @@ void native_local_store() {
 void serial_notice() {
   using namespace stanli;
   if (!thread_safe_build()) return;
-  const auto mir = slurp("tests/fixtures/reduce_sum_region_map.tmir.sexp");
+  const auto mir = slurp("tests/fixtures/reduce_sum_region_map.mir");
   CompileOptions options;
   auto quiet = compile_model(
       mir, DataMap::from_json(region_map_data(0, 1, 256)), 1, options);
@@ -753,7 +747,7 @@ int retained_children(const stanli::CompiledModel& cm) {
 void work_cutoff() {
   using namespace stanli;
   if (!thread_safe_build()) return;
-  const auto mir = slurp("tests/fixtures/reduce_sum_region_map.tmir.sexp");
+  const auto mir = slurp("tests/fixtures/reduce_sum_region_map.mir");
   CompileOptions options;
   options.reduce_sum_threads = 4;
   const auto compile = [&](int n) {
@@ -780,8 +774,7 @@ void work_cutoff() {
 void region_map_domain_error() {
   using namespace stanli;
   if (!thread_safe_build()) return;
-  const auto mir =
-      slurp("tests/fixtures/reduce_sum_region_map_domain.tmir.sexp");
+  const auto mir = slurp("tests/fixtures/reduce_sum_region_map_domain.mir");
   const auto data = DataMap::from_json(region_map_data(0, 1, 256));
   CompileOptions options;
   options.reduce_sum_min_chunk_ns = 0;
@@ -868,7 +861,7 @@ bool has_inplace_store(const stanli::Graph& g) {
 void native_inplace_stores() {
   using namespace stanli;
   if (!thread_safe_build()) return;
-  const auto mir = slurp("tests/fixtures/reduce_sum_inplace.tmir.sexp");
+  const auto mir = slurp("tests/fixtures/reduce_sum_inplace.mir");
   const auto data = DataMap::from_json(inplace_data(257, 0));
   CompileOptions options;
   options.reduce_sum_threads = 4;
@@ -963,7 +956,7 @@ void inplace_store_imports() {
 // both accumulating forms lower like the terms added to target directly.
 void accumulated_terms() {
   using namespace stanli;
-  const auto mir = slurp("tests/fixtures/reduce_sum_accumulator.tmir.sexp");
+  const auto mir = slurp("tests/fixtures/reduce_sum_accumulator.mir");
   const int n = 64;
   const auto compile = [&](int mode) {
     std::ostringstream json;
@@ -1017,7 +1010,7 @@ int main() {
 
   DataMap data = DataMap::from_json_file("tests/fixtures/reduce_sum.json");
   CompiledModel cm =
-      compile_model(slurp("tests/fixtures/reduce_sum.tmir.sexp"), data);
+      compile_model(slurp("tests/fixtures/reduce_sum.mir"), data);
 
   // Ask the graph before the executor takes it. The empty slice's callee
   // rejects, so reaching it at all is the bug this catches.
@@ -1028,8 +1021,8 @@ int main() {
 
   DataMap equiv_data =
       DataMap::from_json_file("tests/fixtures/reduce_sum_equiv.json");
-  CompiledModel equiv_cm = compile_model(
-      slurp("tests/fixtures/reduce_sum_equiv.tmir.sexp"), equiv_data);
+  CompiledModel equiv_cm =
+      compile_model(slurp("tests/fixtures/reduce_sum_equiv.mir"), equiv_data);
   const Run want = evaluate(equiv_cm);
 
   expect_true("lp is finite", std::isfinite(got.lp));

@@ -3,6 +3,7 @@
 // evaluation order. Plus the unsupported-construct error path.
 #include "env_helpers.hpp"
 #include "categorical_check_mir.hpp"
+#include "portable_mir_writer.hpp"
 #include "stdout_capture.hpp"
 #include <stanli/compile.hpp>
 #include <stanli/dae.hpp>
@@ -175,135 +176,41 @@ static bool same_graph_structure(const stanli::CompiledModel& a,
   return true;
 }
 
-// A minimal model whose only statement slices a declared 3-vector parameter
-// v[2:] (Upfrom) or the pre-bump v[2:3] (Between) it is equivalent to.
-static const char* kUpfromSliceMir = R"MIR(
-((functions_block ())
- (input_vars ())
- (log_prob
-  (((pattern
-     (Decl (decl_adtype AutoDiffable) (decl_id v)
-      (decl_type
-       (Sized
-        (SVector AoS
-         ((pattern (Lit Int 3)) (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly)))))))
-      (initialize
-       (Assign
-        ((pattern
-          (FunApp
-           (CompilerInternal
-            (FnReadParam (constrain Identity)
-             (dims
-              (((pattern (Lit Int 3))
-                (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly))))))
-             (mem_pattern AoS)))
-           ()))
-         (meta ((type_ UVector) (loc <opaque>) (adlevel AutoDiffable))))))))
-    (meta <opaque>))
-   ((pattern
-     (TargetPE
-      ((pattern
-        (FunApp (StanLib normal_lpdf (FnLpdf false) AoS)
-         (((pattern
-            (Indexed
-             ((pattern (Var v))
-              (meta ((type_ UVector) (loc <opaque>) (adlevel AutoDiffable))))
-             ((Upfrom
-               ((pattern (Lit Int 2))
-                (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly))))))))
-           (meta ((type_ UVector) (loc <opaque>) (adlevel AutoDiffable))))
-          ((pattern
-            (Promotion
-             ((pattern (Lit Int 0))
-              (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly))))
-             UReal DataOnly))
-           (meta ((type_ UReal) (loc <opaque>) (adlevel DataOnly))))
-          ((pattern
-            (Promotion
-             ((pattern (Lit Int 1))
-              (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly))))
-             UReal DataOnly))
-           (meta ((type_ UReal) (loc <opaque>) (adlevel DataOnly)))))))
-       (meta ((type_ UReal) (loc <opaque>) (adlevel AutoDiffable))))))
-    (meta <opaque>))))
- (output_vars
-  ((v <opaque>
-    ((out_unconstrained_st
-      (SVector AoS
-       ((pattern (Lit Int 3)) (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly))))))
-     (out_constrained_st
-      (SVector AoS
-       ((pattern (Lit Int 3)) (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly))))))
-     (out_block Parameters) (out_trans Identity)))))
- (prog_name upfrom_test_model)
- (prog_path upfrom_test.stan))
-)MIR";
-
-static std::string between_slice_mir() {
-  std::string text = kUpfromSliceMir;
-  const std::string upfrom =
-      "((Upfrom\n"
-      "               ((pattern (Lit Int 2))\n"
-      "                (meta ((type_ UInt) (loc <opaque>) (adlevel "
-      "DataOnly))))))))";
-  const size_t at = text.find(upfrom);
-  if (at == std::string::npos) return "";
-  text.replace(at, upfrom.size(),
-               "((Between\n"
-               "               ((pattern (Lit Int 2))\n"
-               "                (meta ((type_ UInt) (loc <opaque>) (adlevel "
-               "DataOnly))))\n"
-               "               ((pattern (Lit Int 3))\n"
-               "                (meta ((type_ UInt) (loc <opaque>) (adlevel "
-               "DataOnly))))))))");
-  return text;
-}
-
-// Returns the parenthesized s-expression starting at or after `start`.
-static std::string read_sexp_at(const std::string& text, size_t start) {
-  size_t i = start;
-  while (text[i] == ' ' || text[i] == '\n') ++i;
-  int depth = 0;
-  size_t j = i;
-  for (; j < text.size(); ++j) {
-    if (text[j] == '(') {
-      ++depth;
-    } else if (text[j] == ')') {
-      if (--depth == 0) {
-        ++j;
-        break;
-      }
-    }
-  }
-  return text.substr(i, j - i);
-}
-
 // Rewrites a UDF-formal matrix's full-extent row range W[1:rows(W), k] into
 // the Upfrom shape W[1:, k] it is equivalent to.
-static size_t rewrite_udf_rows_slice_to_upfrom(std::string& text) {
-  std::string out;
-  size_t pos = 0, count = 0;
-  while (true) {
-    const size_t idx = text.find("(Between", pos);
-    if (idx == std::string::npos) {
-      out += text.substr(pos);
-      break;
-    }
-    const std::string node = read_sexp_at(text, idx);
-    const size_t node_end = idx + node.size();
-    if (node.find("rows FnPlain)") != std::string::npos &&
-        node.find("(Var W)") != std::string::npos) {
-      const std::string lo = read_sexp_at(node, std::strlen("(Between"));
-      out += text.substr(pos, idx - pos);
-      out += "(Upfrom " + lo + ")";
+static size_t rewrite_udf_rows_slice_to_upfrom(stanli::mir::Program& program) {
+  using namespace stanli;
+  size_t count = 0;
+  portable_writer::visit_exprs(program, [&](mir::Expr& e) {
+    if (e.kind == mir::Expr::IndexBetween && e.args.size() == 2 &&
+        portable_writer::calls(e.args[1], "rows") &&
+        e.args[1].args.size() == 1 &&
+        e.args[1].args[0].kind == mir::Expr::Var &&
+        e.args[1].args[0].name == "W") {
+      e.kind = mir::Expr::IndexUpfrom;
+      e.args.pop_back();
       ++count;
-    } else {
-      out += text.substr(pos, node_end - pos);
     }
-    pos = node_end;
-  }
-  text = std::move(out);
+  });
   return count;
+}
+
+// tests/fixtures/cat.mir. With `logit` its densities are
+// categorical_logit_lpmf and its simplex parameter is an unconstrained
+// vector.
+static stanli::mir::Program cat_program(bool logit) {
+  using namespace stanli;
+  mir::Program program = decode_program(slurp("tests/fixtures/cat.mir"));
+  if (!logit) return program;
+  portable_writer::visit_exprs(program, [](mir::Expr& e) {
+    if (portable_writer::calls(e, "categorical_lpmf"))
+      e.name = "categorical_logit_lpmf";
+  });
+  portable_writer::for_each_stmt(program, [](mir::Stmt& s) {
+    if (s.read_transform && s.read_transform->kind == mir::Transform::Simplex)
+      s.read_transform->kind = mir::Transform::Identity;
+  });
+  return program;
 }
 
 static stanli::DataMap bound_check_data(double raw = 0.0, int N = 1, int M = 1,
@@ -941,7 +848,7 @@ static void test_fixture_constants() {
   for (const ConstantCase& c : cases) {
     const std::string what = c.what;
     stanli::CompiledModel cm = stanli::compile_model(
-        slurp(std::string("tests/fixtures/") + c.stem + ".tmir.sexp"), c.data);
+        slurp(std::string("tests/fixtures/") + c.stem + ".mir"), c.data);
     if (c.n_unconstrained >= 0)
       check(cm.n_unconstrained == c.n_unconstrained, what + " parameter width");
     if (c.island)
@@ -1009,7 +916,7 @@ static std::pair<double, double> anchor_gradient(const std::string& mir,
 static void test_bounded_specialization() {
   SKIP_WITHOUT_DEBUG_SWITCHES();
   using namespace stanli;
-  const auto mir = slurp("tests/fixtures/bounded_control.tmir.sexp");
+  const auto mir = slurp("tests/fixtures/bounded_control.mir");
   for (int mode : {0, 1})
     for (int n : {0, 1, 40, 20000}) {
       std::ostringstream json;
@@ -1075,7 +982,7 @@ static void test_bounded_specialization() {
       }
     }
   // Range reductions are outside the single-selector specialization proof.
-  const auto range_mir = slurp("tests/fixtures/dynslice.tmir.sexp");
+  const auto range_mir = slurp("tests/fixtures/dynslice.mir");
   const auto range_data =
       DataMap::from_json(slurp("tests/fixtures/dynslice.json"));
   test_setenv("STANLI_BOUNDED_SPECIALIZATION", "0", 1);
@@ -1097,7 +1004,7 @@ static void test_udf_tail_branch() {
   using namespace stanli;
   const DataMap data =
       DataMap::from_json(slurp("tests/fixtures/udf_tail_branch.json"));
-  const std::string mir = slurp("tests/fixtures/udf_tail_branch.tmir.sexp");
+  const std::string mir = slurp("tests/fixtures/udf_tail_branch.mir");
   const int n = (int)data.at("N").r[0];
   const auto count = [](const CompiledModel& cm, uint16_t opcode) {
     int k = 0;
@@ -1157,7 +1064,7 @@ static void test_udf_packed_branch() {
   test_setenv("STANLI_STRUCTURED_LOOPS", "0", 1);
   test_setenv("STANLI_REGION_MAP", "0", 1);
   CompiledModel cm =
-      compile_model(slurp("tests/fixtures/udf_packed_branch.tmir.sexp"), data);
+      compile_model(slurp("tests/fixtures/udf_packed_branch.mir"), data);
   test_unsetenv("STANLI_REGION_MAP");
   test_unsetenv("STANLI_STRUCTURED_LOOPS");
   const int n = (int)data.at("N").r[0];
@@ -1208,7 +1115,7 @@ static void test_region_dynamic_index(bool map) {
   test_setenv("STANLI_STRUCTURED_LOOPS", "0", 1);
   if (!map) test_setenv("STANLI_REGION_MAP", "0", 1);
   CompiledModel cm =
-      compile_model(slurp("tests/fixtures/dynindex_region.tmir.sexp"), data);
+      compile_model(slurp("tests/fixtures/dynindex_region.mir"), data);
   test_unsetenv("STANLI_STRUCTURED_LOOPS");
   test_unsetenv("STANLI_REGION_MAP");
   const uint16_t region = map ? OP_REGION_MAP : OP_ISLAND;
@@ -1270,8 +1177,8 @@ static void test_udf_constant_branch() {
       DataMap::from_json(slurp("tests/fixtures/udf_constant_branch.json"));
   test_setenv("STANLI_STRUCTURED_LOOPS", "0", 1);
   test_setenv("STANLI_REGION_MAP", "0", 1);
-  CompiledModel cm = compile_model(
-      slurp("tests/fixtures/udf_constant_branch.tmir.sexp"), data);
+  CompiledModel cm =
+      compile_model(slurp("tests/fixtures/udf_constant_branch.mir"), data);
   test_unsetenv("STANLI_REGION_MAP");
   test_unsetenv("STANLI_STRUCTURED_LOOPS");
   int islands = 0;
@@ -1306,8 +1213,7 @@ static void test_udf_guard_returns() {
       DataMap::from_json(slurp("tests/fixtures/udf_guard_returns.json"));
   CompiledModel cm;
   try {
-    cm = compile_model(slurp("tests/fixtures/udf_guard_returns.tmir.sexp"),
-                       data);
+    cm = compile_model(slurp("tests/fixtures/udf_guard_returns.mir"), data);
   } catch (const std::exception& error) {
     check(false, std::string("udf guard returns compile: ") + error.what());
     return;
@@ -1342,7 +1248,7 @@ static void test_udf_call_int_size() {
   CompiledModel cm;
   try {
     cm = compile_model(
-        slurp("tests/fixtures/udf_call_int_size.tmir.sexp"),
+        slurp("tests/fixtures/udf_call_int_size.mir"),
         DataMap::from_json(slurp("tests/fixtures/udf_call_int_size.json")));
   } catch (const std::exception& error) {
     check(false, std::string("udf call int size compile: ") + error.what());
@@ -1371,7 +1277,7 @@ static void test_udf_call_int_index() {
   CompiledModel cm;
   try {
     cm = compile_model(
-        slurp("tests/fixtures/udf_call_int_index.tmir.sexp"),
+        slurp("tests/fixtures/udf_call_int_index.mir"),
         DataMap::from_json(slurp("tests/fixtures/udf_call_int_index.json")));
   } catch (const std::exception& error) {
     check(false, std::string("udf call int index compile: ") + error.what());
@@ -1401,8 +1307,8 @@ static void test_call_matches_inlined(const std::string& name,
   const DataMap data = DataMap::from_json(slurp(base + "_o0.json"));
   CompiledModel call, inlined;
   try {
-    call = compile_model(slurp(base + "_o0.tmir.sexp"), data);
-    inlined = compile_model(slurp(base + "_inline_o0.tmir.sexp"), data);
+    call = compile_model(slurp(base + "_o0.mir"), data);
+    inlined = compile_model(slurp(base + "_inline_o0.mir"), data);
   } catch (const std::exception& error) {
     check(false, name + " compile: " + error.what());
     return;
@@ -1448,7 +1354,7 @@ static void test_udf_lp_propto() {
       DataMap::from_json(slurp("tests/fixtures/udf_lp_propto.json"));
   CompiledModel cm;
   try {
-    cm = compile_model(slurp("tests/fixtures/udf_lp_propto.tmir.sexp"), data);
+    cm = compile_model(slurp("tests/fixtures/udf_lp_propto.mir"), data);
   } catch (const std::exception& error) {
     check(false, std::string("udf lp propto compile: ") + error.what());
     return;
@@ -1478,8 +1384,7 @@ static void test_repeated_target_terms() {
       DataMap::from_json(slurp("tests/fixtures/repeated_target_terms.json"));
   CompiledModel cm;
   try {
-    cm = compile_model(slurp("tests/fixtures/repeated_target_terms.tmir.sexp"),
-                       data);
+    cm = compile_model(slurp("tests/fixtures/repeated_target_terms.mir"), data);
   } catch (const std::exception& error) {
     check(false, std::string("repeated target terms compile: ") + error.what());
     return;
@@ -1516,8 +1421,8 @@ static void test_inplace_copy_then_store() {
   using namespace stanli;
   CompiledModel cm;
   try {
-    cm = compile_model(
-        slurp("tests/fixtures/inplace_copy_then_store.tmir.sexp"), DataMap{});
+    cm = compile_model(slurp("tests/fixtures/inplace_copy_then_store.mir"),
+                       DataMap{});
   } catch (const std::exception& error) {
     check(false, std::string("inplace copy compile: ") + error.what());
     return;
@@ -1550,7 +1455,7 @@ static void test_inplace_copy_then_store() {
 static void test_udf_lpdf_folded_normalized() {
   using namespace stanli;
   const std::string mir =
-      slurp("tests/fixtures/udf_lpdf_folded_normalized.tmir.sexp");
+      slurp("tests/fixtures/udf_lpdf_folded_normalized.mir");
   const DataMap data = DataMap::from_json("{}");
   CompiledModel cm;
   try {
@@ -1607,7 +1512,7 @@ static void test_udf_truncate() {
     CompiledModel cm;
     try {
       cm = compile_model(
-          slurp("tests/fixtures/udf_truncate_forms.tmir.sexp"),
+          slurp("tests/fixtures/udf_truncate_forms.mir"),
           DataMap::from_json("{\"form\": " + std::to_string(form) + "}"));
     } catch (const std::exception& error) {
       check(false, name + " compile: " + error.what());
@@ -1626,8 +1531,7 @@ static void test_udf_truncate() {
       DataMap::from_json(slurp("tests/fixtures/udf_truncate_shapes.json"));
   CompiledModel cm;
   try {
-    cm = compile_model(slurp("tests/fixtures/udf_truncate_shapes.tmir.sexp"),
-                       data);
+    cm = compile_model(slurp("tests/fixtures/udf_truncate_shapes.mir"), data);
   } catch (const std::exception& error) {
     check(false, std::string("udf truncate shapes compile: ") + error.what());
     return;
@@ -1679,8 +1583,7 @@ static void test_udf_lp_inlined_propto() {
       DataMap::from_json(slurp("tests/fixtures/udf_lp_inlined_propto.json"));
   CompiledModel cm;
   try {
-    cm = compile_model(slurp("tests/fixtures/udf_lp_inlined_propto.tmir.sexp"),
-                       data);
+    cm = compile_model(slurp("tests/fixtures/udf_lp_inlined_propto.mir"), data);
   } catch (const std::exception& error) {
     check(false, std::string("udf lp inlined compile: ") + error.what());
     return;
@@ -1723,8 +1626,7 @@ static void test_udf_lp_branch_propto() {
       DataMap::from_json(slurp("tests/fixtures/udf_lp_branch_propto.json"));
   CompiledModel cm;
   try {
-    cm = compile_model(slurp("tests/fixtures/udf_lp_branch_propto.tmir.sexp"),
-                       data);
+    cm = compile_model(slurp("tests/fixtures/udf_lp_branch_propto.mir"), data);
   } catch (const std::exception& error) {
     check(false, std::string("udf lp branch compile: ") + error.what());
     return;
@@ -1763,8 +1665,7 @@ static void test_udf_lp_condition() {
       DataMap::from_json(slurp("tests/fixtures/udf_lp_condition.json"));
   CompiledModel cm;
   try {
-    cm =
-        compile_model(slurp("tests/fixtures/udf_lp_condition.tmir.sexp"), data);
+    cm = compile_model(slurp("tests/fixtures/udf_lp_condition.mir"), data);
   } catch (const std::exception& error) {
     check(false, std::string("udf lp condition compile: ") + error.what());
     return;
@@ -1797,7 +1698,7 @@ static void test_udf_lp_bound() {
       DataMap::from_json(slurp("tests/fixtures/udf_lp_bound.json"));
   CompiledModel cm;
   try {
-    cm = compile_model(slurp("tests/fixtures/udf_lp_bound.tmir.sexp"), data);
+    cm = compile_model(slurp("tests/fixtures/udf_lp_bound.mir"), data);
   } catch (const std::exception& error) {
     check(false, std::string("udf lp bound compile: ") + error.what());
     return;
@@ -1822,8 +1723,8 @@ static void test_structured_refused_branch() {
       slurp("tests/fixtures/structured_refused_branch.json"));
   CompiledModel cm;
   try {
-    cm = compile_model(
-        slurp("tests/fixtures/structured_refused_branch.tmir.sexp"), data);
+    cm = compile_model(slurp("tests/fixtures/structured_refused_branch.mir"),
+                       data);
   } catch (const std::exception& error) {
     check(false,
           std::string("structured refused branch compile: ") + error.what());
@@ -1846,8 +1747,8 @@ static void test_udf_void_return_in_branch() {
       slurp("tests/fixtures/udf_void_return_in_branch.json"));
   CompiledModel cm;
   try {
-    cm = compile_model(
-        slurp("tests/fixtures/udf_void_return_in_branch.tmir.sexp"), data);
+    cm = compile_model(slurp("tests/fixtures/udf_void_return_in_branch.mir"),
+                       data);
   } catch (const std::exception& error) {
     check(false,
           std::string("udf void return in branch compile: ") + error.what());
@@ -1878,8 +1779,7 @@ static void test_udf_branch_kernels() {
       DataMap::from_json(slurp("tests/fixtures/udf_branch_kernels.json"));
   CompiledModel cm;
   try {
-    cm = compile_model(slurp("tests/fixtures/udf_branch_kernels.tmir.sexp"),
-                       data);
+    cm = compile_model(slurp("tests/fixtures/udf_branch_kernels.mir"), data);
   } catch (const std::exception& error) {
     check(false, std::string("udf branch kernels compile: ") + error.what());
     return;
@@ -1922,8 +1822,7 @@ static void test_udf_data_call_o1() {
       DataMap::from_json(slurp("tests/fixtures/udf_data_call_o1.json"));
   CompiledModel cm;
   try {
-    cm =
-        compile_model(slurp("tests/fixtures/udf_data_call_o1.tmir.sexp"), data);
+    cm = compile_model(slurp("tests/fixtures/udf_data_call_o1.mir"), data);
   } catch (const std::exception& error) {
     check(false, std::string("udf data call o1 compile: ") + error.what());
     return;
@@ -1962,8 +1861,7 @@ static void test_udf_void_names() {
   using namespace stanli;
   CompiledModel cm;
   try {
-    cm = compile_model(slurp("tests/fixtures/udf_void_names.tmir.sexp"),
-                       DataMap());
+    cm = compile_model(slurp("tests/fixtures/udf_void_names.mir"), DataMap());
   } catch (const std::exception& error) {
     check(false, std::string("udf void names compile: ") + error.what());
     return;
@@ -1991,7 +1889,7 @@ static void test_region_local_only() {
   using namespace stanli;
   CompiledModel cm;
   try {
-    cm = compile_model(slurp("tests/fixtures/paramcond_local_only.tmir.sexp"),
+    cm = compile_model(slurp("tests/fixtures/paramcond_local_only.mir"),
                        DataMap::from_json(R"({"s": 1.0})"));
   } catch (const std::exception& error) {
     check(false, std::string("local-only region compile: ") + error.what());
@@ -2021,7 +1919,7 @@ static void test_udf_void_early_return() {
   using namespace stanli;
   CompiledModel cm;
   try {
-    cm = compile_model(slurp("tests/fixtures/udf_void_early_return.tmir.sexp"),
+    cm = compile_model(slurp("tests/fixtures/udf_void_early_return.mir"),
                        DataMap());
   } catch (const std::exception& error) {
     check(false, std::string("void early return compile: ") + error.what());
@@ -2053,8 +1951,8 @@ static void test_effect_ternary() {
   using namespace stanli;
   CompiledModel cm;
   try {
-    cm = compile_model(
-        slurp("tests/fixtures/paramcond_effect_ternary.tmir.sexp"), DataMap());
+    cm = compile_model(slurp("tests/fixtures/paramcond_effect_ternary.mir"),
+                       DataMap());
   } catch (const std::exception& error) {
     check(false, std::string("effect ternary compile: ") + error.what());
     return;
@@ -2087,7 +1985,7 @@ static void test_effect_ternary() {
 
 static void test_udf_void_statements() {
   using namespace stanli;
-  const std::string mir = slurp("tests/fixtures/udf_void_statements.tmir.sexp");
+  const std::string mir = slurp("tests/fixtures/udf_void_statements.mir");
   const DataMap data =
       DataMap::from_json(slurp("tests/fixtures/udf_void_statements.json"));
   CompiledModel cm;
@@ -2138,7 +2036,7 @@ static void test_udf_void_statements() {
 // interpreted write_array.
 static void test_write_array_shadowed_size() {
   using namespace stanli;
-  const std::string mir = slurp("tests/fixtures/wa_shadowed_size.tmir.sexp");
+  const std::string mir = slurp("tests/fixtures/wa_shadowed_size.mir");
   const DataMap data = DataMap::from_json(R"({"N":3,"r":1})");
   const std::vector<double> q{0.25};
   const std::vector<double> want{0.25, 0.5, 0.5, 0.5};
@@ -2163,8 +2061,8 @@ static void test_structured_vector_return() {
   const DataMap data =
       DataMap::from_json(slurp("tests/fixtures/structured_vector_return.json"));
   test_setenv("STANLI_REGION_MAP", "0", 1);
-  CompiledModel cm = compile_model(
-      slurp("tests/fixtures/structured_vector_return.tmir.sexp"), data);
+  CompiledModel cm =
+      compile_model(slurp("tests/fixtures/structured_vector_return.mir"), data);
   test_unsetenv("STANLI_REGION_MAP");
   int loops = 0, islands = 0;
   for (const Op& op : cm.graph.ops) {
@@ -2201,7 +2099,7 @@ static void test_structured_dead_after_break() {
       slurp("tests/fixtures/structured_dead_after_break.json"));
   test_setenv("STANLI_REGION_MAP", "0", 1);
   CompiledModel cm = compile_model(
-      slurp("tests/fixtures/structured_dead_after_break.tmir.sexp"), data);
+      slurp("tests/fixtures/structured_dead_after_break.mir"), data);
   test_unsetenv("STANLI_REGION_MAP");
   int loops = 0;
   for (const Op& op : cm.graph.ops) {
@@ -2237,7 +2135,7 @@ static void test_structured_while_vector_return() {
   const DataMap data = DataMap::from_json(
       slurp("tests/fixtures/structured_while_vector_return.json"));
   CompiledModel cm = compile_model(
-      slurp("tests/fixtures/structured_while_vector_return.tmir.sexp"), data);
+      slurp("tests/fixtures/structured_while_vector_return.mir"), data);
   const std::vector<double>& y = data.at("y").r;
   const double mu0 = 0.4;
   stan::math::var mu = mu0, lp = 0;
@@ -2266,7 +2164,7 @@ static void test_structured_while_vector_return() {
 static void test_region_constant_shadow() {
   using namespace stanli;
   CompiledModel cm = compile_model(
-      slurp("tests/fixtures/region_constant_shadow.tmir.sexp"), DataMap());
+      slurp("tests/fixtures/region_constant_shadow.mir"), DataMap());
   const double thetas[2] = {0.1, 0.02};
   const double want_lp[2] = {0.3, 0.04};
   const double want_grad[2] = {3.0, 2.0};
@@ -2291,7 +2189,7 @@ static void test_wiener_forms() {
       DataMap::from_json(slurp("tests/fixtures/wiener_forms.json"));
   CompiledModel cm;
   try {
-    cm = compile_model(slurp("tests/fixtures/wiener_forms.tmir.sexp"), data);
+    cm = compile_model(slurp("tests/fixtures/wiener_forms.mir"), data);
   } catch (const std::exception& error) {
     check(false, std::string("wiener forms compile: ") + error.what());
     return;
@@ -2341,8 +2239,7 @@ static void test_wiener_cdf_forms() {
       DataMap::from_json(slurp("tests/fixtures/wiener_cdf_forms.json"));
   CompiledModel cm;
   try {
-    cm =
-        compile_model(slurp("tests/fixtures/wiener_cdf_forms.tmir.sexp"), data);
+    cm = compile_model(slurp("tests/fixtures/wiener_cdf_forms.mir"), data);
   } catch (const std::exception& error) {
     check(false, std::string("wiener cdf forms compile: ") + error.what());
     return;
@@ -2405,7 +2302,7 @@ static void test_wiener_activity() {
       DataMap::from_json(slurp("tests/fixtures/wiener_activity.json"));
   CompiledModel cm;
   try {
-    cm = compile_model(slurp("tests/fixtures/wiener_activity.tmir.sexp"), data);
+    cm = compile_model(slurp("tests/fixtures/wiener_activity.mir"), data);
   } catch (const std::exception& error) {
     check(false, std::string("wiener activity compile: ") + error.what());
     return;
@@ -2444,8 +2341,7 @@ static void test_wiener_scalar_calls() {
       DataMap::from_json(slurp("tests/fixtures/wiener_scalar_calls.json"));
   CompiledModel cm;
   try {
-    cm = compile_model(slurp("tests/fixtures/wiener_scalar_calls.tmir.sexp"),
-                       data);
+    cm = compile_model(slurp("tests/fixtures/wiener_scalar_calls.mir"), data);
   } catch (const std::exception& error) {
     check(false, std::string("wiener scalar calls compile: ") + error.what());
     return;
@@ -2495,8 +2391,7 @@ static void test_udf_param_branch() {
   test_setenv("STANLI_STRUCTURED_LOOPS", "0", 1);
   CompiledModel cm;
   try {
-    cm =
-        compile_model(slurp("tests/fixtures/udf_param_branch.tmir.sexp"), data);
+    cm = compile_model(slurp("tests/fixtures/udf_param_branch.mir"), data);
   } catch (const std::exception& e) {
     test_unsetenv("STANLI_STRUCTURED_LOOPS");
     check(false, std::string("udf param branch compiles: ") + e.what());
@@ -2543,7 +2438,7 @@ int main() {
   {
     DataMap d;
     CompiledModel reductions =
-        compile_model(slurp("tests/fixtures/a1_reductions.tmir.sexp"), d);
+        compile_model(slurp("tests/fixtures/a1_reductions.mir"), d);
     check(count_opcode(reductions, OP_PROD_VEC) == 1,
           "A1 product opcode census");
     for (const Op& op : reductions.graph.ops)
@@ -2588,7 +2483,7 @@ int main() {
   {
     DataMap d;
     CompiledModel matrix_functions =
-        compile_model(slurp("tests/fixtures/a2_matrix_functions.tmir.sexp"), d);
+        compile_model(slurp("tests/fixtures/a2_matrix_functions.mir"), d);
     check(count_opcode(matrix_functions, OP_INVERSE) == 1,
           "A2 inverse opcode census");
     check(count_opcode(matrix_functions, OP_INVERSE_SPD) == 1,
@@ -2652,7 +2547,7 @@ int main() {
              "Sigma": [[2.0, 0.5], [0.5, 1.0]]})");
     const std::vector<double> q = {0.35, -0.2,  0.4,  0.15, -0.3,
                                    0.5,  -0.45, 0.25, -0.1};
-    const std::string mir = slurp("tests/fixtures/shapes.tmir.sexp");
+    const std::string mir = slurp("tests/fixtures/shapes.mir");
     const LowerSnapshot fast = lower_snapshot(mir, d, q, false);
     const LowerSnapshot oracle = lower_snapshot(mir, d, q, true);
     expect_same_lowering("data preload shapes", fast, oracle);
@@ -2664,7 +2559,7 @@ int main() {
   {
     DataMap missing;
     missing.set_int("N", 2);
-    const std::string mir = slurp("tests/fixtures/loopy.tmir.sexp");
+    const std::string mir = slurp("tests/fixtures/loopy.mir");
     const std::string fast = lower_error(mir, missing, false);
     const std::string oracle = lower_error(mir, missing, true);
     check(!fast.empty() && fast.find("y") != std::string::npos,
@@ -2672,7 +2567,7 @@ int main() {
     check(fast == oracle, "data preload missing input diagnostic");
 
     const DataMap malformed = DataMap::from_json(R"({"K": 1.5})");
-    const std::string simp = slurp("tests/fixtures/simp.tmir.sexp");
+    const std::string simp = slurp("tests/fixtures/simp.mir");
     const std::string fast_int = lower_error(simp, malformed, false);
     const std::string oracle_int = lower_error(simp, malformed, true);
     check(!fast_int.empty(), "data preload real token for int rejected");
@@ -2684,7 +2579,7 @@ int main() {
   data.set_real_array("y", std::vector<double>(kY, kY + 8));
   data.set_real_array("sigma", std::vector<double>(kSigma, kSigma + 8));
 
-  CompiledModel cm = compile_model(slurp("tests/fixtures/es.tmir.sexp"), data);
+  CompiledModel cm = compile_model(slurp("tests/fixtures/es.mir"), data);
   check(cm.n_unconstrained == 10, "10 unconstrained params");
   check(cm.param_names.size() == 3 && cm.param_names[0] == "mu" &&
             cm.param_names[1] == "tau" && cm.param_names[2] == "theta_tilde",
@@ -2715,8 +2610,7 @@ int main() {
     DataMap d;
     d.set_int("N", 3);
     d.set_real_array("y", {1.0, 2.0, 3.0});
-    CompiledModel lm =
-        compile_model(slurp("tests/fixtures/loopy.tmir.sexp"), d);
+    CompiledModel lm = compile_model(slurp("tests/fixtures/loopy.mir"), d);
     Executor lex(std::move(lm.graph));
     lm.bind(lex);
     lex.params_data()[0] = 0.4;
@@ -2740,8 +2634,7 @@ int main() {
   // re-rolling could hide an unroll. The nested form accumulates N*M into
   // the same one multiply rather than leaving a chain of scalar scales.
   if (debug_switches_available()) {
-    const std::string mir =
-        slurp("tests/fixtures/invariant_target_loop.tmir.sexp");
+    const std::string mir = slurp("tests/fixtures/invariant_target_loop.mir");
     const auto compile_loop = [&](int mode, int N, int M = 1) {
       DataMap d;
       d.set_int("N", N);
@@ -2832,8 +2725,7 @@ int main() {
     DataMap d;
     d.set_int("M", 3);
     d.set_int_array("s", {2, 0, 1});
-    CompiledModel lm =
-        compile_model(slurp("tests/fixtures/staticif.tmir.sexp"), d);
+    CompiledModel lm = compile_model(slurp("tests/fixtures/staticif.mir"), d);
     Executor lex(std::move(lm.graph));
     lm.bind(lex);
     lex.params_data()[0] = 0.3;
@@ -2864,8 +2756,7 @@ int main() {
   {
     DataMap d =
         DataMap::from_json(R"({"M": 2, "T": 3, "y": [[1, 0, 1], [0, 0, 1]]})");
-    CompiledModel lm =
-        compile_model(slurp("tests/fixtures/introw.tmir.sexp"), d);
+    CompiledModel lm = compile_model(slurp("tests/fixtures/introw.mir"), d);
     check(lm.n_unconstrained == 3, "introw 3 unconstrained");
     Executor lex(std::move(lm.graph));
     lm.bind(lex);
@@ -2896,8 +2787,7 @@ int main() {
     DataMap d;
     d.set_int("N", 2);
     d.set_real_array("y", {1.3, -0.7});
-    CompiledModel lm =
-        compile_model(slurp("tests/fixtures/dfold.tmir.sexp"), d);
+    CompiledModel lm = compile_model(slurp("tests/fixtures/dfold.mir"), d);
     Executor lex(std::move(lm.graph));
     lm.bind(lex);
     lex.params_data()[0] = 0.25;
@@ -2934,7 +2824,7 @@ int main() {
     DataMap d = DataMap::from_json(
         std::string(R"({"N": 3, "K": 3, "flag": )") + std::to_string(flag) +
         R"(, "W": [[1.0, 2.0, 4.0], [1.0, 0.5, 2.0], [1.0, -1.0, 6.0]]})");
-    CompiledModel lm = compile_model(slurp("tests/fixtures/udf.tmir.sexp"), d);
+    CompiledModel lm = compile_model(slurp("tests/fixtures/udf.mir"), d);
     check(lm.n_unconstrained == 3, "udf 3 unconstrained");
     Executor lex(std::move(lm.graph));
     lm.bind(lex);
@@ -2975,8 +2865,7 @@ int main() {
     DataMap d;
     d.set_int("N", 4);
     d.set_real_array("y", {2.0, 1.5, -1.0, 3.0});
-    CompiledModel lm =
-        compile_model(slurp("tests/fixtures/tdext.tmir.sexp"), d);
+    CompiledModel lm = compile_model(slurp("tests/fixtures/tdext.mir"), d);
     Executor lex(std::move(lm.graph));
     lm.bind(lex);
     lex.params_data()[0] = 0.3;
@@ -3007,8 +2896,7 @@ int main() {
     DataMap d;
     d.set_real("a", 1.25);
     d.set_real("b", -0.5);
-    CompiledModel lm =
-        compile_model(slurp("tests/fixtures/tdvocab.tmir.sexp"), d);
+    CompiledModel lm = compile_model(slurp("tests/fixtures/tdvocab.mir"), d);
     Executor lex(std::move(lm.graph));
     lm.bind(lex);
     lex.params_data()[0] = 0.3;
@@ -3052,8 +2940,7 @@ int main() {
       "dm": [[[111.0,112.0,113.0],[121.0,122.0,123.0]],
              [[211.0,212.0,213.0],[221.0,222.0,223.0]]]
     })");
-    CompiledModel lm =
-        compile_model(slurp("tests/fixtures/ndlit.tmir.sexp"), d);
+    CompiledModel lm = compile_model(slurp("tests/fixtures/ndlit.mir"), d);
     Executor lex(std::move(lm.graph));
     lm.bind(lex);
     const double q[3] = {0.3, 0.5, -0.25};
@@ -3103,8 +2990,7 @@ int main() {
     };
     const DataMap d =
         DataMap::from_json(slurp("tests/fixtures/whileloop.json"));
-    CompiledModel lm =
-        compile_model(slurp("tests/fixtures/whileloop.tmir.sexp"), d);
+    CompiledModel lm = compile_model(slurp("tests/fixtures/whileloop.mir"), d);
     check(count_whiles(lm) == 3, "gather-containing model retains three loops");
     Executor lex(std::move(lm.graph));
     lm.bind(lex);
@@ -3127,13 +3013,13 @@ int main() {
     DataMap long_d;
     long_d.set_int("N", 1000001);
     CompiledModel long_loop =
-        compile_model(slurp("tests/fixtures/whileloop.tmir.sexp"), long_d);
+        compile_model(slurp("tests/fixtures/whileloop.mir"), long_d);
     check(count_whiles(long_loop) == 3,
           "long while lowers without a compile-time iteration cap");
     if (debug_switches_available()) {
       test_setenv("STANLI_STRUCTURED_LOOPS", "0", 1);
       CompiledModel islands =
-          compile_model(slurp("tests/fixtures/whileloop.tmir.sexp"), d);
+          compile_model(slurp("tests/fixtures/whileloop.mir"), d);
       test_unsetenv("STANLI_STRUCTURED_LOOPS");
       check(count_opcode(islands, OP_ISLAND) == 3,
             "while loops lower as three control islands on the legacy path");
@@ -3146,7 +3032,7 @@ int main() {
   // the same Stan Math calls, and exercise it again through write_array.
   {
     CompiledModel cm = compile_model(
-        slurp("tests/fixtures/structured_matrix_ops.tmir.sexp"), DataMap());
+        slurp("tests/fixtures/structured_matrix_ops.mir"), DataMap());
     const double point[5] = {0.5, 0.2, -0.1, 0.3, 0.4};
     Executor ex(cm.graph);
     cm.bind(ex);
@@ -3214,7 +3100,7 @@ int main() {
   {
     DataMap d = DataMap::from_json(slurp("tests/fixtures/matblockassign.json"));
     CompiledModel lm =
-        compile_model(slurp("tests/fixtures/matblockassign.tmir.sexp"), d);
+        compile_model(slurp("tests/fixtures/matblockassign.mir"), d);
     Executor lex(std::move(lm.graph));
     lm.bind(lex);
     lex.params_data()[0] = 0.1;
@@ -3233,8 +3119,7 @@ int main() {
     DataMap d;
     d.set_int("N", 3);
     d.set_real_array("y", {1.1, -0.4, 2.2});
-    CompiledModel lm =
-        compile_model(slurp("tests/fixtures/udflp.tmir.sexp"), d);
+    CompiledModel lm = compile_model(slurp("tests/fixtures/udflp.mir"), d);
     check(lm.n_unconstrained == 4, "udflp 4 unconstrained");
     Executor lex(std::move(lm.graph));
     lm.bind(lex);
@@ -3274,7 +3159,7 @@ int main() {
     DataMap d;
     d.set_int("D", 2);
     CompiledModel lm =
-        compile_model(slurp("tests/fixtures/udf_local_shape.tmir.sexp"), d);
+        compile_model(slurp("tests/fixtures/udf_local_shape.mir"), d);
     check(lm.write_array && !lm.write_array->truncated,
           "UDF local shape write_array compiled");
     if (lm.write_array && !lm.write_array->truncated) {
@@ -3304,7 +3189,7 @@ int main() {
   // the same path as the generated C++.
   {
     CompiledModel cm = compile_model(
-        slurp("tests/fixtures/udf_conditional_return.tmir.sexp"), DataMap());
+        slurp("tests/fixtures/udf_conditional_return.mir"), DataMap());
     const double points[2][2] = {{0.5, -0.2}, {-0.5, -0.2}};
     const double want_lp[2] = {1.3, -0.7};
     const double want_grad[2][2] = {{3.0, 1.0}, {1.0, 1.0}};
@@ -3348,8 +3233,7 @@ int main() {
     DataMap d = DataMap::from_json(
         R"({"N": 3, "Y": [1.0, 2.0, 3.0], "bhaz": [0.4, 0.5, 0.6],
             "cbhaz": [0.2, 0.3, 0.4]})");
-    CompiledModel lm =
-        compile_model(slurp("tests/fixtures/overload.tmir.sexp"), d);
+    CompiledModel lm = compile_model(slurp("tests/fixtures/overload.mir"), d);
     check(lm.n_unconstrained == 1, "overload 1 unconstrained");
     Executor lex(std::move(lm.graph));
     lm.bind(lex);
@@ -3381,7 +3265,7 @@ int main() {
   {
     DataMap d = DataMap::from_json(R"({"N": 2, "y": [0.25, 3.0]})");
     CompiledModel lm =
-        compile_model(slurp("tests/fixtures/overload_bound.tmir.sexp"), d);
+        compile_model(slurp("tests/fixtures/overload_bound.mir"), d);
     check(lm.n_unconstrained == 2, "overload bound 2 unconstrained");
     Executor lex(std::move(lm.graph));
     lm.bind(lex);
@@ -3433,7 +3317,7 @@ int main() {
       d.set_int_array("cens", empty ? std::vector<int>{1, 1, 1, 1}
                                     : std::vector<int>{0, 1, 0, 1});
       CompiledModel lm =
-          compile_model(slurp("tests/fixtures/emptygather.tmir.sexp"), d);
+          compile_model(slurp("tests/fixtures/emptygather.mir"), d);
       check(lm.n_unconstrained == 4, "emptygather 4 unconstrained");
       Executor lex(std::move(lm.graph));
       lm.bind(lex);
@@ -3473,8 +3357,7 @@ int main() {
       DataMap d = DataMap::from_json(
           empty ? R"({"M": 0, "idx": [], "Y": [1.5, -0.5, 2.0, 0.25]})"
                 : R"({"M": 2, "idx": [3, 1], "Y": [1.5, -0.5, 2.0, 0.25]})");
-      CompiledModel lm =
-          compile_model(slurp("tests/fixtures/emptyidx.tmir.sexp"), d);
+      CompiledModel lm = compile_model(slurp("tests/fixtures/emptyidx.mir"), d);
       Executor lex(std::move(lm.graph));
       lm.bind(lex);
       lex.params_data()[0] = 0.4;
@@ -3524,7 +3407,7 @@ int main() {
                 : R"({"K": 2, "lo": 2, "hi": 3, "Y": [1.5, -0.5, 2.0, 0.25],
                       "Zm": [[1, 5], [2, 6], [3, 7], [4, 8]]})");
       CompiledModel lm =
-          compile_model(slurp("tests/fixtures/rangeclamp.tmir.sexp"), d);
+          compile_model(slurp("tests/fixtures/rangeclamp.mir"), d);
       Executor lex(std::move(lm.graph));
       lm.bind(lex);
       lex.params_data()[0] = -0.3;
@@ -3566,7 +3449,7 @@ int main() {
               "Zm": [[1, 5], [2, 6], [3, 7], [4, 8]]})");
       return d;
     };
-    const std::string mir = slurp("tests/fixtures/oob.tmir.sexp");
+    const std::string mir = slurp("tests/fixtures/oob.mir");
 
     const auto reference = [&](bool rows_empty, double q) {
       using stan::math::var;
@@ -3677,7 +3560,7 @@ int main() {
   // column slices, column writes.
   {
     DataMap d = DataMap::from_json(R"({"N": 4, "idx": [2, 1, 3, 2]})");
-    CompiledModel lm = compile_model(slurp("tests/fixtures/idx.tmir.sexp"), d);
+    CompiledModel lm = compile_model(slurp("tests/fixtures/idx.mir"), d);
     check(lm.n_unconstrained == 9, "idx 9 unconstrained");
     Executor lex(std::move(lm.graph));
     lm.bind(lex);
@@ -3722,8 +3605,10 @@ int main() {
   // x's declared extent. Upfrom must lower exactly like Between(a, extent),
   // both on a declared local and on a UDF's unsized formal.
   {
-    CompiledModel upfrom_model = compile_model(kUpfromSliceMir, DataMap{});
-    CompiledModel between_model = compile_model(between_slice_mir(), DataMap{});
+    CompiledModel upfrom_model =
+        compile_model(slurp("tests/fixtures/slice_upfrom_o0.mir"), DataMap{});
+    CompiledModel between_model =
+        compile_model(slurp("tests/fixtures/slice_between_o0.mir"), DataMap{});
     check(same_graph_structure(upfrom_model, between_model),
           "v[k:] and v[k:N] on a declared vector lower identically");
   }
@@ -3731,11 +3616,12 @@ int main() {
     DataMap d = DataMap::from_json(
         R"({"N": 3, "K": 3, "flag": 0, )"
         R"("W": [[1.0, 2.0, 4.0], [1.0, 0.5, 2.0], [1.0, -1.0, 6.0]]})");
-    std::string between_mir = slurp("tests/fixtures/udf.tmir.sexp");
-    std::string upfrom_mir = between_mir;
-    check(rewrite_udf_rows_slice_to_upfrom(upfrom_mir) == 2,
+    std::string between_mir = slurp("tests/fixtures/udf.mir");
+    mir::Program upfrom_program = decode_program(between_mir);
+    check(rewrite_udf_rows_slice_to_upfrom(upfrom_program) == 2,
           "udf fixture has two W[1:rows(W), k] slices to rewrite");
-    CompiledModel upfrom_model = compile_model(upfrom_mir, d);
+    CompiledModel upfrom_model =
+        compile_model(portable_writer::write_v2(upfrom_program), d);
     CompiledModel between_model = compile_model(between_mir, d);
     check(same_graph_structure(upfrom_model, between_model),
           "W[k:] and W[k:rows(W)] on a UDF formal lower identically");
@@ -3748,7 +3634,7 @@ int main() {
     DataMap d;
     d.set_int_array("idx", {5, 2, 2});
     CompiledModel gm =
-        compile_model(slurp("tests/fixtures/viewa_outer_gather.tmir.sexp"), d);
+        compile_model(slurp("tests/fixtures/viewa_outer_gather.mir"), d);
     check(count_opcode(gm, OP_GATHER) == 1,
           "duplicate outer gather has one explicit gather");
     Executor gex(std::move(gm.graph));
@@ -3773,7 +3659,7 @@ int main() {
       d.set_real_array("A", {1.0, 3.0, 2.0, 4.0}, {2, 2});
       d.set_real_array("y", {0.5, -0.25}, {2});
       CompiledModel lm =
-          compile_model(slurp("tests/fixtures/viewalias.tmir.sexp"), d);
+          compile_model(slurp("tests/fixtures/viewalias.mir"), d);
       check(lm.n_unconstrained == 6, "viewalias 6 unconstrained");
       Executor lex(std::move(lm.graph));
       lm.bind(lex);
@@ -3850,7 +3736,7 @@ int main() {
   // categorical_lpmf, scalar and array outcomes, on a simplex parameter.
   {
     DataMap d = DataMap::from_json(R"({"K": 3, "y": 2, "ys": [3, 1, 3]})");
-    CompiledModel lm = compile_model(slurp("tests/fixtures/cat.tmir.sexp"), d);
+    CompiledModel lm = compile_model(slurp("tests/fixtures/cat.mir"), d);
     check(lm.n_unconstrained == 2, "cat 2 unconstrained");
     Executor lex(std::move(lm.graph));
     lm.bind(lex);
@@ -3879,14 +3765,16 @@ int main() {
   // disconnected zero. In particular, an unselected zero probability must
   // not be reached by a zero-adjoint log backward and turn into 0 / 0.
   {
-    std::string mir = slurp("tests/fixtures/cat.tmir.sexp");
-    auto replace_all = [&](const std::string& from, const std::string& to) {
-      for (size_t pos = mir.find(from); pos != std::string::npos;
-           pos = mir.find(from, pos + to.size()))
-        mir.replace(pos, from.size(), to);
-    };
-    replace_all("(pattern (Lit Int 3))", "(pattern (Lit Int 0))");
-    replace_all("(constrain Simplex)", "(constrain Identity)");
+    // The outcome array is empty and the simplex an unconstrained vector.
+    mir::Program program = cat_program(false);
+    portable_writer::visit_exprs(program, [](mir::Expr& e) {
+      if (e.kind == mir::Expr::LitInt && e.lit_i == 3) e.lit_i = 0;
+    });
+    portable_writer::for_each_stmt(program, [](mir::Stmt& s) {
+      if (s.read_transform && s.read_transform->kind == mir::Transform::Simplex)
+        s.read_transform->kind = mir::Transform::Identity;
+    });
+    const std::string mir = portable_writer::write_v2(program);
 
     DataMap d;
     d.set_int("K", 2);
@@ -3919,15 +3807,13 @@ int main() {
   // pullback. Exercise both scalar
   // and array outcomes under normalized and propto MIR flags.
   for (bool propto : {false, true}) {
-    std::string mir = slurp("tests/fixtures/cat.tmir.sexp");
-    auto replace_all = [&](const std::string& from, const std::string& to) {
-      for (size_t pos = mir.find(from); pos != std::string::npos;
-           pos = mir.find(from, pos + to.size()))
-        mir.replace(pos, from.size(), to);
-    };
-    replace_all("categorical_lpmf", "categorical_logit_lpmf");
-    replace_all("(constrain Simplex)", "(constrain Identity)");
-    if (propto) replace_all("(FnLpmf false)", "(FnLpmf true)");
+    mir::Program program = cat_program(true);
+    if (propto)
+      portable_writer::visit_exprs(program, [](mir::Expr& e) {
+        if (portable_writer::calls(e, "categorical_logit_lpmf"))
+          e.fn_propto = true;
+      });
+    const std::string mir = portable_writer::write_v2(program);
 
     DataMap d = DataMap::from_json(R"({"K":3,"y":2,"ys":[3,1,3]})");
     CompiledModel lm = compile_model(mir, d);
@@ -4101,18 +3987,9 @@ int main() {
   // immediate. It executes once, then the exact categorical op consumes that
   // value and supplies the same pullback as Stan Math.
   for (const std::string& fn : {"categorical_lpmf", "categorical_logit_lpmf"}) {
-    std::string mir = slurp("tests/fixtures/cat.tmir.sexp");
-    if (fn == "categorical_logit_lpmf") {
-      for (size_t pos = mir.find("categorical_lpmf"); pos != std::string::npos;
-           pos = mir.find("categorical_lpmf", pos + fn.size()))
-        mir.replace(pos, std::strlen("categorical_lpmf"), fn);
-      for (size_t pos = mir.find("(constrain Simplex)");
-           pos != std::string::npos;
-           pos = mir.find("(constrain Simplex)", pos + 20))
-        mir.replace(pos, std::strlen("(constrain Simplex)"),
-                    "(constrain Identity)");
-    }
-    mir = categorical_parameter_effect_mir(std::move(mir), fn);
+    const std::string mir = categorical_parameter_effect_mir(
+        portable_writer::write_v2(cat_program(fn == "categorical_logit_lpmf")),
+        fn);
     DataMap d = DataMap::from_json(R"({"K":3,"y":2,"ys":[3,1,3]})");
     std::optional<CompiledModel> lm;
     {
@@ -4174,8 +4051,8 @@ int main() {
       for (bool island : {false, true}) {
         DataMap d = DataMap::from_json(R"({"K":3,"y":2,"ys":[3,1,3]})");
         CompiledModel lm = compile_model(
-            categorical_write_array_mir(slurp("tests/fixtures/cat.tmir.sexp"),
-                                        fn, propto, island),
+            categorical_write_array_mir(slurp("tests/fixtures/cat.mir"), fn,
+                                        propto, island),
             d);
         const std::string tag =
             fn + std::string(propto ? " propto" : " normalized") +
@@ -4208,8 +4085,8 @@ int main() {
       for (int outcome_count : {1, 3}) {
         DataMap d = DataMap::from_json(R"({"K":3,"y":2,"ys":[3,1,3]})");
         const std::string interpreted_mir = categorical_write_array_mir(
-            slurp("tests/fixtures/cat.tmir.sexp"), fn, propto, false, false,
-            true, outcome_count);
+            slurp("tests/fixtures/cat.mir"), fn, propto, false, false, true,
+            outcome_count);
         CompiledModel lm = compile_model(interpreted_mir, d);
         const std::string tag =
             fn + std::string(propto ? " propto" : " normalized") +
@@ -4259,18 +4136,14 @@ int main() {
   // Propto still validates on the interpreted route. A runtime RNG outcome
   // keeps the section in WaInterp while producing an out-of-range category.
   for (const std::string& fn : {"categorical_lpmf", "categorical_logit_lpmf"}) {
-    std::string mir = categorical_write_array_mir(
-        slurp("tests/fixtures/cat.tmir.sexp"), fn, true, false, false, true);
-    const size_t gq = mir.find("(generate_quantities");
-    const size_t density = mir.find("(FunApp (StanLib " + fn, gq);
-    const size_t rng = mir.find("(FunApp (StanLib binomial_rng", density);
-    const std::string one = "(pattern (Lit Int 1))";
-    const size_t trials = mir.find(one, rng);
-    check(gq != std::string::npos && density != std::string::npos &&
-              rng != std::string::npos && trials != std::string::npos,
-          fn + " invalid interpreted mutation found target");
-    if (trials != std::string::npos)
-      mir.replace(trials, one.size(), "(pattern (Lit Int 4))");
+    // The generated categorical's random outcome draws from 4 trials.
+    mir::Program program = categorical_mir::write_array_program(
+        slurp("tests/fixtures/cat.mir"), fn, true, false, false, true);
+    mir::Expr& density = categorical_mir::expect_expr(
+        program.generate_quantities, categorical_mir::calls(fn),
+        "no generated categorical density");
+    density.args.at(0).args.at(0).lit_i = 4;
+    const std::string mir = portable_writer::write_v2(program);
     DataMap d = DataMap::from_json(R"({"K":3,"y":2,"ys":[3,1,3]})");
     CompiledModel lm = compile_model(mir, d);
     check(lm.write_array && lm.write_array->interp,
@@ -4303,27 +4176,17 @@ int main() {
   // scalar-left multiplication must retain the vector's logical geometry in
   // the interpreter before the categorical runtime check.
   for (const std::string& fn : {"categorical_lpmf", "categorical_logit_lpmf"}) {
-    std::string mir = categorical_write_array_mir(
-        slurp("tests/fixtures/cat.tmir.sexp"), fn, false, false, false, true);
-    const size_t gq = mir.find("(generate_quantities");
-    const size_t density = mir.find("(FunApp (StanLib " + fn, gq);
-    const std::string vector_arg =
-        "((pattern (Var theta))\n"
-        "             (meta ((type_ UVector) (adlevel DataOnly)))))";
-    const size_t arg = mir.find(vector_arg, density);
-    check(gq != std::string::npos && density != std::string::npos &&
-              arg != std::string::npos,
-          fn + " scalar-left vector mutation found target");
-    if (arg != std::string::npos) {
-      const std::string scaled_arg = R"(((pattern
-             (FunApp (StanLib Times__ FnPlain AoS)
-              (((pattern (Lit Real 1.0))
-                (meta ((type_ UReal) (adlevel DataOnly))))
-               ((pattern (Var theta))
-                (meta ((type_ UVector) (adlevel DataOnly)))))))
-            (meta ((type_ UVector) (adlevel DataOnly))))))";
-      mir.replace(arg, vector_arg.size(), scaled_arg);
-    }
+    // The generated categorical's vector argument is 1.0 * theta.
+    mir::Program program = categorical_mir::write_array_program(
+        slurp("tests/fixtures/cat.mir"), fn, false, false, false, true);
+    mir::Expr& arg =
+        categorical_mir::expect_expr(program.generate_quantities,
+                                     categorical_mir::calls(fn),
+                                     "no generated categorical density")
+            .args.at(1);
+    arg = portable_writer::call("Times__", arg.unsized,
+                                {portable_writer::lit_real(1.0), arg});
+    const std::string mir = portable_writer::write_v2(program);
     DataMap d = DataMap::from_json(R"({"K":1,"y":1,"ys":[1,1,1]})");
     CompiledModel lm = compile_model(mir, d);
     check(lm.write_array && lm.write_array->interp,
@@ -4351,38 +4214,23 @@ int main() {
   // the outcomes or the empty vector.
   if (debug_switches_available()) {
     const std::string fn = "categorical_logit_lpmf";
-    std::string mir =
-        categorical_write_array_mir(slurp("tests/fixtures/cat.tmir.sexp"), fn,
-                                    false, false, false, true, 0);
-    const size_t gq = mir.find("(generate_quantities");
-    const size_t density = mir.find("(FunApp (StanLib " + fn, gq);
-    const std::string vector_arg =
-        "((pattern (Var theta))\n"
-        "             (meta ((type_ UVector) (adlevel DataOnly)))))";
-    const size_t arg = mir.find(vector_arg, density);
-    check(gq != std::string::npos && density != std::string::npos &&
-              arg != std::string::npos,
-          "empty scalar-left vector mutation found target");
-    if (arg != std::string::npos) {
-      const std::string scaled_empty = R"(((pattern
-             (FunApp (StanLib Times__ FnPlain AoS)
-              (((pattern
-                 (FunApp (StanLib gamma_rng FnRng AoS)
-                  (((pattern (Lit Real 1.0))
-                    (meta ((type_ UReal) (adlevel DataOnly))))
-                   ((pattern (Lit Real 1.0))
-                    (meta ((type_ UReal) (adlevel DataOnly)))))))
-                (meta ((type_ UReal) (adlevel DataOnly))))
-               ((pattern
-                 (FunApp (StanLib head FnPlain AoS)
-                  (((pattern (Var theta))
-                    (meta ((type_ UVector) (adlevel DataOnly))))
-                   ((pattern (Lit Int 0))
-                    (meta ((type_ UInt) (adlevel DataOnly)))))))
-                (meta ((type_ UVector) (adlevel DataOnly)))))))
-            (meta ((type_ UVector) (adlevel DataOnly))))))";
-      mir.replace(arg, vector_arg.size(), scaled_empty);
-    }
+    // The generated categorical's vector argument is
+    // gamma_rng(1.0, 1.0) * head(theta, 0).
+    namespace pw = portable_writer;
+    mir::Program program = categorical_mir::write_array_program(
+        slurp("tests/fixtures/cat.mir"), fn, false, false, false, true, 0);
+    mir::Expr& arg =
+        categorical_mir::expect_expr(program.generate_quantities,
+                                     categorical_mir::calls(fn),
+                                     "no generated categorical density")
+            .args.at(1);
+    mir::Expr draw = pw::call("gamma_rng", pw::view(mir::UnsizedLeaf::Real),
+                              {pw::lit_real(1.0), pw::lit_real(1.0)});
+    draw.fn_suffix = mir::FnSuffix::Rng;
+    arg =
+        pw::call("Times__", arg.unsized,
+                 {draw, pw::call("head", arg.unsized, {arg, pw::lit_int(0)})});
+    const std::string mir = pw::write_v2(program);
     DataMap d = DataMap::from_json(R"({"K":3,"y":2,"ys":[3,1,3]})");
     test_setenv("STANLI_WA_FORCE_INTERP", "1");
     CompiledModel lm = compile_model(mir, d);
@@ -4412,7 +4260,7 @@ int main() {
   {
     DataMap d;
     d.set_int("R", 2);
-    CompiledModel lm = compile_model(slurp("tests/fixtures/repm.tmir.sexp"), d);
+    CompiledModel lm = compile_model(slurp("tests/fixtures/repm.mir"), d);
     check(lm.n_unconstrained == 4, "repm 4 unconstrained");
     Executor lex(std::move(lm.graph));
     lm.bind(lex);
@@ -4448,8 +4296,7 @@ int main() {
   {
     DataMap d;
     d.set_int("C", 2);
-    CompiledModel lm =
-        compile_model(slurp("tests/fixtures/aprow.tmir.sexp"), d);
+    CompiledModel lm = compile_model(slurp("tests/fixtures/aprow.mir"), d);
     check(lm.n_unconstrained == 8, "aprow 8 unconstrained");
     Executor lex(std::move(lm.graph));
     lm.bind(lex);
@@ -4494,7 +4341,7 @@ int main() {
   // are outer-major -- so the same source function needs two lowerings.
   {
     CompiledModel lm =
-        compile_model(slurp("tests/fixtures/reverse.tmir.sexp"), DataMap());
+        compile_model(slurp("tests/fixtures/reverse.mir"), DataMap());
     check(lm.n_unconstrained == 10, "reverse 10 unconstrained");
     Executor lex(std::move(lm.graph));
     lm.bind(lex);
@@ -4545,7 +4392,7 @@ int main() {
   // `high`, not `low`), which is exactly what open-coding gets wrong.
   {
     CompiledModel lm =
-        compile_model(slurp("tests/fixtures/linspaced.tmir.sexp"), DataMap());
+        compile_model(slurp("tests/fixtures/linspaced.mir"), DataMap());
     check(lm.n_unconstrained == 7, "linspaced 7 unconstrained");
     Executor lex(std::move(lm.graph));
     lm.bind(lex);
@@ -4587,8 +4434,7 @@ int main() {
   // slots while reading the wrong ones.
   {
     DataMap d = DataMap::from_json(slurp("tests/fixtures/blockfn.json"));
-    CompiledModel lm =
-        compile_model(slurp("tests/fixtures/blockfn.tmir.sexp"), d);
+    CompiledModel lm = compile_model(slurp("tests/fixtures/blockfn.mir"), d);
     check(lm.n_unconstrained == 20, "blockfn 20 unconstrained");
     Executor lex(std::move(lm.graph));
     lm.bind(lex);
@@ -4627,8 +4473,7 @@ int main() {
   // under a wrong (row-major) fill, so the reference pins the ordering.
   {
     DataMap d = DataMap::from_json(slurp("tests/fixtures/tomatrix.json"));
-    CompiledModel lm =
-        compile_model(slurp("tests/fixtures/tomatrix.tmir.sexp"), d);
+    CompiledModel lm = compile_model(slurp("tests/fixtures/tomatrix.mir"), d);
     check(lm.n_unconstrained == 6, "tomatrix 6 unconstrained");
     Executor lex(std::move(lm.graph));
     lm.bind(lex);
@@ -4664,7 +4509,7 @@ int main() {
   // cell, so a transposed or flattened fill moves the gradient. M's
   // unconstrained order is column-major: M11 M21 M12 M22 M13 M23.
   {
-    const std::string mir = slurp("tests/fixtures/to_array_2d.tmir.sexp");
+    const std::string mir = slurp("tests/fixtures/to_array_2d.mir");
     DataMap d = DataMap::from_json(slurp("tests/fixtures/to_array_2d.json"));
     CompiledModel lm = compile_model(mir, d);
     check(lm.n_unconstrained == 6, "to_array_2d 6 unconstrained");
@@ -4696,7 +4541,7 @@ int main() {
   // A density of an empty integer outcome is 0, as in Stan Math, also when
   // the interpreter evaluates it.
   {
-    const std::string mir = slurp("tests/fixtures/empty_int_outcome.tmir.sexp");
+    const std::string mir = slurp("tests/fixtures/empty_int_outcome.mir");
     DataMap d =
         DataMap::from_json(slurp("tests/fixtures/empty_int_outcome.json"));
     const std::vector<double> q{0.75};
@@ -4719,7 +4564,7 @@ int main() {
   //   -2 + 10*3 + 100*(-2) + 1000*7 + 10000*(2 - 1 + 5) + 100000*1
   //   + 1000000*(-3) = -2833172.
   {
-    const std::string mir = slurp("tests/fixtures/to_int.tmir.sexp");
+    const std::string mir = slurp("tests/fixtures/to_int.mir");
     DataMap d = DataMap::from_json(slurp("tests/fixtures/to_int.json"));
     CompiledModel lm = compile_model(mir, d);
     Executor lex(std::move(lm.graph));
@@ -4742,7 +4587,7 @@ int main() {
   // Compare acceptance against Stan Math independently of the flat gather
   // offsets. In particular, a row overrun may still fit in the source slot.
   {
-    const std::string text = slurp("tests/fixtures/block_bounds.tmir.sexp");
+    const std::string text = slurp("tests/fixtures/block_bounds.mir");
     const Eigen::MatrixXd reference = Eigen::MatrixXd::Ones(2, 3);
     for (int row : {0, 1, 2, 3})
       for (int col : {0, 1, 3, 4})
@@ -4795,8 +4640,7 @@ int main() {
   // agree. Here: lp = 3 * sum(a) + 2 * s, so grad a = {3,3,3}, grad s = 2.
   {
     DataMap d = DataMap::from_json(slurp("tests/fixtures/reparray.json"));
-    CompiledModel lm =
-        compile_model(slurp("tests/fixtures/reparray.tmir.sexp"), d);
+    CompiledModel lm = compile_model(slurp("tests/fixtures/reparray.mir"), d);
     check(lm.n_unconstrained == 4, "reparray 4 unconstrained");
     Executor lex(std::move(lm.graph));
     lm.bind(lex);
@@ -4818,8 +4662,7 @@ int main() {
   // had it. Both operand orders exercise the base and exponent gradients.
   {
     DataMap d = DataMap::from_json(slurp("tests/fixtures/eltpow.json"));
-    CompiledModel lm =
-        compile_model(slurp("tests/fixtures/eltpow.tmir.sexp"), d);
+    CompiledModel lm = compile_model(slurp("tests/fixtures/eltpow.mir"), d);
     check(lm.n_unconstrained == 3, "eltpow 3 unconstrained");
     Executor lex(std::move(lm.graph));
     lm.bind(lex);
@@ -4849,7 +4692,7 @@ int main() {
     DataMap d =
         DataMap::from_json(slurp("tests/fixtures/pow_data_exponent.json"));
     CompiledModel lm =
-        compile_model(slurp("tests/fixtures/pow_data_exponent.tmir.sexp"), d);
+        compile_model(slurp("tests/fixtures/pow_data_exponent.mir"), d);
     Executor lex(std::move(lm.graph));
     lm.bind(lex);
     const double q[6] = {0.3, 1.7, 0.011, 2.9, 0.77, 1.3};
@@ -4885,7 +4728,7 @@ int main() {
   // (x, alpha, rho) against the var path with the same constrains.
   {
     CompiledModel lm =
-        compile_model(slurp("tests/fixtures/gpcov.tmir.sexp"), DataMap());
+        compile_model(slurp("tests/fixtures/gpcov.mir"), DataMap());
     check(lm.n_unconstrained == 5, "gpcov 5 unconstrained");
     Executor lex(std::move(lm.graph));
     lm.bind(lex);
@@ -4914,7 +4757,7 @@ int main() {
   // coordinates, with active coordinates, scale and length scale.
   {
     CompiledModel lm =
-        compile_model(slurp("tests/fixtures/gpmatern.tmir.sexp"), DataMap());
+        compile_model(slurp("tests/fixtures/gpmatern.mir"), DataMap());
     check(lm.n_unconstrained == 8, "gpmatern 8 unconstrained");
     Executor lex(std::move(lm.graph));
     lm.bind(lex);
@@ -4952,7 +4795,7 @@ int main() {
   // fuse_gp_diagonal_updates folds into the covariance op.
   {
     CompiledModel lm =
-        compile_model(slurp("tests/fixtures/gpard.tmir.sexp"), DataMap());
+        compile_model(slurp("tests/fixtures/gpard.mir"), DataMap());
     check(lm.n_unconstrained == 14, "gpard 14 unconstrained");
     Executor lex(std::move(lm.graph));
     lm.bind(lex);
@@ -5001,8 +4844,7 @@ int main() {
   // so the normal mean is a + b + c + d + e + f + g + h = 6.
   {
     DataMap d = DataMap::from_json(slurp("tests/fixtures/isinf.json"));
-    CompiledModel lm =
-        compile_model(slurp("tests/fixtures/isinf.tmir.sexp"), d);
+    CompiledModel lm = compile_model(slurp("tests/fixtures/isinf.mir"), d);
     check(lm.n_unconstrained == 1, "isinf 1 unconstrained");
     Executor lex(std::move(lm.graph));
     lm.bind(lex);
@@ -5025,8 +4867,7 @@ int main() {
   // gradient (X, beta, alpha, sigma) against the var path.
   {
     DataMap d = DataMap::from_json(slurp("tests/fixtures/glmparamx.json"));
-    CompiledModel lm =
-        compile_model(slurp("tests/fixtures/glmparamx.tmir.sexp"), d);
+    CompiledModel lm = compile_model(slurp("tests/fixtures/glmparamx.mir"), d);
     check(lm.n_unconstrained == 12, "glmparamx 12 unconstrained");
     Executor lex(std::move(lm.graph));
     lm.bind(lex);
@@ -5066,8 +4907,7 @@ int main() {
   // path.
   {
     DataMap d = DataMap::from_json(slurp("tests/fixtures/idxarray3d.json"));
-    CompiledModel lm =
-        compile_model(slurp("tests/fixtures/idxarray3d.tmir.sexp"), d);
+    CompiledModel lm = compile_model(slurp("tests/fixtures/idxarray3d.mir"), d);
     check(lm.n_unconstrained == 8, "idxarray3d 8 unconstrained");
     Executor lex(std::move(lm.graph));
     lm.bind(lex);
@@ -5108,8 +4948,7 @@ int main() {
   // path.
   {
     DataMap d = DataMap::from_json(slurp("tests/fixtures/idxrowvec.json"));
-    CompiledModel lm =
-        compile_model(slurp("tests/fixtures/idxrowvec.tmir.sexp"), d);
+    CompiledModel lm = compile_model(slurp("tests/fixtures/idxrowvec.mir"), d);
     check(lm.n_unconstrained == 12, "idxrowvec 12 unconstrained");
     Executor lex(std::move(lm.graph));
     lm.bind(lex);
@@ -5150,8 +4989,7 @@ int main() {
   // theta ~ normal(0,1)).
   {
     DataMap d = DataMap::from_json(slurp("tests/fixtures/idxassign.json"));
-    CompiledModel lm =
-        compile_model(slurp("tests/fixtures/idxassign.tmir.sexp"), d);
+    CompiledModel lm = compile_model(slurp("tests/fixtures/idxassign.mir"), d);
     check(lm.n_unconstrained == 1, "idxassign 1 unconstrained");
     Executor lex(std::move(lm.graph));
     lm.bind(lex);
@@ -5181,7 +5019,7 @@ int main() {
   {
     DataMap d = DataMap::from_json(slurp("tests/fixtures/rowassign2d.json"));
     CompiledModel lm =
-        compile_model(slurp("tests/fixtures/rowassign2d.tmir.sexp"), d);
+        compile_model(slurp("tests/fixtures/rowassign2d.mir"), d);
     check(lm.n_unconstrained == 3, "rowassign2d 3 unconstrained");
     Executor lex(std::move(lm.graph));
     lm.bind(lex);
@@ -5213,7 +5051,7 @@ int main() {
   {
     DataMap d = DataMap::from_json(slurp("tests/fixtures/inlinesolve.json"));
     CompiledModel lm =
-        compile_model(slurp("tests/fixtures/inlinesolve.tmir.sexp"), d);
+        compile_model(slurp("tests/fixtures/inlinesolve.mir"), d);
     check(lm.n_unconstrained == 1, "inlinesolve 1 unconstrained");
     Executor lex(std::move(lm.graph));
     lm.bind(lex);
@@ -5237,7 +5075,7 @@ int main() {
   {
     DataMap d = DataMap::from_json(slurp("tests/fixtures/rejectguard.json"));
     CompiledModel lm =
-        compile_model(slurp("tests/fixtures/rejectguard.tmir.sexp"), d);
+        compile_model(slurp("tests/fixtures/rejectguard.mir"), d);
     check(lm.n_unconstrained == 1, "rejectguard 1 unconstrained");
     Executor lex(std::move(lm.graph));
     lm.bind(lex);
@@ -5256,7 +5094,7 @@ int main() {
   {
     DataMap d = DataMap::from_json(slurp("tests/fixtures/rejectguard.json"));
     CompiledModel lm =
-        compile_model(slurp("tests/fixtures/rejectguard.tmir.sexp"), d);
+        compile_model(slurp("tests/fixtures/rejectguard.mir"), d);
     Executor lex(std::move(lm.graph));
     lm.bind(lex);
     lex.params_data()[0] = -0.115;
@@ -5278,7 +5116,7 @@ int main() {
   {
     DataMap d = DataMap::from_json(slurp("tests/fixtures/sliceminmax.json"));
     CompiledModel lm =
-        compile_model(slurp("tests/fixtures/sliceminmax.tmir.sexp"), d);
+        compile_model(slurp("tests/fixtures/sliceminmax.mir"), d);
     check(count_opcode(lm, OP_EXTREMA_VEC) == 4,
           "sliceminmax extrema opcode census");
     check(lm.n_unconstrained == 8, "sliceminmax 8 unconstrained");
@@ -5317,8 +5155,7 @@ int main() {
   // uses instead.
   {
     DataMap d = DataMap::from_json(slurp("tests/fixtures/sliceprod.json"));
-    CompiledModel lm =
-        compile_model(slurp("tests/fixtures/sliceprod.tmir.sexp"), d);
+    CompiledModel lm = compile_model(slurp("tests/fixtures/sliceprod.mir"), d);
     check(count_opcode(lm, OP_PROD_VEC) == 2, "sliceprod opcode census");
     for (const Op& op : lm.graph.ops)
       if (op.opcode == OP_PROD_VEC)
@@ -5362,8 +5199,7 @@ int main() {
   // against N stan::math::normal_lpdf<false> calls over the same data.
   {
     DataMap d = DataMap::from_json(slurp("tests/fixtures/densityvec.json"));
-    CompiledModel lm =
-        compile_model(slurp("tests/fixtures/densityvec.tmir.sexp"), d);
+    CompiledModel lm = compile_model(slurp("tests/fixtures/densityvec.mir"), d);
     check(lm.n_unconstrained == 0, "densityvec 0 unconstrained");
     Executor lex(std::move(lm.graph));
     lm.bind(lex);
@@ -5387,7 +5223,7 @@ int main() {
     DataMap d = DataMap::from_json(slurp("tests/fixtures/densityvecgrad.json"));
     test_setenv("STANLI_STRUCTURED_LOOPS", "0", 1);
     CompiledModel lm =
-        compile_model(slurp("tests/fixtures/densityvecgrad.tmir.sexp"), d);
+        compile_model(slurp("tests/fixtures/densityvecgrad.mir"), d);
     test_unsetenv("STANLI_STRUCTURED_LOOPS");
     check(count_opcode(lm, OP_ISLAND) >= 1, "densityvecgrad has an island");
     check(lm.n_unconstrained == 1, "densityvecgrad 1 unconstrained");
@@ -5418,9 +5254,9 @@ int main() {
   {
     DataMap d = DataMap::from_json(slurp("tests/fixtures/csthres.json"));
     CompiledModel expression =
-        compile_model(slurp("tests/fixtures/csthres.tmir.sexp"), d);
+        compile_model(slurp("tests/fixtures/csthres.mir"), d);
     CompiledModel bound =
-        compile_model(slurp("tests/fixtures/csthresbound.tmir.sexp"), d);
+        compile_model(slurp("tests/fixtures/csthresbound.mir"), d);
     check(expression.n_unconstrained == 12, "csthres 12 unconstrained");
     check(bound.n_unconstrained == 12, "csthresbound 12 unconstrained");
     Executor ex(std::move(expression.graph)), bx(std::move(bound.graph));
@@ -5443,9 +5279,9 @@ int main() {
     DataMap d =
         DataMap::from_json(slurp("tests/fixtures/whilegrouplocal.json"));
     CompiledModel loop =
-        compile_model(slurp("tests/fixtures/whilegrouplocal.tmir.sexp"), d);
+        compile_model(slurp("tests/fixtures/whilegrouplocal.mir"), d);
     CompiledModel unrolled =
-        compile_model(slurp("tests/fixtures/whilegroupfor.tmir.sexp"), d);
+        compile_model(slurp("tests/fixtures/whilegroupfor.mir"), d);
     check(loop.n_unconstrained == 5, "whilegrouplocal 5 unconstrained");
     check(unrolled.n_unconstrained == 5, "whilegroupfor 5 unconstrained");
     Executor ex(std::move(loop.graph)), bx(std::move(unrolled.graph));
@@ -5468,8 +5304,7 @@ int main() {
   // CmdStan does, so both the value and the triangular pullback match.
   {
     DataMap d = DataMap::from_json(slurp("tests/fixtures/mltmask.json"));
-    CompiledModel lm =
-        compile_model(slurp("tests/fixtures/mltmask.tmir.sexp"), d);
+    CompiledModel lm = compile_model(slurp("tests/fixtures/mltmask.mir"), d);
     check(count_opcode(lm, OP_MULT_LOWER_TRI_SELF_TRANSPOSE) == 1,
           "mltmask opcode census");
     check(count_opcode(lm, OP_GEMM) == 0, "mltmask does not reach GEMM");
@@ -5504,8 +5339,7 @@ int main() {
   if (debug_switches_available()) {
     DataMap d = DataMap::from_json(slurp("tests/fixtures/mltgrad.json"));
     test_setenv("STANLI_STRUCTURED_LOOPS", "0", 1);
-    CompiledModel lm =
-        compile_model(slurp("tests/fixtures/mltgrad.tmir.sexp"), d);
+    CompiledModel lm = compile_model(slurp("tests/fixtures/mltgrad.mir"), d);
     test_unsetenv("STANLI_STRUCTURED_LOOPS");
     check(count_opcode(lm, OP_ISLAND) >= 1, "mltgrad has an island");
     check(lm.n_unconstrained == 9, "mltgrad 9 unconstrained");
@@ -5545,8 +5379,7 @@ int main() {
   // nts=[1,2,3] makes sumnt2 = 1+4+9 = 14.
   {
     DataMap d = DataMap::from_json(slurp("tests/fixtures/tdintsize.json"));
-    CompiledModel lm =
-        compile_model(slurp("tests/fixtures/tdintsize.tmir.sexp"), d);
+    CompiledModel lm = compile_model(slurp("tests/fixtures/tdintsize.mir"), d);
     check(lm.n_unconstrained == 14, "tdintsize 14 unconstrained");
     Executor lex(std::move(lm.graph));
     lm.bind(lex);
@@ -5594,8 +5427,7 @@ int main() {
   // compile and grade exactly as if the wrapper were absent.
   {
     DataMap d = DataMap::from_json(slurp("tests/fixtures/profile.json"));
-    CompiledModel lm =
-        compile_model(slurp("tests/fixtures/profile.tmir.sexp"), d);
+    CompiledModel lm = compile_model(slurp("tests/fixtures/profile.mir"), d);
     check(lm.n_unconstrained == 1, "profile 1 unconstrained");
     Executor lex(std::move(lm.graph));
     lm.bind(lex);
@@ -5618,7 +5450,7 @@ int main() {
   {
     DataMap d;
     d.set_int("K", 3);
-    CompiledModel sm = compile_model(slurp("tests/fixtures/simp.tmir.sexp"), d);
+    CompiledModel sm = compile_model(slurp("tests/fixtures/simp.mir"), d);
     check(sm.n_unconstrained == 2, "simplex K-1 unconstrained");
     Executor sex(std::move(sm.graph));
     sm.bind(sex);
@@ -5646,12 +5478,11 @@ int main() {
   // The unsupported-transform error path is covered by the
   // unsupported-function check below.
   {
-    CompiledModel cm =
-        compile_model(slurp("tests/fixtures/chol.tmir.sexp"), [] {
-          DataMap d;
-          d.set_int("K", 3);
-          return d;
-        }());
+    CompiledModel cm = compile_model(slurp("tests/fixtures/chol.mir"), [] {
+      DataMap d;
+      d.set_int("K", 3);
+      return d;
+    }());
     check(cm.n_unconstrained == 3, "cholesky_corr unconstrained size is 3");
   }
   // Control flow on a parameter: an `if` and a ternary whose conditions
@@ -5669,8 +5500,7 @@ int main() {
     test_setenv("STANLI_NO_ISLAND", "1", 1);
     DataMap d;
     d.set_real("y", 1.75);
-    CompiledModel lm =
-        compile_model(slurp("tests/fixtures/paramcond.tmir.sexp"), d);
+    CompiledModel lm = compile_model(slurp("tests/fixtures/paramcond.mir"), d);
     int islands = 0;
     for (const Op& op : lm.graph.ops)
       if (op.opcode == OP_ISLAND) ++islands;
@@ -5717,7 +5547,7 @@ int main() {
   // design matrix is parameter-free (as normal_id_glm requires) and there is
   // no runtime-control island.
   {
-    const std::string mir = slurp("tests/fixtures/shape_named_guard.tmir.sexp");
+    const std::string mir = slurp("tests/fixtures/shape_named_guard.mir");
     for (int n : {0, 3}) {
       DataMap d;
       d.set_int("n", n);
@@ -5748,8 +5578,7 @@ int main() {
   // determine geometry without materializing the two-dimensional gather,
   // while a reached out-of-bounds selector retains Stan's bind-time error.
   {
-    const std::string mir =
-        slurp("tests/fixtures/shape_indexed_guard.tmir.sexp");
+    const std::string mir = slurp("tests/fixtures/shape_indexed_guard.mir");
     const auto run = [&](const std::vector<int>& idx, double scale,
                          const std::string& tag) {
       DataMap d;
@@ -5794,7 +5623,7 @@ int main() {
     d.set_int_array("valid", {1});
     d.set_int_array("bad", {3});
     CompiledModel cm = compile_without_optional_islands(
-        slurp("tests/fixtures/shape_guard_lazy.tmir.sexp"), d);
+        slurp("tests/fixtures/shape_guard_lazy.mir"), d);
     check(cm.n_unconstrained == 5, "lazy shape guard parameter count");
     check(count_opcode(cm, OP_ISLAND) == 0, "lazy shape guard has no island");
     Executor ex(std::move(cm.graph));
@@ -5815,8 +5644,7 @@ int main() {
   // condition.  The preceding flag guard also pins the opposite walk: a
   // false shape lhs followed by a true data-only rhs still folds completely.
   {
-    const std::string mir =
-        slurp("tests/fixtures/shape_partial_guard.tmir.sexp");
+    const std::string mir = slurp("tests/fixtures/shape_partial_guard.mir");
     for (int n : {0, 2}) {
       DataMap d;
       d.set_int("n", n);
@@ -5852,8 +5680,8 @@ int main() {
     const auto check_case = [&](const std::string& tag, const DataMap& d,
                                 const std::vector<int>& selected,
                                 double positive_lp, double positive_grad) {
-      CompiledModel cm = compile_model(
-          slurp("tests/fixtures/runtime_int_array_udf.tmir.sexp"), d);
+      CompiledModel cm =
+          compile_model(slurp("tests/fixtures/runtime_int_array_udf.mir"), d);
       Executor ex(cm.graph);
       cm.bind(ex);
       double grad = 0.0;
@@ -5919,7 +5747,7 @@ int main() {
   for (const bool force_register : {false, true}) {
     if (force_register) test_setenv("STANLI_STRUCTURED_LOOPS", "0", 1);
     CompiledModel cm = compile_model(
-        slurp("tests/fixtures/gather_rows_udf.tmir.sexp"),
+        slurp("tests/fixtures/gather_rows_udf.mir"),
         DataMap::from_json(slurp("tests/fixtures/gather_rows_udf.json")));
     if (force_register) test_unsetenv("STANLI_STRUCTURED_LOOPS");
     const std::string tag =
@@ -5966,7 +5794,7 @@ int main() {
   // written as a decimal.
   {
     CompiledModel cm = compile_model(
-        slurp("tests/fixtures/paramcond_matrixrow.tmir.sexp"), DataMap());
+        slurp("tests/fixtures/paramcond_matrixrow.mir"), DataMap());
     Executor ex(std::move(cm.graph));
     cm.bind(ex);
     const int64_t n = ex.n_params();
@@ -5998,7 +5826,7 @@ int main() {
   // accumulation order and when a prior adjoint is added.
   {
     CompiledModel cm = compile_model(
-        slurp("tests/fixtures/paramcond_diag_multiply.tmir.sexp"), DataMap());
+        slurp("tests/fixtures/paramcond_diag_multiply.mir"), DataMap());
     Executor ex(std::move(cm.graph));
     cm.bind(ex);
     constexpr int kDim = 4;
@@ -6097,7 +5925,7 @@ int main() {
   // expectation accumulates in the order the region emits.
   {
     CompiledModel cm = compile_model(
-        slurp("tests/fixtures/paramcond_diagonal.tmir.sexp"), DataMap());
+        slurp("tests/fixtures/paramcond_diagonal.mir"), DataMap());
     Executor ex(std::move(cm.graph));
     cm.bind(ex);
     const int64_t n = ex.n_params();
@@ -6135,8 +5963,8 @@ int main() {
   {
     DataMap d = DataMap::from_json(
         R"({"y": 2, "N": 5, "z": [1, 0], "c": 2, "cats": [1, 3], "X": [[0.4], [-0.7]]})");
-    CompiledModel dm = compile_model(
-        slurp("tests/fixtures/density_runtime_shared.tmir.sexp"), d);
+    CompiledModel dm =
+        compile_model(slurp("tests/fixtures/density_runtime_shared.mir"), d);
     Executor dex(std::move(dm.graph));
     dm.bind(dex);
     double grad = 0.0;
@@ -6175,7 +6003,7 @@ int main() {
     DataMap invalid = DataMap::from_json(
         R"({"y": 5, "N": 5, "z": [1, 0], "c": 2, "cats": [1, 3], "X": [[0.4], [-0.7]]})");
     CompiledModel invalid_model = compile_model(
-        slurp("tests/fixtures/density_runtime_shared.tmir.sexp"), invalid);
+        slurp("tests/fixtures/density_runtime_shared.mir"), invalid);
     Executor invalid_executor(std::move(invalid_model.graph));
     invalid_model.bind(invalid_executor);
     invalid_executor.params_data()[0] = -0.3;
@@ -6203,8 +6031,7 @@ int main() {
   // Four terms, four rules, and the whole lp in closed form.
   {
     DataMap d;
-    CompiledModel cm =
-        compile_model(slurp("tests/fixtures/proptoudf.tmir.sexp"), d);
+    CompiledModel cm = compile_model(slurp("tests/fixtures/proptoudf.mir"), d);
     Executor ex(std::move(cm.graph));
     cm.bind(ex);
     const double mu = 0.375;
@@ -6241,7 +6068,7 @@ int main() {
     DataMap d;
     d.set_real("y", 1.75);
     CompiledModel dm =
-        compile_model(slurp("tests/fixtures/paramcond_density.tmir.sexp"), d);
+        compile_model(slurp("tests/fixtures/paramcond_density.mir"), d);
     Executor dex(std::move(dm.graph));
     dm.bind(dex);
     // Both arms, so every density is evaluated and differentiated.
@@ -6279,8 +6106,7 @@ int main() {
   {
     DataMap d;
     d.set_real("y", 1.75);
-    CompiledModel tm =
-        compile_model(slurp("tests/fixtures/trunc.tmir.sexp"), d);
+    CompiledModel tm = compile_model(slurp("tests/fixtures/trunc.mir"), d);
     Executor tex(std::move(tm.graph));
     tm.bind(tex);
     const double pts[2][2] = {{0.6, -0.3}, {-0.25, 0.4}};
@@ -6322,7 +6148,7 @@ int main() {
   // Exercise generated reverse and var replay, including support rejection.
   for (bool replay : {false, true}) {
     if (replay) test_setenv("STANLI_NO_NATIVE_ADJ", "1", 1);
-    auto tm = compile_model(slurp("tests/fixtures/trunc_param.tmir.sexp"),
+    auto tm = compile_model(slurp("tests/fixtures/trunc_param.mir"),
                             DataMap::from_json("{}"));
     if (replay) test_unsetenv("STANLI_NO_NATIVE_ADJ");
     Executor tex(std::move(tm.graph));
@@ -6358,8 +6184,7 @@ int main() {
     DataMap d;
     d.set_int("N", 3);
     d.set_real_array("y", yv);
-    CompiledModel tm =
-        compile_model(slurp("tests/fixtures/truncvec.tmir.sexp"), d);
+    CompiledModel tm = compile_model(slurp("tests/fixtures/truncvec.mir"), d);
     Executor tex(std::move(tm.graph));
     tm.bind(tex);
     // Declaration order: mu, theta[3], sigma.
@@ -6405,7 +6230,7 @@ int main() {
   // multiplied it as one.
   {
     CompiledModel tm =
-        compile_model(slurp("tests/fixtures/trunc_param_vector.tmir.sexp"),
+        compile_model(slurp("tests/fixtures/trunc_param_vector.mir"),
                       DataMap::from_json("{}"));
     Executor tex(std::move(tm.graph));
     tm.bind(tex);
@@ -6445,8 +6270,7 @@ int main() {
     const int n = 3;
     DataMap d;
     d.set_int("n", n);
-    CompiledModel bm =
-        compile_model(slurp("tests/fixtures/intbcast.tmir.sexp"), d);
+    CompiledModel bm = compile_model(slurp("tests/fixtures/intbcast.mir"), d);
     Executor bex(std::move(bm.graph));
     bm.bind(bex);
     // Declaration order: theta[2], lambda.
@@ -6506,7 +6330,7 @@ int main() {
     d.set_int("n", 3);
     d.set_int_array("ns", {1, 2, 3});
     d.set_int_array("N", {5, 7, 9});
-    CompiledModel bm = compile_model(slurp("tests/fixtures/dcdf.tmir.sexp"), d);
+    CompiledModel bm = compile_model(slurp("tests/fixtures/dcdf.mir"), d);
     Executor bex(std::move(bm.graph));
     bm.bind(bex);
     // Both points keep every parameter inside (0, 1), which is a
@@ -6560,7 +6384,7 @@ int main() {
     DataMap d;
     d.set_int("n", 3);
     d.set_int_array("ns", {1, 2, 3});
-    CompiledModel tm = compile_model(slurp("tests/fixtures/tcdf.tmir.sexp"), d);
+    CompiledModel tm = compile_model(slurp("tests/fixtures/tcdf.mir"), d);
     Executor tex(std::move(tm.graph));
     tm.bind(tex);
     // Declaration order: y1[3], k1[3], y2[3], k2[3], y3, k3, m4[3], p4[3],
@@ -6631,8 +6455,7 @@ int main() {
     DataMap d;
     d.set_int_array("counts", {1, 2, 3});
     d.set_real_array("mat", matv, {2, 3});
-    CompiledModel lm =
-        compile_model(slurp("tests/fixtures/lsepair.tmir.sexp"), d);
+    CompiledModel lm = compile_model(slurp("tests/fixtures/lsepair.mir"), d);
     check(count_opcode(lm, OP_LSE2) > 0,
           "lsepair: two-argument log_sum_exp uses its direct opcode");
     check(count_opcode(lm, OP_LOG_DIFF_EXP) > 0,
@@ -6712,8 +6535,7 @@ int main() {
     d.set_real_array("dv", dvv, {2});
     d.set_real_array("drv", drvv, {2});
     d.set_real_array("dm", dmv, {2, 2});
-    CompiledModel lm =
-        compile_model(slurp("tests/fixtures/opalias.tmir.sexp"), d);
+    CompiledModel lm = compile_model(slurp("tests/fixtures/opalias.mir"), d);
     Executor lex(std::move(lm.graph));
     lm.bind(lex);
 
@@ -6805,8 +6627,7 @@ int main() {
             "counts": [0, 1, 2],
             "expo3": [[[0, 3], [1, 2]], [[2, 0], [3, 1]]],
             "nn": [[2, 0], [3, 1]]})");
-    CompiledModel lm =
-        compile_model(slurp("tests/fixtures/binint.tmir.sexp"), d);
+    CompiledModel lm = compile_model(slurp("tests/fixtures/binint.mir"), d);
     Executor lex(std::move(lm.graph));
     lm.bind(lex);
     // Declaration order: a[3], b.
@@ -6904,7 +6725,7 @@ int main() {
   // and both int argument positions.
   {
     CompiledModel rm = compile_model(
-        slurp("tests/fixtures/paramcond_regular_calls.tmir.sexp"), DataMap());
+        slurp("tests/fixtures/paramcond_regular_calls.mir"), DataMap());
     check(rm.n_unconstrained == 7, "regular-call island parameter width");
     check(count_opcode(rm, OP_ISLAND) > 0, "regular-call runtime island");
     Executor rex(std::move(rm.graph));
@@ -6973,8 +6794,7 @@ int main() {
     const std::vector<double> matv = {0.5, 1.5, 1.25, 0.25, 2.0, 2.5};
     DataMap d;
     d.set_real_array("mat", matv, {2, 3});
-    CompiledModel um =
-        compile_model(slurp("tests/fixtures/unaryfns.tmir.sexp"), d);
+    CompiledModel um = compile_model(slurp("tests/fixtures/unaryfns.mir"), d);
     Executor uex(std::move(um.graph));
     um.bind(uex);
     // Transformed data: evaluated once by the interpreter, on doubles. Its
@@ -7067,8 +6887,7 @@ int main() {
     const std::vector<double> mdv = {0.5, 1.5, 1.25, 0.25};
     DataMap d;
     d.set_real_array("md", mdv, {2, 2});
-    CompiledModel bm =
-        compile_model(slurp("tests/fixtures/boundfn.tmir.sexp"), d);
+    CompiledModel bm = compile_model(slurp("tests/fixtures/boundfn.mir"), d);
     Executor bex(std::move(bm.graph));
     bm.bind(bex);
     // Declaration order: a[2], s.
@@ -7157,7 +6976,7 @@ int main() {
     DataMap data;
     data.set_int("mode", 1);
     CompiledModel mm = compile_model(
-        slurp("tests/fixtures/runtime_extrema_grouping.tmir.sexp"), data);
+        slurp("tests/fixtures/runtime_extrema_grouping.mir"), data);
     check(count_opcode(mm, OP_ISLAND) > 0,
           "runtime extrema grouping uses a control-flow island");
     Executor mex(std::move(mm.graph));
@@ -7174,7 +6993,7 @@ int main() {
     DataMap data;
     data.set_int("mode", 2);
     CompiledModel mm = compile_model(
-        slurp("tests/fixtures/runtime_extrema_grouping.tmir.sexp"), data);
+        slurp("tests/fixtures/runtime_extrema_grouping.mir"), data);
     Executor mex(std::move(mm.graph));
     mm.bind(mex);
     const double q[] = {0.1, -0.0, -2.0, +0.0, -3.0};
@@ -7194,7 +7013,7 @@ int main() {
   // compiled into a typed Program::TRANSFORM and replayed under var.
   {
     CompiledModel jm = compile_model(
-        slurp("tests/fixtures/callable_jacobians.tmir.sexp"), DataMap());
+        slurp("tests/fixtures/callable_jacobians.mir"), DataMap());
     check(jm.n_unconstrained == 37, "callable jacobians parameter width");
     check(count_opcode(jm, OP_CONSTRAIN_STOCHASTIC_COLUMN) > 0,
           "callable stochastic-column graph kernel");
@@ -7224,8 +7043,7 @@ int main() {
   // map_rect and reduce_sum remain shared structural interpreter operations.
   {
     CompiledModel hm = compile_model(
-        slurp("tests/fixtures/higher_order_transformed_data.tmir.sexp"),
-        DataMap());
+        slurp("tests/fixtures/higher_order_transformed_data.mir"), DataMap());
     check(hm.n_unconstrained == 1, "transformed-data HOF parameter width");
     Executor hex(std::move(hm.graph));
     hm.bind(hex);
@@ -7270,7 +7088,7 @@ int main() {
   // arguments available only at draw time.
   {
     CompiledModel hm = compile_model(
-        slurp("tests/fixtures/higher_order_all_contexts.tmir.sexp"), DataMap());
+        slurp("tests/fixtures/higher_order_all_contexts.mir"), DataMap());
     check(hm.n_unconstrained == 7, "all-context HOF parameter width");
     check(count_opcode(hm, OP_ISLAND) > 0, "all-context HOF runtime island");
     Executor hex(std::move(hm.graph));
@@ -7330,8 +7148,8 @@ int main() {
   // lowering inside runtime control. Bounds and packed callback reals remain
   // independently differentiable in both backends.
   {
-    CompiledModel qm = compile_model(
-        slurp("tests/fixtures/quadrature_region.tmir.sexp"), DataMap());
+    CompiledModel qm =
+        compile_model(slurp("tests/fixtures/quadrature_region.mir"), DataMap());
     check(qm.n_unconstrained == 3, "quadrature region parameter width");
     check(count_opcode(qm, OP_QUADRATURE) > 0, "quadrature graph kernel");
     check(count_opcode(qm, OP_ISLAND) > 0, "quadrature runtime island");
@@ -7369,7 +7187,7 @@ int main() {
   // tolerance call is compiled inside a parameter-dependent Program region.
   {
     CompiledModel dm =
-        compile_model(slurp("tests/fixtures/dae_region.tmir.sexp"), DataMap());
+        compile_model(slurp("tests/fixtures/dae_region.mir"), DataMap());
     check(dm.n_unconstrained == 3, "DAE region parameter width");
     check(count_opcode(dm, OP_ISLAND) > 0, "DAE shared runtime island");
     int dae_calls = 0;
@@ -7415,8 +7233,8 @@ int main() {
   // ts therefore travel as kernel operands, sharing the same graph/Program
   // call in ordinary expressions and parameter-dependent control flow.
   {
-    CompiledModel om = compile_model(
-        slurp("tests/fixtures/ode_active_times.tmir.sexp"), DataMap());
+    CompiledModel om =
+        compile_model(slurp("tests/fixtures/ode_active_times.mir"), DataMap());
     check(om.n_unconstrained == 5, "active-time ODE parameter width");
     check(count_opcode(om, OP_ISLAND) > 0, "active-time ODE runtime island");
     Executor oex(std::move(om.graph));
@@ -7462,8 +7280,8 @@ int main() {
   // a var changes the coupled adaptive system, so t0-only and ts-only calls
   // have distinct activity bits rather than one combined "time" bit.
   {
-    CompiledModel om = compile_model(
-        slurp("tests/fixtures/ode_time_activity.tmir.sexp"), DataMap());
+    CompiledModel om =
+        compile_model(slurp("tests/fixtures/ode_time_activity.mir"), DataMap());
     Executor oex(std::move(om.graph));
     om.bind(oex);
     const double start_log = std::log(0.3);
@@ -7486,7 +7304,7 @@ int main() {
   // one weighted adjoint solve and propagates y0, t0, ts, and callback args.
   {
     CompiledModel am = compile_model(
-        slurp("tests/fixtures/ode_adjoint_region.tmir.sexp"), DataMap());
+        slurp("tests/fixtures/ode_adjoint_region.mir"), DataMap());
     check(am.n_unconstrained == 5, "adjoint ODE parameter width");
     int adjoint_calls = 0;
     for (const Op& op : am.graph.ops) {
@@ -7546,7 +7364,7 @@ int main() {
   // iteration-limit error in both the value and the gradient pass.
   {
     CompiledModel tm = compile_model(
-        slurp("tests/fixtures/algebra_tol_controls.tmir.sexp"), DataMap());
+        slurp("tests/fixtures/algebra_tol_controls.mir"), DataMap());
     Executor tex(std::move(tm.graph));
     tm.bind(tex);
     tex.params_data()[0] = 4.0;
@@ -7573,7 +7391,7 @@ int main() {
   // output.
   {
     CompiledModel vm = compile_model(
-        slurp("tests/fixtures/region_vector1_binary.tmir.sexp"), DataMap());
+        slurp("tests/fixtures/region_vector1_binary.mir"), DataMap());
     check(count_opcode(vm, OP_ISLAND) > 0, "vector[1] region island");
     Executor vex(std::move(vm.graph));
     vm.bind(vex);
@@ -7598,7 +7416,7 @@ int main() {
   // the elements that do transform are checked in the same pass.
   {
     CompiledModel im =
-        compile_model(slurp("tests/fixtures/infbounds.tmir.sexp"), DataMap());
+        compile_model(slurp("tests/fixtures/infbounds.mir"), DataMap());
     Executor iex(std::move(im.graph));
     im.bind(iex);
     // Declaration order: a[4], b[4], c[4], d, e.
@@ -7698,8 +7516,8 @@ int main() {
       "L": [[1.2, 0.0], [0.2, 0.8]],
       "nu": 4.5
     })");
-    CompiledModel model = compile_model(
-        slurp("tests/fixtures/mvt_vectorized_inputs.tmir.sexp"), d);
+    CompiledModel model =
+        compile_model(slurp("tests/fixtures/mvt_vectorized_inputs.mir"), d);
     Executor executor(std::move(model.graph));
     model.bind(executor);
     const double point[4] = {0.2, -0.4, -0.1, 0.7};
@@ -7751,8 +7569,7 @@ int main() {
     d.set_int("K", 2);
     d.set_real_array("y", {1, 3, 5, 2, 4, 6}, {3, 2});
     d.set_real_array("Sigma", {2.0, 0.5, 0.5, 1.0}, {2, 2});
-    CompiledModel am =
-        compile_model(slurp("tests/fixtures/mnarr.tmir.sexp"), d);
+    CompiledModel am = compile_model(slurp("tests/fixtures/mnarr.mir"), d);
     Executor aex(std::move(am.graph));
     am.bind(aex);
     const double pts[2][2] = {{0.4, -0.7}, {-0.3, 0.9}};
@@ -7794,8 +7611,7 @@ int main() {
     d.set_real_array("y", {1, 3, 5, 2, 4, 6}, {3, 2});
     d.set_real_array("y1", {0.5, -1.0}, {2});
     d.set_real_array("L", {1.2, 0.4, 0.0, 0.9}, {2, 2});
-    CompiledModel am =
-        compile_model(slurp("tests/fixtures/mnarrmu.tmir.sexp"), d);
+    CompiledModel am = compile_model(slurp("tests/fixtures/mnarrmu.mir"), d);
     check(am.n_unconstrained == 7, "mnarrmu 7 unconstrained");
     Executor aex(std::move(am.graph));
     am.bind(aex);
@@ -7839,8 +7655,7 @@ int main() {
     d.set_int("K", 2);
     d.set_real_array("y", {1, 3, 5, 2, 4, 6}, {3, 2});
     d.set_real_array("S", {2.0, 0.5, 0.5, 1.0}, {2, 2});
-    CompiledModel am =
-        compile_model(slurp("tests/fixtures/mstarrmu.tmir.sexp"), d);
+    CompiledModel am = compile_model(slurp("tests/fixtures/mstarrmu.mir"), d);
     check(am.n_unconstrained == 6, "mstarrmu 6 unconstrained");
     Executor aex(std::move(am.graph));
     am.bind(aex);
@@ -7878,8 +7693,7 @@ int main() {
     d.set_int("N", 3);
     d.set_int("K", 2);
     d.set_real_array("p", {0.3, 0.4, 0.2, 0.7, 0.6, 0.8}, {3, 2});
-    CompiledModel dm =
-        compile_model(slurp("tests/fixtures/dirvec.tmir.sexp"), d);
+    CompiledModel dm = compile_model(slurp("tests/fixtures/dirvec.mir"), d);
     Executor dex(std::move(dm.graph));
     dm.bind(dex);
     const double pts[2][2] = {{0.3, -0.4}, {-0.6, 0.8}};
@@ -7927,8 +7741,7 @@ int main() {
     d.set_real_array("y", {1, 3, 5, 2, 4, 6}, {3, 2});
     d.set_real_array("p", {0.3, 0.4, 0.2, 0.7, 0.6, 0.8}, {3, 2});
     d.set_real_array("Sigma", {2.0, 0.5, 0.5, 1.0}, {2, 2});
-    CompiledModel sm =
-        compile_model(slurp("tests/fixtures/shapes.tmir.sexp"), d);
+    CompiledModel sm = compile_model(slurp("tests/fixtures/shapes.mir"), d);
     Executor sex(std::move(sm.graph));
     sm.bind(sex);
     // Declaration order: mu, theta[3], sigma, m[2], a[2].
@@ -8006,8 +7819,7 @@ int main() {
     d.set_int("N", 4);
     d.set_int("K", 4);
     d.set_int_array("y", {1, 3, 2, 4});
-    CompiledModel om =
-        compile_model(slurp("tests/fixtures/ordlog.tmir.sexp"), d);
+    CompiledModel om = compile_model(slurp("tests/fixtures/ordlog.mir"), d);
     Executor oex(std::move(om.graph));
     om.bind(oex);
     // 4 lambdas + 3 unconstrained cutpoints.
@@ -8052,8 +7864,7 @@ int main() {
         R"({"N": 4, "K": 2,
             "x": [[0.3, -0.2], [1.1, 0.4], [-0.5, 0.9], [0.2, 0.7]],
             "y": [2, 5, 1, 3]})");
-    CompiledModel gm =
-        compile_model(slurp("tests/fixtures/glmpois.tmir.sexp"), d);
+    CompiledModel gm = compile_model(slurp("tests/fixtures/glmpois.mir"), d);
     Executor gex(std::move(gm.graph));
     gm.bind(gex);
     const double q[4] = {0.15, 0.3, -0.25, -0.4};  // alpha, beta[2], log phi
@@ -8095,8 +7906,7 @@ int main() {
         R"({"N": 4, "K": 2,
             "x": [[0.3, -0.2], [1.1, 0.4], [-0.5, 0.9], [0.2, 0.7]],
             "y": 3})");
-    CompiledModel gm =
-        compile_model(slurp("tests/fixtures/glmscalary.tmir.sexp"), d);
+    CompiledModel gm = compile_model(slurp("tests/fixtures/glmscalary.mir"), d);
     Executor gex(std::move(gm.graph));
     gm.bind(gex);
     const double q[3] = {0.15, 0.3, -0.25};
@@ -8128,7 +7938,7 @@ int main() {
     DataMap d = DataMap::from_json(
         R"({"N": 3, "K": 2,
             "x": [[1.0, 2.0], [0.5, -1.0], [2.0, 0.25]]})");
-    CompiledModel gm = compile_model(slurp("tests/fixtures/glmy.tmir.sexp"), d);
+    CompiledModel gm = compile_model(slurp("tests/fixtures/glmy.mir"), d);
     Executor gex(std::move(gm.graph));
     gm.bind(gex);
     const double q[5] = {0.3, -0.2, 1.1, 0.7, -0.4};  // theta[3], b[2]
@@ -8160,8 +7970,7 @@ int main() {
   // rejecting the width mismatch.
   {
     DataMap d = DataMap::from_json(R"({"N": 4, "y": [1.0, 2.0, 4.0, -0.5]})");
-    CompiledModel im =
-        compile_model(slurp("tests/fixtures/inlret.tmir.sexp"), d);
+    CompiledModel im = compile_model(slurp("tests/fixtures/inlret.mir"), d);
     Executor iex(std::move(im.graph));
     im.bind(iex);
     iex.params_data()[0] = 0.4;  // mu
@@ -8188,8 +7997,7 @@ int main() {
   // and substitutes the call argument into its size expressions.
   {
     DataMap d = DataMap::from_json(R"({"N": 3})");
-    CompiledModel sm =
-        compile_model(slurp("tests/fixtures/inlseg.tmir.sexp"), d);
+    CompiledModel sm = compile_model(slurp("tests/fixtures/inlseg.mir"), d);
     Executor sex(std::move(sm.graph));
     sm.bind(sex);
     const double q[3] = {0.6, -0.3, 0.2};
@@ -8226,8 +8034,7 @@ int main() {
   // function-signatures/math/matrix/size.stan and nothing smaller.
   {
     DataMap d = DataMap::from_json(R"({"n": 7})");
-    CompiledModel im =
-        compile_model(slurp("tests/fixtures/intsize.tmir.sexp"), d);
+    CompiledModel im = compile_model(slurp("tests/fixtures/intsize.mir"), d);
     Executor iex(std::move(im.graph));
     im.bind(iex);
     iex.params_data()[0] = 0.4;
@@ -8248,8 +8055,7 @@ int main() {
   // correlation columns of a correlated group-level effect.
   {
     DataMap d = DataMap::from_json(R"({"M": 4})");
-    CompiledModel cm =
-        compile_model(slurp("tests/fixtures/choosesize.tmir.sexp"), d);
+    CompiledModel cm = compile_model(slurp("tests/fixtures/choosesize.mir"), d);
     check(cm.n_unconstrained == 22,
           "choose size: choose(4, 2) sizes the parameter vector");
     check(cm.write_array && !cm.write_array->columns.empty() &&
@@ -8261,7 +8067,7 @@ int main() {
   // condition and only its selected arm are compile-time integer expressions;
   // compound conditions retain Stan's short-circuit semantics.
   {
-    const std::string mir = slurp("tests/fixtures/conditional_size.tmir.sexp");
+    const std::string mir = slurp("tests/fixtures/conditional_size.mir");
 
     DataMap on =
         DataMap::from_json(R"({"enabled": 1, "n": 2, "x": [[1, 2], [3, 4]]})");
@@ -8286,8 +8092,7 @@ int main() {
     DataMap d;
     d.set_real_array("diagonal", {1.0, 2.0, 3.0}, {3});
     d.set_real_array("rectangular", {1.0, 2.0, 3.0, 4.0, 5.0, 6.0}, {3, 2});
-    CompiledModel dm =
-        compile_model(slurp("tests/fixtures/diagtd.tmir.sexp"), d);
+    CompiledModel dm = compile_model(slurp("tests/fixtures/diagtd.mir"), d);
     Executor dex(std::move(dm.graph));
     dm.bind(dex);
     dex.params_data()[0] = 0.4;
@@ -8306,8 +8111,7 @@ int main() {
   // this pins both the shared input's accumulated adjoint and matrix layout.
   {
     DataMap d;
-    CompiledModel tm =
-        compile_model(slurp("tests/fixtures/tcross.tmir.sexp"), d);
+    CompiledModel tm = compile_model(slurp("tests/fixtures/tcross.mir"), d);
     Executor tex(std::move(tm.graph));
     tm.bind(tex);
     const double q[6] = {0.2, -0.4, 0.7, 0.1, -0.3, 0.8};
@@ -8335,8 +8139,7 @@ int main() {
     DataMap d;
     const double observed[6] = {0.6, -0.2, 0.4, 0.9, -0.5, 0.3};
     d.set_real_array("d", std::vector<double>(observed, observed + 6), {2, 3});
-    CompiledModel cm =
-        compile_model(slurp("tests/fixtures/crossprod.tmir.sexp"), d);
+    CompiledModel cm = compile_model(slurp("tests/fixtures/crossprod.mir"), d);
     Executor ex(std::move(cm.graph));
     cm.bind(ex);
     const double q[6] = {0.2, -0.4, 0.7, 0.1, -0.3, 0.8};
@@ -8393,7 +8196,7 @@ int main() {
   {
     DataMap d;
     CompiledModel tm =
-        compile_model(slurp("tests/fixtures/rep_row_vector.tmir.sexp"), d);
+        compile_model(slurp("tests/fixtures/rep_row_vector.mir"), d);
     Executor tex(std::move(tm.graph));
     tm.bind(tex);
     const double q = 0.3;
@@ -8417,8 +8220,7 @@ int main() {
   // both implementations pass this test.
   {
     DataMap d = DataMap::from_json(R"({"N": 3, "t": [1.7, -0.3, 0.9]})");
-    CompiledModel fm =
-        compile_model(slurp("tests/fixtures/vecfma.tmir.sexp"), d);
+    CompiledModel fm = compile_model(slurp("tests/fixtures/vecfma.mir"), d);
     Executor fex(std::move(fm.graph));
     fm.bind(fex);
     const double q[6] = {0.3, -0.2, 1.1, 0.7, -0.4, 0.9};  // k[3], c[3]
@@ -8453,7 +8255,7 @@ int main() {
     // is mu_c,sigma,prec,mu,sd_from_prec,resid.<i>: two constrained
     // parameters, one transformed parameter, three generated quantities.
     DataMap d = DataMap::from_json_file("tests/fixtures/conj.json");
-    CompiledModel wm = compile_model(slurp("tests/fixtures/conj.tmir.sexp"), d);
+    CompiledModel wm = compile_model(slurp("tests/fixtures/conj.mir"), d);
     check(wm.write_array.has_value(), "conj: write_array compiled");
     if (wm.write_array) {
       expect_eq("conj columns", (double)wm.write_array->columns.size(), 6);
@@ -8466,7 +8268,7 @@ int main() {
     // boundaries sit at the end.
     DataMap d;
     d.set_int("K", 3);
-    CompiledModel wm = compile_model(slurp("tests/fixtures/simp.tmir.sexp"), d);
+    CompiledModel wm = compile_model(slurp("tests/fixtures/simp.mir"), d);
     check(wm.write_array.has_value(), "simp: write_array compiled");
     if (wm.write_array) {
       expect_eq("simp columns", (double)wm.write_array->columns.size(), 1);
@@ -8490,8 +8292,7 @@ int main() {
     // reader has to slice the draw with, and only the declared dims tell
     // corr_matrix[3] from cov_matrix[3].
     DataMap d = DataMap::from_json_file("tests/fixtures/newtrans.json");
-    CompiledModel nm =
-        compile_model(slurp("tests/fixtures/newtrans.tmir.sexp"), d);
+    CompiledModel nm = compile_model(slurp("tests/fixtures/newtrans.mir"), d);
     check(nm.unc_params.size() == nm.param_names.size(),
           "newtrans: one unc_param per declared parameter");
     int64_t total = 0;
@@ -8539,7 +8340,7 @@ int main() {
   // constructs the model. These are construction errors, not bad draws that
   // may survive until a density or transform happens to notice them.
   {
-    const std::string mir = slurp("tests/fixtures/newtrans.tmir.sexp");
+    const std::string mir = slurp("tests/fixtures/newtrans.mir");
     auto rejected_s = [&](double s) {
       DataMap d;
       d.set_real("m", 0.3);
@@ -8576,7 +8377,7 @@ int main() {
     d.set_int_array("ys", {1, 2, 4});
     bool rejected = false;
     try {
-      (void)compile_model(slurp("tests/fixtures/cat.tmir.sexp"), d);
+      (void)compile_model(slurp("tests/fixtures/cat.mir"), d);
     } catch (const std::domain_error& e) {
       rejected = std::string(e.what()).find("ys") != std::string::npos;
     }
@@ -8590,7 +8391,7 @@ int main() {
     // distinct execution phases.
     DataMap d = bound_check_data();
     CompiledModel checked =
-        compile_model(slurp("tests/fixtures/data_and_tp_checks.tmir.sexp"), d);
+        compile_model(slurp("tests/fixtures/data_and_tp_checks.mir"), d);
     Executor cex(std::move(checked.graph));
     checked.bind(cex);
     cex.params_data()[0] = -1.0;
@@ -8622,8 +8423,8 @@ int main() {
     bool constructed = true;
     bool rejected = false;
     try {
-      CompiledModel checked = compile_model(
-          slurp("tests/fixtures/data_and_tp_checks.tmir.sexp"), d);
+      CompiledModel checked =
+          compile_model(slurp("tests/fixtures/data_and_tp_checks.mir"), d);
       Executor cex(std::move(checked.graph));
       checked.bind(cex);
       cex.params_data()[0] = 0.0;
@@ -8648,8 +8449,8 @@ int main() {
       bool constructed = true;
       bool rejected = false;
       try {
-        CompiledModel checked = compile_model(
-            slurp("tests/fixtures/data_and_tp_checks.tmir.sexp"), d);
+        CompiledModel checked =
+            compile_model(slurp("tests/fixtures/data_and_tp_checks.mir"), d);
         Executor cex(std::move(checked.graph));
         checked.bind(cex);
         cex.params_data()[0] = x;
@@ -9007,171 +8808,123 @@ int main() {
                             "categorical_logit_lpmf", false, {1, 4},
                             {-1.0, 0.0, 1.0});
 
-    auto malformed_refused = [](const std::string& mir, const DataMap& data) {
+    // The model must fail to compile, with `reason` in the error. Lowering
+    // names the categorical call; the decoder names the binding it found
+    // inconsistent before lowering runs.
+    auto refused = [](const std::string& mir, const DataMap& data,
+                      const std::string& reason, const std::string& what) {
       try {
         (void)compile_model(mir, data);
       } catch (const std::exception& e) {
-        return std::string(e.what()).find("categorical") != std::string::npos;
+        if (std::string(e.what()).find(reason) != std::string::npos) return;
+        ++failures;
+        std::printf("FAIL %s: refused for another reason: %s\n", what.c_str(),
+                    e.what());
+        return;
       }
-      return false;
+      ++failures;
+      std::printf("FAIL %s: compiled\n", what.c_str());
     };
+    namespace cm = categorical_mir;
+    namespace pw = portable_writer;
+    const DataMap cat_data =
+        DataMap::from_json(R"({"K":3,"y":2,"ys":[3,1,3]})");
     {
-      std::string mir = categorical_check_mir("categorical_lpmf", true, 1, 3);
-      const std::string from = "(Var outcome)";
-      mir.replace(mir.find(from), from.size(), "(Var anchor)");
+      mir::Program program = cm::check_program("categorical_lpmf", true, 1, 3);
+      cm::expect_expr(program.log_prob, cm::is_var("outcome"), "no outcome")
+          .name = "anchor";
       DataMap malformed_data;
       malformed_data.set_int("outcome", 2);
       malformed_data.set_real_array("arg", {0.2, 0.3, 0.5});
-      check(malformed_refused(mir, malformed_data),
-            "categorical rejects data-only parameter outcome metadata");
+      refused(pw::write_v2(program), malformed_data,
+              "categorical argument type disagrees with its binding",
+              "categorical rejects data-only parameter outcome metadata");
     }
     {
-      std::string mir = categorical_check_mir("categorical_lpmf", true, 1, 3);
-      const std::string from = "outcome <opaque> SInt";
-      mir.replace(mir.find(from), from.size(), "outcome <opaque> SReal");
+      mir::Program program = cm::check_program("categorical_lpmf", true, 1, 3);
+      program.input_vars.at(0).second.base = "SReal";
       DataMap malformed_data;
       malformed_data.set_real("outcome", 2.0);
       malformed_data.set_real_array("arg", {0.2, 0.3, 0.5});
-      check(malformed_refused(mir, malformed_data),
-            "categorical rejects real binding with integer metadata");
+      refused(pw::write_v2(program), malformed_data,
+              "categorical argument type disagrees with its binding",
+              "categorical rejects real binding with integer metadata");
     }
     {
-      std::string mir = slurp("tests/fixtures/cat.tmir.sexp");
-      const std::string from =
-          "((pattern (Var theta))\n"
-          "               (meta ((type_ UVector) (loc <opaque>) (adlevel "
-          "AutoDiffable))))";
-      const size_t pos = mir.find(from);
-      check(pos != std::string::npos,
-            "categorical malformed arg mutation found target");
-      if (pos != std::string::npos) {
-        std::string to = from;
-        to.replace(to.find("AutoDiffable"), std::strlen("AutoDiffable"),
-                   "DataOnly");
-        mir.replace(pos, from.size(), to);
-      }
-      DataMap malformed_data =
-          DataMap::from_json(R"({"K":3,"y":2,"ys":[3,1,3]})");
-      check(malformed_refused(mir, malformed_data),
-            "categorical rejects data-only parameter vector metadata");
+      mir::Program program = cat_program(false);
+      mir::Expr& theta = cm::expect_expr(
+          program.log_prob,
+          [](const mir::Expr& e) {
+            return e.kind == mir::Expr::Var && e.name == "theta" &&
+                   !e.data_only;
+          },
+          "no autodiff theta");
+      theta.data_only = true;
+      refused(pw::write_v2(program), cat_data, "categorical",
+              "categorical rejects data-only parameter vector metadata");
     }
     {
       const std::string mir = categorical_check_mir("categorical_lpmf", false,
                                                     2, 3, true, false, true);
       DataMap malformed_data =
           DataMap::from_json(R"({"outcome":[[1,2]],"arg":[0.2,0.3,0.5]})");
-      check(malformed_refused(mir, malformed_data),
-            "categorical rejects flattened rank-two outcome metadata");
+      refused(mir, malformed_data, "categorical",
+              "categorical rejects flattened rank-two outcome metadata");
     }
     for (bool in_gq : {false, true}) {
-      const std::string malformed =
-          categorical_transformed_data_mismatch_mir(in_gq);
-      check(malformed.find("(Var td_outcome)") != std::string::npos,
-            "categorical transformed-data fixture rewrites outcome");
       DataMap malformed_data;
       malformed_data.set_real("source", 2.0);
       malformed_data.set_int("outcome", 2);
       malformed_data.set_real_array("arg", {0.2, 0.3, 0.5});
-      check(malformed_refused(malformed, malformed_data),
-            std::string("categorical rejects transformed-data binding in ") +
-                (in_gq ? "generated quantities" : "log probability"));
+      refused(categorical_transformed_data_mismatch_mir(in_gq), malformed_data,
+              "categorical argument type disagrees with its binding",
+              std::string("categorical rejects transformed-data binding in ") +
+                  (in_gq ? "generated quantities" : "log probability"));
     }
-    {
-      std::string malformed = categorical_write_array_mir(
-          slurp("tests/fixtures/cat.tmir.sexp"), "categorical_lpmf", false);
-      const size_t gq = malformed.find("(generate_quantities");
-      const size_t call =
-          malformed.find("(FunApp (StanLib categorical_lpmf", gq);
-      const size_t outcome = malformed.find("(Var y)", call);
-      check(gq != std::string::npos && call != std::string::npos &&
-                outcome != std::string::npos,
-            "categorical missing-binding mutation found target");
-      if (outcome != std::string::npos)
-        malformed.replace(outcome, std::strlen("(Var y)"), "(Var missing)");
-      DataMap malformed_data =
-          DataMap::from_json(R"({"K":3,"y":2,"ys":[3,1,3]})");
-      check(malformed_refused(malformed, malformed_data),
+    // The generated categorical of write_array_program(...), changed by
+    // `change`.
+    const auto generated =
+        [&](bool data_udf,
+            const std::function<void(mir::Program&, mir::Expr&)>& change) {
+          mir::Program program = cm::write_array_program(
+              slurp("tests/fixtures/cat.mir"), "categorical_lpmf", false, false,
+              data_udf, data_udf);
+          mir::Expr& call = cm::expect_expr(
+              program.generate_quantities,
+              cm::calls(data_udf ? "data_categorical" : "categorical_lpmf"),
+              "no generated categorical");
+          change(program, call);
+          return pw::write_v2(program);
+        };
+    refused(generated(false,
+                      [](mir::Program&, mir::Expr& call) {
+                        call.args.at(0).name = "missing";
+                      }),
+            cat_data, "categorical argument has no binding",
             "categorical rejects missing GQ binding before fallback");
-    }
-    {
-      std::string malformed = categorical_write_array_mir(
-          slurp("tests/fixtures/cat.tmir.sexp"), "categorical_lpmf", false,
-          false, false, true);
-      const size_t gq = malformed.find("(generate_quantities");
-      const size_t call =
-          malformed.find("(FunApp (StanLib categorical_lpmf", gq);
-      const std::string vector_arg =
-          "((pattern (Var theta))\n"
-          "             (meta ((type_ UVector) (adlevel DataOnly)))))";
-      const size_t arg = malformed.find(vector_arg, call);
-      check(gq != std::string::npos && call != std::string::npos &&
-                arg != std::string::npos,
-            "categorical malformed fallback mutation found target");
-      if (arg != std::string::npos) {
-        const std::string scalar_arg =
-            "((pattern (Lit Real 1.0))\n"
-            "             (meta ((type_ UReal) (adlevel DataOnly)))))";
-        malformed.replace(arg, vector_arg.size(), scalar_arg);
-      }
-      DataMap malformed_data =
-          DataMap::from_json(R"({"K":3,"y":2,"ys":[3,1,3]})");
-      check(malformed_refused(malformed, malformed_data),
+    refused(generated(false,
+                      [](mir::Program&, mir::Expr& call) {
+                        call.args.at(1) = pw::lit_real(1.0);
+                      }),
+            cat_data, "categorical",
             "categorical rejects malformed GQ signature before fallback");
-    }
-    {
-      std::string malformed = categorical_write_array_mir(
-          slurp("tests/fixtures/cat.tmir.sexp"), "categorical_lpmf", false,
-          false, true, true);
-      const size_t gq = malformed.find("(generate_quantities");
-      const size_t call =
-          malformed.find("(FunApp (UserDefined data_categorical", gq);
-      const std::string vector_arg =
-          "((pattern (Var theta))\n"
-          "             (meta ((type_ UVector) (adlevel DataOnly)))))";
-      const size_t arg = malformed.find(vector_arg, call);
-      check(gq != std::string::npos && call != std::string::npos &&
-                arg != std::string::npos,
-            "categorical malformed UDF fallback mutation found target");
-      if (arg != std::string::npos) {
-        const std::string scalar_arg =
-            "((pattern (Lit Real 1.0))\n"
-            "             (meta ((type_ UReal) (adlevel DataOnly)))))";
-        malformed.replace(arg, vector_arg.size(), scalar_arg);
-      }
-      DataMap malformed_data =
-          DataMap::from_json(R"({"K":3,"y":2,"ys":[3,1,3]})");
-      check(malformed_refused(malformed, malformed_data),
+    refused(generated(true,
+                      [](mir::Program&, mir::Expr& call) {
+                        call.args.at(1) = pw::lit_real(1.0);
+                      }),
+            cat_data, "data_categorical",
             "categorical rejects malformed UDF actual before fallback");
-    }
-    {
-      std::string malformed = categorical_write_array_mir(
-          slurp("tests/fixtures/cat.tmir.sexp"), "categorical_lpmf", false,
-          false, true, true);
-      const std::string formal = "(DataOnly p UVector)";
-      const size_t formal_at = malformed.find(formal);
-      const size_t gq = malformed.find("(generate_quantities");
-      const size_t call =
-          malformed.find("(FunApp (UserDefined data_categorical", gq);
-      const std::string actual =
-          "((pattern (Var theta))\n"
-          "             (meta ((type_ UVector) (adlevel DataOnly)))))";
-      const size_t actual_at = malformed.find(actual, call);
-      check(formal_at != std::string::npos && gq != std::string::npos &&
-                call != std::string::npos && actual_at != std::string::npos,
-            "categorical malformed UDF binding mutation found target");
-      if (actual_at != std::string::npos) {
-        std::string scalar_actual = actual;
-        scalar_actual.replace(scalar_actual.find("UVector"),
-                              std::strlen("UVector"), "UReal");
-        malformed.replace(actual_at, actual.size(), scalar_actual);
-      }
-      if (formal_at != std::string::npos)
-        malformed.replace(formal_at, formal.size(), "(DataOnly p UReal)");
-      DataMap malformed_data =
-          DataMap::from_json(R"({"K":3,"y":2,"ys":[3,1,3]})");
-      check(malformed_refused(malformed, malformed_data),
+    refused(generated(true,
+                      [](mir::Program& program, mir::Expr& call) {
+                        call.args.at(1).unsized =
+                            pw::view(mir::UnsizedLeaf::Real);
+                        program.fun_defs.back().arg_views.at(1) =
+                            pw::view(mir::UnsizedLeaf::Real);
+                      }),
+            cat_data,
+            "user function argument type disagrees with its binding for "
+            "data_categorical",
             "categorical rejects UDF metadata that contradicts its binding");
-    }
     for (const std::string& fn :
          {"categorical_lpmf", "categorical_logit_lpmf"}) {
       DataMap malformed_data;
@@ -9195,8 +8948,8 @@ int main() {
       bool gq_accepted = true;
       try {
         CompiledModel gq_model = compile_model(
-            categorical_write_array_mir(slurp("tests/fixtures/cat.tmir.sexp"),
-                                        fn, false, false, true),
+            categorical_write_array_mir(slurp("tests/fixtures/cat.mir"), fn,
+                                        false, false, true),
             gq_data);
       } catch (const std::exception& e) {
         (void)e;
@@ -9242,11 +8995,11 @@ int main() {
   {
     // Error path: an unsupported function is reported by name, never
     // silently miscompiled. Mutate a known-good fixture's density name.
-    std::string txt = slurp("tests/fixtures/es.tmir.sexp");
-    const std::string from = "normal_lpdf", to = "not_a_real_fn";
-    for (size_t pos = txt.find(from); pos != std::string::npos;
-         pos = txt.find(from, pos + to.size()))
-      txt.replace(pos, from.size(), to);
+    mir::Program program = decode_program(slurp("tests/fixtures/es.mir"));
+    portable_writer::visit_exprs(program, [](mir::Expr& e) {
+      if (portable_writer::calls(e, "normal_lpdf")) e.name = "not_a_real_fn";
+    });
+    const std::string txt = portable_writer::write_v2(program);
     bool threw2 = false;
     try {
       compile_model(txt, data);
@@ -9268,7 +9021,7 @@ int main() {
     bool rejected = false;
     std::string msg;
     try {
-      compile_model(slurp("tests/fixtures/oob.tmir.sexp"), d);
+      compile_model(slurp("tests/fixtures/oob.mir"), d);
     } catch (const std::invalid_argument& e) {
       rejected = true;
       msg = e.what();
@@ -9297,7 +9050,7 @@ int main() {
     bool rejected = false;
     std::string msg;
     try {
-      compile_model(slurp("tests/fixtures/es.tmir.sexp"), d);
+      compile_model(slurp("tests/fixtures/es.mir"), d);
     } catch (const std::invalid_argument& e) {
       rejected = true;
       msg = e.what();
@@ -9319,7 +9072,7 @@ int main() {
     wide.set_real_array("sigma", std::vector<double>(9, 1.0));
     bool wide_rejected = false;
     try {
-      compile_model(slurp("tests/fixtures/es.tmir.sexp"), wide);
+      compile_model(slurp("tests/fixtures/es.mir"), wide);
     } catch (const std::invalid_argument&) {
       wide_rejected = true;
     } catch (const std::exception&) {
@@ -9332,7 +9085,7 @@ int main() {
     // they must equal the declared dims, as in CmdStan. A 3x3 matrix given
     // nine flat values, or nine values under a 1x9 shape, has the right
     // count but the wrong shape.
-    const std::string mir = slurp("tests/fixtures/quad_form_sym.tmir.sexp");
+    const std::string mir = slurp("tests/fixtures/quad_form_sym.mir");
     const auto message = [&](const DataMap& d) {
       try {
         compile_model(mir, d);
@@ -9375,8 +9128,7 @@ int main() {
     // container expression, because the truncation was in the consumer and
     // so was blind to which shape produced the value.
     DataMap d = DataMap::from_json(R"({"N": 3, "w": [1.25, 2.5, 0.75]})");
-    CompiledModel lm =
-        compile_model(slurp("tests/fixtures/tpecont.tmir.sexp"), d);
+    CompiledModel lm = compile_model(slurp("tests/fixtures/tpecont.mir"), d);
     Executor lex(std::move(lm.graph));
     lm.bind(lex);
     // Unconstrained parameters throughout, so the target terms are the
@@ -9420,8 +9172,7 @@ int main() {
     // The same increment reached once per loop iteration: the loop unrolls
     // into one target term per pass, each of them a container.
     DataMap d = DataMap::from_json(R"({"N": 3})");
-    CompiledModel lm =
-        compile_model(slurp("tests/fixtures/tpeloop.tmir.sexp"), d);
+    CompiledModel lm = compile_model(slurp("tests/fixtures/tpeloop.mir"), d);
     Executor lex(std::move(lm.graph));
     lm.bind(lex);
     const double q[7] = {0.3, -1.2, 0.7, 2.1, -0.4, 1.6, 0.9};
@@ -9453,8 +9204,7 @@ int main() {
     // container too, and both arms are checked because only one of them
     // runs per evaluation.
     DataMap d;
-    CompiledModel lm =
-        compile_model(slurp("tests/fixtures/tpeisland.tmir.sexp"), d);
+    CompiledModel lm = compile_model(slurp("tests/fixtures/tpeisland.mir"), d);
     Executor lex(std::move(lm.graph));
     lm.bind(lex);
     const double q[4] = {0.3, -1.2, 0.7, 1.5};
@@ -9482,8 +9232,7 @@ int main() {
   // element through the full, nonsymmetric matrix exponential.
   {
     DataMap d;
-    CompiledModel mm =
-        compile_model(slurp("tests/fixtures/matrix_exp.tmir.sexp"), d);
+    CompiledModel mm = compile_model(slurp("tests/fixtures/matrix_exp.mir"), d);
     Executor mex(std::move(mm.graph));
     mm.bind(mex);
     const double q[4] = {0.2, -0.4, 0.7, -0.1};
@@ -9511,8 +9260,7 @@ int main() {
   // input remains active so the graph path also pins its reverse pullback.
   {
     DataMap d;
-    CompiledModel am =
-        compile_model(slurp("tests/fixtures/add_diag.tmir.sexp"), d);
+    CompiledModel am = compile_model(slurp("tests/fixtures/add_diag.mir"), d);
     check(count_opcode(am, OP_ADD_DIAG) == 1,
           "add_diag lowers to its native matrix kernel");
     Executor aex(std::move(am.graph));
@@ -9540,8 +9288,7 @@ int main() {
           "enable new-functions write_array interpreter");
     CompiledModel fm;
     try {
-      fm = compile_model(slurp("tests/fixtures/interp_new_functions.tmir.sexp"),
-                         d);
+      fm = compile_model(slurp("tests/fixtures/interp_new_functions.mir"), d);
     } catch (...) {
       test_unsetenv("STANLI_WA_FORCE_INTERP");
       throw;
@@ -9597,7 +9344,7 @@ int main() {
     d.set_real_array("d", dm, {3, 3});
     d.set_real_array("dv", dvv);
     CompiledModel mm =
-        compile_model(slurp("tests/fixtures/quad_form_sym.tmir.sexp"), d);
+        compile_model(slurp("tests/fixtures/quad_form_sym.mir"), d);
     Executor mex(std::move(mm.graph));
     mm.bind(mex);
     const double q[18] = {0.2, -0.4, 0.7, -0.1, 0.9,  0.3, -0.6, 0.5,  0.8,
@@ -9650,7 +9397,7 @@ int main() {
     d.set_real_array("d", std::vector<double>(9, 0.0), {3, 3});
     d.set_real_array("dv", std::vector<double>(3, 0.0));
     CompiledModel qm =
-        compile_model(slurp("tests/fixtures/quad_form_sym.tmir.sexp"), d);
+        compile_model(slurp("tests/fixtures/quad_form_sym.mir"), d);
     Executor qex(std::move(qm.graph));
     qm.bind(qex);
     std::fill(qex.params_data(), qex.params_data() + 18, 0.0);
@@ -9673,7 +9420,7 @@ int main() {
       "dt": [[2.8, 9.1, -7.3], [-0.4, 3.2, 8.2], [0.6, -0.5, 2.9]]
     })");
     CompiledModel mm =
-        compile_model(slurp("tests/fixtures/mdivide_named.tmir.sexp"), d);
+        compile_model(slurp("tests/fixtures/mdivide_named.mir"), d);
     Executor mex(std::move(mm.graph));
     mm.bind(mex);
     // Three families of 54 reals: four divisors, then the matrix, vector,
@@ -9773,7 +9520,7 @@ int main() {
   // section to the interpreter.
   {
     stanli::CompiledModel cm =
-        compile_model(slurp("tests/fixtures/wa_local_shape_query.tmir.sexp"),
+        compile_model(slurp("tests/fixtures/wa_local_shape_query.mir"),
                       DataMap::from_json("{}"));
     check(cm.interpreter_fallbacks.empty(),
           "local shape query stays on the compiled path");

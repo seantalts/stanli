@@ -42,8 +42,7 @@ int main() {
   using namespace stanli;
 
   DataMap data = DataMap::from_json_file("tests/fixtures/newtrans.json");
-  CompiledModel cm =
-      compile_model(slurp("tests/fixtures/newtrans.tmir.sexp"), data);
+  CompiledModel cm = compile_model(slurp("tests/fixtures/newtrans.mir"), data);
   Executor ex(std::move(cm.graph));
   cm.bind(ex);
 
@@ -208,8 +207,7 @@ int main() {
   // The free size is the check a gradient cannot make, so it comes first.
   {
     DataMap none;
-    CompiledModel sm =
-        compile_model(slurp("tests/fixtures/stzmat.tmir.sexp"), none);
+    CompiledModel sm = compile_model(slurp("tests/fixtures/stzmat.mir"), none);
     Executor sx(std::move(sm.graph));
     sm.bind(sx);
     expect_true("sum_to_zero_matrix[4,5] is (4-1)*(5-1) free, got " +
@@ -264,7 +262,7 @@ int main() {
   {
     DataMap none;
     CompiledModel sm =
-        compile_model(slurp("tests/fixtures/stochastic.tmir.sexp"), none);
+        compile_model(slurp("tests/fixtures/stochastic.mir"), none);
     Executor sx(std::move(sm.graph));
     sm.bind(sx);
     expect_true("stochastic parameters have 9 + 9 + 2 * 4 free, got " +

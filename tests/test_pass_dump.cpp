@@ -96,7 +96,7 @@ int main(int argc, char** argv) {
   // store_forward and constfold dumps differ in the graph itself.
   const DataMap data =
       DataMap::from_json_file("tests/fixtures/arr2d_rowrange.json");
-  const std::string mir = slurp("tests/fixtures/arr2d_rowrange.tmir.sexp");
+  const std::string mir = slurp("tests/fixtures/arr2d_rowrange.mir");
 
   const std::filesystem::path root =
       std::filesystem::temp_directory_path() / "stanli_pass_dump_test";

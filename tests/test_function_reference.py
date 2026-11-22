@@ -19,7 +19,7 @@ def main(host):
         assert source_digest(FIXTURE.with_suffix(suffix)) == reference[key]
     points = ('0','1','2','0')
     values = [str(reference['points'][point]['wa']['values'][0]) for point in points]
-    run = subprocess.run([host,str(FIXTURE.with_suffix('.tmir.sexp')),*values],
+    run = subprocess.run([host,str(FIXTURE.with_suffix('.mir')),*values],
                          capture_output=True,text=True)
     assert run.returncode == 0, (run.returncode,run.stdout,run.stderr)
     reports = [json.loads(line) for line in run.stderr.splitlines() if line.startswith('{')]

@@ -3076,8 +3076,8 @@ static void test_e2e_fixtures() {
     size_t max_ops;
   };
   const Case cases[] = {
-      {"tests/fixtures/rloop.tmir.sexp", rdata, "rloop", 7},
-      {"tests/fixtures/arloop.tmir.sexp", adata, "arloop", 10},
+      {"tests/fixtures/rloop.mir", rdata, "rloop", 7},
+      {"tests/fixtures/arloop.mir", adata, "arloop", 10},
   };
   for (const Case& c : cases) {
     size_t ops_unrolled = 0, ops_rerolled = 0;
@@ -3175,17 +3175,15 @@ static void test_read_modify_write_models() {
     bool vectorizes;
   };
   const Case cases[] = {
-      {"tests/fixtures/rmw_re.tmir.sexp", rmw_re_json, "rmw_re", true},
-      {"tests/fixtures/rmw_double_store.tmir.sexp", rmw_double_json,
+      {"tests/fixtures/rmw_re.mir", rmw_re_json, "rmw_re", true},
+      {"tests/fixtures/rmw_double_store.mir", rmw_double_json,
        "rmw_double_store", true},
-      {"tests/fixtures/rmw_recurrence.tmir.sexp", rmw_recurrence_json,
+      {"tests/fixtures/rmw_recurrence.mir", rmw_recurrence_json,
        "rmw_recurrence", false},
-      {"tests/fixtures/rmw_terms16.tmir.sexp", rmw_terms16_json, "rmw_terms16",
-       true},
-      {"tests/fixtures/rmw_terms25.tmir.sexp", rmw_terms25_json, "rmw_terms25",
-       true},
-      {"tests/fixtures/reroll_ordered_logistic.tmir.sexp",
-       ordered_logistic_json, "ordered_logistic", true},
+      {"tests/fixtures/rmw_terms16.mir", rmw_terms16_json, "rmw_terms16", true},
+      {"tests/fixtures/rmw_terms25.mir", rmw_terms25_json, "rmw_terms25", true},
+      {"tests/fixtures/reroll_ordered_logistic.mir", ordered_logistic_json,
+       "ordered_logistic", true},
   };
   for (const Case& c : cases) {
     const std::string tag = c.name;
@@ -3232,7 +3230,7 @@ static void test_random_effect_loops_fully_rerolled() {
       ",\"J_3\":" + json_int_array(N, ints) +
       ",\"Z_1\":" + json_array(N, ones) + ",\"Z_2\":" + json_array(N, ones) +
       ",\"Z_3\":" + json_array(N, ones) + "}";
-  const char* sexp = "tests/fixtures/rmw_re_adjacent.tmir.sexp";
+  const char* sexp = "tests/fixtures/rmw_re_adjacent.mir";
   size_t n_ops = 0;
   test_setenv("STANLI_NO_REROLL", "1", 1);
   test_setenv("STANLI_NO_PARTITION", "1", 1);
@@ -3308,8 +3306,8 @@ static void test_signature_soundness() {
     const char* name;
   };
   const Fixture fixtures[] = {
-      {"tests/fixtures/rloop.tmir.sexp", rdata, "rloop corpus"},
-      {"tests/fixtures/arloop.tmir.sexp", adata, "arloop corpus"},
+      {"tests/fixtures/rloop.mir", rdata, "rloop corpus"},
+      {"tests/fixtures/arloop.mir", adata, "arloop corpus"},
   };
   test_setenv("STANLI_NO_REROLL", "1", 1);
   for (const Fixture& f : fixtures) {
@@ -3322,7 +3320,7 @@ static void test_signature_soundness() {
   {
     DataMap data = DataMap::from_json_file("tests/fixtures/brmsmono.json");
     CompiledModel cm =
-        compile_model(slurp("tests/fixtures/brmsmono.tmir.sexp"), data);
+        compile_model(slurp("tests/fixtures/brmsmono.mir"), data);
     check("brmsmono corpus", cm.graph);
     if (cm.write_array)
       check("brmsmono corpus write_array", cm.write_array->graph);

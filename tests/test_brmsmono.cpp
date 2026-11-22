@@ -30,7 +30,7 @@ int main() {
   using namespace stanli;
 
   DataMap data = DataMap::from_json_file("tests/fixtures/brmsmono.json");
-  const std::string mir = slurp("tests/fixtures/brmsmono.tmir.sexp");
+  const std::string mir = slurp("tests/fixtures/brmsmono.mir");
   CompiledModel cm = compile_model(mir, data);
   auto island_count = [](const Graph& g) {
     int n = 0;

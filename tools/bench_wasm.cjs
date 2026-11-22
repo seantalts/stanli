@@ -66,7 +66,7 @@ function loadAdhoc(M) {
 
 function loadModel(M, stem, dataFile) {
   const fixtures = path.join(repo, "tests", "fixtures");
-  const mirPath = path.join(fixtures, stem + ".tmir.sexp");
+  const mirPath = path.join(fixtures, stem + ".mir");
   let mir;
   if (fs.existsSync(mirPath)) {
     mir = fs.readFileSync(mirPath, "utf8");

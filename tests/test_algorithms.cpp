@@ -49,7 +49,7 @@ static void test_fixed_param_stream() {
   using namespace stanli;
   DataMap data = DataMap::from_json(slurp("tests/fixtures/alg_noparam.json"));
   CompiledModel cm =
-      compile_model(slurp("tests/fixtures/alg_noparam.tmir.sexp"), data);
+      compile_model(slurp("tests/fixtures/alg_noparam.mir"), data);
   Executor ex(std::move(cm.graph));
   cm.bind(ex);
   expect("noparam has no parameters", ex.n_params() == 0);

@@ -2005,7 +2005,7 @@ def replay_corpus(name, selected, check_bin, stanc, jobs, timeout,
                         "stanli_signature_models target", [])
             args = ()
             if corpus.mir:
-                args = ("--mir", str(source.with_suffix(".tmir.sexp")))
+                args = ("--mir", str(source.with_suffix(".mir")))
             elif stanc:
                 # Stock stanc writes the model's C++ beside its source.
                 copy = work / "stanc" / model / source.name
