@@ -252,9 +252,9 @@ fit <- sample_walnuts(m, pathfinder_init = list())  # Pathfinder starting points
 ```
 
 The chains run one after another. Seeds, chain ids and starting values work
-as in `sample_model()`, so chain 1 starts where NUTS chain 1 with the same
-seed starts. `pathfinder_init` accepts the same options as in `sample_model()`
-and cannot be combined with `init`. It runs one Pathfinder path, keyed on the
+as in `sample_model()`. Without `init` or `pathfinder_init`, chain 1 starts
+where NUTS chain 1 with the same seed starts. `pathfinder_init` accepts the
+same options as in `sample_model()` and cannot be combined with `init`. It runs one Pathfinder path, keyed on the
 first chain id, to generate all chains' starts; splitting a run into separate
 calls can therefore change those starts. The result is a `stanli_fit`, so
 `summary()`, `as_draws_array()`, `log_lik()` and the fit adapters work on it.

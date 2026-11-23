@@ -8,6 +8,7 @@ first useful results, compressed size and installed size are separate concerns.
 
 | Prior work | What to recover from it |
 | --- | --- |
+| [WALNUTS Pathfinder initialization](../../../notes/triage/2026-11-23-issue-658-pathfinder-walnuts.md) | R-only reuse of the existing initializer, shared-path seed/chain-ID contract, focused tests and remaining integration checks for #658. |
 | [Portable runtime design](../archive/specs/2026-08-04-stan-portable-runtime-design.md) | Original architecture and distribution assumptions; not a current feature inventory. |
 | [BridgeStan facade](../archive/specs/2026-08-10-bridgestan-facade-design.md) | ABI and surrounding ecosystem compatibility rationale. |
 | [Embedded MIR/data](../archive/specs/2026-08-11-embedded-mir-data.md) | Loading and artifact ownership design. |

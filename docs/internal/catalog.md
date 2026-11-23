@@ -283,6 +283,9 @@ paths and hashes in raw records unchanged.
 | Document | Contents / use |
 | --- | --- |
 | [2026-11-23 · Social feedback triage](../../notes/triage/2026-11-23-social-feedback.md) | Public bug/performance reports, source threads, historical issue dispositions and search/access limits; no fresh reproductions. |
+| [2026-11-23 · Issue 656 covariance investigation](../../notes/triage/2026-11-23-issue-656-investigation.md) | Matched covariance/Cholesky diagnostics and useful rejection behavior; original reported error remains unreproduced. |
+| [2026-11-23 · Issue 657 mixed-model investigation](../../notes/triage/2026-11-23-issue-657-investigation.md) | Reproducible surrogate, raw oracle results and unmatched timing limits; original slowdown remains unresolved. |
+| [2026-11-23 · Issue 658 WALNUTS Pathfinder initialization](../../notes/triage/2026-11-23-issue-658-pathfinder-walnuts.md) | R-only implementation, initialization semantics, focused test evidence and remaining integration checks. |
 | [Corpus benchmark evidence](../../output/corpus-performance-vectorized/README.md) | Published run/report provenance; retains recorded revision. |
 | [Corpus benchmark evidence](../../output/corpus-performance/README.md) | Published run/report provenance; retains recorded revision. |
 | [Rethinking report evidence](../../output/rethinking-report/README.md) | Published 2026-09-16 against a pre-release CmdStan snapshot (`11cb052`); the sampling harness that produced it was removed, so it is not rerun. |

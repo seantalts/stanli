@@ -19,11 +19,20 @@ on 2026-11-23 with the source reports and missing reproduction details.
 Separate subagent investigations started from the baseline above; neither
 report is considered resolved.
 
+- [#656 first investigation](2026-11-23-issue-656-investigation.md):
+  custom covariance/Cholesky diagnostics match CmdStan within 1 ULP and
+  invalid matrices reject; the original error remains unreproduced.
+- [#657 first investigation](2026-11-23-issue-657-investigation.md):
+  reproducible 10/50/500-subject surrogate and retained numerical evidence;
+  timing interfaces differ and full inference comparison is unfinished.
+
 An additional direct user request is tracked separately as
 [#658](https://github.com/seantalts/stanli/issues/658): support
 `pathfinder_init` in R's `sample_walnuts()`. A third subagent owns that
-implementation and its R interface tests. This request did not come from
-the social-media search.
+implementation and its R interface tests. The [implementation and validation
+record](2026-11-23-issue-658-pathfinder-walnuts.md) describes the completed
+local change and remaining integration validation. This request did not come
+from the social-media search.
 
 ### 1. Custom covariance / Cholesky models fail
 
