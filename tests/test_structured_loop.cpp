@@ -8401,6 +8401,14 @@ static void counted_bounded_cholesky(KernelCtx& context) {
   find_kernel(OP_CHOLESKY)->forward(context);
 }
 
+// Exercise the shipped bounded path without a developer environment switch.
+// Cacheable plans deliberately retain the ordinary recording/replay policy.
+static Graph bounded_outer(std::shared_ptr<StructuredLoop> plan,
+                           std::vector<int64_t> param_lens = {1, 1}) {
+  plan->cache_execution_path = false;
+  return outer(std::move(plan), std::move(param_lens));
+}
+
 static void bounded_invariant_cholesky_test() {
   auto plan = std::make_shared<StructuredLoop>();
   const int matrix = plan->body.add_slot(4, false);
@@ -8434,6 +8442,7 @@ static void bounded_invariant_cholesky_test() {
                                     alias(factor, zero_matrix)})))}));
   plan->outputs = {factor};
   plan->has_target = true;
+  plan->cache_execution_path = false;
   plan->prepare();
   Node* node = find_call(plan->root, cholesky_op);
   check(node && node->invariant_loop >= 0,
@@ -8451,8 +8460,8 @@ static void bounded_invariant_cholesky_test() {
   for (int repeat = 0; repeat < 2; ++repeat) {
     bounded_cholesky_calls = 0;
     bounded.run_forward_only(state);
-    check(bounded_cholesky_calls == (repeat == 0 ? 2 : 0),
-          "container invariant falls back to retained constant replay");
+    check(bounded_cholesky_calls == 2,
+          "nonreplayable container invariant retains its old recording path");
     const int output = graph.ops[0].out;
     check(std::memcmp(retained_executor.value_ptr(output),
                       bounded.value_ptr(output), 5 * sizeof(double)) == 0,
@@ -8464,12 +8473,20 @@ static void bounded_invariant_cholesky_test() {
 
 static int bounded_vector_calls = 0;
 static std::vector<double*> bounded_fill_outputs;
+static std::vector<double*> bounded_refusal_vector_outputs;
+static std::vector<double*> bounded_refusal_scalar_outputs;
 static void counted_bounded_vector_tanh(KernelCtx& context) {
   ++bounded_vector_calls;
+  bounded_refusal_vector_outputs.push_back(context.out.data);
   find_kernel(OP_TANHV)->forward(context);
 }
 static void counted_bounded_vector_mul(KernelCtx& context) {
   ++bounded_vector_calls;
+  bounded_refusal_vector_outputs.push_back(context.out.data);
+  find_kernel(OP_MUL)->forward(context);
+}
+static void traced_bounded_refusal_scalar(KernelCtx& context) {
+  bounded_refusal_scalar_outputs.push_back(context.out.data);
   find_kernel(OP_MUL)->forward(context);
 }
 static void traced_bounded_fill_tanh(KernelCtx& context) {
@@ -8484,6 +8501,7 @@ static void bounded_forward_selection_tests() {
     const int input = plan->body.add_slot(4, false);
     const int output = plan->body.add_slot(4, false);
     const int snapshot = plan->body.add_slot(4, false);
+    const int scaled = plan->body.add_slot(1, false);
     const int iterator = plan->body.add_slot(1, false);
     const int lower = scalar(*plan, 1), upper = scalar(*plan, 3);
     plan->fills.push_back({input, {1, 2, 3, 4}});
@@ -8491,11 +8509,14 @@ static void bounded_forward_selection_tests() {
     Node work = repeated_alias ? call(*plan, OP_MUL, {input, iterator}, output)
                                : call(*plan, OP_TANHV, {input}, output);
     const int work_op = work.op;
-    std::vector<Node> body{std::move(work), target(theta)};
+    Node scale = call(*plan, OP_MUL, {theta, iterator}, scaled);
+    const int scale_op = scale.op;
+    std::vector<Node> body{std::move(work), std::move(scale), target(scaled)};
     if (repeated_alias) body.push_back(alias(snapshot, output));
     plan->root = counted(lower, upper, iterator, sequence(std::move(body)));
     plan->outputs = {repeated_alias ? snapshot : output};
     plan->has_target = true;
+    plan->cache_execution_path = false;
     plan->prepare();
     Node* node = find_call(plan->root, work_op);
     check(node && (repeated_alias ? node->invariant_loop < 0
@@ -8505,6 +8526,49 @@ static void bounded_forward_selection_tests() {
                       repeated_alias ? counted_bounded_vector_mul
                                      : counted_bounded_vector_tanh),
           "install observable fallback counter");
+    check(set_forward(plan->root, scale_op, traced_bounded_refusal_scalar),
+          "install independent fallback output-address trace");
+    Executor executor(outer(plan, {1}));
+    executor.params_data()[0] = .25;
+    EvalState state;
+    state.no_reverse = true;
+    for (int repeat = 0; repeat < 2; ++repeat) {
+      bounded_vector_calls = 0;
+      bounded_refusal_vector_outputs.clear();
+      bounded_refusal_scalar_outputs.clear();
+      executor.run_forward_only(state);
+      check(bounded_vector_calls == (repeated_alias ? 3 : 1),
+            "nonreplayable cost refusal preserves old callback counts");
+      check(!bounded_refusal_vector_outputs.empty() &&
+                !bounded_refusal_scalar_outputs.empty() &&
+                bounded_refusal_vector_outputs[0] !=
+                    bounded_refusal_scalar_outputs[0],
+            "cost refusal keeps separate retained outputs instead of one "
+            "temporary");
+      if (repeated_alias)
+        check(distinct_addresses(bounded_refusal_vector_outputs),
+              "repeated container Alias refuses bounded temporary reuse");
+    }
+  }
+  {
+    auto plan = std::make_shared<StructuredLoop>();
+    const int theta = plan->body.add_slot(1, false);
+    const int input = scalar(*plan, .5);
+    const int output = plan->body.add_slot(1, false);
+    const int iterator = plan->body.add_slot(1, false);
+    const int lower = scalar(*plan, 1), upper = scalar(*plan, 3);
+    plan->imports = {{theta, 0, 0, true}};
+    Node work = call(*plan, OP_TANHV, {input}, output);
+    const int work_op = work.op;
+    plan->root = counted(lower, upper, iterator,
+                         sequence({std::move(work), target(theta)}));
+    plan->outputs = {output};
+    plan->has_target = true;
+    plan->prepare();
+    check(plan->cache_execution_path,
+          "ordinary scalar loop keeps its default cacheable policy");
+    check(set_forward(plan->root, work_op, counted_bounded_vector_tanh),
+          "install cacheable scalar invariant counter");
     Executor executor(outer(plan, {1}));
     executor.params_data()[0] = .25;
     EvalState state;
@@ -8512,9 +8576,8 @@ static void bounded_forward_selection_tests() {
     for (int repeat = 0; repeat < 2; ++repeat) {
       bounded_vector_calls = 0;
       executor.run_forward_only(state);
-      check(
-          bounded_vector_calls == (repeat == 0 ? (repeated_alias ? 3 : 1) : 0),
-          "cost refusal uses retained constant replay on warm evaluation");
+      check(bounded_vector_calls == (repeat == 0 ? 1 : 0),
+            "cacheable no-reverse evaluation preserves warm constant replay");
     }
   }
   // An active indexed fill keeps the bounded path: the update's container
@@ -8546,7 +8609,7 @@ static void bounded_forward_selection_tests() {
         "retained tanh needs its historical output primal");
   check(set_forward(plan->root, transform_op, traced_bounded_fill_tanh),
         "install indexed fill output-address trace");
-  const Graph graph = outer(plan, {1});
+  const Graph graph = bounded_outer(plan, {1});
   Executor retained_executor(graph), bounded(graph);
   retained_executor.params_data()[0] = bounded.params_data()[0] = .125;
   bounded_fill_outputs.clear();
@@ -8566,6 +8629,89 @@ static void bounded_forward_selection_tests() {
     check(std::memcmp(retained_executor.value_ptr(output),
                       bounded.value_ptr(output), 16 * sizeof(double)) == 0,
           "bounded indexed fill preserves all matrix cells exactly");
+  }
+}
+
+static void cacheable_varying_output_carry_tests() {
+  // 0 varying seed, 1 data seed, 2 data overwrite, 3 Alias chain,
+  // 4 ambiguous branch initialization, 5 ordinary prefix overwrite,
+  // 6 ordinary loop overwrite. Every import is inactive, as in write_array.
+  for (int mode = 0; mode < 7; ++mode) {
+    auto plan = std::make_shared<StructuredLoop>();
+    const int theta = plan->body.add_slot(1, false);
+    const int varying = plan->body.add_slot(8, false);
+    const int data = plan->body.add_slot(8, false);
+    const int bridge = plan->body.add_slot(8, false);
+    const int base = plan->body.add_slot(8, false);
+    const int updated = plan->body.add_slot(8, false);
+    const int rhs = plan->body.add_slot(1, false);
+    const int iterator = plan->body.add_slot(1, false);
+    const int invariant = plan->body.add_slot(1, false);
+    const int constant = scalar(*plan, .5);
+    const int lower = scalar(*plan, 1), upper = scalar(*plan, 3);
+    plan->imports = {{theta, 0, 0, false, false},
+                     {varying, 1, 0, false, false},
+                     {data, 2, 0, false, true}};
+    std::vector<Node> prefix;
+    if (mode == 3) {
+      prefix.push_back(alias(bridge, varying));
+      prefix.push_back(alias(base, bridge));
+    } else if (mode == 4) {
+      prefix.push_back(branch(theta, alias(base, varying), alias(base, data)));
+    } else {
+      prefix.push_back(alias(base, mode == 1 ? data : varying));
+    }
+    if (mode == 2) prefix.push_back(alias(base, data));
+    if (mode == 5) prefix.push_back(call(*plan, OP_ADD, {data, data}, base));
+    Node invariant_call = call(*plan, OP_TANHV, {constant}, invariant);
+    const int invariant_op = invariant_call.op;
+    std::vector<Node> body{std::move(invariant_call)};
+    if (mode == 6) body.push_back(call(*plan, OP_MUL, {data, iterator}, base));
+    body.push_back(call(*plan, OP_ADD, {theta, iterator}, rhs));
+    Node update =
+        call(*plan, OP_SET_INDEX_DYNAMIC, {base, iterator, rhs}, updated);
+    const int update_op = update.op;
+    attach(*plan, update_op, single_spec(8));
+    body.push_back(std::move(update));
+    body.push_back(alias(base, updated));
+    prefix.push_back(
+        counted(lower, upper, iterator, sequence(std::move(body))));
+    plan->root = sequence(std::move(prefix));
+    plan->outputs = {base};
+    plan->prepare();
+    check(plan->cache_execution_path,
+          "varying output carry test retains a cacheable plan");
+    check(find_call(plan->root, update_op)->storage == Node::InPlace,
+          "varying output carry is updated in place");
+    check(set_forward(plan->root, invariant_op, counted_bounded_vector_tanh),
+          "install cacheable carry path-selection discriminator");
+    Graph graph = outer(plan, {1, 8}, {8});
+    graph.forward_only = true;
+    Executor executor(graph);
+    const std::vector<double> fixed(8, .125);
+    executor.set_values(2, fixed.data(), fixed.size());
+    const bool expect_bounded = mode == 0 || mode == 3;
+    for (int repeat = 0; repeat < 2; ++repeat) {
+      const double theta_value = .25 * (repeat + 1);
+      executor.params_data()[0] = theta_value;
+      for (int i = 0; i < 8; ++i)
+        executor.params_data()[i + 1] = 10 * (repeat + 1) + i;
+      bounded_vector_calls = 0;
+      executor.run_forward_only();
+      check(
+          bounded_vector_calls == (repeat == 0 || expect_bounded ? 1 : 0),
+          "cacheable carry selects bounded only for unambiguous varying seed");
+      const double* output = executor.value_ptr(graph.ops[0].out);
+      for (int i = 0; i < 8; ++i) {
+        double expected = 10 * (repeat + 1) + i;
+        if (mode == 1 || mode == 2) expected = .125;
+        if (mode == 5) expected = .25;
+        if (mode == 6) expected = i == 2 ? theta_value + 3 : .375;
+        if (mode != 6 && i < 3) expected = theta_value + i + 1;
+        check(output[i] == expected,
+              "cacheable carry preserves seed snapshots and indexed updates");
+      }
+    }
   }
 }
 
@@ -8615,7 +8761,7 @@ static void forward_without_history_tests() {
     }
   };
   for (int trips : {0, 1, 4, 256}) {
-    compare(outer(recurrence(trips)), {.1, .7},
+    compare(bounded_outer(recurrence(trips)), {.1, .7},
             "bounded recurrence matches retained forward bitwise");
     auto plan = std::make_shared<StructuredLoop>();
     const int theta = plan->body.add_slot(1, false);
@@ -8647,7 +8793,7 @@ static void forward_without_history_tests() {
     plan->outputs = {base, snapshot};
     plan->has_target = true;
     plan->prepare();
-    compare(outer(plan), {.25, 0},
+    compare(bounded_outer(plan), {.25, 0},
             "bounded snapshots, duplicate writes and target order match");
   }
   {
@@ -8670,7 +8816,7 @@ static void forward_without_history_tests() {
     const Node* node = find_call(plan->root, update_op);
     check(node && node->storage != Node::InPlace,
           "same-base RHS refuses in-place fusion");
-    compare(outer(plan, {4}), {1, 2, 3, 4},
+    compare(bounded_outer(plan, {4}), {1, 2, 3, 4},
             "bounded staged ordinary kernel preserves overlapping RHS");
   }
   for (int len : {3, 5, 7, 17, 33, 65}) {
@@ -8704,7 +8850,7 @@ static void forward_without_history_tests() {
     plan->outputs = {density, dot, sum};
     plan->has_target = true;
     plan->prepare();
-    compare(outer(plan, {len, 1}), point,
+    compare(bounded_outer(plan, {len, 1}), point,
             "bounded awkward-length reduction and density scratch parity");
   }
   // Hand-built trees also exercise native control in the shipped build,
@@ -8742,13 +8888,13 @@ static void forward_without_history_tests() {
     plan->outputs = {counter};
     plan->has_target = true;
     plan->prepare();
-    compare(outer(plan), {.1, .7},
+    compare(bounded_outer(plan), {.1, .7},
             "bounded while, exits and branch flips match retained bitwise");
   }
   auto retry_plan = recurrence(8);
   check(install_failure_callbacks(*retry_plan, retry_plan->root),
         "bounded failure test finds native callback");
-  Executor retry(outer(retry_plan));
+  Executor retry(bounded_outer(retry_plan));
   retry.params_data()[0] = .1;
   retry.params_data()[1] = .7;
   EvalState state;
@@ -8784,7 +8930,7 @@ static void forward_without_history_tests() {
     plan->prepare();
     check(install_failure_callbacks(*plan, plan->root),
           "bounded RNG test finds failure callback");
-    const Graph graph = outer(plan, {1});
+    const Graph graph = bounded_outer(plan, {1});
     Executor retained_executor(graph), bounded(graph);
     retained_executor.params_data()[0] = bounded.params_data()[0] = .25;
     WaRng reference_rng(991), bounded_rng(991);
@@ -8821,6 +8967,7 @@ int main(int argc, char** argv) {
   if (argc == 2 && std::string(argv[1]) == "--forward-without-history") {
     bounded_invariant_cholesky_test();
     bounded_forward_selection_tests();
+    cacheable_varying_output_carry_tests();
     forward_without_history_tests();
     if (failures == 0)
       std::printf("test_structured_loop forward-without-history OK\n");
@@ -8844,6 +8991,7 @@ int main(int argc, char** argv) {
   transient_classification_tests();
   bounded_invariant_cholesky_test();
   bounded_forward_selection_tests();
+  cacheable_varying_output_carry_tests();
   forward_without_history_tests();
   invariant_active_reuse_tests();
   invariant_gradient_order_test();

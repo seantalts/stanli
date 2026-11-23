@@ -1,0 +1,48 @@
+{
+  "executable_sha256": "20c42732df350e74fb2510b48dbc28c456a01b2ad9a639678c5158beb68dca86",
+  "source_sha256": "c4a5c45f0823401cb88923bbf221fa7e8db60772c731c3b1fcd27ff59fc37abe",
+  "linked_runtime": "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-covariance-fix/build/libstanli_test_core.dylib",
+  "linked_runtime_sha256": "59d96bc27b4c08544134e972f22fa3639c4c769755e6f59ba9872709fb746430",
+  "runs": {
+    "gp-n256": {
+      "argv": [
+        "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanrt/.cache/structured_loop_carry_probe",
+        "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-covariance/.cache/issue656/attribution/gp-native-metadata-input/udf-n256.mir.sexp",
+        "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-covariance/.cache/issue656/attribution/gp-native-metadata-input/udf-n256.json"
+      ],
+      "stdout_sha256": "6b5e98a1ada264d113f68ba8f81226ea93b5d56e17d696c2cfdb3edb66a4dc56",
+      "records": 193,
+      "returncode": 0
+    },
+    "wa-counted-size": {
+      "argv": [
+        "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanrt/.cache/structured_loop_carry_probe",
+        "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-covariance-fix/tests/fixtures/structured_wa_counted_size.tmir.sexp",
+        "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-covariance-fix/.cache/forward-plan-probe/wa-ci.json"
+      ],
+      "stdout_sha256": "737e5f492286ac27b046182e77bbfae8833733cbacef30d56c34701eeaadc333",
+      "records": 1,
+      "returncode": 0
+    },
+    "wa-data-branch": {
+      "argv": [
+        "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanrt/.cache/structured_loop_carry_probe",
+        "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-covariance-fix/tests/fixtures/structured_wa_data_branch.tmir.sexp",
+        "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-covariance-fix/.cache/forward-plan-probe/wa-ci.json"
+      ],
+      "stdout_sha256": "cd255b8567e1e943f9204ffcde821de869f1c83efc91701bd1bf45bb13a02c59",
+      "records": 2,
+      "returncode": 0
+    },
+    "wa-data-start": {
+      "argv": [
+        "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanrt/.cache/structured_loop_carry_probe",
+        "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-covariance-fix/tests/fixtures/structured_wa_data_start.tmir.sexp",
+        "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-covariance-fix/.cache/forward-plan-probe/wa-ci.json"
+      ],
+      "stdout_sha256": "833aeb248781346649336eb4fc163fc1896b2114b0bf142addaa6126ca112095",
+      "records": 4,
+      "returncode": 0
+    }
+  }
+}

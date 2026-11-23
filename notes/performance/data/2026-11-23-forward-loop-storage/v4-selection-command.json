@@ -1,0 +1,21 @@
+{
+  "argv": [
+    "/Library/Developer/CommandLineTools/usr/bin/python3",
+    "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-walnuts-pathfinder/.cache/covariance-storage-validation/finalize_selection.py",
+    "--out",
+    "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-walnuts-pathfinder/.cache/covariance-storage-validation/selection-v4",
+    "--base",
+    "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-covariance-base/build",
+    "--candidate",
+    "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-covariance-fix/build"
+  ],
+  "cwd": "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-walnuts-pathfinder",
+  "threads": {
+    "STAN_NUM_THREADS": "1",
+    "OMP_NUM_THREADS": "1",
+    "OPENBLAS_NUM_THREADS": "1",
+    "MKL_NUM_THREADS": "1",
+    "VECLIB_MAXIMUM_THREADS": "1"
+  },
+  "script_sha256": "c8b09db0a2f995abf9521b6f27a7bc199702184c56e79af6fbe2845a41fc3142"
+}

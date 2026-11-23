@@ -1,0 +1,16 @@
+{
+  "argv": [
+    "Rscript",
+    "--vanilla",
+    "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanrt/.cache/pr-r-validation-20261123/full-suite-v3.R"
+  ],
+  "cwd": "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanrt",
+  "environment": {
+    "R_LIBS_USER": "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanrt/.cache/pr-r-validation-20261123/rlib",
+    "STANLI_RUNTIME": "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-covariance-fix/build/libstanli.dylib",
+    "STANLI_RUN": "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-covariance-fix/build/stanli_run",
+    "STANLI_REQUIRE_RUNTIME": "1"
+  },
+  "portable_compiler": "not found in current artifacts; standalone executable tests may skip",
+  "rerun_reason": "Validate PR659 replay-eligibility fix against the fresh runtime and CLI; R source unchanged."
+}

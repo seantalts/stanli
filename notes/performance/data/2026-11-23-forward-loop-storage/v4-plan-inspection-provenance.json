@@ -1,0 +1,131 @@
+{
+  "compiler_version": "Apple clang version 21.0.0 (clang-2100.1.1.101)\nTarget: arm64-apple-darwin25.6.0\nThread model: posix\nInstalledDir: /Library/Developer/CommandLineTools/usr/bin",
+  "contemporaneous_production_runtime_context": {
+    "build_id": "abi6-0eb880b9b957-Darwin-arm64-threads",
+    "path": "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-covariance-fix/build/libstanli.dylib",
+    "sha256": "58b25dab93f67a79ce5ffd86f796703e86bf77d758cd068e8b5c85246272f1a1",
+    "source": "Covariance investigator supplied this actual V3 profile identity when materializing the exact GP MIR/data."
+  },
+  "exact_compile_argv": [
+    "/usr/bin/c++",
+    "-std=c++17",
+    "-O1",
+    "-Iruntime/include",
+    "harnesses/diagnostics/forward_loop_plan_probe.cpp",
+    "tests/tbb_stub.cpp",
+    "-Lbuild",
+    "-lstanli_test_core",
+    "-Wl,-rpath,/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-covariance-fix/build",
+    "-o",
+    "build/forward_loop_plan_probe"
+  ],
+  "exact_invocations_argv": {
+    "gp-n256": [
+      "build/forward_loop_plan_probe",
+      "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-covariance/.cache/issue656/attribution/gp-native-metadata-input/udf-n256.mir.sexp",
+      "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-covariance/.cache/issue656/attribution/gp-native-metadata-input/udf-n256.json"
+    ],
+    "wa-counted-size": [
+      "build/forward_loop_plan_probe",
+      "tests/fixtures/structured_wa_counted_size.tmir.sexp",
+      ".cache/forward-plan-probe/wa-ci.json"
+    ],
+    "wa-data-branch": [
+      "build/forward_loop_plan_probe",
+      "tests/fixtures/structured_wa_data_branch.tmir.sexp",
+      ".cache/forward-plan-probe/wa-ci.json"
+    ],
+    "wa-data-start": [
+      "build/forward_loop_plan_probe",
+      "tests/fixtures/structured_wa_data_start.tmir.sexp",
+      ".cache/forward-plan-probe/wa-ci.json"
+    ]
+  },
+  "input_sha256": {
+    "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-covariance-fix/tests/fixtures/structured_wa_counted_size.tmir.sexp": "0c1765e8446e912b4a8c756f9d00a9f49ff0fa436cd1857554bcba96ee0f0fe9",
+    "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-covariance-fix/tests/fixtures/structured_wa_data_branch.tmir.sexp": "d8c5cd3c26f012449ba0f3a0b1dfe3ea68461e48f03c5557d82457cf67cd36ec",
+    "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-covariance-fix/tests/fixtures/structured_wa_data_start.tmir.sexp": "1acd40d8e29b30d2d161eabdb24446a606adbf34054bb12f85ee9523890f0905",
+    "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-covariance/.cache/issue656/attribution/gp-native-metadata-input/udf-n256.json": "3248d5e037fe88873bd9701c28f2b618f94a84c3d39902f2bd921c9c58d23625",
+    "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-covariance/.cache/issue656/attribution/gp-native-metadata-input/udf-n256.mir.sexp": "d0636f944620f49e9180578a0df437c48fddd8238f3c94cca80697f9e387f66c",
+    "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-covariance/.cache/issue656/attribution/gp-native-metadata-input/udf-n256.stan": "27381150e055c5a8f7a32be11c96c3f6e648ca9e3c5e231e0000874731b7539d"
+  },
+  "inspection_executable_path": "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-covariance-fix/build/forward_loop_plan_probe",
+  "inspection_executable_sha256": "627c90d98592c0bf2053e1ac86083e8e4c35ea7f757c6b218fb08653374c9874",
+  "inspection_final_source_sha256": "72684f7d673bde34a04e8b352044c074b73d114d424e489c9f9d421cde8fb048",
+  "inspection_source_path": "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-covariance-fix/harnesses/diagnostics/forward_loop_plan_probe.cpp",
+  "limitations": "A false data_only flag is not a proof of a nonzero parameter derivative. The observed distinction is a carry not proven data-only. Admission is generic structural policy; these facts alone do not prove a universal performance bound.",
+  "linked_test_runtime_hash_at_inspection": null,
+  "linked_test_runtime_identity_limit": "The shared C++ test-runtime hash was not captured at inspection; it has since been rebuilt for V4. Do not substitute its current hash as historical provenance.",
+  "linked_test_runtime_path": "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-covariance-fix/build/libstanli_test_core.dylib",
+  "maintained_source": "harnesses/diagnostics/structured_loop_carry_probe.cpp",
+  "maintained_source_sha256": "c4a5c45f0823401cb88923bbf221fa7e8db60772c731c3b1fcd27ff59fc37abe",
+  "observed_on": "2026-11-23",
+  "purpose": "Native compiled write_array plan inspection only; no draw, gradient, sampler or timing evaluation.",
+  "records": {
+    "ci_input_data": {
+      "bytes": 400,
+      "compressed_path": "notes/performance/data/2026-11-23-forward-loop-storage/v4-plan-inspection-ci.data.json.gz",
+      "compressed_sha256": "6d0041ce594e59a6a4b45ff98fd5bd1d59b06ab8fa432b9e2bf38ca76b5eff4d",
+      "source_path": "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-covariance-fix/.cache/forward-plan-probe/wa-ci.json",
+      "uncompressed_sha256": "6bd1498169cea548245f0b4ecd01f759e748f8138838fcb394b93f066f42d745"
+    },
+    "compiler_build_log": {
+      "bytes": 0,
+      "compressed_path": "notes/performance/data/2026-11-23-forward-loop-storage/v4-plan-inspection-build.log.gz",
+      "compressed_sha256": "9ceffb7310338057cfe71a4ae1e2c98d2c485d81cdef906532a801f457a38d64",
+      "source_path": "/tmp/stanli-forward-plan-probe-build.log",
+      "uncompressed_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "gp-n256": {
+      "bytes": 141745,
+      "compressed_path": "notes/performance/data/2026-11-23-forward-loop-storage/v4-plan-inspection-gp-n256.jsonl.gz",
+      "compressed_sha256": "cc989ecbe29b2c3f6a3089de66ac7bb7229b647201f07ecee13447767833d430",
+      "source_path": "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-covariance-fix/.cache/forward-plan-probe/gp-n256.jsonl",
+      "uncompressed_sha256": "6b5e98a1ada264d113f68ba8f81226ea93b5d56e17d696c2cfdb3edb66a4dc56"
+    },
+    "gp_input_data": {
+      "bytes": 11614,
+      "compressed_path": "notes/performance/data/2026-11-23-forward-loop-storage/v4-plan-inspection-gp-n256.data.json.gz",
+      "compressed_sha256": "7832ff6c5592781dda9e64b46f7d3dff2aa44495aea89f9d044d4bb6c571cd89",
+      "source_path": "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-covariance/.cache/issue656/attribution/gp-native-metadata-input/udf-n256.json",
+      "uncompressed_sha256": "3248d5e037fe88873bd9701c28f2b618f94a84c3d39902f2bd921c9c58d23625"
+    },
+    "wa-counted-size": {
+      "bytes": 583,
+      "compressed_path": "notes/performance/data/2026-11-23-forward-loop-storage/v4-plan-inspection-wa-counted-size.jsonl.gz",
+      "compressed_sha256": "b301385dff409b0dab729f6c1662d04f3886d5dcc99e4705fb3a29346af9b2c0",
+      "source_path": "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-covariance-fix/.cache/forward-plan-probe/wa-counted-size.jsonl",
+      "uncompressed_sha256": "96befc9b1b899715c2ce7d9efd5f9d174ec79bdd7fe501642fb3447078867152"
+    },
+    "wa-data-branch": {
+      "bytes": 968,
+      "compressed_path": "notes/performance/data/2026-11-23-forward-loop-storage/v4-plan-inspection-wa-data-branch.jsonl.gz",
+      "compressed_sha256": "b15a768dedc7fee8ccb5a40964b1f687f00ade0b46102357ea1536b530426623",
+      "source_path": "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-covariance-fix/.cache/forward-plan-probe/wa-data-branch.jsonl",
+      "uncompressed_sha256": "5a506d16f8d0485acdbd23b84f3b74d2f604ac292480167051fc97f7261d84f6"
+    },
+    "wa-data-start": {
+      "bytes": 1712,
+      "compressed_path": "notes/performance/data/2026-11-23-forward-loop-storage/v4-plan-inspection-wa-data-start.jsonl.gz",
+      "compressed_sha256": "3225393880abb4ad6428e522f6a28de34591a4d365e86a51f53fe73668cfa4f5",
+      "source_path": "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-covariance-fix/.cache/forward-plan-probe/wa-data-start.jsonl",
+      "uncompressed_sha256": "a3c860dfc947c4601d133b62916983d58cada9c00ff08fd0564b9739de8c395b"
+    }
+  },
+  "schema_evolution": "CI JSONL was recorded before the additive straight_prefix field was added; final GP JSONL includes it. Existing observations were preserved. Current maintained source emits the additional field for every input. Numeric Node kinds follow StructuredLoop::Node::Kind: KernelCall=1, Alias=2, For=4.",
+  "source_base": "0eb880b9b9579cd28ca64c3afa4257cba9adca1e",
+  "summary": {
+    "ci_cacheable_loops": 7,
+    "ci_loop_counts": {
+      "counted_size": 1,
+      "data_branch": 2,
+      "data_start": 4
+    },
+    "ci_nondata_container_alias_to_updated_published_output": 0,
+    "gp_cacheable_loops": 193,
+    "gp_loops": 193,
+    "gp_nondata_container_alias_to_updated_published_output": 193,
+    "gp_straight_prefix": "Alias(4,1), KernelCall(out7), For"
+  },
+  "working_directory": "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-covariance-fix"
+}

@@ -1,0 +1,14 @@
+{
+  "base": {
+    "path": "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-covariance-base/build/libstanli.dylib",
+    "bytes": 45499872,
+    "gzip9_bytes": 13721356,
+    "sha256": "1906eab504830b5bb079e3af027c11ff6e70283f925da38dea657a67c4332153"
+  },
+  "fix": {
+    "path": "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-covariance-fix/build/libstanli.dylib",
+    "bytes": 45500976,
+    "gzip9_bytes": 13726230,
+    "sha256": "0efb24c153e2c3440634c55dbf563ce66c71416c1223ba7fcf68ac11f72d8588"
+  }
+}

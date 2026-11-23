@@ -1,5 +1,5 @@
-// A forward-only evaluation has no consumer for versions, undo entries or
-// replay instructions. Keep one private value per logical slot instead. Alias
+// Eligible forward-only loops use private slot values instead of a recorded
+// execution trace. Alias
 // is a snapshot copy, not a pointer assignment: later writes must not mutate a
 // previously assigned Stan value. The plan admits only stateless body kernels
 // (prepare_node rejects make_state and nested execution kernels).

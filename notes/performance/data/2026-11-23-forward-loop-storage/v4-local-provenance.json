@@ -1,0 +1,36 @@
+{
+  "argv": [
+    "/Library/Developer/CommandLineTools/usr/bin/python3",
+    "harnesses/diagnostics/covariance_heap_pair.py",
+    "--base",
+    "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-covariance-base/build/libstanli.dylib",
+    "--candidate",
+    "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-covariance-fix/build/libstanli.dylib",
+    "--pairs",
+    "6",
+    "--output",
+    ".cache/issue656/final-pair-v4"
+  ],
+  "cwd": "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanrt",
+  "host": "macOS-26.6.2-arm64-arm-64bit",
+  "python": "3.9.6 (default, May 22 2026, 11:13:45) \n[Clang 21.0.0 (clang-2100.1.1.101)]",
+  "libraries": {
+    "base": {
+      "path": "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-covariance-base/build/libstanli.dylib",
+      "bytes": 45499872,
+      "gzip9_bytes": 13721356,
+      "sha256": "1906eab504830b5bb079e3af027c11ff6e70283f925da38dea657a67c4332153"
+    },
+    "fix": {
+      "path": "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-covariance-fix/build/libstanli.dylib",
+      "bytes": 45500976,
+      "gzip9_bytes": 13726230,
+      "sha256": "0efb24c153e2c3440634c55dbf563ce66c71416c1223ba7fcf68ac11f72d8588"
+    }
+  },
+  "source_manifest": "v4-runtime-source-sha256.json",
+  "cases": 7,
+  "pairs": 42,
+  "workers": 84,
+  "all_exact": true
+}

@@ -1,0 +1,57 @@
+{
+  "candidate": "V3 blanket no_replay guard; rejected, not final implementation",
+  "correctness": {
+    "prepared_models": 402,
+    "program_failures": 0,
+    "recorded_models": 414,
+    "recorded_points_per_model": 3,
+    "values": 1504488,
+    "replay_returncode": 0
+  },
+  "measurements_started": {
+    "all402pairedpreparation": false,
+    "gradientbenchmark": false
+  },
+  "rejection_reason_reported_by_lead": "actual GP N256 target memory regresses approximately106MiB to314MiB; covariance agent preserved all84 negative worker records",
+  "frozen_native_sha256": {
+    "runtime/src/structured_loop.cpp": "6f080c555b1fdc4643faf198842aeff143dca4f225d8b87a34264a1afd418bc4",
+    "runtime/src/structured_forward_only.inc": "d1cddbac4dd9880afca3791e6e35788524e1e039c8e255442d895cec22cf8594",
+    "runtime/src/executor.cpp": "befb64e73ce6f263ef93776b841903ec3e309ed2f48d708aed0969a4e67b11c4",
+    "runtime/include/stanli/kernel_types.hpp": "4de1fb75298b7cc7e24d3dc772622f09d3a78c9220d9f110388afe41d7ee7ae7"
+  },
+  "native_snapshot_still_matched_when_archiving": true,
+  "all402program_dumps_preserved_at": "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-walnuts-pathfinder/.cache/covariance-storage-validation/selection-v3",
+  "timing_hold": true,
+  "artifacts": {
+    "v3-recorded-corpus-replay.log.gz": {
+      "sha256": "4343684eb51241104d1a0904b1a6762ece7f1689064473299ffc80ef71e93f44",
+      "bytes": 4646,
+      "source": "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-walnuts-pathfinder/.cache/covariance-storage-validation/v3-candidate-replay.log"
+    },
+    "v3-recorded-corpus-replay-command.json": {
+      "sha256": "b2635a479c1f9781efba05d9f81f72d96861f994d40298c712e63425f9d2e8d8",
+      "bytes": 1373,
+      "source": "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-walnuts-pathfinder/.cache/covariance-storage-validation/v3-candidate-replay-command.json"
+    },
+    "v3-recorded-corpus-replay-process.json": {
+      "sha256": "bc1d7fb0428a101f0f47201e834a2657244229317c22bf2c0f0fdd793e0fb94a",
+      "bytes": 149,
+      "source": "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-walnuts-pathfinder/.cache/covariance-storage-validation/v3-candidate-replay-process.json"
+    },
+    "v3-candidate-program-screen.json.gz": {
+      "sha256": "d3bd18b44429f958612459fea2ebd6c28365881ca2f2ff35a0a7805707bc4731",
+      "bytes": 54657,
+      "source": "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-walnuts-pathfinder/.cache/covariance-storage-validation/selection-v3/candidate-programs.json"
+    },
+    "v3-evaluator-plan.json": {
+      "sha256": "8ab3dfe412fdfd4413c670147a523c84131e9a7748413eb67b4d4c711bae2cb2",
+      "bytes": 2401,
+      "source": "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-walnuts-pathfinder/.cache/covariance-storage-validation/v3-plan.json"
+    },
+    "v3-native-source-record.tar.gz": {
+      "sha256": "d58f03a53d83e911a11df6797ae26dbd5d370ecff5c3cd2808bd75049f661e66",
+      "bytes": 48429,
+      "source": "frozenV3productionfilesarchivedbeforeV4"
+    }
+  }
+}

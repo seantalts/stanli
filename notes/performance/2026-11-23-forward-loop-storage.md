@@ -1,5 +1,8 @@
 # Forward-only structured-loop storage
 
+The current candidate is V4, described in the PR #659 follow-up below. V1–V3
+records remain historical evidence, including the rejected replay-policy gate.
+
 ## Scope and evaluator
 
 The synthetic covariance investigation for [issue #656](https://github.com/seantalts/stanli/issues/656)
@@ -298,3 +301,106 @@ added. Compiler/test/format logs are retained beside the evidence, including
 the local OCaml dependency link diagnostic noted above. The affected runtime
 objects were forced to recompile and complete compiler output was inspected;
 no project C++ diagnostics remain. Formatting uses clang-format 22.1.8.
+
+## PR #659 follow-up: preserve forward replay (V4)
+
+The first Linux PR run passed its shipped-configuration tests but failed the
+developer-switch `test_write_array` suite: the three existing data-start,
+data-branch and counted-size cases no longer replayed their retained loops.
+See the [original CI failure](data/2026-11-23-forward-loop-storage/v3-initial-linux-failure.log.gz).
+These assertions protect an existing forward-cache benefit; numerical parity
+alone was insufficient. They remain unchanged.
+
+V3 restricted bounded execution to `no_replay` plans. It passed those replay
+tests and numerical checks, but the actual covariance plans were also
+cacheable, contrary to the earlier lowering-route hypothesis. The repeated
+heap experiment falsified V3: the N=256 first-row increment returned to
+207.414 MiB. Its exact source, correctness and negative heap evidence remain
+under `v3-*`; it was not accepted or pushed.
+
+Direct native plan inspection supplies the V4 discriminator. All 193 large
+covariance loops import a non-data container of length 65,536, copy it through
+a straight-line Alias into the published matrix, and update that matrix in
+place. All seven loops in the three CI cases instead have data-seeded
+containers; their non-data imports are scalar. Derivative activity does not
+distinguish these cases: the write-array imports are inactive.
+The maintained [plan inspector](../../harnesses/diagnostics/structured_loop_carry_probe.cpp)
+and [current native inspection](data/2026-11-23-forward-loop-storage/v4-plan-current-provenance.json)
+retain exact input paths, source/executable/runtime hashes and the 193/4/2/1
+plan records. Earlier inspection records remain unchanged, including their
+explicit missing historical test-runtime hash.
+
+V4 preserves cached execution unless replay is already disabled or a
+published in-place container carry has a proven varying initialization. A
+short prefix analysis starts with non-data container imports, propagates
+only Alias provenance, clears it on ordinary writes, and stops at the first
+For/While. It refuses ambiguous conditional initialization and any ordinary
+overwrite of the candidate carry in that control subtree. No dependency is
+inferred through arbitrary kernels. Existing container-invariant and repeated
+container-Alias cost refusals still apply. The test is structural and uses no
+source names, fingerprints, dimensions chosen for a fixture, or observed values.
+
+Seven cacheable-plan tests distinguish the policies through callback counts:
+varying seeds and Alias chains use bounded per-call evaluation, while data
+seeds, Alias overwrites, ordinary overwrites and ambiguous control keep cached
+replay. Separate non-replayable tests continue to exercise the full bounded
+execution semantics. The unchanged three CI replay assertions pass locally,
+along with full structured-loop, cross-path, data-memo, ctsem and preparation
+checks: [seven developer-switch tests pass](data/2026-11-23-forward-loop-storage/v4-debug-tests.log.gz).
+The full R suite passes again (2,210 expectations, the same three optional
+skips, including the fresh CLI CSV oracle). The 414-model recorded numerical
+replay passes unchanged; all 402 prepared programs remain identical.
+
+The final 42 pairs / 84 fresh workers pass all exact density/gradient/output
+hashes without failures. [V4 raw heap pairs](data/2026-11-23-forward-loop-storage/v4-local-pairs.json.gz)
+and [summary](data/2026-11-23-forward-loop-storage/v4-local-summary.json.gz)
+retain the measurements. N=256 medians: extra live output storage
+207.414 to 1.032 MiB, peak process RSS 364.34 to 187.35 MiB, first row
+63.90 to 14.09 ms and second row 20.00 to 14.52 ms. Preparation allocator
+variation remains visible; no preparation-memory improvement is claimed.
+Final source identities are in the [V4 source manifest](data/2026-11-23-forward-loop-storage/v4-runtime-source-sha256.json).
+
+The [V4 evaluator index](data/2026-11-23-forward-loop-storage/v4-evaluator-provenance.json)
+retains exact commands, source/tool identities, raw preparation and per-round
+timing records, all original flags, and follow-up observations. All 402 models
+prepare in both arms, with zero program changes or selection failures. Nine
+`LOOP` users, eleven controls and three preparation flags produce 21 selected
+models; retaining all 23 earlier V2 cases expands actual timing coverage to
+25 models. The flags are `mlumr_survival_mspline_relaxed` (162.0 to 176.2 ms),
+`radon_variable_intercept_slope_noncentered` (47.7 to 52.9 ms) and
+`stanguide_changepoint` (77.9 to 83.4 ms). Overall preparation baseline/candidate
+geomean speedup is 1.00127. [Selection](data/2026-11-23-forward-loop-storage/v4-corpus-selection.json)
+preserves every reason, not just aggregates.
+
+Both unchanged six-round benchmark arms retain all 25 rows: 24 complete and
+the same known `ctsem_ctsm_post4_100` point-4 failure. [Original comparison](data/2026-11-23-forward-loop-storage/v4-comparison.json)
+records five apparent major slowdowns; they were investigated, not discarded.
+Six fresh balanced baseline/fix/CmdStan rounds give total-estimate deltas of
+-6.21% (`cm_lba2`), +0.21% (`covid19imperial_v2`), -0.81% (`hmm_gaussian`),
++1.02% (`mlumr_survival_mspline_relaxed`) and -2.24% (`stanguide_changepoint`).
+The `covid19imperial_v3` control is +0.05%. None confirms a major regression.
+See [raw follow-up](data/2026-11-23-forward-loop-storage/v4-regression-followup-events.json.gz)
+and [summary](data/2026-11-23-forward-loop-storage/v4-regression-followup-summary.json).
+
+Two cases remain noisy. A further balanced baseline/baseline/fix comparison
+gives -0.11% for `cm_lba2` and -0.71% for `stanguide_changepoint`; identical
+baseline paired-ratio MAD is itself 2.91%/2.50%. This [A/A discriminator](data/2026-11-23-forward-loop-storage/v4-aa-discriminator-summary.json)
+documents host/process uncertainty; it does not prove a tight zero-overhead
+bound. All adverse and noisy samples remain recorded. Fresh preparation
+signals do not persist: paired medians are -4.38 ms, +0.306 ms and -3.80 ms
+for the three flagged models, respectively, in the
+[preparation follow-up](data/2026-11-23-forward-loop-storage/v4-preparation-followup-summary.json).
+No threshold, point, opcode coverage or tolerance was changed.
+
+The final ctsem discrepancy remains cause-unknown and unresolved, as before:
+baseline/fix densities and all gradients agree bitwise at all ten benchmark
+points and in fresh/reordered sequences. This is separate from the passing
+414-model recorded replay. The final repair also passes all 15 focused
+shipped-configuration tests and clang-format 22.1.8. Complete build/test logs
+and the rejected V3 source/profiles remain alongside the final evidence.
+The 24-case/72-point source-oracle comparison is also replayed against the
+final library with exact density/gradient and full output bytes; see
+[final oracle replay](data/2026-11-23-forward-loop-storage/v4-covariance-oracle-replay.json.gz).
+The final native artifact grows 1,104 bytes, or 4,874 bytes under gzip level 9,
+relative to baseline; [size and hash records](data/2026-11-23-forward-loop-storage/v4-native-binary-sizes.json)
+describe build artifacts rather than rebuilt wheel/browser packages.

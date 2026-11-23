@@ -1547,6 +1547,69 @@ double reduce_target(std::vector<double>& work) {
   return sum;
 }
 
+// A varying container seed cannot be folded across draws. If a published
+// carry is initialized from that seed and only updated in place, bounding its
+// storage can avoid retaining a separate full-container recording per loop.
+// Immutable/data-seeded loops retain their existing forward replay benefit.
+bool has_varying_output_carry(const StructuredLoop& p) {
+  std::vector<uint8_t> seeded(p.body.slots.size(), 0);
+  for (const auto& in : p.imports)
+    seeded[in.slot] = !in.data_only && length(p, in.slot) > 1;
+  bool scanning = true, found = false;
+  const auto prefix = [&](const auto& self, const Node& n) -> void {
+    if (!scanning) return;
+    switch (n.kind) {
+      case Node::Sequence:
+        for (const auto& child : n.children) self(self, child);
+        return;
+      case Node::Alias:
+        seeded[n.dst] = seeded[n.src];
+        return;
+      case Node::KernelCall: {
+        const Op& op = p.body.ops[n.op];
+        seeded[op.out] = 0;
+        if (op.out2 >= 0) seeded[op.out2] = 0;
+        if (n.storage == Node::InPlace) seeded[op.in[0]] = 0;
+        return;
+      }
+      case Node::For:
+      case Node::While: {
+        std::vector<uint8_t> updated(seeded.size(), 0),
+            overwritten(seeded.size(), 0);
+        const auto body = [&](const auto& visit, const Node& child) -> void {
+          if (child.kind == Node::KernelCall) {
+            const Op& op = p.body.ops[child.op];
+            if (child.storage == Node::InPlace) {
+              updated[op.in[0]] = 1;
+            } else {
+              overwritten[op.out] = 1;
+              if (op.out2 >= 0) overwritten[op.out2] = 1;
+            }
+          } else if (child.kind == Node::Alias) {
+            overwritten[child.dst] = 1;
+          } else if (child.kind == Node::For) {
+            overwritten[child.iterator] = 1;
+          }
+          for (const auto& nested : child.children) visit(visit, nested);
+        };
+        body(body, n);
+        for (int out : p.outputs)
+          found |= seeded[out] && updated[out] && !overwritten[out];
+        scanning = false;
+        return;
+      }
+      case Node::Target:
+        return;
+      default:
+        // Do not infer a unique initialization through conditional control.
+        scanning = false;
+        return;
+    }
+  };
+  prefix(prefix, p.root);
+  return found;
+}
+
 struct LoopState : KernelState {
   const StructuredLoop& p;
   BlockArena arena;
@@ -1580,6 +1643,7 @@ struct LoopState : KernelState {
   bool has_reusable_primals = false;
   bool reuse_primals = false;
   bool bounded_forward_eligible = true;
+  bool varying_output_carry = false;
   bool diagnostics = debug_env("STANLI_STRUCTURED_LOOP_DIAGNOSTICS") != nullptr;
   bool report_tape = diagnostics;
   bool no_replay = debug_env("STANLI_NO_STRUCTURED_REPLAY") != nullptr;
@@ -1622,6 +1686,8 @@ struct LoopState : KernelState {
                  frame_option[0] == '1';
     frame_auto = !no_replay && plan.outer_loop_index >= 0 && !frame_option;
     collect(plan.root);
+    if (!no_replay && bounded_forward_eligible)
+      varying_output_carry = has_varying_output_carry(plan);
     for (size_t site = 0; site < sites.size(); ++site) {
       const Node* n = sites[site];
       if (!n) throw std::logic_error("structured loop site numbering is stale");
@@ -3571,8 +3637,10 @@ void structured_loop_forward(KernelCtx& ctx) {
   const StructuredLoop& p = s.p;
   s.reverse_ready = false;
   s.frame_clone_ready = false;
+  // Keep forward replay for data-seeded loops. A varying container carry
+  // instead benefits from bounding its full-container recording storage.
   if (ctx.eval_state && ctx.eval_state->no_reverse &&
-      s.bounded_forward_eligible) {
+      (s.no_replay || s.varying_output_carry) && s.bounded_forward_eligible) {
     ForwardLoopExecution{s, ctx}.forward();
     return;
   }

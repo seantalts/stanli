@@ -83,3 +83,10 @@ list column ([original log](data/issue658-2026-11-23/integration-first-run.log.g
 Only the cache-local exporter was corrected; the identical full suite reran
 and exited zero. Sampler messages are retained separately from compiler/test
 diagnostics. The R-only feature itself requires no compiler-pipeline benchmark.
+
+After the native replay-policy repair for PR #659, the same full suite ran
+again against the final runtime and CLI: 2,210 passes, zero failures/errors/
+test warnings and the same three optional skips. The CSV oracle ran. See the
+[final full log](data/issue658-2026-11-23/integration-v4-full-suite.log.gz)
+and [final results](data/issue658-2026-11-23/integration-v4-full-suite-results.json.gz).
+R source was unchanged by this repair.

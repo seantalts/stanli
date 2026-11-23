@@ -1,0 +1,26 @@
+[
+  {
+    "path": "notes/performance/data/2026-11-23-forward-loop-storage/v3-local-pairs.json.gz",
+    "bytes": 271419,
+    "sha256": "e71994d4ad07441342487d11455a036eac05d826e65428ea11f6b7e08f39b5fb",
+    "uncompressed_sha256": "81e7497a8fe821264ae326707719ddba40ac19ec7c044abd6dd2c90051b7da67"
+  },
+  {
+    "path": "notes/performance/data/2026-11-23-forward-loop-storage/v3-local-summary.json.gz",
+    "bytes": 16202,
+    "sha256": "16494f0f0317eb41d896592d131e564b49cca73e489aea09896e5b80adae1085",
+    "uncompressed_sha256": "e8e9a0736e8e0057f5b7ea0f8f3cac49e435a54c470d2cd14315162fa2a3df4a"
+  },
+  {
+    "path": "notes/performance/data/2026-11-23-forward-loop-storage/v3-local-provenance.json.gz",
+    "bytes": 996,
+    "sha256": "a7d4bf1a8704ba0b8c35b64936d29d2d83977d3a6115a46dbf75d44fb99504d1",
+    "uncompressed_sha256": "12c478768b8d1cdd493c1dbf2a5d3bea234cef4e67544f0f3590d848044f4f91"
+  },
+  {
+    "path": "notes/performance/data/2026-11-23-forward-loop-storage/v3-sanity-udf256.json.gz",
+    "bytes": 8720,
+    "sha256": "751f4090d4ed74ed2367b6d94d64a74536557339559bf7de140fecb3457a9514",
+    "uncompressed_sha256": "e912cebabfb9a29f9af92d22370ea3415f3596a52819a875e0536b025eaa68e1"
+  }
+]
