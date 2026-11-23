@@ -73,18 +73,25 @@ mirror image.
     PYTHONPATH=... tools/hp/accuracy.py /tmp/hp --check build-rel/stanli_check
     python3 tools/gen_docs.py
 
-`accuracy.py` scores every log density, gradient entry and write_array value
-that has an 80-digit value, for CmdStan's recorded value and for the value
-that `stanli_check` gives now, and writes
+`accuracy.py` writes
 [`docs/internal/artifacts/accuracy.json`](../../docs/internal/artifacts/accuracy.json).
-For each model and kind of value the record has the number of values, the
-mean and largest distance for each engine in ULP of the replay gate's scale,
-and under `worse` the values where stanli is more than 10 ULP from the true
-value and farther from it than CmdStan (a value that both engines miss by
-more than 1e6 ULP is left out of `worse`). `--only MODEL ...` rescoring merges
-into the existing record. The survey takes about 40 minutes on 26 cores, and
-the scoring about 3 minutes. Run both again after a change that moves
-results, on macOS arm64, where the CmdStan references were recorded.
+It scores every log density, gradient entry and write_array value that has an
+80-digit value. It scores CmdStan's recorded value and the value that
+`stanli_check` gives now. A score is the distance from the 80-digit value in
+ULP, with the same scale as the replay gate.
+
+For each model and kind of value, the record has:
+
+- the number of values scored
+- the mean and the largest distance for each engine
+- `worse`, the values where stanli is more than 10 ULP from the true value and
+  farther from it than CmdStan. A value that both engines miss by more than
+  1e6 ULP is not listed there.
+
+`--only MODEL ...` scores the named models and merges them into the existing
+record. The survey takes about 40 minutes on 26 cores, and the scoring takes
+about 3 minutes. Run both on macOS arm64, where the CmdStan references were
+recorded, after a change that moves results.
 
 ## The ULP ledger
 

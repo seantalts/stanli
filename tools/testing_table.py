@@ -35,7 +35,7 @@ def _cell(entries):
     worst = {}
     for entry in entries:
         worst[entry["closer"]] = max(worst.get(entry["closer"], 0), entry["bound"])
-    return "; ".join(f"{_count(worst[c])} ({CLOSER_TEXT[c]})"
+    return ", ".join(f"{_count(worst[c])} ({CLOSER_TEXT[c]})"
                      for c in ("cmdstan", "unknown", "stanli") if c in worst)
 
 
@@ -98,18 +98,18 @@ def _note(model, ref):
                      + ", and stanli must too")
     if model in v.ILL_CONDITIONED:
         lp_gate = v.ILL_CONDITIONED_LP_GATE.get(model)
-        notes.append("ill-conditioned: the 1e-9 limit is "
+        notes.append("ill-conditioned, so the 1e-9 limit is "
                      f"{_sci(v.ILL_CONDITIONED_GATE)} for the gradient"
                      + (f" and {_sci(lp_gate)} for lp" if lp_gate else ""))
     if model in v.MISMATCH_OUTPUTS:
         indices = v.MISMATCH_OUTPUTS[model].indices
-        notes.append("known mismatch: "
+        notes.append("known mismatch in "
                      + ", ".join(f"grad[{i}]" for i in indices)
-                     + " have their own relative limit")
+                     + ", which have their own relative limit")
     limit = _brms_limit(model)
     if limit and len(rejected) < len(points):
         notes.append(limit)
-    return "; ".join(notes)
+    return ". ".join(notes)
 
 
 def _collections(refs):
@@ -209,14 +209,13 @@ def render_collections(rows):
 def render_local_ledger():
     """The local-corpus values with a ledger entry."""
     ledger = v.load_ulp_ledger()["platforms"][LEDGER_PLATFORM]
-    lines = ["| corpus | model | value | limit | reason |",
-             "| --- | --- | --- | --- | --- |"]
+    lines = ["| corpus | model | value | limit |",
+             "| --- | --- | --- | --- |"]
     for corpus in sorted(c for c in ledger if c != "main"):
         for model, entries in sorted(ledger[corpus].items()):
             for label, entry in sorted(entries.items()):
-                reason = entry["reason"].split("; ", 1)[-1]
                 lines.append(f"| `{corpus}` | `{model}` | `{label}` | "
-                             f"{_cell([entry])} | {reason} |")
+                             f"{_cell([entry])} |")
     return "\n".join(lines)
 
 

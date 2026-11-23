@@ -21,7 +21,7 @@ class CellTest(unittest.TestCase):
     def test_largest_bound_for_each_verdict_with_cmdstan_first(self):
         cell = table._cell([entry(16, "stanli"), entry(815, "stanli"),
                             entry(32, "cmdstan"), entry(12, "unknown")])
-        self.assertEqual(cell, "32 (CmdStan closer); 12 (undecided); "
+        self.assertEqual(cell, "32 (CmdStan closer), 12 (undecided), "
                                "815 (stanli closer)")
 
     def test_a_bound_over_a_million_is_in_scientific_notation(self):

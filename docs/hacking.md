@@ -909,15 +909,24 @@ one graph dump per stage for diffing.
 ### Updating the ULP ledger
 
 [`tests/ulp_ledger.json`](../tests/ulp_ledger.json) lists every value that is
-more than 10 ULP from CmdStan ([TESTING.md](../TESTING.md#the-rule)). It is
-keyed by platform, then corpus (`main`, or the local corpus name, with
-` --stanc` for the replays through stock stanc), then model. An entry covers
-one value (`lp`, `grad[3]`, `wa mu.2`) or, when one model has more than 8 such
-values of one kind, every `grad` or `wa` value that has no entry of its own.
-Each entry has a `bound`, a `reason` and `closer`, which says which engine is
-closer to the 80-digit value: `stanli`, `cmdstan` or `unknown`. After a change
-to the ledger, run `python3 tools/gen_docs.py` to rewrite the table in
-TESTING.md.
+more than 10 ULP from CmdStan ([TESTING.md](../TESTING.md#the-rule)). Its keys
+are the platform, then the corpus, then the model. The corpus is `main` or the
+name of a local corpus, with ` --stanc` added for a replay through stock
+stanc.
+
+An entry covers one value, such as `lp`, `grad[3]` or `wa mu.2`. When a model
+has more than 8 such values of one kind, one `grad` or `wa` entry covers every
+value of that kind that has no entry of its own.
+
+Each entry has three fields:
+
+- `bound` is the largest distance measured, in ULP.
+- `reason` is the cause.
+- `closer` says which engine is closer to the 80-digit value. It is `stanli`,
+  `cmdstan` or `unknown`.
+
+After you change the ledger, run `python3 tools/gen_docs.py` to rewrite the
+table in TESTING.md.
 
 The bounds come only from a tool run:
 
