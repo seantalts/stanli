@@ -19,6 +19,12 @@ on 2026-11-23 with the source reports and missing reproduction details.
 Separate subagent investigations started from the baseline above; neither
 report is considered resolved.
 
+An additional direct user request is tracked separately as
+[#658](https://github.com/seantalts/stanli/issues/658): support
+`pathfinder_init` in R's `sample_walnuts()`. A third subagent owns that
+implementation and its R interface tests. This request did not come from
+the social-media search.
+
 ### 1. Custom covariance / Cholesky models fail
 
 - **Reporter/date:** Richard McElreath, 2026-11-22.
