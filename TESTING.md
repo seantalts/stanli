@@ -39,8 +39,9 @@ The same rule applies to every model in every corpus. The details:
   `unknown`. An entry with `stanli` is settled, because stanli is at least as
   accurate as the reference it differs from. The other entries are open
   findings, and [Known limits](#known-limits) counts them.
-- A change to a kernel that does not reorder a sum should move no result by
-  more than 2 ULP. The commit message says so when it does.
+- Within the 10, a change may move a result away from CmdStan by 2 ULP
+  without comment. A change that reorders a sum may use all 10, and its commit
+  message says so. No tool checks this part; reviewers do.
 
 <a id="the-ulp-gate"></a>
 
@@ -80,14 +81,17 @@ a merge to `main`, and Windows never runs the main corpus.
 
 ### The limits of the other checks
 
-Every comparison on this page has one limit and one place where its
-exceptions are written down.
+Each numerical comparison has one limit and one place where its exceptions
+are written down. The checks that compare with a wider tolerance, such as the
+stanc3 models (1e-9) and the posterior checks, give it in
+[the checks](#the-checks).
 
 | comparison | limit | exceptions are listed in |
 | --- | --- | --- |
 | a model's values against CmdStan | 10 ULP | [`tests/ulp_ledger.json`](tests/ulp_ledger.json) |
 | the same, on every platform | 1e-9 relative error | `ILL_CONDITIONED` and `MISMATCH_OUTPUTS` in [`tools/verify_refs.py`](tools/verify_refs.py): the <!--gen:testing_floored_models-->6<!--/gen--> models marked in the table below |
 | brms models against CmdStan on the same platform | 10 ULP for each element | `ULP_LIMITS` and `GRADIENT_AGAINST_LARGEST` in `tools/verify_refs.py`, marked in the table below |
+| the `fixtures` corpus against CmdStan | 10 ULP for each element | `VALUE_ULP_LIMITS` (2 models, 16 ULP for one gradient entry), and off macOS arm64 `GRADIENT_AGAINST_LARGEST_OFF_PLATFORM` (3 models) and `WRITE_ARRAY_AGAINST_LARGEST_OFF_PLATFORM` (1 model), all in `tools/verify_refs.py` |
 | a model in [fast mode](#fast-mode) against CmdStan | 1e-12 relative error | `FAST_HP_CHECKED` in `tools/verify_refs.py`: 1 model |
 | stanli's execution paths against each other | every bit | [`tests/cross_path_ledger.json`](tests/cross_path_ledger.json) |
 | one kernel against the Stan Math call it replaces | every bit | the budget written at the assertion |
@@ -643,7 +647,7 @@ is a CTest and runs wherever the suite runs. The jobs are in
 
 | check | compares | against | when | cannot see |
 | --- | --- | --- | --- | --- |
-| [corpus replay](#every-model) | log density, gradient and `write_array` rows of 414 models at 3 points | recorded CmdStan values, under [the rule](#the-rule) | PR on Linux x86-64; post-merge on macOS arm64 and x86-64, Linux aarch64 and Linux GCC | parameter values away from the 3 points; Windows; the 10 ULP rule on any platform but macOS arm64 |
+| [corpus replay](#every-model) | log density, gradient and `write_array` rows of <!--gen:testing_models-->414<!--/gen--> models at 3 points | recorded CmdStan values, under [the rule](#the-rule) | PR on Linux x86-64; post-merge on macOS arm64 and x86-64, Linux aarch64 and Linux GCC | parameter values away from the 3 points; Windows; the 10 ULP rule on any platform but macOS arm64 |
 | [fast-mode replay](#fast-mode) | the same models compiled in fast mode | the same references, fast-mode limits | PR and post-merge, Linux x86-64 only | macOS, Windows and ARM |
 | [local corpus replays](#the-local-corpora) | log density, gradient and outputs of the function, signature, fixture and other local models | recorded CmdStan values | PR (CTest) | signatures and sizes the generators exclude |
 | [stanc3 good models](#stan-language-coverage) | the 1,382 models in stanc3's `good` integration tests at up to 5 points | recorded CmdStan values and messages, 1e-9; a status ledger | PR (CTest) | models whose generated data CmdStan rejects |
@@ -690,6 +694,13 @@ is a CTest and runs wherever the suite runs. The jobs are in
 | Windows dev setup | [`tools/dev_setup.sh`](tools/dev_setup.sh) on Windows, then CTest | the full suite on ARM64 (through `stanli-compile`); six tests on x64 with the embedded compiler | pushes to `main`, on demand | the rest of the suite with the embedded compiler on x64 |
 | AddressSanitizer | the CTest suite, compiling through `stanli-compile` | no diagnostics | post-merge except release tags | a stale `vari` that points into reused arena memory |
 | ThreadSanitizer | `test_capi`, `test_pool`, `test_multichain`, `test_wa_parallel`, `test_wa_parallel_abi` and `test_wa_parallel_switches` | no diagnostics | post-merge except release tags | the other tests |
+| typed producer | portable MIR from the typed producer for three models | the legacy MIR of the same source | PR and post-merge, Linux x86-64 | other models |
+| bundled compiler | `r/inst/js/stanc.js`, and the compiler loaded in a browser worker, in webR and through V8 in R | a fresh build, byte for byte; expected compile results | PR | |
+| Windows compiler | the Windows build of the compiler | expected results in `tests/test_windows_compiler.R`; no integer folded past int32 | PR | |
+| R ABI | the ABI constants in the runtime and in the R bridge | each other | PR and pushes that touch the R paths | |
+| `R CMD check` matrix | the R package without a runtime, on 4 OS and R combinations, warnings as errors | R's own checks | post-merge | sampling, which skips without a runtime |
+| packaging guards | glibc symbol versions, the macOS minimum version, the x86-64 instruction set of the Linux library | the wheel tag and the baseline ISA | every build | |
+| signature watch | the signatures of upstream stanc3 | the signatures in the conformance baseline | nightly; it reports and does not fail | |
 | Safari 17 bundle check | the js_of_ocaml bundles | no line ending in `static` | PR | |
 | docs and formatting | stamped numbers, C/C++ formatting | their artifacts ([`tools/gen_docs.py --check`](tools/gen_docs.py)), the pinned formatter | every PR | |
 | red-main issue | whether any post-merge job of `wheels.yml` failed | none: it opens, updates or closes one GitHub issue, "main is red: wheels" | after each push to `main`, nightly run and manual run on `main` | a run in which a job is cancelled |
@@ -708,6 +719,12 @@ Three checks fail on time and compare no numbers: the MIR wire cost,
 grows 8-fold) and `test_prep_deep_expression_time` (a 20,000-deep expression
 must prepare in under 3 seconds). Release tags also check the version
 strings, the runtime tarballs and the PyPI description.
+
+The tables leave out the tests of CI's own scripts (`test_ci_policy`,
+`test_dev_setup` and similar), two measurements that gate nothing (R time to
+first posterior, and a webR canary that only warns), and four harnesses that
+CI never runs: `fn_sweep.py`, `ode_sweep.py`, `transform_sweep.py` and
+`collapse_census.py` in [`harnesses`](harnesses).
 
 The sections below say more about the checks that need it.
 
@@ -772,11 +789,14 @@ match, unless [`tests/cross_path_ledger.json`](tests/cross_path_ledger.json)
 lists the difference with a cause and a bound in ULP. An entry that excuses
 nothing in a full run fails that run.
 
-Most of the 58 entries are sums that the region map and the lane passes
-regroup, by 1 to 10 ULP. Two `cm_rdm` entries allow 2,526 ULP on Windows for a
-rounding difference there. Ten entries have no bound, for one open bug: on
-Windows x86-64, a gradient entry of `higher_order_all_contexts` and of
-`ode_adjoint_region` was far off in some runs, and the cause is not known.
+Most of the ledger's <!--gen:testing_cross_entries-->58<!--/gen--> entries are
+sums that the region map and the lane passes regroup, by 1 to 10 ULP. Two
+`cm_rdm` entries allow 2,526 ULP on Windows for a rounding difference there.
+Another <!--gen:testing_cross_unbounded-->10<!--/gen--> entries allow any
+distance, for one open bug: a gradient entry of `higher_order_all_contexts`
+and of `ode_adjoint_region` was far off on Windows x86-64 in some runs, and
+the cause is not known. Of those, <!--gen:testing_cross_unbounded_everywhere-->1<!--/gen-->
+names no platform, so it allows any distance on every platform.
 
 The matrix runs over every fixture and over the 22 cogmod models at 13 points.
 It needs developer switches, so it runs only in a build that has them (see
@@ -902,7 +922,9 @@ them.
 - **Windows** runs CTest, with the local corpora, and never the main corpus
   replay. One cross-path bug is open there: a gradient entry of
   `higher_order_all_contexts` and of `ode_adjoint_region` was far off on
-  Windows x86-64 in some runs.
+  Windows x86-64 in some runs. One of the ledger entries for it names no
+  platform, so that comparison of `higher_order_all_contexts` is unchecked
+  everywhere.
 - **WebAssembly.** CI builds the WebAssembly runtime and runs Eight Schools
   through it. The corpus replay through it runs by hand, without
   `write_array`.

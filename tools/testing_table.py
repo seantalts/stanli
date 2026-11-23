@@ -1,4 +1,4 @@
-"""The per-model tables in TESTING.md.
+"""The per-model tables and the counts in TESTING.md.
 
 Every cell comes from what the corpus replay reads: the recorded CmdStan
 references, tests/ulp_ledger.json and the limits in tools/verify_refs.py.
@@ -6,11 +6,13 @@ Nothing here runs a model, so tools/gen_docs.py can check the tables without
 a build or a posteriordb checkout.
 """
 import collections
+import json
 
 import verify_refs as v
 from corpus_inventory import COLLECTIONS, local_cases
 
 LEDGER_PLATFORM = "Darwin arm64"
+CROSS_PATH_LEDGER = v.REPO / "tests" / "cross_path_ledger.json"
 CLOSER_TEXT = {"stanli": "stanli closer", "cmdstan": "CmdStan closer",
                "unknown": "undecided"}
 KINDS = ("lp", "grad", "wa")
@@ -154,7 +156,13 @@ def stats():
     points = [pt for ref in refs.values() for pt in ref["points"].values()]
     values = sum(len(pt.get("values", ())) + len(pt.get("wa", {}).get("values", ()))
                  for pt in points)
+    cross = json.loads(CROSS_PATH_LEDGER.read_text())
+    unbounded = [entry for entry in cross if entry["bound_ulp"] == -1]
     return {
+        "testing_cross_entries": str(len(cross)),
+        "testing_cross_unbounded": str(len(unbounded)),
+        "testing_cross_unbounded_everywhere": str(sum(
+            "platform" not in entry for entry in unbounded)),
         "testing_corpus_table": render_corpus_table(rows),
         "testing_collections": render_collections(rows),
         "testing_local_ledger": render_local_ledger(),
