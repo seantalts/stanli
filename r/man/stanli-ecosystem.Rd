@@ -21,7 +21,13 @@ rhat.stanli_fit(object, pars = NULL, ...)
 
 neff_ratio.stanli_fit(object, pars = NULL, ...)
 
-loo.stanli_fit(x, ..., variable = "log_lik", r_eff = NULL)
+loo.stanli_fit(
+  x,
+  ...,
+  variable = "log_lik",
+  r_eff = NULL,
+  cores = getOption("mc.cores", 1)
+)
 
 loo_compare.stanli_fit(x, ...)
 
