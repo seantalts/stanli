@@ -41,27 +41,49 @@ class CorpusRowsTest(unittest.TestCase):
     def test_every_ledger_model_has_a_row(self):
         self.assertLessEqual(set(self.ledger), set(self.rows))
 
-    def test_a_cell_shows_the_ledger_bound_of_its_kind(self):
+    def test_the_limit_names_the_largest_bound_of_each_kind(self):
         for model, entries in self.ledger.items():
-            lp, grad, wa = self.rows[model]["cells"][2:5]
-            for label, item in entries.items():
-                cell = {"lp": lp, "grad": grad, "wa": wa}[v.output_kind(label)]
-                worst = max(e["bound"] for name, e in entries.items()
-                            if v.output_kind(name) == v.output_kind(label)
-                            and e["closer"] == item["closer"])
-                self.assertIn(f"{table._count(worst)} "
-                              f"({table.CLOSER_TEXT[item['closer']]})", cell,
-                              f"{model} {label}")
+            limit = self.rows[model]["cells"][8]
+            for kind in table.KINDS:
+                bounds = [e["bound"] for label, e in entries.items()
+                          if v.output_kind(label) == kind]
+                if bounds:
+                    self.assertIn(f"{table.KIND_NAME[kind]} "
+                                  f"{table._count(max(bounds))}", limit, model)
 
-    def test_a_model_without_entries_shows_only_the_default(self):
+    def test_a_model_without_entries_has_the_default_limit(self):
         row = self.rows["arK"]
-        self.assertEqual(row["cells"][2:5], ["10", "10", "10"])
+        self.assertEqual(row["cells"][8], "10")
         self.assertEqual(row["collection"], "posteriordb")
+
+    def test_measured_cells_are_the_recorded_means(self):
+        record = table.load_accuracy()["models"]["arK"]
+        cells = self.rows["arK"]["cells"]
+        self.assertEqual(cells[2:4], [table._mean(record["lp"]["cmdstan"]["mean"]),
+                                      table._mean(record["lp"]["stanli"]["mean"])])
+        self.assertEqual(cells[4:6], [table._mean(record["grad"]["cmdstan"]["mean"]),
+                                      table._mean(record["grad"]["stanli"]["mean"])])
+
+    def test_an_unscored_kind_has_empty_cells(self):
+        accuracy = table.load_accuracy()["models"]
+        model = next(m for m, r in accuracy.items() if "unscored" in r["grad"]
+                     and self.rows[m]["cells"][0])
+        self.assertEqual(self.rows[model]["cells"][4:6], ["", ""])
+
+    def test_every_reference_model_has_an_accuracy_record(self):
+        self.assertEqual(set(table.load_accuracy()["models"]), set(self.rows))
 
     def test_a_model_that_cmdstan_rejects_everywhere_has_no_limits(self):
         row = self.rows["s2_invgaussian"]
-        self.assertEqual(row["cells"], [""] * 5)
+        self.assertEqual(row["cells"], [""] * 9)
         self.assertIn("rejects every point", row["note"])
+
+
+class MeanTest(unittest.TestCase):
+    def test_formats(self):
+        self.assertEqual([table._mean(x) for x in
+                          (0, 0.001, 0.071, 3.757, 16.89, 226.4, 566394.2)],
+                         ["0", "<0.01", "0.07", "3.76", "16.9", "226", "5.7e5"])
 
 
 if __name__ == "__main__":

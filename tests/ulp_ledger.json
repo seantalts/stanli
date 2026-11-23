@@ -41,9 +41,9 @@
    "main": {
     "GLMM1_model": {
      "lp": {
-      "bound": 104,
-      "closer": "cmdstan",
-      "reason": "measured on Darwin arm64; 80-digit reference at point 0: stanli 148, CmdStan 44 scaled ULP from the true value; stanli is farther from it than CmdStan; cause not yet explained"
+      "bound": 44,
+      "closer": "stanli",
+      "reason": "measured on Darwin arm64; 80-digit reference: over the three points stanli is at most 0.9 and CmdStan at most 44.1 scaled ULP from the true value; stanli is at least as close to it; sums of more than 32 terms are compensated in stanli, while CmdStan adds one term at a time"
      }
     },
     "M0_model": {
@@ -75,7 +75,7 @@
       "reason": "measured on Darwin arm64; 80-digit reference at point 0: stanli 9, CmdStan 77 scaled ULP from the true value; stanli is at least as close to it"
      },
      "lp": {
-      "bound": 73,
+      "bound": 69,
       "closer": "stanli",
       "reason": "measured on Darwin arm64; 80-digit reference at point 1: stanli 4, CmdStan 69 scaled ULP from the true value; stanli is at least as close to it"
      }
@@ -106,7 +106,7 @@
     },
     "Mtbh_model": {
      "lp": {
-      "bound": 30,
+      "bound": 28,
       "closer": "stanli",
       "reason": "measured on Darwin arm64; 80-digit reference at point 1: stanli 2, CmdStan 28 scaled ULP from the true value; stanli is at least as close to it"
      },
@@ -123,7 +123,7 @@
       "reason": "measured on Darwin arm64; cause not yet explained; the 80-digit run gives only directional derivatives for this model"
      },
      "lp": {
-      "bound": 27,
+      "bound": 24,
       "closer": "stanli",
       "reason": "measured on Darwin arm64; 80-digit reference at point 1: stanli 3, CmdStan 24 scaled ULP from the true value; stanli is at least as close to it"
      },
@@ -135,7 +135,7 @@
     },
     "Survey_model": {
      "grad[1]": {
-      "bound": 71,
+      "bound": 69,
       "closer": "cmdstan",
       "reason": "measured on Darwin arm64; 80-digit reference at point 1: stanli 120, CmdStan 49 scaled ULP from the true value; stanli is farther from it than CmdStan; cause not yet explained"
      }
@@ -409,12 +409,12 @@
     },
     "dogs": {
      "grad[2]": {
-      "bound": 32,
-      "closer": "cmdstan",
-      "reason": "measured on Darwin arm64; 80-digit reference at point 1: stanli 20, CmdStan 12 scaled ULP from the true value; stanli is farther from it than CmdStan; cause not yet explained"
+      "bound": 13,
+      "closer": "stanli",
+      "reason": "measured on Darwin arm64; 80-digit reference: over the three points stanli is at most 0.9 and CmdStan at most 13.2 scaled ULP from the true value in the gradient; stanli is at least as close to it; the merged loop's sums are pairwise or compensated in stanli, while CmdStan adds one call at a time"
      },
      "grad[3]": {
-      "bound": 16,
+      "bound": 14,
       "closer": "stanli",
       "reason": "measured on Darwin arm64; 80-digit reference at point 0: stanli 2, CmdStan 13 scaled ULP from the true value; stanli is at least as close to it"
      },
@@ -429,18 +429,6 @@
       "bound": 15,
       "closer": "stanli",
       "reason": "measured on Darwin arm64; 80-digit reference at point 2: stanli 2, CmdStan 17 scaled ULP from the true value; stanli is at least as close to it"
-     }
-    },
-    "dogs_log": {
-     "grad[1]": {
-      "bound": 12,
-      "closer": "unknown",
-      "reason": "measured on Darwin arm64; cause not yet explained; the 80-digit lp is not finite at point 0"
-     },
-     "grad[2]": {
-      "bound": 13,
-      "closer": "unknown",
-      "reason": "measured on Darwin arm64; cause not yet explained; the 80-digit lp is not finite at point 0"
      }
     },
     "dogs_nonhierarchical": {

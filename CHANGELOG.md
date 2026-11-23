@@ -8,7 +8,8 @@
   CmdStan, or listed in `tests/ulp_ledger.json` with a measured bound and a
   cause. It now has a generated table of every corpus model with the limit on
   its log density, gradient and outputs, and says which platforms enforce
-  each limit. The table that was in `docs/corpus-status.md` moved there.
+  each limit. For each model the table also gives the mean distance of
+  CmdStan and of stanli from an 80-digit evaluation, in ULP. The table that was in `docs/corpus-status.md` moved there.
 - Contributor material that was in TESTING.md (updating the ULP ledger, tests
   that need developer switches, checks to run by hand) moved to
   `docs/hacking.md`.
@@ -18,6 +19,9 @@
 - Each entry of `tests/ulp_ledger.json` has a `closer` field that says which
   engine is closer to the 80-digit value: `stanli`, `cmdstan` or `unknown`.
   The ledger is schema 2.
+- `tools/hp/accuracy.py` records how far CmdStan and stanli each are from
+  the 80-digit value for every corpus model, in
+  `docs/internal/artifacts/accuracy.json`.
 - `tools/corpus.py` prints its report and no longer writes
   `docs/corpus-status.md`.
 

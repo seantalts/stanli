@@ -13,6 +13,7 @@ from corpus_inventory import COLLECTIONS, local_cases
 
 LEDGER_PLATFORM = "Darwin arm64"
 CROSS_PATH_LEDGER = v.REPO / "tests" / "cross_path_ledger.json"
+ACCURACY = v.REPO / "docs" / "internal" / "artifacts" / "accuracy.json"
 CLOSER_TEXT = {"stanli": "stanli closer", "cmdstan": "CmdStan closer",
                "unknown": "undecided"}
 KINDS = ("lp", "grad", "wa")
@@ -27,8 +28,8 @@ def _count(n):
 
 
 def _cell(entries):
-    """One table cell for the ledger entries of one output kind: the largest
-    bound for each verdict, or the default."""
+    """One table cell for one ledger entry or more: the largest bound for
+    each verdict, or the default."""
     if not entries:
         return str(v.DEFAULT_ULP_BOUND)
     worst = {}
@@ -36,6 +37,37 @@ def _cell(entries):
         worst[entry["closer"]] = max(worst.get(entry["closer"], 0), entry["bound"])
     return "; ".join(f"{_count(worst[c])} ({CLOSER_TEXT[c]})"
                      for c in ("cmdstan", "unknown", "stanli") if c in worst)
+
+
+KIND_NAME = {"lp": "lp", "grad": "gradient", "wa": "outputs"}
+
+
+def _limit(kinds):
+    """The limit against CmdStan for one model: the default, or the largest
+    ledger bound of each output kind that has one."""
+    over = [f"{KIND_NAME[kind]} {_count(max(e['bound'] for e in kinds[kind]))}"
+            for kind in KINDS if kinds[kind]]
+    return ", ".join(over) or str(v.DEFAULT_ULP_BOUND)
+
+
+def _mean(x):
+    """A mean distance in ULP, to two significant digits."""
+    if x == 0:
+        return "0"
+    if x < 0.005:
+        return "<0.01"
+    if x < 10:
+        return f"{x:.2f}"
+    if x < 1e5:
+        return f"{x:,.0f}" if x >= 100 else f"{x:.1f}"
+    return f"{x:.1e}".replace("e+0", "e").replace("e+", "e")
+
+
+def _measured(record):
+    """(CmdStan cell, stanli cell) for one output kind of one model."""
+    if not record or "cmdstan" not in record:
+        return ("", "")
+    return (_mean(record["cmdstan"]["mean"]), _mean(record["stanli"]["mean"]))
 
 
 def _by_kind(entries):
@@ -86,9 +118,14 @@ def _collections(refs):
             for model in refs}
 
 
+def load_accuracy():
+    return json.loads(ACCURACY.read_text())
+
+
 def corpus_rows():
     refs = v.load_refs()[0]
     ledger = v.load_ulp_ledger()["platforms"][LEDGER_PLATFORM]["main"]
+    accuracy = load_accuracy()["models"]
     collection = _collections(refs)
     order = {name: i for i, name in enumerate(COLLECTIONS)}
     rows = []
@@ -96,28 +133,63 @@ def corpus_rows():
         ref = refs[model]
         compared = [pt for pt in ref["points"].values() if "values" in pt]
         kinds = _by_kind(ledger.get(model, {}))
+        measured = accuracy.get(model, {})
         if compared:
             with_wa = [pt for pt in compared if "wa" in pt]
             cells = [str(len(compared[0]["values"]) - 1),
-                     str(len(with_wa[0]["wa"]["values"])) if with_wa else "0",
-                     _cell(kinds["lp"]), _cell(kinds["grad"]),
-                     _cell(kinds["wa"]) if with_wa else "not compared"]
+                     str(len(with_wa[0]["wa"]["values"])) if with_wa else "0"]
+            for kind in KINDS:
+                cells += _measured(measured.get(kind))
+            cells.append(_limit(kinds))
         else:
-            cells = ["", "", "", "", ""]
+            cells = [""] * 9
         rows.append({"model": model, "collection": collection[model],
                      "entries": ledger.get(model, {}), "cells": cells,
-                     "note": _note(model, ref)})
+                     "has_wa": bool(compared and with_wa),
+                     "measured": measured, "note": _note(model, ref)})
     return rows
 
 
 def render_corpus_table(rows):
-    lines = ["| model | source | parameters | outputs | lp | gradient "
-             "| write_array | also |",
-             "| --- | --- | ---: | ---: | --- | --- | --- | --- |"]
+    lines = ["| model | source | parameters | outputs | lp: CmdStan | lp: stanli "
+             "| gradient: CmdStan | gradient: stanli | outputs: CmdStan "
+             "| outputs: stanli | limit | also |",
+             "| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: "
+             "| ---: | --- | --- |"]
     for row in rows:
         lines.append(f"| `{row['model']}` | {row['collection']} | "
                      + " | ".join(row["cells"]) + f" | {row['note']} |")
     return "\n".join(lines)
+
+
+def accuracy_stats(rows):
+    """Counts over the measured distances from the 80-digit values."""
+    out = {}
+    worse_models, worse_values = set(), 0
+    closer = collections.Counter()
+    values = 0
+    for kind in KINDS:
+        scored = [(row["model"], row["measured"][kind]) for row in rows
+                  if "cmdstan" in row["measured"].get(kind, {})]
+        better = sum(r["stanli"]["mean"] < r["cmdstan"]["mean"] for _, r in scored)
+        worse = sum(r["stanli"]["mean"] > r["cmdstan"]["mean"] for _, r in scored)
+        out[f"testing_scored_{kind}"] = str(len(scored))
+        out[f"testing_scored_{kind}_stanli"] = str(better)
+        out[f"testing_scored_{kind}_cmdstan"] = str(worse)
+        out[f"testing_scored_{kind}_same"] = str(len(scored) - better - worse)
+        for model, record in scored:
+            values += record["n"]
+            closer["stanli"] += record["stanli_closer"]
+            closer["cmdstan"] += record["cmdstan_closer"]
+            if record.get("worse_count"):
+                worse_models.add(model)
+                worse_values += record["worse_count"]
+    out["testing_scored_values"] = f"{values:,}"
+    out["testing_values_stanli_closer"] = f"{closer['stanli']:,}"
+    out["testing_values_cmdstan_closer"] = f"{closer['cmdstan']:,}"
+    out["testing_worse_models"] = str(len(worse_models))
+    out["testing_worse_values"] = f"{worse_values:,}"
+    return out
 
 
 def render_collections(rows):
@@ -156,6 +228,7 @@ def stats():
     points = [pt for ref in refs.values() for pt in ref["points"].values()]
     values = sum(len(pt.get("values", ())) + len(pt.get("wa", {}).get("values", ()))
                  for pt in points)
+    recorded = load_accuracy()["recorded"]
     cross = json.loads(CROSS_PATH_LEDGER.read_text())
     unbounded = [entry for entry in cross if entry["bound_ulp"] == -1]
     return {
@@ -176,8 +249,11 @@ def stats():
         "testing_entries_stanli": str(closer["stanli"]),
         "testing_entries_cmdstan": str(closer["cmdstan"]),
         "testing_entries_unknown": str(closer["unknown"]),
-        "testing_models_no_wa": str(sum(row["cells"][4] == "not compared"
-                                        for row in rows)),
+        "testing_models_no_wa": str(sum(bool(row["cells"][0])
+                                        and not row["has_wa"] for row in rows)),
+        **accuracy_stats(rows),
+        "testing_accuracy_date": recorded["date"],
+        "testing_accuracy_source": f"`{recorded['stanli_source'][:8]}`",
         "testing_floored_models": str(len(set(v.ILL_CONDITIONED)
                                           | set(v.MISMATCH_OUTPUTS))),
         "testing_brms_limited": str(sum(m in refs for m in v.ULP_LIMITS)),

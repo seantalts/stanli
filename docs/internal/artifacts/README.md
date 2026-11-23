@@ -10,6 +10,7 @@ Embedded paths describe the original run and may refer to earlier locations.
 | `corpus-refs.json.gz` | Independent CmdStan model references; `tools/verify_refs.py` reads them and `tools/verify_sample.py` records reviewed updates. |
 | `corpus-refs-linux-x86_64.json.gz`, `corpus-refs-linux-x86_64-gcc.json.gz`, `corpus-refs-darwin-x86_64.json.gz` | Platform/compiler supplements selected by the reference reader; preserve their own provenance. |
 | `verification.json` | Recording-time status/deviations used by `tools/corpus.py`, `tools/gen_docs.py` and `tools/gen_web_models.py`; not a fresh replay result. |
+| `accuracy.json` | For each corpus model, the mean and largest distance of CmdStan and of stanli from the 80-digit value, in ULP. `tools/hp/accuracy.py` records it and `tools/gen_docs.py` writes the columns of TESTING.md's table from it. |
 | `conformance-baseline.json.gz` | Signature conformance baseline, read by the conformance harness and function-model generator. |
 | `corpus-bench.tsv` | Historical benchmark source cited by `runtime/src/OPTIMIZATIONS.md`; no maintained reader. |
 | `corpus-bench-o1vec.tsv`, `corpus-bench-o1vec.manifest.json` | Historical optimized-reference comparison and provenance; no maintained reader. |
