@@ -23,3 +23,9 @@ and [the vectorized reference run](../../../output/corpus-performance-vectorized
 Dated execution evidence is in `notes/execution/data/`; older ctsem/numerical
 records remain in `notes/performance/`. Their adjacent Markdown reports explain
 what each sample can establish. The [catalog](../catalog.md) locates those reports.
+
+Synthetic bug/performance investigation records are under
+`notes/triage/data/`. The [social-feedback collection](../../../notes/triage/2026-11-23-social-feedback.md)
+links the owning reports, reproduction harnesses, runtime identities and
+limits. Gzip-packaged raw records preserve their decompressed bytes; do not
+replace them with a later run's results.

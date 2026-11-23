@@ -1,0 +1,64 @@
+{
+  "baseline_current": "0eb880b9b9579cd28ca64c3afa4257cba9adca1e",
+  "historical": {
+    "tag": "v0.27.0",
+    "build_id": "abi6-c32930c15132-Darwin-arm64-threads",
+    "archive_sha256": "9371b54f623ac0a31287144519bc8cc57662e4b0c9fe2a3ae089f01763869fc5",
+    "runtime": "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanrt/.cache/social-feedback/runtime-v0.27.0/libstanli.dylib",
+    "tag_commit": "c491b5cab2999039409c7e60351f655a477384a3",
+    "runtime_build_commit": "c32930c15132",
+    "provenance_note": "Official release asset embeds a pre-release source identity distinct from the tag commit; keep both identities."
+  },
+  "current": {
+    "source_commit": "0eb880b9b9579cd28ca64c3afa4257cba9adca1e",
+    "tag": "dev-0eb880b9b957",
+    "asset": "stanli-runtime-darwin-arm64.tar.gz",
+    "sha256": "8d955fe96c6e7b2df499ada2f81a0f49c845c4b560042ce2068adba2a7c927c4",
+    "build_id": "abi6-0eb880b9b957-Darwin-arm64-threads",
+    "runtime": "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanrt/.cache/social-feedback/runtime-0eb880b9b957/libstanli.dylib"
+  },
+  "historical_tree": "f54c91ebfc0b02eb90e538e231381aaf08802198",
+  "runtime_tree": "f54c91ebfc0b02eb90e538e231381aaf08802198",
+  "commands": {
+    "old": [
+      "clang++",
+      "-std=c++17",
+      "-O3",
+      "-ffp-contract=off",
+      "-Wall",
+      "-Wextra",
+      "-Wpedantic",
+      "-Iruntime/include",
+      "-Itools",
+      ".cache/social-feedback/historical-027/native_grad_legacy.cpp",
+      "-L.cache/social-feedback/runtime-v0.27.0",
+      "-Wl,-rpath,/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanrt/.cache/social-feedback/runtime-v0.27.0",
+      "-lstanli",
+      "-o",
+      ".cache/social-feedback/historical-027/native_grad_027"
+    ],
+    "current": [
+      "clang++",
+      "-std=c++17",
+      "-O3",
+      "-ffp-contract=off",
+      "-Wall",
+      "-Wextra",
+      "-Wpedantic",
+      "-Iruntime/include",
+      "-Itools",
+      ".cache/social-feedback/historical-027/native_grad_legacy.cpp",
+      "-L.cache/social-feedback/runtime-0eb880b9b957",
+      "-Wl,-rpath,/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanrt/.cache/social-feedback/runtime-0eb880b9b957",
+      "-lstanli",
+      "-o",
+      ".cache/social-feedback/historical-027/native_grad_current"
+    ]
+  },
+  "driver_sha256": "728e69d75b46b22aae17b1781a178b863ae0a46dacb54eba51b2196fdd9e9eca",
+  "driver_origin": "Agent issue657_native_grad.cpp before legacy compile-option addition; header include made -Itools-relative and stanli_grad_err call replaced with stanli_grad on BOTH arms. Final harness supports equivalent STANLI_BENCH_LEGACY_GRAD branch.",
+  "timing_protocol": "tools/benchmark_timer.hpp, points2,warmup20ms,measurement40ms;7alternatingpairs percase, firstdiscarded; sourcecompiled freshlyinsideeachbinary, prep excludedfromgradienttimer; agentspausedforwindow",
+  "initial_failed_integration": "build.log retains missing stanli_grad_err symbol on0.27, corrected by legacyCABIcall inbotharms; no productionsourcechanged",
+  "old_binary_sha256": "31115ca3f3544734129986354e22367b6184ef2c9336f3c56e283ba083052f6b",
+  "current_binary_sha256": "9c3d0941727707e329d42730acd7bf19562ef1028668030764f452dad259e331"
+}

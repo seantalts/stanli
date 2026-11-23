@@ -19,6 +19,18 @@ on 2026-11-23 with the source reports and missing reproduction details.
 Separate subagent investigations started from the baseline above; neither
 report is considered resolved.
 
+- [#656 structural search](2026-11-23-issue-656-round2.md): 306 valid
+  synthetic cases, 153 exact-source CmdStan point comparisons, and a
+  standalone custom-covariance preparation/memory cost gap. The low-level
+  error was not reproduced; the cost gap can be investigated without the
+  original model.
+- [#657 matched native and standard-fit comparison](2026-11-23-issue-657-native-comparison.md):
+  eleven synthetic cells and one converged 500-subject fit show no slowdown
+  on the measured host. Whole-workflow R memory is higher in Stanli;
+  output/materialization boundaries and numerical limits are documented.
+- [#657 historical-release check](2026-11-23-issue-657-historical-runtime.md):
+  bounded 0.27.0/current native comparisons, with noisy small shifts and no
+  claim about the reporter's installed version.
 - [#656 first investigation](2026-11-23-issue-656-investigation.md):
   custom covariance/Cholesky diagnostics match CmdStan within 1 ULP and
   invalid matrices reject; the original error remains unreproduced.

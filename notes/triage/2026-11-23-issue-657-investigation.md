@@ -1,5 +1,11 @@
 # Issue #657: first mixed-model diagnostic
 
+The [next round](2026-11-23-issue-657-native-comparison.md) removes this
+round's timing-interface mismatch and includes a converged standard fit;
+the [historical-runtime check](2026-11-23-issue-657-historical-runtime.md)
+tests a separately labeled older-release hypothesis. Keep this first-round
+record and its raw samples as historical evidence.
+
 The reported 500-subject slowdown remains **unreproduced and unresolved**.
 The original generated program/data, observation count, versions, hardware,
 sampler settings and ESS are missing. A focused public search did not recover

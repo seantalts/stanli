@@ -1,5 +1,9 @@
 # Issue #656: first covariance/Cholesky investigation
 
+For the subsequent synthetic structural search and standalone resource-cost
+reproducer, see [round 2](2026-11-23-issue-656-round2.md). The evidence below
+records the narrower first round.
+
 ## Current decision
 
 The reported low-level bit-length error is **not reproduced**. Custom
