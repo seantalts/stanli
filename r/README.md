@@ -48,6 +48,13 @@ main, so a commit that was merged in the last hour may not have one yet.
 Only the last 10 commits on main keep a runtime, so reinstall the package
 from main if yours is older.
 
+Installing the R package from main alone still uses the latest release's
+runtime by default. Run `stanli::stanli_install("dev")` as well to try runtime
+fixes on main. For example, `multinomial_rng` is supported on main but is
+missing from the v0.30.1 runtime. If an error names that function and shows
+build `abi6-f63191b99347`, use both installation steps above and restart R
+to load the new runtime.
+
 ## Quick start
 
 ```r
