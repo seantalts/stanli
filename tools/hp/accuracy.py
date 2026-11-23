@@ -144,6 +144,27 @@ def score_model(model, hp_dir, check, refs, tmp):
     return out
 
 
+def round3(x):
+    """x to three significant digits, which is all that the table shows."""
+    if isinstance(x, float):
+        return float(f"{x:.3g}")
+    if isinstance(x, dict):
+        return {k: round3(v) for k, v in x.items()}
+    if isinstance(x, list):
+        return [round3(v) for v in x]
+    return x
+
+
+def dumps(record):
+    """The record as JSON with one line for each model."""
+    line = lambda x: json.dumps(x, sort_keys=True, separators=(",", ":"))
+    models = ",\n".join(f"  {json.dumps(m)}: {line(round3(r))}"
+                        for m, r in sorted(record["models"].items()))
+    return ("{\n" + f' "schema": {record["schema"]},\n'
+            + f' "recorded": {line(record["recorded"])},\n'
+            + ' "models": {\n' + models + "\n }\n}\n")
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("hp")
@@ -177,7 +198,7 @@ def main():
         old = json.loads(a.out.read_text())
         old["models"].update(record["models"])
         record["models"] = dict(sorted(old["models"].items()))
-    a.out.write_text(json.dumps(record, indent=1, sort_keys=True) + "\n")
+    a.out.write_text(dumps(record))
     for kind in KINDS:
         done = sum("n" in m[kind] for m in scored.values())
         print(f"{kind}: {done}/{len(scored)} models scored")
