@@ -1,0 +1,25 @@
+{
+  "argv": [
+    "/Library/Developer/CommandLineTools/usr/bin/python3",
+    "tools/verify_refs.py",
+    "/Users/xitrium/claud/stanrt/deps/posteriordb",
+    "--check",
+    "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-covariance-fix/build/stanli_check",
+    "--jobs",
+    "4",
+    "--timeout",
+    "300",
+    "--per-model"
+  ],
+  "cwd": "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-covariance-fix",
+  "check_sha256": "aa0e4279330b989c9b68d0ac9f713a08606596dbd952d54ceca7fd98892d205d",
+  "source_sha": "0eb880b9b9579cd28ca64c3afa4257cba9adca1e",
+  "tracked_diff_sha256": "26bd0761cdea904cba5761b0479e64ada6577f64474db0314bc97a725ffe9089",
+  "threads": {
+    "STAN_NUM_THREADS": "1",
+    "OMP_NUM_THREADS": "1",
+    "OPENBLAS_NUM_THREADS": "1",
+    "MKL_NUM_THREADS": "1",
+    "VECLIB_MAXIMUM_THREADS": "1"
+  }
+}

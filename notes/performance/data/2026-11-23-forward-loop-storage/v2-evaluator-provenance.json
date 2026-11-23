@@ -1,0 +1,199 @@
+{
+  "base": "0eb880b9b9579cd28ca64c3afa4257cba9adca1e (lead-fetched origin/HEAD)",
+  "configuration": "matched shipped Release/embed ON/debug OFF/oracle OFF/macOS deployment target11; third-party OCaml object min26 link diagnostic retained by lead",
+  "identity_at_packaging": {
+    "base": {
+      "head": "0eb880b9b9579cd28ca64c3afa4257cba9adca1e",
+      "current_tracked_diff_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "executables": {
+        "bench_grad": "5ec16afcb14062c2a2f20a46d54d3ab1d7ef7a9991487b66701429d95e6f1456",
+        "stanli_check": "d19d82e40539b90cca8cac64645a8f7c40e2c3016f7e9b545e6842f1d3573a04",
+        "dump_ops": "288287ad551a16cc5353c4b6316f8bef6ff5cff767a342e6e9066b3c998166c0",
+        "dump_islands": "38aeecf0e73d60b59a3777210ea8960cb0e619ddc55f78bd79f85d391e93d1dc"
+      }
+    },
+    "candidate": {
+      "head": "0eb880b9b9579cd28ca64c3afa4257cba9adca1e",
+      "current_tracked_diff_sha256": "c440325d2368ccc59bafcfa937ca83606d09036e54f8099025dedfeadb47473e",
+      "executables": {
+        "bench_grad": "73d4d3e6418c059293f6b96fe9cc2622c4eec71fd32278c9ee16a35e873f2b24",
+        "stanli_check": "aa0e4279330b989c9b68d0ac9f713a08606596dbd952d54ceca7fd98892d205d",
+        "dump_ops": "93aba2349710b54ff7e56f324f932fc806976b45dadafaf97e8a0f5f5cfe6c55",
+        "dump_islands": "9bf34696a0086acca5fd9cd4e9a715eb3dcca8364a35718a98b0223256299240"
+      }
+    }
+  },
+  "frozen_runtime_source_sha256_verified": {
+    "runtime/src/structured_loop.cpp": "9ceb6c9c50595e29d3016a5fd11054c039267f5548f6a6dc4846f328763f3f69",
+    "runtime/src/structured_forward_only.inc": "eb7d9d103336401078edb929dad7cfd18d73aa9ad575fbfe9b8c4f0f97dcc333",
+    "runtime/src/executor.cpp": "befb64e73ce6f263ef93776b841903ec3e309ed2f48d708aed0969a4e67b11c4",
+    "runtime/include/stanli/kernel_types.hpp": "4de1fb75298b7cc7e24d3dc772622f09d3a78c9220d9f110388afe41d7ee7ae7"
+  },
+  "whole_tracked_diff_note": "whole diff changed between program/replay screen and timing because lead added tests/docs; frozen runtime source hashes and binary identities remain equal",
+  "host": {
+    "platform": "macOS-26.6.2-arm64-arm-64bit",
+    "python": "3.9.6"
+  },
+  "cache_preserved": "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-walnuts-pathfinder/.cache/covariance-storage-validation",
+  "large_program_dumps": "selection/ and selection-v2/ remain intact in preserved cache; compact per-model preparation/dump command hashes retained in program-screen files",
+  "benchmark_protocol": "unmodified original corpus_bench.py stanli-corpus-v6;6paired rounds,20ms warmup,40ms measure,10points;baseline andcandidate arms sequential on quiet host",
+  "selection": "402 models screened each arm;0 changed programs;9 LOOP users;4 preparation flags;11 fixed controls;0 failures;23 selected",
+  "result": "22 complete both arms;0 apparent major regressions;1 known unresolved baseline numerical failure in ctsem_ctsm_post4_100 point4",
+  "limits": "not a full end-to-end sampler/WA/CSV benchmark; scaled-error gates are not universal10ULP; ctsem selected benchmark case did not pass",
+  "retained_artifacts": {
+    "v2-candidate-replay-command.json": {
+      "sha256": "0665e9782c512de73c512d05d494d5414656dafb944b3d3b79204387575fd858",
+      "bytes": 904,
+      "source": "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-walnuts-pathfinder/.cache/covariance-storage-validation/v2-candidate-replay-command.json"
+    },
+    "v2-candidate-replay-process.json": {
+      "sha256": "c798c0072d3672857e7edec2695859abbc05bc60e39e72df22838da52292e47b",
+      "bytes": 149,
+      "source": "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-walnuts-pathfinder/.cache/covariance-storage-validation/v2-candidate-replay-process.json"
+    },
+    "v2-base-benchmark-command.json": {
+      "sha256": "6e2ff198337492f333b5f54f6d1c76d77b56df9a014dc800ce706637a2f7f756",
+      "bytes": 2813,
+      "source": "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-walnuts-pathfinder/.cache/covariance-storage-validation/v2-base-benchmark-command.json"
+    },
+    "v2-base-benchmark-process.json": {
+      "sha256": "8a67697d5e5a4761ead8102b620847a1c77e0b4374e87afda5dda5ccd27d8b40",
+      "bytes": 149,
+      "source": "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-walnuts-pathfinder/.cache/covariance-storage-validation/v2-base-benchmark-process.json"
+    },
+    "v2-candidate-benchmark-command.json": {
+      "sha256": "ce31f2905d517e16bcb3ae64f264e46078482af52cf4d46169990f16330903e0",
+      "bytes": 2815,
+      "source": "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-walnuts-pathfinder/.cache/covariance-storage-validation/v2-candidate-benchmark-command.json"
+    },
+    "v2-candidate-benchmark-process.json": {
+      "sha256": "2bfb356e643b0245863c268e87aa9345a906801a420db580ebe89ac9c4cbf2a2",
+      "bytes": 148,
+      "source": "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-walnuts-pathfinder/.cache/covariance-storage-validation/v2-candidate-benchmark-process.json"
+    },
+    "v2-comparison.json": {
+      "sha256": "158d4351ef89c14d311ed9bef5b27b38f97ebb35b7f2a807cc70d670de0edea3",
+      "bytes": 35182,
+      "source": "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-walnuts-pathfinder/.cache/covariance-storage-validation/v2-comparison.json"
+    },
+    "v2-comparison.tsv": {
+      "sha256": "fd8fab5115513b95beb82edce5b9da87f6980cdb69ebb9c9ae671fee3c508014",
+      "bytes": 12304,
+      "source": "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-walnuts-pathfinder/.cache/covariance-storage-validation/v2-comparison.tsv"
+    },
+    "v2-preparation-followup-events.json": {
+      "sha256": "2c71383833378b6fd006a189287ac931fe7fc54a790a33b34190b63098fe8fec",
+      "bytes": 101554,
+      "source": "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-walnuts-pathfinder/.cache/covariance-storage-validation/v2-preparation-followup-events.json"
+    },
+    "v2-preparation-followup-summary.json": {
+      "sha256": "f3f6c266a3105a9a888b568fe5fd61a9bddf799a7f98fab57d2628448aac16ac",
+      "bytes": 5136,
+      "source": "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-walnuts-pathfinder/.cache/covariance-storage-validation/v2-preparation-followup-summary.json"
+    },
+    "v2-ctsem-fixed-points.json": {
+      "sha256": "09ddd401b2f8d06f033f7042a5f6fe562ef587a6eb793210414c1e47a79612b1",
+      "bytes": 116484,
+      "source": "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-walnuts-pathfinder/.cache/covariance-storage-validation/v2-ctsem-fixed-points.json"
+    },
+    "v2-ctsem-point4.json": {
+      "sha256": "f8facc497e2eb743d1296192d96b95769daf0e62cb7a7c4f01579d9591a07726",
+      "bytes": 11895,
+      "source": "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-walnuts-pathfinder/.cache/covariance-storage-validation/v2-ctsem-point4.json"
+    },
+    "v2-candidate-replay.log.gz": {
+      "sha256": "3511aca8e8d67895c220c34421285e05192d5938efc96992736fa383fe5e91e8",
+      "bytes": 4675,
+      "source": "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-walnuts-pathfinder/.cache/covariance-storage-validation/v2-candidate-replay.log"
+    },
+    "v2-base-benchmark.log.gz": {
+      "sha256": "8703a00e87a9bb5abaf461404d5330d33032aa9bd79497c2c51de43bdfcdc7f6",
+      "bytes": 518,
+      "source": "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-walnuts-pathfinder/.cache/covariance-storage-validation/v2-base-benchmark.log"
+    },
+    "v2-candidate-benchmark.log.gz": {
+      "sha256": "5317e17278bee743cda3e4a673ff54e47ed3df9bec6f67bcd9bddb6e213b727e",
+      "bytes": 514,
+      "source": "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-walnuts-pathfinder/.cache/covariance-storage-validation/v2-candidate-benchmark.log"
+    },
+    "v2-ctsem-point-diagnostic.json.gz": {
+      "sha256": "e26e145a44de963fcdd113ce9a07a9d5490ef050da4447467481d64577aff0d3",
+      "bytes": 247776,
+      "source": "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-walnuts-pathfinder/.cache/covariance-storage-validation/v2-ctsem-point-diagnostic.json"
+    },
+    "v2-ctsem-sequence-discriminator.json.gz": {
+      "sha256": "170e36807be2cf4cd585dbbbeb03becd2ba6002bd7ae898740866e0945e22ea4",
+      "bytes": 123012,
+      "source": "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-walnuts-pathfinder/.cache/covariance-storage-validation/v2-ctsem-sequence-discriminator.json"
+    },
+    "v2-corpus-selection.json": {
+      "sha256": "7bcee7b658c702abb4d701eedd82d85a97180d5f119b33e7b413509d3bd8f7aa",
+      "bytes": 37505,
+      "source": "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-walnuts-pathfinder/.cache/covariance-storage-validation/selection-v2/selection.json"
+    },
+    "v2-corpus-preparation-processes.jsonl.gz": {
+      "sha256": "ca8fce03ee9c98f2cfa047de04da025af355e7e151593240145885fe76714ec2",
+      "bytes": 88489,
+      "source": "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-walnuts-pathfinder/.cache/covariance-storage-validation/selection-v2/preparation-processes.jsonl"
+    },
+    "v2-base-program-screen.json.gz": {
+      "sha256": "2147d50d1039f972f37e48aacbc327fbcfa59d4564565ad29bb51a796f32a810",
+      "bytes": 54842,
+      "source": "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-walnuts-pathfinder/.cache/covariance-storage-validation/selection-v2/base-programs.json"
+    },
+    "v2-base-corpus-benchmark.tsv": {
+      "sha256": "a597790d906f57d100dd503094b9ae4a7e578800eefc3976a17751594719e9ff",
+      "bytes": 6875,
+      "source": "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-walnuts-pathfinder/.cache/covariance-storage-validation/bench-v2/base.tsv"
+    },
+    "v2-base-corpus-benchmark-manifest.json": {
+      "sha256": "2aa10b86fd510c2f1521fef377bc899b61de556d1d237147d22400655b1c6539",
+      "bytes": 16729,
+      "source": "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-walnuts-pathfinder/.cache/covariance-storage-validation/bench-v2/base.tsv.run/manifest.json"
+    },
+    "v2-base-corpus-benchmark-model-records.json.gz": {
+      "sha256": "a7c123863199757ab508e9e8984787cd1aa4107e529183eb423095339ade408d",
+      "bytes": 57884,
+      "source": "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-walnuts-pathfinder/.cache/covariance-storage-validation/bench-v2/base.tsv.run"
+    },
+    "v2-candidate-program-screen.json.gz": {
+      "sha256": "118e2c1745c8e03069eff237b95be13bdbcf591501cbce2c79eb8591951829df",
+      "bytes": 54808,
+      "source": "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-walnuts-pathfinder/.cache/covariance-storage-validation/selection-v2/candidate-programs.json"
+    },
+    "v2-candidate-corpus-benchmark.tsv": {
+      "sha256": "bca0ae2433d690cb4a98fb5a9e2c590131e561be5d638c8c13440a85c98693c9",
+      "bytes": 6878,
+      "source": "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-walnuts-pathfinder/.cache/covariance-storage-validation/bench-v2/candidate.tsv"
+    },
+    "v2-candidate-corpus-benchmark-manifest.json": {
+      "sha256": "a285bc74b970e02bcb85eff5ce1e2f1e57dd8d42cee7dfc98804b1af309b4144",
+      "bytes": 16727,
+      "source": "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-walnuts-pathfinder/.cache/covariance-storage-validation/bench-v2/candidate.tsv.run/manifest.json"
+    },
+    "v2-candidate-corpus-benchmark-model-records.json.gz": {
+      "sha256": "7405953b8fa0f48028d079aaf5d3abac650a32b44192cb358fb430295c66de27",
+      "bytes": 57622,
+      "source": "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-walnuts-pathfinder/.cache/covariance-storage-validation/bench-v2/candidate.tsv.run"
+    },
+    "v2-evaluator-source-record.tar.gz": {
+      "sha256": "9f333fdbe991bcc3c736fa444e4ea6889faa577aeb0e352e4749017c1cb0d2c2",
+      "bytes": 7986,
+      "source": "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-walnuts-pathfinder/.cache/covariance-storage-validation"
+    }
+  },
+  "large_raw_files_retained": {
+    "v2-base-corpus-benchmark-raw.tar.gz": {
+      "path": "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-walnuts-pathfinder/.cache/covariance-storage-validation/bench-v2/v2-base-corpus-benchmark-raw.tar.gz",
+      "sha256": "8b3f25f31d140698eeb5b00b07b2f82359e80005f9ab2d653d79d25d2f402780",
+      "bytes": 14561330,
+      "source_directory_also_retained": "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-walnuts-pathfinder/.cache/covariance-storage-validation/bench-v2/base.tsv.run"
+    },
+    "v2-candidate-corpus-benchmark-raw.tar.gz": {
+      "path": "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-walnuts-pathfinder/.cache/covariance-storage-validation/bench-v2/v2-candidate-corpus-benchmark-raw.tar.gz",
+      "sha256": "ad25ef8e99edb486899e17733cfff1fad63fb2e3807b25d5bc97de8fb00ff641",
+      "bytes": 14560799,
+      "source_directory_also_retained": "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-walnuts-pathfinder/.cache/covariance-storage-validation/bench-v2/candidate.tsv.run"
+    }
+  }
+}

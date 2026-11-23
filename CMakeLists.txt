@@ -1420,6 +1420,11 @@ set(STANLI_TESTS
 foreach(STANLI_TEST IN LISTS STANLI_TESTS)
   stanli_add_test(${STANLI_TEST})
 endforeach()
+# The bounded output-loop path is shipped behavior and must also run in
+# builds that disable the developer switches used by the rest of this suite.
+add_test(NAME test_structured_loop_forward
+         COMMAND test_structured_loop --forward-without-history
+         WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
 if(STANLI_STAN_DENSITY_ORACLE)
   stanli_add_test(test_density_fused OPTIMIZED)
 endif()

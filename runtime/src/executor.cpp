@@ -926,6 +926,9 @@ void Executor::run_forward_only() {
 
 void Executor::run_forward_only(EvalState state) {
   reverse_ready_ = false;
+  // These graphs cannot be reversed, but must retain their selected forward
+  // arithmetic. Keep this distinct from log_prob<double>'s values_only mode.
+  state.no_reverse = state.no_reverse || graph_.forward_only;
   struct RestoreState {
     EvalState& slot;
     EvalState previous;

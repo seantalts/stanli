@@ -16,3 +16,6 @@ tests/test_windows_provenance.sh text eol=lf
 tests/rethinking/*.stan -text whitespace=-blank-at-eol,-blank-at-eof
 output/pdf/*.pdf binary
 output/rethinking-report/*.csv -text whitespace=cr-at-eol
+# Frozen diagnostic inputs and raw tables retain their measured bytes.
+harnesses/diagnostics/fixtures/covariance_*.stan -text whitespace=-blank-at-eol,-blank-at-eof
+notes/performance/data/2026-11-23-forward-loop-storage/*.tsv -text whitespace=-blank-at-eol,cr-at-eol

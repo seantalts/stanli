@@ -1579,6 +1579,7 @@ struct LoopState : KernelState {
   bool memo_ready = false;
   bool has_reusable_primals = false;
   bool reuse_primals = false;
+  bool bounded_forward_eligible = true;
   bool diagnostics = debug_env("STANLI_STRUCTURED_LOOP_DIAGNOSTICS") != nullptr;
   bool report_tape = diagnostics;
   bool no_replay = debug_env("STANLI_NO_STRUCTURED_REPLAY") != nullptr;
@@ -1649,15 +1650,26 @@ struct LoopState : KernelState {
     }
   }
 
-  void collect(const Node& n) {
+  void collect(const Node& n, unsigned loop_depth = 0) {
     if (n.kind == Node::KernelCall) {
       if (n.site >= sites.size())
         throw std::logic_error("structured loop site numbering is stale");
       sites[n.site] = &n;
+      const Op& op = p.body.ops[n.op];
+      // Retained replay keeps container invariants by pointer and can fold
+      // them across evaluations. Dense snapshots would copy them per trip.
+      if (n.invariant_loop >= 0 &&
+          (length(p, op.out) > 1 || length(p, op.out2) > 1))
+        bounded_forward_eligible = false;
     }
+    // A repeated container assignment is a cheap version binding in the
+    // retained path; copying it per trip can outweigh removing the tape.
+    if (n.kind == Node::Alias && loop_depth > 0 && length(p, n.dst) > 1)
+      bounded_forward_eligible = false;
     if (n.kind == Node::For && n.storage == Node::Transient)
       transient_loops.push_back(&n);
-    for (const auto& c : n.children) collect(c);
+    const bool loop = n.kind == Node::For || n.kind == Node::While;
+    for (const auto& c : n.children) collect(c, loop_depth + loop);
   }
 
   void release() {
@@ -3552,11 +3564,18 @@ void start_recording(LoopState& s, Execution& e, KernelCtx& ctx) {
   for (auto& c : s.ctx) c.eval_state = ctx.eval_state;
 }
 
+#include "structured_forward_only.inc"
+
 void structured_loop_forward(KernelCtx& ctx) {
   LoopState& s = require_state(ctx);
   const StructuredLoop& p = s.p;
   s.reverse_ready = false;
   s.frame_clone_ready = false;
+  if (ctx.eval_state && ctx.eval_state->no_reverse &&
+      s.bounded_forward_eligible) {
+    ForwardLoopExecution{s, ctx}.forward();
+    return;
+  }
   if (s.frames && !s.frames->ready) s.frames.reset();
   if (s.frames && s.frames->ready) {
     if (frames_forward(s, ctx)) {

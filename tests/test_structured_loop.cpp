@@ -6,6 +6,7 @@
 #include <stanli/graph_print.hpp>
 #include <stanli/mir_interp.hpp>
 #include <stanli/optable.hpp>
+#include <stanli/rng_family.hpp>
 #include <stanli/structured_loop.hpp>
 #include <stanli/wa_interp.hpp>
 #include <stan/math.hpp>
@@ -8394,7 +8395,437 @@ static void frame_instance_fuzz_tests() {
               instanced);
 }
 
-int main() {
+static int bounded_cholesky_calls = 0;
+static void counted_bounded_cholesky(KernelCtx& context) {
+  ++bounded_cholesky_calls;
+  find_kernel(OP_CHOLESKY)->forward(context);
+}
+
+static void bounded_invariant_cholesky_test() {
+  auto plan = std::make_shared<StructuredLoop>();
+  const int matrix = plan->body.add_slot(4, false);
+  const int zero_matrix = plan->body.add_slot(4, false);
+  const int scaled = plan->body.add_slot(4, false);
+  const int factor = plan->body.add_slot(4, false);
+  const int total = plan->body.add_slot(1, false);
+  const int outer_iterator = plan->body.add_slot(1, false);
+  const int inner_iterator = plan->body.add_slot(1, false);
+  const int condition = plan->body.add_slot(1, false);
+  const int one = scalar(*plan, 1), two = scalar(*plan, 2);
+  const int three = scalar(*plan, 3);
+  plan->fills.push_back({matrix, {1, 0, 0, 1}});
+  plan->fills.push_back({zero_matrix, {0, 0, 0, 0}});
+  Node cholesky;
+  cholesky.kind = Node::KernelCall;
+  cholesky.op = plan->body.add_op(OP_CHOLESKY, {scaled}, factor, {2});
+  const int cholesky_op = cholesky.op;
+  Node is_two = call(*plan, OP_COMPARE, {outer_iterator, two}, condition);
+  plan->body.ops[static_cast<size_t>(is_two.op)].variant = 4;
+  plan->root = counted(
+      one, three, outer_iterator,
+      sequence(
+          {call(*plan, OP_MUL, {matrix, outer_iterator}, scaled),
+           std::move(is_two),
+           branch(condition, sequence({}),
+                  counted(one, three, inner_iterator,
+                          sequence({std::move(cholesky),
+                                    call(*plan, OP_SUM_VEC, {factor}, total),
+                                    target(total),
+                                    alias(factor, zero_matrix)})))}));
+  plan->outputs = {factor};
+  plan->has_target = true;
+  plan->prepare();
+  Node* node = find_call(plan->root, cholesky_op);
+  check(node && node->invariant_loop >= 0,
+        "data Cholesky is invariant inside the inner loop");
+  check(set_forward(plan->root, cholesky_op, counted_bounded_cholesky),
+        "install bounded Cholesky call counter");
+  const Graph graph = outer(plan, {});
+  Executor retained_executor(graph), bounded(graph);
+  bounded_cholesky_calls = 0;
+  retained_executor.run_forward_only();
+  check(bounded_cholesky_calls == 2,
+        "retained Cholesky runs once per entered inner loop");
+  EvalState state;
+  state.no_reverse = true;
+  for (int repeat = 0; repeat < 2; ++repeat) {
+    bounded_cholesky_calls = 0;
+    bounded.run_forward_only(state);
+    check(bounded_cholesky_calls == (repeat == 0 ? 2 : 0),
+          "container invariant falls back to retained constant replay");
+    const int output = graph.ops[0].out;
+    check(std::memcmp(retained_executor.value_ptr(output),
+                      bounded.value_ptr(output), 5 * sizeof(double)) == 0,
+          "fallback restores overwritten output across loop reentry");
+    close(bounded.value_ptr(output)[4], 6 * (1 + std::sqrt(3.0)),
+          "fallback target uses the restored Cholesky factor");
+  }
+}
+
+static int bounded_vector_calls = 0;
+static std::vector<double*> bounded_fill_outputs;
+static void counted_bounded_vector_tanh(KernelCtx& context) {
+  ++bounded_vector_calls;
+  find_kernel(OP_TANHV)->forward(context);
+}
+static void counted_bounded_vector_mul(KernelCtx& context) {
+  ++bounded_vector_calls;
+  find_kernel(OP_MUL)->forward(context);
+}
+static void traced_bounded_fill_tanh(KernelCtx& context) {
+  bounded_fill_outputs.push_back(context.out.data);
+  find_kernel(OP_TANHV)->forward(context);
+}
+
+static void bounded_forward_selection_tests() {
+  for (bool repeated_alias : {false, true}) {
+    auto plan = std::make_shared<StructuredLoop>();
+    const int theta = plan->body.add_slot(1, false);
+    const int input = plan->body.add_slot(4, false);
+    const int output = plan->body.add_slot(4, false);
+    const int snapshot = plan->body.add_slot(4, false);
+    const int iterator = plan->body.add_slot(1, false);
+    const int lower = scalar(*plan, 1), upper = scalar(*plan, 3);
+    plan->fills.push_back({input, {1, 2, 3, 4}});
+    plan->imports = {{theta, 0, 0, true}};
+    Node work = repeated_alias ? call(*plan, OP_MUL, {input, iterator}, output)
+                               : call(*plan, OP_TANHV, {input}, output);
+    const int work_op = work.op;
+    std::vector<Node> body{std::move(work), target(theta)};
+    if (repeated_alias) body.push_back(alias(snapshot, output));
+    plan->root = counted(lower, upper, iterator, sequence(std::move(body)));
+    plan->outputs = {repeated_alias ? snapshot : output};
+    plan->has_target = true;
+    plan->prepare();
+    Node* node = find_call(plan->root, work_op);
+    check(node && (repeated_alias ? node->invariant_loop < 0
+                                  : node->invariant_loop >= 0),
+          "refusal cases independently isolate alias and container invariant");
+    check(set_forward(plan->root, work_op,
+                      repeated_alias ? counted_bounded_vector_mul
+                                     : counted_bounded_vector_tanh),
+          "install observable fallback counter");
+    Executor executor(outer(plan, {1}));
+    executor.params_data()[0] = .25;
+    EvalState state;
+    state.no_reverse = true;
+    for (int repeat = 0; repeat < 2; ++repeat) {
+      bounded_vector_calls = 0;
+      executor.run_forward_only(state);
+      check(
+          bounded_vector_calls == (repeat == 0 ? (repeated_alias ? 3 : 1) : 0),
+          "cost refusal uses retained constant replay on warm evaluation");
+    }
+  }
+  // An active indexed fill keeps the bounded path: the update's container
+  // assignment is fused away, and only its scalar RHS is staged per write.
+  auto plan = std::make_shared<StructuredLoop>();
+  const int theta = plan->body.add_slot(1, false);
+  const int base = plan->body.add_slot(16, false);
+  const int updated = plan->body.add_slot(16, false);
+  const int scaled = plan->body.add_slot(1, false);
+  const int rhs = plan->body.add_slot(1, false);
+  const int iterator = plan->body.add_slot(1, false);
+  const int lower = scalar(*plan, 1), upper = scalar(*plan, 16);
+  plan->imports = {{theta, 0, 0, true}};
+  Node transform = call(*plan, OP_TANHV, {scaled}, rhs);
+  const int transform_op = transform.op;
+  Node update =
+      call(*plan, OP_SET_INDEX_DYNAMIC, {base, iterator, rhs}, updated);
+  const int update_op = update.op;
+  attach(*plan, update_op, single_spec(16));
+  plan->root = counted(lower, upper, iterator,
+                       sequence({call(*plan, OP_MUL, {theta, iterator}, scaled),
+                                 std::move(transform), std::move(update),
+                                 alias(base, updated)}));
+  plan->outputs = {base};
+  plan->prepare();
+  check(find_call(plan->root, update_op)->storage == Node::InPlace,
+        "positive indexed fill has no repeated container Alias");
+  check(!find_call(plan->root, transform_op)->reuse_primal_output,
+        "retained tanh needs its historical output primal");
+  check(set_forward(plan->root, transform_op, traced_bounded_fill_tanh),
+        "install indexed fill output-address trace");
+  const Graph graph = outer(plan, {1});
+  Executor retained_executor(graph), bounded(graph);
+  retained_executor.params_data()[0] = bounded.params_data()[0] = .125;
+  bounded_fill_outputs.clear();
+  retained_executor.run_forward_only();
+  check(bounded_fill_outputs.size() == 16 &&
+            distinct_addresses(bounded_fill_outputs),
+        "retained active indexed fill records per-trip output primals");
+  EvalState state;
+  state.no_reverse = true;
+  for (int repeat = 0; repeat < 2; ++repeat) {
+    bounded_fill_outputs.clear();
+    bounded.run_forward_only(state);
+    check(
+        bounded_fill_outputs.size() == 16 && one_address(bounded_fill_outputs),
+        "bounded indexed fill reuses one primal instead of reverse history");
+    const int output = graph.ops[0].out;
+    check(std::memcmp(retained_executor.value_ptr(output),
+                      bounded.value_ptr(output), 16 * sizeof(double)) == 0,
+          "bounded indexed fill preserves all matrix cells exactly");
+  }
+}
+
+static void forward_without_history_tests() {
+  const auto compare = [](const Graph& graph, const std::vector<double>& point,
+                          const char* message) {
+    Executor retained_executor(graph), bounded(graph);
+    std::copy(point.begin(), point.end(), retained_executor.params_data());
+    std::copy(point.begin(), point.end(), bounded.params_data());
+    retained_executor.run_forward_only();
+    EvalState state;
+    state.no_reverse = true;
+    bounded.run_forward_only(state);
+    for (const auto& op : graph.ops) {
+      if (op.opcode != OP_LOOP) continue;
+      const auto len = graph.slots[op.out].len;
+      check(std::memcmp(retained_executor.value_ptr(op.out),
+                        bounded.value_ptr(op.out),
+                        static_cast<size_t>(len) * sizeof(double)) == 0,
+            message);
+    }
+    // No state, history or scratch from a preceding call or clone may leak.
+    Executor clone(bounded);
+    clone.run_forward_only(state);
+    bounded.run_forward_only(state);
+    for (const auto& op : graph.ops) {
+      if (op.opcode != OP_LOOP) continue;
+      const auto bytes =
+          static_cast<size_t>(graph.slots[op.out].len) * sizeof(double);
+      check(std::memcmp(clone.value_ptr(op.out), bounded.value_ptr(op.out),
+                        bytes) == 0,
+            "forward-only loop clone has independent scratch");
+    }
+    for (double first : {-point[0], point[0]}) {
+      retained_executor.params_data()[0] = first;
+      bounded.params_data()[0] = first;
+      retained_executor.run_forward_only();
+      bounded.run_forward_only(state);
+      for (const auto& op : graph.ops) {
+        if (op.opcode != OP_LOOP) continue;
+        check(std::memcmp(retained_executor.value_ptr(op.out),
+                          bounded.value_ptr(op.out),
+                          static_cast<size_t>(graph.slots[op.out].len) *
+                              sizeof(double)) == 0,
+              "bounded loop changed-point A-B-A has no stale state");
+      }
+    }
+  };
+  for (int trips : {0, 1, 4, 256}) {
+    compare(outer(recurrence(trips)), {.1, .7},
+            "bounded recurrence matches retained forward bitwise");
+    auto plan = std::make_shared<StructuredLoop>();
+    const int theta = plan->body.add_slot(1, false);
+    const int base = plan->body.add_slot(4, false);
+    const int snapshot = plan->body.add_slot(4, false);
+    const int updated = plan->body.add_slot(4, false);
+    const int rhs = plan->body.add_slot(2, false);
+    const int selectors = plan->body.add_slot(2, false);
+    const int iterator = plan->body.add_slot(1, false);
+    const int lower = scalar(*plan, 1), upper = scalar(*plan, trips);
+    const int large = scalar(*plan, 1e16), one = scalar(*plan, 1);
+    const int negative = scalar(*plan, -1e16);
+    plan->fills.push_back({base, {1, 2, 3, 4}});
+    plan->fills.push_back({selectors, {2, 2}});
+    plan->imports = {{theta, 0, 0, true}};
+    Node update =
+        call(*plan, OP_SET_INDEX_DYNAMIC, {base, selectors, rhs}, updated);
+    auto spec = std::make_shared<DynamicIndexSpec>();
+    spec->axes = {{DynamicIndexSpec::Axis::Multi, 4, 1, 2, 0}};
+    spec->selected_size = 2;
+    attach(*plan, update.op, spec);
+    plan->root = sequence(
+        {alias(snapshot, base),
+         counted(
+             lower, upper, iterator,
+             sequence({call(*plan, OP_CONCAT2, {theta, iterator}, rhs),
+                       std::move(update), alias(base, updated), target(large),
+                       target(one), target(negative), target(theta)}))});
+    plan->outputs = {base, snapshot};
+    plan->has_target = true;
+    plan->prepare();
+    compare(outer(plan), {.25, 0},
+            "bounded snapshots, duplicate writes and target order match");
+  }
+  {
+    auto plan = std::make_shared<StructuredLoop>();
+    const int base = plan->body.add_slot(4, false);
+    const int selectors = plan->body.add_slot(4, false);
+    const int updated = plan->body.add_slot(4, false);
+    plan->imports = {{base, 0, 0, true}};
+    plan->fills.push_back({selectors, {4, 3, 2, 1}});
+    auto spec = std::make_shared<DynamicIndexSpec>();
+    spec->axes = {{DynamicIndexSpec::Axis::Multi, 4, 1, 4, 0}};
+    spec->selected_size = 4;
+    Node update =
+        call(*plan, OP_SET_INDEX_DYNAMIC, {base, selectors, base}, updated);
+    const int update_op = update.op;
+    attach(*plan, update_op, spec);
+    plan->root = sequence({std::move(update), alias(base, updated)});
+    plan->outputs = {base};
+    plan->prepare();
+    const Node* node = find_call(plan->root, update_op);
+    check(node && node->storage != Node::InPlace,
+          "same-base RHS refuses in-place fusion");
+    compare(outer(plan, {4}), {1, 2, 3, 4},
+            "bounded staged ordinary kernel preserves overlapping RHS");
+  }
+  for (int len : {3, 5, 7, 17, 33, 65}) {
+    auto plan = std::make_shared<StructuredLoop>();
+    const int mean = plan->body.add_slot(len, false);
+    const int scale = plan->body.add_slot(1, false);
+    const int y = plan->body.add_slot(len, false);
+    const int density = plan->body.add_slot(1, false);
+    const int dot = plan->body.add_slot(1, false);
+    const int sum = plan->body.add_slot(1, false);
+    const int lower = scalar(*plan, 1), upper = scalar(*plan, 3);
+    const int iterator = plan->body.add_slot(1, false);
+    std::vector<double> observed(static_cast<size_t>(len));
+    std::vector<double> point(static_cast<size_t>(len) + 1);
+    for (int i = 0; i < len; ++i) {
+      observed[static_cast<size_t>(i)] = i % 3 == 0   ? 1e8
+                                         : i % 3 == 1 ? .25
+                                                      : -1e8;
+      point[static_cast<size_t>(i)] = .125 * (i + 1);
+    }
+    point.back() = 1.25;
+    plan->fills.push_back({y, observed});
+    plan->imports = {{mean, 0, 0, true}, {scale, 1, 0, true}};
+    Node normal = call(*plan, OP_NORMAL_LPDF, {y, mean, scale}, density);
+    plan->body.ops[static_cast<size_t>(normal.op)].variant =
+        DensityMode::all_active(3).byte();
+    plan->root = counted(
+        lower, upper, iterator,
+        sequence({std::move(normal), call(*plan, OP_DOT, {y, mean}, dot),
+                  call(*plan, OP_SUM_VEC, {y}, sum), target(density)}));
+    plan->outputs = {density, dot, sum};
+    plan->has_target = true;
+    plan->prepare();
+    compare(outer(plan, {len, 1}), point,
+            "bounded awkward-length reduction and density scratch parity");
+  }
+  // Hand-built trees also exercise native control in the shipped build,
+  // without relying on environment-only lowering switches.
+  {
+    auto plan = std::make_shared<StructuredLoop>();
+    const int theta = plan->body.add_slot(1, false);
+    const int counter = scalar(*plan, 0), zero = scalar(*plan, 0);
+    const int one = scalar(*plan, 1), two = scalar(*plan, 2);
+    const int four = scalar(*plan, 4), five = scalar(*plan, 5);
+    const int next = plan->body.add_slot(1, false);
+    const int positive = plan->body.add_slot(1, false);
+    const int condition = plan->body.add_slot(1, false);
+    const int is_two = plan->body.add_slot(1, false);
+    const int is_four = plan->body.add_slot(1, false);
+    plan->imports = {{theta, 0, 0, true}};
+    Node positive_test = call(*plan, OP_COMPARE, {theta, zero}, positive);
+    plan->body.ops[static_cast<size_t>(positive_test.op)].variant = 2;
+    Node two_test = call(*plan, OP_COMPARE, {counter, two}, is_two);
+    plan->body.ops[static_cast<size_t>(two_test.op)].variant = 4;
+    Node four_test = call(*plan, OP_COMPARE, {counter, four}, is_four);
+    plan->body.ops[static_cast<size_t>(four_test.op)].variant = 4;
+    Node continue_node, break_node;
+    continue_node.kind = Node::Continue;
+    break_node.kind = Node::Break;
+    Node loop = while_loop(
+        condition, call(*plan, OP_COMPARE, {counter, five}, condition),
+        sequence({call(*plan, OP_ADD, {counter, one}, next),
+                  alias(counter, next), std::move(two_test),
+                  branch(is_two, continue_node, sequence({})),
+                  std::move(four_test),
+                  branch(is_four, break_node, sequence({})), target(theta)}));
+    plan->root = sequence({std::move(positive_test),
+                           branch(positive, std::move(loop), sequence({}))});
+    plan->outputs = {counter};
+    plan->has_target = true;
+    plan->prepare();
+    compare(outer(plan), {.1, .7},
+            "bounded while, exits and branch flips match retained bitwise");
+  }
+  auto retry_plan = recurrence(8);
+  check(install_failure_callbacks(*retry_plan, retry_plan->root),
+        "bounded failure test finds native callback");
+  Executor retry(outer(retry_plan));
+  retry.params_data()[0] = .1;
+  retry.params_data()[1] = .7;
+  EvalState state;
+  state.no_reverse = true;
+  fail_forward.store(true);
+  check(throws<std::runtime_error>([&] { retry.run_forward_only(state); },
+                                   "injected structured forward failure"),
+        "bounded loop preserves callback failure");
+  retry.run_forward_only(state);
+  const double retried = retry.value_ptr(retry.graph().result_slot)[0];
+  double gradient[2];
+  check(retry.gradient(gradient) == retried,
+        "bounded failure retry can transition back to differentiable work");
+  {
+    auto plan = std::make_shared<StructuredLoop>();
+    const int theta = plan->body.add_slot(1, false);
+    const int first = plan->body.add_slot(1, false);
+    const int second = plan->body.add_slot(1, false);
+    const int transformed = plan->body.add_slot(1, false);
+    const int lower = scalar(*plan, 1), upper = scalar(*plan, 3);
+    const int iterator = plan->body.add_slot(1, false);
+    plan->imports = {{theta, 0, 0, true}};
+    plan->root = counted(lower, upper, iterator,
+                         sequence({call(*plan, OP_RNG, {}, first),
+                                   call(*plan, OP_TANHV, {theta}, transformed),
+                                   call(*plan, OP_RNG, {}, second),
+                                   target(first), target(second)}));
+    for (auto& op : plan->body.ops)
+      if (op.opcode == OP_RNG)
+        op.variant = static_cast<uint8_t>(ScalarRng::StdNormal);
+    plan->outputs = {first, second, transformed};
+    plan->has_target = true;
+    plan->prepare();
+    check(install_failure_callbacks(*plan, plan->root),
+          "bounded RNG test finds failure callback");
+    const Graph graph = outer(plan, {1});
+    Executor retained_executor(graph), bounded(graph);
+    retained_executor.params_data()[0] = bounded.params_data()[0] = .25;
+    WaRng reference_rng(991), bounded_rng(991);
+    EvalState reference_state{&reference_rng}, bounded_state{&bounded_rng};
+    bounded_state.no_reverse = true;
+    fail_forward.store(true);
+    check(throws<std::runtime_error>(
+              [&] { retained_executor.run_forward_only(reference_state); },
+              "injected structured forward failure"),
+          "retained RNG evaluation fails at injected source position");
+    fail_forward.store(true);
+    check(throws<std::runtime_error>(
+              [&] { bounded.run_forward_only(bounded_state); },
+              "injected structured forward failure"),
+          "bounded RNG evaluation preserves error position");
+    check(stan::math::std_normal_rng(reference_rng.gen()) ==
+              stan::math::std_normal_rng(bounded_rng.gen()),
+          "bounded failure consumes exactly preceding RNG draws");
+    retained_executor.run_forward_only(reference_state);
+    bounded.run_forward_only(bounded_state);
+    const int output = graph.ops[0].out;
+    check(
+        std::memcmp(
+            retained_executor.value_ptr(output), bounded.value_ptr(output),
+            static_cast<size_t>(graph.slots[output].len) * sizeof(double)) == 0,
+        "bounded RNG retry preserves draws and target source order");
+    check(stan::math::std_normal_rng(reference_rng.gen()) ==
+              stan::math::std_normal_rng(bounded_rng.gen()),
+          "bounded successful evaluation preserves RNG stream position");
+  }
+}
+
+int main(int argc, char** argv) {
+  if (argc == 2 && std::string(argv[1]) == "--forward-without-history") {
+    bounded_invariant_cholesky_test();
+    bounded_forward_selection_tests();
+    forward_without_history_tests();
+    if (failures == 0)
+      std::printf("test_structured_loop forward-without-history OK\n");
+    return failures != 0;
+  }
   // This suite exercises retained plans, including their automatic selector.
   // Whole-program specialization has its own differential tests in test_lower.
   test_setenv("STANLI_BOUNDED_SPECIALIZATION", "0");
@@ -8411,6 +8842,9 @@ int main() {
     return failures != 0;
   }
   transient_classification_tests();
+  bounded_invariant_cholesky_test();
+  bounded_forward_selection_tests();
+  forward_without_history_tests();
   invariant_active_reuse_tests();
   invariant_gradient_order_test();
   for (const char* flag :

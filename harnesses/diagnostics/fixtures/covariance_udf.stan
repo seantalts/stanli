@@ -43,3 +43,4 @@ transformed parameters { matrix[N,N] K;K = assemble(x, amplitude, rate, jitter);
       vector[N] mu = L*z;
     } model { amplitude ~ exponential(1); rate ~ exponential(1); z ~ std_normal(); y ~ normal(mu,1); }
     generated quantities { real checksum = sum(L); }
+    
