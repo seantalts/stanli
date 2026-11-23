@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+### Fixes
+
+- In webR, loading stanli no longer breaks compiled rstan models from other
+  packages such as RBesT and OncoBayes2. The webR runtime exported its copy
+  of Stan Math, Eigen and Boost, and those models then ran on stanli's copy.
+  It now exports only stanli's C API (#652).
+- `loo()` on a stanli fit now passes `cores` to `loo::relative_eff()` too,
+  so `loo(fit, cores = 1)` no longer forks R when `mc.cores` is above 1
+  (#641, thanks @VisruthSK).
+
 ### Docs
 
 - TESTING.md now starts with one rule. Every value of every model must be

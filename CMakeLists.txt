@@ -269,6 +269,16 @@ option(STANLI_WASM_SIDE
   "Build libstanli.so as an Emscripten side module for webR" OFF)
 if(EMSCRIPTEN AND STANLI_WASM_SIDE)
   set(CMAKE_POSITION_INDEPENDENT_CODE ON)
+  # webR puts every side module in one symbol table, and the first module
+  # to define a name wins. wasm-ld exports and imports every default-visibility
+  # symbol of a side module whatever EXPORTED_FUNCTIONS says, so without
+  # hidden visibility an rstan model from another package would use stanli's
+  # Stan Math (#652). EXPORTED_FUNCTIONS still exports the C API.
+  set(CMAKE_C_VISIBILITY_PRESET hidden)
+  set(CMAKE_CXX_VISIBILITY_PRESET hidden)
+  set(CMAKE_VISIBILITY_INLINES_HIDDEN ON)
+  # SUNDIALS marks its API visibility("default") unless built static.
+  add_compile_definitions(SUNDIALS_STATIC_DEFINE)
 endif()
 
 # The distributable shared library: C ABI + all kernels, TBB stubbed
