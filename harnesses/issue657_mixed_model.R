@@ -18,33 +18,74 @@ write_json <- function(value, path) {
   jsonlite::write_json(value, path, auto_unbox = TRUE, digits = 17,
                        pretty = TRUE, null = "null", na = "null")
 }
-subjects <- c(10L, 50L, 500L)
+subjects <- as.integer(strsplit(Sys.getenv("ISSUE657_SUBJECTS", "10,50,500"),
+                                ",", fixed = TRUE)[[1L]])
+stopifnot(length(subjects) > 0L, all(!is.na(subjects)), all(subjects >= 2L))
 if (mode == "emit") {
   stopifnot(requireNamespace("brms"), requireNamespace("jsonlite"))
   n_per <- if (length(args) >= 3L) as.integer(args[3L]) else 20L
   stopifnot(length(n_per) == 1L, !is.na(n_per), n_per >= 2L)
+  likelihood <- Sys.getenv("ISSUE657_FAMILY", "gaussian")
+  centered <- Sys.getenv("ISSUE657_CENTERED") == "1"
+  censored <- Sys.getenv("ISSUE657_CENSOR") == "1"
+  stopifnot(likelihood %in% c("gaussian", "bernoulli", "poisson"))
+  stopifnot(!censored || (likelihood == "gaussian" && !centered))
   for (j in subjects) {
     set.seed(657000L + j)
     subject <- factor(rep(seq_len(j), each = n_per))
     x <- rnorm(j * n_per)
     a <- rnorm(j, sd = 0.5)
     b <- 0.1 * a + rnorm(j, sd = 0.25)
-    d <- data.frame(subject, x,
-                    y = 0.2 + a[subject] + (0.5 + b[subject]) * x +
-                      rnorm(length(x), sd = 0.7))
+    eta <- 0.2 + a[subject] + (0.5 + b[subject]) * x
+    y <- switch(likelihood, gaussian = eta + rnorm(length(x), sd = 0.7),
+                 bernoulli = rbinom(length(x), 1, plogis(eta)),
+                 poisson = rpois(length(x), exp(eta)))
+    d <- data.frame(subject, x, y)
+    if (censored) {
+      d$censored <- ifelse(d$y > 1, "right", "none")
+      d$y <- pmin(d$y, 1)
+    }
     prior <- c(brms::prior(normal(0, 1), class = "b"),
                brms::prior(normal(0, 1), class = "Intercept"),
                brms::prior(student_t(3, 0, 1), class = "sd"),
-               brms::prior(student_t(3, 0, 1), class = "sigma"),
                brms::prior(lkj(2), class = "cor"))
-    f <- stats::as.formula("y ~ x + (1 + x | subject)")
-    code <- brms::make_stancode(f, data = d, prior = prior)
-    data <- brms::make_standata(f, data = d, prior = prior)
+    if (likelihood == "gaussian")
+      prior <- c(prior, brms::prior(student_t(3, 0, 1), class = "sigma"))
+    f <- stats::as.formula(if (censored)
+      "y | cens(censored) ~ x + (1 + x | subject)" else
+      "y ~ x + (1 + x | subject)")
+    family <- switch(likelihood, gaussian = gaussian(),
+                       bernoulli = brms::bernoulli(), poisson = poisson())
+    code <- brms::make_stancode(f, data = d, prior = prior, family = family)
+    data <- brms::make_standata(f, data = d, prior = prior, family = family)
+    if (centered) {
+      # A separate canonical centered/uncorrelated workload. This deliberately
+      # changes geometry and generated output, never the backend comparison
+      # within a workload. Both engines receive this same source and data.
+      code <- paste0(
+        "data { int<lower=1> N; int<lower=2> J; array[N] int<lower=1,upper=J> g; ",
+        "vector[N] x; ", if (likelihood == "gaussian") "vector[N] y;" else
+          "array[N] int<lower=0> y;", " } ",
+        "parameters { real alpha; real beta; vector[J] a; vector[J] b; ",
+        "real<lower=0> sd_a; real<lower=0> sd_b; ",
+        if (likelihood == "gaussian") "real<lower=0> sigma;" else "", " } ",
+        "model { vector[N] mu = alpha + a[g] + (beta + b[g]) .* x; ",
+        "alpha ~ normal(0,1); beta ~ normal(0,1); ",
+        "sd_a ~ student_t(3,0,1); sd_b ~ student_t(3,0,1); ",
+        "a ~ normal(0,sd_a); b ~ normal(0,sd_b); ",
+        switch(likelihood,
+                 gaussian = "sigma ~ student_t(3,0,1); y ~ normal(mu,sigma);",
+                 bernoulli = "y ~ bernoulli_logit(mu);",
+                 poisson = "y ~ poisson_log(mu);"), " }")
+      data <- list(N = nrow(d), J = j, g = as.integer(subject), x = x, y = y)
+    }
     writeLines(code, file.path(out, "proxy.stan"))
     write_json(data, file.path(out, paste0("j", j, ".json")))
   }
   write_json(list(issue = 657L, surrogate = TRUE, formula = deparse(f),
-                   family = "gaussian", subjects = subjects,
+                   family = likelihood, centered_uncorrelated = centered,
+                   right_censoring = censored,
+                   subjects = subjects,
                    observations_per_subject = n_per,
                    brms = as.character(utils::packageVersion("brms")),
                    r = R.version.string, seed_rule = "657000 + subjects"),
