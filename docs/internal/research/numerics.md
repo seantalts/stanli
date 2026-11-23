@@ -8,6 +8,7 @@ retain their recorded inputs and revisions.
 
 | Question | Read |
 | --- | --- |
+| What bugs or slowdowns have users reported on social media? | [2026-11-23 social feedback triage](../../../notes/triage/2026-11-23-social-feedback.md): covariance/Cholesky errors and a 500-subject mixed-model slowdown; reported evidence, historical fixes, reproduction gaps and a bounded signed-in X search with no additional actionable reports. |
 | What is in the shared corpus? | [Every model](../../../TESTING.md#every-model), collection provenance in the [catalog](../catalog.md#corpus-and-test-guides). |
 | Why can inference time differ despite similar gradients? | [Teaching investigation digest](../archive/plans/2026-09-15-teaching-performance.md), [sampler RNG parity](../../../notes/performance/2026-09-20-sampler-rng-parity.md), [startup parity](../../../notes/performance/2026-09-20-sampler-startup-parity.md). |
 | Remaining issue-374 cases | [Triage](../../../notes/performance/2026-09-21-issue-374-triage.md), [refreshed measurements](../../../notes/performance/2026-09-21-issue-374-refresh.md), [numerics](../../../notes/performance/2026-09-21-issue-374-numerics.md), [scalar experiment](../../../notes/performance/2026-09-21-issue-374-scalar-experiment.md). These records have different revisions; do not mix their timings. |

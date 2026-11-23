@@ -282,6 +282,7 @@ paths and hashes in raw records unchanged.
 
 | Document | Contents / use |
 | --- | --- |
+| [2026-11-23 · Social feedback triage](../../notes/triage/2026-11-23-social-feedback.md) | Public bug/performance reports, source threads, historical issue dispositions and search/access limits; no fresh reproductions. |
 | [Corpus benchmark evidence](../../output/corpus-performance-vectorized/README.md) | Published run/report provenance; retains recorded revision. |
 | [Corpus benchmark evidence](../../output/corpus-performance/README.md) | Published run/report provenance; retains recorded revision. |
 | [Rethinking report evidence](../../output/rethinking-report/README.md) | Published 2026-09-16 against a pre-release CmdStan snapshot (`11cb052`); the sampling harness that produced it was removed, so it is not rerun. |
