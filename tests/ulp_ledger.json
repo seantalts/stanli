@@ -112,8 +112,8 @@
      },
      "wa alpha.4": {
       "bound": 14,
-      "closer": "unknown",
-      "reason": "measured on Darwin arm64; cause not yet explained; the 80-digit evaluator covers lp and gradient only"
+      "closer": "cmdstan",
+      "reason": "measured on Darwin arm64; cause not yet explained; the 80-digit evaluator covers lp and gradient only; 80-digit value on 2026-11-23, at point 0: stanli 11, CmdStan 3 scaled ULP from it"
      }
     },
     "Mth_model": {
@@ -129,8 +129,8 @@
      },
      "wa mean_lp.4": {
       "bound": 14,
-      "closer": "unknown",
-      "reason": "measured on Darwin arm64; cause not yet explained; the 80-digit evaluator covers lp and gradient only"
+      "closer": "cmdstan",
+      "reason": "measured on Darwin arm64; cause not yet explained; the 80-digit evaluator covers lp and gradient only; 80-digit value on 2026-11-23, at point 0: stanli 11, CmdStan 3 scaled ULP from it"
      }
     },
     "Survey_model": {
@@ -480,8 +480,8 @@
      },
      "grad[82]": {
       "bound": 11,
-      "closer": "unknown",
-      "reason": "measured on Darwin arm64; no 80-digit value for this entry; the merged loop's sums are pairwise or compensated in stanli, while CmdStan adds one call at a time"
+      "closer": "stanli",
+      "reason": "measured on Darwin arm64; no 80-digit value for this entry; the merged loop's sums are pairwise or compensated in stanli, while CmdStan adds one call at a time; 80-digit value on 2026-11-23, at point 0: stanli 0.1, CmdStan 10.9 scaled ULP from it"
      },
      "grad[83]": {
       "bound": 43,
@@ -524,8 +524,8 @@
      },
      "lp": {
       "bound": 68,
-      "closer": "unknown",
-      "reason": "measured on Darwin arm64; cause not yet explained; the 80-digit value at point 1 is more than 1e6 scaled ULP from both engines, so it does not settle which is closer"
+      "closer": "stanli",
+      "reason": "measured on Darwin arm64; cause not yet explained; the 80-digit value at point 1 is more than 1e6 scaled ULP from both engines, so it does not settle which is closer; 80-digit value on 2026-11-23, at point 1: stanli 18.8, CmdStan 86.8 scaled ULP from it"
      }
     },
     "examplemodels_cjs_cov_raneff": {
@@ -793,8 +793,8 @@
     "mlumr_survival_mspline_relaxed": {
      "wa": {
       "bound": 128,
-      "closer": "unknown",
-      "reason": "measured on Darwin arm64; cause not yet explained; the 80-digit evaluator covers lp and gradient only"
+      "closer": "cmdstan",
+      "reason": "measured on Darwin arm64; cause not yet explained; the 80-digit evaluator covers lp and gradient only; 80-digit value on 2026-11-23, at point 1: stanli 123.6, CmdStan 4.4 scaled ULP from it"
      }
     },
     "mlumr_survival_relaxed": {
@@ -821,8 +821,8 @@
     "oncobayes2_blrm_exnex_combo3": {
      "wa beta_EX_prob.2.2": {
       "bound": 14,
-      "closer": "unknown",
-      "reason": "measured on Darwin arm64; cause not yet explained; the 80-digit evaluator covers lp and gradient only"
+      "closer": "cmdstan",
+      "reason": "measured on Darwin arm64; cause not yet explained; the 80-digit evaluator covers lp and gradient only; 80-digit value on 2026-11-23, at point 0: stanli 7.6, CmdStan 6.4 scaled ULP from it"
      }
     },
     "one_comp_mm_elim_abs": {

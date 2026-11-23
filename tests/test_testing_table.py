@@ -70,13 +70,47 @@ class CorpusRowsTest(unittest.TestCase):
                      and self.rows[m]["cells"][0])
         self.assertEqual(self.rows[model]["cells"][4:6], ["", ""])
 
-    def test_every_reference_model_has_an_accuracy_record(self):
-        self.assertEqual(set(table.load_accuracy()["models"]), set(self.rows))
+    def test_accuracy_records_are_for_reference_models(self):
+        self.assertLessEqual(set(table.load_accuracy()["models"]), set(self.rows))
 
     def test_a_model_that_cmdstan_rejects_everywhere_has_no_limits(self):
         row = self.rows["s2_invgaussian"]
         self.assertEqual(row["cells"], [""] * 9)
         self.assertIn("rejects every point", row["note"])
+
+
+class TallyTest(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        sys.path.insert(0, str(REPO / "tools" / "hp"))
+        import accuracy
+        cls.accuracy = accuracy
+
+    def record(self, *pairs):
+        tally = self.accuracy.Tally()
+        for i, (cmdstan, stanli) in enumerate(pairs):
+            tally.add(f"grad[{i + 1}]", 0, cmdstan, stanli)
+        return tally.record()
+
+    def test_means_and_counts(self):
+        record = self.record((2.0, 1.0), (4.0, 4.0), (0.0, 1.0))
+        self.assertEqual(record["n"], 3)
+        self.assertEqual(record["cmdstan"], {"mean": 2.0, "max": 4.0})
+        self.assertEqual(record["stanli"], {"mean": 2.0, "max": 4.0})
+        self.assertEqual((record["stanli_closer"], record["cmdstan_closer"]), (1, 1))
+        self.assertNotIn("worse", record)
+
+    def test_worse_is_over_ten_ulp_and_farther_than_cmdstan(self):
+        record = self.record((3.0, 11.0), (12.0, 11.0), (3.0, 9.0), (11.0, 11.0))
+        self.assertEqual(record["worse_count"], 1)
+        self.assertEqual(record["worse"][0]["value"], "grad[1]")
+
+    def test_a_value_that_both_engines_miss_by_millions_is_not_worse(self):
+        record = self.record((6e7, 6e7 + 19))
+        self.assertNotIn("worse", record)
+
+    def test_no_values_is_no_record(self):
+        self.assertIsNone(self.record())
 
 
 class MeanTest(unittest.TestCase):

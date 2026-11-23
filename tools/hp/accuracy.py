@@ -12,7 +12,9 @@ is scored for both engines: |value - true value| in ULPs of the scale that
 the replay gate uses for it (verify_refs.scaled_ulp). The record keeps, for
 each model and output kind, the number of values scored, the mean and the
 largest distance for each engine, and the values where stanli is more than
-BUG_ULP from the true value and farther from it than CmdStan.
+BUG_ULP from the true value and farther from it than CmdStan. A value that
+both engines miss by more than UNDECIDED_ULP is counted in the means and left
+out of that list.
 
 tools/gen_docs.py writes the columns of TESTING.md's table from the record.
 """

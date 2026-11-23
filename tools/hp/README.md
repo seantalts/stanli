@@ -80,7 +80,8 @@ that `stanli_check` gives now, and writes
 For each model and kind of value the record has the number of values, the
 mean and largest distance for each engine in ULP of the replay gate's scale,
 and under `worse` the values where stanli is more than 10 ULP from the true
-value and farther from it than CmdStan. `--only MODEL ...` rescoring merges
+value and farther from it than CmdStan (a value that both engines miss by
+more than 1e6 ULP is left out of `worse`). `--only MODEL ...` rescoring merges
 into the existing record. The survey takes about 40 minutes on 26 cores, and
 the scoring about 3 minutes. Run both again after a change that moves
 results, on macOS arm64, where the CmdStan references were recorded.

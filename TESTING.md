@@ -36,9 +36,9 @@ The same rule applies to every model in every corpus. The details:
   it. Adding an entry or raising one takes a commit that gives the cause.
 - Each ledger entry also says which engine is closer to an 80-digit evaluation
   of the model ([`tools/hp`](tools/hp/README.md)): `stanli`, `cmdstan` or
-  `unknown`. An entry with `stanli` is settled, because stanli is at least as
-  accurate as the reference it differs from. The other entries are open
-  findings, and [Known limits](#known-limits) counts them.
+  `unknown`. The verdict is for the point where stanli is farthest from
+  CmdStan, so it does not speak for the other two points. The accuracy columns
+  of [the table](#every-model) cover every value at every point.
 - Within the 10, a change may move a result away from CmdStan by 2 ULP
   without comment. A change that reorders a sum may use all 10, and its commit
   message says so. No tool checks this part; reviewers do.
@@ -111,9 +111,9 @@ stanli must reject them too.
 Of those models, <!--gen:testing_models_within-->333<!--/gen--> have every
 value within 10 ULP of CmdStan. The other <!--gen:testing_models_over-->81<!--/gen-->
 models have <!--gen:testing_entries-->175<!--/gen--> ledger entries between
-them. In <!--gen:testing_entries_stanli-->125<!--/gen--> of those entries
-stanli is at least as close to the 80-digit value as CmdStan. In <!--gen:testing_entries_cmdstan-->5<!--/gen-->
-CmdStan is closer, and <!--gen:testing_entries_unknown-->45<!--/gen--> are
+them. In <!--gen:testing_entries_stanli-->127<!--/gen--> of those entries
+stanli is at least as close to the 80-digit value as CmdStan. In <!--gen:testing_entries_cmdstan-->9<!--/gen-->
+CmdStan is closer, and <!--gen:testing_entries_unknown-->39<!--/gen--> are
 undecided.
 
 <!--gen:testing_collections-->
@@ -942,10 +942,12 @@ them.
   [#648](https://github.com/seantalts/stanli/issues/648),
   [#649](https://github.com/seantalts/stanli/issues/649) and
   [#650](https://github.com/seantalts/stanli/issues/650).
-- **Models with no 80-digit value.** The accuracy columns are empty where the
+- **Values with no 80-digit value.** The accuracy columns are empty where the
   evaluator cannot score a value, so for those values the only evidence is the
-  distance from CmdStan. Of the ledger's entries, <!--gen:testing_entries_unknown-->45<!--/gen-->
-  are for such values.
+  distance from CmdStan. In the ledger, <!--gen:testing_entries_unknown-->39<!--/gen-->
+  entries are undecided for that reason or because both engines are far from
+  the true value, and in <!--gen:testing_entries_cmdstan-->9<!--/gen-->
+  CmdStan is closer.
 - **Three points for each model.** Agreement at three points does not prove
   agreement over the parameter space. The sampler checks cover a little of
   that gap.
