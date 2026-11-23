@@ -165,9 +165,9 @@ This table counts the models where one engine has the smaller mean:
 
 | values | models scored | stanli closer | CmdStan closer | the same |
 | --- | ---: | ---: | ---: | ---: |
-| log density | <!--gen:testing_scored_lp-->370<!--/gen--> | <!--gen:testing_scored_lp_stanli-->84<!--/gen--> | <!--gen:testing_scored_lp_cmdstan-->65<!--/gen--> | <!--gen:testing_scored_lp_same-->221<!--/gen--> |
-| gradient | <!--gen:testing_scored_grad-->337<!--/gen--> | <!--gen:testing_scored_grad_stanli-->206<!--/gen--> | <!--gen:testing_scored_grad_cmdstan-->47<!--/gen--> | <!--gen:testing_scored_grad_same-->84<!--/gen--> |
-| outputs | <!--gen:testing_scored_wa-->367<!--/gen--> | <!--gen:testing_scored_wa_stanli-->91<!--/gen--> | <!--gen:testing_scored_wa_cmdstan-->14<!--/gen--> | <!--gen:testing_scored_wa_same-->262<!--/gen--> |
+| log density | <!--gen:testing_scored_lp-->370<!--/gen--> | <!--gen:testing_scored_lp_stanli-->88<!--/gen--> | <!--gen:testing_scored_lp_cmdstan-->68<!--/gen--> | <!--gen:testing_scored_lp_same-->214<!--/gen--> |
+| gradient | <!--gen:testing_scored_grad-->337<!--/gen--> | <!--gen:testing_scored_grad_stanli-->217<!--/gen--> | <!--gen:testing_scored_grad_cmdstan-->57<!--/gen--> | <!--gen:testing_scored_grad_same-->63<!--/gen--> |
+| outputs | <!--gen:testing_scored_wa-->367<!--/gen--> | <!--gen:testing_scored_wa_stanli-->99<!--/gen--> | <!--gen:testing_scored_wa_cmdstan-->16<!--/gen--> | <!--gen:testing_scored_wa_same-->252<!--/gen--> |
 
 We scored <!--gen:testing_scored_values-->765,761<!--/gen--> values in total. stanli is closer to
 the true value in <!--gen:testing_values_stanli_closer-->16,058<!--/gen--> of them and CmdStan is
@@ -213,7 +213,7 @@ table and those files disagree.
 | `accel_gp` | posteriordb | 66 | 72 | 1.51 | 1.51 | 0.06 | 0.02 | 0.03 | 0.03 | 10 |  |
 | `accel_splines` | posteriordb | 82 | 160 | 0.58 | 0.58 | 0.09 | 0.07 | 0.05 | 0.05 | 10 |  |
 | `arK` | posteriordb | 7 | 7 | 3.76 | 1.82 | 0.56 | 0.18 | 0.03 | 0.03 | 10 |  |
-| `arma11` | posteriordb | 4 | 4 | 0.60 | 0.60 | 0.59 | 0.59 | 0.07 | 0.07 | 10 |  |
+| `arma11` | posteriordb | 4 | 4 | 0.60 | 0.60 | 0.60 | 0.60 | 0.07 | 0.07 | 10 |  |
 | `blr` | posteriordb | 6 | 6 | 0.90 | 0.90 | 0.65 | 0.65 | 0.05 | 0.05 | 10 |  |
 | `bones_model` | posteriordb | 13 | 13 | 0.64 | 0.64 | 0.58 | 0.59 | <0.01 | <0.01 | 10 |  |
 | `bym2_offset_only` | posteriordb | 3845 | 9610 | 2.18 | 2.63 |  |  | 0.29 | 0.29 | 10 |  |
@@ -230,25 +230,25 @@ table and those files disagree.
 | `eight_schools_noncentered` | posteriordb | 10 | 18 | 0.56 | 0.56 | 0.10 | 0.10 | 0.13 | 0.13 | 10 |  |
 | `election88_full` | posteriordb | 90 | 11656 | 255 | 255 | 1.96 | 0.56 | 0.19 | 0.19 | gradient 91 |  |
 | `garch11` | posteriordb | 4 | 4 | 0.45 | 0.45 | 3.02 | 3.02 | 0.17 | 0.17 | 10 |  |
-| `GLM_Binomial_model` | posteriordb | 3 | 83 | 2.52 | 2.52 | 0.46 | 0.17 | 0.25 | 0.26 | 10 |  |
+| `GLM_Binomial_model` | posteriordb | 3 | 83 | 2.52 | 2.52 | 0.46 | 0.16 | 0.25 | 0.26 | 10 |  |
 | `GLM_Poisson_model` | posteriordb | 4 | 84 | 14.5 | 14.7 | 0.51 | 0.54 | 6.73 | 6.76 | 10 |  |
 | `GLMM1_model` | posteriordb | 237 | 2395 | 16.9 | 0.52 | 0.07 | 0.07 | <0.01 | <0.01 | lp 44 |  |
 | `GLMM_Poisson_model` | posteriordb | 45 | 125 | 13.2 | 12.8 | 1.03 | 1.05 | 1.06 | 1.06 | 10 |  |
-| `gp_pois_regr` | posteriordb | 13 | 24 | 0.73 | 0.73 | 0.21 | 0.21 | 0.14 | 0.14 | 10 |  |
-| `gp_regr` | posteriordb | 3 | 3 | 0.81 | 0.81 | 0.69 | 0.69 | 0.17 | 0.17 | 10 |  |
+| `gp_pois_regr` | posteriordb | 13 | 24 | 0.73 | 0.73 | 0.21 | 0.21 | 0.13 | 0.13 | 10 |  |
+| `gp_regr` | posteriordb | 3 | 3 | 0.80 | 0.80 | 0.69 | 0.69 | 0.17 | 0.17 | 10 |  |
 | `gpcm_latent_reg_irt` | posteriordb | 530 | 550 | 56.2 | 3.94 |  |  | 0.02 | 0.02 | lp 131, gradient 55 |  |
 | `grsm_latent_reg_irt` | posteriordb | 408 | 418 | 182 | 17.2 |  |  | <0.01 | <0.01 | lp 493, gradient 23 |  |
 | `hier_2pl` | posteriordb | 669 | 804 | 602 | 602 |  |  | 0.01 | 0.01 | 10 |  |
 | `hierarchical_gp` | posteriordb | 933 | 3279 | 0.33 | 0.66 |  |  | 0.29 | 0.29 | 10 |  |
-| `hmm_drive_0` | posteriordb | 6 | 429 | 32.6 | 32.9 | 10,600 | 10,600 | 0.09 | 0.09 | 10 |  |
-| `hmm_drive_1` | posteriordb | 6 | 429 | 36.7 | 37.0 | 55,900 | 55,900 | 0.09 | 0.09 | 10 |  |
-| `hmm_example` | posteriordb | 4 | 111 | 10.4 | 11.1 | 423 | 423 | 0.10 | 0.10 | 10 |  |
-| `hmm_gaussian` | posteriordb | 14 | 9519 | 18.1 | 17.7 | 10,300 | 10,300 | 961 | 961 | 10 |  |
-| `iohmm_reg` | posteriordb | 29 | 18031 | 4.43 | 4.43 | 14,100 | 14,100 | 41.6 | 41.6 | 10 |  |
+| `hmm_drive_0` | posteriordb | 6 | 429 | 32.6 | 32.9 | 10,568 | 10,568 | 0.09 | 0.09 | 10 |  |
+| `hmm_drive_1` | posteriordb | 6 | 429 | 36.7 | 37.0 | 55,945 | 55,945 | 0.09 | 0.09 | 10 |  |
+| `hmm_example` | posteriordb | 4 | 111 | 10.4 | 11.1 | 423 | 423 | 0.11 | 0.11 | 10 |  |
+| `hmm_gaussian` | posteriordb | 14 | 9519 | 18.1 | 17.7 | 10,342 | 10,342 | 961 | 961 | 10 |  |
+| `iohmm_reg` | posteriordb | 29 | 18031 | 4.43 | 4.43 | 14,117 | 14,117 | 41.6 | 41.6 | 10 |  |
 | `irt_2pl` | posteriordb | 144 | 144 | 2.23 | 2.23 | 0.10 | 0.04 | 0.03 | 0.03 | 10 |  |
 | `kidscore_interaction` | posteriordb | 5 | 5 | 1.04 | 1.04 | 2.03 | 0.35 | 0.05 | 0.05 | 10 |  |
 | `kidscore_interaction_c` | posteriordb | 5 | 5 | 0.89 | 0.89 | 0.20 | 0.13 | 0.05 | 0.05 | 10 |  |
-| `kidscore_interaction_c2` | posteriordb | 5 | 5 | 0.36 | 0.36 | 0.10 | 0.08 | 0.05 | 0.05 | 10 |  |
+| `kidscore_interaction_c2` | posteriordb | 5 | 5 | 0.37 | 0.37 | 0.10 | 0.08 | 0.05 | 0.05 | 10 |  |
 | `kidscore_interaction_z` | posteriordb | 5 | 5 | 0.38 | 0.38 | 0.07 | 0.07 | 0.05 | 0.05 | 10 |  |
 | `kidscore_mom_work` | posteriordb | 5 | 5 | 0.45 | 0.45 | 0.08 | 0.07 | 0.05 | 0.05 | 10 |  |
 | `kidscore_momhs` | posteriordb | 3 | 3 | 0.26 | 0.26 | 0.28 | 0.19 | 0.05 | 0.05 | 10 |  |
@@ -264,9 +264,9 @@ table and those files disagree.
 | `logearn_interaction` | posteriordb | 5 | 5 | 2.88 | 2.88 | 2.89 | 0.47 | 0.05 | 0.05 | gradient 15 |  |
 | `logearn_interaction_z` | posteriordb | 5 | 5 | 2.70 | 2.70 | 0.61 | 0.47 | 0.05 | 0.05 | 10 |  |
 | `logearn_logheight_male` | posteriordb | 4 | 4 | 2.09 | 2.09 | 1.09 | 0.63 | 0.06 | 0.06 | 10 |  |
-| `logistic_regression_rhs` | posteriordb | 3075 | 4719 | 3,220 | 3,220 |  |  | 27.2 | 27.2 | 10 |  |
+| `logistic_regression_rhs` | posteriordb | 3075 | 4719 | 3,219 | 3,219 |  |  | 27.2 | 27.2 | 10 |  |
 | `logmesquite` | posteriordb | 8 | 8 | 1.12 | 1.12 | 0.22 | 0.19 | <0.01 | <0.01 | 10 |  |
-| `logmesquite_logva` | posteriordb | 5 | 5 | 0.51 | 0.51 | 0.20 | 0.16 | 0.05 | 0.05 | 10 |  |
+| `logmesquite_logva` | posteriordb | 5 | 5 | 0.50 | 0.50 | 0.20 | 0.16 | 0.05 | 0.05 | 10 |  |
 | `logmesquite_logvas` | posteriordb | 8 | 8 | 0.39 | 0.39 | 0.14 | 0.12 | <0.01 | <0.01 | 10 |  |
 | `logmesquite_logvash` | posteriordb | 7 | 7 | 0.35 | 0.35 | 0.14 | 0.12 | 0.03 | 0.03 | 10 |  |
 | `logmesquite_logvolume` | posteriordb | 3 | 3 | 0.93 | 0.93 | 0.37 | 0.39 | 0.05 | 0.05 | 10 |  |
@@ -277,7 +277,7 @@ table and those files disagree.
 | `lsat_model` | posteriordb | 1006 | 1012 | 55.7 | 55.7 |  |  | <0.01 | <0.01 | gradient 70 |  |
 | `M0_model` | posteriordb | 2 | 4 | 49.0 | 0.29 | 73.2 | 3.78 | 0.69 | 0.69 | lp 66, gradient 180 |  |
 | `Mb_model` | posteriordb | 3 | 1596 | 27.8 | 0.47 | 21.0 | 6.74 | 0.12 | 0.12 | lp 69, gradient 68 |  |
-| `mesquite` | posteriordb | 8 | 8 | 0.92 | 0.92 | 0.12 | 0.12 | <0.01 | <0.01 | 10 |  |
+| `mesquite` | posteriordb | 8 | 8 | 0.91 | 0.91 | 0.12 | 0.12 | <0.01 | <0.01 | 10 |  |
 | `Mh_model` | posteriordb | 388 | 1159 | 24.2 | 2.43 |  |  | 3.01 | 3.01 | lp 51, gradient 43 |  |
 | `Mt_model` | posteriordb | 4 | 7 | 15.7 | 0.99 | 11.9 | 0.45 | 0.50 | 0.50 | lp 36, gradient 66 |  |
 | `Mtbh_model` | posteriordb | 154 | 1912 | 21.3 | 0.10 | 0.08 | 0.05 | 2.07 | 2.12 | lp 28, outputs 14 |  |
@@ -291,7 +291,7 @@ table and those files disagree.
 | `normal_mixture_k` | posteriordb | 14 | 15 | 7.20 | 6.53 | 14.9 | 15.0 | 0.24 | 0.23 | gradient 15 |  |
 | `one_comp_mm_elim_abs` | posteriordb | 4 | 44 |  |  |  |  |  |  | outputs 245 |  |
 | `pilots` | posteriordb | 18 | 58 | 0.69 | 0.69 | 0.05 | 0.05 | 0.05 | 0.05 | 10 |  |
-| `prophet` | posteriordb | 62 | 62 | 0.78 | 0.78 | 0.41 | 0.36 | <0.01 | <0.01 | 10 |  |
+| `prophet` | posteriordb | 62 | 62 | 0.78 | 0.78 | 0.41 | 0.37 | <0.01 | <0.01 | 10 |  |
 | `radon_county` | posteriordb | 389 | 389 | 0.38 | 0.38 |  |  | <0.01 | <0.01 | 10 |  |
 | `radon_county_intercept` | posteriordb | 388 | 388 | 53.8 | 4.62 |  |  | <0.01 | <0.01 | lp 95, gradient 213 |  |
 | `radon_hierarchical_intercept_centered` | posteriordb | 391 | 391 | 31.7 | 5.38 |  |  | <0.01 | <0.01 | lp 95, gradient 213 |  |
@@ -309,17 +309,17 @@ table and those files disagree.
 | `Rate_2_model` | posteriordb | 2 | 3 | 0.23 | 0.23 | 0.47 | 0.47 | 11.8 | 11.8 | 10 |  |
 | `Rate_3_model` | posteriordb | 1 | 1 | 0.57 | 0.57 | 1.87 | 1.87 | 0.33 | 0.33 | 10 |  |
 | `Rate_4_model` | posteriordb | 2 | 4 | 0.62 | 0.95 | 0.31 | 0.31 | 0.27 | 0.27 | 10 |  |
-| `Rate_5_model` | posteriordb | 1 | 3 | 0.65 | 0.65 | 22.5 | 22.5 | 0.33 | 0.33 | 10 |  |
-| `rats_model` | posteriordb | 65 | 66 | 0.74 | 0.26 | 0.01 | <0.01 | 0.01 | 0.01 | 10 |  |
+| `Rate_5_model` | posteriordb | 1 | 3 | 0.64 | 0.64 | 22.5 | 22.5 | 0.33 | 0.33 | 10 |  |
+| `rats_model` | posteriordb | 65 | 66 | 0.75 | 0.25 | 0.01 | <0.01 | 0.01 | 0.01 | 10 |  |
 | `seeds_centered_model` | posteriordb | 26 | 47 | 0.54 | 0.54 | 0.23 | 0.22 | 0.09 | 0.09 | 10 |  |
-| `seeds_model` | posteriordb | 26 | 27 | 0.23 | 0.23 | 0.20 | 0.20 | 0.02 | 0.02 | 10 |  |
+| `seeds_model` | posteriordb | 26 | 27 | 0.22 | 0.22 | 0.20 | 0.20 | 0.02 | 0.02 | 10 |  |
 | `seeds_stanified_model` | posteriordb | 26 | 26 | 0.38 | 0.38 | 0.21 | 0.20 | 0.01 | 0.01 | 10 |  |
 | `sesame_one_pred_a` | posteriordb | 3 | 3 | 6.58 | 6.58 | 7.17 | 0.64 | 0.05 | 0.05 | gradient 36 |  |
 | `soil_incubation` | posteriordb | 6 | 31 |  |  |  |  |  |  | 10 |  |
 | `state_space_stochastic_level_stochastic_seasonal` | posteriordb | 389 | 581 | 6.01 | 4.34 |  |  | 0.18 | 0.18 | 10 |  |
 | `surgical_model` | posteriordb | 14 | 28 | 0.37 | 0.37 | 0.09 | 0.09 | 0.12 | 0.12 | 10 |  |
 | `Survey_model` | posteriordb | 1 | 1002 | 2.58 | 2.58 | 57.9 | 72.2 | 0.60 | 0.60 | gradient 69 |  |
-| `wells_daae_c_model` | posteriordb | 6 | 6 | 1.82 | 1.49 | 1.40 | 0.96 | <0.01 | <0.01 | 10 |  |
+| `wells_daae_c_model` | posteriordb | 6 | 6 | 1.82 | 1.49 | 1.40 | 0.97 | <0.01 | <0.01 | 10 |  |
 | `wells_dae_c_model` | posteriordb | 5 | 5 | 1.37 | 1.71 | 1.56 | 1.46 | <0.01 | <0.01 | 10 |  |
 | `wells_dae_inter_model` | posteriordb | 7 | 7 | 1.48 | 1.48 | 1.27 | 1.20 | <0.01 | <0.01 | 10 |  |
 | `wells_dae_model` | posteriordb | 4 | 4 | 3.49 | 3.49 | 1.73 | 1.73 | <0.01 | <0.01 | 10 |  |
@@ -328,8 +328,8 @@ table and those files disagree.
 | `wells_dist100ars_model` | posteriordb | 3 | 3 | 3.25 | 3.25 | 2.16 | 2.16 | <0.01 | <0.01 | 10 |  |
 | `wells_interaction_c_model` | posteriordb | 4 | 4 | 2.09 | 2.09 | 1.75 | 1.35 | <0.01 | <0.01 | 10 |  |
 | `wells_interaction_model` | posteriordb | 4 | 4 | 1.60 | 1.60 | 1.17 | 1.17 | <0.01 | <0.01 | 10 |  |
-| `aalto_bern` | educational | 1 | 12 | 0.34 | 0.34 | 0.84 | 0.84 | 0.43 | 0.43 | 10 |  |
-| `aalto_binom` | educational | 1 | 1 | 0.34 | 0.34 | 1.17 | 1.17 | 0.33 | 0.33 | 10 |  |
+| `aalto_bern` | educational | 1 | 12 | 0.33 | 0.33 | 0.84 | 0.84 | 0.43 | 0.43 | 10 |  |
+| `aalto_binom` | educational | 1 | 1 | 0.33 | 0.33 | 1.17 | 1.17 | 0.33 | 0.33 | 10 |  |
 | `aalto_binom2` | educational | 2 | 3 | 0.35 | 0.68 | 0.27 | 0.27 | 0.49 | 0.49 | 10 |  |
 | `aalto_binomb` | educational | 1 | 2 | 0.52 | 0.52 | 0.91 | 0.91 | 0.20 | 0.20 | 10 |  |
 | `aalto_gpareto` | educational | 2 | 30 | 0.57 | 0.57 | 2.66 | 1.51 | 0.33 | 0.33 | 10 |  |
@@ -347,7 +347,7 @@ table and those files disagree.
 | `i319_pois_fixed` | brms | 5 | 7 | 3.04 | 3.04 | 0.37 | 0.37 | 0.09 | 0.09 | 10 | brms limit 10, gradient against its largest entry |
 | `i319_pois_re` | brms | 65 | 126 | 2.10 | 2.10 | 0.06 | 0.04 | 0.10 | 0.10 | 10 | brms limit 10, gradient against its largest entry |
 | `i319_pois_re2` | brms | 302 | 599 | 1.21 | 1.54 |  |  | 0.08 | 0.08 | 10 | brms limit 10, gradient against its largest entry |
-| `i320_gp_expquad` | brms | 34 | 36 | 36,600 | 36,600 | 34,900 | 34,900 | 0.06 | 0.06 | 10 | ill-conditioned, so the 1e-9 limit is 1.5e-6 for the gradient. brms limit 10 |
+| `i320_gp_expquad` | brms | 34 | 36 | 36,641 | 36,641 | 34,870 | 34,870 | 0.06 | 0.06 | 10 | ill-conditioned, so the 1e-9 limit is 1.5e-6 for the gradient. brms limit 10 |
 | `i320_gp_matern32` | brms | 34 | 36 | 1.53 | 0.98 | 0.66 | 0.66 | 0.06 | 0.06 | 10 | brms limit 10 |
 | `i320_mi_nhanes` | brms | 27 | 30 | 0.68 | 1.07 | 0.06 | 0.06 | 0.06 | 0.06 | 10 | brms limit 10 |
 | `i320_pois_trunc_both` | brms | 4 | 6 | 4.94 | 4.94 | 2.61 | 0.63 | 0.12 | 0.12 | gradient 16 | brms limit 16, gradient against its largest entry |
@@ -359,13 +359,13 @@ table and those files disagree.
 | `s2_car` | brms | 10 | 12 | 0.66 | 0.85 | 0.35 | 0.29 | 0.10 | 0.06 | 10 | brms limit 10, gradient against its largest entry |
 | `s2_car_esicar` | brms | 8 | 15 | 0.71 | 0.38 | 0.31 | 0.33 | 0.07 | 0.04 | 10 | brms limit 10, gradient against its largest entry |
 | `s2_car_icar` | brms | 9 | 16 | 1.15 | 1.15 | 14.8 | 14.8 | 0.12 | 0.09 | 10 | brms limit 10, gradient against its largest entry |
-| `s2_categorical_re` | brms | 16 | 29 | 1.29 | 1.63 | 0.60 | 0.64 | 0.17 | 0.15 | 10 | brms limit 10, gradient against its largest entry |
+| `s2_categorical_re` | brms | 16 | 29 | 1.29 | 1.63 | 0.61 | 0.64 | 0.17 | 0.15 | 10 | brms limit 10, gradient against its largest entry |
 | `s2_cens_interval` | brms | 3 | 5 | 2.04 | 1.04 | 5.0e10 | 5.0e10 | 0.20 | 0.12 | 10 | brms limit 10, gradient against its largest entry |
 | `s2_com_poisson` | brms | 3 | 5 | 1.38 | 1.38 | 1.4e15 | 1.4e15 | 0.39 | 0.39 | 10 | brms limit 10 |
 | `s2_cosy` | brms | 4 | 70 | 0.87 | 0.60 | 0.79 | 0.77 | 0.07 | 0.07 | 10 | brms limit 10, gradient against its largest entry |
 | `s2_cox` | brms | 6 | 9 | 0.94 | 0.26 | 0.50 | 0.17 | 0.57 | 0.53 | 10 | brms limit 10, gradient against its largest entry |
 | `s2_cox_cens` | brms | 6 | 9 | 0.35 | 0.35 | 0.86 | 0.63 | 0.57 | 0.53 | 10 | brms limit 10 |
-| `s2_cumulative_cauchit` | brms | 4 | 9 | 1.42 | 1.06 | 0.70 | 0.44 | 0.08 | 0.08 | 10 | brms limit 10, gradient against its largest entry |
+| `s2_cumulative_cauchit` | brms | 4 | 9 | 1.42 | 1.06 | 0.71 | 0.44 | 0.08 | 0.08 | 10 | brms limit 10, gradient against its largest entry |
 | `s2_cumulative_cloglog` | brms | 4 | 9 | 11.8 | 11.8 | 173 | 173 | 0.08 | 0.08 | 10 | brms limit 10 |
 | `s2_cumulative_probit` | brms | 4 | 9 | 0.83 | 0.83 | 5.3e9 | 5.3e9 | 0.08 | 0.08 | 10 | brms limit 10 |
 | `s2_custom_vint` | brms | 3 | 5 | 3.52 | 3.52 | 1.08 | 1.06 | 0.39 | 0.30 | 10 | brms limit 10 |
@@ -375,37 +375,37 @@ table and those files disagree.
 | `s2_dist_sigma_re` | brms | 9 | 17 | 0.33 | 0.33 | 0.47 | 0.36 | 0.11 | 0.08 | 10 | brms limit 10, gradient against its largest entry |
 | `s2_fcor` | brms | 3 | 5 | 0.78 | 0.78 | 0.61 | 1.57 | 0.21 | 0.13 | 10 | brms limit 10, gradient against its largest entry |
 | `s2_frechet` | brms | 3 | 5 | 0.92 | 0.92 | 2.00 | 1.91 | 0.20 | 0.12 | 10 | brms limit 10 |
-| `s2_gev` | brms | 4 | 6 | 0.29 | 0.29 | 1.32 | 1.43 | 0.18 | 0.11 | 10 | brms limit 10, gradient against its largest entry |
+| `s2_gev` | brms | 4 | 6 | 0.29 | 0.29 | 1.32 | 1.43 | 0.19 | 0.11 | 10 | brms limit 10, gradient against its largest entry |
 | `s2_gp_approx` | brms | 9 | 11 | 0.30 | 0.63 | 0.33 | 0.29 | 0.08 | 0.08 | 10 | brms limit 10 |
 | `s2_gp_by_approx` | brms | 16 | 18 | 0.43 | 0.45 | 0.15 | 0.14 | 0.11 | 0.11 | 10 | brms limit 10 |
-| `s2_gp_by_gr` | brms | 52 | 54 | 1.7e6 | 1.7e6 | 1.8e7 | 1.8e7 | 0.04 | 0.04 | 10 | ill-conditioned, so the 1e-9 limit is 1.5e-6 for the gradient. brms limit 10 |
+| `s2_gp_by_gr` | brms | 52 | 54 | 1.7e6 | 1.7e6 | 1.9e7 | 1.9e7 | 0.04 | 0.04 | 10 | ill-conditioned, so the 1e-9 limit is 1.5e-6 for the gradient. brms limit 10 |
 | `s2_gr_by` | brms | 10 | 17 | 0.39 | 0.37 | 0.28 | 0.25 | 0.14 | 0.12 | 10 | brms limit 10, gradient against its largest entry |
 | `s2_gr_student` | brms | 15 | 27 | 0.83 | 1.17 | 0.31 | 0.36 | 0.20 | 0.18 | 10 | brms limit 10 |
-| `s2_hurdle_cumulative` | brms | 4 | 8 | 1.44 | 1.60 | 0.96 | 0.62 | 0.06 | 0.06 | 10 | brms limit 10, gradient against its largest entry |
+| `s2_hurdle_cumulative` | brms | 4 | 8 | 1.44 | 1.60 | 0.96 | 0.63 | 0.06 | 0.06 | 10 | brms limit 10, gradient against its largest entry |
 | `s2_hurdle_negbin` | brms | 4 | 6 | 1.10 | 1.10 | 1.70 | 1.66 | 0.25 | 0.18 | 10 | brms limit 10 |
 | `s2_index_mi` | brms | 9 | 12 | 0.30 | 0.35 | 0.36 | 0.37 | 0.08 | 0.08 | 10 | brms limit 10, gradient against its largest entry |
 | `s2_invgaussian` | brms |  |  |  |  |  |  |  |  |  | CmdStan rejects every point, and stanli must too |
 | `s2_logistic_normal` | brms | 7 | 18 | 1.57 | 1.90 | 0.65 | 0.69 | 0.10 | 0.07 | 10 | brms limit 10 |
-| `s2_me2` | brms | 89 | 259 | 0.45 | 0.71 | 0.06 | 0.06 | 0.10 | 0.10 | 10 | brms limit 10 |
+| `s2_me2` | brms | 89 | 259 | 0.45 | 0.71 | 0.05 | 0.06 | 0.10 | 0.10 | 10 | brms limit 10 |
 | `s2_me2_nomecor` | brms | 88 | 170 | 0.61 | 0.61 | 0.06 | 0.05 | 0.06 | 0.06 | 10 | brms limit 10, gradient against its largest entry |
 | `s2_mi_lognormal` | brms | 9 | 12 | 0.36 | 0.39 | 0.59 | 0.58 | 2.53 | 0.29 | outputs 64 | brms limit 64 |
 | `s2_mi_trunc_lb` | brms | 9 | 12 | 0.75 | 0.75 | 1.2e8 | 1.2e8 | 2.53 | 0.29 | outputs 64 | brms limit 64 |
-| `s2_mixture_theta` | brms | 8 | 14 | 0.54 | 0.62 | 0.39 | 0.32 | 0.14 | 0.14 | 10 | brms limit 10, gradient against its largest entry |
+| `s2_mixture_theta` | brms | 8 | 14 | 0.54 | 0.63 | 0.39 | 0.32 | 0.14 | 0.14 | 10 | brms limit 10, gradient against its largest entry |
 | `s2_mm` | brms | 9 | 16 | 0.51 | 0.51 | 0.50 | 0.48 | 0.10 | 0.07 | 10 | brms limit 10, gradient against its largest entry |
 | `s2_mm_weights` | brms | 9 | 16 | 0.53 | 0.53 | 0.36 | 0.32 | 0.10 | 0.07 | 10 | brms limit 10, gradient against its largest entry |
-| `s2_mmc` | brms | 16 | 46 | 0.22 | 0.89 | 0.23 | 0.27 | 0.12 | 0.12 | 10 | brms limit 10, gradient against its largest entry |
+| `s2_mmc` | brms | 16 | 46 | 0.22 | 0.89 | 0.23 | 0.27 | 0.13 | 0.12 | 10 | brms limit 10, gradient against its largest entry |
 | `s2_mo_simo_prior` | brms | 5 | 8 | 0.59 | 0.77 | 1.00 | 0.88 | 0.27 | 0.27 | 10 | brms limit 10 |
 | `s2_multinomial` | brms | 4 | 7 | 1.03 | 1.03 | 0.92 | 0.46 | 0.23 | 0.16 | 10 | brms limit 10, gradient against its largest entry |
 | `s2_mv_shared_re` | brms | 19 | 50 | 0.51 | 1.42 | 0.40 | 0.38 | 0.09 | 0.08 | 10 | brms limit 10, gradient against its largest entry |
 | `s2_mv_subset` | brms | 6 | 9 | 0.37 | 0.49 | 0.74 | 0.74 | 0.41 | 0.41 | 10 | brms limit 10 |
 | `s2_nl_noloop` | brms | 5 | 6 | 0.81 | 0.81 | 1.07 | 1.07 | 0.17 | 0.17 | 10 | brms limit 10 |
-| `s2_nlf` | brms | 3 | 4 | 1.84 | 1.84 | 0.61 | 0.61 | 0.20 | 0.20 | 10 | CmdStan rejects point 1 and 2, and stanli must too. brms limit 10 |
+| `s2_nlf` | brms | 3 | 4 | 1.84 | 1.84 | 0.62 | 0.62 | 0.20 | 0.20 | 10 | CmdStan rejects point 1 and 2, and stanli must too. brms limit 10 |
 | `s2_rate` | brms | 2 | 4 | 1.75 | 0.62 | 2.71 | 2.22 | 0.27 | 0.16 | 10 | brms limit 10, gradient against its largest entry |
 | `s2_s_by` | brms | 52 | 94 | 1.73 | 1.73 | 0.10 | 0.09 | 0.07 | 0.07 | 10 | brms limit 10 |
 | `s2_s_cc` | brms | 11 | 21 | 0.30 | 0.30 | 0.21 | 0.21 | 0.11 | 0.11 | 10 | brms limit 10 |
 | `s2_sar` | brms | 4 | 6 | 1.45 | 1.45 | 2.90 | 2.80 | 7.5e13 | 7.5e13 | 10 | brms limit 10, gradient against its largest entry |
 | `s2_sar_error` | brms | 4 | 6 | 1.81 | 1.81 | 2.22 | 2.64 | 7.5e13 | 7.5e13 | 10 | brms limit 10, gradient against its largest entry |
-| `s2_shifted_lognormal` | brms | 4 | 6 | 0.86 | 0.86 | 0.81 | 0.69 | 0.27 | 0.20 | 10 | brms limit 10 |
+| `s2_shifted_lognormal` | brms | 4 | 6 | 0.86 | 0.86 | 0.82 | 0.69 | 0.27 | 0.20 | 10 | brms limit 10 |
 | `s2_t2_by` | brms | 56 | 100 | 0.51 | 0.18 | 0.09 | 0.09 | 0.08 | 0.08 | 10 | brms limit 10 |
 | `s2_threading` | brms | 4 | 6 | 0.41 | 0.41 | 1.84 | 1.95 | 0.31 | 0.23 | 10 | brms limit 10 |
 | `s2_unstr` | brms | 31 | 161 | 0.99 | 0.99 | 0.27 | 0.25 | 0.17 | 0.15 | 10 | brms limit 10, gradient against its largest entry |
@@ -413,17 +413,17 @@ table and those files disagree.
 | `s2_wiener` | brms | 5 | 7 |  |  |  |  |  |  | 10 | brms limit 10, gradient against its largest entry |
 | `s2_zi_asymlaplace` | brms | 5 | 7 | 1.62 | 1.62 | 1.02 | 0.95 | 0.23 | 0.17 | 10 | brms limit 10 |
 | `s2_zi_beta` | brms | 4 | 6 | 0.94 | 0.94 | 0.78 | 0.39 | 0.35 | 0.28 | 10 | brms limit 10, gradient against its largest entry |
-| `s2_zoi_beta` | brms | 5 | 7 | 1.01 | 1.68 | 0.59 | 0.20 | 0.34 | 0.29 | 10 | brms limit 10, gradient against its largest entry |
+| `s2_zoi_beta` | brms | 5 | 7 | 1.01 | 1.68 | 0.60 | 0.20 | 0.34 | 0.29 | 10 | brms limit 10, gradient against its largest entry |
 | `sw_acat` | brms | 4 | 9 | 15.2 | 15.2 | 9.35 | 9.35 | 0.05 | 0.05 | 10 | brms limit 10, gradient against its largest entry |
 | `sw_acat_cs` | brms | 7 | 12 | 21.9 | 21.9 | 6.54 | 6.54 | 0.03 | 0.03 | 10 | brms limit 10, gradient against its largest entry |
-| `sw_ar` | brms | 4 | 6 | 0.93 | 0.93 | 0.69 | 0.74 | 0.37 | 0.19 | 10 | brms limit 10, gradient against its largest entry |
+| `sw_ar` | brms | 4 | 6 | 0.93 | 0.93 | 0.68 | 0.74 | 0.37 | 0.19 | 10 | brms limit 10, gradient against its largest entry |
 | `sw_arma` | brms | 5 | 7 | 0.48 | 0.48 | 0.64 | 0.59 | 0.30 | 0.15 | 10 | brms limit 10, gradient against its largest entry |
 | `sw_asymlaplace` | brms | 4 | 6 | 0.37 | 0.71 | 0.96 | 0.94 | 0.32 | 0.17 | 10 | brms limit 10 |
 | `sw_bernoulli` | brms | 3 | 5 | 0.59 | 0.59 | 1.74 | 1.12 | 0.27 | 0.15 | 10 | brms limit 10, gradient against its largest entry |
 | `sw_beta` | brms | 3 | 5 | 2.20 | 2.20 | 1.27 | 0.38 | 0.53 | 0.34 | 10 | brms limit 10 |
 | `sw_binomial` | brms | 2 | 4 | 4.55 | 5.89 | 0.60 | 0.48 | 0.49 | 0.24 | 10 | brms limit 10, gradient against its largest entry |
 | `sw_categorical` | brms | 4 | 7 | 3.64 | 3.64 | 1.55 | 1.08 | 0.37 | 0.19 | 10 | brms limit 10, gradient against its largest entry |
-| `sw_cens` | brms | 3 | 5 | 0.57 | 0.57 | 1.8e9 | 1.8e9 | 0.35 | 0.17 | 10 | brms limit 10, gradient against its largest entry |
+| `sw_cens` | brms | 3 | 5 | 0.57 | 0.57 | 1.8e9 | 1.8e9 | 0.35 | 0.16 | 10 | brms limit 10, gradient against its largest entry |
 | `sw_cratio` | brms | 4 | 9 | 16.7 | 16.7 | 8.09 | 8.09 | 0.05 | 0.05 | 10 | brms limit 10, gradient against its largest entry |
 | `sw_cratio_cs` | brms | 7 | 12 | 3.18 | 3.18 | 4.86 | 4.86 | 0.03 | 0.03 | 10 | brms limit 10, gradient against its largest entry |
 | `sw_cumulative` | brms | 5 | 10 | 21.3 | 21.3 | 7.79 | 7.79 | 0.12 | 0.12 | 10 | brms limit 10, gradient against its largest entry |
@@ -433,18 +433,18 @@ table and those files disagree.
 | `sw_gamma` | brms | 3 | 5 | 0.83 | 0.92 | 0.89 | 0.81 | 0.51 | 0.32 | 10 | brms limit 10, gradient against its largest entry |
 | `sw_gaussian` | brms | 4 | 6 | 0.71 | 0.71 | 0.63 | 0.59 | 0.19 | 0.10 | 10 | brms limit 10, gradient against its largest entry |
 | `sw_gp` | brms | 44 | 46 | 2.0e5 | 2.0e5 | 1.6e6 | 1.6e6 | 0.02 | 0.02 | 10 | ill-conditioned, so the 1e-9 limit is 1.5e-6 for the gradient. brms limit 10 |
-| `sw_hurdle_gamma` | brms | 4 | 6 | 0.92 | 1.25 | 0.96 | 0.39 | 0.44 | 0.29 | 10 | brms limit 10, gradient against its largest entry |
+| `sw_hurdle_gamma` | brms | 4 | 6 | 0.91 | 1.25 | 0.96 | 0.39 | 0.44 | 0.29 | 10 | brms limit 10, gradient against its largest entry |
 | `sw_hurdle_lognormal` | brms | 4 | 6 | 0.80 | 0.46 | 1.02 | 0.39 | 0.32 | 0.17 | 10 | brms limit 10, gradient against its largest entry |
 | `sw_hurdle_pois` | brms | 3 | 5 | 1.95 | 0.16 | 0.35 | 0.17 | 0.39 | 0.20 | 10 | brms limit 10, gradient against its largest entry |
-| `sw_lognormal` | brms | 3 | 5 | 0.51 | 0.51 | 0.79 | 0.85 | 0.35 | 0.17 | 10 | brms limit 10, gradient against its largest entry |
+| `sw_lognormal` | brms | 3 | 5 | 0.51 | 0.51 | 0.79 | 0.85 | 0.35 | 0.16 | 10 | brms limit 10, gradient against its largest entry |
 | `sw_ma` | brms | 4 | 6 | 1.08 | 1.08 | 0.73 | 0.78 | 0.37 | 0.19 | 10 | brms limit 10, gradient against its largest entry |
 | `sw_me` | brms | 45 | 87 | 0.67 | 0.94 | 0.08 | 0.08 | 0.17 | 0.17 | 10 | brms limit 10 |
 | `sw_mi` | brms | 9 | 12 | 0.68 | 0.39 | 0.72 | 0.72 | 0.20 | 0.17 | 10 | brms limit 10, gradient against its largest entry |
-| `sw_mixture` | brms | 7 | 15 | 0.93 | 1.42 | 0.95 | 0.70 | 0.24 | 0.20 | 10 | brms limit 10, gradient against its largest entry |
+| `sw_mixture` | brms | 7 | 15 | 0.93 | 1.42 | 0.95 | 0.70 | 0.24 | 0.19 | 10 | brms limit 10, gradient against its largest entry |
 | `sw_mono` | brms | 5 | 8 | 0.51 | 0.51 | 0.63 | 0.70 | 0.21 | 0.21 | 10 | brms limit 10 |
 | `sw_mv_norescor` | brms | 6 | 9 | 0.43 | 0.72 | 0.64 | 0.48 | 0.30 | 0.14 | 10 | brms limit 10, gradient against its largest entry |
 | `sw_mv_rescor` | brms | 7 | 18 | 0.57 | 0.44 | 0.57 | 0.44 | 0.16 | 0.09 | 10 | brms limit 10, gradient against its largest entry |
-| `sw_negbinomial` | brms | 4 | 6 | 2.61 | 2.61 | 0.48 | 0.57 | 0.23 | 0.14 | 10 | brms limit 10, gradient against its largest entry |
+| `sw_negbinomial` | brms | 4 | 6 | 2.61 | 2.61 | 0.48 | 0.57 | 0.22 | 0.14 | 10 | brms limit 10, gradient against its largest entry |
 | `sw_nonlinear` | brms | 3 | 4 | 0.59 | 0.59 | 0.76 | 0.76 | 0.12 | 0.12 | 10 | brms limit 10 |
 | `sw_poisson` | brms | 3 | 5 | 0.21 | 0.21 | 0.21 | 0.23 | 0.29 | 0.18 | 10 | brms limit 10, gradient against its largest entry |
 | `sw_re_bern` | brms | 8 | 15 | 0.20 | 0.20 | 0.45 | 0.30 | 0.21 | 0.14 | 10 | brms limit 10, gradient against its largest entry |
@@ -453,12 +453,12 @@ table and those files disagree.
 | `sw_re_pois` | brms | 8 | 15 | 0.42 | 0.42 | 0.13 | 0.10 | 0.17 | 0.10 | 10 | brms limit 10, gradient against its largest entry |
 | `sw_re_slope` | brms | 16 | 46 | 0.52 | 0.85 | 0.49 | 0.46 | 0.16 | 0.13 | 10 | brms limit 10, gradient against its largest entry |
 | `sw_se` | brms | 2 | 5 | 0.43 | 0.43 | 1.22 | 1.10 | 0.41 | 0.16 | 10 | brms limit 10 |
-| `sw_skewnormal` | brms | 4 | 6 | 1.29 | 1.29 | 1.91 | 1.55 | 0.30 | 0.14 | 10 | brms limit 10, gradient against its largest entry |
+| `sw_skewnormal` | brms | 4 | 6 | 1.29 | 1.29 | 1.91 | 1.55 | 0.30 | 0.13 | 10 | brms limit 10, gradient against its largest entry |
 | `sw_spline_s` | brms | 12 | 22 | 0.92 | 0.92 | 0.11 | 0.13 | 0.12 | 0.12 | 10 | brms limit 10 |
 | `sw_spline_t2` | brms | 29 | 52 | 0.61 | 0.61 | 0.13 | 0.14 | 0.07 | 0.07 | 10 | brms limit 10 |
 | `sw_sratio` | brms | 4 | 9 | 16.7 | 16.7 | 8.09 | 8.09 | 0.05 | 0.05 | 10 | brms limit 10, gradient against its largest entry |
 | `sw_student` | brms | 5 | 7 | 0.33 | 0.33 | 0.31 | 0.44 | 0.33 | 0.26 | 10 | brms limit 10, gradient against its largest entry |
-| `sw_trunc` | brms | 3 | 5 | 0.31 | 0.31 | 1.1e9 | 1.1e9 | 0.35 | 0.17 | 10 | brms limit 10, gradient against its largest entry |
+| `sw_trunc` | brms | 3 | 5 | 0.31 | 0.31 | 1.1e9 | 1.1e9 | 0.35 | 0.16 | 10 | brms limit 10, gradient against its largest entry |
 | `sw_vonmises` | brms | 3 | 5 | 0.91 | 0.91 | 0.54 | 0.44 | 0.38 | 0.19 | 10 | brms limit 10, gradient against its largest entry |
 | `sw_weibull` | brms | 3 | 5 | 1.11 | 1.11 | 0.38 | 0.40 | 0.51 | 0.32 | 10 | brms limit 10, gradient against its largest entry |
 | `sw_weights` | brms | 3 | 5 | 1.62 | 0.50 | 2.17 | 1.38 | 0.35 | 0.16 | 10 | brms limit 10, gradient against its largest entry |
@@ -467,9 +467,9 @@ table and those files disagree.
 | `sw_zi_poisson` | brms | 3 | 5 | 1.00 | 0.52 | 0.32 | 0.34 | 0.39 | 0.20 | 10 | brms limit 10, gradient against its largest entry |
 | `ch09_m5_8s` | rethinking | 4 | 4 | 0.57 | 0.57 | 0.52 | 0.34 | 0.07 | 0.07 | 10 |  |
 | `ch09_m5_8s2` | rethinking | 4 | 4 | 0.70 | 0.70 | 1.02 | 0.66 | 0.09 | 0.09 | 10 |  |
-| `ch09_m9_1` | rethinking | 5 | 5 | 0.22 | 0.22 | 0.43 | 0.21 | 0.05 | 0.05 | 10 |  |
-| `ch09_m9_1_chains4` | rethinking | 5 | 5 | 0.22 | 0.22 | 0.43 | 0.21 | 0.05 | 0.05 | 10 |  |
-| `ch09_m9_2` | rethinking | 2 | 2 | 0.63 | 0.63 | 0.70 | 0.70 | 0.11 | 0.11 | 10 |  |
+| `ch09_m9_1` | rethinking | 5 | 5 | 0.22 | 0.22 | 0.43 | 0.22 | 0.05 | 0.05 | 10 |  |
+| `ch09_m9_1_chains4` | rethinking | 5 | 5 | 0.22 | 0.22 | 0.43 | 0.22 | 0.05 | 0.05 | 10 |  |
+| `ch09_m9_2` | rethinking | 2 | 2 | 0.63 | 0.63 | 0.71 | 0.71 | 0.11 | 0.11 | 10 |  |
 | `ch09_m9_3` | rethinking | 2 | 2 | 0.53 | 0.53 | 6.29 | 6.29 | 0.11 | 0.11 | 10 |  |
 | `ch09_m9_4` | rethinking | 3 | 3 | 0.90 | 0.90 | 1.62 | 1.62 | 0.05 | 0.05 | 10 |  |
 | `ch09_m9_5` | rethinking | 3 | 3 | 0.66 | 0.66 | 1.67 | 1.67 | 0.05 | 0.05 | 10 |  |
@@ -485,8 +485,8 @@ table and those files disagree.
 | `ch11_m_pois` | rethinking | 2 | 2 | 4.30 | 4.30 | 0.31 | 0.31 | <0.01 | <0.01 | 10 |  |
 | `ch12_m12_1` | rethinking | 3 | 4 | 1.30 | 1.30 | 4.20 | 3.93 | 0.06 | 0.06 | 10 |  |
 | `ch12_m12_2` | rethinking | 6 | 26 | 4.31 | 4.64 | 4.01 | 3.95 | 5.35 | 5.35 | 10 |  |
-| `ch12_m12_3` | rethinking | 2 | 2 | 24.9 | 0.51 | 24.4 | 0.99 | <0.01 | <0.01 | lp 35, gradient 78 |  |
-| `ch12_m12_3_alt` | rethinking | 2 | 2 | 14.0 | 0.51 | 81.9 | 0.99 | <0.01 | <0.01 | lp 20, gradient 138 |  |
+| `ch12_m12_3` | rethinking | 2 | 2 | 24.9 | 0.50 | 24.4 | 0.99 | <0.01 | <0.01 | lp 35, gradient 78 |  |
+| `ch12_m12_3_alt` | rethinking | 2 | 2 | 14.0 | 0.50 | 81.9 | 0.99 | <0.01 | <0.01 | lp 20, gradient 138 |  |
 | `ch12_m12_4` | rethinking | 6 | 6 | 296 | 0.38 | 71.0 | 0.65 | 0.07 | 0.07 | lp 518, gradient 156 |  |
 | `ch12_m12_5` | rethinking | 11 | 11 | 144 | 145 | 33.1 | 0.24 | 0.04 | 0.04 | outputs 157 |  |
 | `ch12_m12_6` | rethinking | 16 | 17 | 148 | 148 | 24.5 | 7.71 | 0.17 | 0.17 | gradient 157 |  |
@@ -496,7 +496,7 @@ table and those files disagree.
 | `ch13_m13_3` | rethinking | 62 | 62 | 0.71 | 0.71 | 0.08 | 0.07 | 0.01 | 0.01 | 10 |  |
 | `ch13_m13_4` | rethinking | 20 | 1028 | 15.8 | 16.2 | 0.36 | 0.29 | 0.28 | 0.28 | 10 |  |
 | `ch13_m13_4b` | rethinking | 20 | 20 | 15.8 | 16.2 | 0.36 | 0.29 | 0.01 | 0.01 | 10 |  |
-| `ch13_m13_4nc` | rethinking | 20 | 33 | 9.02 | 9.02 | 0.45 | 0.30 | 0.07 | 0.07 | 10 |  |
+| `ch13_m13_4nc` | rethinking | 20 | 33 | 9.02 | 9.02 | 0.45 | 0.31 | 0.07 | 0.07 | 10 |  |
 | `ch13_m13_5` | rethinking | 13 | 1021 | 21.4 | 21.8 | 0.85 | 0.47 | 0.25 | 0.25 | 10 |  |
 | `ch13_m13_6` | rethinking | 21 | 1029 | 15.7 | 16.1 | 0.35 | 0.28 | 0.28 | 0.28 | 10 |  |
 | `ch13_m13_7` | rethinking | 2 | 2 | 5.07 | 5.07 | 0.25 | 0.25 | <0.01 | <0.01 | 10 |  |
@@ -514,7 +514,7 @@ table and those files disagree.
 | `ch14_m14_7` | rethinking | 656 | 1266 | 3.79 | 3.79 |  |  | 0.16 | 0.16 | gradient 13 |  |
 | `ch14_m14_8` | rethinking | 15 | 15 | 4.08 | 3.08 | 0.27 | 0.29 | 0.08 | 0.08 | 10 |  |
 | `ch14_m14_8nc` | rethinking | 15 | 225 | 2.24 | 2.24 | 0.39 | 0.32 | 0.06 | 0.06 | 10 |  |
-| `ch14_m14_9` | rethinking | 4 | 4 | 0.37 | 0.37 | 0.70 | 0.21 | 0.07 | 0.07 | 10 |  |
+| `ch14_m14_9` | rethinking | 4 | 4 | 0.37 | 0.37 | 0.71 | 0.21 | 0.07 | 0.07 | 10 |  |
 | `ch15_m15_1` | rethinking | 54 | 54 | 0.78 | 0.78 | 0.10 | 0.10 | <0.01 | <0.01 | 10 |  |
 | `ch15_m15_2` | rethinking | 104 | 104 | 0.56 | 0.56 | 0.06 | 0.06 | <0.01 | <0.01 | 10 |  |
 | `ch15_m15_3` | rethinking | 2 | 2 | 40.4 | 40.4 | 14.7 | 0.25 | <0.01 | <0.01 | gradient 83 |  |
@@ -544,7 +544,7 @@ table and those files disagree.
 | `cm_lnr` | cogmod | 8 | 16 | 0.65 | 1.00 | 1.51 | 0.19 | 0.08 | 0.08 | gradient 32 |  |
 | `cm_lnr_bench` | cogmod | 9 | 16 | 10.6 | 10.6 | 3.68 | 3.36 | 1.37 | 1.37 | 10 |  |
 | `cm_loggamma` | cogmod | 6 | 12 | 44.8 | 45.4 | 18.5 | 18.5 | 0.07 | 0.07 | 10 |  |
-| `cm_lognormal` | cogmod | 6 | 12 | 1.84 | 2.24 | 0.84 | 0.57 | 0.07 | 0.07 | 10 |  |
+| `cm_lognormal` | cogmod | 6 | 12 | 1.84 | 2.24 | 0.85 | 0.57 | 0.07 | 0.07 | 10 |  |
 | `cm_logstudent` | cogmod | 6 | 12 | 1.61 | 1.94 | 3.22 | 1.37 | 0.07 | 0.07 | gradient 28 |  |
 | `cm_logweibull` | cogmod | 5 | 10 | 2.20 | 1.87 | 0.81 | 0.56 | 0.08 | 0.08 | 10 |  |
 | `cm_rdm` | cogmod | 7 | 14 | 2.45 | 2.78 | 1.11 | 0.16 | 0.09 | 0.09 | gradient 18 |  |
@@ -567,14 +567,14 @@ table and those files disagree.
 | `examplemodels_mr_ss` | examplemodels | 2 | 19602 | 14.7 | 14.4 | 277 | 110 | 0.14 | 0.14 | gradient 729 |  |
 | `examplemodels_ms` | examplemodels | 6 | 72036 | 7.19 | 7.19 | 36.4 | 13.3 | 0.05 | 0.05 | gradient 254 |  |
 | `examplemodels_ode_one_comp_mm` | examplemodels | 4 | 44 |  |  |  |  |  |  | gradient 30, outputs 13 |  |
-| `examplemodels_probit_multi_good` | examplemodels | 2038 | 2064 | 87.8 | 87.8 |  |  | 0.17 | 0.17 | 10 |  |
+| `examplemodels_probit_multi_good` | examplemodels | 2038 | 2064 | 87.8 | 87.8 |  |  | 0.17 | 0.18 | 10 |  |
 | `examplemodels_radon_group` | examplemodels | 92 | 92 | 4.99 | 4.33 | 0.09 | 0.08 | 0.15 | 0.14 | 10 |  |
 | `examplemodels_roaches_overdispersion` | examplemodels | 267 | 267 | 3.05 | 3.05 | 0.01 | 0.01 | 0.33 | 0.33 | 10 |  |
 | `examplemodels_ssm` | examplemodels | 28 | 55 | 1.92 | 1.83 | 1.13 | 1.13 | 0.24 | 0.24 | 10 |  |
 | `examplemodels_stagnant2` | examplemodels | 5 | 5 | 0.26 | 0.60 | 0.52 | 0.52 | 53.2 | 53.2 | 10 |  |
 | `examplemodels_stochvol_optimized` | examplemodels | 503 | 1003 | 1.05 | 1.05 |  |  | 0.14 | 0.14 | 10 |  |
 | `examplemodels_sum_to_zero_binomial` | examplemodels | 19 | 833 | 1.35 | 1.35 | 0.53 | 0.16 | 0.28 | 0.28 | 10 |  |
-| `examplemodels_sur` | examplemodels | 27 | 33 | 0.28 | 0.28 | 0.22 | 0.22 | 0.03 | 0.03 | 10 |  |
+| `examplemodels_sur` | examplemodels | 27 | 33 | 0.29 | 0.29 | 0.22 | 0.22 | 0.03 | 0.03 | 10 |  |
 | `stanguide_changepoint` | stanguide | 2 | 114 | 3.37 | 3.37 | 138 | 138 | 3.15 | 3.15 | 10 |  |
 | `stanguide_cjs_history` | stanguide | 5 | 8 | 0.57 | 0.24 | 1.02 | 1.04 | 0.20 | 0.23 | 10 |  |
 | `stanguide_copula` | stanguide | 6 | 21 |  |  |  |  |  |  | 10 |  |
@@ -600,7 +600,7 @@ table and those files disagree.
 | `hdbayes_pwe_npp` | hdbayes | 8 | 64 |  |  |  |  |  |  | 10 |  |
 | `ecoensemble_hierarchical_withdrivers` | ecoensemble | 63 | 612 |  |  |  |  |  |  | outputs 16 |  |
 | `ecoensemble_hierarchical_withdrivers_conj` | ecoensemble | 63 | 612 |  |  |  |  |  |  | outputs 16 |  |
-| `hbayesdm_dd_hyperbolic` | hbayesdm | 44 | 2266 | 42,000 | 42,000 | 39,000 | 39,000 | 6,120 | 6,120 | 10 |  |
+| `hbayesdm_dd_hyperbolic` | hbayesdm | 44 | 2266 | 42,015 | 42,014 | 39,048 | 39,048 | 6,116 | 6,116 | 10 |  |
 | `hbayesdm_gng_m4` | hbayesdm | 72 | 14548 | 9.66 | 9.66 | 0.18 | 0.16 | 0.12 | 0.11 | 10 |  |
 | `hbayesdm_igt_pvl_delta` | hbayesdm | 24 | 448 | 1.81 | 1.81 | 0.32 | 0.31 | 0.26 | 0.29 | 10 |  |
 | `hbayesdm_prl_rp` | hbayesdm | 66 | 8149 | 3.02 | 3.02 | 0.06 | 0.06 | 0.34 | 0.34 | 10 |  |

@@ -144,21 +144,10 @@ def score_model(model, hp_dir, check, refs, tmp):
     return out
 
 
-def round3(x):
-    """x to three significant digits, which is all that the table shows."""
-    if isinstance(x, float):
-        return float(f"{x:.3g}")
-    if isinstance(x, dict):
-        return {k: round3(v) for k, v in x.items()}
-    if isinstance(x, list):
-        return [round3(v) for v in x]
-    return x
-
-
 def dumps(record):
     """The record as JSON with one line for each model."""
     line = lambda x: json.dumps(x, sort_keys=True, separators=(",", ":"))
-    models = ",\n".join(f"  {json.dumps(m)}: {line(round3(r))}"
+    models = ",\n".join(f"  {json.dumps(m)}: {line(r)}"
                         for m, r in sorted(record["models"].items()))
     return ("{\n" + f' "schema": {record["schema"]},\n'
             + f' "recorded": {line(record["recorded"])},\n'
