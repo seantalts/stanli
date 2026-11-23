@@ -1,0 +1,11 @@
+{
+  "issue": 657,
+  "surrogate": true,
+  "formula": "y ~ x + (1 + x | subject)",
+  "family": "gaussian",
+  "subjects": [10, 50, 500],
+  "observations_per_subject": 20,
+  "brms": "2.23.0",
+  "r": "R version 4.6.1 (2026-06-24)",
+  "seed_rule": "657000 + subjects"
+}

@@ -1,0 +1,23 @@
+[
+  "clang++",
+  "-std=c++17",
+  "-O3",
+  "-ffp-contract=off",
+  "-D_REENTRANT",
+  "-DBOOST_DISABLE_ASSERTS",
+  "-I/Users/xitrium/claud/stanrt/deps/cmdstan/stan/src",
+  "-I/Users/xitrium/claud/stanrt/deps/cmdstan/stan/lib/stan_math",
+  "-I/Users/xitrium/claud/stanrt/deps/cmdstan/stan/lib/rapidjson_1.1.0",
+  "-I/Users/xitrium/claud/stanrt/deps/cmdstan/stan/lib/stan_math/lib/eigen_5.0.1",
+  "-I/Users/xitrium/claud/stanrt/deps/cmdstan/stan/lib/stan_math/lib/boost_1.87.0",
+  "-I/Users/xitrium/claud/stanrt/deps/cmdstan/stan/lib/stan_math/lib/sundials_6.1.1/include",
+  "-I/Users/xitrium/claud/stanrt/deps/cmdstan/stan/lib/stan_math/lib/tbb_2020.3/include",
+  "-include",
+  "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-mixed-model/.cache/issue657/probe/proxy.hpp",
+  "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-mixed-model/tools/bench_cmdstan_grad.cpp",
+  "-L/Users/xitrium/claud/stanrt/deps/cmdstan/stan/lib/stan_math/lib/tbb",
+  "-ltbb",
+  "-Wl,-rpath,/Users/xitrium/claud/stanrt/deps/cmdstan/stan/lib/stan_math/lib/tbb",
+  "-o",
+  "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-mixed-model/.cache/issue657/probe/cmdstan_grad"
+]
