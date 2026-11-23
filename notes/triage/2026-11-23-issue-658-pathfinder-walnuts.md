@@ -2,8 +2,8 @@
 
 The direct user request is tracked in
 [#658](https://github.com/seantalts/stanli/issues/658). R's
-`sample_walnuts(pathfinder_init = list())` is implemented locally. The issue
-remains open; this change has not been pushed, merged or released.
+`sample_walnuts(pathfinder_init = list())` implementation and local validation
+are included on this branch; merge and release are pending.
 
 ## Change and contract
 
@@ -58,7 +58,28 @@ R_LIBS_USER=/path/to/private-library STANLI_RUNTIME=/path/to/libstanli.dylib \
   'testthat::test_dir("r/tests/testthat", filter="^(walnuts|sampling|algorithms)$", package="stanli", load_package="installed")'
 ```
 
-The full R suite's CSV-oracle checks with a fresh `STANLI_RUN` and the
-standalone portable-compiler case remain integration validation. This record
-does not claim those checks or PR CI ran. The R-only change does not require
-a compiler-pipeline performance benchmark.
+## Integrated full-suite validation
+
+At combined-branch commit `f047d5d56c7cf5771afe4bc41f135332bc2b492d`,
+the R bridge was installed privately again with `--preclean --install-tests`.
+Its complete [build log](data/issue658-2026-11-23/integration-install.log)
+contained no compiler diagnostics. Native production source matches the
+validated candidate runtime and fresh CLI; their hashes, exact commands and
+private library path are in [integration provenance](data/issue658-2026-11-23/integration-provenance.json).
+
+With `STANLI_REQUIRE_RUNTIME=1`, the full 36-file suite passed **2,210
+expectations across 293 test blocks, with zero failures, errors or test
+warnings**. All 116 WALNUTS expectations and the fresh `STANLI_RUN` CSV
+oracle's 140 expectations ran. See the [full log](data/issue658-2026-11-23/integration-full-suite.log.gz)
+and [per-test results](data/issue658-2026-11-23/integration-full-suite-results.json.gz).
+
+Three optional tests skipped: installed brms lacks the stanli backend, and
+no standalone `stanli-compile` was available for the native include-path and
+O1-warning tests. Bundled JavaScript/V8 tests ran; CI must cover the two
+standalone cases. This record does not claim PR CI passed.
+
+The first run passed the same tests but its post-test exporter failed on a
+list column ([original log](data/issue658-2026-11-23/integration-first-run.log.gz)).
+Only the cache-local exporter was corrected; the identical full suite reran
+and exited zero. Sampler messages are retained separately from compiler/test
+diagnostics. The R-only feature itself requires no compiler-pipeline benchmark.
