@@ -83,8 +83,9 @@ sampler_long <- function(object, pars, inc_warmup = FALSE, parameter = TRUE) {
 #'   For `nuts_params`, exact sampler names such as `divergent__`.
 #' @param inc_warmup Include saved warmup in sampler tables.
 #' @param samples A `stanli_fit` for `bridge_sampler`.
-#' @param repetitions,method,cores,use_neff,maxiter,silent,verbose Passed to
+#' @param repetitions,method,use_neff,maxiter,silent,verbose Passed to
 #'   `bridgesampling::bridge_sampler()`.
+#' @param cores Number of cores used by `loo::loo()` and `bridgesampling::bridge_sampler()`.
 #' @param ... Further arguments passed to the underlying package where applicable.
 #' @return `nuts_params` returns a data frame with `Chain`, `Iteration`,
 #'   `Parameter` (a factor), and `Value`; `log_posterior` omits `Parameter`.
