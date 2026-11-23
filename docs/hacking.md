@@ -815,7 +815,7 @@ ignored, with a one-time notice. `tools/dev_setup.sh` configures both of its
 builds ON. Tests that set a switch carry the CTest label `debug_switches`. In
 an OFF build a case that needs a switch skips itself and the rest of the test
 runs; tests where no case can run are disabled. `ctest -L debug_switches` runs
-them all in an ON build. See [TESTING.md](../TESTING.md#developer-switches). `STANLI_NO_INTERPRETER`, `STANLI_ISA`, `STANLI_NO_FUSED_DENSITY` and
+them all in an ON build. See [Tests that need developer switches](#tests-that-need-developer-switches). `STANLI_NO_INTERPRETER`, `STANLI_ISA`, `STANLI_NO_FUSED_DENSITY` and
 `STANLI_NO_O1_FALLBACK` are not developer switches and work in every build.
 
 `tools/build_jobs.sh` caps parallelism by CPU count and usable RAM: 4 GiB
@@ -834,8 +834,10 @@ cmake --build build-rel --parallel "$build_jobs" && \
 python3 tools/verify_refs.py deps/posteriordb --check build-rel/stanli_check --jobs 8
 ```
 
-The second command is the corpus replay: every model with a recorded reference (353 at 0.21.0), log density and
-every gradient component, compared against recorded CmdStan values.
+The second command is the corpus replay: every model with a recorded reference
+([TESTING.md](../TESTING.md#every-model) lists them), log density, every
+gradient component and every `write_array` value, compared against recorded
+CmdStan values.
 That is the 119 runnable posteriordb posteriors, the lowering
 regressions in [`tests/regressions/`](../tests/regressions/README.md), the brms
 output in [`tests/brms/`](../tests/brms/README.md), cogmod's custom
@@ -852,8 +854,9 @@ runs in CI on every push, and
 [`tools/wasm_check.sh`](../tools/wasm_check.sh) drives the same replay
 through the WASM build. A change that claims to be a pure refactor
 should leave the replay's worst-deviation line exactly as it found it.
-For kernel changes, see the numeric parity policy in [`TESTING.md`](../TESTING.md):
-within 2 ULP by default, up to 10 ULP for reassociation-class optimizations.
+For kernel changes, see [the rule in `TESTING.md`](../TESTING.md#the-rule):
+every value within 10 ULP of CmdStan or listed in the ULP ledger, and no more
+than 2 ULP of movement from a change that does not reorder a sum.
 
 To add a CRAN package, put its `.stan`/`.json` pairs, a README and
 `licenses/` in `tests/<package>/` and its generator in
@@ -864,12 +867,15 @@ regenerate the docs.
 If the change touches raw pointers, an `Eigen::Map` over a buffer
 somebody else sized, or the island register file, run the suite with
 AddressSanitizer as well. CI does this after merges and nightly, and it is
-one flag locally. Its compiler uses much more memory than Release:
+one flag locally. Its compiler uses much more memory than Release, and the
+build compiles Stan source through `stanli-compile`, which
+`./tools/dev_setup.sh --no-embed` builds:
 
 ```
 asan_jobs=$(STANLI_JOB_MEMORY_GIB=12 tools/build_jobs.sh)
 cmake -B build-asan -DCMAKE_BUILD_TYPE=RelWithDebInfo -DSTANLI_SANITIZE=address \
-  -DSTANLI_DEBUG_SWITCHES=ON
+  -DSTANLI_DEBUG_SWITCHES=ON \
+  -DSTANLI_PORTABLE_COMPILER="$PWD/deps/stanc3/stanli-compile"
 cmake --build build-asan --parallel "$asan_jobs" && \
   ctest --test-dir build-asan --parallel "$asan_jobs"
 ```
@@ -899,6 +905,138 @@ evaluation work, or `STANLI_PROFILE_PREP=1` for compilation and binding;
 [`docs/benchmarks.md`](benchmarks.md) has the harnesses. When the question is
 what a pass did rather than what it cost, `STANLI_DUMP_PASSES=<dir>` writes
 one graph dump per stage for diffing.
+
+### Updating the ULP ledger
+
+[`tests/ulp_ledger.json`](../tests/ulp_ledger.json) lists every value that is
+more than 10 ULP from CmdStan ([TESTING.md](../TESTING.md#the-rule)). Its keys
+are the platform, then the corpus, then the model. The corpus is `main` or the
+name of a local corpus, with ` --stanc` added for a replay through stock
+stanc.
+
+An entry covers one value, such as `lp`, `grad[3]` or `wa mu.2`. When a model
+has more than 8 such values of one kind, one `grad` or `wa` entry covers every
+value of that kind that has no entry of its own.
+
+Each entry has three fields:
+
+- `bound` is the largest distance measured, in ULP.
+- `reason` is the cause.
+- `closer` says which engine is closer to the 80-digit value. It is `stanli`,
+  `cmdstan` or `unknown`.
+
+After you change the ledger, run `python3 tools/gen_docs.py` to rewrite the
+table in TESTING.md.
+
+The bounds come only from a tool run:
+
+    tools/verify_refs.py deps/posteriordb --update-ulp-ledger
+    tools/verify_refs.py --corpus NAME [--stanc STANC] --update-ulp-ledger
+
+The run writes nothing unless every model passes every gate, including the
+ledger's current bounds. It lowers an entry to the new measurement and
+deletes an entry that is back within 10. It never raises a bound: a value
+over its bound fails the replay, and raising it means editing the entry by
+hand in a commit that says why. On a platform or corpus with no section yet,
+the gate is off, and the run creates the section with an entry for every
+value over 10. Such a generated entry's reason says only where it was
+measured; a person replaces it with the cause. A replay that measures half
+the bound or less prints a `ULP LEDGER` note asking for a rerun to tighten it.
+
+Inside a section, a value over 10 that no entry covers fails the gate, so a
+model that is new to the corpus, or a value that moved for a known reason,
+gets its entries from a separate run:
+
+    tools/verify_refs.py deps/posteriordb MODEL... --add-ulp-entries REASONS.json
+
+`REASONS.json` maps each named model to `{label: reason}`. The run replays
+those models without their ULP gate, and every other model with it, and
+replaces the named models' entries. The same run raises an entry of a model
+that has moved for a known reason, because the ledger cannot tell that from
+a regression: only the person who names the model can. A value over 10
+needs a reason in the file, unless the model has an entry for it that the
+value is within, which keeps its reason. The run writes nothing unless every
+model passes the other gates and every value over 10 has a reason, and no
+reason names a value within 10. A first run with an empty `{}` per model
+lists the values that need one.
+`--corpus NAME` takes the same flag.
+`REASONS.json` may also give `{"reason": ..., "closer": ...}` for a label. A
+plain string means `closer` is `unknown`. Score an entry against the 80-digit
+value with [`tools/hp/ledger_accuracy.py`](../tools/hp/README.md).
+
+Linux and Windows have no section yet, so the 10 ULP rule is not enforced
+there. Record one by running the commands above on that platform.
+
+### Tests that need developer switches
+
+A test that sets a switch is listed in `STANLI_DEBUG_SWITCH_TESTS` in
+[`CMakeLists.txt`](../CMakeLists.txt) and carries the CTest label
+`debug_switches`. Such a test builds and runs in every configuration. In an
+OFF build, a case that needs a switch skips itself: it starts with
+`SKIP_WITHOUT_DEBUG_SWITCHES()` or tests `debug_switches_available()`, both
+in [`tests/env_helpers.hpp`](../tests/env_helpers.hpp), and prints a `SKIP` line,
+while the cases that need no switch run. A case that sets a switch and does
+not skip still runs in an OFF build, where the switch is ignored, so it passes
+only if its checks hold without it. Some cases that compare a run with and
+without a switch are like that today: they pass by comparing the default with
+itself, and only an ON build tests them.
+
+Nine tests and the 22 cogmod runs of the cross-path matrix
+(`test_cross_path_cm_*`) are disabled in an OFF build, because almost every
+case in them needs a switch. They are in `STANLI_DEBUG_SWITCH_ONLY_TESTS`, and CTest
+reports `Not Run (Disabled)`: `test_cross_path`, `test_structured_loop`,
+`test_region_map`, `test_wa_parallel_switches`, `test_pass_dump_switches`,
+`test_prep_profile_reroll_dispositions`, `test_prep_work`, `test_ctsem_engine`
+and `test_data_loop_memo`. CTest reports those 31 as disabled in an OFF build.
+
+CI runs CTest in the shipped OFF `build-rel/` on every platform, so the
+switch-free cases of the pass, lowering, write_array and sampler-parity tests
+run on macOS, Linux aarch64 and Windows x64 as well. The manylinux job's
+differential step builds ON and runs `ctest -L debug_switches`, which is
+where the skipped cases and the nine disabled tests run. The
+AddressSanitizer job and the Windows ARM64 setup job, which run after a merge,
+also build ON. Locally:
+
+```sh
+cmake -B build -DSTANLI_DEBUG_SWITCHES=ON
+cmake --build build --parallel "$(tools/build_jobs.sh)"
+ctest --test-dir build -L debug_switches
+```
+
+A test that needs only pass dumps, an execution report or a write_array
+thread policy sets the typed fields instead, and runs in every build. The
+fields are `CompileOptions::dump_passes`, `dump_stages`, `execution_report`
+and `parallel_write_array`; the last two are also in `stanli_model_opts`.
+`test_wa_parallel --switches` and `test_pass_dump --switches` are the labeled
+halves that check the environment switches themselves.
+
+### Other checks to run by hand
+
+The cross-path, sampler and recording tools use release-build targets:
+
+```sh
+./tools/dev_setup.sh --conformance   # sweep stack and .venv-conformance
+cmake --build build-rel --parallel "$(tools/build_jobs.sh)" \
+  --target stanli_check dump_ops stanli_shared
+build-rel/stanli_check model.stan data.json --cross        # cross-path
+python3 tools/check_corpus_sampling.py --build build-rel   # sampling smoke
+python3 tools/sampler_trace.py deps/cmdstan deps/posteriordb eight_schools_noncentered
+python3 tools/verify_sample.py deps/cmdstan --corpus functions  # re-record
+python3 tools/check_stanc3_good.py --record     # stanc3 good references
+cp build-rel/libstanli.* python/stanli/_bin/   # the sweep loads this copy
+.venv-conformance/bin/python harnesses/stan_conformance.py \
+  --stanc deps/stanc3/stanc-pinned --cmdstan deps/cmdstan \
+  --build build-rel --stanli-pythonpath python --filter log1p
+```
+
+The WebAssembly replay also needs Node, Emscripten and stancjs's dependencies:
+
+```sh
+./tools/build_web.sh
+python3 tools/verify_refs.py deps/posteriordb \
+  --check tools/wasm_check.sh --target-platform 'WebAssembly wasm32' \
+  --no-wa --skip nn_rbm1bJ100
+```
 
 ## Landing a change
 

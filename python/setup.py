@@ -65,7 +65,7 @@ setup(
         "Benchmarks": ("https://github.com/seantalts/stanli/blob/main/"
                        "docs/benchmarks.md"),
         "Model coverage": ("https://github.com/seantalts/stanli/blob/main/"
-                           "docs/corpus-status.md"),
+                           "TESTING.md#every-model"),
     },
     python_requires=">=3.9",
     install_requires=["numpy>=1.22"],

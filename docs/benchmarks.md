@@ -27,7 +27,7 @@ All timings were measured on <!--gen:benchmark_hardware-->Apple M3 Ultra<!--/gen
 ## Full corpus results
 
 Every application model runs with the same settings. The language-conformance
-fixtures belong to the [numerical corpus](corpus-status.md) and are not timed
+fixtures belong to the [numerical corpus](../TESTING.md#every-model) and are not timed
 here. CmdStan uses its default compiler settings. The `CmdStan / Stanli
 gradient` column shows how many times faster Stanli's gradient is. The rows
 are sorted by this column.

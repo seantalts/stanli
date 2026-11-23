@@ -122,7 +122,7 @@ hard to sample on purpose. They show the same poor diagnostics in stanli,
 because a different sampler does not fix an unidentified model.
 
 stanli's CI checks the brms and Rethinking models in the
-[corpus](corpus-status.md) against CmdStan.
+[corpus](../TESTING.md#every-model) against CmdStan.
 
 ## Offline labs
 

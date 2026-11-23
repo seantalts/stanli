@@ -2,6 +2,31 @@
 
 ## Unreleased
 
+### Docs
+
+- TESTING.md now starts with one rule. Every value of every model must be
+  within 10 ULP of CmdStan, or `tests/ulp_ledger.json` must list it with the
+  measured distance and the cause. The page says which platforms enforce the
+  rule.
+- TESTING.md has a generated table of every corpus model. For each model it
+  shows how far CmdStan and stanli are from an 80-digit evaluation, in ULP,
+  and how far stanli may be from CmdStan. This table replaces the one in
+  `docs/corpus-status.md`.
+- Three topics moved from TESTING.md to `docs/hacking.md`: how to update the
+  ULP ledger, which tests need developer switches, and which checks to run by
+  hand.
+
+### Internal
+
+- Each entry of `tests/ulp_ledger.json` has a new `closer` field. It says
+  which engine is closer to the 80-digit value: `stanli`, `cmdstan` or
+  `unknown`. The ledger is now schema 2.
+- `tools/hp/accuracy.py` measures how far CmdStan and stanli are from the
+  80-digit value for every corpus model. It writes
+  `docs/internal/artifacts/accuracy.json`.
+- `tools/corpus.py` prints its report and no longer writes
+  `docs/corpus-status.md`.
+
 ## 0.30.1
 
 R users can install the development version from main with a runtime built

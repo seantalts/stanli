@@ -88,7 +88,7 @@ example in their language.
   the results for <!--gen:corpus_bitwise-->55<!--/gen--> are bitwise
   identical. The worst relative deviation
   is <!--gen:corpus_worst-->7.1e-13<!--/gen-->.
-  [docs/corpus-status.md](docs/corpus-status.md) lists every model.
+  [TESTING.md](TESTING.md#every-model) lists every model.
 - Language coverage. stanc3's own test suite covers type and language
   features that no real posterior uses. We compare every model in that suite
   with recorded CmdStan answers
@@ -139,9 +139,10 @@ The full index is [docs/README.md](docs/README.md).
 
 ### Trust
 
-- [TESTING.md](TESTING.md), every oracle and the known limits
-- [Corpus status](docs/corpus-status.md) and
-  [distribution coverage](docs/coverage.md)
+- [TESTING.md](TESTING.md), the rule that every model is held to, the
+  [table of every model](TESTING.md#every-model), every check and the known
+  limits
+- [Distribution coverage](docs/coverage.md)
 - [Benchmarks and how we measure](docs/benchmarks.md)
 - [lp__ and dropped constants](docs/lp-constant.md), which terms `~`
   leaves out of `lp__`

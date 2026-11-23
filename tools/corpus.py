@@ -4,7 +4,9 @@ inventory and histogram the failures by missing feature.
 
 Usage: tools/corpus.py PDB_DIR [--filter SUBSTR]
 PDB_DIR is a posteriordb checkout containing posterior_database/.
-Writes docs/corpus-status.md and prints the failure histogram.
+Prints which models evaluate and the failure histogram. The per-model
+limits and the reference comparison are in TESTING.md, which
+tools/gen_docs.py generates from the references and the ULP ledger.
 """
 import collections
 import json
@@ -28,8 +30,8 @@ CHECK = default_check_bin()
 VERIFY_JSON = REPO / "docs" / "internal" / "artifacts" / "verification.json"
 
 
-# Context for models that evaluate but do not match, so the reason is not
-# lost between runs.
+# Why these models differ from CmdStan. The ULP ledger's reasons and
+# MISMATCH_OUTPUTS in tools/verify_refs.py refer to these.
 NOTES = {
     "dogs":
         "CmdStan sums Bernoulli terms one call per iteration; stanli's "
@@ -148,104 +150,20 @@ def main():
     for k, c in reasons.most_common(30):
         print(f"  {c:3d}  {k}")
 
-    imported = [m for m in ok if m not in ver and m in refs]
-    md = ["# Corpus status", "",
-          f"Models that evaluate: {len(ok)}/{len(results)}",
-          f"Models with CmdStan reference values: {sum(m in refs for m in results)}/{len(results)}, "
-          f"at {sum(len(refs.get(m, {}).get('points', {})) for m in results)} evaluation points in total.", "",
-          "The corpus includes models from posteriordb, generated brms and "
-          "cogmod models, ctsem's state-space template, models from CRAN "
-          "packages, imported teaching models, and language fixtures. The "
-          "source collection column says where each model came from. "
-          "`tools/verify_refs.py` checks all reference values the same way.", "",
-          f"For {len(verified)} verified models, the table below shows how far "
-          "stanli was from CmdStan at the primary evaluation point. These "
-          "numbers were measured when the reference was recorded. Imported "
-          "references keep their original CmdStan answers and a record of "
-          "how each one was made. No deviation was recorded for them, so "
-          "their rows say \"not recorded\". Having a reference "
-          "for a model does not mean that the current build matches it. The "
-          "numerical replay checks the current build.", "",
-          "A model passes only when tools/verify_sample.py finds that "
-          "stanli's log_prob and full gradient match CmdStan's at a shared, "
-          "fixed evaluation point. The accuracy columns show the worst "
-          "deviation over lp and every gradient component, as a relative "
-          "difference and in ULPs. 0 ULP means bitwise identical to CmdStan. "
-          "The bitwise results are for information only. The replay requires "
-          "a scaled error of at most 1e-9, with documented exceptions for "
-          "ill-conditioned models. Models that evaluate but are not verified "
-          "are listed in a separate section and do not count as passing.",
-          "",
-          "| model | source collection | values compared | max rel diff | max ULP |",
-          "| --- | --- | ---: | ---: | ---: |"]
-    for m in sorted(verified + imported):
-        if m in imported:
-            pt = refs[m]["points"][str(refs[m]["primary"])]
-            md.append(f"| `{m}` | {cases[m].collection} | {len(pt['values'])} | not recorded | not recorded |")
-        else:
-            v = ver[m]
-            rel = "0 (bitwise)" if v["max_rel"] == 0 else f"{v['max_rel']:.1e}"
-            md.append(f"| `{m}` | {cases[m].collection} | {v['n_values']} | {rel} | {v['max_ulp']} |")
-    noted = [m for m in verified if m in NOTES]
-    if noted:
-        md += ["", "Numerical notes:", ""]
-        for m in noted:
-            points = refs.get(m, {}).get("points", {}).values()
-            deviations = [p["max_ulp"] for p in points if "max_ulp" in p]
-            measured = (f" Worst recorded deviation across all points: "
-                        f"{max(deviations)} ULP." if deviations else "")
-            md.append(f"- `{m}`: {NOTES[m]}{measured}")
-    wa_refs = {}
-    if REFS_PATH.exists():
-        # Every point carries its own write_array reference; the table
-        # counts the primary point's, the one this scoreboard's other
-        # columns already describe.
-        refs = load_refs()[0]
-        for m, v in refs.items():
-            pt = v["points"].get(str(v.get("primary")), {})
-            if "wa" in pt and m in results:
-                wa_refs[m] = len(pt["wa"]["values"])
-    if wa_refs:
-        md += ["", "## write_array references", "",
-               "The reference recorder also saves CmdStan's write_array "
-               "output at the same point. This covers every CSV column: "
-               "constrained parameters, transformed parameters and generated "
-               "quantities. Both drivers call write_array directly and use "
-               "Stan's RNG with the same seed and chain 0, so the "
-               "generated-quantity draws can be compared too. In CI, "
-               "tools/verify_refs.py replays these rows. Column names must "
-               "match exactly, and values must pass the same tolerance as the "
-               "model's log density and gradient.", "",
-               "| model | write_array values compared |",
-               "| --- | ---: |"]
-        for m in sorted(wa_refs):
-            md.append(f"| `{m}` | {wa_refs[m]} |")
-    rejected = [m for m, v in ver.items()
-                if v.get("status") == "REJECTED_BOTH"]
-    if rejected:
-        md += ["", "## Rejected by both engines", "",
-               "CmdStan and stanli both reject every shared evaluation "
-               "point for these models. The model is invalid at those "
-               "points, for example when an ODE solution dips below a "
-               "declared lower bound. There is nothing to compare. The two "
-               "engines agree, but these models do not count as verified.", ""]
-        md += [f"- `{m}`" for m in sorted(rejected)]
-    unver = [m for m in ok if m not in verified and m not in rejected and m not in imported]
-    if unver:
-        md += ["", "## Evaluate but not verified", ""]
-        for m in unver:
-            v = ver.get(m)
-            why = (f"max rel diff {v['max_rel']:.1e}" if v
-                   else "not yet run through verify_sample.py")
-            md.append(f"- `{m}`: {why}")
+    rejected = {m for m, v in ver.items() if v.get("status") == "REJECTED_BOTH"}
+    unverified = [m for m in ok if m not in verified and m not in rejected
+                  and m not in refs]
+    if unverified:
+        print("\n== evaluate, no CmdStan reference ==")
+        for m in unverified:
+            print(f"  {m}")
+    failed = {m: r for m, r in sorted(results.items()) if r[0] != "OK"}
+    if failed:
+        print("\n== failures ==")
+        for m, (status, msg) in failed.items():
+            print(f"  {m}: {status} {msg}")
             if m in NOTES:
-                md.append(f"  - {NOTES[m]}")
-    md += ["", "## Failures", ""]
-    for model, (s, msg) in sorted(results.items()):
-        if s != "OK":
-            md.append(f"- `{model}`: {s} {msg}")
-    (REPO / "docs" / "corpus-status.md").write_text("\n".join(md) + "\n",
-                                                    encoding="utf-8")
+                print(f"    {NOTES[m]}")
 
 
 if __name__ == "__main__":

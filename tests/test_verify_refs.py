@@ -584,9 +584,11 @@ class ScaledUlpTest(unittest.TestCase):
 class UlpLedgerTest(unittest.TestCase):
     """The per-model exceptions to the ULP gate, and how they move."""
 
-    ENTRIES = {"lp": {"bound": 40, "reason": "lp test"},
-               "grad": {"bound": 30, "reason": "kind test"},
-               "grad[2]": {"bound": 500, "reason": "value test"}}
+    ENTRIES = {"lp": {"bound": 40, "reason": "lp test", "closer": "stanli"},
+               "grad": {"bound": 30, "reason": "kind test",
+                        "closer": "cmdstan"},
+               "grad[2]": {"bound": 500, "reason": "value test",
+                           "closer": "unknown"}}
 
     def test_a_value_takes_its_own_entry_then_its_kind_then_the_default(self):
         bound = verify_refs.ulp_bound
@@ -611,8 +613,9 @@ class UlpLedgerTest(unittest.TestCase):
     def test_entries_only_go_down(self):
         new = verify_refs.updated_entries(
             self.ENTRIES, {"lp": 12, "grad[2]": 9, "grad[5]": 25}, "new")
-        self.assertEqual(new, {"lp": {"bound": 12, "reason": "lp test"},
-                               "grad": {"bound": 25, "reason": "kind test"}})
+        self.assertEqual(new, {
+            "lp": {"bound": 12, "reason": "lp test", "closer": "stanli"},
+            "grad": {"bound": 25, "reason": "kind test", "closer": "cmdstan"}})
         with self.assertRaises(ValueError):
             verify_refs.updated_entries(self.ENTRIES, {"lp": 41}, "new")
 
@@ -620,14 +623,17 @@ class UlpLedgerTest(unittest.TestCase):
         measured = {"lp": 518, "grad[1]": 11, "grad[3]": 10, "wa mu": 12}
         new = verify_refs.updated_entries({}, measured, "measured here")
         self.assertEqual(new, {
-            "lp": {"bound": 518, "reason": "measured here"},
-            "grad[1]": {"bound": 11, "reason": "measured here"},
-            "wa mu": {"bound": 12, "reason": "measured here"}})
+            "lp": {"bound": 518, "reason": "measured here", "closer": "unknown"},
+            "grad[1]": {"bound": 11, "reason": "measured here",
+                        "closer": "unknown"},
+            "wa mu": {"bound": 12, "reason": "measured here",
+                      "closer": "unknown"}})
         many = {f"grad[{i}]": 20 + i for i in range(1, 11)}
         new = verify_refs.updated_entries({}, many, "measured here")
         self.assertEqual(list(new), ["grad"])
         self.assertEqual(new["grad"]["bound"], 30)
         self.assertIn("10 grad values over 10", new["grad"]["reason"])
+        self.assertEqual(new["grad"]["closer"], "unknown")
 
     def test_a_wide_margin_is_reported(self):
         notes = verify_refs.ledger_notes("m", self.ENTRIES,
@@ -639,12 +645,26 @@ class UlpLedgerTest(unittest.TestCase):
     def test_the_ledger_file_is_validated(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = pathlib.Path(tmp) / "ledger.json"
-            for entry in ({"bound": 10, "reason": "x"}, {"bound": 11},
-                          {"bound": 11.5, "reason": "x"}):
-                path.write_text(json.dumps({"schema": 1, "platforms": {
-                    "P": {"main": {"m": {"lp": entry}}}}}))
+            def ledger(entry, schema=2):
+                return json.dumps({"schema": schema, "platforms": {
+                    "P": {"main": {"m": {"lp": entry}}}}})
+            for entry in ({"bound": 10, "reason": "x", "closer": "stanli"},
+                          {"bound": 11, "closer": "stanli"},
+                          {"bound": 11.5, "reason": "x", "closer": "stanli"},
+                          {"bound": 11, "reason": "x"},
+                          {"bound": 11, "reason": "x", "closer": "tie"},
+                          {"bound": 11, "reason": "x", "closer": None}):
+                path.write_text(ledger(entry))
                 with self.subTest(entry=entry), self.assertRaises(SystemExit):
                     verify_refs.load_ulp_ledger(path)
+            path.write_text(ledger({"bound": 11, "reason": "x"}, schema=1))
+            with self.assertRaises(SystemExit) as caught:
+                verify_refs.load_ulp_ledger(path)
+            self.assertIn("schema 1", str(caught.exception))
+            for closer in ("stanli", "cmdstan", "unknown"):
+                path.write_text(ledger({"bound": 11, "reason": "x",
+                                        "closer": closer}))
+                verify_refs.load_ulp_ledger(path)
             path.unlink()
             empty = verify_refs.load_ulp_ledger(path)
             self.assertIsNone(verify_refs.ulp_section(empty, "P", "main"))
@@ -652,9 +672,11 @@ class UlpLedgerTest(unittest.TestCase):
     def test_writing_a_section_ratchets_only_the_models_that_ran(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = pathlib.Path(tmp) / "ledger.json"
-            ledger = {"schema": 1, "platforms": {"P": {"main": {
-                "kept": {"lp": {"bound": 99, "reason": "not run"}},
-                "ran": {"lp": {"bound": 99, "reason": "why"}}}}}}
+            ledger = {"schema": 2, "platforms": {"P": {"main": {
+                "kept": {"lp": {"bound": 99, "reason": "not run",
+                                "closer": "unknown"}},
+                "ran": {"lp": {"bound": 99, "reason": "why",
+                               "closer": "stanli"}}}}}}
             verify_refs.write_ulp_ledger(
                 ledger, "P", "main", {"ran": {"lp": 50, "grad[1]": 20},
                                       "clean": {"lp": 3}},
@@ -662,9 +684,11 @@ class UlpLedgerTest(unittest.TestCase):
             written = verify_refs.load_ulp_ledger(path)
             section = verify_refs.ulp_section(written, "P", "main")
             self.assertEqual(section["kept"]["lp"]["bound"], 99)
-            self.assertEqual(section["ran"]["lp"], {"bound": 50, "reason": "why"})
+            self.assertEqual(section["ran"]["lp"],
+                             {"bound": 50, "reason": "why", "closer": "stanli"})
             self.assertIn("against a reference recorded on Q",
                           section["ran"]["grad[1]"]["reason"])
+            self.assertEqual(section["ran"]["grad[1]"]["closer"], "unknown")
             self.assertNotIn("clean", section)
 
     def test_first_entries_need_a_reason_for_every_value(self):
@@ -673,8 +697,18 @@ class UlpLedgerTest(unittest.TestCase):
         entries, problems = verify_refs.first_entries(measured, reasons, "P")
         self.assertEqual(problems, [])
         self.assertEqual(entries, {
-            "lp": {"bound": 518, "reason": "measured on P; lp why"},
-            "grad[1]": {"bound": 11, "reason": "measured on P; grad why"}})
+            "lp": {"bound": 518, "reason": "measured on P; lp why",
+                   "closer": "unknown"},
+            "grad[1]": {"bound": 11, "reason": "measured on P; grad why",
+                        "closer": "unknown"}})
+        entries, problems = verify_refs.first_entries(
+            measured, {"lp": {"reason": "lp why", "closer": "cmdstan"},
+                       "grad[1]": "grad why"}, "P")
+        self.assertEqual(problems, [])
+        self.assertEqual(entries["lp"], {"bound": 518,
+                                         "reason": "measured on P; lp why",
+                                         "closer": "cmdstan"})
+        self.assertEqual(entries["grad[1]"]["closer"], "unknown")
         _, problems = verify_refs.first_entries(measured, {"lp": "why"}, "P")
         self.assertEqual(problems, ["grad[1] measured 11 needs a reason"])
         _, problems = verify_refs.first_entries(
@@ -684,25 +718,32 @@ class UlpLedgerTest(unittest.TestCase):
         entries, problems = verify_refs.first_entries(many, {"grad": "why"}, "P")
         self.assertEqual(problems, [])
         self.assertEqual(entries["grad"], {
-            "bound": 30, "reason": "measured on P; why; 10 grad values over 10"})
+            "bound": 30, "reason": "measured on P; why; 10 grad values over 10",
+            "closer": "unknown"})
 
     def test_named_entries_replace_a_model_and_keep_unnamed_reasons(self):
-        old = {"lp": {"bound": 20, "reason": "lp before"},
-               "grad[1]": {"bound": 15, "reason": "grad before"}}
+        old = {"lp": {"bound": 20, "reason": "lp before", "closer": "stanli"},
+               "grad[1]": {"bound": 15, "reason": "grad before",
+                           "closer": "stanli"}}
         measured = {"lp": 12, "grad[1]": 30, "grad[2]": 25}
         entries, problems = verify_refs.first_entries(
-            measured, {"grad[1]": "moved", "grad[2]": "new"}, "P", old)
+            measured, {"grad[1]": "moved",
+                       "grad[2]": {"reason": "new", "closer": "stanli"}},
+            "P", old)
         self.assertEqual(problems, [])
         self.assertEqual(entries, {
-            "lp": {"bound": 12, "reason": "lp before"},
-            "grad[1]": {"bound": 30, "reason": "measured on P; moved"},
-            "grad[2]": {"bound": 25, "reason": "measured on P; new"}})
+            "lp": {"bound": 12, "reason": "lp before", "closer": "stanli"},
+            "grad[1]": {"bound": 30, "reason": "measured on P; moved",
+                        "closer": "unknown"},
+            "grad[2]": {"bound": 25, "reason": "measured on P; new",
+                        "closer": "stanli"}})
         _, problems = verify_refs.first_entries(measured, {"grad[2]": "new"},
                                                 "P", old)
         self.assertEqual(problems, ["grad[1] measured 30 needs a reason"])
 
     def test_entries_may_be_added_to_models_that_have_some(self):
-        section = {"old": {"lp": {"bound": 20, "reason": "why"}}}
+        section = {"old": {"lp": {"bound": 20, "reason": "why",
+                                  "closer": "unknown"}}}
         check = verify_refs.first_entry_models
         self.assertEqual(check({"new": {}}, section, ["new", "old"]), [])
         self.assertEqual(check({"old": {"lp": "why"}}, section, ["old"]), [])
@@ -715,28 +756,59 @@ class UlpLedgerTest(unittest.TestCase):
     def test_adding_first_entries_writes_only_the_named_models(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = pathlib.Path(tmp) / "ledger.json"
-            ledger = {"schema": 1, "platforms": {"P": {"main": {
-                "old": {"lp": {"bound": 99, "reason": "why"}}}}}}
+            ledger = {"schema": 2, "platforms": {"P": {"main": {
+                "old": {"lp": {"bound": 99, "reason": "why",
+                               "closer": "cmdstan"}}}}}}
             problems = verify_refs.add_first_entries(
                 ledger, "P", "main",
                 {"old": {"lp": 50}, "new": {"lp": 30, "grad[1]": 3},
-                 "clean": {}},
-                {"new": {"lp": "new why"}, "clean": {}}, path)
+                 "obj": {"lp": 40}, "clean": {}},
+                {"new": {"lp": "new why"},
+                 "obj": {"lp": {"reason": "obj why", "closer": "stanli"}},
+                 "clean": {}}, path)
             self.assertEqual(problems, [])
             section = verify_refs.ulp_section(verify_refs.load_ulp_ledger(path),
                                               "P", "main")
             self.assertEqual(section, {
-                "new": {"lp": {"bound": 30, "reason": "measured on P; new why"}},
-                "old": {"lp": {"bound": 99, "reason": "why"}}})
+                "new": {"lp": {"bound": 30, "reason": "measured on P; new why",
+                               "closer": "unknown"}},
+                "obj": {"lp": {"bound": 40, "reason": "measured on P; obj why",
+                               "closer": "stanli"}},
+                "old": {"lp": {"bound": 99, "reason": "why",
+                               "closer": "cmdstan"}}})
             path.unlink()
             problems = verify_refs.add_first_entries(
                 ledger, "P", "main", {"new": {"lp": 31}}, {"new": {}}, path)
             self.assertEqual(problems, ["new: lp measured 31 needs a reason"])
             self.assertFalse(path.exists())
 
+    def test_the_reasons_file_takes_a_string_or_an_object(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = pathlib.Path(tmp) / "reasons.json"
+            good = {"m": {"lp": "why",
+                          "grad[1]": {"reason": "why", "closer": "cmdstan"}}}
+            path.write_text(json.dumps(good))
+            self.assertEqual(verify_refs.load_first_entry_reasons(path), good)
+            for bad in ("why", {"m": "why"}, {"m": {"lp": ""}},
+                        {"m": {"lp": {"reason": "why"}}},
+                        {"m": {"lp": {"reason": "", "closer": "stanli"}}},
+                        {"m": {"lp": {"reason": "why", "closer": "tie"}}},
+                        {"m": {"lp": {"reason": "why", "closer": "stanli",
+                                      "x": 1}}}):
+                path.write_text(json.dumps(bad))
+                with self.subTest(bad=bad), self.assertRaises(SystemExit):
+                    verify_refs.load_first_entry_reasons(path)
+
     def test_the_checked_in_ledger_loads(self):
         ledger = verify_refs.load_ulp_ledger()
+        self.assertEqual(ledger["schema"], 2)
         self.assertIsNotNone(ledger["platforms"])
+        for corpora in ledger["platforms"].values():
+            for models in corpora.values():
+                for entries in models.values():
+                    for entry in entries.values():
+                        self.assertIn(entry["closer"],
+                                      ("stanli", "cmdstan", "unknown"))
 
 
 class UlpGateReplayTest(unittest.TestCase):
@@ -764,12 +836,11 @@ class UlpGateReplayTest(unittest.TestCase):
         body = f'echo "OK -3.5 1e-4 {near!r}"'
         self.assertEqual(self.run_check(body, {})[1], "ULP_GATE")
         measured = {}
-        result = self.run_check(body, {"grad[2]": {"bound": 40, "reason": "r"}},
-                                measured)
+        entries = {"grad[2]": {"bound": 40, "reason": "r", "closer": "unknown"}}
+        result = self.run_check(body, entries, measured)
         self.assertEqual(result[1], "OK")
         self.assertEqual(measured, {"grad[2]": 40})
-        result = self.run_check('echo "OK -3.5 1e-4 2"',
-                                {"grad[2]": {"bound": 40, "reason": "r"}})
+        result = self.run_check('echo "OK -3.5 1e-4 2"', entries)
         self.assertEqual(result[1], "OK")
         self.assertIn("ULP LEDGER while_counter_size grad[2]: measured 0",
                       " ".join(result[6]))

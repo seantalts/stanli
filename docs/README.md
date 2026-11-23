@@ -18,8 +18,8 @@ language: [Python](../python/README.md), [R](../r/README.md) or
 
 | Page | Read it when |
 | --- | --- |
-| [Testing](../TESTING.md) | You want to know what is checked, against what, and the known limits. |
-| [Corpus status](corpus-status.md) | You want to know whether a particular model runs and matches CmdStan. This page is generated. |
+| [Testing](../TESTING.md) | You want to know the rule that every model is held to, what is checked, against what, and the known limits. |
+| [Every model](../TESTING.md#every-model) | You want to know whether a particular model runs and how closely it matches CmdStan. This table is generated. |
 | [Distribution coverage](coverage.md) | You want to know which densities, CDFs and transforms are supported. |
 | [lp__ and dropped constants](lp-constant.md) | You want to know which terms `~` leaves out of `lp__`. |
 | [Benchmarks](benchmarks.md) | You want speed numbers and to know how we measured them. |

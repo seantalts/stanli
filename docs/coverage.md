@@ -7,7 +7,7 @@ substitutes an approximation.
 
 This page covers probability functions, real-valued scalar math, parameter
 transforms, truncation, censoring, `print` and `reject`. For whole models, see
-[corpus status](corpus-status.md). For language constructs, see the
+[the table of every model](../TESTING.md#every-model). For language constructs, see the
 [stanc3 test models](../tests/stanc3_good/README.md). For how the checks work
 and their numerical limits, see [TESTING.md](../TESTING.md).
 
@@ -69,8 +69,9 @@ instructions, and the default x86-64 build does not use them, so the two
 platforms can differ by a few ULP in matrix products, reductions and vectorized
 `exp` and `log`. The cause is in Eigen, which CmdStan also uses, so a CmdStan
 reference that one platform recorded can differ from stanli on the other.
-[TESTING.md](../TESTING.md#numerical-policy) describes how the matrix product
-case is handled. The second is between stanli and Stan Math. In the graph kernel
+`GRADIENT_AGAINST_LARGEST_OFF_PLATFORM` in
+[`tools/verify_refs.py`](../tools/verify_refs.py) describes how the matrix
+product case is handled. The second is between stanli and Stan Math. In the graph kernel
 for `logit`, stanli divides the incoming adjoint by `x * (1 - x)` where Stan
 Math multiplies it by `1 / (x - x * x)`. Near `x = 1` the second form loses
 digits to cancellation. Against exact arithmetic stanli is within one ULP at

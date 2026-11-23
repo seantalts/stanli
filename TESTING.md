@@ -1,716 +1,1036 @@
 # Why should I trust this?
 
-stanli reimplements the Stan runtime. This page lists the checks that test
-it: what each one compares, against what, when it runs, and what it cannot
-see.
+stanli reimplements the Stan runtime. We test it against CmdStan at the
+versions pinned in [`deps/pins.env`](deps/pins.env). This page has four parts:
 
-There are three kinds of check. The first compares stanli with CmdStan at
-fixed points in unconstrained space: log density, every gradient component and
-every value that a draw writes. The second compares stanli's execution paths
-with each other bitwise. This catches an error that one path alone would
-hide. The third compares the samplers and other algorithms with Stan's own
-service code, because a gradient at a fixed point cannot show a wrong sampler
-setting. Agreement at fixed points does not prove agreement over the whole
-parameter space.
+- [The rule](#the-rule) that we hold every model to, and where CI enforces it
+- [Every model](#every-model), with how accurate each engine is on it
+- [The checks](#the-checks) that CI and we run
+- [Known limits](#known-limits)
 
-## Numerical policy
+<a id="numerical-policy"></a>
 
-A ULP is one step between adjacent doubles at a given magnitude. stanli and
-CmdStan call the same stan-math with the same floating-point flags
-(`-ffp-contract=off`, set project-wide in [`CMakeLists.txt`](CMakeLists.txt)).
-Most differences come from evaluation order: `(a+b)+c` can differ from
-`a+(b+c)` in the last bit.
+## The rule
 
-A change may move a result away from CmdStan by:
+Each model has three fixed test points in unconstrained space. At each point
+stanli computes the log density, every gradient entry and every value that a
+draw writes. A draw writes the constrained parameters, the transformed
+parameters and the generated quantities. The code calls these values
+`write_array`, and this page calls them outputs.
 
-- 2 ULP by default.
-- 10 ULP for a change to a reassociation kernel (reductions, matvec, gather
-  backward, softmax backward). The commit message must state that budget, and
-  the baseline must move in the same commit.
-- 30 ULP for a density merged across loop lanes, where stanli sums in one call
-  what CmdStan sums once per iteration. `NOTES` in
-  [`tools/corpus.py`](tools/corpus.py) gives the cause for each such model.
-- More, when a high-precision reference that is recorded with the model shows
-  stanli at least as close to the true value as CmdStan. A closed-form
-  replacement for a nested-tape backward always needs one. The `matrix_exp`
-  and matrix-solve adjoints were evaluated at 60 digits.
+**Each of those numbers must be within 10 ULP of the number that CmdStan
+computes. If a number is farther away, the run fails, unless
+[`tests/ulp_ledger.json`](tests/ulp_ledger.json) lists that value with the
+distance that we measured and the cause.**
 
-Anything beyond these budgets is a bug. Bitwise agreement with CmdStan is
-reported but does not fail a run. A speedup that gives up a bitwise match
-within these budgets is accepted.
+This rule applies to every model in every corpus. Some details:
 
-CI enforces:
-
-- The limit written at each C++ unit test assertion, and bitwise equality
-  between stanli's own execution paths except for divergences listed in the
-  ledger.
-- 10 ULP per element for the brms fixtures, against CmdStan references
-  recorded on the same platform (`ULP_LIMITS` in
-  [`tools/verify_refs.py`](tools/verify_refs.py)): on macOS arm64 and on
-  Linux x86-64, which has its own recording. The same holds for the fixtures
-  corpus on every platform. Some models measure the gradient in ULP of its
-  largest entry: those in `GRADIENT_AGAINST_LARGEST` on every platform, and
-  those in `GRADIENT_AGAINST_LARGEST_OFF_PLATFORM` on platforms other than the
-  one that recorded them. Their covariance gradients cancel, and Eigen's
-  matrix product fuses multiply-adds on arm64 and not on x86-64 or MSVC.
-  CmdStan built on arm64, with Eigen's kernel changed to round each product,
-  matches stanli on Linux within 2 ULP. Against an 80-digit reference, the
-  largest gradient error is the same on both platforms. A brms fixture that
-  centres a predictor on a mean of more than 32 rows is in
-  `GRADIENT_AGAINST_LARGEST` too when the gradient entry of a centred
-  coefficient cancels so far that one rounding per term is at least 5 ULP of
-  the entry (79 of the 105 that centre, measured with the 50-digit
-  interpreter). The compensated mean, and each platform's own rounding of the
-  cancelling sum, move such an entry by several to hundreds of its own ULP in
-  either direction. In the same way,
-  off the recording platform, the write_array variables listed in
-  `WRITE_ARRAY_AGAINST_LARGEST_OFF_PLATFORM` are measured in ULP of their
-  variable's largest value. Today that is `lk` in `gq_library_rng`, whose
-  `lkj_corr_rng` draws go through `tan`. macOS's `tan` is 0.97 ULP off at
-  one of its draws, and a correlation near 0.25, computed as 2 * beta - 1,
-  then differs by 16 ULP. Stan Math run on macOS with a correctly rounded
-  `tan` gives the Linux value exactly. Its `lk` values are then at most 3
-  ULP from the macOS reference, counted in ULP of 1, the largest entry.
-- A scaled error `|a-b| / max(|a|, |b|, 1)` below 1e-9 for every reference
-  comparison. For a value below 1 in magnitude this is an absolute error of
-  1e-9, so it does not prove a ULP bound.
-- The [ULP gate](#the-ulp-gate) on every value of every corpus replay, on the
-  platforms that the ledger has measured (macOS arm64 today).
-- Limits from measured deviations for the ill-conditioned models
-  (`ILL_CONDITIONED`: 1.5e-6 scaled error on gradient entries, and on the
-  log density only for a model in `ILL_CONDITIONED_LP_GATE`, today
-  `examplemodels_gp_fit_multi_output` at 5e-8, whose covariance has
-  condition number 5.6e10 at point 0) and for
-  the values that `MISMATCH_OUTPUTS` names at the points recorded as
-  MISMATCH (`gate_for`: 4 times the recorded deviation, and at least the
-  entry's own floor). These are two `kronecker_gp` gradient entries, with a
-  floor of 3.3e-2 from its measurements on x86-64, and three
-  `stanguide_ode_adjoint` gradient entries from an adjoint ODE solve at
-  tolerance 1e-6, with no floor (1.5e-5 and 1.3e-5). Every other value of
-  these models keeps the 1e-9 gate.
-- Matching rejection: stanli must reject a point that CmdStan rejects, and a
-  non-finite value must match in kind.
-- 10 ULP by default in the generated conformance sweep, with reviewed
-  per-case exceptions.
-- A separate limit for [fast mode](#fast-mode).
+- A ULP is one step between adjacent doubles.
+- stanli and CmdStan call the same Stan Math with the same floating-point
+  flags. Most differences come from the order in which each engine adds up a
+  sum.
+- If CmdStan rejects a point, stanli must reject it too. If CmdStan returns
+  NaN or an infinity, stanli must return the same.
+- stanli does not have to match CmdStan in every bit.
+- The bound in a ledger entry is the largest distance that we measured over
+  the three points. `tools/verify_refs.py` can lower a bound. A person has to
+  raise a bound or add an entry by hand, in a commit that gives the cause.
+- Each ledger entry says which engine is closer to the true value at the point
+  where stanli is farthest from CmdStan. It says `stanli`, `cmdstan` or
+  `unknown`. We get the true value from an 80-digit evaluation of the model
+  ([`tools/hp`](tools/hp/README.md)).
+- Most changes should move a result by 2 ULP or less. A change that adds up a
+  sum in a different order can move a result by up to 10 ULP, and its commit
+  message should say that it does. Reviewers check this. CI does not.
 
 <a id="the-ulp-gate"></a>
 
-### The ULP gate
+### How we count the distance
 
-[`tools/verify_refs.py`](tools/verify_refs.py) counts the distance between
-each stanli value `b` and its CmdStan value `a` as
+Call the CmdStan value `a` and the stanli value `b`. The distance is
 
-    min(ulp_distance(a, b), ceil(|a - b| / ulp(S)))
+    min(doubles between a and b, ceil(|a - b| / ulp(S)))
 
-where `S` is the largest finite CmdStan magnitude among the values computed
-together with `a`: the whole gradient for a gradient entry, `|a|` itself for
-the log density, and the other columns of the same variable for a
-`write_array` value (`scaled_ulp`). The second term keeps a gradient entry
-that cancels to nearly zero from counting as 1e18 ULP when stanli and CmdStan
-round one term differently; it is measured against the size of the terms that
-formed the entry, not against the constant 1. `S` comes from CmdStan's values
-only, so a wrong large stanli value cannot widen it. In the `signatures`
-corpus, one gradient holds many independent cases, so `S` is the largest case
-(at most 2.8 there) and not the terms of each case. A small case is then held
-to an absolute error of about `10 ulp(S)`, at most 4.4e-15. 186 nonzero
-signature values are more than 10 ULP from CmdStan in their own magnitude and
-pass this way; the worst is grad[1178] of `density_signatures_13`, 1.02e-6 and
-5243 ULP from CmdStan in its own magnitude, 1 ULP of `S`. Both NaN, or the same
-infinity, is a distance of 0; a nonfinite value on one side only fails.
+`S` is the largest CmdStan value, in magnitude, in the group that `a` belongs
+to. For a gradient entry the group is the whole gradient. For an output it is
+the variable that the output is an element of. For the log density `S` is
+`|a|`.
 
-Every value must be within 10 of these ULP (`DEFAULT_ULP_BOUND`) unless
-[`tests/ulp_ledger.json`](tests/ulp_ledger.json) lists a measured bound for
-it. The ledger is keyed by platform, then corpus (`main` for the main corpus,
-the local corpus name, with ` --stanc` for the stock-stanc replays), then
-model. An entry covers one value (`lp`, `grad[3]`, `wa mu.2`) or, when one
-model has more than 8 such values of one kind, every `grad` or `wa` value
-that has no entry of its own. Each entry has the bound, which is the worst
-value measured over the three points, and a reason. A replay on a platform
-with no section in the ledger skips this gate, as do fast mode and the
-WebAssembly replay (`--no-wa`). The gate adds to the scaled-error gate and
-the per-element brms limits above; it replaces neither.
+We need the second term for gradient entries that cancel to nearly zero. When
+one term of such an entry rounds differently, the entry can move by millions
+of its own ULP. So we also measure it against the largest gradient entry and
+take the smaller count. `S` uses only CmdStan's values, so a wrong stanli
+value cannot make `S` larger.
 
-The bounds come only from a tool run:
+### Where CI enforces the rule
 
-    tools/verify_refs.py deps/posteriordb --update-ulp-ledger
-    tools/verify_refs.py --corpus NAME [--stanc STANC] --update-ulp-ledger
+CI enforces the 10 ULP rule only on macOS arm64, because the ledger has
+measurements only from that platform. macOS arm64 runs after a merge to
+`main`. Pull requests run on Linux x86-64, where CI enforces two other limits:
 
-The run writes nothing unless every model passes every gate, including the
-ledger's current bounds. It lowers an entry to the new measurement and
-deletes an entry that is back within 10. It never raises a bound: a value
-over its bound fails the replay, and raising it means editing the entry by
-hand in a commit that says why. On a platform or corpus with no section yet,
-the gate is off, and the run creates the section with an entry for every
-value over 10. Such a generated entry's reason says only where it was
-measured; a person replaces it with the cause. A replay that measures half
-the bound or less prints a `ULP LEDGER` note asking for a rerun to tighten it.
+- The relative error `|a - b| / max(|a|, |b|, 1)` of every value must be below
+  1e-9. Every platform enforces this limit.
+- Every value of the <!--gen:testing_brms_limited-->124<!--/gen--> brms models and of the
+  `fixtures` corpus must be within 10 ULP of CmdStan. This limit counts plain
+  ULP for each element and does not use the ledger. Linux x86-64 has its own
+  CmdStan recording of the brms models for it.
 
-Inside a section, a value over 10 that no entry covers fails the gate, so a
-model that is new to the corpus, or a value that moved for a known reason,
-gets its entries from a separate run:
+| limit | applies to | macOS arm64 | Linux x86-64 | other platforms |
+| --- | --- | --- | --- | --- |
+| 10 ULP or the ledger bound | every value of every model | yes | no | no |
+| 10 ULP for each element | brms models and the `fixtures` corpus | yes | yes | `fixtures` only |
+| 1e-9 relative error | every value of every model | yes | yes | yes |
+| rejections and non-finite values match | every point | yes | yes | yes |
 
-    tools/verify_refs.py deps/posteriordb MODEL... --add-ulp-entries REASONS.json
+Windows runs the `fixtures` corpus and the other local corpora in CTest. It
+does not run the main corpus.
 
-`REASONS.json` maps each named model to `{label: reason}`. The run replays
-those models without their ULP gate, and every other model with it, and
-replaces the named models' entries. The same run raises an entry of a model
-that has moved for a known reason, because the ledger cannot tell that from
-a regression: only the person who names the model can. A value over 10
-needs a reason in the file, unless the model has an entry for it that the
-value is within, which keeps its reason. The run writes nothing unless every
-model passes the other gates and every value over 10 has a reason, and no
-reason names a value within 10. A first run with an empty `{}` per model
-lists the values that need one.
-`--corpus NAME` takes the same flag.
+### The limit of each kind of comparison
 
-The reasons in the macOS arm64 section compare both engines with the 80-digit
-evaluator in [`tools/hp`](tools/hp/README.md) where it can score the value.
-Of the 177 main-corpus entries, it scores 144. stanli is at least as close
-to the true value as CmdStan in 132 of them, including the 32 lp entries it
-can decide; it is farther in 6 and cannot decide 6.
-Entries whose reason says
-"stanli is farther from it than CmdStan" are open findings under the budgets
-above. Linux and Windows have no section yet, so pull request CI does not run
-this gate; record a section by running the commands above on that platform.
+This table gives the limit for each kind of numerical comparison and the file
+that lists its exceptions.
 
-`sum()` and `mean()` of more than 32 values do not keep the reference order:
-they add their terms with compensation (`compensated_sum` in
-[`runtime/include/stanli/pairwise_sum.hpp`](runtime/include/stanli/pairwise_sum.hpp)),
-and the sums that re-roll and partition build from a loop's terms add them
-pairwise. Both are held to the exact sum of the same doubles in
-[`tests/test_sum_accuracy.cpp`](tests/test_sum_accuracy.cpp), not to Stan
-Math's bits, and the values that moved away from CmdStan have ledger
-entries that compare both engines with the 80-digit value. The `signatures`
-corpus holds each model's lp to the exact value of its own expression,
--0.5 * sum(probe^2) + 2 * sum(cases), formed from the recorded probe and case
-values and rounded once, instead of to CmdStan's in-order sum
-(`signature_exact_lp` in `tools/verify_refs.py`); a ULP_GATE message there
-calls that value "CmdStan".
+| comparison | limit | exceptions |
+| --- | --- | --- |
+| a model's values against CmdStan | 10 ULP | [`tests/ulp_ledger.json`](tests/ulp_ledger.json) |
+| the same, on every platform | 1e-9 relative error | `ILL_CONDITIONED` and `MISMATCH_OUTPUTS` in [`tools/verify_refs.py`](tools/verify_refs.py). They name <!--gen:testing_floored_models-->6<!--/gen--> models, which the table below marks. |
+| brms models against CmdStan on the same platform | 10 ULP for each element | `ULP_LIMITS` and `GRADIENT_AGAINST_LARGEST` in `tools/verify_refs.py`. The table below marks the models. |
+| the `fixtures` corpus against CmdStan | 10 ULP for each element | `VALUE_ULP_LIMITS` (2 models), `GRADIENT_AGAINST_LARGEST_OFF_PLATFORM` (3 models) and `WRITE_ARRAY_AGAINST_LARGEST_OFF_PLATFORM` (1 model) in `tools/verify_refs.py` |
+| a model in [fast mode](#fast-mode) against CmdStan | 1e-12 relative error | `FAST_HP_CHECKED` in `tools/verify_refs.py` (1 model) |
+| stanli's execution paths against each other | every bit | [`tests/cross_path_ledger.json`](tests/cross_path_ledger.json) |
+| one kernel against the Stan Math call that it replaces | every bit | the budget written at the assertion |
+| a generated signature case against BridgeStan | 10 ULP | the per-case entries of the conformance baseline |
+| stanli's NUTS against Stan's NUTS services | every bit | none |
 
-Kernels keep the reference summation order where practical, so the unit tests
-are stricter than the corpus check. A reordered matrix-vector
-sum stays inside 1e-9 but fails the zero-ULP cancellation case in
-[`tests/test_matvec.cpp`](tests/test_matvec.cpp). A kernel with an allowance
-documents it at the call site, as in
-[`runtime/kernels/eltwise_expr.cpp`](runtime/kernels/eltwise_expr.cpp).
+<a id="comparison-with-cmdstan-on-complete-models"></a>
+
+## Every model
+
+The main corpus has <!--gen:testing_models-->414<!--/gen--> models. We recorded CmdStan's
+answers at 3 points for each model. That makes <!--gen:testing_points-->1242<!--/gen--> points
+and <!--gen:testing_values-->1,504,488<!--/gen--> values. CmdStan rejects <!--gen:testing_rejected_points-->6<!--/gen-->
+of the points.
+
+In <!--gen:testing_models_within-->333<!--/gen--> models, every value is within 10 ULP of
+CmdStan. The other <!--gen:testing_models_over-->81<!--/gen--> models have <!--gen:testing_entries-->175<!--/gen-->
+ledger entries. stanli is at least as close to the true value as CmdStan in <!--gen:testing_entries_stanli-->127<!--/gen-->
+of those entries. CmdStan is closer in <!--gen:testing_entries_cmdstan-->9<!--/gen-->. We
+cannot tell for the other <!--gen:testing_entries_unknown-->39<!--/gen-->.
+
+<!--gen:testing_collections-->
+| source | models | models with a value over 10 ULP |
+| --- | ---: | ---: |
+| posteriordb | 119 | 40 |
+| educational | 13 | 1 |
+| brms | 124 | 4 |
+| rethinking | 62 | 11 |
+| cogmod | 22 | 12 |
+| ctsem | 3 | 1 |
+| examplemodels | 23 | 4 |
+| stanguide | 6 | 1 |
+| oncobayes2 | 3 | 1 |
+| rstanarm | 4 | 0 |
+| multinma | 2 | 0 |
+| epinow2 | 2 | 2 |
+| mlumr | 2 | 2 |
+| rbioacc | 1 | 0 |
+| beeguts | 1 | 0 |
+| hdbayes | 2 | 0 |
+| ecoensemble | 2 | 2 |
+| hbayesdm | 4 | 0 |
+| bmgarch | 2 | 0 |
+| walker | 2 | 0 |
+| bayesdfa | 2 | 0 |
+| regressions | 13 | 0 |
+| all | 414 | 81 |
+<!--/gen-->
+
+The models come from posteriordb, brms formulas, the code of Statistical
+Rethinking, cogmod's brms families, the Aalto Bayesian data analysis course
+(`educational`), ctsem's state-space template, stan-dev/example-models, the
+Stan User's Guide and 13 CRAN packages. The `regressions` models are programs
+that stanli once failed to compile.
+[`tools/corpus_inventory.py`](tools/corpus_inventory.py) lists them all.
+
+### How accurate each engine is
+
+We also evaluated each model with 80 digits of precision
+([`tools/hp`](tools/hp/README.md)). That gives the true value of the log
+density, of each gradient entry and of each output. For each model, the big
+table gives the mean distance of CmdStan's values from the true values, and
+the mean distance of stanli's values, in ULP. The mean is over all values at
+all three points.
+
+This table counts the models where one engine has the smaller mean:
+
+| values | models scored | stanli closer | CmdStan closer | the same |
+| --- | ---: | ---: | ---: | ---: |
+| log density | <!--gen:testing_scored_lp-->370<!--/gen--> | <!--gen:testing_scored_lp_stanli-->88<!--/gen--> | <!--gen:testing_scored_lp_cmdstan-->68<!--/gen--> | <!--gen:testing_scored_lp_same-->214<!--/gen--> |
+| gradient | <!--gen:testing_scored_grad-->337<!--/gen--> | <!--gen:testing_scored_grad_stanli-->217<!--/gen--> | <!--gen:testing_scored_grad_cmdstan-->57<!--/gen--> | <!--gen:testing_scored_grad_same-->63<!--/gen--> |
+| outputs | <!--gen:testing_scored_wa-->367<!--/gen--> | <!--gen:testing_scored_wa_stanli-->99<!--/gen--> | <!--gen:testing_scored_wa_cmdstan-->16<!--/gen--> | <!--gen:testing_scored_wa_same-->252<!--/gen--> |
+
+We scored <!--gen:testing_scored_values-->765,761<!--/gen--> values in total. stanli is closer to
+the true value in <!--gen:testing_values_stanli_closer-->16,058<!--/gen--> of them and CmdStan is
+closer in <!--gen:testing_values_cmdstan_closer-->16,739<!--/gen-->. The two engines are the same
+distance away in the rest.
+
+We measured these numbers on macOS arm64 on <!--gen:testing_accuracy_date-->2026-11-23<!--/gen-->, at
+commit <!--gen:testing_accuracy_source-->`caa6f407`<!--/gen-->. CI does not measure them again.
+
+### How to read the table
+
+- **parameters** is the number of gradient entries.
+- **outputs** is the number of `write_array` values at one point.
+- The **lp**, **gradient** and **outputs** columns come in pairs. The first
+  column of a pair is CmdStan's mean distance from the true value, in ULP. The
+  second is stanli's. A smaller number is more accurate. We count the distance
+  with the same `S` as in the rule.
+- If both columns of a pair are large, double arithmetic loses digits at those
+  points in both engines.
+- An empty cell means that we have no 80-digit value. The 80-digit evaluator
+  gives no gradient for a model with more than 300 parameters. It does not
+  implement some functions, such as the ODE solvers and the wiener density. It
+  skips an output that depends on a random draw.
+- **limit** is how far stanli may be from CmdStan on macOS arm64, in ULP. `10`
+  is the rule. Any other entry is the largest ledger bound for that kind of
+  value. The ledger gives the cause of each bound.
+- **also** lists other limits on the model. "brms limit 10" is the limit for
+  each element from the table above. Some brms models say "gradient against
+  its largest entry". For those, we count a gradient entry in ULP of the
+  largest gradient entry, because the gradient entries of mean-centred
+  predictors cancel. An ill-conditioned model and a known mismatch have their
+  own relative-error limit for the values that the cell names.
+
+`python3 tools/gen_docs.py` writes the table. It reads the CmdStan references,
+the ledger, `tools/verify_refs.py` and the recorded measurements in
+[`accuracy.json`](docs/internal/artifacts/accuracy.json). CI fails when the
+table and those files disagree.
+
+<!--gen:testing_corpus_table-->
+| model | source | parameters | outputs | lp: CmdStan | lp: stanli | gradient: CmdStan | gradient: stanli | outputs: CmdStan | outputs: stanli | limit | also |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- | --- |
+| `2pl_latent_reg_irt` | posteriordb | 531 | 549 | 226 | 226 |  |  | 0.01 | 0.01 | 10 |  |
+| `accel_gp` | posteriordb | 66 | 72 | 1.51 | 1.51 | 0.06 | 0.02 | 0.03 | 0.03 | 10 |  |
+| `accel_splines` | posteriordb | 82 | 160 | 0.58 | 0.58 | 0.09 | 0.07 | 0.05 | 0.05 | 10 |  |
+| `arK` | posteriordb | 7 | 7 | 3.76 | 1.82 | 0.56 | 0.18 | 0.03 | 0.03 | 10 |  |
+| `arma11` | posteriordb | 4 | 4 | 0.60 | 0.60 | 0.60 | 0.60 | 0.07 | 0.07 | 10 |  |
+| `blr` | posteriordb | 6 | 6 | 0.90 | 0.90 | 0.65 | 0.65 | 0.05 | 0.05 | 10 |  |
+| `bones_model` | posteriordb | 13 | 13 | 0.64 | 0.64 | 0.58 | 0.59 | <0.01 | <0.01 | 10 |  |
+| `bym2_offset_only` | posteriordb | 3845 | 9610 | 2.18 | 2.63 |  |  | 0.29 | 0.29 | 10 |  |
+| `covid19imperial_v2` | posteriordb | 51 | 8457 | 0.56 | 0.72 | 0.13 | 0.05 | 0.14 | 0.15 | 10 |  |
+| `covid19imperial_v3` | posteriordb | 51 | 8457 | 0.56 | 0.72 | 0.13 | 0.05 | 0.14 | 0.15 | 10 |  |
+| `diamonds` | posteriordb | 26 | 27 | 1.63 | 1.96 | 0.60 | 0.10 | 3.58 | 0.23 | outputs 168 |  |
+| `dogs` | posteriordb | 3 | 2253 | 25.1 | 1.51 | 4.55 | 0.21 | 0.03 | 0.03 | lp 59, gradient 14 |  |
+| `dogs_hierarchical` | posteriordb | 2 | 752 | 9.39 | 4.28 | 3.52 | 1.54 | 0.27 | 0.27 | lp 15 |  |
+| `dogs_log` | posteriordb | 2 | 2252 |  |  |  |  |  |  | 10 |  |
+| `dogs_nonhierarchical` | posteriordb | 65 | 946 | 10.1 | 1.99 | 0.04 | 0.04 | 0.12 | 0.12 | lp 15 |  |
+| `dugongs_model` | posteriordb | 4 | 6 | 0.18 | 0.51 | 0.43 | 0.34 | 0.17 | 0.17 | 10 |  |
+| `earn_height` | posteriordb | 3 | 3 | 3.33 | 3.33 | 0.91 | 0.91 | 0.05 | 0.05 | 10 |  |
+| `eight_schools_centered` | posteriordb | 10 | 10 | 0.70 | 0.70 | 0.06 | 0.06 | 0.01 | 0.01 | 10 |  |
+| `eight_schools_noncentered` | posteriordb | 10 | 18 | 0.56 | 0.56 | 0.10 | 0.10 | 0.13 | 0.13 | 10 |  |
+| `election88_full` | posteriordb | 90 | 11656 | 255 | 255 | 1.96 | 0.56 | 0.19 | 0.19 | gradient 91 |  |
+| `garch11` | posteriordb | 4 | 4 | 0.45 | 0.45 | 3.02 | 3.02 | 0.17 | 0.17 | 10 |  |
+| `GLM_Binomial_model` | posteriordb | 3 | 83 | 2.52 | 2.52 | 0.46 | 0.16 | 0.25 | 0.26 | 10 |  |
+| `GLM_Poisson_model` | posteriordb | 4 | 84 | 14.5 | 14.7 | 0.51 | 0.54 | 6.73 | 6.76 | 10 |  |
+| `GLMM1_model` | posteriordb | 237 | 2395 | 16.9 | 0.52 | 0.07 | 0.07 | <0.01 | <0.01 | lp 44 |  |
+| `GLMM_Poisson_model` | posteriordb | 45 | 125 | 13.2 | 12.8 | 1.03 | 1.05 | 1.06 | 1.06 | 10 |  |
+| `gp_pois_regr` | posteriordb | 13 | 24 | 0.73 | 0.73 | 0.21 | 0.21 | 0.13 | 0.13 | 10 |  |
+| `gp_regr` | posteriordb | 3 | 3 | 0.80 | 0.80 | 0.69 | 0.69 | 0.17 | 0.17 | 10 |  |
+| `gpcm_latent_reg_irt` | posteriordb | 530 | 550 | 56.2 | 3.94 |  |  | 0.02 | 0.02 | lp 131, gradient 55 |  |
+| `grsm_latent_reg_irt` | posteriordb | 408 | 418 | 182 | 17.2 |  |  | <0.01 | <0.01 | lp 493, gradient 23 |  |
+| `hier_2pl` | posteriordb | 669 | 804 | 602 | 602 |  |  | 0.01 | 0.01 | 10 |  |
+| `hierarchical_gp` | posteriordb | 933 | 3279 | 0.33 | 0.66 |  |  | 0.29 | 0.29 | 10 |  |
+| `hmm_drive_0` | posteriordb | 6 | 429 | 32.6 | 32.9 | 10,568 | 10,568 | 0.09 | 0.09 | 10 |  |
+| `hmm_drive_1` | posteriordb | 6 | 429 | 36.7 | 37.0 | 55,945 | 55,945 | 0.09 | 0.09 | 10 |  |
+| `hmm_example` | posteriordb | 4 | 111 | 10.4 | 11.1 | 423 | 423 | 0.11 | 0.11 | 10 |  |
+| `hmm_gaussian` | posteriordb | 14 | 9519 | 18.1 | 17.7 | 10,342 | 10,342 | 961 | 961 | 10 |  |
+| `iohmm_reg` | posteriordb | 29 | 18031 | 4.43 | 4.43 | 14,117 | 14,117 | 41.6 | 41.6 | 10 |  |
+| `irt_2pl` | posteriordb | 144 | 144 | 2.23 | 2.23 | 0.10 | 0.04 | 0.03 | 0.03 | 10 |  |
+| `kidscore_interaction` | posteriordb | 5 | 5 | 1.04 | 1.04 | 2.03 | 0.35 | 0.05 | 0.05 | 10 |  |
+| `kidscore_interaction_c` | posteriordb | 5 | 5 | 0.89 | 0.89 | 0.20 | 0.13 | 0.05 | 0.05 | 10 |  |
+| `kidscore_interaction_c2` | posteriordb | 5 | 5 | 0.37 | 0.37 | 0.10 | 0.08 | 0.05 | 0.05 | 10 |  |
+| `kidscore_interaction_z` | posteriordb | 5 | 5 | 0.38 | 0.38 | 0.07 | 0.07 | 0.05 | 0.05 | 10 |  |
+| `kidscore_mom_work` | posteriordb | 5 | 5 | 0.45 | 0.45 | 0.08 | 0.07 | 0.05 | 0.05 | 10 |  |
+| `kidscore_momhs` | posteriordb | 3 | 3 | 0.26 | 0.26 | 0.28 | 0.19 | 0.05 | 0.05 | 10 |  |
+| `kidscore_momhsiq` | posteriordb | 4 | 4 | 0.92 | 0.92 | 1.36 | 0.43 | 0.06 | 0.06 | 10 |  |
+| `kidscore_momiq` | posteriordb | 3 | 3 | 0.27 | 0.27 | 1.58 | 0.24 | 0.05 | 0.05 | 10 |  |
+| `kilpisjarvi` | posteriordb | 3 | 3 | 0.74 | 0.74 | 0.29 | 0.29 | 0.05 | 0.05 | 10 |  |
+| `kronecker_gp` | posteriordb | 438 | 0 | 5.35 | 6.68 |  |  |  |  | gradient 2.6e12 | known mismatch in grad[1], grad[2], which have their own relative limit |
+| `ldaK2` | posteriordb | 7 | 12 | 105 | 0.68 | 113 | 101 | 0.32 | 0.32 | lp 171, gradient 204 |  |
+| `ldaK5` | posteriordb | 7714 | 7780 | 290 | 2.18 |  |  | 3.11 | 3.11 | lp 815, outputs 38 |  |
+| `log10earn_height` | posteriordb | 3 | 3 | 0.86 | 0.86 | 3.43 | 0.32 | 0.05 | 0.05 | gradient 20 |  |
+| `logearn_height` | posteriordb | 3 | 3 | 1.31 | 1.31 | 3.70 | 0.43 | 0.05 | 0.05 | gradient 15 |  |
+| `logearn_height_male` | posteriordb | 4 | 4 | 1.51 | 1.51 | 1.47 | 0.18 | 0.06 | 0.06 | 10 |  |
+| `logearn_interaction` | posteriordb | 5 | 5 | 2.88 | 2.88 | 2.89 | 0.47 | 0.05 | 0.05 | gradient 15 |  |
+| `logearn_interaction_z` | posteriordb | 5 | 5 | 2.70 | 2.70 | 0.61 | 0.47 | 0.05 | 0.05 | 10 |  |
+| `logearn_logheight_male` | posteriordb | 4 | 4 | 2.09 | 2.09 | 1.09 | 0.63 | 0.06 | 0.06 | 10 |  |
+| `logistic_regression_rhs` | posteriordb | 3075 | 4719 | 3,219 | 3,219 |  |  | 27.2 | 27.2 | 10 |  |
+| `logmesquite` | posteriordb | 8 | 8 | 1.12 | 1.12 | 0.22 | 0.19 | <0.01 | <0.01 | 10 |  |
+| `logmesquite_logva` | posteriordb | 5 | 5 | 0.50 | 0.50 | 0.20 | 0.16 | 0.05 | 0.05 | 10 |  |
+| `logmesquite_logvas` | posteriordb | 8 | 8 | 0.39 | 0.39 | 0.14 | 0.12 | <0.01 | <0.01 | 10 |  |
+| `logmesquite_logvash` | posteriordb | 7 | 7 | 0.35 | 0.35 | 0.14 | 0.12 | 0.03 | 0.03 | 10 |  |
+| `logmesquite_logvolume` | posteriordb | 3 | 3 | 0.93 | 0.93 | 0.37 | 0.39 | 0.05 | 0.05 | 10 |  |
+| `losscurve_sislob` | posteriordb | 15 | 384 | 0.86 | 0.86 | 0.10 | 0.08 | 0.27 | 0.27 | 10 |  |
+| `lotka_volterra` | posteriordb | 8 | 90 |  |  |  |  |  |  | 10 |  |
+| `low_dim_gauss_mix` | posteriordb | 5 | 5 | 6.35 | 0.08 | 1.80 | 0.60 | 0.18 | 0.18 | lp 14, gradient 14 |  |
+| `low_dim_gauss_mix_collapse` | posteriordb | 5 | 5 | 7.00 | 0.33 | 1.52 | 0.56 | 0.13 | 0.13 | 10 |  |
+| `lsat_model` | posteriordb | 1006 | 1012 | 55.7 | 55.7 |  |  | <0.01 | <0.01 | gradient 70 |  |
+| `M0_model` | posteriordb | 2 | 4 | 49.0 | 0.29 | 73.2 | 3.78 | 0.69 | 0.69 | lp 66, gradient 180 |  |
+| `Mb_model` | posteriordb | 3 | 1596 | 27.8 | 0.47 | 21.0 | 6.74 | 0.12 | 0.12 | lp 69, gradient 68 |  |
+| `mesquite` | posteriordb | 8 | 8 | 0.91 | 0.91 | 0.12 | 0.12 | <0.01 | <0.01 | 10 |  |
+| `Mh_model` | posteriordb | 388 | 1159 | 24.2 | 2.43 |  |  | 3.01 | 3.01 | lp 51, gradient 43 |  |
+| `Mt_model` | posteriordb | 4 | 7 | 15.7 | 0.99 | 11.9 | 0.45 | 0.50 | 0.50 | lp 36, gradient 66 |  |
+| `Mtbh_model` | posteriordb | 154 | 1912 | 21.3 | 0.10 | 0.08 | 0.05 | 2.07 | 2.12 | lp 28, outputs 14 |  |
+| `Mth_model` | posteriordb | 394 | 5044 | 19.1 | 0.23 |  |  | 1.17 | 1.23 | lp 24, gradient 28, outputs 14 |  |
+| `multi_occupancy` | posteriordb | 106 | 312 | 14.2 | 2.44 | 0.02 | 0.01 | 0.10 | 0.10 | lp 24 |  |
+| `nes` | posteriordb | 10 | 10 | 2.64 | 2.64 | 1.51 | 0.21 | 0.01 | 0.01 | 10 |  |
+| `nes_logit_model` | posteriordb | 2 | 2 | 17.8 | 17.8 | 4.04 | 4.04 | <0.01 | <0.01 | 10 |  |
+| `nn_rbm1bJ10` | posteriordb | 7951 | 7951 | 21.1 | 21.1 |  |  | <0.01 | <0.01 | 10 |  |
+| `nn_rbm1bJ100` | posteriordb | 79411 | 79411 |  |  |  |  |  |  | 10 |  |
+| `normal_mixture` | posteriordb | 3 | 3 | 4.11 | 0.26 | 7.44 | 6.98 | 0.14 | 0.14 | 10 |  |
+| `normal_mixture_k` | posteriordb | 14 | 15 | 7.20 | 6.53 | 14.9 | 15.0 | 0.24 | 0.23 | gradient 15 |  |
+| `one_comp_mm_elim_abs` | posteriordb | 4 | 44 |  |  |  |  |  |  | outputs 245 |  |
+| `pilots` | posteriordb | 18 | 58 | 0.69 | 0.69 | 0.05 | 0.05 | 0.05 | 0.05 | 10 |  |
+| `prophet` | posteriordb | 62 | 62 | 0.78 | 0.78 | 0.41 | 0.37 | <0.01 | <0.01 | 10 |  |
+| `radon_county` | posteriordb | 389 | 389 | 0.38 | 0.38 |  |  | <0.01 | <0.01 | 10 |  |
+| `radon_county_intercept` | posteriordb | 388 | 388 | 53.8 | 4.62 |  |  | <0.01 | <0.01 | lp 95, gradient 213 |  |
+| `radon_hierarchical_intercept_centered` | posteriordb | 391 | 391 | 31.7 | 5.38 |  |  | <0.01 | <0.01 | lp 95, gradient 213 |  |
+| `radon_hierarchical_intercept_noncentered` | posteriordb | 391 | 777 | 52.6 | 5.63 |  |  | 0.15 | 0.15 | lp 95, gradient 213 |  |
+| `radon_partially_pooled_centered` | posteriordb | 389 | 389 | 55.8 | 5.99 |  |  | <0.01 | <0.01 | lp 95, gradient 229 |  |
+| `radon_partially_pooled_noncentered` | posteriordb | 389 | 775 | 43.3 | 6.41 |  |  | 0.07 | 0.07 | lp 95, gradient 213 |  |
+| `radon_pooled` | posteriordb | 3 | 3 | 136 | 7.77 | 54.3 | 5.75 | 0.05 | 0.05 | lp 196, gradient 213 |  |
+| `radon_variable_intercept_centered` | posteriordb | 390 | 390 | 73.1 | 6.76 |  |  | <0.01 | <0.01 | lp 95, gradient 213 |  |
+| `radon_variable_intercept_noncentered` | posteriordb | 390 | 776 | 79.2 | 7.09 |  |  | 0.08 | 0.08 | lp 95, gradient 213 |  |
+| `radon_variable_intercept_slope_centered` | posteriordb | 777 | 777 | 55.9 | 8.66 |  |  | <0.01 | <0.01 | lp 95, gradient 213 |  |
+| `radon_variable_intercept_slope_noncentered` | posteriordb | 777 | 1549 | 63.3 | 8.63 |  |  | 0.07 | 0.07 | lp 95, gradient 213 |  |
+| `radon_variable_slope_centered` | posteriordb | 390 | 390 | 78.7 | 12.0 |  |  | <0.01 | <0.01 | lp 103, gradient 213 |  |
+| `radon_variable_slope_noncentered` | posteriordb | 390 | 776 | 80.7 | 11.7 |  |  | 0.08 | 0.08 | lp 95, gradient 213 |  |
+| `Rate_1_model` | posteriordb | 1 | 1 | 0.53 | 0.53 | 24.2 | 24.2 | 0.33 | 0.33 | 10 |  |
+| `Rate_2_model` | posteriordb | 2 | 3 | 0.23 | 0.23 | 0.47 | 0.47 | 11.8 | 11.8 | 10 |  |
+| `Rate_3_model` | posteriordb | 1 | 1 | 0.57 | 0.57 | 1.87 | 1.87 | 0.33 | 0.33 | 10 |  |
+| `Rate_4_model` | posteriordb | 2 | 4 | 0.62 | 0.95 | 0.31 | 0.31 | 0.27 | 0.27 | 10 |  |
+| `Rate_5_model` | posteriordb | 1 | 3 | 0.64 | 0.64 | 22.5 | 22.5 | 0.33 | 0.33 | 10 |  |
+| `rats_model` | posteriordb | 65 | 66 | 0.75 | 0.25 | 0.01 | <0.01 | 0.01 | 0.01 | 10 |  |
+| `seeds_centered_model` | posteriordb | 26 | 47 | 0.54 | 0.54 | 0.23 | 0.22 | 0.09 | 0.09 | 10 |  |
+| `seeds_model` | posteriordb | 26 | 27 | 0.22 | 0.22 | 0.20 | 0.20 | 0.02 | 0.02 | 10 |  |
+| `seeds_stanified_model` | posteriordb | 26 | 26 | 0.38 | 0.38 | 0.21 | 0.20 | 0.01 | 0.01 | 10 |  |
+| `sesame_one_pred_a` | posteriordb | 3 | 3 | 6.58 | 6.58 | 7.17 | 0.64 | 0.05 | 0.05 | gradient 36 |  |
+| `soil_incubation` | posteriordb | 6 | 31 |  |  |  |  |  |  | 10 |  |
+| `state_space_stochastic_level_stochastic_seasonal` | posteriordb | 389 | 581 | 6.01 | 4.34 |  |  | 0.18 | 0.18 | 10 |  |
+| `surgical_model` | posteriordb | 14 | 28 | 0.37 | 0.37 | 0.09 | 0.09 | 0.12 | 0.12 | 10 |  |
+| `Survey_model` | posteriordb | 1 | 1002 | 2.58 | 2.58 | 57.9 | 72.2 | 0.60 | 0.60 | gradient 69 |  |
+| `wells_daae_c_model` | posteriordb | 6 | 6 | 1.82 | 1.49 | 1.40 | 0.97 | <0.01 | <0.01 | 10 |  |
+| `wells_dae_c_model` | posteriordb | 5 | 5 | 1.37 | 1.71 | 1.56 | 1.46 | <0.01 | <0.01 | 10 |  |
+| `wells_dae_inter_model` | posteriordb | 7 | 7 | 1.48 | 1.48 | 1.27 | 1.20 | <0.01 | <0.01 | 10 |  |
+| `wells_dae_model` | posteriordb | 4 | 4 | 3.49 | 3.49 | 1.73 | 1.73 | <0.01 | <0.01 | 10 |  |
+| `wells_dist` | posteriordb | 2 | 2 | 117 | 117 | 33.4 | 1.64 | <0.01 | <0.01 | gradient 118 |  |
+| `wells_dist100_model` | posteriordb | 2 | 2 | 9.38 | 9.38 | 15.0 | 15.0 | <0.01 | <0.01 | 10 |  |
+| `wells_dist100ars_model` | posteriordb | 3 | 3 | 3.25 | 3.25 | 2.16 | 2.16 | <0.01 | <0.01 | 10 |  |
+| `wells_interaction_c_model` | posteriordb | 4 | 4 | 2.09 | 2.09 | 1.75 | 1.35 | <0.01 | <0.01 | 10 |  |
+| `wells_interaction_model` | posteriordb | 4 | 4 | 1.60 | 1.60 | 1.17 | 1.17 | <0.01 | <0.01 | 10 |  |
+| `aalto_bern` | educational | 1 | 12 | 0.33 | 0.33 | 0.84 | 0.84 | 0.43 | 0.43 | 10 |  |
+| `aalto_binom` | educational | 1 | 1 | 0.33 | 0.33 | 1.17 | 1.17 | 0.33 | 0.33 | 10 |  |
+| `aalto_binom2` | educational | 2 | 3 | 0.35 | 0.68 | 0.27 | 0.27 | 0.49 | 0.49 | 10 |  |
+| `aalto_binomb` | educational | 1 | 2 | 0.52 | 0.52 | 0.91 | 0.91 | 0.20 | 0.20 | 10 |  |
+| `aalto_gpareto` | educational | 2 | 30 | 0.57 | 0.57 | 2.66 | 1.51 | 0.33 | 0.33 | 10 |  |
+| `aalto_grp_aov` | educational | 4 | 4 | 0.70 | 0.70 | 0.08 | 0.08 | 0.06 | 0.06 | 10 |  |
+| `aalto_grp_prior_mean` | educational | 6 | 6 | 0.52 | 0.52 | 0.12 | 0.12 | 0.09 | 0.09 | 10 |  |
+| `aalto_grp_prior_mean_var` | educational | 10 | 10 | 0.59 | 0.59 | 0.19 | 0.19 | 0.06 | 0.06 | 10 |  |
+| `aalto_lin` | educational | 3 | 20 | 0.22 | 0.22 | 0.31 | 0.28 | 0.28 | 0.28 | 10 |  |
+| `aalto_lin_std` | educational | 3 | 29 | 0.25 | 0.25 | 4.72 | 4.74 | 2.58 | 2.58 | 10 |  |
+| `aalto_lin_std_t` | educational | 4 | 30 | 1.20 | 1.20 | 2.56 | 2.52 | 2.33 | 2.33 | 10 |  |
+| `aalto_poisson_hurdle` | educational | 2 | 1002 | 13.8 | 0.64 | 13.2 | 0.39 | 0.26 | 0.26 | lp 19, gradient 44 |  |
+| `aalto_poisson_simple` | educational | 1 | 1001 | 1.08 | 1.08 | 1.63 | 1.63 | 0.29 | 0.29 | 10 |  |
+| `i319_gauss_re` | brms | 66 | 127 | 0.79 | 0.79 | 0.02 | 0.02 | 0.03 | 0.03 | 10 | brms limit 10, gradient against its largest entry |
+| `i319_negbin_fixed` | brms | 6 | 8 | 9.87 | 9.87 | 0.49 | 0.49 | 0.21 | 0.21 | 10 | brms limit 10, gradient against its largest entry |
+| `i319_negbin_re` | brms | 66 | 127 | 9.29 | 9.29 | 0.08 | 0.07 | 0.02 | 0.02 | 10 | brms limit 10, gradient against its largest entry |
+| `i319_pois_fixed` | brms | 5 | 7 | 3.04 | 3.04 | 0.37 | 0.37 | 0.09 | 0.09 | 10 | brms limit 10, gradient against its largest entry |
+| `i319_pois_re` | brms | 65 | 126 | 2.10 | 2.10 | 0.06 | 0.04 | 0.10 | 0.10 | 10 | brms limit 10, gradient against its largest entry |
+| `i319_pois_re2` | brms | 302 | 599 | 1.21 | 1.54 |  |  | 0.08 | 0.08 | 10 | brms limit 10, gradient against its largest entry |
+| `i320_gp_expquad` | brms | 34 | 36 | 36,641 | 36,641 | 34,870 | 34,870 | 0.06 | 0.06 | 10 | ill-conditioned, so the 1e-9 limit is 1.5e-6 for the gradient. brms limit 10 |
+| `i320_gp_matern32` | brms | 34 | 36 | 1.53 | 0.98 | 0.66 | 0.66 | 0.06 | 0.06 | 10 | brms limit 10 |
+| `i320_mi_nhanes` | brms | 27 | 30 | 0.68 | 1.07 | 0.06 | 0.06 | 0.06 | 0.06 | 10 | brms limit 10 |
+| `i320_pois_trunc_both` | brms | 4 | 6 | 4.94 | 4.94 | 2.61 | 0.63 | 0.12 | 0.12 | gradient 16 | brms limit 16, gradient against its largest entry |
+| `i320_pois_trunc_ub` | brms | 4 | 6 | 4.94 | 4.94 | 2.61 | 0.63 | 0.12 | 0.12 | gradient 16 | brms limit 16, gradient against its largest entry |
+| `i320_sratio_cs` | brms | 8 | 13 | 8.10 | 8.10 | 3.32 | 3.32 | 0.08 | 0.08 | 10 | brms limit 10, gradient against its largest entry |
+| `i320_sratio_plain` | brms | 6 | 11 | 4.73 | 4.73 | 2.43 | 2.43 | 0.07 | 0.07 | 10 | brms limit 10, gradient against its largest entry |
+| `s2_ar_cov` | brms | 4 | 70 | 0.61 | 0.61 | 0.76 | 0.67 | 0.07 | 0.06 | 10 | brms limit 10, gradient against its largest entry |
+| `s2_beta_binomial` | brms | 3 | 5 | 4.19 | 4.19 | 1.19 | 0.84 | 0.39 | 0.30 | 10 | brms limit 10 |
+| `s2_car` | brms | 10 | 12 | 0.66 | 0.85 | 0.35 | 0.29 | 0.10 | 0.06 | 10 | brms limit 10, gradient against its largest entry |
+| `s2_car_esicar` | brms | 8 | 15 | 0.71 | 0.38 | 0.31 | 0.33 | 0.07 | 0.04 | 10 | brms limit 10, gradient against its largest entry |
+| `s2_car_icar` | brms | 9 | 16 | 1.15 | 1.15 | 14.8 | 14.8 | 0.12 | 0.09 | 10 | brms limit 10, gradient against its largest entry |
+| `s2_categorical_re` | brms | 16 | 29 | 1.29 | 1.63 | 0.61 | 0.64 | 0.17 | 0.15 | 10 | brms limit 10, gradient against its largest entry |
+| `s2_cens_interval` | brms | 3 | 5 | 2.04 | 1.04 | 5.0e10 | 5.0e10 | 0.20 | 0.12 | 10 | brms limit 10, gradient against its largest entry |
+| `s2_com_poisson` | brms | 3 | 5 | 1.38 | 1.38 | 1.4e15 | 1.4e15 | 0.39 | 0.39 | 10 | brms limit 10 |
+| `s2_cosy` | brms | 4 | 70 | 0.87 | 0.60 | 0.79 | 0.77 | 0.07 | 0.07 | 10 | brms limit 10, gradient against its largest entry |
+| `s2_cox` | brms | 6 | 9 | 0.94 | 0.26 | 0.50 | 0.17 | 0.57 | 0.53 | 10 | brms limit 10, gradient against its largest entry |
+| `s2_cox_cens` | brms | 6 | 9 | 0.35 | 0.35 | 0.86 | 0.63 | 0.57 | 0.53 | 10 | brms limit 10 |
+| `s2_cumulative_cauchit` | brms | 4 | 9 | 1.42 | 1.06 | 0.71 | 0.44 | 0.08 | 0.08 | 10 | brms limit 10, gradient against its largest entry |
+| `s2_cumulative_cloglog` | brms | 4 | 9 | 11.8 | 11.8 | 173 | 173 | 0.08 | 0.08 | 10 | brms limit 10 |
+| `s2_cumulative_probit` | brms | 4 | 9 | 0.83 | 0.83 | 5.3e9 | 5.3e9 | 0.08 | 0.08 | 10 | brms limit 10 |
+| `s2_custom_vint` | brms | 3 | 5 | 3.52 | 3.52 | 1.08 | 1.06 | 0.39 | 0.30 | 10 | brms limit 10 |
+| `s2_custom_vreal` | brms | 3 | 5 | 1.18 | 0.85 | 0.55 | 0.39 | 0.21 | 0.13 | 10 | brms limit 10, gradient against its largest entry |
+| `s2_dirichlet` | brms | 5 | 8 | 0.13 | 0.65 | 0.31 | 0.29 | 0.25 | 0.19 | 10 | brms limit 10 |
+| `s2_discrete_weibull` | brms | 3 | 5 | 0.70 | 0.70 | 0.80 | 0.64 | 0.39 | 0.30 | 10 | brms limit 10, gradient against its largest entry |
+| `s2_dist_sigma_re` | brms | 9 | 17 | 0.33 | 0.33 | 0.47 | 0.36 | 0.11 | 0.08 | 10 | brms limit 10, gradient against its largest entry |
+| `s2_fcor` | brms | 3 | 5 | 0.78 | 0.78 | 0.61 | 1.57 | 0.21 | 0.13 | 10 | brms limit 10, gradient against its largest entry |
+| `s2_frechet` | brms | 3 | 5 | 0.92 | 0.92 | 2.00 | 1.91 | 0.20 | 0.12 | 10 | brms limit 10 |
+| `s2_gev` | brms | 4 | 6 | 0.29 | 0.29 | 1.32 | 1.43 | 0.19 | 0.11 | 10 | brms limit 10, gradient against its largest entry |
+| `s2_gp_approx` | brms | 9 | 11 | 0.30 | 0.63 | 0.33 | 0.29 | 0.08 | 0.08 | 10 | brms limit 10 |
+| `s2_gp_by_approx` | brms | 16 | 18 | 0.43 | 0.45 | 0.15 | 0.14 | 0.11 | 0.11 | 10 | brms limit 10 |
+| `s2_gp_by_gr` | brms | 52 | 54 | 1.7e6 | 1.7e6 | 1.9e7 | 1.9e7 | 0.04 | 0.04 | 10 | ill-conditioned, so the 1e-9 limit is 1.5e-6 for the gradient. brms limit 10 |
+| `s2_gr_by` | brms | 10 | 17 | 0.39 | 0.37 | 0.28 | 0.25 | 0.14 | 0.12 | 10 | brms limit 10, gradient against its largest entry |
+| `s2_gr_student` | brms | 15 | 27 | 0.83 | 1.17 | 0.31 | 0.36 | 0.20 | 0.18 | 10 | brms limit 10 |
+| `s2_hurdle_cumulative` | brms | 4 | 8 | 1.44 | 1.60 | 0.96 | 0.63 | 0.06 | 0.06 | 10 | brms limit 10, gradient against its largest entry |
+| `s2_hurdle_negbin` | brms | 4 | 6 | 1.10 | 1.10 | 1.70 | 1.66 | 0.25 | 0.18 | 10 | brms limit 10 |
+| `s2_index_mi` | brms | 9 | 12 | 0.30 | 0.35 | 0.36 | 0.37 | 0.08 | 0.08 | 10 | brms limit 10, gradient against its largest entry |
+| `s2_invgaussian` | brms |  |  |  |  |  |  |  |  |  | CmdStan rejects every point, and stanli must too |
+| `s2_logistic_normal` | brms | 7 | 18 | 1.57 | 1.90 | 0.65 | 0.69 | 0.10 | 0.07 | 10 | brms limit 10 |
+| `s2_me2` | brms | 89 | 259 | 0.45 | 0.71 | 0.05 | 0.06 | 0.10 | 0.10 | 10 | brms limit 10 |
+| `s2_me2_nomecor` | brms | 88 | 170 | 0.61 | 0.61 | 0.06 | 0.05 | 0.06 | 0.06 | 10 | brms limit 10, gradient against its largest entry |
+| `s2_mi_lognormal` | brms | 9 | 12 | 0.36 | 0.39 | 0.59 | 0.58 | 2.53 | 0.29 | outputs 64 | brms limit 64 |
+| `s2_mi_trunc_lb` | brms | 9 | 12 | 0.75 | 0.75 | 1.2e8 | 1.2e8 | 2.53 | 0.29 | outputs 64 | brms limit 64 |
+| `s2_mixture_theta` | brms | 8 | 14 | 0.54 | 0.63 | 0.39 | 0.32 | 0.14 | 0.14 | 10 | brms limit 10, gradient against its largest entry |
+| `s2_mm` | brms | 9 | 16 | 0.51 | 0.51 | 0.50 | 0.48 | 0.10 | 0.07 | 10 | brms limit 10, gradient against its largest entry |
+| `s2_mm_weights` | brms | 9 | 16 | 0.53 | 0.53 | 0.36 | 0.32 | 0.10 | 0.07 | 10 | brms limit 10, gradient against its largest entry |
+| `s2_mmc` | brms | 16 | 46 | 0.22 | 0.89 | 0.23 | 0.27 | 0.13 | 0.12 | 10 | brms limit 10, gradient against its largest entry |
+| `s2_mo_simo_prior` | brms | 5 | 8 | 0.59 | 0.77 | 1.00 | 0.88 | 0.27 | 0.27 | 10 | brms limit 10 |
+| `s2_multinomial` | brms | 4 | 7 | 1.03 | 1.03 | 0.92 | 0.46 | 0.23 | 0.16 | 10 | brms limit 10, gradient against its largest entry |
+| `s2_mv_shared_re` | brms | 19 | 50 | 0.51 | 1.42 | 0.40 | 0.38 | 0.09 | 0.08 | 10 | brms limit 10, gradient against its largest entry |
+| `s2_mv_subset` | brms | 6 | 9 | 0.37 | 0.49 | 0.74 | 0.74 | 0.41 | 0.41 | 10 | brms limit 10 |
+| `s2_nl_noloop` | brms | 5 | 6 | 0.81 | 0.81 | 1.07 | 1.07 | 0.17 | 0.17 | 10 | brms limit 10 |
+| `s2_nlf` | brms | 3 | 4 | 1.84 | 1.84 | 0.62 | 0.62 | 0.20 | 0.20 | 10 | CmdStan rejects point 1 and 2, and stanli must too. brms limit 10 |
+| `s2_rate` | brms | 2 | 4 | 1.75 | 0.62 | 2.71 | 2.22 | 0.27 | 0.16 | 10 | brms limit 10, gradient against its largest entry |
+| `s2_s_by` | brms | 52 | 94 | 1.73 | 1.73 | 0.10 | 0.09 | 0.07 | 0.07 | 10 | brms limit 10 |
+| `s2_s_cc` | brms | 11 | 21 | 0.30 | 0.30 | 0.21 | 0.21 | 0.11 | 0.11 | 10 | brms limit 10 |
+| `s2_sar` | brms | 4 | 6 | 1.45 | 1.45 | 2.90 | 2.80 | 7.5e13 | 7.5e13 | 10 | brms limit 10, gradient against its largest entry |
+| `s2_sar_error` | brms | 4 | 6 | 1.81 | 1.81 | 2.22 | 2.64 | 7.5e13 | 7.5e13 | 10 | brms limit 10, gradient against its largest entry |
+| `s2_shifted_lognormal` | brms | 4 | 6 | 0.86 | 0.86 | 0.82 | 0.69 | 0.27 | 0.20 | 10 | brms limit 10 |
+| `s2_t2_by` | brms | 56 | 100 | 0.51 | 0.18 | 0.09 | 0.09 | 0.08 | 0.08 | 10 | brms limit 10 |
+| `s2_threading` | brms | 4 | 6 | 0.41 | 0.41 | 1.84 | 1.95 | 0.31 | 0.23 | 10 | brms limit 10 |
+| `s2_unstr` | brms | 31 | 161 | 0.99 | 0.99 | 0.27 | 0.25 | 0.17 | 0.15 | 10 | brms limit 10, gradient against its largest entry |
+| `s2_weights_trunc` | brms | 3 | 5 | 1.14 | 1.48 | 5.0e8 | 5.0e8 | 0.20 | 0.12 | 10 | brms limit 10, gradient against its largest entry |
+| `s2_wiener` | brms | 5 | 7 |  |  |  |  |  |  | 10 | brms limit 10, gradient against its largest entry |
+| `s2_zi_asymlaplace` | brms | 5 | 7 | 1.62 | 1.62 | 1.02 | 0.95 | 0.23 | 0.17 | 10 | brms limit 10 |
+| `s2_zi_beta` | brms | 4 | 6 | 0.94 | 0.94 | 0.78 | 0.39 | 0.35 | 0.28 | 10 | brms limit 10, gradient against its largest entry |
+| `s2_zoi_beta` | brms | 5 | 7 | 1.01 | 1.68 | 0.60 | 0.20 | 0.34 | 0.29 | 10 | brms limit 10, gradient against its largest entry |
+| `sw_acat` | brms | 4 | 9 | 15.2 | 15.2 | 9.35 | 9.35 | 0.05 | 0.05 | 10 | brms limit 10, gradient against its largest entry |
+| `sw_acat_cs` | brms | 7 | 12 | 21.9 | 21.9 | 6.54 | 6.54 | 0.03 | 0.03 | 10 | brms limit 10, gradient against its largest entry |
+| `sw_ar` | brms | 4 | 6 | 0.93 | 0.93 | 0.68 | 0.74 | 0.37 | 0.19 | 10 | brms limit 10, gradient against its largest entry |
+| `sw_arma` | brms | 5 | 7 | 0.48 | 0.48 | 0.64 | 0.59 | 0.30 | 0.15 | 10 | brms limit 10, gradient against its largest entry |
+| `sw_asymlaplace` | brms | 4 | 6 | 0.37 | 0.71 | 0.96 | 0.94 | 0.32 | 0.17 | 10 | brms limit 10 |
+| `sw_bernoulli` | brms | 3 | 5 | 0.59 | 0.59 | 1.74 | 1.12 | 0.27 | 0.15 | 10 | brms limit 10, gradient against its largest entry |
+| `sw_beta` | brms | 3 | 5 | 2.20 | 2.20 | 1.27 | 0.38 | 0.53 | 0.34 | 10 | brms limit 10 |
+| `sw_binomial` | brms | 2 | 4 | 4.55 | 5.89 | 0.60 | 0.48 | 0.49 | 0.24 | 10 | brms limit 10, gradient against its largest entry |
+| `sw_categorical` | brms | 4 | 7 | 3.64 | 3.64 | 1.55 | 1.08 | 0.37 | 0.19 | 10 | brms limit 10, gradient against its largest entry |
+| `sw_cens` | brms | 3 | 5 | 0.57 | 0.57 | 1.8e9 | 1.8e9 | 0.35 | 0.16 | 10 | brms limit 10, gradient against its largest entry |
+| `sw_cratio` | brms | 4 | 9 | 16.7 | 16.7 | 8.09 | 8.09 | 0.05 | 0.05 | 10 | brms limit 10, gradient against its largest entry |
+| `sw_cratio_cs` | brms | 7 | 12 | 3.18 | 3.18 | 4.86 | 4.86 | 0.03 | 0.03 | 10 | brms limit 10, gradient against its largest entry |
+| `sw_cumulative` | brms | 5 | 10 | 21.3 | 21.3 | 7.79 | 7.79 | 0.12 | 0.12 | 10 | brms limit 10, gradient against its largest entry |
+| `sw_cumulative_cs` | brms | 7 | 12 | 19.2 | 19.2 | 7.95 | 7.95 | 0.05 | 0.05 | 10 | brms limit 10, gradient against its largest entry |
+| `sw_dist_sigma` | brms | 4 | 7 | 0.65 | 0.65 | 0.78 | 0.64 | 0.26 | 0.10 | 10 | brms limit 10, gradient against its largest entry |
+| `sw_exgaussian` | brms | 4 | 6 | 0.57 | 0.57 | 0.48 | 0.65 | 0.30 | 0.15 | 10 | brms limit 10, gradient against its largest entry |
+| `sw_gamma` | brms | 3 | 5 | 0.83 | 0.92 | 0.89 | 0.81 | 0.51 | 0.32 | 10 | brms limit 10, gradient against its largest entry |
+| `sw_gaussian` | brms | 4 | 6 | 0.71 | 0.71 | 0.63 | 0.59 | 0.19 | 0.10 | 10 | brms limit 10, gradient against its largest entry |
+| `sw_gp` | brms | 44 | 46 | 2.0e5 | 2.0e5 | 1.6e6 | 1.6e6 | 0.02 | 0.02 | 10 | ill-conditioned, so the 1e-9 limit is 1.5e-6 for the gradient. brms limit 10 |
+| `sw_hurdle_gamma` | brms | 4 | 6 | 0.91 | 1.25 | 0.96 | 0.39 | 0.44 | 0.29 | 10 | brms limit 10, gradient against its largest entry |
+| `sw_hurdle_lognormal` | brms | 4 | 6 | 0.80 | 0.46 | 1.02 | 0.39 | 0.32 | 0.17 | 10 | brms limit 10, gradient against its largest entry |
+| `sw_hurdle_pois` | brms | 3 | 5 | 1.95 | 0.16 | 0.35 | 0.17 | 0.39 | 0.20 | 10 | brms limit 10, gradient against its largest entry |
+| `sw_lognormal` | brms | 3 | 5 | 0.51 | 0.51 | 0.79 | 0.85 | 0.35 | 0.16 | 10 | brms limit 10, gradient against its largest entry |
+| `sw_ma` | brms | 4 | 6 | 1.08 | 1.08 | 0.73 | 0.78 | 0.37 | 0.19 | 10 | brms limit 10, gradient against its largest entry |
+| `sw_me` | brms | 45 | 87 | 0.67 | 0.94 | 0.08 | 0.08 | 0.17 | 0.17 | 10 | brms limit 10 |
+| `sw_mi` | brms | 9 | 12 | 0.68 | 0.39 | 0.72 | 0.72 | 0.20 | 0.17 | 10 | brms limit 10, gradient against its largest entry |
+| `sw_mixture` | brms | 7 | 15 | 0.93 | 1.42 | 0.95 | 0.70 | 0.24 | 0.19 | 10 | brms limit 10, gradient against its largest entry |
+| `sw_mono` | brms | 5 | 8 | 0.51 | 0.51 | 0.63 | 0.70 | 0.21 | 0.21 | 10 | brms limit 10 |
+| `sw_mv_norescor` | brms | 6 | 9 | 0.43 | 0.72 | 0.64 | 0.48 | 0.30 | 0.14 | 10 | brms limit 10, gradient against its largest entry |
+| `sw_mv_rescor` | brms | 7 | 18 | 0.57 | 0.44 | 0.57 | 0.44 | 0.16 | 0.09 | 10 | brms limit 10, gradient against its largest entry |
+| `sw_negbinomial` | brms | 4 | 6 | 2.61 | 2.61 | 0.48 | 0.57 | 0.22 | 0.14 | 10 | brms limit 10, gradient against its largest entry |
+| `sw_nonlinear` | brms | 3 | 4 | 0.59 | 0.59 | 0.76 | 0.76 | 0.12 | 0.12 | 10 | brms limit 10 |
+| `sw_poisson` | brms | 3 | 5 | 0.21 | 0.21 | 0.21 | 0.23 | 0.29 | 0.18 | 10 | brms limit 10, gradient against its largest entry |
+| `sw_re_bern` | brms | 8 | 15 | 0.20 | 0.20 | 0.45 | 0.30 | 0.21 | 0.14 | 10 | brms limit 10, gradient against its largest entry |
+| `sw_re_gauss` | brms | 9 | 16 | 0.49 | 0.49 | 0.64 | 0.66 | 0.17 | 0.10 | 10 | brms limit 10, gradient against its largest entry |
+| `sw_re_negbin` | brms | 9 | 16 | 1.70 | 1.70 | 0.27 | 0.26 | 0.15 | 0.09 | 10 | brms limit 10, gradient against its largest entry |
+| `sw_re_pois` | brms | 8 | 15 | 0.42 | 0.42 | 0.13 | 0.10 | 0.17 | 0.10 | 10 | brms limit 10, gradient against its largest entry |
+| `sw_re_slope` | brms | 16 | 46 | 0.52 | 0.85 | 0.49 | 0.46 | 0.16 | 0.13 | 10 | brms limit 10, gradient against its largest entry |
+| `sw_se` | brms | 2 | 5 | 0.43 | 0.43 | 1.22 | 1.10 | 0.41 | 0.16 | 10 | brms limit 10 |
+| `sw_skewnormal` | brms | 4 | 6 | 1.29 | 1.29 | 1.91 | 1.55 | 0.30 | 0.13 | 10 | brms limit 10, gradient against its largest entry |
+| `sw_spline_s` | brms | 12 | 22 | 0.92 | 0.92 | 0.11 | 0.13 | 0.12 | 0.12 | 10 | brms limit 10 |
+| `sw_spline_t2` | brms | 29 | 52 | 0.61 | 0.61 | 0.13 | 0.14 | 0.07 | 0.07 | 10 | brms limit 10 |
+| `sw_sratio` | brms | 4 | 9 | 16.7 | 16.7 | 8.09 | 8.09 | 0.05 | 0.05 | 10 | brms limit 10, gradient against its largest entry |
+| `sw_student` | brms | 5 | 7 | 0.33 | 0.33 | 0.31 | 0.44 | 0.33 | 0.26 | 10 | brms limit 10, gradient against its largest entry |
+| `sw_trunc` | brms | 3 | 5 | 0.31 | 0.31 | 1.1e9 | 1.1e9 | 0.35 | 0.16 | 10 | brms limit 10, gradient against its largest entry |
+| `sw_vonmises` | brms | 3 | 5 | 0.91 | 0.91 | 0.54 | 0.44 | 0.38 | 0.19 | 10 | brms limit 10, gradient against its largest entry |
+| `sw_weibull` | brms | 3 | 5 | 1.11 | 1.11 | 0.38 | 0.40 | 0.51 | 0.32 | 10 | brms limit 10, gradient against its largest entry |
+| `sw_weights` | brms | 3 | 5 | 1.62 | 0.50 | 2.17 | 1.38 | 0.35 | 0.16 | 10 | brms limit 10, gradient against its largest entry |
+| `sw_zi_binomial` | brms | 3 | 5 | 4.43 | 5.10 | 0.56 | 0.37 | 0.42 | 0.23 | 10 | brms limit 10, gradient against its largest entry |
+| `sw_zi_negbin` | brms | 4 | 6 | 0.83 | 0.50 | 0.92 | 0.68 | 0.36 | 0.21 | 10 | brms limit 10, gradient against its largest entry |
+| `sw_zi_poisson` | brms | 3 | 5 | 1.00 | 0.52 | 0.32 | 0.34 | 0.39 | 0.20 | 10 | brms limit 10, gradient against its largest entry |
+| `ch09_m5_8s` | rethinking | 4 | 4 | 0.57 | 0.57 | 0.52 | 0.34 | 0.07 | 0.07 | 10 |  |
+| `ch09_m5_8s2` | rethinking | 4 | 4 | 0.70 | 0.70 | 1.02 | 0.66 | 0.09 | 0.09 | 10 |  |
+| `ch09_m9_1` | rethinking | 5 | 5 | 0.22 | 0.22 | 0.43 | 0.22 | 0.05 | 0.05 | 10 |  |
+| `ch09_m9_1_chains4` | rethinking | 5 | 5 | 0.22 | 0.22 | 0.43 | 0.22 | 0.05 | 0.05 | 10 |  |
+| `ch09_m9_2` | rethinking | 2 | 2 | 0.63 | 0.63 | 0.71 | 0.71 | 0.11 | 0.11 | 10 |  |
+| `ch09_m9_3` | rethinking | 2 | 2 | 0.53 | 0.53 | 6.29 | 6.29 | 0.11 | 0.11 | 10 |  |
+| `ch09_m9_4` | rethinking | 3 | 3 | 0.90 | 0.90 | 1.62 | 1.62 | 0.05 | 0.05 | 10 |  |
+| `ch09_m9_5` | rethinking | 3 | 3 | 0.66 | 0.66 | 1.67 | 1.67 | 0.05 | 0.05 | 10 |  |
+| `ch09_mp` | rethinking | 2 | 2 | 0.36 | 0.36 | 0.09 | 0.09 | <0.01 | <0.01 | 10 |  |
+| `ch11_m11_10` | rethinking | 4 | 24 | 0.94 | 0.94 | 0.33 | 0.42 | 0.23 | 0.23 | 10 |  |
+| `ch11_m11_11` | rethinking | 5 | 25 | 1.86 | 1.86 | 0.79 | 0.60 | 0.58 | 0.58 | 10 |  |
+| `ch11_m11_4` | rethinking | 11 | 1019 | 12.9 | 12.9 | 0.77 | 0.61 | 0.26 | 0.26 | 10 |  |
+| `ch11_m11_5` | rethinking | 11 | 1019 | 15.1 | 15.4 | 1.73 | 0.50 | 0.27 | 0.27 | gradient 14 |  |
+| `ch11_m11_6` | rethinking | 11 | 67 | 0.91 | 0.91 | 0.21 | 0.20 | 0.52 | 0.52 | 10 |  |
+| `ch11_m11_7` | rethinking | 2 | 2 | 0.70 | 0.70 | 0.35 | 0.29 | <0.01 | <0.01 | 10 |  |
+| `ch11_m11_8` | rethinking | 8 | 8 | 0.68 | 0.68 | 0.21 | 0.37 | <0.01 | <0.01 | 10 |  |
+| `ch11_m11_9` | rethinking | 1 | 12 | 9.65 | 9.65 | 0.62 | 0.62 | 0.33 | 0.33 | 10 |  |
+| `ch11_m_pois` | rethinking | 2 | 2 | 4.30 | 4.30 | 0.31 | 0.31 | <0.01 | <0.01 | 10 |  |
+| `ch12_m12_1` | rethinking | 3 | 4 | 1.30 | 1.30 | 4.20 | 3.93 | 0.06 | 0.06 | 10 |  |
+| `ch12_m12_2` | rethinking | 6 | 26 | 4.31 | 4.64 | 4.01 | 3.95 | 5.35 | 5.35 | 10 |  |
+| `ch12_m12_3` | rethinking | 2 | 2 | 24.9 | 0.50 | 24.4 | 0.99 | <0.01 | <0.01 | lp 35, gradient 78 |  |
+| `ch12_m12_3_alt` | rethinking | 2 | 2 | 14.0 | 0.50 | 81.9 | 0.99 | <0.01 | <0.01 | lp 20, gradient 138 |  |
+| `ch12_m12_4` | rethinking | 6 | 6 | 296 | 0.38 | 71.0 | 0.65 | 0.07 | 0.07 | lp 518, gradient 156 |  |
+| `ch12_m12_5` | rethinking | 11 | 11 | 144 | 145 | 33.1 | 0.24 | 0.04 | 0.04 | outputs 157 |  |
+| `ch12_m12_6` | rethinking | 16 | 17 | 148 | 148 | 24.5 | 7.71 | 0.17 | 0.17 | gradient 157 |  |
+| `ch12_m12_7` | rethinking | 10 | 10 | 169 | 169 | 33.9 | 0.35 | 0.10 | 0.10 | outputs 157 |  |
+| `ch13_m13_1` | rethinking | 48 | 144 | 1.43 | 1.10 | 0.15 | 0.15 | 0.25 | 0.25 | 10 |  |
+| `ch13_m13_2` | rethinking | 50 | 146 | 1.20 | 0.87 | 0.09 | 0.09 | 0.25 | 0.25 | 10 |  |
+| `ch13_m13_3` | rethinking | 62 | 62 | 0.71 | 0.71 | 0.08 | 0.07 | 0.01 | 0.01 | 10 |  |
+| `ch13_m13_4` | rethinking | 20 | 1028 | 15.8 | 16.2 | 0.36 | 0.29 | 0.28 | 0.28 | 10 |  |
+| `ch13_m13_4b` | rethinking | 20 | 20 | 15.8 | 16.2 | 0.36 | 0.29 | 0.01 | 0.01 | 10 |  |
+| `ch13_m13_4nc` | rethinking | 20 | 33 | 9.02 | 9.02 | 0.45 | 0.31 | 0.07 | 0.07 | 10 |  |
+| `ch13_m13_5` | rethinking | 13 | 1021 | 21.4 | 21.8 | 0.85 | 0.47 | 0.25 | 0.25 | 10 |  |
+| `ch13_m13_6` | rethinking | 21 | 1029 | 15.7 | 16.1 | 0.35 | 0.28 | 0.28 | 0.28 | 10 |  |
+| `ch13_m13_7` | rethinking | 2 | 2 | 5.07 | 5.07 | 0.25 | 0.25 | <0.01 | <0.01 | 10 |  |
+| `ch13_m13_7nc` | rethinking | 2 | 3 | 0.52 | 0.52 | 0.35 | 0.35 | 0.10 | 0.10 | 10 |  |
+| `ch14_m14_1` | rethinking | 46 | 49 | 0.50 | 0.50 | 0.04 | 0.04 | 0.02 | 0.02 | 10 |  |
+| `ch14_m14_10` | rethinking | 4 | 4 | 3.57 | 3.57 | 5.96 | 4.46 | 0.07 | 0.07 | 10 |  |
+| `ch14_m14_11` | rethinking | 5 | 5 | 6.71 | 6.71 | 6.32 | 6.41 | 0.10 | 0.10 | 10 |  |
+| `ch14_m14_2` | rethinking | 76 | 96 | 14.0 | 13.3 | 0.15 | 0.12 | 0.03 | 0.03 | 10 |  |
+| `ch14_m14_3` | rethinking | 76 | 1188 | 8.16 | 7.82 | 0.16 | 0.13 | 0.24 | 0.24 | 10 |  |
+| `ch14_m14_4` | rethinking | 3 | 3 | 1.06 | 1.06 | 1.45 | 1.00 | 0.05 | 0.05 | 10 |  |
+| `ch14_m14_4x` | rethinking | 3 | 3 | 1.06 | 1.06 | 1.45 | 1.00 | 0.05 | 0.05 | 10 |  |
+| `ch14_m14_5` | rethinking | 4 | 4 | 1.41 | 1.41 | 1.20 | 0.46 | 0.07 | 0.07 | 10 |  |
+| `ch14_m14_6` | rethinking | 7 | 10 | 3.08 | 2.75 | 2.45 | 1.86 | 0.05 | 0.05 | 10 |  |
+| `ch14_m14_6x` | rethinking | 7 | 10 | 3.08 | 2.75 | 2.45 | 1.86 | 0.05 | 0.05 | 10 |  |
+| `ch14_m14_7` | rethinking | 656 | 1266 | 3.79 | 3.79 |  |  | 0.16 | 0.16 | gradient 13 |  |
+| `ch14_m14_8` | rethinking | 15 | 15 | 4.08 | 3.08 | 0.27 | 0.29 | 0.08 | 0.08 | 10 |  |
+| `ch14_m14_8nc` | rethinking | 15 | 225 | 2.24 | 2.24 | 0.39 | 0.32 | 0.06 | 0.06 | 10 |  |
+| `ch14_m14_9` | rethinking | 4 | 4 | 0.37 | 0.37 | 0.71 | 0.21 | 0.07 | 0.07 | 10 |  |
+| `ch15_m15_1` | rethinking | 54 | 54 | 0.78 | 0.78 | 0.10 | 0.10 | <0.01 | <0.01 | 10 |  |
+| `ch15_m15_2` | rethinking | 104 | 104 | 0.56 | 0.56 | 0.06 | 0.06 | <0.01 | <0.01 | 10 |  |
+| `ch15_m15_3` | rethinking | 2 | 2 | 40.4 | 40.4 | 14.7 | 0.25 | <0.01 | <0.01 | gradient 83 |  |
+| `ch15_m15_4` | rethinking | 2 | 2 | 31.4 | 31.4 | 14.3 | 0.25 | <0.01 | <0.01 | gradient 81 |  |
+| `ch15_m15_5` | rethinking | 18 | 18 | 0.90 | 0.90 | 0.17 | 0.14 | 0.03 | 0.03 | 10 |  |
+| `ch15_m15_6` | rethinking | 6 | 6 | 0.39 | 0.39 | 0.83 | 0.80 | 0.09 | 0.09 | 10 |  |
+| `ch15_m15_7` | rethinking | 21 | 24 | 0.40 | 0.73 | 0.36 | 0.33 | 0.02 | 0.02 | 10 |  |
+| `ch15_m15_8` | rethinking | 3 | 3 | 5.86 | 1.27 | 0.93 | 0.14 | 0.08 | 0.08 | 10 |  |
+| `ch15_m15_9` | rethinking | 3 | 303 | 5.86 | 1.27 | 2.13 | 0.14 | 0.33 | 0.33 | gradient 11 |  |
+| `ch16_m16_1` | rethinking | 3 | 3 | 0.40 | 1.06 | 2.96 | 2.33 | 0.21 | 0.21 | 10 |  |
+| `ch16_m16_4` | rethinking | 3 | 3 | 1.19 | 1.19 | 1.32 | 1.25 | 0.17 | 0.17 | 10 |  |
+| `extra_hurdle_poisson` | rethinking | 2 | 2 | 0.70 | 0.37 | 0.50 | 0.68 | 0.26 | 0.26 | 10 |  |
+| `cm_betadiscrete` | cogmod | 4 | 8 | 2.04 | 2.04 | 35.9 | 35.2 | 0.12 | 0.12 | 10 |  |
+| `cm_betagate` | cogmod | 5 | 10 | 1.37 | 1.08 | 1.41 | 0.71 | 0.14 | 0.14 | 10 |  |
+| `cm_bisa` | cogmod | 5 | 10 | 3.27 | 3.27 | 7.19 | 5.66 | 0.11 | 0.11 | gradient 18 |  |
+| `cm_choco` | cogmod | 9 | 18 | 0.64 | 0.64 | 1.98 | 0.50 | 0.04 | 0.04 | gradient 18 |  |
+| `cm_ddm` | cogmod | 9 | 18 |  |  |  |  |  |  | gradient 19 |  |
+| `cm_exgaussian` | cogmod | 4 | 8 | 1.46 | 1.46 | 1.20 | 0.87 | 0.13 | 0.13 | 10 |  |
+| `cm_exwald` | cogmod | 6 | 12 | 2.54 | 2.54 | 2.07 | 0.14 | 0.08 | 0.08 | gradient 30 |  |
+| `cm_gamma` | cogmod | 5 | 10 | 2.02 | 2.02 | 2.13 | 0.89 | 0.07 | 0.07 | gradient 16 |  |
+| `cm_geg` | cogmod | 5 | 10 | 1.85 | 1.85 | 1.37 | 0.76 | 0.17 | 0.17 | 10 |  |
+| `cm_invgamma` | cogmod | 5 | 10 | 0.93 | 0.93 | 2.29 | 2.05 | 0.07 | 0.07 | 10 |  |
+| `cm_invgaussian` | cogmod | 7 | 14 | 2.17 | 2.50 | 1.31 | 0.44 | 0.06 | 0.06 | gradient 16 |  |
+| `cm_invweibull` | cogmod | 5 | 10 | 0.29 | 0.62 | 4.89 | 4.62 | 0.07 | 0.07 | 10 |  |
+| `cm_lba1` | cogmod | 7 | 14 | 3.62 | 2.95 | 7.5e5 | 7.5e5 | 0.05 | 0.05 | gradient 17 |  |
+| `cm_lba2` | cogmod | 9 | 18 | 2.28 | 2.59 | 1.45 | 0.07 | 0.07 | 0.07 | gradient 19 |  |
+| `cm_lnr` | cogmod | 8 | 16 | 0.65 | 1.00 | 1.51 | 0.19 | 0.08 | 0.08 | gradient 32 |  |
+| `cm_lnr_bench` | cogmod | 9 | 16 | 10.6 | 10.6 | 3.68 | 3.36 | 1.37 | 1.37 | 10 |  |
+| `cm_loggamma` | cogmod | 6 | 12 | 44.8 | 45.4 | 18.5 | 18.5 | 0.07 | 0.07 | 10 |  |
+| `cm_lognormal` | cogmod | 6 | 12 | 1.84 | 2.24 | 0.85 | 0.57 | 0.07 | 0.07 | 10 |  |
+| `cm_logstudent` | cogmod | 6 | 12 | 1.61 | 1.94 | 3.22 | 1.37 | 0.07 | 0.07 | gradient 28 |  |
+| `cm_logweibull` | cogmod | 5 | 10 | 2.20 | 1.87 | 0.81 | 0.56 | 0.08 | 0.08 | 10 |  |
+| `cm_rdm` | cogmod | 7 | 14 | 2.45 | 2.78 | 1.11 | 0.16 | 0.09 | 0.09 | gradient 18 |  |
+| `cm_weibull` | cogmod | 5 | 10 | 2.57 | 2.57 | 2.31 | 0.99 | 0.07 | 0.07 | gradient 17 |  |
+| `ctsem_ctsm` | ctsem | 181 | 648 | 2.79 | 0.68 | 0.02 | 0.02 | 0.09 | 0.09 | 10 |  |
+| `ctsem_ctsm_400` | ctsem | 1621 | 4968 | 6.18 | 0.69 |  |  | 0.02 | 0.02 | 10 |  |
+| `ctsem_ctsm_post4_100` | ctsem | 580 | 4929 | 3.52 | 0.52 |  |  | 0.30 | 0.30 | outputs 22 |  |
+| `examplemodels_arch1` | examplemodels | 3 | 3 | 0.72 | 0.72 | 0.34 | 0.34 | 0.14 | 0.14 | 10 |  |
+| `examplemodels_cjs_cov_raneff` | examplemodels | 23 | 16574 | 3.20 | 0.42 | 2.27 | 1.77 | 0.10 | 0.10 | gradient 19 |  |
+| `examplemodels_cjs_mnl_ran` | examplemodels | 21 | 0 | 0.29 | 0.94 | 0.47 | 0.24 |  |  | 10 |  |
+| `examplemodels_covid_sens_spec` | examplemodels | 23 | 41 | 1.31 | 0.98 | 0.05 | 0.05 | 0.20 | 0.18 | 10 |  |
+| `examplemodels_dlm_fx_equicorr` | examplemodels | 7 | 25 |  |  |  |  |  |  | 10 |  |
+| `examplemodels_dlm_fx_factor` | examplemodels | 7 | 10 |  |  |  |  |  |  | 10 |  |
+| `examplemodels_dlm_nile` | examplemodels | 2 | 2 |  |  |  |  |  |  | 10 |  |
+| `examplemodels_gp_fit_multi_output` | examplemodels | 311 | 326 | 1.8e7 | 1.8e7 |  |  | 0.01 | 0.01 | 10 | ill-conditioned, so the 1e-9 limit is 1.5e-6 for the gradient and 5e-8 for lp |
+| `examplemodels_hmm_marginal` | examplemodels | 10 | 0 |  |  |  |  |  |  | 10 |  |
+| `examplemodels_irt_1pl_hier` | examplemodels | 33 | 33 | 0.89 | 0.89 | 0.08 | 0.07 | 0.02 | 0.02 | 10 |  |
+| `examplemodels_irt_multilevel` | examplemodels | 55 | 55 | 6.15 | 6.48 | 0.09 | 0.08 | 0.04 | 0.04 | 10 |  |
+| `examplemodels_kidney` | examplemodels | 46 | 51 | 1.07 | 1.07 | 0.08 | 0.08 | 0.01 | 0.01 | 10 |  |
+| `examplemodels_mr_ss` | examplemodels | 2 | 19602 | 14.7 | 14.4 | 277 | 110 | 0.14 | 0.14 | gradient 729 |  |
+| `examplemodels_ms` | examplemodels | 6 | 72036 | 7.19 | 7.19 | 36.4 | 13.3 | 0.05 | 0.05 | gradient 254 |  |
+| `examplemodels_ode_one_comp_mm` | examplemodels | 4 | 44 |  |  |  |  |  |  | gradient 30, outputs 13 |  |
+| `examplemodels_probit_multi_good` | examplemodels | 2038 | 2064 | 87.8 | 87.8 |  |  | 0.17 | 0.18 | 10 |  |
+| `examplemodels_radon_group` | examplemodels | 92 | 92 | 4.99 | 4.33 | 0.09 | 0.08 | 0.15 | 0.14 | 10 |  |
+| `examplemodels_roaches_overdispersion` | examplemodels | 267 | 267 | 3.05 | 3.05 | 0.01 | 0.01 | 0.33 | 0.33 | 10 |  |
+| `examplemodels_ssm` | examplemodels | 28 | 55 | 1.92 | 1.83 | 1.13 | 1.13 | 0.24 | 0.24 | 10 |  |
+| `examplemodels_stagnant2` | examplemodels | 5 | 5 | 0.26 | 0.60 | 0.52 | 0.52 | 53.2 | 53.2 | 10 |  |
+| `examplemodels_stochvol_optimized` | examplemodels | 503 | 1003 | 1.05 | 1.05 |  |  | 0.14 | 0.14 | 10 |  |
+| `examplemodels_sum_to_zero_binomial` | examplemodels | 19 | 833 | 1.35 | 1.35 | 0.53 | 0.16 | 0.28 | 0.28 | 10 |  |
+| `examplemodels_sur` | examplemodels | 27 | 33 | 0.29 | 0.29 | 0.22 | 0.22 | 0.03 | 0.03 | 10 |  |
+| `stanguide_changepoint` | stanguide | 2 | 114 | 3.37 | 3.37 | 138 | 138 | 3.15 | 3.15 | 10 |  |
+| `stanguide_cjs_history` | stanguide | 5 | 8 | 0.57 | 0.24 | 1.02 | 1.04 | 0.20 | 0.23 | 10 |  |
+| `stanguide_copula` | stanguide | 6 | 21 |  |  |  |  |  |  | 10 |  |
+| `stanguide_integrate_1d_normal` | stanguide | 3 | 3 |  |  |  |  |  |  | 10 |  |
+| `stanguide_map_rect_logistic` | stanguide | 2 | 2 |  |  |  |  |  |  | 10 |  |
+| `stanguide_ode_adjoint` | stanguide | 5 | 5 |  |  |  |  |  |  | gradient 2.0e10 | known mismatch in grad[1], grad[2], grad[5], which have their own relative limit |
+| `oncobayes2_blrm_exnex_combo2` | oncobayes2 | 52 | 143 | 0.71 | 0.37 | 0.09 | 0.09 | 0.07 | 0.07 | 10 |  |
+| `oncobayes2_blrm_exnex_combo3` | oncobayes2 | 99 | 271 | 1.37 | 1.07 | 0.53 | 0.49 | 0.31 | 0.32 | outputs 14 |  |
+| `oncobayes2_blrm_exnex_sa` | oncobayes2 | 9 | 23 |  |  |  |  |  |  | 10 |  |
+| `rstanarm_glm_gaussian` | rstanarm | 4 | 9 |  |  |  |  |  |  | 10 |  |
+| `rstanarm_glmer_bernoulli` | rstanarm | 71 | 142 |  |  |  |  |  |  | 10 |  |
+| `rstanarm_glmer_nb_count` | rstanarm | 25 | 51 |  |  |  |  |  |  | 10 |  |
+| `rstanarm_polr` | rstanarm | 9 | 113 |  |  |  |  |  |  | 10 | CmdStan rejects point 2, and stanli must too |
+| `multinma_ndmm_mspline` | multinma | 62 | 956 |  |  |  |  |  |  | 10 |  |
+| `multinma_smoking_re` | multinma | 59 | 375 |  |  |  |  |  |  | 10 |  |
+| `epinow2_estimate_infections` | epinow2 | 24 | 352 | 1.4e6 | 1.4e6 | 1.6e6 | 1.6e6 | 5.4e5 | 5.4e5 | gradient 34,157, outputs 24 |  |
+| `epinow2_estimate_secondary` | epinow2 | 4 | 72 | 105 | 94.8 | 38.3 | 39.1 | 18.0 | 18.0 | lp 68, gradient 18 |  |
+| `mlumr_survival_mspline_relaxed` | mlumr | 32 | 1052 | 1.03 | 0.53 | 0.24 | 0.18 | 3.34 | 3.58 | outputs 128 |  |
+| `mlumr_survival_relaxed` | mlumr | 12 | 925 | 1.52 | 2.23 | 0.69 | 0.69 | 1.71 | 1.70 | outputs 16 |  |
+| `rbioacc_odetk` | rbioacc | 3 | 124 |  |  |  |  |  |  | 10 |  |
+| `beeguts_guts_sd` | beeguts | 4 | 540 |  |  |  |  |  |  | 10 |  |
+| `hdbayes_lm_npp` | hdbayes | 6 | 6 |  |  |  |  |  |  | 10 |  |
+| `hdbayes_pwe_npp` | hdbayes | 8 | 64 |  |  |  |  |  |  | 10 |  |
+| `ecoensemble_hierarchical_withdrivers` | ecoensemble | 63 | 612 |  |  |  |  |  |  | outputs 16 |  |
+| `ecoensemble_hierarchical_withdrivers_conj` | ecoensemble | 63 | 612 |  |  |  |  |  |  | outputs 16 |  |
+| `hbayesdm_dd_hyperbolic` | hbayesdm | 44 | 2266 | 42,015 | 42,014 | 39,048 | 39,048 | 6,116 | 6,116 | 10 |  |
+| `hbayesdm_gng_m4` | hbayesdm | 72 | 14548 | 9.66 | 9.66 | 0.18 | 0.16 | 0.12 | 0.11 | 10 |  |
+| `hbayesdm_igt_pvl_delta` | hbayesdm | 24 | 448 | 1.81 | 1.81 | 0.32 | 0.31 | 0.26 | 0.29 | 10 |  |
+| `hbayesdm_prl_rp` | hbayesdm | 66 | 8149 | 3.02 | 3.02 | 0.06 | 0.06 | 0.34 | 0.34 | 10 |  |
+| `bmgarch_bekk_arma` | bmgarch | 27 | 0 |  |  |  |  |  |  | 10 |  |
+| `bmgarch_ccc` | bmgarch | 22 | 0 |  |  |  |  |  |  | 10 |  |
+| `walker_rw1_model` | walker | 4 | 410 |  |  |  |  |  |  | 10 |  |
+| `walker_rw1_model_naive` | walker | 304 | 607 |  |  |  |  |  |  | 10 |  |
+| `bayesdfa_dfa` | bayesdfa | 25 | 416 | 1.04 | 1.04 | 0.40 | 0.40 | 0.28 | 0.28 | 10 |  |
+| `bayesdfa_dfa_gp` | bayesdfa | 13 | 0 | 0.57 | 0.91 | 0.71 | 0.71 |  |  | 10 |  |
+| `empty_return_shape` | regressions | 3 | 4 |  |  |  |  |  |  | 10 |  |
+| `rbmi_mmrm` | regressions | 4 | 15 |  |  |  |  |  |  | 10 |  |
+| `reject_udf_data_size` | regressions | 1 | 1 | 0.31 | 0.31 | 0.32 | 0.32 | <0.01 | <0.01 | 10 |  |
+| `tuple_array_params` | regressions | 54 | 109 |  |  |  |  |  |  | 10 |  |
+| `tuple_coef_cont` | regressions | 40 | 49 |  |  |  |  |  |  | 10 |  |
+| `tuple_decompositions` | regressions | 9 | 30 |  |  |  |  |  |  | 10 |  |
+| `tuple_decompositions_more` | regressions | 3 | 68 |  |  |  |  |  |  | 10 |  |
+| `tuple_effect_once` | regressions | 1 | 4 |  |  |  |  |  |  | 10 |  |
+| `tuple_loops` | regressions | 6 | 96 |  |  |  |  |  |  | 10 |  |
+| `tuple_reduce_sum` | regressions | 4 | 5 |  |  |  |  |  |  | 10 |  |
+| `tuple_return_slices` | regressions | 4 | 100 |  |  |  |  |  |  | 10 |  |
+| `while_counter_size` | regressions | 7 | 8 | 0.29 | 0.29 | 0.05 | 0.05 | 0.03 | 0.03 | 10 |  |
+| `while_udf_slices` | regressions | 6 | 6 | 0.18 | 0.18 | 0.15 | 0.10 | <0.01 | <0.01 | 10 |  |
+<!--/gen-->
+
+### The local corpora
+
+CTest replays seven smaller corpora with the same tool and the same rule
+(`tools/verify_refs.py --corpus NAME`). We record their references from
+CmdStan in the same way.
+
+| corpus | models | CTest |
+| --- | --- | --- |
+| `functions` | [10 models that call 468 function names](tests/function_coverage/README.md), including data-only helpers, RNGs, solvers and five operators | `test_function_models` |
+| `signatures` | 74 generated models that cover 19,642 signatures, with one output for each case | `signature_refs_*` |
+| `sized_functions` | 5 models that call library functions at real sizes | `test_sized_functions_reference` |
+| `container_flow` | 66 models that write each container shape in each block and read it back | `test_container_flow_reference` |
+| `fixtures` | 63 models from `tests/fixtures` | `*_reference` |
+| `cmdstan_replay` | 14 models for rewrites that only stock stanc's `--O1` output reaches | `test_cmdstan_replay` |
+| `oncobayes2` | the 3 OncoBayes2 models | `test_oncobayes2_reference` |
+
+CTest runs `container_flow`, `cmdstan_replay` and `oncobayes2` a second time
+with stock stanc as the compiler. Those are the `_stanc` CTests and the
+`--stanc` rows below.
+
+These are all the values in the local corpora that have a ledger entry:
+
+<!--gen:testing_local_ledger-->
+| corpus | model | value | limit |
+| --- | --- | --- | --- |
+| `container_flow` | `container_flow_rt_fn_amm` | `lp` | 17 (stanli closer) |
+| `container_flow --stanc` | `container_flow_rt_fn_amm` | `lp` | 17 (stanli closer) |
+| `fixtures` | `nested_callback_contexts` | `grad[2]` | 16 (undecided) |
+| `fixtures` | `nested_callback_contexts_fallback` | `grad[2]` | 16 (undecided) |
+| `oncobayes2` | `oncobayes2_blrm_exnex_combo3` | `wa beta_EX_prob.2.2` | 14 (undecided) |
+| `oncobayes2 --stanc` | `oncobayes2_blrm_exnex_combo3` | `wa beta_EX_prob.2.2` | 14 (undecided) |
+| `signatures` | `builtin_signatures_20` | `lp` | 20 (stanli closer) |
+| `signatures` | `builtin_signatures_24` | `lp` | 38 (stanli closer) |
+<!--/gen-->
+
+We compare a signature model's log density with the exact sum of its recorded
+terms. CmdStan adds 360 to 1,440 terms in order there, and its sum has
+rounding error of its own.
 
 <a id="checks-run-before-and-after-merge"></a>
 
 ## The checks
 
-"PR" means a pull request that changes source. A PR that touches only
-documentation runs only the static checks. A PR that touches only the R
-package runs the static checks and the R package tests, against the Linux
-runtime from a recent `main` run whose other files match. A PR builds and tests on Linux
-x86-64 (Clang) and Windows x64. "Post-merge" means pushes to `main`, nightly
-runs, release tags and manual dispatch. Post-merge runs add macOS arm64 and
-x86-64, Linux aarch64 and a GCC build on Linux x86-64. To run them on a
-branch, use `gh workflow run wheels.yml --ref BRANCH`. The jobs are in
-[`.github/workflows`](.github/workflows): `wheels.yml`, `lint.yml`,
-`r.yml`, `dev-setup-windows.yml`, `stan-conformance-nightly.yml`,
-`rethinking.yml` and `stanr.yml`.
+The tables below use these words:
+
+- "PR" means a pull request that changes source. CI builds and tests it on
+  Linux x86-64 with Clang and on Windows x64.
+- "Post-merge" means a push to `main`, a nightly run, a release tag or a
+  manual run. These add macOS arm64, macOS x86-64, Linux aarch64 and a GCC
+  build on Linux x86-64.
+- "CTest" means that the check is a CTest and runs wherever the suite runs.
+
+A pull request that touches only documentation runs only the static checks. A
+pull request that touches only the R package runs the static checks and the R
+tests. To run the post-merge jobs on a branch, use
+`gh workflow run wheels.yml --ref BRANCH`. The jobs are in
+[`.github/workflows`](.github/workflows).
+
+#### Against CmdStan
 
 | check | compares | against | when | cannot see |
 | --- | --- | --- | --- | --- |
-| [kernel unit tests](#unit-tests-for-numerical-operations) | one operation's value and every gradient component | the stan-math `var` call CmdStan's generated C++ would make, with the limit stated at each assertion | PR (CTest) | whether lowering selects that kernel |
-| [lowering and pass tests](#unit-tests-for-numerical-operations) | log density, gradient, `write_array` rows and op counts of small compiled models | stan-math `var` references, hand-derived constants or the MIR interpreter | PR (CTest) | models outside the fixtures |
-| [lit](#unit-tests-for-numerical-operations) | each marked `.stan` file's compile or evaluation result, and optionally one pass dump | the expectation written in the file | PR (CTest) | values the file does not state |
-| [fused-density differential](#unit-tests-for-numerical-operations) | the seven fused densities over activity masks, shapes and edge values | Stan Math's kernels; bitwise, 2 ULP for normal and cauchy | Linux x86-64 on PRs and post-merge; AddressSanitizer; Windows ARM64 dev setup | macOS |
-| [corpus replay](#comparison-with-cmdstan-on-complete-models) | log density, gradient and `write_array` rows of 404 models at 3 points | recorded CmdStan values | PR on Linux x86-64; post-merge on macOS arm64 and x86-64, Linux aarch64 and Linux GCC | parameter values away from the 3 points; Windows |
-| [fast-mode replay](#fast-mode) | the same models compiled in fast mode | the same references, fast-mode limits | PR, Linux x86-64 | macOS, Windows and ARM |
-| [local corpus replays](#comparison-with-cmdstan-on-complete-models) | log density, gradient and outputs of the function, signature, fixture and other local models | recorded CmdStan values | PR (CTest) | signatures and sizes the generators exclude |
-| [stanc3 good models](#testing-stan-language-coverage) | the 1,382 models in stanc3's `good` integration tests at up to 5 points | recorded CmdStan values and messages, 1e-9; a status ledger | PR (CTest) | models whose generated data CmdStan rejects |
-| [stanc3 bad models](#testing-stan-language-coverage) | compile errors of the 1,200 models in stanc3's `bad` integration tests | stanc3's expected output; a ledger | PR (CTest) | |
-| [sampling smoke](#comparison-with-cmdstan-on-complete-models) | 100 saved draws of the 13 Aalto fixtures | reference output names, draw count, finiteness | PR (CTest) | convergence |
-| [cross-path matrix](#comparing-stanli-execution-paths) | every fixture at 3 points and the 22 cogmod models at 13, under 18 execution configurations | each other, bitwise, with a ledger | PR (CTest) | transformed data, which has one engine; an error every path shares |
-| [posteriordb cross-path](#comparing-stanli-execution-paths) | the posteriordb models under the same configurations plus one pass-off set | each other, within 1e-11 | by hand after pass changes | an error present in both cells |
-| [sampler parity](#samplers-and-other-algorithms) | NUTS draws and statistics across metrics and options | Stan's own NUTS services on the same executor, bitwise | PR (CTest) | compiler numerics (both sides share the executor) |
-| [algorithm checks](#samplers-and-other-algorithms) | optimize, Laplace, Pathfinder, ADVI, fixed_param, RNG streams | a known Gaussian posterior; Stan's generator | PR (CTest) | non-Gaussian posteriors |
-| [reference posteriors](#samplers-and-other-algorithms) | NUTS means and standard deviations of the 39 posteriordb models with reference draws | posteriordb reference draws, within 4 Monte Carlo standard errors | by hand, post-merge | WALNUTS; models without reference draws |
-| [sampler trace](#samplers-and-other-algorithms) | step counts, tree depth, step size, divergences, mean `lp__` | CmdStan with the same settings | by hand after sampler changes | statistical validity of NUTS |
-| [compiler producer parity](#compiler-producer-parity) | compact MIR bytes from the native, JavaScript and Windows compilers | each other, byte for byte | PR | numerical behavior |
-| MIR wire cost | compact MIR decode time and size on Eight Schools | legacy MIR; each must be at most half | post-merge | other models |
-| [generated conformance sweep](#testing-stan-language-coverage) | 24,322 generated signature and construct cases, and each case's status | reference BridgeStan from the same pins; the checked-in baseline | nightly | operator-only behavior; cases the generator cannot build |
-| Rethinking regeneration | the 62 Rethinking fixtures, regenerated from the book's code with pinned `rethinking` | the checked-in files, byte for byte | nightly; pushes to `main` that touch them | |
-| [installed clients](#installed-clients) | the built wheel, R package and BridgeStan transport | API tests and R ecosystem consumers; skips fail | PR: wheel on Linux x86-64 and Windows x64, R on Linux. Post-merge: wheel on macOS and Linux aarch64, R ecosystem subset on macOS arm64 and Windows x64 | the R suite with a runtime on macOS and Windows |
-| browser runtime | `tests/test_wasm.cjs` and `tests/test_worker_diagnostics.cjs`: compile, evaluate and sample Eight Schools through the browser build and its worker | expected values and API behavior | pushes to `main`; `test_wasm.cjs` again on release tags | pull requests and nightly runs |
-| webR load | the WebAssembly side module | webR's loader and the C API symbols | post-merge | the R package flow |
-| [brms end to end](#samplers-and-other-algorithms) | `brm()` fits of the 124 brms formulas with the `stanli` backend | the same fits with brms's `cmdstanr` backend | by hand | anything beyond posterior means; platforms other than macOS arm64 |
+| [corpus replay](#every-model) | log density, gradient and `write_array` rows of <!--gen:testing_models-->414<!--/gen--> models at 3 points | recorded CmdStan values, under [the rule](#the-rule) | PR on Linux x86-64, post-merge on macOS arm64 and x86-64, Linux aarch64 and Linux GCC | parameter values away from the 3 points, anything on Windows, and the 10 ULP rule on any platform but macOS arm64 |
+| [fast-mode replay](#fast-mode) | the same models compiled in fast mode | the same references, fast-mode limits | PR and post-merge, Linux x86-64 only | macOS, Windows and ARM |
+| [local corpus replays](#the-local-corpora) | log density, gradient and outputs of the function, signature, fixture and other local models | recorded CmdStan values | PR (CTest) | signatures and sizes the generators exclude |
+| [stanc3 good models](#stan-language-coverage) | the 1,382 models in stanc3's `good` integration tests at up to 5 points | recorded CmdStan values and messages, within 1e-9, with a ledger of known differences | PR (CTest) | models whose generated data CmdStan rejects |
+| [stanc3 bad models](#stan-language-coverage) | compile errors of the 1,200 models in stanc3's `bad` integration tests | stanc3's expected output, with a ledger of known differences | PR (CTest) | |
+| [generated conformance sweep](#stan-language-coverage) | 24,322 generated signature and construct cases, and each case's status | BridgeStan built from the same pins, and the checked-in baseline | nightly | behavior that only operators use, and cases that the generator cannot build |
+| [kernel unit tests](#unit-tests) | one operation's value and every gradient component | the stan-math `var` call CmdStan's generated C++ would make, with the limit stated at each assertion | PR (CTest) | whether lowering selects that kernel |
+| [lowering and pass tests](#unit-tests) | log density, gradient, `write_array` rows and op counts of small compiled models | stan-math `var` references, hand-derived constants or the MIR interpreter | PR (CTest) | models outside the fixtures |
+| [lit](#unit-tests) | each marked `.stan` file's compile or evaluation result, and optionally one pass dump | the expectation written in the file | PR (CTest) | values the file does not state |
+| [fused-density differential](#unit-tests) | the seven fused densities over activity masks, shapes and edge values | Stan Math's kernels, in every bit, or 2 ULP for normal and cauchy | Linux x86-64 on PRs and post-merge, and the AddressSanitizer and Windows ARM64 jobs | macOS |
 | BridgeStan C ABI | 4 fixture models: values, names, counts, shapes | reference BridgeStan | post-merge | other models |
-| downstream `stanr` | `stanr` built against this runtime, its backend tests | its own expectations | release tags, on demand | other R consumers |
+| WebAssembly replay | log density and gradient of the corpus through the wasm build | the same references and limits | by hand | outputs, and `nn_rbm1bJ100`, whose compile does not fit in 4 GB |
+
+#### stanli against itself
+
+| check | compares | against | when | cannot see |
+| --- | --- | --- | --- | --- |
+| [cross-path matrix](#comparing-stanlis-execution-paths) | every fixture at 3 points and the 22 cogmod models at 13, under 19 execution configurations | each other, in every bit, with a ledger | PR on Linux x86-64, in the build with developer switches. Post-merge under AddressSanitizer and on Windows ARM64 | transformed data, which has one engine, and an error that every path shares |
+| [posteriordb cross-path](#comparing-stanlis-execution-paths) | the posteriordb models under the same configurations plus one pass-off set | each other, within 1e-11 | by hand after pass changes | an error present in both cells |
+| [compiler producer parity](#stan-language-coverage) | compact MIR bytes from the native, JavaScript and Windows compilers | each other, byte for byte | PR | numerical behavior |
+| stanc3 fuzzer ([`tools/fuzz_stanc`](tools/fuzz_stanc/README.md)) | random Stan programs compiled with and without stanc3's O1 passes: log density, gradient, `write_array`, printed output and errors at 3 points | each other | nightly, Linux x86-64 | programs that the generator cannot write |
+| Rethinking regeneration | the 62 Rethinking fixtures, regenerated from the book's code with pinned `rethinking` | the checked-in files, byte for byte | nightly, and pushes to `main` that touch them | |
+| MIR wire cost | compact MIR decode time and size on Eight Schools | legacy MIR. Each must be at most half | post-merge | other models |
+
+#### Samplers and algorithms
+
+| check | compares | against | when | cannot see |
+| --- | --- | --- | --- | --- |
+| [sampler parity](#samplers-and-other-algorithms) | NUTS draws and statistics across metrics and options | Stan's own NUTS services on the same executor, in every bit | PR (CTest) | compiler numerics, because both sides share the executor |
+| [algorithm checks](#samplers-and-other-algorithms) | optimize, Laplace, Pathfinder, ADVI, fixed_param, RNG streams | a known Gaussian posterior, and Stan's generator | PR (CTest) | non-Gaussian posteriors |
+| [reference posteriors](#samplers-and-other-algorithms) | NUTS means and standard deviations of the 39 posteriordb models with reference draws | posteriordb reference draws, within 4 Monte Carlo standard errors | by hand | WALNUTS, and models without reference draws |
+| [sampler trace](#samplers-and-other-algorithms) | step counts, tree depth, step size, divergences, mean `lp__` | CmdStan with the same settings | by hand after sampler changes | statistical validity of NUTS |
+| [sampling smoke](#every-model) | 100 saved draws of the 13 Aalto fixtures | reference output names, draw count, finiteness | PR (CTest) | convergence |
+| [brms end to end](#samplers-and-other-algorithms) | `brm()` fits of the 124 brms formulas with the `stanli` backend | the same fits with brms's `cmdstanr` backend | by hand | anything beyond posterior means, and platforms other than macOS arm64 |
+
+#### Packages, platforms and memory
+
+| check | compares | against | when | cannot see |
+| --- | --- | --- | --- | --- |
+| [installed clients](#installed-clients) | the built wheel, R package and BridgeStan transport | API tests and R ecosystem consumers. A skip fails | PR: wheel on Linux x86-64 and Windows x64, R on Linux. Post-merge: wheel on macOS and Linux aarch64, R ecosystem subset on macOS arm64 and Windows x64 | the R suite with a runtime on macOS and Windows |
+| browser runtime | `tests/test_wasm.cjs` and `tests/test_worker_diagnostics.cjs`: compile, evaluate and sample Eight Schools through the browser build and its worker | expected values and API behavior | pushes to `main`, and `test_wasm.cjs` again on release tags | pull requests and nightly runs |
+| webR load | the WebAssembly side module | webR's loader and the C API symbols | post-merge | the R package flow |
+| downstream `stanr` | `stanr` built against this runtime, its backend tests | its own expectations | on demand only | other R consumers |
 | no-stdio build | undefined symbols of the runtime objects (via [`tools/check_no_stdio.sh`](tools/check_no_stdio.sh)) | the stdout, `printf`, `abort` and `exit` symbols `R CMD check` rejects | post-merge | |
-| Windows dev setup | [`tools/dev_setup.sh`](tools/dev_setup.sh) on Windows, then CTest | the full suite on ARM64 (through `stanli-compile`); six tests on x64 with the embedded compiler | pushes to `main`, on demand | the rest of the suite with the embedded compiler on x64 |
+| Windows dev setup | [`tools/dev_setup.sh`](tools/dev_setup.sh) on Windows, then CTest | the full suite on ARM64 (through `stanli-compile`), and six tests on x64 with the embedded compiler | pushes to `main`, on demand | the rest of the suite with the embedded compiler on x64 |
 | AddressSanitizer | the CTest suite, compiling through `stanli-compile` | no diagnostics | post-merge except release tags | a stale `vari` that points into reused arena memory |
-| ThreadSanitizer | `test_capi`, `test_pool`, `test_multichain`, `test_wa_parallel` and `test_wa_parallel_abi` | no diagnostics | post-merge except release tags | the other tests |
-| WebAssembly replay | log density and gradient of the corpus through the wasm build | the same references and limits | by hand | `write_array`; `nn_rbm1bJ100`, whose compile does not fit in 4 GB |
+| ThreadSanitizer | `test_capi`, `test_pool`, `test_multichain`, `test_wa_parallel`, `test_wa_parallel_abi` and `test_wa_parallel_switches` | no diagnostics | post-merge except release tags | the other tests |
+| typed producer | portable MIR from the typed producer for three models | the legacy MIR of the same source | PR and post-merge, Linux x86-64 | other models |
+| bundled compiler | `r/inst/js/stanc.js`, and the compiler loaded in a browser worker, in webR and through V8 in R | a fresh build, byte for byte, and expected compile results | PR | |
+| Windows compiler | the Windows build of the compiler | expected results in `tests/test_windows_compiler.R`, and no integer folded past int32 | PR | |
+| R ABI | the ABI constants in the runtime and in the R bridge | each other | PR and pushes that touch the R paths | |
+| `R CMD check` matrix | the R package without a runtime, on 4 OS and R combinations, warnings as errors | R's own checks | post-merge | sampling, which skips without a runtime |
+| packaging guards | glibc symbol versions, the macOS minimum version, the x86-64 instruction set of the Linux library | the wheel tag and the baseline ISA | every build | |
+| signature watch | the signatures of upstream stanc3 | the signatures in the conformance baseline | nightly. It reports and does not fail | |
 | Safari 17 bundle check | the js_of_ocaml bundles | no line ending in `static` | PR | |
 | docs and formatting | stamped numbers, C/C++ formatting | their artifacts ([`tools/gen_docs.py --check`](tools/gen_docs.py)), the pinned formatter | every PR | |
-| red-main issue | whether any post-merge job of `wheels.yml` failed | none: it opens, updates or closes one GitHub issue, "main is red: wheels" | after each push to `main` and each nightly run | a run in which a job is cancelled |
-
-Release tags also check the version strings, the runtime tarballs and the PyPI
-description. Three checks fail on time and compare no numbers: the MIR wire
-cost step, `test_prep_scaling` (preparation must grow less than 20-fold when a
-model grows 8-fold) and `test_prep_deep_expression` (a 20,000-deep expression
-must prepare in under 3 seconds).
-[Benchmarks](docs/benchmarks.md#how-we-measure) keep a timing pair only when
-both engines agree within 1e-9 scaled error.
+| red-main issue | whether any post-merge job of `wheels.yml` failed | nothing. It opens, updates or closes one GitHub issue, "main is red: wheels" | after each push to `main`, nightly run and manual run on `main` | a run in which a job is cancelled |
 
 <a id="installed-clients"></a>
+The wheel jobs run `tests/test_python.py`, `tests/test_bridgestan_embed.py`
+and six Laplace whitening and annotation tests on the installed wheel. The
+Linux R job runs `R CMD check` with the runtime and then
+[`tools/test_r_ecosystem.R`](tools/test_r_ecosystem.R). That script tests
+bayesplot, bridgesampling, loo, posterior, stanfit and the registration of
+the backend. It fails on any skip, failure, error or warning. The macOS and
+Windows R jobs run only that script.
 
-The wheel jobs run `tests/test_python.py` and `tests/test_bridgestan_embed.py`
-on the installed wheel. They then install scipy and run the four Laplace
-whitening and annotation tests (`test_whiten.py`, `test_laplace_whiten.py`,
-`test_sparse_laplace.py`, `test_annotations.py`). Each of these skips with a
-message when scipy is missing. The Linux R job runs `R CMD check` with the
-runtime and then [`tools/test_r_ecosystem.R`](tools/test_r_ecosystem.R). The
-macOS and Windows R jobs run only `test_r_ecosystem.R`. Its testthat files
-(bayesplot, loo, posterior, stanfit) must pass with no skip, failure, error or
-warning. Put a test that needs a package these jobs lack, such as brms, in
-another file. The `r.yml` matrix runs `R CMD check` without a runtime, so its
-sampling tests skip.
+Three checks measure time and compare no numbers. They are the MIR wire cost,
+`test_prep_scaling` and `test_prep_deep_expression_time`. Release tags also
+check the version strings, the runtime tarballs and the PyPI description.
 
-## Comparison with CmdStan on complete models
+The tables leave out a few things:
 
-[`tools/verify_refs.py`](tools/verify_refs.py) replays every corpus against
-CmdStan's recorded answers.
-[`corpus-refs.json.gz`](docs/internal/artifacts/corpus-refs.json.gz) holds the
-main [corpus](tools/corpus_inventory.py): 414 models at 3 points each. They
-are 119 posteriordb, 124 brms, 62 Rethinking, 22 cogmod, 13 Aalto, 13
-regression and 3 ctsem models, 29 models from 13 CRAN packages (OncoBayes2,
-rstanarm, multinma, EpiNow2, mlumr, rbioacc, BeeGUTS, hdbayes, EcoEnsemble,
-hBayesDM, bmgarch, walker and bayesdfa), 23 programs from stan-dev/example-
-models and 6 from the Stan User's Guide. Nearly all also carry `write_array` rows, which the replay
-compares by column name. Both drivers seed Stan's RNG the same way, so
-generated quantities compare too. Per-model status and worst deviations are in
-[`docs/corpus-status.md`](docs/corpus-status.md).
+- the tests of CI's own scripts, such as `test_ci_policy` and
+  `test_dev_setup`
+- two measurements that cannot fail a run: the R time to first posterior, and
+  a webR canary that only warns
+- four harnesses that CI never runs: `fn_sweep.py`, `ode_sweep.py`,
+  `transform_sweep.py` and `collapse_census.py` in [`harnesses`](harnesses)
 
-`verify_refs.py --corpus NAME` replays a local corpus, and CTest runs each one:
+The sections below say more about some of the checks.
 
-| corpus | models | CTest |
-| --- | --- | --- |
-| `functions` | [10 models calling 468 names](tests/function_coverage/README.md), including data-only helpers, RNGs, solvers and five operators | `test_function_models` |
-| `signatures` | 74 generated models covering 19,641 signatures, one output per case | `signature_refs_*` |
-| `sized_functions` | 5 models calling library functions at real sizes | `test_sized_functions_reference` |
-| `container_flow` | 66 models that write each container shape in each block and read it back | `test_container_flow_reference` |
-| `fixtures` | 63 models from `tests/fixtures`, held to 10 ULP | `*_reference` |
-| `cmdstan_replay` | 14 models for lowering rewrites that stock stanc's `--O1` MIR reaches | `test_cmdstan_replay` |
-| `oncobayes2` | the 3 OncoBayes2 models | `test_oncobayes2_reference` |
+### Recording and replaying the references
 
-`container_flow`, `cmdstan_replay` and `oncobayes2` also run through stock
-stanc (the `_stanc` CTests). A model fails if it runs interpreted when its
-corpus does not list it as interpreted, or the reverse. The main corpus replay
-applies the same rule with `CORPUS_INTERPRETED` in
-[`tools/verify_refs.py`](tools/verify_refs.py), which is empty.
+[`tools/verify_sample.py`](tools/verify_sample.py) records the references. It
+uses CmdStan's own driver ([`tools/ref_driver.cpp`](tools/ref_driver.cpp))
+with `propto=true` and the Jacobian. It seeds Stan's RNG the same way that
+stanli does, so we can also compare generated quantities that draw random
+numbers.
 
-[`tools/verify_sample.py`](tools/verify_sample.py) records the references, or
-a local corpus with `--corpus NAME`. It uses CmdStan's own driver
-([`tools/ref_driver.cpp`](tools/ref_driver.cpp)) at the pins in
-[`deps/pins.env`](deps/pins.env), with `propto=true` and the Jacobian. It also
-records points that CmdStan rejects. Linux x86-64 has its own brms recording
-and a GCC supplement, because a CmdStan gradient can differ by hundreds of ULP
-between Clang and GCC. The replay picks the reference by platform and compiler
-before evaluating, never by closeness. The run fails on missing points,
-changed inputs, and references recorded against an unpinned CmdStan, Stan or
-Stan Math. [`tools/toolchain.py`](tools/toolchain.py) makes the recording
-tools stop with an error on an unpinned CmdStan checkout. A model that stanli
-refuses, or whose `write_array` it cannot run, does not fail the run if it is
-listed in `KNOWN_GAPS`. Each entry says what it excuses. A `write_array` entry
-excuses only that section: the replay still compares the log density and
-gradient at every point, with every gate, and fails if anything but the
-`write_array` runs through the interpreter. A whole-model entry excuses any
-failure except a crash. The list is empty today.
-Once stanli supports the model, the run fails until you delete the entry.
+[`tools/verify_refs.py`](tools/verify_refs.py) replays the references and
+does not need CmdStan. The replay fails if a point is missing, or if a model
+or data file changed. It also fails if someone recorded a reference with a
+CmdStan, Stan or Stan Math version other than the pinned one.
 
-[`tools/check_corpus_sampling.py`](tools/check_corpus_sampling.py) runs the
-sampling smoke test, with 100 warmup iterations before the saved draws.
+Linux x86-64 has its own recording of the brms models, and a second one for
+GCC. A CmdStan gradient can differ by hundreds of ULP between platforms and
+compilers. The replay chooses the recording from the platform and compiler of
+the binary that it tests. It chooses before it evaluates anything.
 
-## Fast mode
+`tools/verify_refs.py` has three lists that can excuse a failure:
 
-Fast mode (`fast_math`, see [docs/fast-mode.md](docs/fast-mode.md)) may reorder
-sums and replace per-observation arithmetic with closed forms, so the ULP
-budgets above do not apply. `tools/verify_refs.py --fast-math` compiles every
-model in fast mode and replays the same points against the same CmdStan
-references. At each point:
+- `KNOWN_GAPS`, for a model that stanli refuses
+- `QUARANTINED`, for a point with an open bug
+- `CORPUS_INTERPRETED`, for a model that runs through the interpreter
 
-- The log density must be within 1e-12 scaled error.
-- The largest absolute gradient difference, divided by the largest absolute
-  gradient entry (or 1 if larger), must be below 1e-12. That is about 4,500
-  ULP of the largest entry. The gradient is scaled as a whole because a
-  coordinate that cancels to nearly zero can be thousands of ULP from
-  CmdStan's.
-- Rejections and non-finite values must match. `write_array` names and values
-  keep the default 1e-9 limit.
+All three are empty today. If a listed model starts to pass, the run fails
+until someone deletes the entry.
 
-`kronecker_gp` and the `ILL_CONDITIONED` models keep their default limits.
-Other points may exceed 1e-12 when a high-precision reference shows fast mode
-about as close to the true value as CmdStan. `FAST_HP_CHECKED` lists those
-points with their limit.
+### Unit tests
 
-[`tests/test_collapse.cpp`](tests/test_collapse.cpp) compares every graph that
-the observation collapse rewrites with the graph it came from, over every
-argument form and activity variant. It also compares the grouped forms with
-extended-precision sums on data shifted by up to 1e9. These tests run only
-where `long double` is wider than `double`. Measured accuracy is in
-[docs/fast-mode.md](docs/fast-mode.md#how-accurate).
+A kernel is the runtime's implementation of one operation. Each kernel test
+makes the call that CmdStan's generated C++ would make with
+`stan::math::var`. It compares the value and every gradient component.
 
-## Unit tests for numerical operations
+[`tests/expect.hpp`](tests/expect.hpp) has the assertions. `expect_eq`
+compares every bit, so `+0` and `-0` differ. `expect_ulp` takes a budget as an
+argument. Most comparisons use `expect_eq`. The largest budget in a kernel
+test is 16 ULP, for the adjoints of the matrix solves. The largest budget in a
+lowering test is 40 ULP, for a chain of matrix pullbacks.
 
-A kernel is the runtime implementation of one operation. Each kernel test
-builds the call that CmdStan's generated C++ would make with
-`stan::math::var`, and compares the value and every gradient component.
-`STANLI_TESTS` in [`CMakeLists.txt`](CMakeLists.txt) lists the binaries.
-`test_capi` links the shared library, so it tests the C ABI that the packages
-use. A regression test must first fail against the pre-fix source, for the
-expected reason.
+stanli adds up `sum()` and `mean()` of more than 32 values with compensation.
+It adds up the sums that it builds from a loop's terms pairwise. Stan Math
+adds in order. [`tests/test_sum_accuracy.cpp`](tests/test_sum_accuracy.cpp)
+compares stanli's sums with the exact sum of the same doubles. These sums are
+why stanli is closer to the true value in most ledger entries.
 
-A check that compares a run with itself, because the switch it sets is
-ignored in an OFF build, is not a check. The shared write_array test in
-`test_capi` therefore compares sampled rows with their own draws in every
-build, and compares the shared and copied executors only when switches are
-available. `tests/test_hp_reference.py` skips its 80-digit reference classes
-when `mpmath` is missing; CI installs `mpmath` and sets
-`STANLI_REQUIRE_MPMATH=1` for the matrix legs, which turns the skip into a
-failure.
+Seven common densities have fused kernels. A default CMake build also keeps
+the Stan Math code that they replace.
+[`tests/test_density_fused.cpp`](tests/test_density_fused.cpp) compares the
+two over every activity mask, shape, edge value and rejection message. Normal
+and cauchy may differ by 2 ULP. The other five must match in every bit.
 
-[`tests/expect.hpp`](tests/expect.hpp) provides the assertions. `expect_eq` is
-bitwise, so `+0` and `-0` differ and a NaN never matches.
-`expect_eq_or_both_nan` also accepts two NaNs. `expect_ulp` and `expect_ulp_of`
-take a ULP budget at each call site. Most kernel comparisons are bitwise.
-Kernel budgets go up to 16 ULP, for the matrix-solve adjoints. Lowering tests
-compare compiled models with the same references, hand-derived constants or
-the MIR interpreter. Their budgets go up to 40 ULP where a chain of matrix
-pullbacks reassociates. A few structured-loop, island and matrix-pullback
-tests use a relative error of 1e-12 or 2e-12.
+[`tests/test_pass_safety.cpp`](tests/test_pass_safety.cpp) compares gradients
+before and after the graph passes on 400 random graphs.
 
-[`tests/test_pass_safety.cpp`](tests/test_pass_safety.cpp) fills forward value
-buffers with NaN between the sweeps. The test fails if an operation on the
-`backward_ignores_values` allowlist reads them. It also compares gradients
-before and after the passes on 400 random graphs shaped like real models.
-`run_grad` in [`tests/graph_helpers.hpp`](tests/graph_helpers.hpp) evaluates
-each call twice on one executor and fails on any bit difference.
+When we add a regression test, we first check that it fails against the
+source from before the fix.
 
-Seven common densities run through fused kernels in
-[`runtime/kernels/density_fused.cpp`](runtime/kernels/density_fused.cpp).
-Shipped builds compile out the Stan Math path that these kernels replace. The
-CMake default `-DSTANLI_STAN_DENSITY_ORACLE=ON` keeps both paths, and
-[`tests/test_density_fused.cpp`](tests/test_density_fused.cpp) compares them
-over every activity mask, propto setting, shape, edge value and rejection
-message. Normal and cauchy may differ by 2 ULP, and the others must match
-bitwise. `ordered_logistic` runs three activity variants.
+### Comparing stanli's execution paths
 
-Each [lit test](tests/lit/README.md) is a marked `.stan` file. It states the
-result that `stanli_check` must give and can match one pass dump. A known gap
-is marked `XFAIL` and labeled `broken`.
+stanli can run a model in three ways: graph lowering, the MIR interpreter and
+the register program. Each one implements Stan's operations separately, so
+one can be wrong while another is right.
 
-## Comparing stanli execution paths
+[`tests/cross_path.hpp`](tests/cross_path.hpp) compiles a model once for each
+of 19 configurations and compares the results at three points. Every bit must
+match. [`tests/cross_path_ledger.json`](tests/cross_path_ledger.json) lists
+the exceptions, each with a cause and a bound in ULP. A full run fails if an
+entry excuses nothing.
 
-Graph lowering, the MIR interpreter and the register program each map Stan
-operations separately, so one can be wrong while another is right.
+The ledger has <!--gen:testing_cross_entries-->58<!--/gen--> entries. Most allow 1 to 10 ULP
+for sums that the region map and the lane passes add in a different order.
+Two `cm_rdm` entries allow 2,526 ULP on Windows for a rounding difference
+there.
 
-[`tests/cross_path.hpp`](tests/cross_path.hpp) compiles one model once per
-configuration and compares results at three points on one executor. `configs()`
-in that file lists the switches that each configuration sets. They cover
-islands, island register compaction, generated adjoints, the direct ODE path,
-the graph passes, data preloading, the region map's plans and the choices
-inside a retained loop. The default configuration also runs the interpreter
-beside a complete `write_array` graph and compares the rows. It leaves out
-stochastic columns, which the CmdStan replay covers.
+Another <!--gen:testing_cross_unbounded-->10<!--/gen--> entries allow any distance. They cover
+one open bug. On Windows x86-64, a gradient entry of
+`higher_order_all_contexts` and one of `ode_adjoint_region` were far off in
+some runs. We do not know the cause. One of these entries names no platform,
+so it allows any distance on every platform.
 
-The check is bitwise. A divergence fails unless
-[`tests/cross_path_ledger.json`](tests/cross_path_ledger.json) lists it with a
-cause and a bound in ULP (-1 allows any distance). The ledger lists summation
-regroupings of 1 to 10 ULP by the region map and the lane passes. It also
-lists one open bug: one gradient entry each of `higher_order_all_contexts` and
-`ode_adjoint_region` was far off in Windows x86-64 runs, and the cause is not
-yet known. Those entries, and the `cm_rdm` entries for a Windows x86-64
-rounding difference, name `"platform": "windows-x86_64"`, so they excuse
-nothing on other platforms. A platform is `windows`, `macos` or `linux`,
-optionally followed by `-x86_64` or `-arm64`; an entry without one applies
-everywhere. Every entry needs a non-empty `cause`.
-
-A full run of a model fails when an entry for that model that applies on the
-running platform excused no comparison. The divergence it names has gone, and
-the entry would excuse the next one, so delete it. `test_cross_path` also
-fails for an entry that names a model no harness runs. An entry for another
-platform is not checked on this one.
-
-[`tests/test_cross_path.cpp`](tests/test_cross_path.cpp) runs the matrix over
-every fixture. When a fixture has no data file, the test generates unit data
-from the declared inputs. It skips a fixture that the default configuration
-cannot run. It requires at least 430 fixtures to run, 65 of them on generated
-data. It also requires a minimum count per engine and a minimum number of
-fixtures that each configuration changes, so a renamed switch fails. CTest
-also runs each cogmod model through `stanli_check --cross --cross-points 13`,
-where a skip fails.
-
-Focused tests cover the specialized paths: `test_adjoint` for generated island
-backwards, `test_island` for buffer reuse, `test_ode_prog` for the compiled ODE
-right-hand side against the MIR interpreter, and `test_odevariadic` for the
-direct RK path against Stan Math's solvers.
+The matrix runs over every fixture, and over the 22 cogmod models at 13
+points. It needs [developer switches](#developer-switches), so it runs only
+in a build that has them.
 
 <a id="mir-loop-vectorization-measurement"></a>
-Each graph pass also has unit tests (`test_reroll`, `test_inplace`,
-`test_partition`, `test_cse` and others). After a pass change, run
-`stanli_check --cross --cross-corpus --cross-rel-tol 1e-11` over posteriordb.
-`--cross-corpus` adds `stanli_check`'s default point, and a configuration with
-rerolling, in-place updates, constant folding and islands all off.
-[`runtime/src/OPTIMIZATIONS.md`](runtime/src/OPTIMIZATIONS.md) gives the loop,
-its known failures and the switch for each path.
+After you change a pass, run `stanli_check --cross --cross-corpus
+--cross-rel-tol 1e-11` over posteriordb by hand.
+[`runtime/src/OPTIMIZATIONS.md`](runtime/src/OPTIMIZATIONS.md) has the steps.
 
-## Compiler producer parity
+### Fast mode
 
-The native, JavaScript and Windows compilers must emit the same compact MIR
-bytes.
-[`tests/test_portable_stancjs.cjs`](tests/test_portable_stancjs.cjs) checks
-this on the [compiler fixtures](tests/compiler/README.md). It also checks that
-repeated runs give the same output, and that the JavaScript result and the
-CLI's `--messages-json` file agree on errors, warnings and the O1 fallback
-notice.
+Fast mode (`fast_math`, see [docs/fast-mode.md](docs/fast-mode.md)) may add up
+sums in a different order and replace arithmetic over observations with closed
+forms. The 10 ULP rule does not apply to it.
+`tools/verify_refs.py --fast-math` replays the same points against the same
+CmdStan references. At each point:
 
-## Testing Stan language coverage
+- The log density must be within 1e-12 relative error.
+- Take the largest gradient difference and divide it by the largest gradient
+  entry, or by 1 if that is larger. The result must be below 1e-12, which is
+  about 4,500 ULP of the largest entry.
+- Rejections and non-finite values must match.
+- Outputs keep the 1e-9 limit.
+
+One model has a wider limit. `FAST_HP_CHECKED` allows
+`epinow2_estimate_infections` 1e-10, because an 80-digit evaluation shows that
+fast mode is about as close to the true value as CmdStan there. The
+ill-conditioned models and the known mismatches keep the limits from the big
+table.
+
+[`tests/test_collapse.cpp`](tests/test_collapse.cpp) compares every graph that
+fast mode rewrites with the graph it came from.
+[docs/fast-mode.md](docs/fast-mode.md#how-accurate) has the measured accuracy.
+
+### Samplers and other algorithms
+
+A gradient at a fixed point cannot show a wrong sampler setting. These checks
+can:
+
+- [`tests/test_sampler_parity.cpp`](tests/test_sampler_parity.cpp) runs one
+  executor through stanli's NUTS driver and through Stan's own `hmc_nuts_*`
+  services, which CmdStan calls. Every saved row must match in every bit. The
+  cases cover the three metrics, adaptation on and off, a supplied metric and
+  step size, thinning, saved warmup and chain ids.
+- [`tests/test_capi_algorithms.cpp`](tests/test_capi_algorithms.cpp) runs
+  optimize, Laplace, Pathfinder, ADVI and fixed_param on a correlated
+  Gaussian. The mode must be within 1e-4. The other algorithms must recover
+  the means and standard deviations within five standard errors.
+- [`tools/verify_posteriors.py`](tools/verify_posteriors.py) samples the 39
+  posteriordb models that have reference draws, with 4 chains of 1000
+  iterations. A model fails when a mean or standard deviation is more than 4
+  Monte Carlo standard errors from the reference. We run it by hand.
+- [`tools/sampler_trace.py`](tools/sampler_trace.py) compares leapfrog counts,
+  tree depth, step size and divergences with a CmdStan run of the same model
+  and seed. It finds large configuration errors. We run it by hand.
+- [`harnesses/brms_compare_backends.R`](harnesses/brms_compare_backends.R)
+  fits each brms formula with the `stanli` and `cmdstanr` backends and
+  compares posterior means. We run it by hand. The
+  [latest recording](output/brms-end-to-end/README.md) has the results.
+
+The Python and R tests check only that each binding passes arguments, results
+and errors through.
+
+<a id="testing-stan-language-coverage"></a>
+
+### Stan language coverage
 
 [`harnesses/stan_conformance.py`](harnesses/stan_conformance.py) reads every
-signature that the pinned compiler knows, plus a catalog of language
-constructs. For each applicable case it generates a small type-correct model.
-It evaluates that model with stanli and with a reference BridgeStan built from
-the same pinned CmdStan, Stan, Math and stanc, and compares the log density
-and full gradient at fixed points. The baseline
-([`conformance-baseline.json.gz`](docs/internal/artifacts/conformance-baseline.json.gz))
-holds 24,322 cases (24,291 signatures over 571 names, plus 31 constructs):
-19,035 `verified`, 3,665 `inapplicable`, 923 `generator_gap`, 698
-`expected_unsupported` and 1 `unexpected_unsupported`.
-[docs/coverage.md](docs/coverage.md) explains the statuses and summarizes them
-by function family. The [harness README](harnesses/conformance/README.md)
-covers setup and local runs.
+function signature that the pinned compiler knows, and a catalog of language
+constructs. It generates a small model for each one. It evaluates the model
+with stanli and with BridgeStan built from the same pins, and compares the log
+density and gradient. The nightly run fails if a case that used to pass stops
+passing. [docs/coverage.md](docs/coverage.md) summarizes the results by
+function family.
 
-`mismatch`, `crashed` and `harness_error` fail the run. Unsupported cases and
-generator gaps are counted and listed with reproduction commands. The ratchet
-fails when a `verified` case stops verifying or the toolchain pin changes. A
-`signature-watch` job reports new upstream signatures.
-
-The sweep cannot test behavior that is used only through operators, or a case
-that it cannot generate, and it does not measure cost. The `functions` and
-`signatures` corpora cover part of that gap. The manifests in
-[`tests/function_coverage/`](tests/function_coverage/README.md) list what the
-generators exclude.
-
-stanc3's integration tests cover syntax and type combinations that posteriordb
-and the generators miss. [`tools/check_stanc3_good.py`](tools/check_stanc3_good.py)
-runs the `test/integration/good` models and compares log density, gradient and
-`write_array` row with recorded CmdStan answers. Where CmdStan throws, stanli
-must throw the same message. A CmdStan message that is empty after the file
-location and numbers are removed agrees only with an empty stanli message, so
-CmdStan returning NaN does not agree with stanli throwing.
+stanc3's own integration tests cover syntax and type combinations that real
+models do not use. [`tools/check_stanc3_good.py`](tools/check_stanc3_good.py)
+compares the `good` models with recorded CmdStan values and messages.
 [`tools/check_stanc3_bad.py`](tools/check_stanc3_bad.py) compares the error
-text of the `test/integration/bad` models with stanc3's expected output. A
-model fails if it does better or worse than its ledger entry
-([good](tests/stanc3_good/ledger.json), [bad](tests/stanc3_bad_ledger.json)).
-See [`tests/stanc3_good/README.md`](tests/stanc3_good/README.md).
+text of the `bad` models with stanc3's expected output. Each tool has a ledger
+of known differences. A model fails if it does better or worse than its ledger
+entry. [`tests/stanc3_good/README.md`](tests/stanc3_good/README.md) has the
+details.
 
-## Samplers and other algorithms
+The native, JavaScript and Windows compilers must emit the same bytes for the
+[compiler fixtures](tests/compiler/README.md).
 
-Fixed-point tests cannot see sampler settings.
+### Developer switches
 
-[`tests/test_sampler_parity.cpp`](tests/test_sampler_parity.cpp) runs the same
-executor through stanli's NUTS driver and through Stan's own `hmc_nuts_*`
-services, which CmdStan calls. Every saved row must be bitwise equal. The
-cases cover unit, diagonal and dense metrics, adaptation on and off, a
-supplied inverse metric and step size, thinning, saved warmup, chain ids, and
-the RNG that generated quantities draw between transitions. `test_sampling`
-checks the default maximum tree depth, which the parity test sets explicitly.
-It also samples a compiled conjugate normal with transformed data, a
-transformed parameter and generated quantities, and compares the draws with
-the closed-form posterior, which finds wrong state that one gradient call
-leaves for the next.
+About 60 `STANLI_*` environment variables turn a pass off or force an engine.
+We call them developer switches. Shipped builds compile them out
+(`STANLI_DEBUG_SWITCHES=OFF`).
 
-[`tests/test_algorithms.cpp`](tests/test_algorithms.cpp) checks that each
-algorithm draws from the random stream that Stan's `create_rng` produces.
-[`tests/test_capi_algorithms.cpp`](tests/test_capi_algorithms.cpp) runs
-optimize, Laplace, Pathfinder, ADVI and fixed_param through the C ABI on a
-correlated Gaussian. The mode must be within 1e-4. Laplace, Pathfinder and
-full-rank ADVI must recover the means and standard deviations within five
-standard errors (wider for ADVI), with the reported log density and the
-explicit and origin inits. `test_nuts` covers initialization retries and
-failure. `test_pathfinder` covers determinism, inits, the per-iterate observer
-and Pareto k-hat. `test_capi` checks `stanli_summary_stats` and
-`stanli_diagnose_text`. The Python and R tests check only that each binding
-passes arguments, results and errors through.
+A test that needs a switch has the CTest label `debug_switches`. In a shipped
+build, such a test skips the cases that need the switch. CMake disables the
+cross-path matrix and eight other tests there, because almost all of their
+cases need one.
 
-[`tools/sampler_trace.py`](tools/sampler_trace.py) compares a stanli run with a
-CmdStan run of the same model, seed and lengths. It compares total leapfrog
-steps, maximum tree depth, final step size, divergence rate and scaled mean
-`lp__`. Its tolerances find large configuration errors, such as a 30-fold
-difference in leapfrog steps. Keep its default adaptation target, because
-`--delta` changes only the CmdStan run.
-[`harnesses/fast_sampling_check.py`](harnesses/fast_sampling_check.py)
-compares fast-mode posteriors with default-mode and posteriordb reference
-posteriors. You run it by hand. CTest tests its flag rules.
-
-[`tools/verify_posteriors.py`](tools/verify_posteriors.py) samples each
-posteriordb corpus model that has posteriordb reference draws (39 models) with
-NUTS: 4 chains, 1000 warmup and 1000 kept iterations, adapt delta 0.8 and a
-fixed seed. For each parameter it compares the mean and the standard
-deviation with the reference draws by
-`z = (stanli - reference) / sqrt(mcse_stanli^2 + mcse_reference^2)`, and fails a
-model when any `|z|` exceeds 4. Each side's Monte Carlo standard error comes
-from its own draws by batch means, with batches of `sqrt(n)` draws per chain;
-for the standard deviation, the delta method is applied to the batched squared
-deviations. It reports split R-hat of the stanli chains and the divergence
-count, which do not fail a model. The `deps/posteriordb` checkout has no
-reference draws, so pass a checkout of the same posteriordb revision that has
-`posterior_database/reference_posteriors` with `--references`. It runs by hand
-or after merge, not in pull request CI, and covers NUTS only. CTest runs its
-statistics tests (`tests/test_verify_posteriors.py`) on synthetic draws.
-
-[`harnesses/brms_end_to_end.R`](harnesses/brms_end_to_end.R) fits each brms
-formula and checks the common post-processing calls.
-[`harnesses/brms_compare_backends.R`](harnesses/brms_compare_backends.R)
-compares the posterior means from the `stanli` and `cmdstanr` backends, in
-Monte Carlo standard errors
-([latest recording](output/brms-end-to-end/README.md)).
+These tests run in builds that have the switches. For pull requests, that is a
+second build on Linux x86-64. After a merge, the AddressSanitizer job and the
+Windows ARM64 job also have them. No CI job runs these tests on macOS.
+[docs/hacking.md](docs/hacking.md#tests-that-need-developer-switches) lists
+the tests.
 
 ## Known limits
 
-CI builds the WebAssembly build and loads it in webR, but its corpus replay
-runs only by hand. 119 of 120 posteriordb models compile and evaluate, and 118
-of them are verified against CmdStan. The two that are not:
+### CI enforces the 10 ULP rule on one platform, after merge
 
-- `sir`'s ODE solution falls below a declared lower bound at every shared
-  point, and CmdStan rejects those points too. Both engines also reject the
-  brms model `s2_invgaussian` at every shared point.
-- `kronecker_gp` matches the log density to 1e-13 and 436 of 438 gradients.
-  The two gradients that flow through `eigenvectors_sym` differ by 0.7%. The
-  covariance's smallest eigenvalue gap is 6.5e-17, and eigenvector derivatives
-  amplify last-bit input differences by about 1e16. Intel macOS has its own
-  CmdStan recording for this model
-  ([evidence](notes/performance/2026-09-22-intel-oracle.md)).
+The ledger has measurements for macOS arm64 only. A pull request can move a
+value by more than 10 ULP and still merge, if the value stays within 1e-9 and
+is not in a brms model or the `fixtures` corpus. The macOS run after the merge
+then fails and opens the red-main issue.
 
-No cross-path fixture uses the data-loop memo, and the matrix sets no minimum
-for memo hits. [`tests/test_data_loop_memo.py`](tests/test_data_loop_memo.py)
-is its only check.
+To close this gap, someone needs to record a ledger section on Linux x86-64.
+After that, the separate brms limit is no longer needed.
 
-The `cmdstan_replay` references carry no CmdStan revisions, so a pin change does
-not fail that corpus. No test covers the R interrupt path.
+### stanli is less accurate than CmdStan for some values
 
-Reduction order is not frozen across releases. Fusion and packet arithmetic can
-move gradients by their last bits within the budgets above. The release notes
-give the worst measured deviation.
+In <!--gen:testing_worse_models-->38<!--/gen--> models, <!--gen:testing_worse_values-->255<!--/gen--> values are
+more than 10 ULP from the true value in stanli and farther from it than in
+CmdStan.
 
-Under `~`, every density drops the data-only terms that CmdStan drops. The
-`propto_data_arguments` and `propto_multi_gp` fixtures check this; see
-[docs/lp-constant.md](docs/lp-constant.md).
+In nine of those models, stanli is more than 5 ULP farther than CmdStan. These
+issues track them:
+[#643](https://github.com/seantalts/stanli/issues/643),
+[#644](https://github.com/seantalts/stanli/issues/644),
+[#645](https://github.com/seantalts/stanli/issues/645),
+[#646](https://github.com/seantalts/stanli/issues/646),
+[#647](https://github.com/seantalts/stanli/issues/647),
+[#648](https://github.com/seantalts/stanli/issues/648),
+[#649](https://github.com/seantalts/stanli/issues/649) and
+[#650](https://github.com/seantalts/stanli/issues/650).
 
-The nested callback solver fixtures allow 16 ULP on their combined rate
-gradient, which must also match its analytic value within 2 ULP. The difference
-comes from adjoint ODE sensitivity integration
-([measurements](notes/execution/2026-09-28-nested-callback-coverage.md)).
+In the other models, both engines are far from the true value and stanli
+differs from CmdStan by a ULP or two.
+[#651](https://github.com/seantalts/stanli/issues/651) lists them.
 
-## Developer switches
+### Some values have no 80-digit value
 
-The runtime reads about 60 `STANLI_*` environment variables. They turn a pass
-off, force an engine or print a diagnostic
-([docs/hacking.md](docs/hacking.md#building)). The CMake option
-`STANLI_DEBUG_SWITCHES` compiles them in. It defaults to OFF, which is what
-the wheels, the R runtime and the browser builds ship.
-`tools/build_wheel.sh` stops with an error if `build-rel/` is configured ON.
-`tools/dev_setup.sh` and the sanitizer jobs configure ON.
+The accuracy columns are empty where the 80-digit evaluator cannot score a
+value. For those values, the only evidence is the distance from CmdStan.
 
-A test that sets a switch is listed in `STANLI_DEBUG_SWITCH_TESTS` in
-[`CMakeLists.txt`](CMakeLists.txt) and carries the CTest label
-`debug_switches`. Such a test builds and runs in every configuration. In an
-OFF build, a case that needs a switch skips itself: it starts with
-`SKIP_WITHOUT_DEBUG_SWITCHES()` or tests `debug_switches_available()`, both
-in [`tests/env_helpers.hpp`](tests/env_helpers.hpp), and prints a `SKIP` line,
-while the cases that need no switch run. A case that sets a switch and does
-not skip still runs in an OFF build, where the switch is ignored, so it passes
-only if its checks hold without it. Some cases that compare a run with and
-without a switch are like that today: they pass by comparing the default with
-itself, and only an ON build tests them.
+### We test three points for each model
 
-Nine tests and the 22 cogmod runs of the cross-path matrix
-(`test_cross_path_cm_*`) are disabled in an OFF build, because almost every
-case in them needs a switch. They are in `STANLI_DEBUG_SWITCH_ONLY_TESTS`, and CTest
-reports `Not Run (Disabled)`: `test_cross_path`, `test_structured_loop`,
-`test_region_map`, `test_wa_parallel_switches`, `test_pass_dump_switches`,
-`test_prep_profile_reroll_dispositions`, `test_prep_work`, `test_ctsem_engine`
-and `test_data_loop_memo`. An OFF build on macOS registers 704 tests and runs
-673 of them.
+Agreement at three points does not prove agreement over the whole parameter
+space. The sampler checks cover a small part of that gap.
 
-CI runs CTest in the shipped OFF `build-rel/` on every platform, so the
-switch-free cases of the pass, lowering, write_array and sampler-parity tests
-run on macOS, Linux aarch64 and Windows x64 as well. The manylinux job's
-differential step builds ON and runs `ctest -L debug_switches`, which is
-where the skipped cases and the nine disabled tests run. Locally:
+### Two models have a known mismatch
 
-```sh
-cmake -B build -DSTANLI_DEBUG_SWITCHES=ON
-cmake --build build --parallel "$(tools/build_jobs.sh)"
-ctest --test-dir build -L debug_switches
-```
+Two gradient entries of `kronecker_gp` differ from CmdStan by 0.7%. They go
+through `eigenvectors_sym` of a covariance matrix whose two closest
+eigenvalues are 6.5e-17 apart. The derivative of an eigenvector grows as that
+gap shrinks, so a difference in the last bit of the input becomes a large
+difference in the output.
 
-A test that needs only pass dumps, an execution report or a write_array
-thread policy sets the typed fields instead, and runs in every build. The
-fields are `CompileOptions::dump_passes`, `dump_stages`, `execution_report`
-and `parallel_write_array`; the last two are also in `stanli_model_opts`.
-`test_wa_parallel --switches` and `test_pass_dump --switches` are the labeled
-halves that check the environment switches themselves.
+Three gradient entries of `stanguide_ode_adjoint` differ from CmdStan by up to
+4e-6. They come from an adjoint ODE solve with a tolerance of 1e-6. When we
+set the tolerance to 1e-11, the two engines agree to 1e-10.
 
-## Reproducing locally
+### Some models have nothing to compare
 
-Replaying the checked-in references does not run CmdStan.
-[`tools/dev_setup.sh`](tools/dev_setup.sh) configures `build/` and `build-rel/`
-with `-DSTANLI_EMBED_STANC=ON` and `-DSTANLI_DEBUG_SWITCHES=ON` (`build-rel/`
-with the density oracle off), and runs CTest in `build/`. Without the embedded
-compiler or `deps/stanc3/stanli-compile`, every test that compiles Stan source
-fails.
+CmdStan and stanli both reject every point of the posteriordb model `sir` and
+of the brms model `s2_invgaussian`.
 
-```sh
-./tools/dev_setup.sh --corpus     # native build, posteriordb, and CmdStan
-python3 tools/verify_refs.py deps/posteriordb \
-  --check build/stanli_check --jobs 8    # add --fast-math for fast mode
-python3 tools/verify_refs.py --corpus functions --check build/stanli_check
-ctest --test-dir build --parallel "$(tools/build_jobs.sh)"
-```
+Another <!--gen:testing_models_no_wa-->6<!--/gen--> models have no recorded outputs. For those
+models the replay checks that stanli writes a row and does not check the
+values in it. The big table shows 0 in their outputs column.
 
-The cross-path, sampler and recording tools use release-build targets:
+### Other gaps
 
-```sh
-./tools/dev_setup.sh --conformance   # sweep stack and .venv-conformance
-cmake --build build-rel --parallel "$(tools/build_jobs.sh)" \
-  --target stanli_check dump_ops stanli_shared
-build-rel/stanli_check model.stan data.json --cross        # cross-path
-python3 tools/check_corpus_sampling.py --build build-rel   # sampling smoke
-python3 tools/sampler_trace.py deps/cmdstan deps/posteriordb eight_schools_noncentered
-python3 tools/verify_sample.py deps/cmdstan --corpus functions  # re-record
-python3 tools/check_stanc3_good.py --record     # stanc3 good references
-cp build-rel/libstanli.* python/stanli/_bin/   # the sweep loads this copy
-.venv-conformance/bin/python harnesses/stan_conformance.py \
-  --stanc deps/stanc3/stanc-pinned --cmdstan deps/cmdstan \
-  --build build-rel --stanli-pythonpath python --filter log1p
-```
-
-AddressSanitizer builds compile Stan source through `stanli-compile`, which
-`./tools/dev_setup.sh --no-embed` builds:
-
-```sh
-asan_jobs=$(STANLI_JOB_MEMORY_GIB=12 tools/build_jobs.sh)
-cmake -B build-asan -DCMAKE_BUILD_TYPE=RelWithDebInfo -DSTANLI_SANITIZE=address \
-  -DSTANLI_DEBUG_SWITCHES=ON \
-  -DSTANLI_PORTABLE_COMPILER="$PWD/deps/stanc3/stanli-compile"
-cmake --build build-asan --parallel "$asan_jobs" && \
-  ctest --test-dir build-asan --parallel "$asan_jobs"
-```
-
-The WebAssembly replay also needs Node, Emscripten and stancjs's dependencies:
-
-```sh
-./tools/build_web.sh
-python3 tools/verify_refs.py deps/posteriordb \
-  --check tools/wasm_check.sh --target-platform 'WebAssembly wasm32' \
-  --no-wa --skip nn_rbm1bJ100
-```
-
-[docs/hacking.md](docs/hacking.md) has the steps for each kind of change, and
-[docs/how-it-works.md](docs/how-it-works.md) describes the design that these
-checks test.
+- Windows never runs the main corpus. It runs CTest, which includes the local
+  corpora.
+- One cross-path bug is open on Windows x86-64. See
+  [Comparing stanli's execution paths](#comparing-stanlis-execution-paths).
+- CI builds the WebAssembly runtime and runs Eight Schools through it. We run
+  the corpus through it by hand, and that run does not check outputs.
+- CI replays fast mode on Linux x86-64 only.
+- The `cmdstan_replay` references do not record a CmdStan revision. A change
+  of pin does not fail that corpus.
+- Nothing tests the R interrupt path.
+- The data-loop memo has one test,
+  [`tests/test_data_loop_memo.py`](tests/test_data_loop_memo.py), and no
+  cross-path fixture.
+- A new release can move a value by its last bits, within the rule. The
+  release notes give the largest distance that we measured.
