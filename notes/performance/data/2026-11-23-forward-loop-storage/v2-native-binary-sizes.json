@@ -1,0 +1,12 @@
+{
+  "base": {
+    "bytes": 45499872,
+    "gzip_bytes": 13721356,
+    "sha256": "1906eab504830b5bb079e3af027c11ff6e70283f925da38dea657a67c4332153"
+  },
+  "fix": {
+    "bytes": 45500672,
+    "gzip_bytes": 13725785,
+    "sha256": "163d485332c22f876482bf6c30c6b3ed3ec2a3908fcdbfe90bf738bcadc7d1bf"
+  }
+}

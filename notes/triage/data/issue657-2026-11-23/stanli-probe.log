@@ -1,0 +1,3 @@
+J=10 parameters=26 prep=0.015s median R gradient=0.000004s
+J=50 parameters=106 prep=0.008s median R gradient=0.000011s
+J=500 parameters=1006 prep=0.068s median R gradient=0.000067s

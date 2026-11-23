@@ -1,0 +1,18 @@
+R 4.6.1
+stanli 0.30.1
+runtime abi6-0eb880b9b957-Darwin-arm64-threads
+valid N=1 lp=-2 gradient_length=3
+valid N=3 lp=-2.7674476143526885 gradient_length=5
+valid N=40 lp=-11.940972665238258 gradient_length=42
+invalid=1 error=the log density rejected this point: cholesky_decompose: Matrix m is not positive definite
+invalid=2 error=the log density rejected this point: cholesky_decompose: m is not symmetric. m[1,2] = 1.0288, but m[2,1] = 0.778801
+rethinking ch14_m14_8nc lp=-337761.97295506211 gradient_length=15
+Chain [1] WARNING: There aren't enough warmup iterations to fit the
+Chain [1]          three stages of adaptation as currently configured.
+Chain [1]          Reducing each adaptation stage to 15%/75%/10% of
+Chain [1]          the given number of warmup iterations:
+Chain [1]            init_buffer = 3
+Chain [1]            adapt_window = 20
+Chain [1]            term_buffer = 2
+
+R sampling smoke completed: 25 warmup + 25 retained draws

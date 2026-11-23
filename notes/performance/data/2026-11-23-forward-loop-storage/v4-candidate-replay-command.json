@@ -1,0 +1,31 @@
+{
+  "argv": [
+    "/Library/Developer/CommandLineTools/usr/bin/python3",
+    "tools/verify_refs.py",
+    "/Users/xitrium/claud/stanrt/deps/posteriordb",
+    "--check",
+    "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-covariance-fix/build/stanli_check",
+    "--jobs",
+    "2",
+    "--timeout",
+    "300",
+    "--per-model"
+  ],
+  "cwd": "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-covariance-fix",
+  "check_sha256": "8c2ec74647359459a6b203acd19c54640a8b33fcceb6ca0c9e8550919c36aeb8",
+  "source_sha": "0c50911f2f81d861737e48212a69361266bad2ed",
+  "tracked_diff_sha256": "d6c1acc81ea6f6d79cb03b0753c905ccdd57e053811428123c40e8ed36e9d24b",
+  "threads": {
+    "STAN_NUM_THREADS": "1",
+    "OMP_NUM_THREADS": "1",
+    "OPENBLAS_NUM_THREADS": "1",
+    "MKL_NUM_THREADS": "1",
+    "VECLIB_MAXIMUM_THREADS": "1"
+  },
+  "native_source_sha256": {
+    "runtime/src/structured_loop.cpp": "f605069cbd16493cb93d01ed903d6d0a75772067c3dbb91859ce80abbf4bb2e4",
+    "runtime/src/structured_forward_only.inc": "d2fd2f09f5921f4c8698de44ab9ca9ed5aac7f897cbde6f566de97cda754f139",
+    "runtime/src/executor.cpp": "befb64e73ce6f263ef93776b841903ec3e309ed2f48d708aed0969a4e67b11c4",
+    "runtime/include/stanli/kernel_types.hpp": "4de1fb75298b7cc7e24d3dc772622f09d3a78c9220d9f110388afe41d7ee7ae7"
+  }
+}

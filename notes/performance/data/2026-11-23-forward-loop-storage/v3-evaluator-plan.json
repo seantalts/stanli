@@ -1,0 +1,47 @@
+{
+  "base_sha": "0eb880b9b9579cd28ca64c3afa4257cba9adca1e",
+  "parent_reported_root_head": "5bf3d8df7f932e42a13bb2a2ba5b1706db388ced",
+  "candidate_worktree_head": "0c50911f2f81d861737e48212a69361266bad2ed",
+  "change": "forward-only bounded LOOP path additionally requires no_replay, preserving replayable plan cached value/frame semantics",
+  "named_opcodes": [
+    "LOOP"
+  ],
+  "baseline_programs_reused": 402,
+  "baseline_binary_identity_verified": {
+    "source": "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-covariance-base",
+    "head": "0eb880b9b9579cd28ca64c3afa4257cba9adca1e",
+    "dirty": false,
+    "probe_sha256": "80f6fa6a5cf4891bd669bff07190817c0f33bd69e09946b4ddcd10fa32814f24",
+    "bench_sha256": "5ec16afcb14062c2a2f20a46d54d3ab1d7ef7a9991487b66701429d95e6f1456",
+    "dump_ops_sha256": "288287ad551a16cc5353c4b6316f8bef6ff5cff767a342e6e9066b3c998166c0",
+    "dump_islands_sha256": "38aeecf0e73d60b59a3777210ea8960cb0e619ddc55f78bd79f85d391e93d1dc"
+  },
+  "candidate_binaries_frozen": true,
+  "timing_quiet_release": false,
+  "previous_versions_preserved": [
+    "selection",
+    "selection-v2",
+    "bench-v2"
+  ],
+  "required_gates": [
+    "candidate402programscreen",
+    "candidate414recordedreplay",
+    "both402pairedprep",
+    "selected6roundpairedbenchmarks",
+    "permodeltotalregressionreview"
+  ],
+  "frozen_native_sha256": {
+    "runtime/src/structured_loop.cpp": "6f080c555b1fdc4643faf198842aeff143dca4f225d8b87a34264a1afd418bc4",
+    "runtime/src/structured_forward_only.inc": "d1cddbac4dd9880afca3791e6e35788524e1e039c8e255442d895cec22cf8594",
+    "runtime/src/executor.cpp": "befb64e73ce6f263ef93776b841903ec3e309ed2f48d708aed0969a4e67b11c4",
+    "runtime/include/stanli/kernel_types.hpp": "4de1fb75298b7cc7e24d3dc772622f09d3a78c9220d9f110388afe41d7ee7ae7"
+  },
+  "frozen_tools_sha256": {
+    "bench_grad": "f24e04d0fa0bacba44e5eeff336e606df80e844c0fd2698e6b598ba7a200e305",
+    "dump_ops": "3eb0e87cab3bbfdc391135f4838d7e1a7facc48d9306ee5e8b9a14523d7a09e1",
+    "dump_islands": "6d5caa5dea64836afebdd97f928bacbe2c3c3348e8f4d6733e3891f130888c02",
+    "stanli_check": "c6bc2ab93a3712a5e69e4c98f74c45f57658b32fb7ffa470e1e5346d5ad00212",
+    "stanli_run": "c820d2ec63170b393e84b75831847266c0f548f6a55a969b5a210dd3bfadfec0",
+    "libstanli.dylib": "58b25dab93f67a79ce5ffd86f796703e86bf77d758cd068e8b5c85246272f1a1"
+  }
+}

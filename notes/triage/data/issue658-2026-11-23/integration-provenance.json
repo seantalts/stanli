@@ -1,0 +1,127 @@
+{
+  "source_head": "f047d5d56c7cf5771afe4bc41f135332bc2b492d",
+  "package": "stanli0.30.1",
+  "R": "4.6.1 (2026-06-24), macOS arm64",
+  "private_library": "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanrt/.cache/pr-r-validation-20261123/rlib",
+  "test_files": 36,
+  "test_blocks": 293,
+  "totals": {
+    "passed": 2210,
+    "failed": 0,
+    "error": 0,
+    "warning": 0,
+    "skipped": 3
+  },
+  "walnuts_passing_expectations": 116,
+  "csv_oracle_test": {
+    "file": "test-stanfit.R",
+    "context": "stanfit",
+    "test": "direct stanfit construction agrees with rstan's CLI CSV import",
+    "nb": 140,
+    "failed": 0,
+    "skipped": false,
+    "error": false,
+    "warning": 0,
+    "user": 0.159,
+    "system": 0.019,
+    "real": 0.215,
+    "passed": 140
+  },
+  "skipped_tests": [
+    {
+      "file": "test-brms-support.R",
+      "test": "brm(backend = \"stanli\") works where brms provides it",
+      "reason": "installed brms has no stanli backend"
+    },
+    {
+      "file": "test-includes.R",
+      "test": "native subprocess compilers receive include paths without changing cwd",
+      "reason": "STANLI_TEST_PORTABLE_COMPILER does not name a stanli-compile"
+    },
+    {
+      "file": "test-sampling.R",
+      "test": "the stanli-compile executable reports the O1 fallback as a classed warning",
+      "reason": "STANLI_TEST_PORTABLE_COMPILER does not name a stanli-compile"
+    }
+  ],
+  "compiler_diagnostics": "complete forced bridge.c/init.c compile and link output inspected; none",
+  "short_sampler_messages": "Stan short-warmup adaptation and occasional rejection messages are retained separately from compiler/test diagnostics",
+  "install_command": {
+    "argv": [
+      "R",
+      "CMD",
+      "INSTALL",
+      "--preclean",
+      "--install-tests",
+      "-l",
+      "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanrt/.cache/pr-r-validation-20261123/rlib",
+      "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanrt/r"
+    ],
+    "cwd": "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanrt",
+    "head": "f047d5d56c7cf5771afe4bc41f135332bc2b492d",
+    "environment": {
+      "R_LIBS_USER": "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanrt/.cache/pr-r-validation-20261123/rlib",
+      "STANLI_RUNTIME": "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-covariance-fix/build/libstanli.dylib",
+      "STANLI_RUN": "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-covariance-fix/build/stanli_run",
+      "STANLI_REQUIRE_RUNTIME": "1",
+      "STAN_NUM_THREADS": "1",
+      "OMP_NUM_THREADS": "1",
+      "OPENBLAS_NUM_THREADS": "1",
+      "MKL_NUM_THREADS": "1",
+      "VECLIB_MAXIMUM_THREADS": "1"
+    },
+    "runtime_sha256": "163d485332c22f876482bf6c30c6b3ed3ec2a3908fcdbfe90bf738bcadc7d1bf",
+    "cli_sha256": "441deb358953289b78ca23f34dd0734059a1129902ddbf260c41e6e34787cef0"
+  },
+  "install_process": {
+    "returncode": 0,
+    "elapsed_s": 2.772142171859741
+  },
+  "full_suite_command": {
+    "argv": [
+      "Rscript",
+      "--vanilla",
+      "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanrt/.cache/pr-r-validation-20261123/full-suite-v2.R"
+    ],
+    "cwd": "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanrt",
+    "environment": {
+      "R_LIBS_USER": "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanrt/.cache/pr-r-validation-20261123/rlib",
+      "STANLI_RUNTIME": "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-covariance-fix/build/libstanli.dylib",
+      "STANLI_RUN": "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-covariance-fix/build/stanli_run",
+      "STANLI_REQUIRE_RUNTIME": "1"
+    },
+    "portable_compiler": "not found in current artifacts; standalone executable tests may skip",
+    "rerun_reason": "corrected only post-test exporter by removing testthat result list-column before CSV serialization; original run and complete saved results retained"
+  },
+  "full_suite_process": {
+    "returncode": 0,
+    "elapsed_s": 27.264589071273804
+  },
+  "original_first_run_process": {
+    "returncode": 1,
+    "elapsed_s": 28.268907070159912
+  },
+  "first_run_note": "All tests completed with the same 2,210 passing expectations, 3 skips and 0 failures; the post-test CSV exporter failed on a list column. Original log/RDS retained. Only the exporter was corrected, and the identical full suite rerun exited 0.",
+  "artifacts": {
+    "integration-install.log": {
+      "sha256": "91cab1160ceeb998fac6c68c33449ac93237e83e6df2c6cd1787bdd4b55e9906",
+      "bytes": 1647,
+      "source": "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanrt/.cache/pr-r-validation-20261123/install.log"
+    },
+    "integration-first-run.log.gz": {
+      "sha256": "1bf90fad394c24d135eaf4a981b5415bc8342ce72cce3704ad54754024af18a8",
+      "bytes": 3029,
+      "source": "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanrt/.cache/pr-r-validation-20261123/full-suite.log"
+    },
+    "integration-full-suite.log.gz": {
+      "sha256": "c690c1282b2a3f64a8a14909c2731702d588877108621769077ee55069c6cb33",
+      "bytes": 2936,
+      "source": "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanrt/.cache/pr-r-validation-20261123/full-suite-v2.log"
+    },
+    "integration-full-suite-results.json.gz": {
+      "sha256": "d6516b9d83ae7516ec347f4952af84eed420ed3540a7c8c041941060f9bb60ae",
+      "bytes": 10452,
+      "source": "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanrt/.cache/pr-r-validation-20261123/full-suite-v2-results.json"
+    }
+  }
+}

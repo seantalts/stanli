@@ -1,0 +1,7 @@
+R 4.6.1
+stanli 0.30.1
+runtime abi6-0eb880b9b957-Darwin-arm64-threads
+Error in build_model(if (is_mir) mir else code, data_json, is_mir, seed,  : 
+  mismatch in number dimensions declared and found in context; processing stage=data initialization; variable name=x; dims declared=(1); dims found=()
+Calls: stanli_model -> with_commit_note -> build_model
+Execution halted

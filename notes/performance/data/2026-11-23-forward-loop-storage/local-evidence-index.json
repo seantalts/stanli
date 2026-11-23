@@ -1,0 +1,20 @@
+[
+  {
+    "path": "notes/performance/data/2026-11-23-forward-loop-storage/local-pairs.json.gz",
+    "bytes": 271166,
+    "sha256": "b60771131f49acfd210b31fe57331a0e9af049a0c110fb1aa89eb07093d6a8e4",
+    "uncompressed_sha256": "eb338c13499e15866dea689198d2a47fe497e4b394d60562ab93bec7091045ee"
+  },
+  {
+    "path": "notes/performance/data/2026-11-23-forward-loop-storage/local-summary.json.gz",
+    "bytes": 16114,
+    "sha256": "c3a75d0fa7c66f57d1922fe550d9609a94ff1be3754c8bc7c8bb8aa73f504a08",
+    "uncompressed_sha256": "8c916665f2976f50ec7958097a07953a00d9a796db5b57287951207cdc12675e"
+  },
+  {
+    "path": "notes/performance/data/2026-11-23-forward-loop-storage/local-provenance.json.gz",
+    "bytes": 870,
+    "sha256": "999f336026ac0cf5e8f3b291e5af958c80750c8beaa96dc6640deff598b9c669",
+    "uncompressed_sha256": "7fcfc0c1b22932a32432c20e4d4c61920ae29d3ae3172a8f3c4e9828800794a3"
+  }
+]

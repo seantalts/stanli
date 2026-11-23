@@ -1,0 +1,43 @@
+{
+  "status": "superseded_candidate_v1_not_accepted",
+  "reason": "root invariant canary found warm whole-matrix copy regression; candidate eligibility is being revised",
+  "program_cache": "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-walnuts-pathfinder/.cache/covariance-storage-validation/selection",
+  "baseline_program_count": 402,
+  "candidate_program_count": 402,
+  "program_failures": 0,
+  "replay_models": 414,
+  "replay_exit": 0,
+  "selected_models": 20,
+  "benchmark_arms_timed": false,
+  "driver_sha256": {
+    "selection_stages.py": "d48270d9b9a428e2d15cfe747212de3bee8674c976a588500b5abd7010db6ce6",
+    "finalize_selection.py": "c8b09db0a2f995abf9521b6f27a7bc199702184c56e79af6fbe2845a41fc3142",
+    "run_corpus_arm.py": "b9e78726be9d8fc460cb14a608dd5b026a571fd52b2bdf458e5455d96e73994c"
+  },
+  "files": {
+    "v1-recorded-corpus-replay.log.gz": {
+      "bytes": 4694,
+      "sha256": "b8a909a09ec21d7b8150a8f95cd287f978f92e65df8adb4796dc06454469496a"
+    },
+    "v1-corpus-preparation-processes.jsonl.gz": {
+      "bytes": 86137,
+      "sha256": "9391c947836fbbf083da790f79b38763f02d060cf8428b56812ae9fbbc27e3b5"
+    },
+    "v1-recorded-corpus-replay-command.json": {
+      "bytes": 904,
+      "sha256": "4f11078b27b8976e3b278778bd5e6370ff20a6e5622d1a58169b0bce6a136894"
+    },
+    "v1-recorded-corpus-replay-process.json": {
+      "bytes": 148,
+      "sha256": "20d77ac9b8fb20744ce3604b22a3778a0d7fa9859872195f2763117a2fd7cceb"
+    },
+    "v1-corpus-selection.json": {
+      "bytes": 37302,
+      "sha256": "a95fc1013c7c0f1c49c8d22ef237c0a6b8c4ed89c318b7b878ad37a6c2984f65"
+    },
+    "benchmark-toolchain-guard-resolution.json": {
+      "bytes": 643,
+      "sha256": "13aa91c9e4519374b404cb515c7acdf13e63e45a2ed0dd47a3c77011311bf528"
+    }
+  }
+}

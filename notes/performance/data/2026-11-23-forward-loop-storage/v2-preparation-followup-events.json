@@ -1,0 +1,1694 @@
+{
+  "identity": {
+    "base": {
+      "source": "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-covariance-base",
+      "bench_sha256": "5ec16afcb14062c2a2f20a46d54d3ab1d7ef7a9991487b66701429d95e6f1456"
+    },
+    "candidate": {
+      "source": "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-covariance-fix",
+      "bench_sha256": "73d4d3e6418c059293f6b96fe9cc2622c4eec71fd32278c9ee16a35e873f2b24"
+    }
+  },
+  "events": [
+    {
+      "model": "eight_schools_noncentered",
+      "round": 0,
+      "arm": "base",
+      "argv": [
+        "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-covariance-base/build/bench_grad",
+        "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-walnuts-pathfinder/.cache/covariance-storage-validation/selection-v2/base/eight_schools_noncentered/model.sexp",
+        "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-walnuts-pathfinder/.cache/covariance-storage-validation/selection-v2/inputs/eight_schools_noncentered.json",
+        "--prep"
+      ],
+      "cwd": "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-covariance-base",
+      "started_unix_s": 1795463066.1946292,
+      "process_elapsed_s": 0.005760669708251953,
+      "returncode": 0,
+      "stdout": "0.000464875 10 5259264 0.000009375\n",
+      "stderr": "",
+      "mir_sha256": "b58a844c49f36237f559852b2a105014111091506184a7e3a8a9d0a5ad551fc6",
+      "data_sha256": "f06889e8cae3755c00a4a44f002d5fc3acf3263ff9ae8ffe5655b1907bcadd80",
+      "preparation_s": 0.000464875
+    },
+    {
+      "model": "eight_schools_noncentered",
+      "round": 0,
+      "arm": "candidate",
+      "argv": [
+        "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-covariance-fix/build/bench_grad",
+        "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-walnuts-pathfinder/.cache/covariance-storage-validation/selection-v2/candidate/eight_schools_noncentered/model.sexp",
+        "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-walnuts-pathfinder/.cache/covariance-storage-validation/selection-v2/inputs/eight_schools_noncentered.json",
+        "--prep"
+      ],
+      "cwd": "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-covariance-fix",
+      "started_unix_s": 1795463066.200821,
+      "process_elapsed_s": 0.004847288131713867,
+      "returncode": 0,
+      "stdout": "0.000437458 10 5292032 0.000009958\n",
+      "stderr": "",
+      "mir_sha256": "b58a844c49f36237f559852b2a105014111091506184a7e3a8a9d0a5ad551fc6",
+      "data_sha256": "f06889e8cae3755c00a4a44f002d5fc3acf3263ff9ae8ffe5655b1907bcadd80",
+      "preparation_s": 0.000437458
+    },
+    {
+      "model": "eight_schools_noncentered",
+      "round": 1,
+      "arm": "candidate",
+      "argv": [
+        "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-covariance-fix/build/bench_grad",
+        "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-walnuts-pathfinder/.cache/covariance-storage-validation/selection-v2/candidate/eight_schools_noncentered/model.sexp",
+        "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-walnuts-pathfinder/.cache/covariance-storage-validation/selection-v2/inputs/eight_schools_noncentered.json",
+        "--prep"
+      ],
+      "cwd": "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-covariance-fix",
+      "started_unix_s": 1795463066.206004,
+      "process_elapsed_s": 0.004357099533081055,
+      "returncode": 0,
+      "stdout": "0.000358875 10 5275648 0.000006000\n",
+      "stderr": "",
+      "mir_sha256": "b58a844c49f36237f559852b2a105014111091506184a7e3a8a9d0a5ad551fc6",
+      "data_sha256": "f06889e8cae3755c00a4a44f002d5fc3acf3263ff9ae8ffe5655b1907bcadd80",
+      "preparation_s": 0.000358875
+    },
+    {
+      "model": "eight_schools_noncentered",
+      "round": 1,
+      "arm": "base",
+      "argv": [
+        "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-covariance-base/build/bench_grad",
+        "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-walnuts-pathfinder/.cache/covariance-storage-validation/selection-v2/base/eight_schools_noncentered/model.sexp",
+        "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-walnuts-pathfinder/.cache/covariance-storage-validation/selection-v2/inputs/eight_schools_noncentered.json",
+        "--prep"
+      ],
+      "cwd": "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-covariance-base",
+      "started_unix_s": 1795463066.210687,
+      "process_elapsed_s": 0.004348039627075195,
+      "returncode": 0,
+      "stdout": "0.000371000 10 5292032 0.000007083\n",
+      "stderr": "",
+      "mir_sha256": "b58a844c49f36237f559852b2a105014111091506184a7e3a8a9d0a5ad551fc6",
+      "data_sha256": "f06889e8cae3755c00a4a44f002d5fc3acf3263ff9ae8ffe5655b1907bcadd80",
+      "preparation_s": 0.000371
+    },
+    {
+      "model": "eight_schools_noncentered",
+      "round": 2,
+      "arm": "base",
+      "argv": [
+        "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-covariance-base/build/bench_grad",
+        "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-walnuts-pathfinder/.cache/covariance-storage-validation/selection-v2/base/eight_schools_noncentered/model.sexp",
+        "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-walnuts-pathfinder/.cache/covariance-storage-validation/selection-v2/inputs/eight_schools_noncentered.json",
+        "--prep"
+      ],
+      "cwd": "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-covariance-base",
+      "started_unix_s": 1795463066.215345,
+      "process_elapsed_s": 0.004203081130981445,
+      "returncode": 0,
+      "stdout": "0.000348958 10 5259264 0.000005584\n",
+      "stderr": "",
+      "mir_sha256": "b58a844c49f36237f559852b2a105014111091506184a7e3a8a9d0a5ad551fc6",
+      "data_sha256": "f06889e8cae3755c00a4a44f002d5fc3acf3263ff9ae8ffe5655b1907bcadd80",
+      "preparation_s": 0.000348958
+    },
+    {
+      "model": "eight_schools_noncentered",
+      "round": 2,
+      "arm": "candidate",
+      "argv": [
+        "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-covariance-fix/build/bench_grad",
+        "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-walnuts-pathfinder/.cache/covariance-storage-validation/selection-v2/candidate/eight_schools_noncentered/model.sexp",
+        "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-walnuts-pathfinder/.cache/covariance-storage-validation/selection-v2/inputs/eight_schools_noncentered.json",
+        "--prep"
+      ],
+      "cwd": "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-covariance-fix",
+      "started_unix_s": 1795463066.219865,
+      "process_elapsed_s": 0.004364728927612305,
+      "returncode": 0,
+      "stdout": "0.000377917 10 5292032 0.000007000\n",
+      "stderr": "",
+      "mir_sha256": "b58a844c49f36237f559852b2a105014111091506184a7e3a8a9d0a5ad551fc6",
+      "data_sha256": "f06889e8cae3755c00a4a44f002d5fc3acf3263ff9ae8ffe5655b1907bcadd80",
+      "preparation_s": 0.000377917
+    },
+    {
+      "model": "eight_schools_noncentered",
+      "round": 3,
+      "arm": "candidate",
+      "argv": [
+        "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-covariance-fix/build/bench_grad",
+        "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-walnuts-pathfinder/.cache/covariance-storage-validation/selection-v2/candidate/eight_schools_noncentered/model.sexp",
+        "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-walnuts-pathfinder/.cache/covariance-storage-validation/selection-v2/inputs/eight_schools_noncentered.json",
+        "--prep"
+      ],
+      "cwd": "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-covariance-fix",
+      "started_unix_s": 1795463066.2246091,
+      "process_elapsed_s": 0.004307746887207031,
+      "returncode": 0,
+      "stdout": "0.000341583 10 5292032 0.000005625\n",
+      "stderr": "",
+      "mir_sha256": "b58a844c49f36237f559852b2a105014111091506184a7e3a8a9d0a5ad551fc6",
+      "data_sha256": "f06889e8cae3755c00a4a44f002d5fc3acf3263ff9ae8ffe5655b1907bcadd80",
+      "preparation_s": 0.000341583
+    },
+    {
+      "model": "eight_schools_noncentered",
+      "round": 3,
+      "arm": "base",
+      "argv": [
+        "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-covariance-base/build/bench_grad",
+        "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-walnuts-pathfinder/.cache/covariance-storage-validation/selection-v2/base/eight_schools_noncentered/model.sexp",
+        "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-walnuts-pathfinder/.cache/covariance-storage-validation/selection-v2/inputs/eight_schools_noncentered.json",
+        "--prep"
+      ],
+      "cwd": "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-covariance-base",
+      "started_unix_s": 1795463066.229252,
+      "process_elapsed_s": 0.004230976104736328,
+      "returncode": 0,
+      "stdout": "0.000368125 10 5259264 0.000007208\n",
+      "stderr": "",
+      "mir_sha256": "b58a844c49f36237f559852b2a105014111091506184a7e3a8a9d0a5ad551fc6",
+      "data_sha256": "f06889e8cae3755c00a4a44f002d5fc3acf3263ff9ae8ffe5655b1907bcadd80",
+      "preparation_s": 0.000368125
+    },
+    {
+      "model": "eight_schools_noncentered",
+      "round": 4,
+      "arm": "base",
+      "argv": [
+        "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-covariance-base/build/bench_grad",
+        "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-walnuts-pathfinder/.cache/covariance-storage-validation/selection-v2/base/eight_schools_noncentered/model.sexp",
+        "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-walnuts-pathfinder/.cache/covariance-storage-validation/selection-v2/inputs/eight_schools_noncentered.json",
+        "--prep"
+      ],
+      "cwd": "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-covariance-base",
+      "started_unix_s": 1795463066.2338161,
+      "process_elapsed_s": 0.004225969314575195,
+      "returncode": 0,
+      "stdout": "0.000336500 10 5292032 0.000005458\n",
+      "stderr": "",
+      "mir_sha256": "b58a844c49f36237f559852b2a105014111091506184a7e3a8a9d0a5ad551fc6",
+      "data_sha256": "f06889e8cae3755c00a4a44f002d5fc3acf3263ff9ae8ffe5655b1907bcadd80",
+      "preparation_s": 0.0003365
+    },
+    {
+      "model": "eight_schools_noncentered",
+      "round": 4,
+      "arm": "candidate",
+      "argv": [
+        "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-covariance-fix/build/bench_grad",
+        "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-walnuts-pathfinder/.cache/covariance-storage-validation/selection-v2/candidate/eight_schools_noncentered/model.sexp",
+        "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-walnuts-pathfinder/.cache/covariance-storage-validation/selection-v2/inputs/eight_schools_noncentered.json",
+        "--prep"
+      ],
+      "cwd": "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-covariance-fix",
+      "started_unix_s": 1795463066.238391,
+      "process_elapsed_s": 0.004420042037963867,
+      "returncode": 0,
+      "stdout": "0.000368958 10 5275648 0.000006750\n",
+      "stderr": "",
+      "mir_sha256": "b58a844c49f36237f559852b2a105014111091506184a7e3a8a9d0a5ad551fc6",
+      "data_sha256": "f06889e8cae3755c00a4a44f002d5fc3acf3263ff9ae8ffe5655b1907bcadd80",
+      "preparation_s": 0.000368958
+    },
+    {
+      "model": "eight_schools_noncentered",
+      "round": 5,
+      "arm": "candidate",
+      "argv": [
+        "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-covariance-fix/build/bench_grad",
+        "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-walnuts-pathfinder/.cache/covariance-storage-validation/selection-v2/candidate/eight_schools_noncentered/model.sexp",
+        "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-walnuts-pathfinder/.cache/covariance-storage-validation/selection-v2/inputs/eight_schools_noncentered.json",
+        "--prep"
+      ],
+      "cwd": "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-covariance-fix",
+      "started_unix_s": 1795463066.243198,
+      "process_elapsed_s": 0.004446983337402344,
+      "returncode": 0,
+      "stdout": "0.000339792 10 5259264 0.000005500\n",
+      "stderr": "",
+      "mir_sha256": "b58a844c49f36237f559852b2a105014111091506184a7e3a8a9d0a5ad551fc6",
+      "data_sha256": "f06889e8cae3755c00a4a44f002d5fc3acf3263ff9ae8ffe5655b1907bcadd80",
+      "preparation_s": 0.000339792
+    },
+    {
+      "model": "eight_schools_noncentered",
+      "round": 5,
+      "arm": "base",
+      "argv": [
+        "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-covariance-base/build/bench_grad",
+        "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-walnuts-pathfinder/.cache/covariance-storage-validation/selection-v2/base/eight_schools_noncentered/model.sexp",
+        "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-walnuts-pathfinder/.cache/covariance-storage-validation/selection-v2/inputs/eight_schools_noncentered.json",
+        "--prep"
+      ],
+      "cwd": "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-covariance-base",
+      "started_unix_s": 1795463066.248043,
+      "process_elapsed_s": 0.004452705383300781,
+      "returncode": 0,
+      "stdout": "0.000355666 10 5259264 0.000006291\n",
+      "stderr": "",
+      "mir_sha256": "b58a844c49f36237f559852b2a105014111091506184a7e3a8a9d0a5ad551fc6",
+      "data_sha256": "f06889e8cae3755c00a4a44f002d5fc3acf3263ff9ae8ffe5655b1907bcadd80",
+      "preparation_s": 0.000355666
+    },
+    {
+      "model": "examplemodels_ms",
+      "round": 0,
+      "arm": "base",
+      "argv": [
+        "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-covariance-base/build/bench_grad",
+        "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-walnuts-pathfinder/.cache/covariance-storage-validation/selection-v2/base/examplemodels_ms/model.sexp",
+        "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-walnuts-pathfinder/.cache/covariance-storage-validation/selection-v2/inputs/examplemodels_ms.json",
+        "--prep"
+      ],
+      "cwd": "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-covariance-base",
+      "started_unix_s": 1795463066.2529411,
+      "process_elapsed_s": 0.3962388038635254,
+      "returncode": 0,
+      "stdout": "0.382937125 6 283492352 0.004612333\n",
+      "stderr": "",
+      "mir_sha256": "c4daf11476e7e6e3a678cc3fbea18cd36781cf387b74e33257937aa30728c378",
+      "data_sha256": "d86f1415327c720ac8d7e6744bd9fe90f36392579e650daf806e0acf85f8accf",
+      "preparation_s": 0.382937125
+    },
+    {
+      "model": "examplemodels_ms",
+      "round": 0,
+      "arm": "candidate",
+      "argv": [
+        "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-covariance-fix/build/bench_grad",
+        "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-walnuts-pathfinder/.cache/covariance-storage-validation/selection-v2/candidate/examplemodels_ms/model.sexp",
+        "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-walnuts-pathfinder/.cache/covariance-storage-validation/selection-v2/inputs/examplemodels_ms.json",
+        "--prep"
+      ],
+      "cwd": "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-covariance-fix",
+      "started_unix_s": 1795463066.649885,
+      "process_elapsed_s": 0.400562047958374,
+      "returncode": 0,
+      "stdout": "0.386270834 6 261455872 0.004652875\n",
+      "stderr": "",
+      "mir_sha256": "c4daf11476e7e6e3a678cc3fbea18cd36781cf387b74e33257937aa30728c378",
+      "data_sha256": "d86f1415327c720ac8d7e6744bd9fe90f36392579e650daf806e0acf85f8accf",
+      "preparation_s": 0.386270834
+    },
+    {
+      "model": "examplemodels_ms",
+      "round": 1,
+      "arm": "candidate",
+      "argv": [
+        "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-covariance-fix/build/bench_grad",
+        "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-walnuts-pathfinder/.cache/covariance-storage-validation/selection-v2/candidate/examplemodels_ms/model.sexp",
+        "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-walnuts-pathfinder/.cache/covariance-storage-validation/selection-v2/inputs/examplemodels_ms.json",
+        "--prep"
+      ],
+      "cwd": "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-covariance-fix",
+      "started_unix_s": 1795463067.051141,
+      "process_elapsed_s": 0.4034440517425537,
+      "returncode": 0,
+      "stdout": "0.390382709 6 271286272 0.003988209\n",
+      "stderr": "",
+      "mir_sha256": "c4daf11476e7e6e3a678cc3fbea18cd36781cf387b74e33257937aa30728c378",
+      "data_sha256": "d86f1415327c720ac8d7e6744bd9fe90f36392579e650daf806e0acf85f8accf",
+      "preparation_s": 0.390382709
+    },
+    {
+      "model": "examplemodels_ms",
+      "round": 1,
+      "arm": "base",
+      "argv": [
+        "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-covariance-base/build/bench_grad",
+        "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-walnuts-pathfinder/.cache/covariance-storage-validation/selection-v2/base/examplemodels_ms/model.sexp",
+        "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-walnuts-pathfinder/.cache/covariance-storage-validation/selection-v2/inputs/examplemodels_ms.json",
+        "--prep"
+      ],
+      "cwd": "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-covariance-base",
+      "started_unix_s": 1795463067.455232,
+      "process_elapsed_s": 0.39949798583984375,
+      "returncode": 0,
+      "stdout": "0.386451125 6 271908864 0.004189875\n",
+      "stderr": "",
+      "mir_sha256": "c4daf11476e7e6e3a678cc3fbea18cd36781cf387b74e33257937aa30728c378",
+      "data_sha256": "d86f1415327c720ac8d7e6744bd9fe90f36392579e650daf806e0acf85f8accf",
+      "preparation_s": 0.386451125
+    },
+    {
+      "model": "examplemodels_ms",
+      "round": 2,
+      "arm": "base",
+      "argv": [
+        "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-covariance-base/build/bench_grad",
+        "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-walnuts-pathfinder/.cache/covariance-storage-validation/selection-v2/base/examplemodels_ms/model.sexp",
+        "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-walnuts-pathfinder/.cache/covariance-storage-validation/selection-v2/inputs/examplemodels_ms.json",
+        "--prep"
+      ],
+      "cwd": "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-covariance-base",
+      "started_unix_s": 1795463067.855436,
+      "process_elapsed_s": 0.37886476516723633,
+      "returncode": 0,
+      "stdout": "0.365769709 6 255524864 0.004381250\n",
+      "stderr": "",
+      "mir_sha256": "c4daf11476e7e6e3a678cc3fbea18cd36781cf387b74e33257937aa30728c378",
+      "data_sha256": "d86f1415327c720ac8d7e6744bd9fe90f36392579e650daf806e0acf85f8accf",
+      "preparation_s": 0.365769709
+    },
+    {
+      "model": "examplemodels_ms",
+      "round": 2,
+      "arm": "candidate",
+      "argv": [
+        "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-covariance-fix/build/bench_grad",
+        "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-walnuts-pathfinder/.cache/covariance-storage-validation/selection-v2/candidate/examplemodels_ms/model.sexp",
+        "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-walnuts-pathfinder/.cache/covariance-storage-validation/selection-v2/inputs/examplemodels_ms.json",
+        "--prep"
+      ],
+      "cwd": "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-covariance-fix",
+      "started_unix_s": 1795463068.235009,
+      "process_elapsed_s": 0.40908122062683105,
+      "returncode": 0,
+      "stdout": "0.395883208 6 257654784 0.004102791\n",
+      "stderr": "",
+      "mir_sha256": "c4daf11476e7e6e3a678cc3fbea18cd36781cf387b74e33257937aa30728c378",
+      "data_sha256": "d86f1415327c720ac8d7e6744bd9fe90f36392579e650daf806e0acf85f8accf",
+      "preparation_s": 0.395883208
+    },
+    {
+      "model": "examplemodels_ms",
+      "round": 3,
+      "arm": "candidate",
+      "argv": [
+        "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-covariance-fix/build/bench_grad",
+        "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-walnuts-pathfinder/.cache/covariance-storage-validation/selection-v2/candidate/examplemodels_ms/model.sexp",
+        "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-walnuts-pathfinder/.cache/covariance-storage-validation/selection-v2/inputs/examplemodels_ms.json",
+        "--prep"
+      ],
+      "cwd": "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-covariance-fix",
+      "started_unix_s": 1795463068.644781,
+      "process_elapsed_s": 0.4004647731781006,
+      "returncode": 0,
+      "stdout": "0.386783708 6 260358144 0.004276292\n",
+      "stderr": "",
+      "mir_sha256": "c4daf11476e7e6e3a678cc3fbea18cd36781cf387b74e33257937aa30728c378",
+      "data_sha256": "d86f1415327c720ac8d7e6744bd9fe90f36392579e650daf806e0acf85f8accf",
+      "preparation_s": 0.386783708
+    },
+    {
+      "model": "examplemodels_ms",
+      "round": 3,
+      "arm": "base",
+      "argv": [
+        "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-covariance-base/build/bench_grad",
+        "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-walnuts-pathfinder/.cache/covariance-storage-validation/selection-v2/base/examplemodels_ms/model.sexp",
+        "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-walnuts-pathfinder/.cache/covariance-storage-validation/selection-v2/inputs/examplemodels_ms.json",
+        "--prep"
+      ],
+      "cwd": "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-covariance-base",
+      "started_unix_s": 1795463069.0459478,
+      "process_elapsed_s": 0.3825252056121826,
+      "returncode": 0,
+      "stdout": "0.369214125 6 279560192 0.004330083\n",
+      "stderr": "",
+      "mir_sha256": "c4daf11476e7e6e3a678cc3fbea18cd36781cf387b74e33257937aa30728c378",
+      "data_sha256": "d86f1415327c720ac8d7e6744bd9fe90f36392579e650daf806e0acf85f8accf",
+      "preparation_s": 0.369214125
+    },
+    {
+      "model": "examplemodels_ms",
+      "round": 4,
+      "arm": "base",
+      "argv": [
+        "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-covariance-base/build/bench_grad",
+        "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-walnuts-pathfinder/.cache/covariance-storage-validation/selection-v2/base/examplemodels_ms/model.sexp",
+        "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-walnuts-pathfinder/.cache/covariance-storage-validation/selection-v2/inputs/examplemodels_ms.json",
+        "--prep"
+      ],
+      "cwd": "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-covariance-base",
+      "started_unix_s": 1795463069.429198,
+      "process_elapsed_s": 0.39580607414245605,
+      "returncode": 0,
+      "stdout": "0.383373917 6 278528000 0.003826958\n",
+      "stderr": "",
+      "mir_sha256": "c4daf11476e7e6e3a678cc3fbea18cd36781cf387b74e33257937aa30728c378",
+      "data_sha256": "d86f1415327c720ac8d7e6744bd9fe90f36392579e650daf806e0acf85f8accf",
+      "preparation_s": 0.383373917
+    },
+    {
+      "model": "examplemodels_ms",
+      "round": 4,
+      "arm": "candidate",
+      "argv": [
+        "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-covariance-fix/build/bench_grad",
+        "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-walnuts-pathfinder/.cache/covariance-storage-validation/selection-v2/candidate/examplemodels_ms/model.sexp",
+        "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-walnuts-pathfinder/.cache/covariance-storage-validation/selection-v2/inputs/examplemodels_ms.json",
+        "--prep"
+      ],
+      "cwd": "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-covariance-fix",
+      "started_unix_s": 1795463069.825772,
+      "process_elapsed_s": 0.4126310348510742,
+      "returncode": 0,
+      "stdout": "0.399571667 6 261160960 0.004308375\n",
+      "stderr": "",
+      "mir_sha256": "c4daf11476e7e6e3a678cc3fbea18cd36781cf387b74e33257937aa30728c378",
+      "data_sha256": "d86f1415327c720ac8d7e6744bd9fe90f36392579e650daf806e0acf85f8accf",
+      "preparation_s": 0.399571667
+    },
+    {
+      "model": "examplemodels_ms",
+      "round": 5,
+      "arm": "candidate",
+      "argv": [
+        "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-covariance-fix/build/bench_grad",
+        "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-walnuts-pathfinder/.cache/covariance-storage-validation/selection-v2/candidate/examplemodels_ms/model.sexp",
+        "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-walnuts-pathfinder/.cache/covariance-storage-validation/selection-v2/inputs/examplemodels_ms.json",
+        "--prep"
+      ],
+      "cwd": "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-covariance-fix",
+      "started_unix_s": 1795463070.239111,
+      "process_elapsed_s": 0.4004058837890625,
+      "returncode": 0,
+      "stdout": "0.386939792 6 259817472 0.004443417\n",
+      "stderr": "",
+      "mir_sha256": "c4daf11476e7e6e3a678cc3fbea18cd36781cf387b74e33257937aa30728c378",
+      "data_sha256": "d86f1415327c720ac8d7e6744bd9fe90f36392579e650daf806e0acf85f8accf",
+      "preparation_s": 0.386939792
+    },
+    {
+      "model": "examplemodels_ms",
+      "round": 5,
+      "arm": "base",
+      "argv": [
+        "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-covariance-base/build/bench_grad",
+        "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-walnuts-pathfinder/.cache/covariance-storage-validation/selection-v2/base/examplemodels_ms/model.sexp",
+        "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-walnuts-pathfinder/.cache/covariance-storage-validation/selection-v2/inputs/examplemodels_ms.json",
+        "--prep"
+      ],
+      "cwd": "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-covariance-base",
+      "started_unix_s": 1795463070.640314,
+      "process_elapsed_s": 0.39006686210632324,
+      "returncode": 0,
+      "stdout": "0.377421875 6 260177920 0.003770583\n",
+      "stderr": "",
+      "mir_sha256": "c4daf11476e7e6e3a678cc3fbea18cd36781cf387b74e33257937aa30728c378",
+      "data_sha256": "d86f1415327c720ac8d7e6744bd9fe90f36392579e650daf806e0acf85f8accf",
+      "preparation_s": 0.377421875
+    },
+    {
+      "model": "hbayesdm_gng_m4",
+      "round": 0,
+      "arm": "base",
+      "argv": [
+        "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-covariance-base/build/bench_grad",
+        "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-walnuts-pathfinder/.cache/covariance-storage-validation/selection-v2/base/hbayesdm_gng_m4/model.sexp",
+        "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-walnuts-pathfinder/.cache/covariance-storage-validation/selection-v2/inputs/hbayesdm_gng_m4.json",
+        "--prep"
+      ],
+      "cwd": "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-covariance-base",
+      "started_unix_s": 1795463071.031126,
+      "process_elapsed_s": 0.1848440170288086,
+      "returncode": 0,
+      "stdout": "0.176032625 72 283213824 0.000812583\n",
+      "stderr": "",
+      "mir_sha256": "8684e12435f9864cd866dbb9400033ba297c786c3ba36c95da1ab07671cfd354",
+      "data_sha256": "667f5d1f3ade6e866f47a2104917d374ebc7d9aa4267d636dd90b36a9af70e65",
+      "preparation_s": 0.176032625
+    },
+    {
+      "model": "hbayesdm_gng_m4",
+      "round": 0,
+      "arm": "candidate",
+      "argv": [
+        "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-covariance-fix/build/bench_grad",
+        "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-walnuts-pathfinder/.cache/covariance-storage-validation/selection-v2/candidate/hbayesdm_gng_m4/model.sexp",
+        "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-walnuts-pathfinder/.cache/covariance-storage-validation/selection-v2/inputs/hbayesdm_gng_m4.json",
+        "--prep"
+      ],
+      "cwd": "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-covariance-fix",
+      "started_unix_s": 1795463071.216707,
+      "process_elapsed_s": 0.18095183372497559,
+      "returncode": 0,
+      "stdout": "0.172719458 72 283131904 0.000778250\n",
+      "stderr": "",
+      "mir_sha256": "8684e12435f9864cd866dbb9400033ba297c786c3ba36c95da1ab07671cfd354",
+      "data_sha256": "667f5d1f3ade6e866f47a2104917d374ebc7d9aa4267d636dd90b36a9af70e65",
+      "preparation_s": 0.172719458
+    },
+    {
+      "model": "hbayesdm_gng_m4",
+      "round": 1,
+      "arm": "candidate",
+      "argv": [
+        "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-covariance-fix/build/bench_grad",
+        "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-walnuts-pathfinder/.cache/covariance-storage-validation/selection-v2/candidate/hbayesdm_gng_m4/model.sexp",
+        "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-walnuts-pathfinder/.cache/covariance-storage-validation/selection-v2/inputs/hbayesdm_gng_m4.json",
+        "--prep"
+      ],
+      "cwd": "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-covariance-fix",
+      "started_unix_s": 1795463071.398401,
+      "process_elapsed_s": 0.1694951057434082,
+      "returncode": 0,
+      "stdout": "0.161491417 72 283541504 0.000775417\n",
+      "stderr": "",
+      "mir_sha256": "8684e12435f9864cd866dbb9400033ba297c786c3ba36c95da1ab07671cfd354",
+      "data_sha256": "667f5d1f3ade6e866f47a2104917d374ebc7d9aa4267d636dd90b36a9af70e65",
+      "preparation_s": 0.161491417
+    },
+    {
+      "model": "hbayesdm_gng_m4",
+      "round": 1,
+      "arm": "base",
+      "argv": [
+        "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-covariance-base/build/bench_grad",
+        "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-walnuts-pathfinder/.cache/covariance-storage-validation/selection-v2/base/hbayesdm_gng_m4/model.sexp",
+        "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-walnuts-pathfinder/.cache/covariance-storage-validation/selection-v2/inputs/hbayesdm_gng_m4.json",
+        "--prep"
+      ],
+      "cwd": "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-covariance-base",
+      "started_unix_s": 1795463071.568608,
+      "process_elapsed_s": 0.17990398406982422,
+      "returncode": 0,
+      "stdout": "0.171690833 72 282640384 0.000792333\n",
+      "stderr": "",
+      "mir_sha256": "8684e12435f9864cd866dbb9400033ba297c786c3ba36c95da1ab07671cfd354",
+      "data_sha256": "667f5d1f3ade6e866f47a2104917d374ebc7d9aa4267d636dd90b36a9af70e65",
+      "preparation_s": 0.171690833
+    },
+    {
+      "model": "hbayesdm_gng_m4",
+      "round": 2,
+      "arm": "base",
+      "argv": [
+        "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-covariance-base/build/bench_grad",
+        "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-walnuts-pathfinder/.cache/covariance-storage-validation/selection-v2/base/hbayesdm_gng_m4/model.sexp",
+        "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-walnuts-pathfinder/.cache/covariance-storage-validation/selection-v2/inputs/hbayesdm_gng_m4.json",
+        "--prep"
+      ],
+      "cwd": "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-covariance-base",
+      "started_unix_s": 1795463071.749315,
+      "process_elapsed_s": 0.1830458641052246,
+      "returncode": 0,
+      "stdout": "0.174587083 72 283312128 0.000802834\n",
+      "stderr": "",
+      "mir_sha256": "8684e12435f9864cd866dbb9400033ba297c786c3ba36c95da1ab07671cfd354",
+      "data_sha256": "667f5d1f3ade6e866f47a2104917d374ebc7d9aa4267d636dd90b36a9af70e65",
+      "preparation_s": 0.174587083
+    },
+    {
+      "model": "hbayesdm_gng_m4",
+      "round": 2,
+      "arm": "candidate",
+      "argv": [
+        "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-covariance-fix/build/bench_grad",
+        "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-walnuts-pathfinder/.cache/covariance-storage-validation/selection-v2/candidate/hbayesdm_gng_m4/model.sexp",
+        "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-walnuts-pathfinder/.cache/covariance-storage-validation/selection-v2/inputs/hbayesdm_gng_m4.json",
+        "--prep"
+      ],
+      "cwd": "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-covariance-fix",
+      "started_unix_s": 1795463071.933144,
+      "process_elapsed_s": 0.17082500457763672,
+      "returncode": 0,
+      "stdout": "0.162754625 72 283557888 0.000757250\n",
+      "stderr": "",
+      "mir_sha256": "8684e12435f9864cd866dbb9400033ba297c786c3ba36c95da1ab07671cfd354",
+      "data_sha256": "667f5d1f3ade6e866f47a2104917d374ebc7d9aa4267d636dd90b36a9af70e65",
+      "preparation_s": 0.162754625
+    },
+    {
+      "model": "hbayesdm_gng_m4",
+      "round": 3,
+      "arm": "candidate",
+      "argv": [
+        "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-covariance-fix/build/bench_grad",
+        "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-walnuts-pathfinder/.cache/covariance-storage-validation/selection-v2/candidate/hbayesdm_gng_m4/model.sexp",
+        "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-walnuts-pathfinder/.cache/covariance-storage-validation/selection-v2/inputs/hbayesdm_gng_m4.json",
+        "--prep"
+      ],
+      "cwd": "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-covariance-fix",
+      "started_unix_s": 1795463072.104743,
+      "process_elapsed_s": 0.17973589897155762,
+      "returncode": 0,
+      "stdout": "0.171319709 72 283508736 0.000803083\n",
+      "stderr": "",
+      "mir_sha256": "8684e12435f9864cd866dbb9400033ba297c786c3ba36c95da1ab07671cfd354",
+      "data_sha256": "667f5d1f3ade6e866f47a2104917d374ebc7d9aa4267d636dd90b36a9af70e65",
+      "preparation_s": 0.171319709
+    },
+    {
+      "model": "hbayesdm_gng_m4",
+      "round": 3,
+      "arm": "base",
+      "argv": [
+        "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-covariance-base/build/bench_grad",
+        "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-walnuts-pathfinder/.cache/covariance-storage-validation/selection-v2/base/hbayesdm_gng_m4/model.sexp",
+        "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-walnuts-pathfinder/.cache/covariance-storage-validation/selection-v2/inputs/hbayesdm_gng_m4.json",
+        "--prep"
+      ],
+      "cwd": "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-covariance-base",
+      "started_unix_s": 1795463072.285357,
+      "process_elapsed_s": 0.183790922164917,
+      "returncode": 0,
+      "stdout": "0.174930750 72 282656768 0.000795208\n",
+      "stderr": "",
+      "mir_sha256": "8684e12435f9864cd866dbb9400033ba297c786c3ba36c95da1ab07671cfd354",
+      "data_sha256": "667f5d1f3ade6e866f47a2104917d374ebc7d9aa4267d636dd90b36a9af70e65",
+      "preparation_s": 0.17493075
+    },
+    {
+      "model": "hbayesdm_gng_m4",
+      "round": 4,
+      "arm": "base",
+      "argv": [
+        "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-covariance-base/build/bench_grad",
+        "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-walnuts-pathfinder/.cache/covariance-storage-validation/selection-v2/base/hbayesdm_gng_m4/model.sexp",
+        "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-walnuts-pathfinder/.cache/covariance-storage-validation/selection-v2/inputs/hbayesdm_gng_m4.json",
+        "--prep"
+      ],
+      "cwd": "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-covariance-base",
+      "started_unix_s": 1795463072.470017,
+      "process_elapsed_s": 0.1700758934020996,
+      "returncode": 0,
+      "stdout": "0.161849167 72 284229632 0.000806250\n",
+      "stderr": "",
+      "mir_sha256": "8684e12435f9864cd866dbb9400033ba297c786c3ba36c95da1ab07671cfd354",
+      "data_sha256": "667f5d1f3ade6e866f47a2104917d374ebc7d9aa4267d636dd90b36a9af70e65",
+      "preparation_s": 0.161849167
+    },
+    {
+      "model": "hbayesdm_gng_m4",
+      "round": 4,
+      "arm": "candidate",
+      "argv": [
+        "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-covariance-fix/build/bench_grad",
+        "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-walnuts-pathfinder/.cache/covariance-storage-validation/selection-v2/candidate/hbayesdm_gng_m4/model.sexp",
+        "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-walnuts-pathfinder/.cache/covariance-storage-validation/selection-v2/inputs/hbayesdm_gng_m4.json",
+        "--prep"
+      ],
+      "cwd": "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-covariance-fix",
+      "started_unix_s": 1795463072.640909,
+      "process_elapsed_s": 0.16770100593566895,
+      "returncode": 0,
+      "stdout": "0.159632375 72 285179904 0.000810792\n",
+      "stderr": "",
+      "mir_sha256": "8684e12435f9864cd866dbb9400033ba297c786c3ba36c95da1ab07671cfd354",
+      "data_sha256": "667f5d1f3ade6e866f47a2104917d374ebc7d9aa4267d636dd90b36a9af70e65",
+      "preparation_s": 0.159632375
+    },
+    {
+      "model": "hbayesdm_gng_m4",
+      "round": 5,
+      "arm": "candidate",
+      "argv": [
+        "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-covariance-fix/build/bench_grad",
+        "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-walnuts-pathfinder/.cache/covariance-storage-validation/selection-v2/candidate/hbayesdm_gng_m4/model.sexp",
+        "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-walnuts-pathfinder/.cache/covariance-storage-validation/selection-v2/inputs/hbayesdm_gng_m4.json",
+        "--prep"
+      ],
+      "cwd": "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-covariance-fix",
+      "started_unix_s": 1795463072.8094,
+      "process_elapsed_s": 0.18442893028259277,
+      "returncode": 0,
+      "stdout": "0.176206542 72 285655040 0.000792833\n",
+      "stderr": "",
+      "mir_sha256": "8684e12435f9864cd866dbb9400033ba297c786c3ba36c95da1ab07671cfd354",
+      "data_sha256": "667f5d1f3ade6e866f47a2104917d374ebc7d9aa4267d636dd90b36a9af70e65",
+      "preparation_s": 0.176206542
+    },
+    {
+      "model": "hbayesdm_gng_m4",
+      "round": 5,
+      "arm": "base",
+      "argv": [
+        "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-covariance-base/build/bench_grad",
+        "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-walnuts-pathfinder/.cache/covariance-storage-validation/selection-v2/base/hbayesdm_gng_m4/model.sexp",
+        "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-walnuts-pathfinder/.cache/covariance-storage-validation/selection-v2/inputs/hbayesdm_gng_m4.json",
+        "--prep"
+      ],
+      "cwd": "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-covariance-base",
+      "started_unix_s": 1795463072.994708,
+      "process_elapsed_s": 0.17728781700134277,
+      "returncode": 0,
+      "stdout": "0.169067917 72 282787840 0.000817625\n",
+      "stderr": "",
+      "mir_sha256": "8684e12435f9864cd866dbb9400033ba297c786c3ba36c95da1ab07671cfd354",
+      "data_sha256": "667f5d1f3ade6e866f47a2104917d374ebc7d9aa4267d636dd90b36a9af70e65",
+      "preparation_s": 0.169067917
+    },
+    {
+      "model": "hmm_gaussian",
+      "round": 0,
+      "arm": "base",
+      "argv": [
+        "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-covariance-base/build/bench_grad",
+        "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-walnuts-pathfinder/.cache/covariance-storage-validation/selection-v2/base/hmm_gaussian/model.sexp",
+        "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-walnuts-pathfinder/.cache/covariance-storage-validation/selection-v2/inputs/hmm_gaussian.json",
+        "--prep"
+      ],
+      "cwd": "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-covariance-base",
+      "started_unix_s": 1795463073.172829,
+      "process_elapsed_s": 0.11538910865783691,
+      "returncode": 0,
+      "stdout": "0.109457250 14 88195072 0.000219541\n",
+      "stderr": "",
+      "mir_sha256": "83b84b6706916692197aff712da10a68ba27f1482a7e89592758abcac7011b37",
+      "data_sha256": "b3dacb0e6d576fe51a3760310d0f94a42b7b0d150a961a96850a2c4faccada2c",
+      "preparation_s": 0.10945725
+    },
+    {
+      "model": "hmm_gaussian",
+      "round": 0,
+      "arm": "candidate",
+      "argv": [
+        "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-covariance-fix/build/bench_grad",
+        "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-walnuts-pathfinder/.cache/covariance-storage-validation/selection-v2/candidate/hmm_gaussian/model.sexp",
+        "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-walnuts-pathfinder/.cache/covariance-storage-validation/selection-v2/inputs/hmm_gaussian.json",
+        "--prep"
+      ],
+      "cwd": "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-covariance-fix",
+      "started_unix_s": 1795463073.2890081,
+      "process_elapsed_s": 0.12127375602722168,
+      "returncode": 0,
+      "stdout": "0.115108291 14 88276992 0.000245708\n",
+      "stderr": "",
+      "mir_sha256": "83b84b6706916692197aff712da10a68ba27f1482a7e89592758abcac7011b37",
+      "data_sha256": "b3dacb0e6d576fe51a3760310d0f94a42b7b0d150a961a96850a2c4faccada2c",
+      "preparation_s": 0.115108291
+    },
+    {
+      "model": "hmm_gaussian",
+      "round": 1,
+      "arm": "candidate",
+      "argv": [
+        "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-covariance-fix/build/bench_grad",
+        "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-walnuts-pathfinder/.cache/covariance-storage-validation/selection-v2/candidate/hmm_gaussian/model.sexp",
+        "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-walnuts-pathfinder/.cache/covariance-storage-validation/selection-v2/inputs/hmm_gaussian.json",
+        "--prep"
+      ],
+      "cwd": "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-covariance-fix",
+      "started_unix_s": 1795463073.411212,
+      "process_elapsed_s": 0.12760400772094727,
+      "returncode": 0,
+      "stdout": "0.121125625 14 88145920 0.000244875\n",
+      "stderr": "",
+      "mir_sha256": "83b84b6706916692197aff712da10a68ba27f1482a7e89592758abcac7011b37",
+      "data_sha256": "b3dacb0e6d576fe51a3760310d0f94a42b7b0d150a961a96850a2c4faccada2c",
+      "preparation_s": 0.121125625
+    },
+    {
+      "model": "hmm_gaussian",
+      "round": 1,
+      "arm": "base",
+      "argv": [
+        "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-covariance-base/build/bench_grad",
+        "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-walnuts-pathfinder/.cache/covariance-storage-validation/selection-v2/base/hmm_gaussian/model.sexp",
+        "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-walnuts-pathfinder/.cache/covariance-storage-validation/selection-v2/inputs/hmm_gaussian.json",
+        "--prep"
+      ],
+      "cwd": "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-covariance-base",
+      "started_unix_s": 1795463073.539742,
+      "process_elapsed_s": 0.12648487091064453,
+      "returncode": 0,
+      "stdout": "0.120223708 14 88162304 0.000210042\n",
+      "stderr": "",
+      "mir_sha256": "83b84b6706916692197aff712da10a68ba27f1482a7e89592758abcac7011b37",
+      "data_sha256": "b3dacb0e6d576fe51a3760310d0f94a42b7b0d150a961a96850a2c4faccada2c",
+      "preparation_s": 0.120223708
+    },
+    {
+      "model": "hmm_gaussian",
+      "round": 2,
+      "arm": "base",
+      "argv": [
+        "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-covariance-base/build/bench_grad",
+        "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-walnuts-pathfinder/.cache/covariance-storage-validation/selection-v2/base/hmm_gaussian/model.sexp",
+        "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-walnuts-pathfinder/.cache/covariance-storage-validation/selection-v2/inputs/hmm_gaussian.json",
+        "--prep"
+      ],
+      "cwd": "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-covariance-base",
+      "started_unix_s": 1795463073.66704,
+      "process_elapsed_s": 0.11634182929992676,
+      "returncode": 0,
+      "stdout": "0.109815416 14 88096768 0.000212333\n",
+      "stderr": "",
+      "mir_sha256": "83b84b6706916692197aff712da10a68ba27f1482a7e89592758abcac7011b37",
+      "data_sha256": "b3dacb0e6d576fe51a3760310d0f94a42b7b0d150a961a96850a2c4faccada2c",
+      "preparation_s": 0.109815416
+    },
+    {
+      "model": "hmm_gaussian",
+      "round": 2,
+      "arm": "candidate",
+      "argv": [
+        "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-covariance-fix/build/bench_grad",
+        "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-walnuts-pathfinder/.cache/covariance-storage-validation/selection-v2/candidate/hmm_gaussian/model.sexp",
+        "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-walnuts-pathfinder/.cache/covariance-storage-validation/selection-v2/inputs/hmm_gaussian.json",
+        "--prep"
+      ],
+      "cwd": "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-covariance-fix",
+      "started_unix_s": 1795463073.784247,
+      "process_elapsed_s": 0.12044906616210938,
+      "returncode": 0,
+      "stdout": "0.114563959 14 86441984 0.000218792\n",
+      "stderr": "",
+      "mir_sha256": "83b84b6706916692197aff712da10a68ba27f1482a7e89592758abcac7011b37",
+      "data_sha256": "b3dacb0e6d576fe51a3760310d0f94a42b7b0d150a961a96850a2c4faccada2c",
+      "preparation_s": 0.114563959
+    },
+    {
+      "model": "hmm_gaussian",
+      "round": 3,
+      "arm": "candidate",
+      "argv": [
+        "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-covariance-fix/build/bench_grad",
+        "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-walnuts-pathfinder/.cache/covariance-storage-validation/selection-v2/candidate/hmm_gaussian/model.sexp",
+        "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-walnuts-pathfinder/.cache/covariance-storage-validation/selection-v2/inputs/hmm_gaussian.json",
+        "--prep"
+      ],
+      "cwd": "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-covariance-fix",
+      "started_unix_s": 1795463073.905596,
+      "process_elapsed_s": 0.12035393714904785,
+      "returncode": 0,
+      "stdout": "0.114056125 14 89735168 0.000250542\n",
+      "stderr": "",
+      "mir_sha256": "83b84b6706916692197aff712da10a68ba27f1482a7e89592758abcac7011b37",
+      "data_sha256": "b3dacb0e6d576fe51a3760310d0f94a42b7b0d150a961a96850a2c4faccada2c",
+      "preparation_s": 0.114056125
+    },
+    {
+      "model": "hmm_gaussian",
+      "round": 3,
+      "arm": "base",
+      "argv": [
+        "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-covariance-base/build/bench_grad",
+        "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-walnuts-pathfinder/.cache/covariance-storage-validation/selection-v2/base/hmm_gaussian/model.sexp",
+        "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-walnuts-pathfinder/.cache/covariance-storage-validation/selection-v2/inputs/hmm_gaussian.json",
+        "--prep"
+      ],
+      "cwd": "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-covariance-base",
+      "started_unix_s": 1795463074.026927,
+      "process_elapsed_s": 0.12749409675598145,
+      "returncode": 0,
+      "stdout": "0.120784625 14 87949312 0.000237583\n",
+      "stderr": "",
+      "mir_sha256": "83b84b6706916692197aff712da10a68ba27f1482a7e89592758abcac7011b37",
+      "data_sha256": "b3dacb0e6d576fe51a3760310d0f94a42b7b0d150a961a96850a2c4faccada2c",
+      "preparation_s": 0.120784625
+    },
+    {
+      "model": "hmm_gaussian",
+      "round": 4,
+      "arm": "base",
+      "argv": [
+        "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-covariance-base/build/bench_grad",
+        "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-walnuts-pathfinder/.cache/covariance-storage-validation/selection-v2/base/hmm_gaussian/model.sexp",
+        "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-walnuts-pathfinder/.cache/covariance-storage-validation/selection-v2/inputs/hmm_gaussian.json",
+        "--prep"
+      ],
+      "cwd": "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-covariance-base",
+      "started_unix_s": 1795463074.155421,
+      "process_elapsed_s": 0.12749099731445312,
+      "returncode": 0,
+      "stdout": "0.120431542 14 88473600 0.000217375\n",
+      "stderr": "",
+      "mir_sha256": "83b84b6706916692197aff712da10a68ba27f1482a7e89592758abcac7011b37",
+      "data_sha256": "b3dacb0e6d576fe51a3760310d0f94a42b7b0d150a961a96850a2c4faccada2c",
+      "preparation_s": 0.120431542
+    },
+    {
+      "model": "hmm_gaussian",
+      "round": 4,
+      "arm": "candidate",
+      "argv": [
+        "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-covariance-fix/build/bench_grad",
+        "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-walnuts-pathfinder/.cache/covariance-storage-validation/selection-v2/candidate/hmm_gaussian/model.sexp",
+        "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-walnuts-pathfinder/.cache/covariance-storage-validation/selection-v2/inputs/hmm_gaussian.json",
+        "--prep"
+      ],
+      "cwd": "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-covariance-fix",
+      "started_unix_s": 1795463074.2838342,
+      "process_elapsed_s": 0.115142822265625,
+      "returncode": 0,
+      "stdout": "0.109102584 14 86196224 0.000216000\n",
+      "stderr": "",
+      "mir_sha256": "83b84b6706916692197aff712da10a68ba27f1482a7e89592758abcac7011b37",
+      "data_sha256": "b3dacb0e6d576fe51a3760310d0f94a42b7b0d150a961a96850a2c4faccada2c",
+      "preparation_s": 0.109102584
+    },
+    {
+      "model": "hmm_gaussian",
+      "round": 5,
+      "arm": "candidate",
+      "argv": [
+        "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-covariance-fix/build/bench_grad",
+        "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-walnuts-pathfinder/.cache/covariance-storage-validation/selection-v2/candidate/hmm_gaussian/model.sexp",
+        "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-walnuts-pathfinder/.cache/covariance-storage-validation/selection-v2/inputs/hmm_gaussian.json",
+        "--prep"
+      ],
+      "cwd": "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-covariance-fix",
+      "started_unix_s": 1795463074.3998752,
+      "process_elapsed_s": 0.11436676979064941,
+      "returncode": 0,
+      "stdout": "0.108439625 14 87293952 0.000217792\n",
+      "stderr": "",
+      "mir_sha256": "83b84b6706916692197aff712da10a68ba27f1482a7e89592758abcac7011b37",
+      "data_sha256": "b3dacb0e6d576fe51a3760310d0f94a42b7b0d150a961a96850a2c4faccada2c",
+      "preparation_s": 0.108439625
+    },
+    {
+      "model": "hmm_gaussian",
+      "round": 5,
+      "arm": "base",
+      "argv": [
+        "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-covariance-base/build/bench_grad",
+        "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-walnuts-pathfinder/.cache/covariance-storage-validation/selection-v2/base/hmm_gaussian/model.sexp",
+        "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-walnuts-pathfinder/.cache/covariance-storage-validation/selection-v2/inputs/hmm_gaussian.json",
+        "--prep"
+      ],
+      "cwd": "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-covariance-base",
+      "started_unix_s": 1795463074.5151548,
+      "process_elapsed_s": 0.12605810165405273,
+      "returncode": 0,
+      "stdout": "0.119680667 14 88276992 0.000235000\n",
+      "stderr": "",
+      "mir_sha256": "83b84b6706916692197aff712da10a68ba27f1482a7e89592758abcac7011b37",
+      "data_sha256": "b3dacb0e6d576fe51a3760310d0f94a42b7b0d150a961a96850a2c4faccada2c",
+      "preparation_s": 0.119680667
+    },
+    {
+      "model": "ldaK5",
+      "round": 0,
+      "arm": "base",
+      "argv": [
+        "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-covariance-base/build/bench_grad",
+        "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-walnuts-pathfinder/.cache/covariance-storage-validation/selection-v2/base/ldaK5/model.sexp",
+        "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-walnuts-pathfinder/.cache/covariance-storage-validation/selection-v2/inputs/ldaK5.json",
+        "--prep"
+      ],
+      "cwd": "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-covariance-base",
+      "started_unix_s": 1795463074.642272,
+      "process_elapsed_s": 0.4398360252380371,
+      "returncode": 0,
+      "stdout": "0.430844083 7714 354910208 0.002546125\n",
+      "stderr": "",
+      "mir_sha256": "3b4f53f74112b58a6e177eff0f773e5983a5115f6a1e435bbc39f775c22dc583",
+      "data_sha256": "7bbd590c960952956a9efd90ac0e5cb2e9d7ad75dba26c0b36cd5fb9a1374c69",
+      "preparation_s": 0.430844083
+    },
+    {
+      "model": "ldaK5",
+      "round": 0,
+      "arm": "candidate",
+      "argv": [
+        "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-covariance-fix/build/bench_grad",
+        "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-walnuts-pathfinder/.cache/covariance-storage-validation/selection-v2/candidate/ldaK5/model.sexp",
+        "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-walnuts-pathfinder/.cache/covariance-storage-validation/selection-v2/inputs/ldaK5.json",
+        "--prep"
+      ],
+      "cwd": "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-covariance-fix",
+      "started_unix_s": 1795463075.083331,
+      "process_elapsed_s": 0.4520378112792969,
+      "returncode": 0,
+      "stdout": "0.443180542 7714 355991552 0.002241583\n",
+      "stderr": "",
+      "mir_sha256": "3b4f53f74112b58a6e177eff0f773e5983a5115f6a1e435bbc39f775c22dc583",
+      "data_sha256": "7bbd590c960952956a9efd90ac0e5cb2e9d7ad75dba26c0b36cd5fb9a1374c69",
+      "preparation_s": 0.443180542
+    },
+    {
+      "model": "ldaK5",
+      "round": 1,
+      "arm": "candidate",
+      "argv": [
+        "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-covariance-fix/build/bench_grad",
+        "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-walnuts-pathfinder/.cache/covariance-storage-validation/selection-v2/candidate/ldaK5/model.sexp",
+        "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-walnuts-pathfinder/.cache/covariance-storage-validation/selection-v2/inputs/ldaK5.json",
+        "--prep"
+      ],
+      "cwd": "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-covariance-fix",
+      "started_unix_s": 1795463075.536421,
+      "process_elapsed_s": 0.45092201232910156,
+      "returncode": 0,
+      "stdout": "0.441935875 7714 356007936 0.002476291\n",
+      "stderr": "",
+      "mir_sha256": "3b4f53f74112b58a6e177eff0f773e5983a5115f6a1e435bbc39f775c22dc583",
+      "data_sha256": "7bbd590c960952956a9efd90ac0e5cb2e9d7ad75dba26c0b36cd5fb9a1374c69",
+      "preparation_s": 0.441935875
+    },
+    {
+      "model": "ldaK5",
+      "round": 1,
+      "arm": "base",
+      "argv": [
+        "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-covariance-base/build/bench_grad",
+        "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-walnuts-pathfinder/.cache/covariance-storage-validation/selection-v2/base/ldaK5/model.sexp",
+        "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-walnuts-pathfinder/.cache/covariance-storage-validation/selection-v2/inputs/ldaK5.json",
+        "--prep"
+      ],
+      "cwd": "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-covariance-base",
+      "started_unix_s": 1795463075.988551,
+      "process_elapsed_s": 0.4394969940185547,
+      "returncode": 0,
+      "stdout": "0.430311125 7714 352927744 0.002475792\n",
+      "stderr": "",
+      "mir_sha256": "3b4f53f74112b58a6e177eff0f773e5983a5115f6a1e435bbc39f775c22dc583",
+      "data_sha256": "7bbd590c960952956a9efd90ac0e5cb2e9d7ad75dba26c0b36cd5fb9a1374c69",
+      "preparation_s": 0.430311125
+    },
+    {
+      "model": "ldaK5",
+      "round": 2,
+      "arm": "base",
+      "argv": [
+        "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-covariance-base/build/bench_grad",
+        "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-walnuts-pathfinder/.cache/covariance-storage-validation/selection-v2/base/ldaK5/model.sexp",
+        "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-walnuts-pathfinder/.cache/covariance-storage-validation/selection-v2/inputs/ldaK5.json",
+        "--prep"
+      ],
+      "cwd": "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-covariance-base",
+      "started_unix_s": 1795463076.4292412,
+      "process_elapsed_s": 0.44640278816223145,
+      "returncode": 0,
+      "stdout": "0.437598500 7714 352681984 0.002537417\n",
+      "stderr": "",
+      "mir_sha256": "3b4f53f74112b58a6e177eff0f773e5983a5115f6a1e435bbc39f775c22dc583",
+      "data_sha256": "7bbd590c960952956a9efd90ac0e5cb2e9d7ad75dba26c0b36cd5fb9a1374c69",
+      "preparation_s": 0.4375985
+    },
+    {
+      "model": "ldaK5",
+      "round": 2,
+      "arm": "candidate",
+      "argv": [
+        "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-covariance-fix/build/bench_grad",
+        "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-walnuts-pathfinder/.cache/covariance-storage-validation/selection-v2/candidate/ldaK5/model.sexp",
+        "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-walnuts-pathfinder/.cache/covariance-storage-validation/selection-v2/inputs/ldaK5.json",
+        "--prep"
+      ],
+      "cwd": "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-covariance-fix",
+      "started_unix_s": 1795463076.8768718,
+      "process_elapsed_s": 0.4437582492828369,
+      "returncode": 0,
+      "stdout": "0.435073500 7714 356007936 0.002281750\n",
+      "stderr": "",
+      "mir_sha256": "3b4f53f74112b58a6e177eff0f773e5983a5115f6a1e435bbc39f775c22dc583",
+      "data_sha256": "7bbd590c960952956a9efd90ac0e5cb2e9d7ad75dba26c0b36cd5fb9a1374c69",
+      "preparation_s": 0.4350735
+    },
+    {
+      "model": "ldaK5",
+      "round": 3,
+      "arm": "candidate",
+      "argv": [
+        "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-covariance-fix/build/bench_grad",
+        "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-walnuts-pathfinder/.cache/covariance-storage-validation/selection-v2/candidate/ldaK5/model.sexp",
+        "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-walnuts-pathfinder/.cache/covariance-storage-validation/selection-v2/inputs/ldaK5.json",
+        "--prep"
+      ],
+      "cwd": "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-covariance-fix",
+      "started_unix_s": 1795463077.321782,
+      "process_elapsed_s": 0.4547388553619385,
+      "returncode": 0,
+      "stdout": "0.446263209 7714 355876864 0.002275667\n",
+      "stderr": "",
+      "mir_sha256": "3b4f53f74112b58a6e177eff0f773e5983a5115f6a1e435bbc39f775c22dc583",
+      "data_sha256": "7bbd590c960952956a9efd90ac0e5cb2e9d7ad75dba26c0b36cd5fb9a1374c69",
+      "preparation_s": 0.446263209
+    },
+    {
+      "model": "ldaK5",
+      "round": 3,
+      "arm": "base",
+      "argv": [
+        "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-covariance-base/build/bench_grad",
+        "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-walnuts-pathfinder/.cache/covariance-storage-validation/selection-v2/base/ldaK5/model.sexp",
+        "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-walnuts-pathfinder/.cache/covariance-storage-validation/selection-v2/inputs/ldaK5.json",
+        "--prep"
+      ],
+      "cwd": "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-covariance-base",
+      "started_unix_s": 1795463077.777636,
+      "process_elapsed_s": 0.45634889602661133,
+      "returncode": 0,
+      "stdout": "0.448076542 7714 352714752 0.002222875\n",
+      "stderr": "",
+      "mir_sha256": "3b4f53f74112b58a6e177eff0f773e5983a5115f6a1e435bbc39f775c22dc583",
+      "data_sha256": "7bbd590c960952956a9efd90ac0e5cb2e9d7ad75dba26c0b36cd5fb9a1374c69",
+      "preparation_s": 0.448076542
+    },
+    {
+      "model": "ldaK5",
+      "round": 4,
+      "arm": "base",
+      "argv": [
+        "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-covariance-base/build/bench_grad",
+        "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-walnuts-pathfinder/.cache/covariance-storage-validation/selection-v2/base/ldaK5/model.sexp",
+        "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-walnuts-pathfinder/.cache/covariance-storage-validation/selection-v2/inputs/ldaK5.json",
+        "--prep"
+      ],
+      "cwd": "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-covariance-base",
+      "started_unix_s": 1795463078.235153,
+      "process_elapsed_s": 0.4386589527130127,
+      "returncode": 0,
+      "stdout": "0.429700875 7714 352698368 0.002493958\n",
+      "stderr": "",
+      "mir_sha256": "3b4f53f74112b58a6e177eff0f773e5983a5115f6a1e435bbc39f775c22dc583",
+      "data_sha256": "7bbd590c960952956a9efd90ac0e5cb2e9d7ad75dba26c0b36cd5fb9a1374c69",
+      "preparation_s": 0.429700875
+    },
+    {
+      "model": "ldaK5",
+      "round": 4,
+      "arm": "candidate",
+      "argv": [
+        "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-covariance-fix/build/bench_grad",
+        "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-walnuts-pathfinder/.cache/covariance-storage-validation/selection-v2/candidate/ldaK5/model.sexp",
+        "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-walnuts-pathfinder/.cache/covariance-storage-validation/selection-v2/inputs/ldaK5.json",
+        "--prep"
+      ],
+      "cwd": "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-covariance-fix",
+      "started_unix_s": 1795463078.675154,
+      "process_elapsed_s": 0.45064401626586914,
+      "returncode": 0,
+      "stdout": "0.441373458 7714 353632256 0.002546666\n",
+      "stderr": "",
+      "mir_sha256": "3b4f53f74112b58a6e177eff0f773e5983a5115f6a1e435bbc39f775c22dc583",
+      "data_sha256": "7bbd590c960952956a9efd90ac0e5cb2e9d7ad75dba26c0b36cd5fb9a1374c69",
+      "preparation_s": 0.441373458
+    },
+    {
+      "model": "ldaK5",
+      "round": 5,
+      "arm": "candidate",
+      "argv": [
+        "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-covariance-fix/build/bench_grad",
+        "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-walnuts-pathfinder/.cache/covariance-storage-validation/selection-v2/candidate/ldaK5/model.sexp",
+        "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-walnuts-pathfinder/.cache/covariance-storage-validation/selection-v2/inputs/ldaK5.json",
+        "--prep"
+      ],
+      "cwd": "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-covariance-fix",
+      "started_unix_s": 1795463079.12706,
+      "process_elapsed_s": 0.44367003440856934,
+      "returncode": 0,
+      "stdout": "0.435193875 7714 355876864 0.002297542\n",
+      "stderr": "",
+      "mir_sha256": "3b4f53f74112b58a6e177eff0f773e5983a5115f6a1e435bbc39f775c22dc583",
+      "data_sha256": "7bbd590c960952956a9efd90ac0e5cb2e9d7ad75dba26c0b36cd5fb9a1374c69",
+      "preparation_s": 0.435193875
+    },
+    {
+      "model": "ldaK5",
+      "round": 5,
+      "arm": "base",
+      "argv": [
+        "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-covariance-base/build/bench_grad",
+        "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-walnuts-pathfinder/.cache/covariance-storage-validation/selection-v2/base/ldaK5/model.sexp",
+        "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-walnuts-pathfinder/.cache/covariance-storage-validation/selection-v2/inputs/ldaK5.json",
+        "--prep"
+      ],
+      "cwd": "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-covariance-base",
+      "started_unix_s": 1795463079.571928,
+      "process_elapsed_s": 0.4513239860534668,
+      "returncode": 0,
+      "stdout": "0.442773708 7714 352681984 0.002264458\n",
+      "stderr": "",
+      "mir_sha256": "3b4f53f74112b58a6e177eff0f773e5983a5115f6a1e435bbc39f775c22dc583",
+      "data_sha256": "7bbd590c960952956a9efd90ac0e5cb2e9d7ad75dba26c0b36cd5fb9a1374c69",
+      "preparation_s": 0.442773708
+    },
+    {
+      "model": "mlumr_survival_mspline_relaxed",
+      "round": 0,
+      "arm": "base",
+      "argv": [
+        "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-covariance-base/build/bench_grad",
+        "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-walnuts-pathfinder/.cache/covariance-storage-validation/selection-v2/base/mlumr_survival_mspline_relaxed/model.sexp",
+        "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-walnuts-pathfinder/.cache/covariance-storage-validation/selection-v2/inputs/mlumr_survival_mspline_relaxed.json",
+        "--prep"
+      ],
+      "cwd": "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-covariance-base",
+      "started_unix_s": 1795463080.0245252,
+      "process_elapsed_s": 0.17170286178588867,
+      "returncode": 0,
+      "stdout": "0.163904125 32 55115776 0.002131750\n",
+      "stderr": "",
+      "mir_sha256": "6ff69b5f2bf893344bf1429f163f42a6df1b9939b45106a60dfc61ebecfb3b12",
+      "data_sha256": "5a5eefbdebad298afe2dfb5d797d28ff506093844014e8ccf94349ff2adb92d7",
+      "preparation_s": 0.163904125
+    },
+    {
+      "model": "mlumr_survival_mspline_relaxed",
+      "round": 0,
+      "arm": "candidate",
+      "argv": [
+        "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-covariance-fix/build/bench_grad",
+        "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-walnuts-pathfinder/.cache/covariance-storage-validation/selection-v2/candidate/mlumr_survival_mspline_relaxed/model.sexp",
+        "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-walnuts-pathfinder/.cache/covariance-storage-validation/selection-v2/inputs/mlumr_survival_mspline_relaxed.json",
+        "--prep"
+      ],
+      "cwd": "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-covariance-fix",
+      "started_unix_s": 1795463080.197642,
+      "process_elapsed_s": 0.18712806701660156,
+      "returncode": 0,
+      "stdout": "0.179508208 32 54837248 0.002100083\n",
+      "stderr": "",
+      "mir_sha256": "6ff69b5f2bf893344bf1429f163f42a6df1b9939b45106a60dfc61ebecfb3b12",
+      "data_sha256": "5a5eefbdebad298afe2dfb5d797d28ff506093844014e8ccf94349ff2adb92d7",
+      "preparation_s": 0.179508208
+    },
+    {
+      "model": "mlumr_survival_mspline_relaxed",
+      "round": 1,
+      "arm": "candidate",
+      "argv": [
+        "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-covariance-fix/build/bench_grad",
+        "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-walnuts-pathfinder/.cache/covariance-storage-validation/selection-v2/candidate/mlumr_survival_mspline_relaxed/model.sexp",
+        "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-walnuts-pathfinder/.cache/covariance-storage-validation/selection-v2/inputs/mlumr_survival_mspline_relaxed.json",
+        "--prep"
+      ],
+      "cwd": "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-covariance-fix",
+      "started_unix_s": 1795463080.3860521,
+      "process_elapsed_s": 0.17912507057189941,
+      "returncode": 0,
+      "stdout": "0.171768375 32 55083008 0.001931167\n",
+      "stderr": "",
+      "mir_sha256": "6ff69b5f2bf893344bf1429f163f42a6df1b9939b45106a60dfc61ebecfb3b12",
+      "data_sha256": "5a5eefbdebad298afe2dfb5d797d28ff506093844014e8ccf94349ff2adb92d7",
+      "preparation_s": 0.171768375
+    },
+    {
+      "model": "mlumr_survival_mspline_relaxed",
+      "round": 1,
+      "arm": "base",
+      "argv": [
+        "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-covariance-base/build/bench_grad",
+        "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-walnuts-pathfinder/.cache/covariance-storage-validation/selection-v2/base/mlumr_survival_mspline_relaxed/model.sexp",
+        "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-walnuts-pathfinder/.cache/covariance-storage-validation/selection-v2/inputs/mlumr_survival_mspline_relaxed.json",
+        "--prep"
+      ],
+      "cwd": "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-covariance-base",
+      "started_unix_s": 1795463080.566415,
+      "process_elapsed_s": 0.17189693450927734,
+      "returncode": 0,
+      "stdout": "0.164679791 32 55132160 0.002145500\n",
+      "stderr": "",
+      "mir_sha256": "6ff69b5f2bf893344bf1429f163f42a6df1b9939b45106a60dfc61ebecfb3b12",
+      "data_sha256": "5a5eefbdebad298afe2dfb5d797d28ff506093844014e8ccf94349ff2adb92d7",
+      "preparation_s": 0.164679791
+    },
+    {
+      "model": "mlumr_survival_mspline_relaxed",
+      "round": 2,
+      "arm": "base",
+      "argv": [
+        "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-covariance-base/build/bench_grad",
+        "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-walnuts-pathfinder/.cache/covariance-storage-validation/selection-v2/base/mlumr_survival_mspline_relaxed/model.sexp",
+        "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-walnuts-pathfinder/.cache/covariance-storage-validation/selection-v2/inputs/mlumr_survival_mspline_relaxed.json",
+        "--prep"
+      ],
+      "cwd": "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-covariance-base",
+      "started_unix_s": 1795463080.7396648,
+      "process_elapsed_s": 0.18798327445983887,
+      "returncode": 0,
+      "stdout": "0.180453833 32 55148544 0.002110042\n",
+      "stderr": "",
+      "mir_sha256": "6ff69b5f2bf893344bf1429f163f42a6df1b9939b45106a60dfc61ebecfb3b12",
+      "data_sha256": "5a5eefbdebad298afe2dfb5d797d28ff506093844014e8ccf94349ff2adb92d7",
+      "preparation_s": 0.180453833
+    },
+    {
+      "model": "mlumr_survival_mspline_relaxed",
+      "round": 2,
+      "arm": "candidate",
+      "argv": [
+        "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-covariance-fix/build/bench_grad",
+        "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-walnuts-pathfinder/.cache/covariance-storage-validation/selection-v2/candidate/mlumr_survival_mspline_relaxed/model.sexp",
+        "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-walnuts-pathfinder/.cache/covariance-storage-validation/selection-v2/inputs/mlumr_survival_mspline_relaxed.json",
+        "--prep"
+      ],
+      "cwd": "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-covariance-fix",
+      "started_unix_s": 1795463080.929033,
+      "process_elapsed_s": 0.176224946975708,
+      "returncode": 0,
+      "stdout": "0.168974875 32 55017472 0.001905292\n",
+      "stderr": "",
+      "mir_sha256": "6ff69b5f2bf893344bf1429f163f42a6df1b9939b45106a60dfc61ebecfb3b12",
+      "data_sha256": "5a5eefbdebad298afe2dfb5d797d28ff506093844014e8ccf94349ff2adb92d7",
+      "preparation_s": 0.168974875
+    },
+    {
+      "model": "mlumr_survival_mspline_relaxed",
+      "round": 3,
+      "arm": "candidate",
+      "argv": [
+        "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-covariance-fix/build/bench_grad",
+        "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-walnuts-pathfinder/.cache/covariance-storage-validation/selection-v2/candidate/mlumr_survival_mspline_relaxed/model.sexp",
+        "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-walnuts-pathfinder/.cache/covariance-storage-validation/selection-v2/inputs/mlumr_survival_mspline_relaxed.json",
+        "--prep"
+      ],
+      "cwd": "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-covariance-fix",
+      "started_unix_s": 1795463081.1064692,
+      "process_elapsed_s": 0.16900897026062012,
+      "returncode": 0,
+      "stdout": "0.162217708 32 55050240 0.001887417\n",
+      "stderr": "",
+      "mir_sha256": "6ff69b5f2bf893344bf1429f163f42a6df1b9939b45106a60dfc61ebecfb3b12",
+      "data_sha256": "5a5eefbdebad298afe2dfb5d797d28ff506093844014e8ccf94349ff2adb92d7",
+      "preparation_s": 0.162217708
+    },
+    {
+      "model": "mlumr_survival_mspline_relaxed",
+      "round": 3,
+      "arm": "base",
+      "argv": [
+        "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-covariance-base/build/bench_grad",
+        "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-walnuts-pathfinder/.cache/covariance-storage-validation/selection-v2/base/mlumr_survival_mspline_relaxed/model.sexp",
+        "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-walnuts-pathfinder/.cache/covariance-storage-validation/selection-v2/inputs/mlumr_survival_mspline_relaxed.json",
+        "--prep"
+      ],
+      "cwd": "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-covariance-base",
+      "started_unix_s": 1795463081.2766972,
+      "process_elapsed_s": 0.18073296546936035,
+      "returncode": 0,
+      "stdout": "0.173640958 32 55181312 0.002098625\n",
+      "stderr": "",
+      "mir_sha256": "6ff69b5f2bf893344bf1429f163f42a6df1b9939b45106a60dfc61ebecfb3b12",
+      "data_sha256": "5a5eefbdebad298afe2dfb5d797d28ff506093844014e8ccf94349ff2adb92d7",
+      "preparation_s": 0.173640958
+    },
+    {
+      "model": "mlumr_survival_mspline_relaxed",
+      "round": 4,
+      "arm": "base",
+      "argv": [
+        "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-covariance-base/build/bench_grad",
+        "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-walnuts-pathfinder/.cache/covariance-storage-validation/selection-v2/base/mlumr_survival_mspline_relaxed/model.sexp",
+        "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-walnuts-pathfinder/.cache/covariance-storage-validation/selection-v2/inputs/mlumr_survival_mspline_relaxed.json",
+        "--prep"
+      ],
+      "cwd": "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-covariance-base",
+      "started_unix_s": 1795463081.458872,
+      "process_elapsed_s": 0.18678998947143555,
+      "returncode": 0,
+      "stdout": "0.179622208 32 55132160 0.001909083\n",
+      "stderr": "",
+      "mir_sha256": "6ff69b5f2bf893344bf1429f163f42a6df1b9939b45106a60dfc61ebecfb3b12",
+      "data_sha256": "5a5eefbdebad298afe2dfb5d797d28ff506093844014e8ccf94349ff2adb92d7",
+      "preparation_s": 0.179622208
+    },
+    {
+      "model": "mlumr_survival_mspline_relaxed",
+      "round": 4,
+      "arm": "candidate",
+      "argv": [
+        "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-covariance-fix/build/bench_grad",
+        "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-walnuts-pathfinder/.cache/covariance-storage-validation/selection-v2/candidate/mlumr_survival_mspline_relaxed/model.sexp",
+        "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-walnuts-pathfinder/.cache/covariance-storage-validation/selection-v2/inputs/mlumr_survival_mspline_relaxed.json",
+        "--prep"
+      ],
+      "cwd": "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-covariance-fix",
+      "started_unix_s": 1795463081.64692,
+      "process_elapsed_s": 0.16774916648864746,
+      "returncode": 0,
+      "stdout": "0.160974708 32 54886400 0.001918875\n",
+      "stderr": "",
+      "mir_sha256": "6ff69b5f2bf893344bf1429f163f42a6df1b9939b45106a60dfc61ebecfb3b12",
+      "data_sha256": "5a5eefbdebad298afe2dfb5d797d28ff506093844014e8ccf94349ff2adb92d7",
+      "preparation_s": 0.160974708
+    },
+    {
+      "model": "mlumr_survival_mspline_relaxed",
+      "round": 5,
+      "arm": "candidate",
+      "argv": [
+        "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-covariance-fix/build/bench_grad",
+        "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-walnuts-pathfinder/.cache/covariance-storage-validation/selection-v2/candidate/mlumr_survival_mspline_relaxed/model.sexp",
+        "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-walnuts-pathfinder/.cache/covariance-storage-validation/selection-v2/inputs/mlumr_survival_mspline_relaxed.json",
+        "--prep"
+      ],
+      "cwd": "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-covariance-fix",
+      "started_unix_s": 1795463081.815865,
+      "process_elapsed_s": 0.18604302406311035,
+      "returncode": 0,
+      "stdout": "0.178830792 32 54951936 0.002104458\n",
+      "stderr": "",
+      "mir_sha256": "6ff69b5f2bf893344bf1429f163f42a6df1b9939b45106a60dfc61ebecfb3b12",
+      "data_sha256": "5a5eefbdebad298afe2dfb5d797d28ff506093844014e8ccf94349ff2adb92d7",
+      "preparation_s": 0.178830792
+    },
+    {
+      "model": "mlumr_survival_mspline_relaxed",
+      "round": 5,
+      "arm": "base",
+      "argv": [
+        "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-covariance-base/build/bench_grad",
+        "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-walnuts-pathfinder/.cache/covariance-storage-validation/selection-v2/base/mlumr_survival_mspline_relaxed/model.sexp",
+        "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-walnuts-pathfinder/.cache/covariance-storage-validation/selection-v2/inputs/mlumr_survival_mspline_relaxed.json",
+        "--prep"
+      ],
+      "cwd": "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-covariance-base",
+      "started_unix_s": 1795463082.0033228,
+      "process_elapsed_s": 0.18046832084655762,
+      "returncode": 0,
+      "stdout": "0.173126833 32 55115776 0.001895000\n",
+      "stderr": "",
+      "mir_sha256": "6ff69b5f2bf893344bf1429f163f42a6df1b9939b45106a60dfc61ebecfb3b12",
+      "data_sha256": "5a5eefbdebad298afe2dfb5d797d28ff506093844014e8ccf94349ff2adb92d7",
+      "preparation_s": 0.173126833
+    },
+    {
+      "model": "one_comp_mm_elim_abs",
+      "round": 0,
+      "arm": "base",
+      "argv": [
+        "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-covariance-base/build/bench_grad",
+        "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-walnuts-pathfinder/.cache/covariance-storage-validation/selection-v2/base/one_comp_mm_elim_abs/model.sexp",
+        "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-walnuts-pathfinder/.cache/covariance-storage-validation/selection-v2/inputs/one_comp_mm_elim_abs.json",
+        "--prep"
+      ],
+      "cwd": "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-covariance-base",
+      "started_unix_s": 1795463082.1851368,
+      "process_elapsed_s": 0.005880117416381836,
+      "returncode": 0,
+      "stdout": "0.000811750 4 6602752 0.000543292\n",
+      "stderr": "",
+      "mir_sha256": "b2f4688f3ddfef39599391a8f858a4a5e3056995906969b64b716e3340a49688",
+      "data_sha256": "8df0f4206783394f97241d81f8ba53680dd559f1bc9ad3a721ee438c9151093e",
+      "preparation_s": 0.00081175
+    },
+    {
+      "model": "one_comp_mm_elim_abs",
+      "round": 0,
+      "arm": "candidate",
+      "argv": [
+        "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-covariance-fix/build/bench_grad",
+        "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-walnuts-pathfinder/.cache/covariance-storage-validation/selection-v2/candidate/one_comp_mm_elim_abs/model.sexp",
+        "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-walnuts-pathfinder/.cache/covariance-storage-validation/selection-v2/inputs/one_comp_mm_elim_abs.json",
+        "--prep"
+      ],
+      "cwd": "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-covariance-fix",
+      "started_unix_s": 1795463082.1919942,
+      "process_elapsed_s": 0.005478858947753906,
+      "returncode": 0,
+      "stdout": "0.000808917 4 6520832 0.000536291\n",
+      "stderr": "",
+      "mir_sha256": "b2f4688f3ddfef39599391a8f858a4a5e3056995906969b64b716e3340a49688",
+      "data_sha256": "8df0f4206783394f97241d81f8ba53680dd559f1bc9ad3a721ee438c9151093e",
+      "preparation_s": 0.000808917
+    },
+    {
+      "model": "one_comp_mm_elim_abs",
+      "round": 1,
+      "arm": "candidate",
+      "argv": [
+        "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-covariance-fix/build/bench_grad",
+        "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-walnuts-pathfinder/.cache/covariance-storage-validation/selection-v2/candidate/one_comp_mm_elim_abs/model.sexp",
+        "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-walnuts-pathfinder/.cache/covariance-storage-validation/selection-v2/inputs/one_comp_mm_elim_abs.json",
+        "--prep"
+      ],
+      "cwd": "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-covariance-fix",
+      "started_unix_s": 1795463082.198533,
+      "process_elapsed_s": 0.005453824996948242,
+      "returncode": 0,
+      "stdout": "0.000725125 4 6602752 0.000530625\n",
+      "stderr": "",
+      "mir_sha256": "b2f4688f3ddfef39599391a8f858a4a5e3056995906969b64b716e3340a49688",
+      "data_sha256": "8df0f4206783394f97241d81f8ba53680dd559f1bc9ad3a721ee438c9151093e",
+      "preparation_s": 0.000725125
+    },
+    {
+      "model": "one_comp_mm_elim_abs",
+      "round": 1,
+      "arm": "base",
+      "argv": [
+        "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-covariance-base/build/bench_grad",
+        "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-walnuts-pathfinder/.cache/covariance-storage-validation/selection-v2/base/one_comp_mm_elim_abs/model.sexp",
+        "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-walnuts-pathfinder/.cache/covariance-storage-validation/selection-v2/inputs/one_comp_mm_elim_abs.json",
+        "--prep"
+      ],
+      "cwd": "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-covariance-base",
+      "started_unix_s": 1795463082.205037,
+      "process_elapsed_s": 0.005531787872314453,
+      "returncode": 0,
+      "stdout": "0.000756000 4 6586368 0.000521209\n",
+      "stderr": "",
+      "mir_sha256": "b2f4688f3ddfef39599391a8f858a4a5e3056995906969b64b716e3340a49688",
+      "data_sha256": "8df0f4206783394f97241d81f8ba53680dd559f1bc9ad3a721ee438c9151093e",
+      "preparation_s": 0.000756
+    },
+    {
+      "model": "one_comp_mm_elim_abs",
+      "round": 2,
+      "arm": "base",
+      "argv": [
+        "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-covariance-base/build/bench_grad",
+        "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-walnuts-pathfinder/.cache/covariance-storage-validation/selection-v2/base/one_comp_mm_elim_abs/model.sexp",
+        "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-walnuts-pathfinder/.cache/covariance-storage-validation/selection-v2/inputs/one_comp_mm_elim_abs.json",
+        "--prep"
+      ],
+      "cwd": "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-covariance-base",
+      "started_unix_s": 1795463082.211639,
+      "process_elapsed_s": 0.005448102951049805,
+      "returncode": 0,
+      "stdout": "0.000713958 4 6537216 0.000516666\n",
+      "stderr": "",
+      "mir_sha256": "b2f4688f3ddfef39599391a8f858a4a5e3056995906969b64b716e3340a49688",
+      "data_sha256": "8df0f4206783394f97241d81f8ba53680dd559f1bc9ad3a721ee438c9151093e",
+      "preparation_s": 0.000713958
+    },
+    {
+      "model": "one_comp_mm_elim_abs",
+      "round": 2,
+      "arm": "candidate",
+      "argv": [
+        "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-covariance-fix/build/bench_grad",
+        "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-walnuts-pathfinder/.cache/covariance-storage-validation/selection-v2/candidate/one_comp_mm_elim_abs/model.sexp",
+        "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-walnuts-pathfinder/.cache/covariance-storage-validation/selection-v2/inputs/one_comp_mm_elim_abs.json",
+        "--prep"
+      ],
+      "cwd": "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-covariance-fix",
+      "started_unix_s": 1795463082.218086,
+      "process_elapsed_s": 0.005513191223144531,
+      "returncode": 0,
+      "stdout": "0.000745916 4 6520832 0.000532333\n",
+      "stderr": "",
+      "mir_sha256": "b2f4688f3ddfef39599391a8f858a4a5e3056995906969b64b716e3340a49688",
+      "data_sha256": "8df0f4206783394f97241d81f8ba53680dd559f1bc9ad3a721ee438c9151093e",
+      "preparation_s": 0.000745916
+    },
+    {
+      "model": "one_comp_mm_elim_abs",
+      "round": 3,
+      "arm": "candidate",
+      "argv": [
+        "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-covariance-fix/build/bench_grad",
+        "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-walnuts-pathfinder/.cache/covariance-storage-validation/selection-v2/candidate/one_comp_mm_elim_abs/model.sexp",
+        "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-walnuts-pathfinder/.cache/covariance-storage-validation/selection-v2/inputs/one_comp_mm_elim_abs.json",
+        "--prep"
+      ],
+      "cwd": "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-covariance-fix",
+      "started_unix_s": 1795463082.224658,
+      "process_elapsed_s": 0.0053539276123046875,
+      "returncode": 0,
+      "stdout": "0.000706000 4 6520832 0.000528250\n",
+      "stderr": "",
+      "mir_sha256": "b2f4688f3ddfef39599391a8f858a4a5e3056995906969b64b716e3340a49688",
+      "data_sha256": "8df0f4206783394f97241d81f8ba53680dd559f1bc9ad3a721ee438c9151093e",
+      "preparation_s": 0.000706
+    },
+    {
+      "model": "one_comp_mm_elim_abs",
+      "round": 3,
+      "arm": "base",
+      "argv": [
+        "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-covariance-base/build/bench_grad",
+        "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-walnuts-pathfinder/.cache/covariance-storage-validation/selection-v2/base/one_comp_mm_elim_abs/model.sexp",
+        "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-walnuts-pathfinder/.cache/covariance-storage-validation/selection-v2/inputs/one_comp_mm_elim_abs.json",
+        "--prep"
+      ],
+      "cwd": "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-covariance-base",
+      "started_unix_s": 1795463082.231029,
+      "process_elapsed_s": 0.0051288604736328125,
+      "returncode": 0,
+      "stdout": "0.000739959 4 6586368 0.000527416\n",
+      "stderr": "",
+      "mir_sha256": "b2f4688f3ddfef39599391a8f858a4a5e3056995906969b64b716e3340a49688",
+      "data_sha256": "8df0f4206783394f97241d81f8ba53680dd559f1bc9ad3a721ee438c9151093e",
+      "preparation_s": 0.000739959
+    },
+    {
+      "model": "one_comp_mm_elim_abs",
+      "round": 4,
+      "arm": "base",
+      "argv": [
+        "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-covariance-base/build/bench_grad",
+        "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-walnuts-pathfinder/.cache/covariance-storage-validation/selection-v2/base/one_comp_mm_elim_abs/model.sexp",
+        "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-walnuts-pathfinder/.cache/covariance-storage-validation/selection-v2/inputs/one_comp_mm_elim_abs.json",
+        "--prep"
+      ],
+      "cwd": "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-covariance-base",
+      "started_unix_s": 1795463082.237244,
+      "process_elapsed_s": 0.0054051876068115234,
+      "returncode": 0,
+      "stdout": "0.000731083 4 6619136 0.000526000\n",
+      "stderr": "",
+      "mir_sha256": "b2f4688f3ddfef39599391a8f858a4a5e3056995906969b64b716e3340a49688",
+      "data_sha256": "8df0f4206783394f97241d81f8ba53680dd559f1bc9ad3a721ee438c9151093e",
+      "preparation_s": 0.000731083
+    },
+    {
+      "model": "one_comp_mm_elim_abs",
+      "round": 4,
+      "arm": "candidate",
+      "argv": [
+        "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-covariance-fix/build/bench_grad",
+        "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-walnuts-pathfinder/.cache/covariance-storage-validation/selection-v2/candidate/one_comp_mm_elim_abs/model.sexp",
+        "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-walnuts-pathfinder/.cache/covariance-storage-validation/selection-v2/inputs/one_comp_mm_elim_abs.json",
+        "--prep"
+      ],
+      "cwd": "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-covariance-fix",
+      "started_unix_s": 1795463082.243809,
+      "process_elapsed_s": 0.0058171749114990234,
+      "returncode": 0,
+      "stdout": "0.000779833 4 6537216 0.000576750\n",
+      "stderr": "",
+      "mir_sha256": "b2f4688f3ddfef39599391a8f858a4a5e3056995906969b64b716e3340a49688",
+      "data_sha256": "8df0f4206783394f97241d81f8ba53680dd559f1bc9ad3a721ee438c9151093e",
+      "preparation_s": 0.000779833
+    },
+    {
+      "model": "one_comp_mm_elim_abs",
+      "round": 5,
+      "arm": "candidate",
+      "argv": [
+        "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-covariance-fix/build/bench_grad",
+        "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-walnuts-pathfinder/.cache/covariance-storage-validation/selection-v2/candidate/one_comp_mm_elim_abs/model.sexp",
+        "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-walnuts-pathfinder/.cache/covariance-storage-validation/selection-v2/inputs/one_comp_mm_elim_abs.json",
+        "--prep"
+      ],
+      "cwd": "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-covariance-fix",
+      "started_unix_s": 1795463082.250776,
+      "process_elapsed_s": 0.005266904830932617,
+      "returncode": 0,
+      "stdout": "0.000714333 4 6504448 0.000535916\n",
+      "stderr": "",
+      "mir_sha256": "b2f4688f3ddfef39599391a8f858a4a5e3056995906969b64b716e3340a49688",
+      "data_sha256": "8df0f4206783394f97241d81f8ba53680dd559f1bc9ad3a721ee438c9151093e",
+      "preparation_s": 0.000714333
+    },
+    {
+      "model": "one_comp_mm_elim_abs",
+      "round": 5,
+      "arm": "base",
+      "argv": [
+        "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-covariance-base/build/bench_grad",
+        "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-walnuts-pathfinder/.cache/covariance-storage-validation/selection-v2/base/one_comp_mm_elim_abs/model.sexp",
+        "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-walnuts-pathfinder/.cache/covariance-storage-validation/selection-v2/inputs/one_comp_mm_elim_abs.json",
+        "--prep"
+      ],
+      "cwd": "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-covariance-base",
+      "started_unix_s": 1795463082.25718,
+      "process_elapsed_s": 0.005568981170654297,
+      "returncode": 0,
+      "stdout": "0.000775750 4 6635520 0.000546917\n",
+      "stderr": "",
+      "mir_sha256": "b2f4688f3ddfef39599391a8f858a4a5e3056995906969b64b716e3340a49688",
+      "data_sha256": "8df0f4206783394f97241d81f8ba53680dd559f1bc9ad3a721ee438c9151093e",
+      "preparation_s": 0.00077575
+    }
+  ]
+}

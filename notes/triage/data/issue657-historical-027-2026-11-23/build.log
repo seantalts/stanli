@@ -1,0 +1,7 @@
+Undefined symbols for architecture arm64:
+  "_stanli_grad_err", referenced from:
+      _main in issue657_native_grad-db83e3.o
+      _main in issue657_native_grad-db83e3.o
+      stanli_benchmark::Window stanli_benchmark::window<std::__1::chrono::steady_clock, main::$_0 const&>(main::$_0 const&, long long, unsigned long long, bool) in issue657_native_grad-db83e3.o
+ld: symbol(s) not found for architecture arm64
+clang++: error: linker command failed with exit code 1 (use -v to see invocation)

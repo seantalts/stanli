@@ -15,6 +15,7 @@ sample_walnuts(
   init_radius = 2,
   chain_id = 1L,
   refresh = 100,
+  pathfinder_init = NULL,
   ...
 )
 }
@@ -42,6 +43,14 @@ origin.}
 each phase, plus the first and last iteration of the phase. Set to 0 for
 no output.}
 
+\item{pathfinder_init}{Optional named list enabling Pathfinder-generated
+starts, as in [sample_model()]. An empty list uses defaults; supported
+entries are `num_iterations` (1000), `num_elbo_draws` (25),
+`history_size` (5), and Pathfinder's own `init_radius` (2). Uses `seed`
+and the first `chain_id`, returns one start per chain, and cannot be
+combined with `init`. Single-path Pathfinder does not perform PSIS
+resampling.}
+
 \item{...}{Not used. Options that WALNUTS lacks, such as `thin` or
 `delta`, are an error.}
 }
@@ -65,12 +74,16 @@ runtime samples one WALNUTS chain at a time on one model. Each chain uses
 the model's `threads_per_chain`.
 
 Chain `c` uses the random stream for `(seed, chain_id + c - 1)`, as in
-[sample_model()]. A run of chains 1 to 4 gives the same draws, chain for
-chain, as four one-chain runs with `chain_id = 1:4` and the same `seed`.
-Without `init`, a chain starts where the NUTS chain with the same `seed`
-and chain id starts. Generated quantities draw from the stream that
-[sample_model()] would give that seed and chain id, but they do not match
-its draws, because NUTS shares that stream with the sampler.
+[sample_model()]. Without `pathfinder_init`, a run of chains 1 to 4 gives
+the same draws, chain for chain, as four one-chain runs with
+`chain_id = 1:4` and the same `seed`.
+Without `init` or `pathfinder_init`, a chain starts where the NUTS chain
+with the same `seed` and chain id starts. With `pathfinder_init`, all
+chains' starts come from one Pathfinder run seeded by the first chain's
+id, so splitting the run into separate calls can change the starts.
+Generated quantities draw from the stream that [sample_model()] would
+give that seed and chain id, but they do not match its draws, because
+NUTS shares that stream with the sampler.
 
 The result is a `stanli_fit`, so [summary.stanli_fit()], [as_draws_array()],
 [log_lik()], [as_stanfit()], [as_rfit()] and [as_cstanfit()] work on it.

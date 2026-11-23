@@ -1,0 +1,34 @@
+{
+  "base_sha": "0eb880b9b9579cd28ca64c3afa4257cba9adca1e",
+  "named_opcodes": [
+    "LOOP"
+  ],
+  "baseline_programs_reused": 402,
+  "baseline_binary_identity_verified": {
+    "source": "/Users/xitrium/.codex-workspaces/worktrees/ios-89f832e3-f63c-4197-9ef1-bf60c667df6b/stanli-covariance-base",
+    "head": "0eb880b9b9579cd28ca64c3afa4257cba9adca1e",
+    "dirty": false,
+    "probe_sha256": "80f6fa6a5cf4891bd669bff07190817c0f33bd69e09946b4ddcd10fa32814f24",
+    "bench_sha256": "5ec16afcb14062c2a2f20a46d54d3ab1d7ef7a9991487b66701429d95e6f1456",
+    "dump_ops_sha256": "288287ad551a16cc5353c4b6316f8bef6ff5cff767a342e6e9066b3c998166c0",
+    "dump_islands_sha256": "38aeecf0e73d60b59a3777210ea8960cb0e619ddc55f78bd79f85d391e93d1dc"
+  },
+  "candidate_binaries_frozen": true,
+  "timing_quiet_release": true,
+  "policy": "bounded no-reverse prefix replay preserves published in-place carry values; blanket no_replay gate rejected as V3",
+  "frozen_native_sha256": {
+    "runtime/include/stanli/kernel_types.hpp": "4de1fb75298b7cc7e24d3dc772622f09d3a78c9220d9f110388afe41d7ee7ae7",
+    "runtime/src/executor.cpp": "befb64e73ce6f263ef93776b841903ec3e309ed2f48d708aed0969a4e67b11c4",
+    "runtime/src/structured_forward_only.inc": "d2fd2f09f5921f4c8698de44ab9ca9ed5aac7f897cbde6f566de97cda754f139",
+    "runtime/src/structured_loop.cpp": "f605069cbd16493cb93d01ed903d6d0a75772067c3dbb91859ce80abbf4bb2e4"
+  },
+  "frozen_tools_sha256": {
+    "bench_grad": "2441e8c34b88984a7b1407a80c7ab559d6d3383612b884bad751315cb0c49a06",
+    "dump_ops": "39f19279860fd83b4f2481c3a92f69e1efec390052703358477468183565312e",
+    "dump_islands": "78e9431064629dc461d5ab59d55bafc9a5324245c7b02ce428bd87c9b0e03089",
+    "stanli_check": "8c2ec74647359459a6b203acd19c54640a8b33fcceb6ca0c9e8550919c36aeb8",
+    "stanli_run": "573ca9336a6b670b202bf78d40710f31a519dbcf06b57d26f8711e391292a28d",
+    "libstanli.dylib": "0efb24c153e2c3440634c55dbf563ce66c71416c1223ba7fcf68ac11f72d8588"
+  },
+  "release_note": "lead final84worker profile completed; no other builds/measurements planned"
+}

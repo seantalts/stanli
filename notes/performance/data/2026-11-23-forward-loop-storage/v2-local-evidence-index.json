@@ -1,0 +1,26 @@
+[
+  {
+    "path": "notes/performance/data/2026-11-23-forward-loop-storage/v2-local-pairs.json.gz",
+    "bytes": 271266,
+    "sha256": "c93ec4eb50151a8afd32a893ce4da731faa57952238e1acd92a1c9daa9c1b1a9",
+    "uncompressed_sha256": "601003f852f911caf731a5ac0b08e64e2e71615fb5b6e5747981227b73ebafb1"
+  },
+  {
+    "path": "notes/performance/data/2026-11-23-forward-loop-storage/v2-local-summary.json.gz",
+    "bytes": 15986,
+    "sha256": "6e2ec8e3a4cee5923afa4537f615918d70a517f21ecb955c14a30c72ede0e9a1",
+    "uncompressed_sha256": "731293a6494b4e1ebfeef0860f439d6e97537372e1e4d78e24e9b85f34974749"
+  },
+  {
+    "path": "notes/performance/data/2026-11-23-forward-loop-storage/v2-local-provenance.json.gz",
+    "bytes": 873,
+    "sha256": "3f5b7965c9d80fb98da7d5fc95fa268c476e291d2004e7cf5f76d6876c37e430",
+    "uncompressed_sha256": "6d91cd94fc8cc6d5d6c02ae85c54e1f07a02f7cd3fa0235dbfd5241c4adbcf80"
+  },
+  {
+    "path": "notes/performance/data/2026-11-23-forward-loop-storage/v2-sanity-udf256.json.gz",
+    "bytes": 8718,
+    "sha256": "ece23ac47ffed0f0b368eeeafd9a6ca0009c913b7d6bdef998ee46cb91d357b8",
+    "uncompressed_sha256": "cae4483a83c6907d65c3dbd9b2fda6af9ab523fd8827a39dda96538e9370cdc8"
+  }
+]

@@ -26,6 +26,7 @@
 #include <stanli/wa_interp.hpp>
 
 #include <stan/math.hpp>
+#include <algorithm>
 #include <cmath>
 #include <cstdio>
 #include <cstring>
@@ -129,9 +130,17 @@ int main() {
     g.ops.back().variant = 1u | 2u | 4u | 8u;
     g.add_op(OP_SUM_VEC, {solved}, total);
     g.result_slot = total;
+    Graph output_graph = g;
+    output_graph.forward_only = true;
+    output_graph.slots[total].pinned = true;
+    Executor output_ex(std::move(output_graph));
     Executor sex(std::move(g));
     for (int i = 0; i < n * n; ++i) sex.params_data()[i] = a.data()[i];
     for (int i = 0; i < n; ++i) sex.params_data()[n * n + i] = b(i);
+    std::copy_n(sex.params_data(), n * n + n, output_ex.params_data());
+    output_ex.run_forward_only();
+    expect_eq("forward-only solve retains active arithmetic",
+              output_ex.value_ptr(total)[0], active_ref);
     expect_eq("active solve forward", sex.forward(), active_ref);
     expect_eq("active solve value-only", sex.forward_value_only(), double_ref);
   }

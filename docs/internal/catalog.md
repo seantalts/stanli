@@ -253,6 +253,7 @@ paths and hashes in raw records unchanged.
 | [2026-09-22 · Full-range slice regression](../../notes/performance/2026-09-22-identity-slice.md) | Dated results, proof limits and linked evidence. |
 | [2026-09-22 · Intel macOS oracle for kronecker_gp](../../notes/performance/2026-09-22-intel-oracle.md) | Dated results, proof limits and linked evidence. |
 | [2026-11-20 · Why reroll and partition decline lanes](../../notes/performance/2026-11-20-lane-declines.md) | Dated results, proof limits and linked evidence. |
+| [2026-11-23 · Forward-only structured-loop storage](../../notes/performance/2026-11-23-forward-loop-storage.md) | Bounded output-only loop evaluation, semantic proof and validation evidence. |
 
 ## Parallel reductions
 
@@ -282,6 +283,13 @@ paths and hashes in raw records unchanged.
 
 | Document | Contents / use |
 | --- | --- |
+| [2026-11-23 · Social feedback triage](../../notes/triage/2026-11-23-social-feedback.md) | Public bug/performance reports, source threads, historical issue dispositions and search/access limits; no fresh reproductions. |
+| [2026-11-23 · Issue 656 covariance investigation](../../notes/triage/2026-11-23-issue-656-investigation.md) | Matched covariance/Cholesky diagnostics and useful rejection behavior; original reported error remains unreproduced. |
+| [2026-11-23 · Issue 657 mixed-model investigation](../../notes/triage/2026-11-23-issue-657-investigation.md) | Reproducible surrogate, raw oracle results and unmatched timing limits; original slowdown remains unresolved. |
+| [2026-11-23 · Issue 656 synthetic structural search](../../notes/triage/2026-11-23-issue-656-round2.md) | Broad shape/placement screening, exact-source CmdStan checks and a standalone covariance memory/preparation cost gap; no low-level failure reproduced. |
+| [2026-11-23 · Issue 657 matched native and standard-fit comparison](../../notes/triage/2026-11-23-issue-657-native-comparison.md) | Eleven synthetic cells, one converged standard fit, process-memory/output-boundary caveats and retained numerical evidence. |
+| [2026-11-23 · Issue 657 historical runtime comparison](../../notes/triage/2026-11-23-issue-657-historical-runtime.md) | 0.27.0/current diagnostic native measurements, provenance and noisy-control limits; no original-version assumption. |
+| [2026-11-23 · Issue 658 WALNUTS Pathfinder initialization](../../notes/triage/2026-11-23-issue-658-pathfinder-walnuts.md) | R-only implementation, initialization semantics, focused test evidence and remaining integration checks. |
 | [Corpus benchmark evidence](../../output/corpus-performance-vectorized/README.md) | Published run/report provenance; retains recorded revision. |
 | [Corpus benchmark evidence](../../output/corpus-performance/README.md) | Published run/report provenance; retains recorded revision. |
 | [Rethinking report evidence](../../output/rethinking-report/README.md) | Published 2026-09-16 against a pre-release CmdStan snapshot (`11cb052`); the sampling harness that produced it was removed, so it is not rerun. |

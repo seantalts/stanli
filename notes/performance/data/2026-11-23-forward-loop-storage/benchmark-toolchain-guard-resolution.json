@@ -1,0 +1,14 @@
+{
+  "cause": "private per-arm stanc3 artifact directory omitted pinned upstream compiler/provenance, despite explicitly selected shared valid compiler",
+  "shared_pinned_sha256": "d549f0ddbccff17f6b882a54109339f2a0f718b3d1fc09fce118ccdf452adc2d",
+  "cmdstan_stanc_sha256": "d549f0ddbccff17f6b882a54109339f2a0f718b3d1fc09fce118ccdf452adc2d",
+  "upstream_sha": "d58446e631b02cacc5355e373defc6092a684554",
+  "private_links": {
+    "stanc-pinned": "/Users/xitrium/claud/stanrt/deps/stanc3/stanc-pinned",
+    "stanc-pinned.src": "/Users/xitrium/claud/stanrt/deps/stanc3/stanc-pinned.src"
+  },
+  "guards_passed": [
+    "base",
+    "candidate"
+  ]
+}

@@ -1,0 +1,98 @@
+[
+  {
+    "subjects": 10,
+    "observations": 200,
+    "parameters": 26,
+    "r_stanli_gradient_us": 4.448890686035156,
+    "cmdstan_cpp_gradient_us": 6.905797214673913,
+    "max_ulp": 7,
+    "max_abs": 5.684341886080802e-14,
+    "exact": 18,
+    "components": 54,
+    "worst": [
+      0,
+      22,
+      0.7899000397565731,
+      0.7899000397565723
+    ],
+    "sampling": {
+      "wall_s": 0.004364013671875,
+      "report": {
+        "warmup_seconds": 0.001821292,
+        "sampling_seconds": 0.001619541,
+        "n_divergent": 0,
+        "n_max_treedepth": 19
+      },
+      "total_leapfrogs": 1128,
+      "total_divergent": 3,
+      "finite_output": true,
+      "convergence_claim": false
+    },
+    "prep_s": 0.015498876571655273,
+    "first_gradient_s": 0.004523038864135742
+  },
+  {
+    "subjects": 50,
+    "observations": 1000,
+    "parameters": 106,
+    "r_stanli_gradient_us": 10.85042953491211,
+    "cmdstan_cpp_gradient_us": 31.681965625,
+    "max_ulp": 61,
+    "max_abs": 2.2737367544323206e-13,
+    "exact": 74,
+    "components": 214,
+    "worst": [
+      1,
+      83,
+      -0.0715898668761499,
+      -0.07158986687614906
+    ],
+    "sampling": {
+      "wall_s": 0.012524127960205078,
+      "report": {
+        "warmup_seconds": 0.006248583,
+        "sampling_seconds": 0.005840541,
+        "n_divergent": 0,
+        "n_max_treedepth": 20
+      },
+      "total_leapfrogs": 1099,
+      "total_divergent": 5,
+      "finite_output": true,
+      "convergence_claim": false
+    },
+    "prep_s": 0.008183956146240234,
+    "first_gradient_s": 0.00022602081298828125
+  },
+  {
+    "subjects": 500,
+    "observations": 10000,
+    "parameters": 1006,
+    "r_stanli_gradient_us": 66.5903091430664,
+    "cmdstan_cpp_gradient_us": 311.15498484848484,
+    "max_ulp": 448,
+    "max_abs": 1.8189894035458565e-11,
+    "exact": 621,
+    "components": 2014,
+    "worst": [
+      1,
+      890,
+      0.007297423520031196,
+      0.0072974235200315846
+    ],
+    "sampling": {
+      "wall_s": 0.08125185966491699,
+      "report": {
+        "warmup_seconds": 0.034578708,
+        "sampling_seconds": 0.044769333,
+        "n_divergent": 0,
+        "n_max_treedepth": 20
+      },
+      "total_leapfrogs": 1098,
+      "total_divergent": 5,
+      "finite_output": true,
+      "convergence_claim": false
+    },
+    "prep_s": 0.06767797470092773,
+    "first_gradient_s": 0.000102996826171875
+  }
+]

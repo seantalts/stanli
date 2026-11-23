@@ -17,9 +17,17 @@ Embedded paths describe the original run and may refer to earlier locations.
 | `educational-bench-o1.tsv`, `educational-bench-o1.manifest.json`, `educational-bench-o1.metadata.json` | Imported-model optimized-reference measurements and metadata; no maintained reader. |
 | `native-reduce-sum-probe.json`, `native-reduce-sum-imports.json`, `native-reduce-sum-integration.json` | Successive prototype/import/integration experiments; [parallelism guide](../research/parallelism.md) explains their distinct scopes. |
 | `python-function-overhead.json` | Function-call overhead A/B evidence linked from the [interface guide](../research/packaging.md). |
+| `notes/performance/data/2026-11-23-covariance-storage-*.json.gz` | Synthetic covariance output-loop storage and exact-source CmdStan checks; [proof and results](../../../notes/performance/2026-11-23-forward-loop-storage.md). |
+| `notes/performance/data/2026-11-23-forward-loop-storage/` | Versioned paired heap/output measurements, invariant counterexample/fallback, complete corpus replay, selection and benchmark evidence; same [proof and results](../../../notes/performance/2026-11-23-forward-loop-storage.md). |
 
 Current published corpus runs are under [output/corpus-performance](../../../output/corpus-performance/README.md)
 and [the vectorized reference run](../../../output/corpus-performance-vectorized/README.md).
 Dated execution evidence is in `notes/execution/data/`; older ctsem/numerical
 records remain in `notes/performance/`. Their adjacent Markdown reports explain
 what each sample can establish. The [catalog](../catalog.md) locates those reports.
+
+Synthetic bug/performance investigation records are under
+`notes/triage/data/`. The [social-feedback collection](../../../notes/triage/2026-11-23-social-feedback.md)
+links the owning reports, reproduction harnesses, runtime identities and
+limits. Gzip-packaged raw records preserve their decompressed bytes; do not
+replace them with a later run's results.

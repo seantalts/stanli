@@ -36,6 +36,9 @@ struct EvalState {
   // skip work whose only consumer is its own backward, and takes the double
   // overload where Stan Math's double and var overloads differ.
   bool values_only = false;
+  // No later reverse sweep can consume history. Unlike values_only, this
+  // preserves the chosen active forward arithmetic (for example QR vs LU).
+  bool no_reverse = false;
 };
 
 // A view of one contiguous buffer. len == 1 means scalar.
