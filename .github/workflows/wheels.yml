@@ -1976,6 +1976,8 @@ jobs:
             -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
           cmake --build build-wasm-side -j4 --target stanli_webr
           ccache -s
+      - name: Check that it exports only the C API
+        run: python3 tests/check_wasm_exports.py build-wasm-side/libstanli.so
       - name: Load it into webR
         run: |
           npm install webr@0.6.0
