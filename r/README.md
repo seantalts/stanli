@@ -248,12 +248,17 @@ other package:
 
 ```r
 fit <- sample_walnuts(m, chains = 4, seed = 1, max_error = 0.5)
+fit <- sample_walnuts(m, pathfinder_init = list())  # Pathfinder starting points
 ```
 
 The chains run one after another. Seeds, chain ids and starting values work
 as in `sample_model()`, so chain 1 starts where NUTS chain 1 with the same
-seed starts. The result is a `stanli_fit`, so `summary()`, `as_draws_array()`,
-`log_lik()` and the fit adapters work on it. `fit$sampler` holds `lp__` and
+seed starts. `pathfinder_init` accepts the same options as in `sample_model()`
+and cannot be combined with `init`. It runs one Pathfinder path, keyed on the
+first chain id, to generate all chains' starts; splitting a run into separate
+calls can therefore change those starts. The result is a `stanli_fit`, so
+`summary()`, `as_draws_array()`, `log_lik()` and the fit adapters work on it.
+`fit$sampler` holds `lp__` and
 `stepsize__`: the runtime does not report divergences, tree depths or the
 adapted metric for WALNUTS. For the same reason, `sample_more()`,
 `stanli_diagnose()` and `nuts_params()` refuse the fit. There is no thinning
@@ -432,7 +437,7 @@ sample_nutpie(m, chains = 4, seed = 1, warmup = NULL, samples = 1000,
               adaptation = "diag", ...)   # needs nutpieR
 sample_walnuts(m, chains = 4, seed = 1, warmup = 1000, samples = 1000,
                max_error = 0.5, init = NULL, init_radius = 2, chain_id = 1,
-               refresh = 100)
+               refresh = 100, pathfinder_init = NULL)
 laplace_whiten(m, latent = NULL, init = NULL, seed = 1, ...)  # experimental, needs Matrix
 whiten(m, q_hat, perm, L, lowrank = NULL); parameter_annotations(m)
 bridgestan_data(m); stanli_build_id()

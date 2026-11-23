@@ -13,12 +13,16 @@
 #' the model's `threads_per_chain`.
 #'
 #' Chain `c` uses the random stream for `(seed, chain_id + c - 1)`, as in
-#' [sample_model()]. A run of chains 1 to 4 gives the same draws, chain for
-#' chain, as four one-chain runs with `chain_id = 1:4` and the same `seed`.
-#' Without `init`, a chain starts where the NUTS chain with the same `seed`
-#' and chain id starts. Generated quantities draw from the stream that
-#' [sample_model()] would give that seed and chain id, but they do not match
-#' its draws, because NUTS shares that stream with the sampler.
+#' [sample_model()]. Without `pathfinder_init`, a run of chains 1 to 4 gives
+#' the same draws, chain for chain, as four one-chain runs with
+#' `chain_id = 1:4` and the same `seed`.
+#' Without `init` or `pathfinder_init`, a chain starts where the NUTS chain
+#' with the same `seed` and chain id starts. With `pathfinder_init`, all
+#' chains' starts come from one Pathfinder run seeded by the first chain's
+#' id, so splitting the run into separate calls can change the starts.
+#' Generated quantities draw from the stream that [sample_model()] would
+#' give that seed and chain id, but they do not match its draws, because
+#' NUTS shares that stream with the sampler.
 #'
 #' The result is a `stanli_fit`, so [summary.stanli_fit()], [as_draws_array()],
 #' [log_lik()], [as_stanfit()], [as_rfit()] and [as_cstanfit()] work on it.
@@ -57,6 +61,13 @@
 #' @param refresh Print a progress update every `refresh` iterations within
 #'   each phase, plus the first and last iteration of the phase. Set to 0 for
 #'   no output.
+#' @param pathfinder_init Optional named list enabling Pathfinder-generated
+#'   starts, as in [sample_model()]. An empty list uses defaults; supported
+#'   entries are `num_iterations` (1000), `num_elbo_draws` (25),
+#'   `history_size` (5), and Pathfinder's own `init_radius` (2). Uses `seed`
+#'   and the first `chain_id`, returns one start per chain, and cannot be
+#'   combined with `init`. Single-path Pathfinder does not perform PSIS
+#'   resampling.
 #' @param ... Not used. Options that WALNUTS lacks, such as `thin` or
 #'   `delta`, are an error.
 #' @details Interrupting R (Ctrl-C, or the stop button in RStudio) stops the
@@ -70,7 +81,7 @@
 sample_walnuts <- function(model, chains = 4, seed = 1, warmup = 1000,
                            samples = 1000, max_error = 0.5, init = NULL,
                            init_radius = 2, chain_id = 1L, refresh = 100,
-                           ...) {
+                           pathfinder_init = NULL, ...) {
   if (!inherits(model, "stanli_model"))
     stop("model must be a stanli_model", call. = FALSE)
   extra <- names(list(...))
@@ -78,9 +89,9 @@ sample_walnuts <- function(model, chains = 4, seed = 1, warmup = 1000,
     stop(if (is.null(extra) || !all(nzchar(extra))) "unnamed arguments are" else
            paste(paste(extra, collapse = ", "),
                  if (length(extra) > 1L) "are" else "is"),
-         " not available in sample_walnuts(): the runtime's WALNUTS takes ",
-         "only chains, seed, warmup, samples, max_error, init, init_radius ",
-         "and chain_id", call. = FALSE)
+         " not available in sample_walnuts(): supported arguments are ",
+         "model, chains, seed, warmup, samples, max_error, init, init_radius, ",
+         "chain_id, refresh and pathfinder_init", call. = FALSE)
   cstan_integer(seed, "seed", 0)
   chains <- algorithm_count(chains, "chains")
   check_chain_id(chain_id, chains)
@@ -90,10 +101,19 @@ sample_walnuts <- function(model, chains = 4, seed = 1, warmup = 1000,
   max_error <- algorithm_number(max_error, "max_error")
   init_radius <- algorithm_number(init_radius, "init_radius", positive = FALSE)
   refresh <- algorithm_count(refresh, "refresh", 0L)
+  if (!is.null(init) && !is.null(pathfinder_init))
+    stop("init and pathfinder_init are mutually exclusive", call. = FALSE)
+  if (!is.null(pathfinder_init))
+    pathfinder_init <- .pathfinder_init_options(pathfinder_init)
   load_runtime()
   model <- with_run_seed(model, seed)
   ncol <- length(model$columns)
   n <- model$n_unconstrained
+  if (!is.null(pathfinder_init)) {
+    init <- .Call("stanli_r_pathfinder_inits", model$ptr, as.integer(seed),
+                  as.integer(chains), unname(pathfinder_init), chain_id)
+    algorithm_interrupt(init, "Pathfinder initialization")
+  }
   starts <- algorithm_inits(model, init, chains)
   draws <- array(NA_real_, c(samples, chains, ncol),
                  dimnames = list(NULL, NULL, model$columns))

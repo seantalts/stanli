@@ -139,6 +139,78 @@ test_that("sample_walnuts fits refuse NUTS-only operations", {
   expect_error(get_sampler_params(fit), "needs a NUTS fit.*walnuts")
 })
 
+test_that("sample_walnuts uses Pathfinder starts with the requested seed and chain id", {
+  skip_without_runtime()
+  model <- walnuts_model()
+  for (options in list(list(), list(num_iterations = 100L,
+                                    num_elbo_draws = 10L,
+                                    history_size = 3L, init_radius = 1))) {
+    a <- walnuts_fit(model, chains = 2, seed = 303, chain_id = 5,
+                     warmup = 30, samples = 10, pathfinder_init = options)
+    starts <- .Call("stanli_r_pathfinder_inits", a$model$ptr, 303L, 2L,
+                     unname(stanli:::.pathfinder_init_options(options)), 5L)
+    explicit <- walnuts_fit(model, chains = 2, seed = 303, chain_id = 5,
+                            warmup = 30, samples = 10, init = starts)
+    expect_identical(a$unconstrained, explicit$unconstrained)
+    expect_identical(a$draws, explicit$draws)
+    expect_identical(a$sampler, explicit$sampler)
+    again <- walnuts_fit(model, chains = 2, seed = 303, chain_id = 5,
+                         warmup = 30, samples = 10, pathfinder_init = options)
+    expect_identical(a$draws, again$draws)
+    expect_false(identical(a$draws[, 1L, ], a$draws[, 2L, ]))
+    one <- walnuts_fit(model, chains = 1, seed = 303, chain_id = 6,
+                        warmup = 30, samples = 10, init = starts[2L, ])
+    expect_identical(a$draws[, 2L, ], one$draws[, 1L, ])
+  }
+})
+
+test_that("sample_walnuts runs Pathfinder after rebuilding random transformed data", {
+  skip_without_runtime()
+  model <- stanli_model(code = "
+    transformed data { real center = normal_rng(0, 1); }
+    parameters { real x; }
+    model { x ~ normal(center, 1); }
+    generated quantities { real location = center; }
+  ", seed = 1)
+  set.seed(21)
+  before <- .Random.seed
+  a <- walnuts_fit(model, chains = 2, seed = 12, warmup = 30,
+                   samples = 10, pathfinder_init = list())
+  starts <- .Call("stanli_r_pathfinder_inits", a$model$ptr, 12L, 2L,
+                   unname(stanli:::.pathfinder_init_options(list())), 1L)
+  explicit <- walnuts_fit(a$model, chains = 2, seed = 12, warmup = 30,
+                           samples = 10, init = starts)
+  expect_identical(a$draws, explicit$draws)
+  original <- walnuts_fit(model, chains = 2, seed = 1, warmup = 30,
+                           samples = 10, pathfinder_init = list())
+  expect_false(identical(a$draws[, , "location"],
+                         original$draws[, , "location"]))
+  expect_identical(.Random.seed, before)
+})
+
+test_that("sample_walnuts propagates Pathfinder initialization errors", {
+  skip_without_runtime()
+  model <- stanli_model(code = "
+    parameters { real x; }
+    model { target += negative_infinity(); }
+  ")
+  expect_error(walnuts_fit(model, chains = 1,
+                           pathfinder_init = list(init_radius = 0)),
+                "Pathfinder initialization failed", fixed = TRUE)
+})
+
+test_that("sample_walnuts validates Pathfinder options and explicit init exclusion", {
+  skip_without_runtime()
+  model <- walnuts_model()
+  expect_error(walnuts_fit(model, init = c(0, 0), pathfinder_init = list()),
+                "mutually exclusive", fixed = TRUE)
+  for (value in list(1, list(1), list(not_an_option = 1),
+                     list(num_iterations = 0), list(num_elbo_draws = 1.5),
+                     list(history_size = TRUE), list(init_radius = NaN),
+                     list(init_radius = -1)))
+    expect_error(walnuts_fit(model, pathfinder_init = value), "pathfinder_init")
+})
+
 test_that("sample_walnuts fits convert to draws and cmdstanr-style objects", {
   skip_without_runtime()
   skip_if_not_installed("posterior")
