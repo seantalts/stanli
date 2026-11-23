@@ -549,13 +549,18 @@ def gradient_ulp(rv, gv):
     return math.ceil(diff / math.ulp(scale)) if diff else 0
 
 
-# The ULP gate (TESTING.md, "Numerical policy"). Every value is held to
+# The ULP gate (TESTING.md, "The rule"). Every value is held to
 # DEFAULT_ULP_BOUND, counted by scaled_ulp, unless the ledger lists a
 # larger bound measured for that model, output and platform. It is an
 # extra condition: the scaled-error gate and the per-element ULP_LIMITS
 # still apply.
 ULP_LEDGER_PATH = REPO / "tests" / "ulp_ledger.json"
-ULP_LEDGER_SCHEMA = 1
+ULP_LEDGER_SCHEMA = 2
+# Each entry's "closer" says which engine is closer to the high-precision
+# value of that output: "stanli" (a tie counts as stanli), "cmdstan" (stanli
+# is farther), or "unknown" (no usable reference, one more than 1e6 scaled
+# ULP from both engines, or not measured).
+CLOSER = ("stanli", "cmdstan", "unknown")
 DEFAULT_ULP_BOUND = 10
 # A replay that measures no more than this fraction of a ledger bound says
 # that the bound can be tightened.
@@ -676,11 +681,12 @@ def load_ulp_ledger(path=ULP_LEDGER_PATH):
                 for label, entry in entries.items():
                     if not (isinstance(entry.get("bound"), int)
                             and entry["bound"] > DEFAULT_ULP_BOUND
-                            and entry.get("reason")):
+                            and entry.get("reason")
+                            and entry.get("closer") in CLOSER):
                         raise SystemExit(
                             f"{path}: {platform_name} {corpus} {model} {label} "
-                            f"needs an integer bound over {DEFAULT_ULP_BOUND} "
-                            f"and a reason")
+                            f"needs an integer bound over {DEFAULT_ULP_BOUND}, "
+                            f"a reason and a closer of {', '.join(CLOSER)}")
     return ledger
 
 
@@ -705,10 +711,11 @@ def ledger_notes(model, entries, measured):
 def updated_entries(old, measured, reason):
     """The ledger entries for one model after a replay that passed.
 
-    Existing entries keep their reason and can only go down: to the new
-    measurement, or away once it is within the default. A value over the
-    default that no entry covers gets a new entry with `reason`. A value
-    over its bound is an error: the gate fails it before this runs.
+    Existing entries keep their reason and closer and can only go down: to
+    the new measurement, or away once it is within the default. A value over
+    the default that no entry covers gets a new entry with `reason` and
+    closer "unknown". A value over its bound is an error: the gate fails it
+    before this runs.
     """
     new = {}
     for label, entry in old.items():
@@ -716,9 +723,11 @@ def updated_entries(old, measured, reason):
         if got > entry["bound"]:
             raise ValueError(f"{label} measured {got} over bound {entry['bound']}")
         if got > DEFAULT_ULP_BOUND:
-            new[label] = {"bound": int(got), "reason": entry["reason"]}
+            new[label] = {"bound": int(got), "reason": entry["reason"],
+                          "closer": entry["closer"]}
     for label, (bound, count) in uncovered_bounds(old, measured).items():
-        new[label] = {"bound": bound, "reason": reason + count}
+        new[label] = {"bound": bound, "reason": reason + count,
+                      "closer": "unknown"}
     return new
 
 
@@ -750,16 +759,21 @@ def uncovered_bounds(old, measured):
 def first_entries(measured, reasons, target_platform, old=None):
     """(entries, problems) for a model named in the --add-ulp-entries file.
 
-    reasons maps labels that the replay measured over the default to why.
-    Every such label needs a reason, unless `old` (the model's current
-    entries) has an entry for that label that the measurement is within:
-    that entry keeps its reason, at the measured bound. A label with neither,
-    or a reason for a label within the default, is a problem, and nothing
-    may be written.
+    reasons maps labels that the replay measured over the default to why:
+    a reason string, or {"reason": str, "closer": one of CLOSER}; a string
+    means closer "unknown". Every such label needs a reason, unless `old`
+    (the model's current entries) has an entry for that label that the
+    measurement is within: that entry keeps its reason and closer, at the
+    measured bound. A label with neither, or a reason for a label within
+    the default, is a problem, and nothing may be written.
     """
     old = old or {}
+    given = {label: why if isinstance(why, dict)
+             else {"reason": why, "closer": "unknown"}
+             for label, why in reasons.items()}
     bounds = uncovered_bounds({}, measured)
-    kept = {label: {"bound": bound, "reason": old[label]["reason"]}
+    kept = {label: {"bound": bound, "reason": old[label]["reason"],
+                    "closer": old[label]["closer"]}
             for label, (bound, _) in bounds.items()
             if label not in reasons and label in old
             and bound <= old[label]["bound"]}
@@ -769,8 +783,9 @@ def first_entries(measured, reasons, target_platform, old=None):
                  for label in sorted(set(reasons) - set(bounds))]
     entries = {label: {"bound": bound,
                        "reason": f"measured on {target_platform}; "
-                                 f"{reasons[label]}{count}"}
-               for label, (bound, count) in bounds.items() if label in reasons}
+                                 f"{given[label]['reason']}{count}",
+                       "closer": given[label]["closer"]}
+               for label, (bound, count) in bounds.items() if label in given}
     return {**kept, **entries}, problems
 
 
@@ -783,14 +798,27 @@ def first_entry_models(reasons, section, models):
             for model in sorted(set(reasons) - set(models))]
 
 
+def first_entry_reason(why):
+    """Whether `why` is a reason string or {"reason": str, "closer": ...}."""
+    if isinstance(why, dict):
+        if set(why) != {"reason", "closer"} or why["closer"] not in CLOSER:
+            return False
+        why = why["reason"]
+    return isinstance(why, str) and bool(why)
+
+
 def load_first_entry_reasons(path):
-    """{model: {label: reason}} from the --add-ulp-entries file."""
+    """{model: {label: reason or {"reason", "closer"}}} from the
+    --add-ulp-entries file."""
     reasons = json.loads(pathlib.Path(path).read_text())
     if not (isinstance(reasons, dict) and all(
-            isinstance(labels, dict) and all(
-                isinstance(why, str) and why for why in labels.values())
+            isinstance(labels, dict)
+            and all(map(first_entry_reason, labels.values()))
             for labels in reasons.values())):
-        raise SystemExit(f"{path} must map each model to {{label: reason}}")
+        raise SystemExit(
+            f"{path} must map each model to {{label: reason}}, where a "
+            f"reason is a string or {{\"reason\": string, \"closer\": "
+            f"one of {', '.join(CLOSER)}}}")
     return reasons
 
 
@@ -2104,7 +2132,10 @@ def main():
     ap.add_argument("--add-ulp-entries", type=pathlib.Path, metavar="REASONS",
                     help="after a passing replay, give the models in REASONS, "
                          "a JSON file of {model: {label: reason}}, new "
-                         "ledger entries; each value over "
+                         "ledger entries; a reason is a string or "
+                         '{"reason": ..., "closer": "stanli", "cmdstan" or '
+                         '"unknown"}, and a string means "unknown"; each '
+                         "value over "
                          f"{DEFAULT_ULP_BOUND} needs a reason, or an "
                          "existing entry that it is within")
     args = ap.parse_intermixed_args()

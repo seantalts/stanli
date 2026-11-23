@@ -9,6 +9,10 @@ is derived from recorded artifacts:
   output/corpus-performance/  one current full-corpus benchmark
   output/corpus-performance-fast/  the fast-mode run of the same corpus
 
+The per-model tables in TESTING.md come from tools/testing_table.py, which
+reads the CmdStan references, tests/ulp_ledger.json and the limits in
+tools/verify_refs.py.
+
 The docs carry <!--gen:key-->...<!--/gen--> markers; this script replaces
 the marked spans with values computed from the artifacts.
 
@@ -29,6 +33,7 @@ import sys
 import textwrap
 import warnings
 
+import testing_table
 import toolchain
 from corpus_inventory import local_cases
 from corpus_table import (FIXED_GRADIENT_COUNT, render_catalog_sections,
@@ -39,7 +44,8 @@ REPO = pathlib.Path(__file__).resolve().parent.parent
 # comments, so the same substitution works there.
 TARGETS = [REPO / "README.md", REPO / "python" / "README.md",
            REPO / "web" / "index.html", REPO / "tests" / "rethinking" / "README.md",
-           REPO / "docs" / "benchmarks.md", REPO / "docs" / "fast-mode.md"]
+           REPO / "docs" / "benchmarks.md", REPO / "docs" / "fast-mode.md",
+           REPO / "TESTING.md"]
 MARK = re.compile(r"(<!--gen:([a-z_]+)-->)(.*?)(<!--/gen-->)", re.S)
 
 
@@ -238,6 +244,7 @@ def compute():
     fast_rows, fast_manifest = fast_mode_benchmark()
 
     return {
+        **testing_table.stats(),
         **fast_mode_figures(benchmark_rows, fast_rows, manifest, fast_manifest),
         "benchmark_table": catalog["table"],
         "benchmark_table_notes": catalog["notes"],

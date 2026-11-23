@@ -7,7 +7,7 @@ substitutes an approximation.
 
 This page covers probability functions, real-valued scalar math, parameter
 transforms, truncation, censoring, `print` and `reject`. For whole models, see
-[corpus status](corpus-status.md). For language constructs, see the
+[the table of every model](../TESTING.md#every-model). For language constructs, see the
 [stanc3 test models](../tests/stanc3_good/README.md). For how the checks work
 and their numerical limits, see [TESTING.md](../TESTING.md).
 

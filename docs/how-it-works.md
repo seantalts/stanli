@@ -467,7 +467,7 @@ is larger than a runtime that contains one model.
 [Install size](install-size.md) has the size breakdown.
 
 stanli tests correctness separately from performance. The
-[corpus replay](corpus-status.md) compares stanli with recorded CmdStan
+[corpus replay](../TESTING.md#every-model) compares stanli with recorded CmdStan
 output: the log density, every gradient component and, where available, the
 complete `write_array` output, including generated quantities. Cross-path
 tests compare the graph, register-machine and MIR interpreter paths with each

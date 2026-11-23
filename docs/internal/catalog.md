@@ -28,7 +28,7 @@ paths and hashes in raw records unchanged.
 | [brms performance and numerics](../../notes/performance/2026-09-16-brms-performance.md) | Human-facing guide or maintained technical contract. |
 | [Build and pull-request latency](../../notes/performance/build-performance.md) | Human-facing guide or maintained technical contract. |
 | [lp\_\_ and dropped constants](../lp-constant.md) | Human-facing guide or maintained technical contract. |
-| [Corpus status](../corpus-status.md) | Recorded model support and reference coverage, distinct from fresh replay. |
+| [Every model](../../TESTING.md#every-model) | Each corpus model with the limit on its log density, gradient and outputs. Generated from the references and the ULP ledger. |
 | [Probability-function coverage](../coverage.md) | Builtin signature coverage and unsupported overloads. |
 | [Coming from cmdstanr](../from-cmdstanr.md) | Human-facing guide or maintained technical contract. |
 | [Hacking on stanli](../hacking.md) | Code ownership, development recipes, diagnostics and validation. |

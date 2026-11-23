@@ -1584,6 +1584,9 @@ if(Python3_Interpreter_FOUND)
   add_test(NAME test_gen_web_models
            COMMAND ${Python3_EXECUTABLE} tests/test_gen_web_models.py
            WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
+  add_test(NAME test_testing_table
+           COMMAND ${Python3_EXECUTABLE} tests/test_testing_table.py
+           WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
   add_test(NAME test_conformance_harness
            COMMAND ${Python3_EXECUTABLE} tests/test_conformance.py
            WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})

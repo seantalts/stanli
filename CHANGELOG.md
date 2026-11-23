@@ -2,6 +2,25 @@
 
 ## Unreleased
 
+### Docs
+
+- TESTING.md states one rule for every model: each value within 10 ULP of
+  CmdStan, or listed in `tests/ulp_ledger.json` with a measured bound and a
+  cause. It now has a generated table of every corpus model with the limit on
+  its log density, gradient and outputs, and says which platforms enforce
+  each limit. The table that was in `docs/corpus-status.md` moved there.
+- Contributor material that was in TESTING.md (updating the ULP ledger, tests
+  that need developer switches, checks to run by hand) moved to
+  `docs/hacking.md`.
+
+### Internal
+
+- Each entry of `tests/ulp_ledger.json` has a `closer` field that says which
+  engine is closer to the 80-digit value: `stanli`, `cmdstan` or `unknown`.
+  The ledger is schema 2.
+- `tools/corpus.py` prints its report and no longer writes
+  `docs/corpus-status.md`.
+
 ## 0.30.1
 
 R users can install the development version from main with a runtime built

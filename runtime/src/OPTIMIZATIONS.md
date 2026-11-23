@@ -15,7 +15,7 @@ another build is ignored, with a one-time notice. [Developer
 switches](#developer-switches) lists every switch, what it does and the file
 that reads it. Corpus sizes and model counts in the measurements are the ones
 at the time of each measurement. The corpus has grown since the early ones;
-[`docs/corpus-status.md`](../../docs/corpus-status.md) has the current count. The file names
+[`TESTING.md`](../../TESTING.md#every-model) has the current count. The file names
 below that have no directory are in
 `runtime/src/`, except the kernels, which are in `runtime/kernels/`, and
 headers such as `mir_prog.hpp`, which are in `runtime/include/stanli/`.
@@ -1648,7 +1648,7 @@ describe the current code. The candidates below change summation order
 rather than any elementwise result. Each was measured or profiled during the 2026-08-25 precision survey
 and is unblocked under the 10 ULP budget for reassociation-class changes.
 Implementations must state that budget in the commit message and update
-[`docs/corpus-status.md`](../../docs/corpus-status.md) and the conformance
+[`TESTING.md`](../../TESTING.md#every-model) and the conformance
 baseline in the same commit. Re-profile before implementing any of them, since
 profile share is a ceiling on the win and the `pow` entry below shows how a
 large share can still yield nothing.
