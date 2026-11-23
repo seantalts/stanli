@@ -21,7 +21,13 @@ rhat.stanli_fit(object, pars = NULL, ...)
 
 neff_ratio.stanli_fit(object, pars = NULL, ...)
 
-loo.stanli_fit(x, ..., variable = "log_lik", r_eff = NULL)
+loo.stanli_fit(
+  x,
+  ...,
+  variable = "log_lik",
+  r_eff = NULL,
+  cores = getOption("mc.cores", 1)
+)
 
 loo_compare.stanli_fit(x, ...)
 
@@ -56,9 +62,11 @@ For `nuts_params`, exact sampler names such as `divergent__`.}
 \item{r_eff}{Optional relative effective sample sizes. By default computed
 from the likelihood with `loo::relative_eff()` using the chain axis.}
 
+\item{cores}{Number of cores used by `loo::loo()` and `bridgesampling::bridge_sampler()`.}
+
 \item{samples}{A `stanli_fit` for `bridge_sampler`.}
 
-\item{repetitions, method, cores, use_neff, maxiter, silent, verbose}{Passed to
+\item{repetitions, method, use_neff, maxiter, silent, verbose}{Passed to
 `bridgesampling::bridge_sampler()`.}
 }
 \value{

@@ -83,8 +83,9 @@ sampler_long <- function(object, pars, inc_warmup = FALSE, parameter = TRUE) {
 #'   For `nuts_params`, exact sampler names such as `divergent__`.
 #' @param inc_warmup Include saved warmup in sampler tables.
 #' @param samples A `stanli_fit` for `bridge_sampler`.
-#' @param repetitions,method,cores,use_neff,maxiter,silent,verbose Passed to
+#' @param repetitions,method,use_neff,maxiter,silent,verbose Passed to
 #'   `bridgesampling::bridge_sampler()`.
+#' @param cores Number of cores used by `loo::loo()` and `bridgesampling::bridge_sampler()`.
 #' @param ... Further arguments passed to the underlying package where applicable.
 #' @return `nuts_params` returns a data frame with `Chain`, `Iteration`,
 #'   `Parameter` (a factor), and `Value`; `log_posterior` omits `Parameter`.
@@ -198,10 +199,10 @@ log_lik.stanli_fit <- function(object, variable = "log_lik", ...) {
 #' @param variable Pointwise log-likelihood variable passed to [log_lik()].
 #' @param r_eff Optional relative effective sample sizes. By default computed
 #'   from the likelihood with `loo::relative_eff()` using the chain axis.
-loo.stanli_fit <- function(x, ..., variable = "log_lik", r_eff = NULL) {
+loo.stanli_fit <- function(x, ..., variable = "log_lik", r_eff = NULL, cores = getOption("mc.cores", 1)) {
   ll <- log_lik(x, variable = variable)
-  if (is.null(r_eff)) r_eff <- loo::relative_eff(exp(ll))
-  loo::loo(ll, r_eff = r_eff, ...)
+  if (is.null(r_eff)) r_eff <- loo::relative_eff(exp(ll), cores = cores)
+  loo::loo(ll, r_eff = r_eff, cores = cores, ...)
 }
 
 #' @rdname stanli-ecosystem
