@@ -5608,13 +5608,46 @@
   },
   "ctsem_ctsm": {
    "grad": {
-    "unscored": "no 80-digit run"
+    "cmdstan": {
+     "max": 1.7674759734438525,
+     "mean": 0.018385604869133494
+    },
+    "cmdstan_closer": 14,
+    "n": 543,
+    "nonfinite": 0,
+    "stanli": {
+     "max": 1.7674759734438525,
+     "mean": 0.01679799840073593
+    },
+    "stanli_closer": 15
    },
    "lp": {
-    "unscored": "no 80-digit run"
+    "cmdstan": {
+     "max": 4.20364997236735,
+     "mean": 2.7851626847438116
+    },
+    "cmdstan_closer": 0,
+    "n": 3,
+    "nonfinite": 0,
+    "stanli": {
+     "max": 0.9918775740225317,
+     "mean": 0.6785223461827762
+    },
+    "stanli_closer": 2
    },
    "wa": {
-    "unscored": "no 80-digit run"
+    "cmdstan": {
+     "max": 2.569117170626292,
+     "mean": 0.09000883417421926
+    },
+    "cmdstan_closer": 26,
+    "n": 1658,
+    "nonfinite": 0,
+    "stanli": {
+     "max": 2.569117170626292,
+     "mean": 0.08851148549299409
+    },
+    "stanli_closer": 66
    }
   },
   "ctsem_ctsm_400": {
@@ -5652,13 +5685,35 @@
   },
   "ctsem_ctsm_post4_100": {
    "grad": {
-    "unscored": "no 80-digit run"
+    "unscored": "over 300 parameters: directional derivatives only"
    },
    "lp": {
-    "unscored": "no 80-digit run"
+    "cmdstan": {
+     "max": 6.843825004733836,
+     "mean": 3.5189247614672605
+    },
+    "cmdstan_closer": 0,
+    "n": 3,
+    "nonfinite": 0,
+    "stanli": {
+     "max": 0.8438250047338363,
+     "mean": 0.5189247614672604
+    },
+    "stanli_closer": 2
    },
    "wa": {
-    "unscored": "no 80-digit run"
+    "cmdstan": {
+     "max": 4.725916580060357,
+     "mean": 0.29592035785451426
+    },
+    "cmdstan_closer": 0,
+    "n": 8238,
+    "nonfinite": 0,
+    "stanli": {
+     "max": 4.725916580060357,
+     "mean": 0.2958664162039114
+    },
+    "stanli_closer": 1
    }
   },
   "diamonds": {
@@ -10405,13 +10460,13 @@
   },
   "nn_rbm1bJ100": {
    "grad": {
-    "unscored": "no 80-digit run"
+    "unscored": "80-digit run: timeout"
    },
    "lp": {
-    "unscored": "no 80-digit run"
+    "unscored": "80-digit run: timeout"
    },
    "wa": {
-    "unscored": "no 80-digit run"
+    "unscored": "80-digit run: timeout"
    }
   },
   "normal_mixture": {
@@ -17252,7 +17307,7 @@
   "date": "2026-11-23",
   "digits": 80,
   "platform": "Darwin arm64",
-  "stanli_source": "d06f58edb1b5440934a544255cbabe5283e63b9e"
+  "stanli_source": "caa6f4072767a0bdb86f818408ff6c1f7a57c8d6"
  },
  "schema": 1
 }

@@ -156,18 +156,18 @@ each model ([`tools/hp`](tools/hp/README.md)) gives the true value of the log
 density, of each gradient entry and of each output. The table gives the mean
 distance of CmdStan's values and of stanli's values from those true values, in
 ULP, over the three points. It was measured on macOS arm64 on <!--gen:testing_accuracy_date-->2026-11-23<!--/gen-->
-at <!--gen:testing_accuracy_source-->`d06f58ed`<!--/gen-->, and is not measured again
+at <!--gen:testing_accuracy_source-->`caa6f407`<!--/gen-->, and is not measured again
 in CI.
 
 | values | models scored | stanli closer on average | CmdStan closer on average | the same |
 | --- | ---: | ---: | ---: | ---: |
-| log density | <!--gen:testing_scored_lp-->368<!--/gen--> | <!--gen:testing_scored_lp_stanli-->86<!--/gen--> | <!--gen:testing_scored_lp_cmdstan-->68<!--/gen--> | <!--gen:testing_scored_lp_same-->214<!--/gen--> |
-| gradient | <!--gen:testing_scored_grad-->336<!--/gen--> | <!--gen:testing_scored_grad_stanli-->216<!--/gen--> | <!--gen:testing_scored_grad_cmdstan-->57<!--/gen--> | <!--gen:testing_scored_grad_same-->63<!--/gen--> |
-| outputs | <!--gen:testing_scored_wa-->365<!--/gen--> | <!--gen:testing_scored_wa_stanli-->97<!--/gen--> | <!--gen:testing_scored_wa_cmdstan-->16<!--/gen--> | <!--gen:testing_scored_wa_same-->252<!--/gen--> |
+| log density | <!--gen:testing_scored_lp-->370<!--/gen--> | <!--gen:testing_scored_lp_stanli-->88<!--/gen--> | <!--gen:testing_scored_lp_cmdstan-->68<!--/gen--> | <!--gen:testing_scored_lp_same-->214<!--/gen--> |
+| gradient | <!--gen:testing_scored_grad-->337<!--/gen--> | <!--gen:testing_scored_grad_stanli-->217<!--/gen--> | <!--gen:testing_scored_grad_cmdstan-->57<!--/gen--> | <!--gen:testing_scored_grad_same-->63<!--/gen--> |
+| outputs | <!--gen:testing_scored_wa-->367<!--/gen--> | <!--gen:testing_scored_wa_stanli-->99<!--/gen--> | <!--gen:testing_scored_wa_cmdstan-->16<!--/gen--> | <!--gen:testing_scored_wa_same-->252<!--/gen--> |
 
-Over the <!--gen:testing_scored_values-->755,316<!--/gen--> values that were scored,
-stanli is closer to the true value in <!--gen:testing_values_stanli_closer-->15,972<!--/gen-->,
-CmdStan is closer in <!--gen:testing_values_cmdstan_closer-->16,699<!--/gen-->, and
+Over the <!--gen:testing_scored_values-->765,761<!--/gen--> values that were scored,
+stanli is closer to the true value in <!--gen:testing_values_stanli_closer-->16,058<!--/gen-->,
+CmdStan is closer in <!--gen:testing_values_cmdstan_closer-->16,739<!--/gen-->, and
 the rest are the same distance away.
 
 How to read the table:
@@ -543,9 +543,9 @@ they disagree.
 | `cm_logweibull` | cogmod | 5 | 10 | 2.20 | 1.87 | 0.81 | 0.56 | 0.08 | 0.08 | 10 |  |
 | `cm_rdm` | cogmod | 7 | 14 | 2.45 | 2.78 | 1.11 | 0.16 | 0.09 | 0.09 | gradient 18 |  |
 | `cm_weibull` | cogmod | 5 | 10 | 2.57 | 2.57 | 2.31 | 0.99 | 0.07 | 0.07 | gradient 17 |  |
-| `ctsem_ctsm` | ctsem | 181 | 648 |  |  |  |  |  |  | 10 |  |
+| `ctsem_ctsm` | ctsem | 181 | 648 | 2.79 | 0.68 | 0.02 | 0.02 | 0.09 | 0.09 | 10 |  |
 | `ctsem_ctsm_400` | ctsem | 1621 | 4968 | 6.18 | 0.69 |  |  | 0.02 | 0.02 | 10 |  |
-| `ctsem_ctsm_post4_100` | ctsem | 580 | 4929 |  |  |  |  |  |  | outputs 22 |  |
+| `ctsem_ctsm_post4_100` | ctsem | 580 | 4929 | 3.52 | 0.52 |  |  | 0.30 | 0.30 | outputs 22 |  |
 | `examplemodels_arch1` | examplemodels | 3 | 3 | 0.72 | 0.72 | 0.34 | 0.34 | 0.14 | 0.14 | 10 |  |
 | `examplemodels_cjs_cov_raneff` | examplemodels | 23 | 16574 | 3.20 | 0.42 | 2.27 | 1.77 | 0.10 | 0.10 | gradient 19 |  |
 | `examplemodels_cjs_mnl_ran` | examplemodels | 21 | 0 | 0.29 | 0.94 | 0.47 | 0.24 |  |  | 10 |  |
