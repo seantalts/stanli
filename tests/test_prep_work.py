@@ -2,8 +2,9 @@
 
 Each case prepares two sizes of one model shape and reads work counters that
 STANLI_PROFILE_PREP=1 prints: how many statements lowering processed and how
-many bytes of data it copied (`stage=lower_work`), and how many lane steps
-reroll took (`stage=reroll ... lane_steps`). The counters do not depend on
+many bytes of data it copied and how many adjoints it generated for
+region-map bodies (`stage=lower_work`), and how many lane steps reroll took
+(`stage=reroll ... lane_steps`). The counters do not depend on
 the clock, so the bounds are exact consequences of the algorithm, not timer
 noise.
 
@@ -24,6 +25,8 @@ WORK = re.compile(r"stanli_prep graph=(\S+) stage=lower_work ns=\d+ "
                   r"statements=(\d+) copied_data_bytes=(\d+)")
 REROLL = re.compile(r"stanli_prep graph=(\S+) stage=reroll ns=\d+ .*?"
                     r"lane_steps=(\d+)")
+ADJOINTS = re.compile(r"stanli_prep graph=(\S+) stage=lower_work ns=\d+ .*?"
+                      r"region_map_adjoints=(\d+)")
 
 
 def work(bench, check, directory, name, source, data):
@@ -48,9 +51,12 @@ def work(bench, check, directory, name, source, data):
         lowerings[graph] = lowerings.get(graph, 0) + 1
     for graph, steps in REROLL.findall(run.stdout + run.stderr):
         lane_steps[graph] = int(steps)
+    adjoints = {graph: int(count)
+                for graph, count in ADJOINTS.findall(run.stdout + run.stderr)}
     rows["lowerings"] = lowerings
     rows["lane_steps"] = lane_steps
-    if "log_prob" not in rows:
+    rows["region_map_adjoints"] = adjoints
+    if "log_prob" not in rows and "bounded_log_prob" not in rows:
         raise RuntimeError(f"{name}: no lower_work row in\n{run.stderr}")
     return rows
 
@@ -291,9 +297,45 @@ def check_reroll_rng_draws(measure):
     return []
 
 
+def region_map_body(k):
+    """A loop that a region map can take, with a branch on the parameter
+    and k more statements that set the size of the map's body."""
+    lines = "\n".join(
+        f"    s = s + 0.001 * exp(theta * x[n] * {i % 97 + 1});"
+        for i in range(k))
+    source = f"""data {{ int N; vector[N] x; }}
+parameters {{ real theta; }}
+model {{
+  theta ~ normal(0, 1);
+  for (n in 1:N) {{
+    real s = x[n];
+    if (s < theta) s = s + 1;
+{lines}
+    target += -square(s);
+  }}
+}}
+"""
+    return source, {"N": 6, "x": [0.1 * i for i in range(6)]}
+
+
+def check_oversized_region_map(measure):
+    small = measure("rmap_small", *region_map_body(10))
+    large = measure("rmap_large", *region_map_body(4000))
+    # The bounded-unroll trial shares the trace, so the last row of either
+    # log-density graph holds the total.
+    small = max(small["region_map_adjoints"].values())
+    large = max(large["region_map_adjoints"].values())
+    print(f"region-map adjoints: {small} for 10 statements, {large} for 4000")
+    if small == 0:
+        return ["the small region-map body got no adjoint"]
+    if large != 0:
+        return [f"a region-map body already too long got {large} adjoints"]
+    return []
+
+
 CASES = [check_ifs_in_retained_loop, check_calls_in_retained_loop,
          check_refused_retention, check_write_array_lowered_once,
-         check_reroll_rng_draws]
+         check_reroll_rng_draws, check_oversized_region_map]
 RUN_CASES = [check_reduce_sum_beside_data]
 
 

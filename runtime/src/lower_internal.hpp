@@ -129,6 +129,8 @@ struct PrepTrace {
   // share their parent's trace, so their work is counted too.
   int64_t lowered_statements = 0;
   int64_t copied_data_bytes = 0;
+  // Adjoints generated for region-map bodies.
+  int64_t region_map_adjoints = 0;
   void work(const char* graph) {
     if (!enabled_) return;
     Row& r = next();
@@ -137,6 +139,7 @@ struct PrepTrace {
     r.extra = Extra::Work;
     r.a = lowered_statements;
     r.b = copied_data_bytes;
+    r.c = region_map_adjoints;
   }
 
   Time start() const { return enabled_ ? Clock::now() : Time{}; }
@@ -264,6 +267,7 @@ struct PrepTrace {
         case Extra::Work:
           field("statements", r.a);
           field("copied_data_bytes", r.b);
+          field("region_map_adjoints", r.c);
           break;
         case Extra::None:
           break;
@@ -1951,12 +1955,17 @@ struct Lowering {
                                  IslandRegion& region,
                                  const std::set<std::string>& names,
                                  const mir::Stmt* s);
-  void finalize_island_program(IslandProg& prog, bool native,
-                               bool keep_every_clear = false,
-                               bool propagate_copies = false);
+  // A caller that refuses a program longer than max_code passes it, and
+  // `adjoints` counts the adjoints that gen_adjoint was asked for.
+  void finalize_island_program(
+      IslandProg& prog, bool native, bool keep_every_clear = false,
+      bool propagate_copies = false,
+      size_t max_code = std::numeric_limits<size_t>::max(),
+      int64_t* adjoints = nullptr);
   void finalize_island_program_once(IslandProg& prog, bool native,
                                     bool keep_every_clear,
-                                    bool propagate_copies);
+                                    bool propagate_copies, size_t max_code,
+                                    int64_t* adjoints);
   std::vector<int> pack_island_inputs(IslandProg& prog,
                                       std::vector<int> inputs);
   bool lower_region_map(const mir::Stmt& s, long lo, long hi);

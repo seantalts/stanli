@@ -429,7 +429,9 @@ bool Lowering::lower_region_map(const mir::Stmt& s, long lo, long hi) {
 
   const auto build = [&](bool recompute, bool keep_every_clear) -> std::string {
     *prog = pristine;
-    finalize_island_program(*prog, true, keep_every_clear, true);
+    finalize_island_program(*prog, true, keep_every_clear, true,
+                            kMaxRegionMapCode, &prep.region_map_adjoints);
+    if (prog->code.size() > kMaxRegionMapCode) return "body program too large";
     if (!prog->native_adj) {
       std::string why = "no generated adjoint";
       if (diagnostics) {
@@ -445,7 +447,6 @@ bool Lowering::lower_region_map(const mir::Stmt& s, long lo, long hi) {
       }
       return why;
     }
-    if (prog->code.size() > kMaxRegionMapCode) return "body program too large";
     for (const auto& li : prog->ins)
       if (!li.immutable) return "program writes a live-in register";
 

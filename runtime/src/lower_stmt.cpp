@@ -662,20 +662,45 @@ void Lowering::configure_island_compiler(ProgramCompiler& c,
     }
   }
 }
+// A pass whose program is already longer than max_code skips gen_adjoint,
+// which keeps every forward instruction and so could only make it longer.
+// Without copy propagation a program can come out shorter, and whether that
+// pass runs depends on the first pass's adjoint, so both adjoints are skipped
+// only when both programs are too long; otherwise the passes run as before.
 void Lowering::finalize_island_program(IslandProg& prog, bool native,
                                        bool keep_every_clear,
-                                       bool propagate_copies) {
+                                       bool propagate_copies, size_t max_code,
+                                       int64_t* adjoints) {
   if (propagate_copies && native) {
     const IslandProg before = prog;
-    finalize_island_program_once(prog, native, keep_every_clear, true);
+    finalize_island_program_once(prog, native, keep_every_clear, true, max_code,
+                                 adjoints);
     if (prog.native_adj) return;
+    if (prog.code.size() > max_code) {
+      IslandProg plain = before;
+      finalize_island_program_once(plain, native, keep_every_clear, false,
+                                   max_code, adjoints);
+      if (plain.code.size() > max_code) {
+        static_cast<IslandProg&>(prog) = std::move(plain);
+        return;
+      }
+      static_cast<IslandProg&>(prog) = before;
+      finalize_island_program_once(prog, native, keep_every_clear, true,
+                                   std::numeric_limits<size_t>::max(),
+                                   adjoints);
+      if (!prog.native_adj) static_cast<IslandProg&>(prog) = std::move(plain);
+      return;
+    }
     static_cast<IslandProg&>(prog) = before;
   }
-  finalize_island_program_once(prog, native, keep_every_clear, false);
+  finalize_island_program_once(prog, native, keep_every_clear, false, max_code,
+                               adjoints);
 }
 void Lowering::finalize_island_program_once(IslandProg& prog, bool native,
                                             bool keep_every_clear,
-                                            bool propagate_copies) {
+                                            bool propagate_copies,
+                                            size_t max_code,
+                                            int64_t* adjoints) {
   // Forward-only branches can record the executed path for generated
   // adjoints. Unsupported derivatives and loops retain the replay.
   // The register compactor's liveness analysis is straight-line (with
@@ -722,6 +747,11 @@ void Lowering::finalize_island_program_once(IslandProg& prog, bool native,
     sink_program_fills(prog);
     elide_program_dead_constants(prog);
   }
+  if (prog.code.size() > max_code) {
+    prog.native_adj = false;
+    return;
+  }
+  if (native && adjoints) ++*adjoints;
   // Generated quantities have no backward consumer.
   prog.native_adj = native && gen_adjoint(prog, keep_every_clear) &&
                     !debug_env("STANLI_NO_NATIVE_ADJ");
