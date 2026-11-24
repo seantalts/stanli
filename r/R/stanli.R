@@ -3,24 +3,40 @@
 json_scalar <- function(x) {
   if (is.character(x)) return(paste0("\"", x, "\""))
   if (is.logical(x) && !is.na(x)) return(if (x) "1" else "0")
-  if (is.na(x) && !is.double(x))
-    stop("Stan integer data cannot contain NA", call. = FALSE)
-  if (is.na(x)) return("\"NaN\"")
+  if (is.nan(x)) return("\"NaN\"")
+  if (is.na(x)) stop("data cannot contain NA", call. = FALSE)
   if (is.infinite(x)) return(if (x > 0) "\"Infinity\"" else "\"-Infinity\"")
   format(x, digits = 17, scientific = FALSE, trim = TRUE)
 }
 
 # Stan's JSON data format, written without a JSON dependency: the values
 # are numbers, strings, and arrays nested to any depth, a small enough
-# grammar to emit directly. A named list is an object; an unnamed list is
-# an array of its elements. An R array goes out with its first index
-# outermost, the way Stan's JSON reader nests it, so a matrix is an array
-# of rows.
+# grammar to emit directly. The rules follow cmdstanr's write_stan_json: a
+# factor goes out as its integer codes, a data frame as data.matrix() makes
+# it, a logical as 1 or 0, and a list as an array of its elements, whatever
+# its names. The one exception is a list named "1", "2", ..., which is a
+# tuple. An R array goes out with its first index outermost, the way Stan's
+# JSON reader nests it, so a matrix is an array of rows. NaN goes out as
+# Stan's NaN, but NA is an error, as in cmdstanr.
 to_json <- function(x) {
-  if (is.list(x) && (length(x) == 0L || !is.null(names(x)))) return(json_object(x))
+  if (is.list(x) && (length(x) == 0L || !is.null(names(x)))) {
+    nms <- names(x)
+    for (i in seq_along(x))
+      if (!is.na(nms[i]) && has_na(x[[i]]))
+        stop("Variable '", nms[i], "' has NA values.", call. = FALSE)
+    return(json_object(x))
+  }
   if (is.list(x))
     stop("a data list must have names for every element", call. = FALSE)
   json_value(x)
+}
+
+# Whether a value holds an NA that is not NaN.
+has_na <- function(x) {
+  if (is.data.frame(x)) x <- data.matrix(x)
+  if (is.list(x)) return(any(vapply(x, has_na, logical(1))))
+  if (!is.numeric(x)) return(anyNA(x))
+  any(is.na(x) & !is.nan(x))
 }
 
 json_object <- function(x) {
@@ -33,10 +49,19 @@ json_object <- function(x) {
   paste0("{", paste(parts, collapse = ", "), "}")
 }
 
+# Whether a list's names are "1", "2", ... in any order, the spelling of a
+# tuple.
+tuple_names <- function(x) {
+  !is.null(names(x)) && length(x) > 0L &&
+    setequal(names(x), as.character(seq_along(x))) && !anyDuplicated(names(x))
+}
+
 json_value <- function(x) {
+  if (is.data.frame(x)) x <- data.matrix(x)
+  if (is.factor(x)) x <- as.integer(x)
   if (is.list(x)) {
-    if (!is.null(names(x)) && length(x) > 0L) return(json_object(x))
-    return(paste0("[", paste(vapply(x, json_value, character(1)),
+    if (tuple_names(x)) return(json_object(x))
+    return(paste0("[", paste(vapply(unname(x), json_value, character(1)),
                              collapse = ", "), "]"))
   }
   shape <- dim(x)

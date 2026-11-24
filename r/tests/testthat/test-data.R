@@ -1,22 +1,59 @@
 # The data writer, which has no runtime dependency.
 
+echo_draw <- function(model, name) {
+  fit <- sample_model(model, fixed_param = TRUE, chains = 1, samples = 1,
+                      refresh = 0)
+  columns <- grep(paste0("^", name, "\\["), fit$columns)
+  unname(fit$draws[1, 1, columns])
+}
+
 test_that("non-finite reals go out in the spellings Stan's reader accepts", {
   expect_equal(stanli:::json_scalar(Inf), "\"Infinity\"")
   expect_equal(stanli:::json_scalar(-Inf), "\"-Infinity\"")
   expect_equal(stanli:::json_scalar(NaN), "\"NaN\"")
-  expect_equal(stanli:::json_scalar(NA_real_), "\"NaN\"")
   expect_equal(stanli:::to_json(list(lb = -Inf, ub = 3.5)),
                "{\"lb\": \"-Infinity\", \"ub\": 3.5}")
-  expect_equal(stanli:::to_json(list(y = c(1.5, Inf, NA))),
+  expect_equal(stanli:::to_json(list(y = c(1.5, Inf, NaN))),
                "{\"y\": [1.5, \"Infinity\", \"NaN\"]}")
   expect_equal(stanli:::to_json(list(M = matrix(c(1, Inf, 2, 3), 2, 2))),
                "{\"M\": [[1, 2], [\"Infinity\", 3]]}")
 })
 
-test_that("integer data still rejects a missing value", {
-  expect_error(stanli:::json_scalar(NA_integer_), "integer data")
-  expect_error(stanli:::json_scalar(NA), "integer data")
-  expect_error(stanli:::to_json(list(N = NA_integer_)), "integer data")
+test_that("a missing value is an error naming the variable, as in cmdstanr", {
+  for (value in list(NA, NA_integer_, NA_real_, c(1, NA, Inf),
+                     list(1, NA), matrix(c(1, NA), 1, 2)))
+    expect_error(stanli:::to_json(list(y = value)),
+                 "Variable 'y' has NA values.", fixed = TRUE)
+  expect_error(stanli:::to_json(list(t = list("1" = 1, "2" = NA_real_))),
+               "Variable 't' has NA values.", fixed = TRUE)
+})
+
+test_that("factors, data frames and named lists go out as cmdstanr writes them", {
+  expect_equal(stanli:::to_json(list(i = factor(5, levels = c(5, 7)))),
+               "{\"i\": 1}")
+  expect_equal(stanli:::to_json(list(i = factor(c("a", "b", "a")))),
+               "{\"i\": [1, 2, 1]}")
+  expect_equal(stanli:::to_json(list(m = data.frame(a = 1:3, b = 4:6))),
+               "{\"m\": [[1, 4], [2, 5], [3, 6]]}")
+  expect_equal(stanli:::to_json(list(av = split(1:6, rep(c("a", "b"), each = 3)))),
+               "{\"av\": [[1, 2, 3], [4, 5, 6]]}")
+  # A list named "1", "2", ... is a tuple.
+  expect_equal(stanli:::to_json(list(t = list("1" = 1, "2" = 2))),
+               "{\"t\": {\"1\": 1, \"2\": 2}}")
+})
+
+test_that("a model reads factors and data frames as cmdstanr does", {
+  skip_without_runtime()
+  m <- stanli_model(code = "
+    data { int i; array[3] int ai; matrix[3, 2] m; array[2] vector[3] av; }
+    generated quantities {
+      array[11] real out = {i, ai[1], ai[2], m[1, 2], m[3, 1], av[1][1],
+        av[2][3], m[2, 2], ai[3], av[1][3], av[2][1]};
+    }",
+    data = list(i = factor(5, levels = c(5, 7)), ai = factor(c(10, 20, 10)),
+                m = data.frame(a = 1:3, b = 4:6),
+                av = split(c(1, 2, 3, 4, 5, 6), rep(c("a", "b"), each = 3))))
+  expect_equal(echo_draw(m, "out"), c(1, 1, 2, 4, 3, 1, 6, 5, 1, 3, 4))
 })
 
 test_that("a model reads data holding an infinite bound", {
@@ -92,13 +129,6 @@ data_echo_model <- function(data) {
       array[2] row_vector[3] rs_out = rs;
       array[2, 2] vector[3] nested_out = nested;
     }", data = data)
-}
-
-echo_draw <- function(model, name) {
-  fit <- sample_model(model, fixed_param = TRUE, chains = 1, samples = 1,
-                      refresh = 0)
-  columns <- grep(paste0("^", name, "\\["), fit$columns)
-  unname(fit$draws[1, 1, columns])
 }
 
 test_that("a model reads back arrays of rank three and four, and lists", {
