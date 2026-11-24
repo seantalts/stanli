@@ -2,8 +2,9 @@
 
 Each case prepares two sizes of one model shape and reads work counters that
 STANLI_PROFILE_PREP=1 prints: how many statements lowering processed and how
-many bytes of data it copied and how many adjoints it generated for
-region-map bodies (`stage=lower_work`), and how many lane steps reroll took
+many bytes of data it copied, how many adjoints it generated for
+region-map bodies, and how many function bodies and statements the
+write_array control scan entered (`stage=lower_work`), and how many lane steps reroll took
 (`stage=reroll ... lane_steps`). The counters do not depend on
 the clock, so the bounds are exact consequences of the algorithm, not timer
 noise.
@@ -27,6 +28,11 @@ REROLL = re.compile(r"stanli_prep graph=(\S+) stage=reroll ns=\d+ .*?"
                     r"lane_steps=(\d+)")
 ADJOINTS = re.compile(r"stanli_prep graph=(\S+) stage=lower_work ns=\d+ .*?"
                       r"region_map_adjoints=(\d+)")
+CALL_SCANS = re.compile(r"stanli_prep graph=(\S+) stage=lower_work ns=\d+ .*?"
+                        r"call_scans=(\d+)")
+SCAN_STATEMENTS = re.compile(
+    r"stanli_prep graph=(\S+) stage=lower_work ns=\d+ .*?"
+    r"scan_statements=(\d+)")
 
 
 def work(bench, check, directory, name, source, data):
@@ -56,6 +62,12 @@ def work(bench, check, directory, name, source, data):
     rows["lowerings"] = lowerings
     rows["lane_steps"] = lane_steps
     rows["region_map_adjoints"] = adjoints
+    rows["call_scans"] = {
+        graph: int(count)
+        for graph, count in CALL_SCANS.findall(run.stdout + run.stderr)}
+    rows["scan_statements"] = {
+        graph: int(count)
+        for graph, count in SCAN_STATEMENTS.findall(run.stdout + run.stderr)}
     if "log_prob" not in rows and "bounded_log_prob" not in rows:
         raise RuntimeError(f"{name}: no lower_work row in\n{run.stderr}")
     return rows
@@ -333,9 +345,142 @@ def check_oversized_region_map(measure):
     return []
 
 
+def same_call_in_generated_loop(n):
+    """generated quantities with a loop of n trips that calls one function
+    in every trip, with arguments that the scan knows the same of. The
+    overload keeps stanc from inlining the function."""
+    source = """functions {
+  real total(real h, vector v) {
+    real s = 0;
+    for (i in 1:num_elements(v)) s += -h * exp(v[i]);
+    return s;
+  }
+  real total(real h, real v) { return -h * exp(v); }
+}
+data { int N; int K; vector[K] x; }
+parameters { real mu; }
+model { mu ~ normal(0, 1); }
+generated quantities {
+  array[N] real y;
+  {
+    vector[K] eta = mu + x;
+    for (n in 1:N) {
+      real h = mu * n;
+      y[n] = total(h, eta);
+    }
+  }
+}
+"""
+    return source, {"N": n, "K": 4, "x": [0.1, 0.2, 0.3, 0.4]}
+
+
+def check_call_scans(measure):
+    small_n, large_n = 200, 2000
+    small = measure("scan_small", *same_call_in_generated_loop(small_n))
+    large = measure("scan_large", *same_call_in_generated_loop(large_n))
+    small = small["call_scans"]["write_array"]
+    large = large["call_scans"]["write_array"]
+    print(f"write_array control scan: {small} function bodies for {small_n} "
+          f"trips, {large} for {large_n}")
+    if small == 0:
+        return ["the write_array control scan entered no function body"]
+    if large > 3 * small:
+        return [f"{large_n // small_n} times the trips made the scan enter "
+                f"{large} function bodies instead of {small}"]
+    return []
+
+
+def loop_without_trip_control(n):
+    """generated quantities with a loop of n trips whose body decides
+    nothing by the trip."""
+    source = """data { int N; int K; vector[K] x; }
+parameters { real mu; }
+model { mu ~ normal(0, 1); }
+generated quantities {
+  array[N] real y;
+  {
+    vector[K] eta = mu + x;
+    for (n in 1:N) {
+      real h = mu * n;
+      real s = 0;
+      for (k in 1:K) s += -h * exp(eta[k]);
+      y[n] = s;
+    }
+  }
+}
+"""
+    return source, {"N": n, "K": 4, "x": [0.1, 0.2, 0.3, 0.4]}
+
+
+def check_scan_once_per_loop(measure):
+    small_n, large_n = 200, 2000
+    small = measure("trips_small", *loop_without_trip_control(small_n))
+    large = measure("trips_large", *loop_without_trip_control(large_n))
+    small = small["scan_statements"]["write_array"]
+    large = large["scan_statements"]["write_array"]
+    print(f"write_array control scan of a loop: {small} statements for "
+          f"{small_n} trips, {large} for {large_n}")
+    if large > 3 * small:
+        return [f"{large_n // small_n} times the trips made the scan visit "
+                f"{large} statements instead of {small}"]
+    return []
+
+
+def search_in_called_function(n):
+    """generated quantities with a loop of n trips that calls a function
+    with a search loop over 200 data rows, for a different target in each
+    trip. The overload keeps stanc from inlining the function."""
+    source = """functions {
+  real find(array[] int ids, int wanted, vector v) {
+    real out = 0;
+    int done = 0;
+    for (r in 1:size(ids)) {
+      if (!done && ids[r] == wanted) {
+        out = v[r];
+        done = 1;
+      }
+    }
+    return out;
+  }
+  real find(int ids, int wanted, real v) { return v; }
+}
+data { int N; int M; array[M] int ids; vector[M] x; }
+parameters { real mu; }
+model { mu ~ normal(0, 1); }
+generated quantities {
+  array[N] real y;
+  {
+    vector[M] eta = mu + x;
+    for (n in 1:N) {
+      real h = mu * n;
+      y[n] = h + find(ids, n, eta);
+    }
+  }
+}
+"""
+    m = 200
+    return source, {"N": n, "M": m, "ids": [i % 997 + 1 for i in range(m)],
+                    "x": [0.001 * i for i in range(m)]}
+
+
+def check_scan_of_calls_stops(measure):
+    small_n, large_n = 400, 800
+    small = measure("search_small", *search_in_called_function(small_n))
+    large = measure("search_large", *search_in_called_function(large_n))
+    small = small["scan_statements"]["write_array"]
+    large = large["scan_statements"]["write_array"]
+    print(f"write_array control scan of a search in a called function: "
+          f"{small} statements for {small_n} trips, {large} for {large_n}")
+    if large > 1.5 * small:
+        return [f"twice the trips made the scan visit {large} statements "
+                f"instead of {small}"]
+    return []
+
+
 CASES = [check_ifs_in_retained_loop, check_calls_in_retained_loop,
          check_refused_retention, check_write_array_lowered_once,
-         check_reroll_rng_draws, check_oversized_region_map]
+         check_reroll_rng_draws, check_oversized_region_map,
+         check_call_scans, check_scan_once_per_loop, check_scan_of_calls_stops]
 RUN_CASES = [check_reduce_sum_beside_data]
 
 

@@ -283,6 +283,14 @@ bool Lowering::scan_block(const std::vector<mir::Stmt>& body,
   return found;
 }
 bool Lowering::needs_runtime_control(const mir::Stmt& s) {
+  // A scan that has not decided within kControlScanSteps statements of
+  // called functions answers as it does for anything else that it cannot
+  // work out.
+  ++prep.scan_statements;
+  if (!scanned_calls.empty() && ++control_scan_steps > kControlScanSteps) {
+    call_scan_partial = true;
+    return true;
+  }
   // Never execute an RNG while the lexical scan tries to discover integer
   // constants. Its result belongs in a runtime register even when MIR marks
   // it DataOnly. The program compiler will still refuse dynamic extents.
@@ -335,10 +343,21 @@ bool Lowering::needs_runtime_control(const mir::Stmt& s) {
     const bool had_old = old != int_env.end();
     const long old_value = had_old ? old->second : 0;
     bool found = false;
+    // The scan answers yes to whatever it cannot work out, so a body that
+    // needs no runtime control with the loop variable unknown needs none on
+    // any trip, and the trips need not be scanned one by one.
+    if (hi > lo) {
+      scan_erase_int(s.loopvar);
+      found = std::any_of(s.body.begin(), s.body.end(), [&](const auto& k) {
+        return needs_runtime_control(k);
+      });
+    }
+    const bool per_trip = hi == lo || found;
+    found = false;
     // Scan under the same compile-time loop bindings ordinary lowering
     // will use. This keeps static conditions such as `if (t < N)` out of
     // a region without overlooking an arm that exists only at a later t.
-    for (int64_t v = lo; v <= hi && !found; ++v) {
+    for (int64_t v = lo; per_trip && v <= hi && !found; ++v) {
       scan_set_int(s.loopvar, static_cast<long>(v));
       for (const auto& k : s.body)
         if (needs_runtime_control(k)) {
@@ -358,16 +377,22 @@ bool Lowering::needs_runtime_control(const mir::Stmt& s) {
 }
 // A user call is scanned as its inlined body would be. The formals take what
 // the scan can work out of the arguments, and the caller's names are out of
-// reach, as in lower_call_udf. A function already being scanned is not
-// entered again: stanc3 does not inline a recursive call either.
+// reach, as in lower_call_udf. So the answer depends only on the function and
+// what the formals hold, and a call with the same ones reuses it. A function
+// already being scanned is not entered again (stanc3 does not inline a
+// recursive call either). An answer that met such a call, or that the step
+// limit cut short, is not reused.
 bool Lowering::call_needs_runtime_control(const mir::Expr& e) {
   for (const auto& a : e.args)
     if (call_needs_runtime_control(a)) return true;
   if (e.kind != mir::Expr::FunApp || e.fn_lib != mir::Expr::Lib::UserDefined)
     return false;
   const auto found = fun_defs.find(mir::function_key(e));
-  if (found == fun_defs.end() || !scanned_calls.insert(found->second).second)
+  if (found == fun_defs.end()) return false;
+  if (scanned_calls.count(found->second)) {
+    call_scan_partial = true;
     return false;
+  }
   const auto specialized = call_site_def(*found->second, e.args);
   const mir::FunDef& f = specialized ? *specialized : *found->second;
   struct Formal {
@@ -376,6 +401,18 @@ bool Lowering::call_needs_runtime_control(const mir::Expr& e) {
     std::optional<DeclView> view;
   };
   std::vector<Formal> formals(std::min(e.args.size(), f.arg_names.size()));
+  std::string key;
+  const auto append = [&](const void* bytes, size_t n) {
+    key.append(static_cast<const char*>(bytes), n);
+  };
+  const auto append_vector = [&](const auto& v) {
+    const size_t n = v.size();
+    append(&n, sizeof n);
+    if (n) append(v.data(), n * sizeof v[0]);
+  };
+  const mir::FunDef* const def = &f;
+  append(&def, sizeof def);
+  append(&while_unroll_depth, sizeof while_unroll_depth);
   for (size_t k = 0; k < formals.size(); ++k) {
     const mir::Expr& a = e.args[k];
     if (mir::is_unsized(a, mir::UnsizedLeaf::Int)) {
@@ -383,25 +420,49 @@ bool Lowering::call_needs_runtime_control(const mir::Expr& e) {
         formals[k].i = eval_int(a);
       } catch (const CompileError&) {
       }
-      continue;
+    } else {
+      formals[k].data = try_eval_pure(a);
+      const auto view = try_static_view(a);
+      if (view.state == StaticProbeState::Known)
+        formals[k].view = DeclView{view.value.len, false, view.value.si};
     }
-    formals[k].data = try_eval_pure(a);
-    const auto view = try_static_view(a);
-    if (view.state == StaticProbeState::Known)
-      formals[k].view = DeclView{view.value.len, false, view.value.si};
+    const char tags[3] = {formals[k].i ? 'i' : '-', formals[k].data ? 'd' : '-',
+                          formals[k].view ? 'v' : '-'};
+    append(tags, sizeof tags);
+    if (formals[k].i) append(&*formals[k].i, sizeof(long));
+    if (const auto& d = formals[k].data) {
+      append(&d->is_int, sizeof d->is_int);
+      append_vector(d->dims);
+      append_vector(d->r);
+      append_vector(d->i);
+    }
+    if (const auto& v = formals[k].view) {
+      const int64_t shape[5] = {v->len, v->si.rows, v->si.cols,
+                                v->si.param_free,
+                                static_cast<int64_t>(v->si.kind)};
+      append(shape, sizeof shape);
+      append(&v->si.shape, sizeof v->si.shape);
+    }
   }
+  if (const auto known = call_scan_answers.find(key);
+      known != call_scan_answers.end())
+    return known->second;
   IntEnvLog* const log_saved = int_env_log;
   auto scope_saved = std::move(scope);
   auto ie_saved = std::move(int_env);
   auto decls_saved = std::move(decls);
   auto il_saved = std::move(int_locals);
   auto env_saved = std::move(td.env());
+  const bool partial_saved = call_scan_partial;
   int_env_log = nullptr;
   scope.clear();
   int_env.clear();
   decls.clear();
   int_locals.clear();
   td.env().clear();
+  call_scan_partial = false;
+  scanned_calls.insert(found->second);
+  ++prep.call_scans;
   const ScopeExit restore{[&] {
     scope = std::move(scope_saved);
     int_env = std::move(ie_saved);
@@ -410,6 +471,7 @@ bool Lowering::call_needs_runtime_control(const mir::Expr& e) {
     td.env() = std::move(env_saved);
     int_env_log = log_saved;
     scanned_calls.erase(found->second);
+    call_scan_partial = call_scan_partial || partial_saved;
   }};
   for (size_t k = 0; k < formals.size(); ++k) {
     const std::string& name = f.arg_names[k];
@@ -417,9 +479,11 @@ bool Lowering::call_needs_runtime_control(const mir::Expr& e) {
     if (formals[k].data) td.env()[name] = *formals[k].data;
     if (formals[k].view) decls[name] = *formals[k].view;
   }
-  return scan_block(f.body, [&](const mir::Stmt& child) {
+  const bool answer = scan_block(f.body, [&](const mir::Stmt& child) {
     return needs_runtime_control(child);
   });
+  if (!call_scan_partial) call_scan_answers.emplace(std::move(key), answer);
+  return answer;
 }
 // Whether `s` holds a break or continue of the loop around it.
 static bool has_loop_control(const mir::Stmt& s) {
@@ -2221,18 +2285,20 @@ Lowering::Flow Lowering::lower_stmt_impl(const mir::Stmt& s) {
       if (bounded_output_candidate(s, &output_references) &&
           try_lower_region(s, std::nullopt, &output_references))
         return Flow::Next;
-      if (!write_array_known_static && in_write_array &&
-          needs_runtime_control(s)) {
-        std::set<std::string> mentioned;
-        mir::collect_names(s, &mentioned);
-        auto snapshot = wa_snapshot(mentioned);
-        try {
-          lower_runtime_ifelse(s);
-          return Flow::Next;
-        } catch (const CompileError&) {
-        } catch (const std::logic_error&) {
+      if (!write_array_known_static && in_write_array) {
+        control_scan_steps = 0;
+        if (needs_runtime_control(s)) {
+          std::set<std::string> mentioned;
+          mir::collect_names(s, &mentioned);
+          auto snapshot = wa_snapshot(mentioned);
+          try {
+            lower_runtime_ifelse(s);
+            return Flow::Next;
+          } catch (const CompileError&) {
+          } catch (const std::logic_error&) {
+          }
+          wa_restore(snapshot);
         }
-        wa_restore(snapshot);
       }
       const bool outer_known_static = write_array_known_static;
       write_array_known_static = true;

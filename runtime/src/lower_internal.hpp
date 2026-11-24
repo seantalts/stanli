@@ -102,6 +102,7 @@ struct PrepTrace {
     int64_t b = 0;
     int64_t c = 0;
     int64_t d = 0;
+    int64_t e = 0;
     int64_t term_steps = 0;
     int64_t lane_steps = 0;
     int64_t packed_rows = 0;
@@ -131,6 +132,10 @@ struct PrepTrace {
   int64_t copied_data_bytes = 0;
   // Adjoints generated for region-map bodies.
   int64_t region_map_adjoints = 0;
+  // User function bodies that the write_array control scan entered, and
+  // the statements that it visited.
+  int64_t call_scans = 0;
+  int64_t scan_statements = 0;
   void work(const char* graph) {
     if (!enabled_) return;
     Row& r = next();
@@ -140,6 +145,8 @@ struct PrepTrace {
     r.a = lowered_statements;
     r.b = copied_data_bytes;
     r.c = region_map_adjoints;
+    r.d = call_scans;
+    r.e = scan_statements;
   }
 
   Time start() const { return enabled_ ? Clock::now() : Time{}; }
@@ -268,6 +275,8 @@ struct PrepTrace {
           field("statements", r.a);
           field("copied_data_bytes", r.b);
           field("region_map_adjoints", r.c);
+          field("call_scans", r.d);
+          field("scan_statements", r.e);
           break;
         case Extra::None:
           break;
@@ -1735,6 +1744,13 @@ struct Lowering {
   bool needs_runtime_control(const mir::Stmt& s);
   bool call_needs_runtime_control(const mir::Expr& e);
   std::set<const mir::FunDef*> scanned_calls;
+  bool call_scan_partial = false;
+  // Statements of called functions that the scan of one write_array block
+  // visits. The corpus needs at most 2,185; ctsem_ctsm_post4_100 needs over
+  // a million, in a search loop nested in a function that a loop calls.
+  static constexpr int64_t kControlScanSteps = int64_t{1} << 14;
+  int64_t control_scan_steps = 0;
+  std::unordered_map<std::string, bool> call_scan_answers;
 
   // A Break/Continue selected by a runtime condition cannot be lowered as a
   // standalone conditional island: its jump target belongs to the enclosing
