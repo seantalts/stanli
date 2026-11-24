@@ -12,6 +12,7 @@ noise.
   test_prep_work.py BENCH_GRAD STANLI_CHECK STANLI_RUN
 """
 import json
+import math
 import os
 import re
 import subprocess
@@ -24,6 +25,7 @@ from gen_fixtures import O1_PASSES  # noqa: E402
 
 WORK = re.compile(r"stanli_prep graph=(\S+) stage=lower_work ns=\d+ "
                   r"statements=(\d+) copied_data_bytes=(\d+)")
+BIND = re.compile(r"stanli_prep graph=(\S+) stage=bind_data ")
 REROLL = re.compile(r"stanli_prep graph=(\S+) stage=reroll ns=\d+ .*?"
                     r"lane_steps=(\d+)")
 ADJOINTS = re.compile(r"stanli_prep graph=(\S+) stage=lower_work ns=\d+ .*?"
@@ -35,9 +37,11 @@ SCAN_STATEMENTS = re.compile(
     r"scan_statements=(\d+)")
 
 
-def work(bench, check, directory, name, source, data):
-    """{graph: (statements, copied bytes)} for the last row of each graph.
-    The model gets the MIR fixtures' O1 passes (tools/gen_fixtures.py)."""
+def work(bench, check, directory, name, source, data, switches=None):
+    """{graph: (statements, copied bytes)} for the last row of each graph,
+    with `switches` set in the environment. "lowerings" counts the lowerings
+    of each graph that finished and "starts" those that began. The model gets
+    the MIR fixtures' O1 passes (tools/gen_fixtures.py)."""
     stan = directory / f"{name}.stan"
     stan.write_text(source)
     mir = subprocess.run(
@@ -47,7 +51,7 @@ def work(bench, check, directory, name, source, data):
     mir_path.write_text(mir)
     data_path = directory / f"{name}.json"
     data_path.write_text(json.dumps(data))
-    env = dict(os.environ, STANLI_PROFILE_PREP="1")
+    env = dict(os.environ, STANLI_PROFILE_PREP="1", **(switches or {}))
     run = subprocess.run([bench, str(mir_path), str(data_path), "--prep",
                           "--parallel-wa=off"],
                          check=True, capture_output=True, text=True, env=env)
@@ -60,6 +64,10 @@ def work(bench, check, directory, name, source, data):
     adjoints = {graph: int(count)
                 for graph, count in ADJOINTS.findall(run.stdout + run.stderr)}
     rows["lowerings"] = lowerings
+    starts = {}
+    for graph in BIND.findall(run.stdout + run.stderr):
+        starts[graph] = starts.get(graph, 0) + 1
+    rows["starts"] = starts
     rows["lane_steps"] = lane_steps
     rows["region_map_adjoints"] = adjoints
     rows["call_scans"] = {
@@ -68,7 +76,7 @@ def work(bench, check, directory, name, source, data):
     rows["scan_statements"] = {
         graph: int(count)
         for graph, count in SCAN_STATEMENTS.findall(run.stdout + run.stderr)}
-    if "log_prob" not in rows and "bounded_log_prob" not in rows:
+    if not {"log_prob", "bounded_log_prob", "budget_log_prob"} & rows.keys():
         raise RuntimeError(f"{name}: no lower_work row in\n{run.stderr}")
     return rows
 
@@ -477,10 +485,107 @@ def check_scan_of_calls_stops(measure):
     return []
 
 
+def varied_rows(n):
+    """n data values with no repeats, so that no two rows fold together."""
+    return [0.9 * math.sin(7.0 * i + 1.0) + i / n for i in range(n)]
+
+
+def mixture_loops(loops, n):
+    """`loops` loops over n rows whose body reroll declines, so each one
+    unrolls to about nine ops a row."""
+    body = "\n".join(
+        f"""  for (n in 1:N)
+    target += {k + 1} * log_sum_exp(
+        log(theta) + normal_lpdf(y[n] | mu[1], sigma),
+        log1m(theta) + normal_lpdf(y[n] | mu[2], sigma));"""
+        for k in range(loops))
+    source = f"""data {{ int N; vector[N] y; }}
+parameters {{
+  real<lower=0, upper=1> theta;
+  ordered[2] mu;
+  real<lower=0> sigma;
+}}
+model {{
+  mu ~ normal(0, 3);
+  sigma ~ exponential(1);
+{body}
+}}
+"""
+    return source, {"N": n, "y": varied_rows(n)}
+
+
+def carried_loop(n):
+    """A loop that carries a value from one row to the next, which the
+    region map cannot take."""
+    source = """data { int N; vector[N] y; }
+parameters { real<lower=-1, upper=1> rho; real<lower=0> sigma; }
+model {
+  real m = 0;
+  for (n in 1:N) {
+    target += normal_lpdf(y[n] | rho * m, sigma);
+    m = 0.5 * m + rho * y[n];
+  }
+}
+"""
+    return source, {"N": n, "y": varied_rows(n)}
+
+
+# The program budget lowers log_prob a second time as budget_log_prob.
+SMALL_BUDGET = {"STANLI_PROGRAM_BUDGET": "65536",
+                "STANLI_LOOP_BUDGET": "1000000000"}
+
+
+def check_budget_refused_loop_stops(measure):
+    # With the lane form off, the loop that the budget chooses has no
+    # compact form, so the second lowering stops at it.
+    rows = measure("budget_refused", *mixture_loops(1, 256),
+                   switches=dict(SMALL_BUDGET, STANLI_REGION_MAP_LANES="0"))
+    started = rows["starts"].get("budget_log_prob", 0)
+    finished = rows["lowerings"].get("budget_log_prob", 0)
+    print(f"budget, no compact form: second lowering started {started} "
+          f"times, finished {finished}")
+    if started != 1 or finished != 0:
+        return [f"a chosen loop with no compact form: the second lowering "
+                f"started {started} times and finished {finished}"]
+    return []
+
+
+def check_budget_skips_loops_without_lanes(measure):
+    # Under the OP_LOOP budget, a loop that the region map cannot take is
+    # not lowered again.
+    rows = measure("budget_carried", *carried_loop(2000),
+                   switches=SMALL_BUDGET)
+    started = rows["starts"].get("budget_log_prob", 0)
+    print(f"budget, carried loop: second lowering started {started} times")
+    if started != 0:
+        return [f"a loop without the lane form started {started} second "
+                f"lowerings under the OP_LOOP budget"]
+    return []
+
+
+def check_unroll_ceiling_retries_bounded(measure):
+    # Ten loops past the unroll ceiling with no compact form: each retry
+    # finds one more, and the eighth retry has no ceiling.
+    rows = measure("ceiling_loops", *mixture_loops(10, 200),
+                   switches={"STANLI_PROGRAM_BUDGET": "0",
+                             "STANLI_UNROLL_CEILING": "100",
+                             "STANLI_REGION_MAP": "0",
+                             "STANLI_STRUCTURED_LOOPS": "0"})
+    started = rows["starts"].get("budget_log_prob", 0)
+    print(f"ten loops past the unroll ceiling: {started} retries")
+    if started != 8:
+        return [f"ten loops past the unroll ceiling took {started} retries, "
+                f"not 8"]
+    return []
+
+
 CASES = [check_ifs_in_retained_loop, check_calls_in_retained_loop,
          check_refused_retention, check_write_array_lowered_once,
          check_reroll_rng_draws, check_oversized_region_map,
-         check_call_scans, check_scan_once_per_loop, check_scan_of_calls_stops]
+         check_call_scans, check_scan_once_per_loop, check_scan_of_calls_stops,
+         check_budget_refused_loop_stops,
+         check_budget_skips_loops_without_lanes,
+         check_unroll_ceiling_retries_bounded]
 RUN_CASES = [check_reduce_sum_beside_data]
 
 
@@ -489,8 +594,9 @@ def main(bench, check, stanli_run):
     with tempfile.TemporaryDirectory() as scratch:
         directory = Path(scratch)
 
-        def measure(name, source, data):
-            return work(bench, check, directory, name, source, data)
+        def measure(name, source, data, switches=None):
+            return work(bench, check, directory, name, source, data,
+                        switches)
 
         def run_measure(name, source, data):
             return run_work(stanli_run, directory, name, source, data,
