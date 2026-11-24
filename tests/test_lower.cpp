@@ -1344,6 +1344,56 @@ static void test_call_matches_inlined(const std::string& name,
   }
 }
 
+// The same for generated quantities. The scan that decides whether a block
+// of write_array runs as one program reads a kept call's body as it would
+// read the body inlined: a branch on a graph value inside the function makes
+// the block one island, and a loop sized from the argument does not.
+static void test_write_array_call_matches_inlined(const std::string& name,
+                                                  size_t islands) {
+  using namespace stanli;
+  const std::string base = "tests/fixtures/" + name;
+  const DataMap data = DataMap::from_json(slurp(base + "_o0.json"));
+  const std::string call_mir = slurp(base + "_o0.mir");
+  const std::string inlined_mir = slurp(base + "_inline_o0.mir");
+  CompiledModel call, inlined;
+  try {
+    call = compile_model(call_mir, data);
+    inlined = compile_model(inlined_mir, data);
+  } catch (const std::exception& error) {
+    check(false, name + " compile: " + error.what());
+    return;
+  }
+  if (!call.write_array || !inlined.write_array) {
+    check(false, name + ": both forms have a write_array graph");
+    return;
+  }
+  const auto opcodes = [](const CompiledModel& cm) {
+    std::vector<uint16_t> out;
+    for (const Op& op : cm.write_array->graph.ops) out.push_back(op.opcode);
+    return out;
+  };
+  const auto count_islands = [&](const CompiledModel& cm) {
+    const auto ops = opcodes(cm);
+    return (size_t)std::count(ops.begin(), ops.end(), OP_ISLAND);
+  };
+  check(opcodes(call) == opcodes(inlined),
+        name + ": call and inlined write_array ops match (" +
+            std::to_string(call.write_array->graph.ops.size()) + " vs " +
+            std::to_string(inlined.write_array->graph.ops.size()) + ")");
+  check(count_islands(call) == islands && count_islands(inlined) == islands,
+        name + ": " + std::to_string(islands) + " write_array islands (" +
+            std::to_string(count_islands(call)) + " and " +
+            std::to_string(count_islands(inlined)) + ")");
+  for (double q : {0.4, -1.3}) {
+    const std::vector<double> params{q, 0.5 * q, 1.5 * q};
+    const auto a = write_array_row(call_mir, data, params, false);
+    const auto b = write_array_row(inlined_mir, data, params, false);
+    check(!a.empty() && a.size() == b.size(), name + " write_array row size");
+    for (size_t i = 0; i < a.size() && i < b.size(); ++i)
+      expect_ulp(name + " write_array", a[i], b[i], 0);
+  }
+}
+
 // User functions stanc did not inline, under `~`. CmdStan instantiates an
 // `_lp` function and an `_lupdf` call with the caller's propto__, and the
 // body with the actual argument types, so the data-bound sigma is a double
@@ -9538,6 +9588,8 @@ int main() {
   test_call_matches_inlined("udf_data_actual_index", true);
   test_call_matches_inlined("udf_data_actual_branch", false);
   test_call_matches_inlined("udf_call_while", false);
+  test_write_array_call_matches_inlined("wa_call_branch", 1);
+  test_write_array_call_matches_inlined("wa_call_loop", 0);
   test_udf_lp_propto();
   test_repeated_target_terms();
   test_inplace_copy_then_store();

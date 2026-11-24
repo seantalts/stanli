@@ -143,7 +143,7 @@ std::optional<Lowering::Flow> Lowering::unroll_while(const mir::Stmt& s) {
 // size locals, to bound a loop and to guard an early return.  Looking
 // through the whole block without this lexical state rejects an otherwise
 // static UDF.
-bool Lowering::scan_block(const mir::Stmt& s,
+bool Lowering::scan_block(const std::vector<mir::Stmt>& body,
                           const std::function<bool(const mir::Stmt&)>& stop) {
   const IntEnvScope saved{*this};
   std::set<std::string> local_ints;
@@ -224,7 +224,7 @@ bool Lowering::scan_block(const mir::Stmt& s,
         return false;
       };
   bool found = false;
-  for (const auto& child : s.body) {
+  for (const auto& child : body) {
     if (stop(child)) {
       found = true;
       break;
@@ -297,8 +297,15 @@ bool Lowering::needs_runtime_control(const mir::Stmt& s) {
   // its enclosing block would absorb UDF-local declarations and returns,
   // which are not live-outs of that outer region.
   if (s.kind == mir::Stmt::While) return false;
+  if (const auto call = mir::user_defined_statement_call(s))
+    if (call_needs_runtime_control(*call)) return true;
+  bool called = false;
+  mir::for_each_expr(s, [&](const mir::Expr& e) {
+    called = called || call_needs_runtime_control(e);
+  });
+  if (called) return true;
   if (s.kind == mir::Stmt::Block || s.kind == mir::Stmt::SList)
-    return scan_block(s, [&](const mir::Stmt& child) {
+    return scan_block(s.body, [&](const mir::Stmt& child) {
       return needs_runtime_control(child);
     });
   if (s.kind == mir::Stmt::IfElse) {
@@ -348,6 +355,71 @@ bool Lowering::needs_runtime_control(const mir::Stmt& s) {
   for (const auto& k : s.body)
     if (needs_runtime_control(k)) return true;
   return false;
+}
+// A user call is scanned as its inlined body would be. The formals take what
+// the scan can work out of the arguments, and the caller's names are out of
+// reach, as in lower_call_udf. A function already being scanned is not
+// entered again: stanc3 does not inline a recursive call either.
+bool Lowering::call_needs_runtime_control(const mir::Expr& e) {
+  for (const auto& a : e.args)
+    if (call_needs_runtime_control(a)) return true;
+  if (e.kind != mir::Expr::FunApp || e.fn_lib != mir::Expr::Lib::UserDefined)
+    return false;
+  const auto found = fun_defs.find(mir::function_key(e));
+  if (found == fun_defs.end() || !scanned_calls.insert(found->second).second)
+    return false;
+  const auto specialized = call_site_def(*found->second, e.args);
+  const mir::FunDef& f = specialized ? *specialized : *found->second;
+  struct Formal {
+    std::optional<long> i;
+    std::optional<DataMap::Entry> data;
+    std::optional<DeclView> view;
+  };
+  std::vector<Formal> formals(std::min(e.args.size(), f.arg_names.size()));
+  for (size_t k = 0; k < formals.size(); ++k) {
+    const mir::Expr& a = e.args[k];
+    if (mir::is_unsized(a, mir::UnsizedLeaf::Int)) {
+      try {
+        formals[k].i = eval_int(a);
+      } catch (const CompileError&) {
+      }
+      continue;
+    }
+    formals[k].data = try_eval_pure(a);
+    const auto view = try_static_view(a);
+    if (view.state == StaticProbeState::Known)
+      formals[k].view = DeclView{view.value.len, false, view.value.si};
+  }
+  IntEnvLog* const log_saved = int_env_log;
+  auto scope_saved = std::move(scope);
+  auto ie_saved = std::move(int_env);
+  auto decls_saved = std::move(decls);
+  auto il_saved = std::move(int_locals);
+  auto env_saved = std::move(td.env());
+  int_env_log = nullptr;
+  scope.clear();
+  int_env.clear();
+  decls.clear();
+  int_locals.clear();
+  td.env().clear();
+  const ScopeExit restore{[&] {
+    scope = std::move(scope_saved);
+    int_env = std::move(ie_saved);
+    decls = std::move(decls_saved);
+    int_locals = std::move(il_saved);
+    td.env() = std::move(env_saved);
+    int_env_log = log_saved;
+    scanned_calls.erase(found->second);
+  }};
+  for (size_t k = 0; k < formals.size(); ++k) {
+    const std::string& name = f.arg_names[k];
+    if (formals[k].i) int_env[name] = *formals[k].i;
+    if (formals[k].data) td.env()[name] = *formals[k].data;
+    if (formals[k].view) decls[name] = *formals[k].view;
+  }
+  return scan_block(f.body, [&](const mir::Stmt& child) {
+    return needs_runtime_control(child);
+  });
 }
 // Whether `s` holds a break or continue of the loop around it.
 static bool has_loop_control(const mir::Stmt& s) {
@@ -401,7 +473,7 @@ bool Lowering::runtime_loop_control(const mir::Stmt& s, bool runtime_path) {
   }
   if (s.kind == mir::Stmt::Block || s.kind == mir::Stmt::SList) {
     try {
-      return scan_block(s, [&](const mir::Stmt& child) {
+      return scan_block(s.body, [&](const mir::Stmt& child) {
         if (runtime_loop_control(child, runtime_path)) return true;
         forget_runtime_ints(child);
         return false;

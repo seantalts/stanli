@@ -1708,7 +1708,7 @@ struct Lowering {
   // Does `s` increment the target, explicitly or through a call?
   static bool has_target_pe(const mir::Stmt& s);
 
-  bool scan_block(const mir::Stmt& s,
+  bool scan_block(const std::vector<mir::Stmt>& body,
                   const std::function<bool(const mir::Stmt&)>& stop);
   static bool while_sizes_from_loop_state(const mir::Stmt& s);
   std::optional<Flow> unroll_while(const mir::Stmt& s);
@@ -1729,6 +1729,8 @@ struct Lowering {
   // and undoes the unroll around it.
   int while_unroll_depth = 0;
   bool needs_runtime_control(const mir::Stmt& s);
+  bool call_needs_runtime_control(const mir::Expr& e);
+  std::set<const mir::FunDef*> scanned_calls;
 
   // A Break/Continue selected by a runtime condition cannot be lowered as a
   // standalone conditional island: its jump target belongs to the enclosing
