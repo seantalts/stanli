@@ -1295,6 +1295,17 @@ constexpr int64_t kLoopBudgetBytes = int64_t{32} << 20;
 // The most ops one outermost loop may unroll to before the passes. The
 // largest corpus loop unrolls to about 180,000.
 constexpr size_t kUnrollCeilingOps = size_t{1} << 20;
+// A first graph whose fills (the data it holds) are larger than this is
+// freed before the budget lowers log_prob again.
+constexpr int64_t kFreeFirstBytes = int64_t{64} << 20;
+
+int64_t fill_bytes(const CompiledModel& cm) {
+  int64_t bytes = 0;
+  for (const auto& fill : cm.fills)
+    bytes += static_cast<int64_t>(fill.second.size() * sizeof(double));
+  return bytes;
+}
+
 // A loop charged less than this is never lowered compact for the budget.
 constexpr int64_t kMinCompactBytes = kProgramBudgetBytes / 8;
 
@@ -1381,10 +1392,12 @@ CompiledModel lower_again(Lowering& lo, const mir::Program& p,
 
 // Lowers log_prob again with `chosen` (the budget's loops) and `capped`
 // (loops past the unroll ceiling) compact. A loop that passes the ceiling
-// joins `capped` and the lowering starts over; the last attempt has no
-// ceiling, so a capped loop that no compact form takes still unrolls. A
-// chosen loop that no compact form takes leaves `chosen` and the lowering
-// starts over, and with no loops left there is nothing to gain.
+// joins `capped` and the lowering starts over. A capped loop that no
+// compact form takes unrolls in the next attempt, which does not hold it to
+// the ceiling; the last attempt has no ceiling at all, which bounds the
+// retries when many loops pass it. A chosen loop that no compact form takes
+// leaves `chosen` and the lowering starts over, and with no loops left
+// there is nothing to gain.
 std::optional<CompiledModel> lower_compact(Lowering& lo, const mir::Program& p,
                                            std::set<const mir::Stmt*> chosen,
                                            std::set<const mir::Stmt*> capped,
@@ -1718,10 +1731,17 @@ CompiledModel compile_model(const std::string& mir_text, const DataMap& data,
     if (!loops.empty()) {
       // Hold one graph at a time: free the first, and lower it again if
       // the compact graph is not smaller.
-      lowered.reset();
-      lowered = lower_compact(lo, *prog, loops, {}, ceiling, op_loop);
-      if (lowered && Executor::program_bytes(lowered->graph) >= first_bytes)
+      // A first graph that holds much data is freed while log_prob is
+      // lowered again, and lowered a third time if the compact graph is
+      // not smaller. A first graph that holds little is kept, since
+      // lowering it again can take as long as the first lowering did.
+      if (fill_bytes(*lowered) >
+          switch_value("STANLI_FREE_FIRST_BYTES", kFreeFirstBytes))
         lowered.reset();
+      auto compact = lower_compact(lo, *prog, loops, {}, ceiling, op_loop);
+      if (compact && Executor::program_bytes(compact->graph) < first_bytes)
+        lowered = std::move(compact);
+      compact.reset();
       if (!lowered)
         lowered = lower_again(lo, *prog, "log_prob", {}, {}, 0, false);
     }

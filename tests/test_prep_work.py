@@ -547,6 +547,22 @@ def check_budget_refused_loop_stops(measure):
     if started != 1 or finished != 0:
         return [f"a chosen loop with no compact form: the second lowering "
                 f"started {started} times and finished {finished}"]
+    # The first graph holds little data, so it is kept, not lowered again.
+    first = rows["lowerings"].get("log_prob", 0)
+    print(f"budget, no compact form: log_prob lowered {first} times")
+    if first != 1:
+        return [f"a first graph that holds little data was lowered {first} "
+                f"times"]
+    # Past STANLI_FREE_FIRST_BYTES the first graph is freed and lowered a
+    # third time, and the result is the same model.
+    freed = measure("budget_refused_freed", *mixture_loops(1, 256),
+                    switches=dict(SMALL_BUDGET, STANLI_REGION_MAP_LANES="0",
+                                  STANLI_FREE_FIRST_BYTES="0"))
+    again = freed["lowerings"].get("log_prob", 0)
+    print(f"budget, no compact form, first graph freed: log_prob lowered "
+          f"{again} times")
+    if again != 2:
+        return [f"a freed first graph was lowered {again} times, not 2"]
     return []
 
 
@@ -563,14 +579,30 @@ def check_budget_skips_loops_without_lanes(measure):
     return []
 
 
+CEILING_NO_COMPACT = {"STANLI_PROGRAM_BUDGET": "0",
+                      "STANLI_UNROLL_CEILING": "100",
+                      "STANLI_REGION_MAP": "0",
+                      "STANLI_STRUCTURED_LOOPS": "0"}
+
+
+def check_unroll_ceiling_one_retry(measure):
+    # One loop past the unroll ceiling with no compact form: the retry
+    # unrolls it without a ceiling, so it is the only retry.
+    rows = measure("ceiling_loop", *mixture_loops(1, 200),
+                   switches=CEILING_NO_COMPACT)
+    started = rows["starts"].get("budget_log_prob", 0)
+    print(f"one loop past the unroll ceiling: {started} retries")
+    if started != 1:
+        return [f"one loop past the unroll ceiling took {started} retries, "
+                f"not 1"]
+    return []
+
+
 def check_unroll_ceiling_retries_bounded(measure):
     # Ten loops past the unroll ceiling with no compact form: each retry
     # finds one more, and the eighth retry has no ceiling.
     rows = measure("ceiling_loops", *mixture_loops(10, 200),
-                   switches={"STANLI_PROGRAM_BUDGET": "0",
-                             "STANLI_UNROLL_CEILING": "100",
-                             "STANLI_REGION_MAP": "0",
-                             "STANLI_STRUCTURED_LOOPS": "0"})
+                   switches=CEILING_NO_COMPACT)
     started = rows["starts"].get("budget_log_prob", 0)
     print(f"ten loops past the unroll ceiling: {started} retries")
     if started != 8:
@@ -585,6 +617,7 @@ CASES = [check_ifs_in_retained_loop, check_calls_in_retained_loop,
          check_call_scans, check_scan_once_per_loop, check_scan_of_calls_stops,
          check_budget_refused_loop_stops,
          check_budget_skips_loops_without_lanes,
+         check_unroll_ceiling_one_retry,
          check_unroll_ceiling_retries_bounded]
 RUN_CASES = [check_reduce_sum_beside_data]
 

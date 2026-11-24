@@ -3022,8 +3022,9 @@ void test_unroll_ceiling() {
 
 // A loop that the budget chooses but no compact form takes stays unrolled:
 // the second lowering stops at that loop and gives up, and the first graph
-// is kept. A loop past the unroll ceiling that no compact form takes still
-// unrolls on the last attempt.
+// is kept, or lowered again when it was freed. A loop past the unroll
+// ceiling that no compact form takes unrolls in the retry, which does not
+// hold it to the ceiling.
 void test_budget_without_compact_form() {
   const int n = 256;
   const CompiledModel off =
@@ -3038,6 +3039,16 @@ void test_budget_without_compact_form() {
         "budget_mix: with no compact form the loop stays unrolled");
   expect_same_gradients("budget_mix refused vs unrolled", refused, off,
                         mix_points);
+  // Freed first, the graph is lowered a third time, to the same graph.
+  const CompiledModel freed = compile_env("budget_mix", n,
+                                          {{"STANLI_PROGRAM_BUDGET", "65536"},
+                                           {"STANLI_LOOP_BUDGET", "1000000000"},
+                                           {"STANLI_REGION_MAP_LANES", "0"},
+                                           {"STANLI_FREE_FIRST_BYTES", "0"}});
+  check(histogram(freed) == histogram(off) &&
+            program_bytes(freed) == program_bytes(off),
+        "budget_mix: a freed first graph is lowered again unchanged");
+  expect_same_gradients("budget_mix freed vs unrolled", freed, off, mix_points);
   const CompiledModel capped = compile_env("budget_mix", 2000,
                                            {{"STANLI_PROGRAM_BUDGET", "0"},
                                             {"STANLI_UNROLL_CEILING", "1000"},

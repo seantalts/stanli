@@ -1336,15 +1336,20 @@ A loop that unrolls to more than 2^20 ops before the passes stops the first
 lowering, which starts again with that loop in a compact form, `OP_LOOP`
 included. The largest loop in the corpus unrolls to about 180,000 ops, so
 the ceiling stops only much larger loops, such as one over ten million rows.
-If no compact form takes such a loop, the last attempt unrolls it anyway.
+If no compact form takes such a loop, the next attempt unrolls it without
+the ceiling. The eighth attempt has no ceiling at all, so a model with many
+such loops is lowered at most nine times.
 
-The cost is a second lowering for the models over the budget. It runs
-after the first graph is freed and borrows the prepared data from the first
-lowering instead of copying it, so the two graphs and two copies of the data
-are never held at once. When the compact graph is not smaller, log_prob is
-lowered a third time without the budget. On `nn_rbm1bJ100` (184 MB of data
-as JSON), peak memory during preparation stays at 3.3 GB, as without the
-budget, and preparation takes 2.8 s.
+The cost is a second lowering for the models over the budget. It borrows
+the prepared data from the first lowering instead of copying it. A first
+graph whose fills hold more than 64 MiB of data is freed before the second
+lowering and lowered a third time if the compact graph is not smaller, so
+two copies of that data are never held at once; a smaller first graph is
+kept, because lowering it again can take as long as the first lowering
+(4.7 s for `examplemodels_mr_ss`, whose chosen loop no compact form takes).
+On `nn_rbm1bJ100` (184 MB of data as JSON), peak memory during preparation
+stays at 3.3 GB, as without the budget. `STANLI_FREE_FIRST_BYTES` sets the
+64 MiB in developer builds.
 
 An out-of-range index raises the same error in every form of a loop: each
 dynamic index read carries the label of Stan's error for its selector
@@ -1358,6 +1363,7 @@ raises `structured index out of range`.
 | --- | --- | --- |
 | `STANLI_PROGRAM_BUDGET=n` | the program budget in bytes, default 8 MiB; 0 turns the budget off | `lower.cpp` |
 | `STANLI_LOOP_BUDGET=n` | the program size in bytes past which a loop may also become `OP_LOOP`, default 32 MiB | `lower.cpp` |
+| `STANLI_FREE_FIRST_BYTES=n` | the bytes of fills past which the first graph is freed before the budget lowers log_prob again, default 64 MiB | `lower.cpp` |
 | `STANLI_UNROLL_CEILING=n` | the most ops an outermost loop may unroll to before the passes, default 2^20; 0 means no ceiling | `lower.cpp` |
 
 ## Tape islands (`island.cpp`, disable: `STANLI_NO_ISLAND=1`)
