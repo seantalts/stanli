@@ -265,6 +265,28 @@ used outside the region in an unsupported way. Or an operation is unsupported
 or has side effects. A recurrence is sequential work and must stay
 sequential.
 
+### When re-rolling cannot fold a large loop
+
+Every chain has its own copy of the program, about 450 bytes for each
+operation. A loop that re-rolling cannot fold, such as a mixture written one
+observation at a time, unrolls to a few operations per observation, so its
+program grows with the data. At 5,000 observations such a program took 24 MB
+in every chain, and twelve chains on one machine made each gradient 2.4x as
+slow as one chain alone.
+
+stanli therefore checks the size of the program after the passes. If it is
+larger than 8 MiB, stanli lowers the model again with its largest unrolled
+loops in a compact form, and keeps that version if its program is smaller.
+The compact form keeps the loop as one operation that runs the body for each
+observation: the region map's lane form
+([`OPTIMIZATIONS.md`](../runtime/src/OPTIMIZATIONS.md#keeping-each-chains-program-small-lowercpp-disable-stanli_program_budget0)),
+which runs 64 observations at a time. If the region map cannot take the loop,
+for example because each iteration reads what the previous one wrote, the
+loop becomes a retained loop (below), but only when the program is larger
+than 32 MiB. Below that size, a retained loop was slower than the unrolled
+loop on one and four chains. A loop that re-rolling folds is never changed,
+because the folded form is the fastest.
+
 ### Partitioning loops using data
 
 Sometimes independent lanes are not next to each other, because the data
