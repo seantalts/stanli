@@ -124,6 +124,42 @@ inline double compensated_sum(const double* x, int64_t n) {
   return std::isfinite(sum[0]) ? sum[0] + error[0] : sum[0];
 }
 
+// compensated_sum for terms that arrive one at a time: result() equals
+// compensated_sum of the terms passed to add(), in that order, bit for bit.
+// Term i goes to lane i % 4, as it does there.
+class CompensatedSum {
+ public:
+  void add(double x) {
+    const int j = static_cast<int>(n_ & 3);
+    const double s = sum_[j] + x;
+    const double x_part = s - sum_[j];
+    error_[j] += (sum_[j] - (s - x_part)) + (x - x_part);
+    sum_[j] = s;
+    ++n_;
+  }
+  int64_t count() const { return n_; }
+  double result() const {
+    double sum[4] = {sum_[0], sum_[1], sum_[2], sum_[3]};
+    double error[4] = {error_[0], error_[1], error_[2], error_[3]};
+    for (int width = 4; width > 1; width /= 2) {
+      for (int j = 0; j < width / 2; ++j) {
+        const double s = sum[2 * j] + sum[2 * j + 1];
+        const double b_part = s - sum[2 * j];
+        const double e =
+            (sum[2 * j] - (s - b_part)) + (sum[2 * j + 1] - b_part);
+        sum[j] = s;
+        error[j] = error[2 * j] + error[2 * j + 1] + e;
+      }
+    }
+    return std::isfinite(sum[0]) ? sum[0] + error[0] : sum[0];
+  }
+
+ private:
+  double sum_[4] = {};
+  double error_[4] = {};
+  int64_t n_ = 0;
+};
+
 // acc += term(0) + ... + term(n - 1). A short sum goes into acc one term at a
 // time; a longer one is summed pairwise and added once.
 template <typename Term>

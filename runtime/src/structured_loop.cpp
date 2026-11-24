@@ -4,6 +4,7 @@
 #include <stanli/structured_loop.hpp>
 #include <stanli/message_sink.hpp>
 #include <stanli/optable.hpp>
+#include <stanli/pairwise_sum.hpp>
 #include <stanli/rejection.hpp>
 #include <stan/math/prim/fun/linspaced_int_array.hpp>
 
@@ -1593,7 +1594,9 @@ double* resolve_pooled_adjoint(double* slot, const StructuredLoop& p,
   return base ? base + in.offset : nullptr;
 }
 
-double reduce_target(std::vector<double>& work) {
+double reduce_target(std::vector<double>& work, bool compensated) {
+  if (compensated && static_cast<int64_t>(work.size()) > kPlainSumMax)
+    return compensated_sum(work.data(), static_cast<int64_t>(work.size()));
   // Stan's var accumulator reduces a prefix into the first element of its
   // next buffer. Its scalar value expression therefore sums in source order.
   double sum = 0.0;
@@ -3352,7 +3355,7 @@ bool replay_forward(LoopState& s, KernelCtx& ctx) {
   if (p.has_target) {
     for (size_t i = 0; i < st.targets.size(); ++i)
       st.target_work[i] = *st.targets[i].value;
-    ctx.out.data[pos++] = reduce_target(st.target_work);
+    ctx.out.data[pos++] = reduce_target(st.target_work, p.compensated_target);
   }
   return true;
 }
@@ -3936,7 +3939,7 @@ void structured_loop_forward(KernelCtx& ctx) {
     for (size_t i = 0; i < s.target_refs.size(); ++i)
       s.target_work[i] =
           s.versions[static_cast<size_t>(s.target_refs[i])].value[0];
-    ctx.out.data[pos++] = reduce_target(s.target_work);
+    ctx.out.data[pos++] = reduce_target(s.target_work, p.compensated_target);
   }
   if (!s.memo_ready) {
     s.record_arena = std::max(s.record_arena, s.arena.used());

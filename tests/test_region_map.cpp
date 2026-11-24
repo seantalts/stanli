@@ -8,6 +8,7 @@
 #include <stanli/ode_adjoint.hpp>
 #include <stanli/optable.hpp>
 #include <stanli/structured_loop.hpp>
+#include <stanli/pairwise_sum.hpp>
 #include <stanli/region_map.hpp>
 #include <stanli/wa_interp.hpp>
 
@@ -2890,6 +2891,207 @@ void test_data_index_out_of_range() {
   }
 }
 
+// The program budget. A graph whose program bytes exceed it is lowered
+// again with its largest loops in a compact form: the region map's lane
+// form when one exists, else OP_LOOP. STANLI_PROGRAM_BUDGET sets the budget
+// in bytes (0 turns it off) and STANLI_UNROLL_CEILING the most ops a loop
+// may unroll to before it is lowered compact at once.
+CompiledModel compile_env(
+    const std::string& stem, int n,
+    const std::vector<std::pair<const char*, const char*>>& env) {
+  for (const auto& [k, v] : env) test_setenv(k, v, 1);
+  try {
+    CompiledModel cm = stanli::compile_model(fixture_mir(stem), make_data(n));
+    for (const auto& [k, v] : env) test_unsetenv(k);
+    return cm;
+  } catch (...) {
+    for (const auto& [k, v] : env) test_unsetenv(k);
+    throw;
+  }
+}
+
+int64_t program_bytes(const CompiledModel& cm) {
+  return Executor::program_bytes(cm.graph);
+}
+
+void expect_same_gradients(const std::string& what, const CompiledModel& got,
+                           const CompiledModel& want,
+                           const std::vector<Params>& points) {
+  Executor eg(got.graph), ew(want.graph);
+  got.bind(eg);
+  want.bind(ew);
+  for (size_t k = 0; k < points.size(); ++k)
+    expect_eval(what + " point " + std::to_string(k), evaluate(eg, points[k]),
+                evaluate(ew, points[k]));
+}
+
+const std::vector<Params> mix_points = {{0.2, -0.5, 0.3, -0.1},
+                                        {-0.4, 0.3, 0.8, 0.2}};
+
+void test_budget_uses_lanes() {
+  const int n = 256;
+  const CompiledModel off =
+      compile_env("budget_mix", n, {{"STANLI_PROGRAM_BUDGET", "0"}});
+  const CompiledModel on =
+      compile_env("budget_mix", n, {{"STANLI_PROGRAM_BUDGET", "65536"}});
+  check(count_opcode(off, OP_REGION_MAP) == 0 && off.graph.ops.size() > 1000,
+        "budget_mix: without a budget the loop unrolls");
+  check(program_bytes(off) > 65536, "budget_mix: unrolled, it is over budget");
+  check(count_opcode(on, OP_REGION_MAP) == 1 && map_payload(on).lanes.active,
+        "budget_mix: over budget, the loop takes the lane form");
+  check(program_bytes(on) <= 65536, "budget_mix: the fallback fits");
+  expect_same_gradients("budget_mix lanes vs unrolled", on, off, mix_points);
+}
+
+void test_budget_program_does_not_grow() {
+  // With the shipped budget, the program of a loop that reroll cannot fold
+  // stops growing with the data once it would pass the budget.
+  const CompiledModel small = compile_env("budget_mix", 4000, {});
+  const CompiledModel large = compile_env("budget_mix", 8000, {});
+  check(count_opcode(small, OP_REGION_MAP) == 1 &&
+            count_opcode(large, OP_REGION_MAP) == 1,
+        "budget_mix N=4000, 8000: the loop takes the lane form");
+  check(program_bytes(small) == program_bytes(large) &&
+            small.graph.ops.size() == large.graph.ops.size(),
+        "budget_mix: program bytes and ops do not grow from N=4000 to 8000 (" +
+            std::to_string(program_bytes(small)) + ", " +
+            std::to_string(program_bytes(large)) + ")");
+  const CompiledModel fits = compile_env("budget_mix", 64, {});
+  check(count_opcode(fits, OP_REGION_MAP) == 0,
+        "budget_mix N=64: under budget the loop unrolls as before");
+}
+
+void test_budget_keeps_folded_loops() {
+  const CompiledModel off =
+      compile_env("budget_lin", 4000, {{"STANLI_PROGRAM_BUDGET", "0"}});
+  const CompiledModel on =
+      compile_env("budget_lin", 4000, {{"STANLI_PROGRAM_BUDGET", "65536"}});
+  check(histogram(on) == histogram(off) &&
+            count_opcode(on, OP_REGION_MAP) == 0 &&
+            count_opcode(on, OP_LOOP) == 0,
+        "budget_lin: a loop that reroll folds keeps its folded form");
+}
+
+void test_budget_carried_loop() {
+  const int n = 300;
+  const CompiledModel off =
+      compile_env("budget_carry", n, {{"STANLI_PROGRAM_BUDGET", "0"}});
+  const CompiledModel on = compile_env(
+      "budget_carry", n,
+      {{"STANLI_PROGRAM_BUDGET", "65536"}, {"STANLI_LOOP_BUDGET", "65536"}});
+  const CompiledModel between =
+      compile_env("budget_carry", n,
+                  {{"STANLI_PROGRAM_BUDGET", "65536"},
+                   {"STANLI_LOOP_BUDGET", "1000000000"}});
+  check(count_opcode(off, OP_LOOP) == 0,
+        "budget_carry: without a budget the loop unrolls");
+  check(histogram(between) == histogram(off),
+        "budget_carry: under the OP_LOOP budget a carried loop stays "
+        "unrolled");
+  check(count_opcode(on, OP_REGION_MAP) == 0 && count_opcode(on, OP_LOOP) == 1,
+        "budget_carry: a carried loop over budget becomes OP_LOOP");
+  check(program_bytes(on) < program_bytes(off),
+        "budget_carry: the fallback is smaller");
+  expect_same_gradients("budget_carry OP_LOOP vs unrolled", on, off,
+                        {{0.3, -0.2}, {-0.5, 0.1}});
+}
+
+void test_unroll_ceiling() {
+  const int n = 2000;
+  const CompiledModel off =
+      compile_env("budget_mix", n, {{"STANLI_PROGRAM_BUDGET", "0"}});
+  const CompiledModel capped = compile_env(
+      "budget_mix", n,
+      {{"STANLI_PROGRAM_BUDGET", "0"}, {"STANLI_UNROLL_CEILING", "1000"}});
+  check(count_opcode(capped, OP_REGION_MAP) == 1,
+        "budget_mix: a loop past the unroll ceiling is lowered compact");
+  expect_same_gradients("budget_mix ceiling vs unrolled", capped, off,
+                        mix_points);
+  // A parameter-branch loop keeps today's form under any budget.
+  const CompiledModel branch_off =
+      compile_env("region_map_branch", 64, {{"STANLI_PROGRAM_BUDGET", "0"}});
+  const CompiledModel branch_on = compile_env(
+      "region_map_branch", 64,
+      {{"STANLI_PROGRAM_BUDGET", "1"}, {"STANLI_UNROLL_CEILING", "4"}});
+  check(histogram(branch_on) == histogram(branch_off),
+        "region_map_branch: a parameter-branch loop keeps its form");
+}
+
+// A budget fallback adds a long target sum with compensation
+// (pairwise_sum.hpp). The terms below nearly cancel, so a sum in plain order,
+// which the unrolled graph uses, is about 1e-9 off in relative terms. Each
+// reference adds the same terms, computed here in double, with compensation.
+double normal_lpdf_d(double y, double mu, double sigma) {
+  const double z = (y - mu) / sigma;
+  return -0.5 * z * z - std::log(sigma) - 0.5 * std::log(2 * M_PI);
+}
+
+double log_sum_exp_d(double a, double b) {
+  const double m = std::max(a, b);
+  return m + std::log1p(std::exp(-std::fabs(a - b)));
+}
+
+double mix_sum_reference(const Series& s, const Params& u) {
+  const double theta = 1 / (1 + std::exp(-u[0]));
+  const double mu1 = u[1], mu2 = u[1] + std::exp(u[2]);
+  const double sigma = std::exp(u[3]);
+  stanli::CompensatedSum sum;
+  sum.add(std::log(theta) + std::log1p(-theta) + u[2] + u[3]);
+  for (size_t i = 0; i < s.y.size(); ++i)
+    sum.add(
+        log_sum_exp_d(std::log(theta) + normal_lpdf_d(s.y[i], mu1, sigma),
+                      std::log1p(-theta) + normal_lpdf_d(s.y[i], mu2, sigma)) +
+        1e6 * s.x[i] * theta);
+  return sum.result();
+}
+
+double carry_sum_reference(const Series& s, const Params& u) {
+  const double p = 1 / (1 + std::exp(-u[0]));
+  const double rho = -1 + 2 * p, sigma = std::exp(u[1]);
+  stanli::CompensatedSum sum;
+  sum.add(std::log(2.0) + std::log(p) + std::log1p(-p) + u[1]);
+  double m = 0;
+  for (size_t i = 0; i < s.y.size(); ++i) {
+    sum.add(normal_lpdf_d(s.y[i], rho * m, sigma) + 1e6 * s.x[i] * (1 + rho));
+    m = 0.5 * m + rho * s.y[i];
+  }
+  return sum.result();
+}
+
+void test_budget_fallback_sums_accurately() {
+  const auto lp = [](const CompiledModel& cm, const Params& p) {
+    Executor ex(cm.graph);
+    cm.bind(ex);
+    return evaluate(ex, p).lp;
+  };
+  const auto close = [](const std::string& what, double got, double want) {
+    check(std::fabs(got - want) <= 1e-12 * std::fabs(want),
+          what + ": got " + std::to_string(got) + " want " +
+              std::to_string(want) + " (relative error " +
+              std::to_string(std::fabs(got - want) / std::fabs(want)) + ")");
+  };
+  const std::vector<std::pair<const char*, const char*>> small = {
+      {"STANLI_PROGRAM_BUDGET", "65536"}, {"STANLI_LOOP_BUDGET", "65536"}};
+  const int n = 4000;
+  const Series s = make_series(n);
+  {
+    const CompiledModel lanes = compile_env("budget_mix_sum", n, small);
+    check(count_opcode(lanes, OP_REGION_MAP) == 1 &&
+              map_payload(lanes).lanes.active,
+          "budget_mix_sum: lane form");
+    for (const Params& p : mix_points)
+      close("budget_mix_sum lane form lp", lp(lanes, p),
+            mix_sum_reference(s, p));
+  }
+  {
+    const CompiledModel loop = compile_env("budget_carry_sum", n, small);
+    check(count_opcode(loop, OP_LOOP) == 1, "budget_carry_sum: OP_LOOP");
+    for (const Params& p : std::vector<Params>{{0.3, -0.2}, {-0.5, 0.1}})
+      close("budget_carry_sum OP_LOOP lp", lp(loop, p),
+            carry_sum_reference(s, p));
+  }
+}
+
 }  // namespace region_map_test
 
 int main() {
@@ -2950,6 +3152,12 @@ int main() {
   test_gather_out_of_range();
   test_data_index_proven();
   test_data_index_out_of_range();
+  test_budget_uses_lanes();
+  test_budget_program_does_not_grow();
+  test_budget_keeps_folded_loops();
+  test_budget_carried_loop();
+  test_unroll_ceiling();
+  test_budget_fallback_sums_accurately();
   test_setenv("STANLI_REGION_MAP_LANES", "0", 1);
   test_large_body_recomputes_by_default();
   test_clear_strategy_follows_mode();

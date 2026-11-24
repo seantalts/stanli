@@ -3173,6 +3173,7 @@ bool Lowering::try_lower_region(
       trial.region_parameter_control = false;
       auto p = std::make_shared<StructuredLoop>();
       p->cache_execution_path = !output_references;
+      p->compensated_target = lowering_compact;
       trial.region_current = &p->root;
       std::map<int, int> imported;
       std::map<int, bool> import_active, import_data_only;

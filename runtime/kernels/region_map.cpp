@@ -3,6 +3,7 @@
 #include <stanli/graph.hpp>
 #include <stanli/island.hpp>
 #include <stanli/optable.hpp>
+#include <stanli/pairwise_sum.hpp>
 #include <stanli/region_map.hpp>
 
 #include <algorithm>
@@ -96,17 +97,20 @@ void run_once(const RegionMapProg& p, KernelCtx& ctx) {
 template <bool ReuseCallCtx>
 void run_iterations(const RegionMapProg& p, KernelCtx& ctx) {
   double total = 0.0;
+  CompensatedSum compensated;
   double* row = ctx.scratch + p.n_regs + p.adj.n_regs;
   for (int64_t i = 0; i < p.count; ++i) {
     ctx.scratch[p.iter_reg] = static_cast<double>(p.lo + i);
     run_once<ReuseCallCtx>(p, ctx);
     total += ctx.scratch[p.out_regs[0]];
+    if (p.compensated) compensated.add(ctx.scratch[p.out_regs[0]]);
     for (const auto& span : p.saved) {
       std::copy_n(ctx.scratch + span.first, span.second, row);
       row += span.second;
     }
   }
-  ctx.out.data[0] = total;
+  ctx.out.data[0] =
+      p.compensated && p.count > kPlainSumMax ? compensated.result() : total;
 }
 
 void seed_registers(const RegionMapProg& p, KernelCtx& ctx) {

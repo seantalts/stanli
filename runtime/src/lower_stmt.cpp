@@ -2376,6 +2376,21 @@ Lowering::Flow Lowering::lower_stmt_impl(const mir::Stmt& s) {
             "stanli_structured counting loop evaluated at compile "
             "time: " +
             std::to_string(hi - lo + 1) + " iterations");
+      if (!bookkeeping && !in_write_array && structured_outer_depth == 1 &&
+          compact_loops.count(&s)) {
+        // The program budget or the unroll ceiling sent this loop here.
+        lowering_compact = true;
+        const ScopeExit leave{[&] { lowering_compact = false; }};
+        if (lower_region_map(s, lo, hi)) return Flow::Next;
+        if (compact_op_loop && structured_policy != StructuredMode::Off) {
+          const StructuredMode old_policy = structured_policy;
+          structured_policy = StructuredMode::Prefer;
+          const ScopeExit restore{[&] { structured_policy = old_policy; }};
+          if (try_lower_region(s, std::pair<int64_t, int64_t>{lo, hi}))
+            return Flow::Next;
+        }
+        if (required_compact.count(&s)) throw CompactRefused{&s};
+      }
       if (!bookkeeping) {
         if (lower_region_map(s, lo, hi)) return Flow::Next;
         if (try_lower_region(s, std::pair<int64_t, int64_t>{lo, hi}))
@@ -2431,6 +2446,17 @@ Lowering::Flow Lowering::lower_stmt_impl(const mir::Stmt& s) {
         carry_diagnostic = std::string(" carries=") +
                            (loop_carries_value(s) ? "1" : "0") +
                            " dep=" + (loop_carries_dependence(s) ? "1" : "0");
+      const size_t ops_before = g.ops.size();
+      const int slots_before = static_cast<int>(g.slots.size());
+      // The budget accounts for the outermost log_prob loops that it may
+      // lower compact. A loop that branches on a parameter keeps its form,
+      // and a retained loop could not print or produce an integer that a
+      // later size reads (log_prob_loop_may_retain).
+      const bool budgeted = !in_write_array && !bounded_specialization &&
+                            structured_outer_depth == 1 && !region_current &&
+                            !compact_loops.count(&s) && hi > lo &&
+                            !stmt_effectful(s) && !loop_assigns_outer_int(s) &&
+                            !loop_has_parameter_control(s);
       const auto unroll = [&]() -> std::optional<Flow> {
         structured_unroll_depth += unrolled;
         const ScopeExit leave{[&] { structured_unroll_depth -= unrolled; }};
@@ -2439,6 +2465,9 @@ Lowering::Flow Lowering::lower_stmt_impl(const mir::Stmt& s) {
           const Flow flow = lower_stmts(s.body);
           if (flow == Flow::Break) break;
           if (flow == Flow::Return) return flow;
+          if (budgeted && unroll_ceiling &&
+              g.ops.size() - ops_before > unroll_ceiling)
+            throw UnrollCeiling{&s};
         }
         return std::nullopt;
       };
@@ -2456,9 +2485,15 @@ Lowering::Flow Lowering::lower_stmt_impl(const mir::Stmt& s) {
         written.insert(assigned.begin(), assigned.end());
         before_unroll = wa_snapshot(mentioned, &written);
       }
-      const size_t ops_before = g.ops.size();
       if (const auto flow = unroll_or_region(s, unroll)) return *flow;
       const size_t loop_ops = g.ops.size() - ops_before;
+      if (budgeted) {
+        std::string sum;
+        const mir::Expr* read = nullptr;
+        unrolled_loops.push_back({&s, slots_before,
+                                  static_cast<int>(g.slots.size()),
+                                  region_map_shape(s, &sum, &read).empty()});
+      }
       if (diagnostics)
         emit_diagnostic("stanli_structured unrolled loop=" + s.loopvar +
                         " trips=" + std::to_string(trips) +

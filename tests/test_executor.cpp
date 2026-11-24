@@ -388,6 +388,36 @@ static void test_duplicate_registration_refused() {
              find_kernel(OP_ADD)->forward == registered.forward, 1);
 }
 
+// Executor::program_bytes, which lowering reads before any executor exists,
+// counts what a bound executor keeps for its program: the ops, one kernel
+// context and one forward entry per op, and one backward step per op with a
+// backward. Values, adjoints and scratch are not program.
+static void test_program_bytes() {
+  using namespace stanli;
+  for (const int n : {1, 10, 1000}) {
+    Graph g;
+    int at = g.add_slot(1, true);
+    for (int i = 0; i < n; ++i) {
+      const int next = g.add_slot(1, false);
+      g.add_op(OP_EXPV, {at}, next);
+      at = next;
+    }
+    g.result_slot = at;
+    const int64_t estimate = Executor::program_bytes(g);
+    const int64_t ops = (int64_t)(g.ops.size() * sizeof(Op));
+    Executor ex(g);
+    const int64_t bound =
+        ex.storage_bytes() -
+        8 * (ex.mutable_value_size() + ex.adjoint_storage_size() +
+             ex.scratch_storage_size()) +
+        ops;
+    expect_i64("program_bytes is what a bound executor keeps for its program",
+               estimate, bound);
+    expect_i64("program_bytes grows by the same amount per op", estimate % n,
+               0);
+  }
+}
+
 int main() {
   using namespace stanli;
 
@@ -583,6 +613,7 @@ int main() {
   test_borrowed_data();
   test_result_slot_out_of_range();
   test_duplicate_registration_refused();
+  test_program_bytes();
   test_compact_idata_lifecycle();
   test_compact_append_after_copy();
   test_mixed_owned_borrowed_idata();

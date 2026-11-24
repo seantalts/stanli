@@ -131,6 +131,10 @@ struct RegionMapProg : IslandProg {
   // Check after each backward iteration that the adjoint cells it should
   // have cleared are zero (STANLI_REGION_MAP_CHECK_CLEAN, read at lowering).
   bool check_clean = false;
+  // Add the iteration terms with compensation once there are more than
+  // kPlainSumMax of them (pairwise_sum.hpp). Set for a loop that the program
+  // budget maps instead of unrolling.
+  bool compensated = false;
   RegionMapLanePlan lanes;
   std::string label;
 };

@@ -327,6 +327,51 @@ RegionMapSwitches read_region_map_switches() {
   switches.diagnostics = debug_env("STANLI_REGION_MAP_DIAGNOSTICS") != nullptr;
   return switches;
 }
+bool Lowering::loop_has_parameter_control(const mir::Stmt& s) {
+  const auto outer_dependent = [&](const std::string& name) {
+    const auto value = scope.find(name);
+    if (value != scope.end()) return !value->second.si.param_free;
+    return !int_env.count(name) && !td.find(name);
+  };
+  return ParameterControl(fun_defs, outer_dependent)(s);
+}
+std::string Lowering::region_map_shape(const mir::Stmt& s,
+                                       std::string* accumulator,
+                                       const mir::Expr** accumulator_read) {
+  if (target_scale != 1.0) return "enclosing target scaling";
+  if (contains_multi_assign(s)) return "a call returning several values";
+  std::set<std::string> locals;
+  for (const auto& child : s.body) collect_loop_locals(child, &locals);
+  std::string& sum = *accumulator;
+  sum.clear();
+  *accumulator_read = nullptr;
+  if (!has_target_pe(s)) {
+    std::vector<std::string> writes;
+    assigned_names(s, &writes);
+    for (const auto& name : writes)
+      if (!locals.count(name) && name != s.loopvar) {
+        if (!sum.empty()) {
+          sum.clear();
+          break;
+        }
+        sum = name;
+      }
+    if (sum.empty()) return "body has no target increment";
+    if (!only_accumulates(s, sum, accumulator_read))
+      return "body does more than add to " + sum;
+  }
+  if (stmt_effectful(s)) return "body has effects";
+  for (const auto& child : s.body)
+    if (body_escapes(child, false)) return "break, continue or return";
+  std::vector<std::string> writes;
+  assigned_names(s, &writes);
+  for (const auto& name : writes) {
+    if (name == s.loopvar) return "loop variable assigned";
+    if (!locals.count(name) && name != sum)
+      return "assigns " + name + " declared outside the body";
+  }
+  return "";
+}
 bool Lowering::lower_region_map(const mir::Stmt& s, long lo, long hi) {
   if (region_map_switches.off) return false;
   if (in_write_array || region_current) return false;
@@ -341,49 +386,18 @@ bool Lowering::lower_region_map(const mir::Stmt& s, long lo, long hi) {
   };
   if (structured_outer_depth != 1) return false;
   if (hi - lo + 1 < 2) return refuse("fewer than two iterations");
-  const auto outer_dependent = [&](const std::string& name) {
-    const auto value = scope.find(name);
-    if (value != scope.end()) return !value->second.si.param_free;
-    return !int_env.count(name) && !td.find(name);
-  };
-  if (!region_map_switches.all &&
-      !ParameterControl(fun_defs, outer_dependent)(s))
+  // A loop that the program budget sends here takes the lane form or
+  // nothing; it never branches on a parameter (unrolled_loops).
+  const bool budget = lowering_compact && !region_map_switches.all;
+  if (!region_map_switches.all && !budget && !loop_has_parameter_control(s))
     return refuse("no parameter-dependent control");
-  if (target_scale != 1.0) return refuse("enclosing target scaling");
-  if (contains_multi_assign(s))
-    return refuse("a call returning several values");
-  std::set<std::string> locals;
-  for (const auto& child : s.body) collect_loop_locals(child, &locals);
   std::string accumulator;
   const mir::Expr* accumulator_read = nullptr;
-  if (!has_target_pe(s)) {
-    std::vector<std::string> writes;
-    assigned_names(s, &writes);
-    for (const auto& name : writes)
-      if (!locals.count(name) && name != s.loopvar) {
-        if (!accumulator.empty()) {
-          accumulator.clear();
-          break;
-        }
-        accumulator = name;
-      }
-    if (accumulator.empty()) return refuse("body has no target increment");
-    if (!only_accumulates(s, accumulator, &accumulator_read))
-      return refuse("body does more than add to " + accumulator);
-  }
+  if (const std::string why =
+          region_map_shape(s, &accumulator, &accumulator_read);
+      !why.empty())
+    return refuse(why);
   const mir::Stmt& loop = s;
-  if (stmt_effectful(loop)) return refuse("body has effects");
-  for (const auto& child : loop.body)
-    if (body_escapes(child, false)) return refuse("break, continue or return");
-  {
-    std::vector<std::string> writes;
-    assigned_names(loop, &writes);
-    for (const auto& name : writes) {
-      if (name == loop.loopvar) return refuse("loop variable assigned");
-      if (!locals.count(name) && name != accumulator)
-        return refuse("assigns " + name + " declared outside the body");
-    }
-  }
 
   std::set<std::string> names;
   mir::collect_names(loop, &names);
@@ -438,6 +452,7 @@ bool Lowering::lower_region_map(const mir::Stmt& s, long lo, long hi) {
   }
   if (island_has_effect(*prog)) return abandon("program has effects");
   prog->label = loop.loopvar;
+  prog->compensated = budget;
   prog->check_clean = debug_env("STANLI_REGION_MAP_CHECK_CLEAN") != nullptr;
   const RegionMapProg pristine = *prog;
   int64_t save_limit = kMaxRegionMapSavedCells;
@@ -559,6 +574,9 @@ bool Lowering::lower_region_map(const mir::Stmt& s, long lo, long hi) {
     }
   }
   if (!use_lanes) prog->lanes.refusal = lane_refusal;
+  if (budget && !use_lanes)
+    return abandon("the program budget needs the lane form (" + lane_refusal +
+                   ")");
   if (use_lanes || prog->recompute) {
     prog->saved.clear();
     prog->saved_cells = 0;

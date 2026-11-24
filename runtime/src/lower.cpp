@@ -1279,6 +1279,108 @@ std::optional<CompiledModel> try_bounded_specialization(Lowering& lo,
   return {};
 }
 
+// The program budget. Each chain's executor holds its own copy of the
+// program: one kernel context and dispatch entry per op. With twelve chains
+// on one machine, unrolled programs of 10-24 MB per executor made each
+// gradient 2.4-3.0x as slow as one chain alone, while programs up to 5 MB
+// cost 1.1-1.3x (notes/triage/2026-11-24-issue-657-region-map-boundary.md).
+// Past the budget, loops take the region map's lane form, which was faster
+// than unrolling at 1, 4 and 12 chains. OP_LOOP was 1.2-1.5x slower than
+// unrolling on 1 and 4 chains for the corpus programs of 9-30 MB, and as
+// fast or faster for those of 44-67 MB, so loops take it only past the
+// second budget. STANLI_PROGRAM_BUDGET and STANLI_LOOP_BUDGET override them
+// in bytes; 0 turns the first off.
+constexpr int64_t kProgramBudgetBytes = int64_t{8} << 20;
+constexpr int64_t kLoopBudgetBytes = int64_t{32} << 20;
+// The most ops one outermost loop may unroll to before the passes. The
+// largest corpus loop unrolls to about 180,000.
+constexpr size_t kUnrollCeilingOps = size_t{1} << 20;
+// A loop charged less than this is never lowered compact for the budget.
+constexpr int64_t kMinCompactBytes = kProgramBudgetBytes / 8;
+
+int64_t switch_value(const char* name, int64_t fallback) {
+  const char* v = debug_env(name);
+  return v ? std::strtoll(v, nullptr, 10) : fallback;
+}
+
+// The outermost loops to lower compact so that the program fits `budget`.
+// Each loop is charged the ops that survived the passes and write a slot
+// that its unroll created; ops that the passes built, such as reroll's
+// vector ops, are charged to no loop. The largest loops are taken until the
+// rest fits.
+std::set<const mir::Stmt*> loops_over_budget(
+    const std::vector<Lowering::UnrolledLoop>& loops, const Graph& g,
+    int64_t budget, bool op_loop) {
+  const int64_t total = Executor::program_bytes(g);
+  if (budget <= 0 || total <= budget || loops.empty() || g.ops.empty())
+    return {};
+  const int64_t per_op = total / static_cast<int64_t>(g.ops.size());
+  std::vector<int64_t> ops(loops.size(), 0);
+  for (const Op& op : g.ops) {
+    const auto after =
+        std::upper_bound(loops.begin(), loops.end(), op.out,
+                         [](int slot, const Lowering::UnrolledLoop& l) {
+                           return slot < l.first_slot;
+                         });
+    if (after == loops.begin()) continue;
+    const size_t k = static_cast<size_t>(after - loops.begin()) - 1;
+    if (op.out < loops[k].end_slot) ++ops[k];
+  }
+  // Without OP_LOOP, a loop that the region map cannot take stays
+  // unrolled, so lowering it again would only cost time.
+  std::map<const mir::Stmt*, int64_t> charged;
+  for (size_t k = 0; k < loops.size(); ++k)
+    if (op_loop || loops[k].lane_shape)
+      charged[loops[k].loop] += ops[k] * per_op;
+  std::vector<std::pair<int64_t, const mir::Stmt*>> order;
+  for (const auto& [loop, bytes] : charged) order.emplace_back(bytes, loop);
+  std::sort(order.begin(), order.end(),
+            [](const auto& a, const auto& b) { return a.first > b.first; });
+  std::set<const mir::Stmt*> chosen;
+  int64_t rest = total;
+  for (const auto& [bytes, loop] : order) {
+    if (rest <= budget || bytes < std::min(kMinCompactBytes, budget)) break;
+    chosen.insert(loop);
+    rest -= bytes;
+  }
+  return chosen;
+}
+
+// Lowers log_prob again with `chosen` (the budget's loops) and `capped`
+// (loops past the unroll ceiling) compact. A loop that passes the ceiling
+// joins `capped` and the lowering starts over; the last attempt has no
+// ceiling, so a capped loop that no compact form takes still unrolls. A
+// chosen loop that no compact form takes leaves `chosen` and the lowering
+// starts over, and with no loops left there is nothing to gain.
+std::optional<CompiledModel> lower_compact(Lowering& lo, const mir::Program& p,
+                                           std::set<const mir::Stmt*> chosen,
+                                           std::set<const mir::Stmt*> capped,
+                                           size_t ceiling, bool op_loop) {
+  constexpr int kAttempts = 8;
+  for (int attempt = 1;; ++attempt) {
+    if (chosen.empty() && capped.empty()) return std::nullopt;
+    std::set<const mir::Stmt*> loops = chosen;
+    loops.insert(capped.begin(), capped.end());
+    Lowering trial(lo.data, lo.prep, lo.dumper, "budget_log_prob",
+                   lo.prepared_context());
+    trial.compile_options = lo.compile_options;
+    trial.int_env_data = lo.int_env_data;
+    trial.data_prepared = true;
+    trial.out.transformed_data_draws = lo.out.transformed_data_draws;
+    trial.compact_loops = loops;
+    trial.required_compact = chosen;
+    trial.compact_op_loop = op_loop;
+    trial.unroll_ceiling = attempt < kAttempts ? ceiling : 0;
+    try {
+      return trial.run(p);
+    } catch (const Lowering::UnrollCeiling& c) {
+      capped.insert(c.loop);
+    } catch (const Lowering::CompactRefused& c) {
+      chosen.erase(c.loop);
+    }
+  }
+}
+
 void add_interpreter_fallback(CompiledModel& cm, const std::string& note) {
   auto& all = cm.interpreter_fallbacks;
   if (std::find(all.begin(), all.end(), note) == all.end()) all.push_back(note);
@@ -1564,8 +1666,38 @@ CompiledModel compile_model(const std::string& mir_text, const DataMap& data,
     lo.after_data_prepared = [&] { wa_lowering->begin(lo); };
   }
   auto specialized = try_bounded_specialization(lo, *prog);
-  CompiledModel cm = specialized ? std::move(*specialized) : lo.run(*prog);
+  const int64_t budget =
+      switch_value("STANLI_PROGRAM_BUDGET", kProgramBudgetBytes);
+  const int64_t loop_budget =
+      switch_value("STANLI_LOOP_BUDGET", kLoopBudgetBytes);
+  const size_t ceiling = static_cast<size_t>(std::max<int64_t>(
+      0, switch_value("STANLI_UNROLL_CEILING", (int64_t)kUnrollCeilingOps)));
+  std::optional<CompiledModel> lowered = std::move(specialized);
+  const bool specialized_path = lowered.has_value();
+  const mir::Stmt* past_ceiling = nullptr;
+  if (!lowered) {
+    lo.unroll_ceiling = ceiling;
+    try {
+      lowered = lo.run(*prog);
+    } catch (const Lowering::UnrollCeiling& c) {
+      past_ceiling = c.loop;
+    }
+  }
   lo.restore_shadowed_prepared();
+  if (!lowered) {
+    lowered = lower_compact(lo, *prog, {}, {past_ceiling}, ceiling, true);
+  } else if (!specialized_path) {
+    const bool op_loop = Executor::program_bytes(lowered->graph) > loop_budget;
+    const auto loops =
+        loops_over_budget(lo.unrolled_loops, lowered->graph, budget, op_loop);
+    if (!loops.empty()) {
+      auto compact = lower_compact(lo, *prog, loops, {}, ceiling, op_loop);
+      if (compact && Executor::program_bytes(compact->graph) <
+                         Executor::program_bytes(lowered->graph))
+        lowered = std::move(compact);
+    }
+  }
+  CompiledModel cm = std::move(*lowered);
   for (const mir::OutputVar& out : prog->output_vars)
     if (!out.annotations.empty())
       cm.annotations.emplace_back(out.name, out.annotations);

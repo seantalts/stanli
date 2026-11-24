@@ -195,6 +195,12 @@ class Executor {
   // scratch and kernel contexts. Kernel state, such as the recordings of
   // retained loops, comes on top.
   int64_t storage_bytes() const;
+  // Bytes an executor of `g` keeps for its program rather than its values:
+  // the ops, one kernel context and one forward entry per op, and one
+  // backward step per op unless the graph only runs forward. Lowering reads
+  // it before any executor exists. An op without a backward has no backward
+  // step, so a bound executor may keep a little less.
+  static int64_t program_bytes(const Graph& g);
   // The bound graph, so a second executor over the same model can be
   // built without re-lowering. Multi-chain sampling needs one executor
   // per chain -- the arenas are mutable per-evaluation state -- and

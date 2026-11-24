@@ -98,6 +98,10 @@ struct StructuredLoop {
   // recording a reusable path costs more when local extents change per draw.
   // Existing loop plans retain their replay policy.
   bool cache_execution_path = true;
+  // Add the target terms with compensation once there are more than
+  // kPlainSumMax of them (pairwise_sum.hpp), as the unrolled graph does. Set
+  // for a loop that the program budget keeps instead of unrolling.
+  bool compensated_target = false;
   Node root;
   int64_t initial_size = 0;
   int64_t workspace_size = 0;

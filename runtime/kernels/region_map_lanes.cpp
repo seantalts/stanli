@@ -2,6 +2,7 @@
 #include <stanli/rejection.hpp>
 #include <stanli/adjoint.hpp>
 #include <stanli/adjoint_rules.hpp>
+#include <stanli/pairwise_sum.hpp>
 #include <stanli/program_density.hpp>
 #include <stanli/region_map.hpp>
 #include <stanli/structured_loop.hpp>
@@ -2563,6 +2564,7 @@ void region_map_lanes_forward(const RegionMapProg& p, KernelCtx& ctx,
   std::vector<Mask> entry;
   entry.reserve(plan.blocks.size() + 1);
   double total = 0.0;
+  CompensatedSum compensated;
   const int target = p.out_regs[0];
   RegionMapTally tally;
   RegionMapTally* counting = plan.profile ? &tally : nullptr;
@@ -2576,13 +2578,16 @@ void region_map_lanes_forward(const RegionMapProg& p, KernelCtx& ctx,
                       segment_masks(plan, region, tile), counting);
     const double* out = t.slot(target);
     for (int l = 0; l < lanes; ++l) total += out[l];
+    if (p.compensated)
+      for (int l = 0; l < lanes; ++l) compensated.add(out[l]);
   }
   if (counting) {
     tally.evaluations = 1;
     tally.tiles = (uint64_t)plan.tiles;
     merge_tally(*plan.profile, tally);
   }
-  ctx.out.data[0] = total;
+  ctx.out.data[0] =
+      p.compensated && p.count > kPlainSumMax ? compensated.result() : total;
 }
 
 void region_map_lanes_backward(const RegionMapProg& p, KernelCtx& ctx,
