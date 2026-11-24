@@ -532,7 +532,7 @@ struct PreparedContext {
   const std::map<std::string, DataMap::Entry>& environment;
   const std::map<std::string, long>& integers;
   const std::map<std::string, DeclView>& declarations;
-  const DataMap& reshaped_data;
+  const std::shared_ptr<DataMap>& reshaped_data;
   const std::set<std::string>& names;
 };
 
@@ -854,10 +854,13 @@ struct Lowering {
   // Data variables bound with their declared dims in place of the value
   // supplied. One whose declared size is zero gets its empty value: CmdStan
   // reads no elements for it, so it may be left out or given any value with
-  // no elements. A scalar given where every extent is 1 gets its one value.
-  DataMap reshaped_data;
+  // no elements. A value whose dims differ from the declared ones only by
+  // extents of 1 gets the declared dims, and a leaf of an array of tuples
+  // gets its values in array order. Every lowering of one model shares this
+  // map, which only bind_data writes.
+  std::shared_ptr<DataMap> reshaped_data = std::make_shared<DataMap>();
   const DataMap::Entry* data_entry(const std::string& name) const {
-    if (reshaped_data.has(name)) return &reshaped_data.at(name);
+    if (reshaped_data->has(name)) return &reshaped_data->at(name);
     if (data.has(name)) return &data.at(name);
     return nullptr;
   }
@@ -1659,7 +1662,8 @@ struct Lowering {
 
   void bind_data(const mir::Program& p);
   void report_missing_data(const mir::Program& p);
-  void bind_declared_shape(const std::string& name, const mir::SizedType& type);
+  void bind_declared_shape(const std::string& key, const mir::SizedType& type,
+                           const mir::detail::TupleLeaf* leaf);
 
   // Lazily materialize an env value as a data slot when log_prob uses it.
   int env_slot(const std::string& name);

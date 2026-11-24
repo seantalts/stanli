@@ -989,18 +989,19 @@ void test_embedded_manifest() {
   bs_free_error_msg(err);
   bs_model_destruct(m);
 
-  // The data reader checks shapes as CmdStan does: the scalar N given as
-  // [50] is rejected.
+  // The data reader checks shapes as CmdStan does, except that it allows
+  // extents of 1 to be added or dropped: the scalar N given as [50, 50] is
+  // rejected.
   nlohmann::json wrapped = root;
-  wrapped["N"] = nlohmann::json::array({50});
+  wrapped["N"] = nlohmann::json::array({50, 50});
   err = nullptr;
   m = bs_model_construct(wrapped.dump().c_str(), 1234, &err);
   if (m != nullptr) {
-    fail("a scalar given as a one-element list was accepted");
+    fail("a scalar given as a two-element list was accepted");
     bs_model_destruct(m);
   } else if (err == nullptr ||
              std::string(err).find("variable name=N; dims declared=(); "
-                                   "dims found=(1)") == std::string::npos) {
+                                   "dims found=(2)") == std::string::npos) {
     fail(std::string("the shape error does not name N and both shapes: ") +
          (err != nullptr ? err : "(no message)"));
   }

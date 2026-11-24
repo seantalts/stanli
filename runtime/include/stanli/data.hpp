@@ -41,8 +41,9 @@ class DataMap {
     e.r = {v};
     m_[name] = std::move(e);
   }
-  // `dims` defaults to one axis; pass it for a nested array, whose values
-  // are the first-index-fastest flattening the JSON reader also produces --
+  // `dims` defaults to one axis of length v.size(), so a scalar needs
+  // set_int or set_real instead. Pass `dims` for a nested array, whose values
+  // are the first-index-fastest flattening the JSON reader also produces:
   // one convention for every rank, which the lowering permutes into graph
   // order once, at materialization.
   void set_int_array(const std::string& name, std::vector<int> v,
@@ -83,14 +84,19 @@ class DataMap {
   std::map<std::string, Entry> m_;
 };
 
-// Whether `found` is a scalar given for a declaration of rank 1 or more whose
-// extents are all 1.
-inline bool scalar_for_ones(const std::vector<int64_t>& declared,
-                            const DataMap::Entry& found) {
-  if (!found.dims.empty() || declared.empty()) return false;
-  for (int64_t d : declared)
-    if (d != 1) return false;
-  return true;
+// Whether two lists of dims are equal once every extent of 1 is removed from
+// both. Removing an axis of length 1 does not change the order in which the
+// values are stored, so a value that passes holds the declared elements in
+// the declared order.
+inline bool same_without_unit_extents(const std::vector<int64_t>& a,
+                                      const std::vector<int64_t>& b) {
+  size_t i = 0, j = 0;
+  for (;;) {
+    while (i < a.size() && a[i] == 1) ++i;
+    while (j < b.size() && b[j] == 1) ++j;
+    if (i == a.size() || j == b.size()) return i == a.size() && j == b.size();
+    if (a[i++] != b[j++]) return false;
+  }
 }
 
 // Which of CmdStan's var_context rules a value's dims are checked by.
@@ -103,10 +109,13 @@ enum class VarStage { Data, ParameterInit };
 // starting values it is stan::io::validate_dims, which has no such escape:
 // CmdStan rejects [] for a matrix[0, 3] and accepts only its absence. In
 // both, a transposed matrix or a flat list for an array is rejected rather
-// than read in the wrong order. Unlike CmdStan, stanli accepts a scalar for a
-// declaration whose extents are all 1, because R cannot write a length-1
-// array; the caller binds it with the declared dims. `int_declared` adds
-// Stan's check that an int variable holds ints.
+// than read in the wrong order. Unlike CmdStan, stanli also accepts any value
+// whose dims differ from the declared ones only by extents of 1, such as a
+// scalar for vector[1], [x] for a real or an N x 1 matrix for vector[N].
+// R drops or adds such extents (a length-1 vector has no dim, and scale(x)
+// returns a matrix), so R users cannot always control them. The caller binds
+// the value with the declared dims. `int_declared` adds Stan's check that an
+// int variable holds ints.
 inline void check_declared_dims(VarStage stage, const std::string& name,
                                 const std::vector<int64_t>& declared,
                                 const DataMap::Entry& found,
@@ -131,7 +140,7 @@ inline void check_declared_dims(VarStage stage, const std::string& name,
                             " initialization; variable name=" + name;
   const std::string shapes = "; dims declared=" + tuple(declared) +
                              "; dims found=" + tuple(found.dims);
-  if (!scalar_for_ones(declared, found)) {
+  if (!same_without_unit_extents(declared, found.dims)) {
     if (found.dims.size() != declared.size())
       throw std::invalid_argument(
           "mismatch in number dimensions declared and found in context" +

@@ -2954,9 +2954,7 @@ void expect_init_shapes_follow_cmdstan() {
        {{"P", "[[1, 2, 3]]"}},
        dim + "variable name=P; position=0; dims declared=(2,3); dims "
              "found=(1,3)"},
-      {"a scalar as a list",
-       {{"s", "[0.5]"}},
-       ndims + "variable name=s; dims declared=(); dims found=(1)"},
+      {"a scalar as a list", {{"s", "[0.5]"}}, ""},
       {"a flat array of vectors",
        {{"av", "[1, 2, 3, 4, 5, 6]"}},
        ndims + "variable name=av; dims declared=(2,3); dims found=(6)"},
@@ -2969,7 +2967,7 @@ void expect_init_shapes_follow_cmdstan() {
        ndims + "variable name=tp.2; dims declared=(2); dims found=()"},
       {"a list tuple slot for a scalar",
        {{"tp", R"({"1": [0.1], "2": [0.2, 0.3]})"}},
-       ndims + "variable name=tp.1; dims declared=(); dims found=(1)"},
+       ""},
       {"a short slot in an array of tuples",
        {{"atp", R"([{"1": 0.1, "2": [0.2]}, {"1": 0.4, "2": [0.5]}])"}},
        dim + "variable name=atp.2; position=1; dims declared=(2,2); dims "
@@ -3038,6 +3036,75 @@ void expect_scalar_init_for_length_one() {
     expect_near("scalar init for matrix[1, 1]", q[2], -1.5);
   }
   stanli_model_free(model);
+}
+
+// A starting value whose dims differ from the declared ones only by extents
+// of 1 is accepted, and each value lands in its own element. Every parameter
+// here is unconstrained, so the free vector holds the values themselves.
+void expect_unit_extent_inits() {
+  stanli_model* model = from_stan(
+      "parameters { vector[1] v; row_vector[1] rv; array[1] real a1;"
+      "  array[1] vector[1] av; array[3] vector[1] a3; vector[3] c;"
+      "  array[3] real r3; matrix[1, 1] m; real s;"
+      "  array[2] tuple(vector[1], real) t;"
+      "  array[1, 2] tuple(real, vector[3]) z; }\n"
+      "model { s ~ normal(0, 1); }\n");
+  if (model == nullptr) return;
+  std::vector<double> q((size_t)stanli_n_unconstrained(model));
+  char err[8192]{};
+  const char* json =
+      R"({"v": [[1]], "rv": [[2]], "a1": [[3]], "av": [4], "a3": [5, 6, 7],)"
+      R"( "c": [[8], [9], [10]], "r3": [[11, 12, 13]], "m": [14], "s": [15],)"
+      R"( "t": [{"1": 16, "2": 17}, {"1": 18, "2": 19}],)"
+      R"( "z": [{"1": 20, "2": [21, 22, 23]}, {"1": 24, "2": [25, 26, 27]}]})";
+  const bool accepted =
+      stanli_unconstrain_inits(model, json, q.data(), err, sizeof err) == 0;
+  expect_true(std::string("inits that differ by extents of 1: ") + err,
+              accepted);
+  // The free vector takes an array of tuples element by element, so the
+  // values are 1, 2, ..., 27 in order.
+  std::vector<double> want(27);
+  for (size_t k = 0; k < want.size(); ++k) want[k] = (double)(k + 1);
+  expect_true("unit-extent inits fill every coordinate",
+              q.size() == want.size());
+  if (accepted && q.size() == want.size())
+    for (size_t k = 0; k < want.size(); ++k)
+      expect_near("unit-extent init coordinate " + std::to_string(k), q[k],
+                  want[k]);
+  for (const char* bad :
+       {R"({"v": [1], "rv": [2], "a1": [3], "av": [4], "a3": [5, 6, 7],)"
+        R"( "c": [8, 9, 10], "r3": [11, 12, 13], "m": [14], "s": 15,)"
+        R"( "t": [{"1": 16, "2": 17}, {"1": 18, "2": 19}],)"
+        R"( "z": [[{"1": 20, "2": [21, 22]}, {"1": 24, "2": [25, 26]}]]})"}) {
+    err[0] = '\0';
+    expect_true(
+        "a short tuple part is still refused",
+        stanli_unconstrain_inits(model, bad, q.data(), err, sizeof err) != 0);
+  }
+  stanli_model_free(model);
+  stanli_model* corr = from_stan(
+      "parameters { cholesky_factor_corr[2] L; array[2, 3, 1] real p; }\n"
+      "model { }\n");
+  if (corr == nullptr) return;
+  std::vector<double> qc((size_t)stanli_n_unconstrained(corr));
+  struct Bad {
+    const char* json;
+    const char* want;
+  };
+  for (
+      const Bad& b :
+      {Bad{R"({"L": [1, 0.6, 0, 0.8], "p": [[[1], [2], [3]], [[4], [5], [6]]]})",
+           "variable name=L; dims declared=(2,2); dims found=(4)"},
+       Bad{R"({"L": [[1, 0], [0.6, 0.8]], "p": [[[1], [2]], [[3], [4]], [[5], [6]]]})",
+           "variable name=p; position=0; dims declared=(2,3,1); dims "
+           "found=(3,2,1)"}}) {
+    err[0] = '\0';
+    const bool refused =
+        stanli_unconstrain_inits(corr, b.json, qc.data(), err, sizeof err) != 0;
+    expect_true(std::string("refuse ") + b.want + "; got: " + err,
+                refused && std::string(err).find(b.want) != std::string::npos);
+  }
+  stanli_model_free(corr);
 }
 
 // CmdStan evaluates a data-only expression in the model block on every
@@ -4183,6 +4250,7 @@ int main() {
   expect_unconstrain_inits_round_trip();
   expect_init_shapes_follow_cmdstan();
   expect_scalar_init_for_length_one();
+  expect_unit_extent_inits();
   expect_callback_print_each_evaluation();
   expect_parameterless_unconstrain();
   expect_parameterless_sampling();

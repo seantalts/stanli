@@ -145,6 +145,58 @@ test_that("a model reads zero-extent containers", {
   expect_equal(unname(fit$draws[1, 1, ]), c(2, 0, 0, 0, 0, 0))
 })
 
+test_that("data whose dims differ only by extents of 1 is read in order", {
+  skip_without_runtime()
+  x <- c(3, 1, 2)
+  m <- stanli_model(code = "
+    data { vector[1] v1; row_vector[1] rv1; array[1] real a1;
+      array[3] vector[1] av; array[1] vector[1] av1;
+      vector[3] sx; array[3] real col; array[3] real row;
+      matrix[1, 1] m11; real s; int n;
+      array[2] tuple(vector[1], real) tv; }
+    generated quantities {
+      array[16] real out = {v1[1], rv1[1], a1[1], av[1][1], av[2][1],
+        av[3][1], av1[1][1], sx[1], sx[3], col[2], row[3], m11[1, 1], s, n,
+        tv[2].1[1], tv[2].2};
+    }",
+    data = list(v1 = matrix(0.5, 1, 1), rv1 = matrix(1.5, 1, 1),
+                a1 = matrix(2.5, 1, 1), av = list(1, 2, 3), av1 = list(0.25),
+                sx = scale(x), col = matrix(c(4, 5, 6), 3, 1),
+                row = matrix(c(7, 8, 9), 1, 3), m11 = array(3.5, 1),
+                s = array(4.5, 1), n = array(6L, c(1, 1, 1)),
+                tv = list(list("1" = 0.1, "2" = 0.2),
+                          list("1" = 0.3, "2" = 0.4))))
+  expect_equal(echo_draw(m, "out"),
+               c(0.5, 1.5, 2.5, 1, 2, 3, 0.25, as.vector(scale(x))[c(1, 3)],
+                 5, 9, 3.5, 4.5, 6, 0.3, 0.4))
+  expect_error(stanli_model(code = "data { matrix[2, 3] M; }",
+                            data = list(M = matrix(1:6, 3, 2))),
+               "dims declared=(2,3); dims found=(3,2)", fixed = TRUE)
+  expect_error(stanli_model(code = "data { matrix[2, 3] M; }",
+                            data = list(M = 1:6)),
+               "dims declared=(2,3); dims found=(6)", fixed = TRUE)
+})
+
+test_that("starting values whose dims differ only by extents of 1 are read in order", {
+  skip_without_runtime()
+  m <- stanli_model(code = "
+    parameters { vector[1] v; array[1] vector[1] av; array[3] vector[1] a3;
+      vector[3] c; matrix[1, 1] m; real s; }
+    model { s ~ normal(0, 1); }")
+  expect_equal(unconstrain(m, list(v = matrix(0.3, 1, 1), av = list(0.4),
+                                   a3 = list(1, 2, 3),
+                                   c = matrix(c(4, 5, 6), 3, 1),
+                                   m = array(7, 1), s = array(8, 1))),
+               c(0.3, 0.4, 1, 2, 3, 4, 5, 6, 7, 8))
+  expect_equal(unconstrain(m, list(v = matrix(0.3, 1, 1)), partial = TRUE,
+                           seed = 1)[1], 0.3)
+  expect_equal(unconstrain(m, list(av = list(0.4)), partial = TRUE,
+                           seed = 1)[2], 0.4)
+  L <- stanli_model(code = "parameters { cholesky_factor_corr[2] L; }")
+  expect_error(unconstrain(L, list(L = c(1, 0.6, 0, 0.8))),
+               "dims declared=(2,2); dims found=(4)", fixed = TRUE)
+})
+
 test_that("a length-1 R vector fills a declaration whose extents are all 1", {
   skip_without_runtime()
   # Issue #671: R writes seasons = 0 as a JSON scalar.

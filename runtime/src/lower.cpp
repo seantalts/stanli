@@ -152,8 +152,9 @@ void Lowering::observe_indexed_rhs(const mir::Expr& rhs, const Val& v) {
   }
 }
 // CmdStan checks every data variable's dims before it reads one. stanli also
-// accepts a scalar where every declared extent is 1, because R cannot write
-// a length-1 array, and binds it with the declared dims. CmdStan rejects this.
+// accepts dims that differ from the declared ones only by extents of 1,
+// because R drops and adds such extents, and bind_declared_shape binds the
+// value with the declared dims. CmdStan rejects these.
 void Lowering::validate_data_dims(const std::string& name,
                                   const mir::SizedType& t) {
   if (!data.has(name)) return;
@@ -248,9 +249,16 @@ struct ExtentScope {
   ~ExtentScope() { flag = false; }
 };
 }  // namespace
-void Lowering::bind_declared_shape(const std::string& name,
-                                   const mir::SizedType& type) {
-  if (type.dims.empty()) return;
+// CmdStan's JSON reader lays out a leaf of an array of tuples element by
+// element: `z.2` of `array[3, 2] tuple(real, vector[4]) z` holds z[1, 1].2,
+// then z[2, 1].2, and so on, each vector whole. A leaf variable is an ordinary
+// array, which DataMap holds first index fastest across all its dimensions,
+// so `leaf` reorders the values. This needs the declared dims: a value given
+// without an outer extent of 1 has found dims that put the tuple boundary in
+// the wrong place.
+void Lowering::bind_declared_shape(const std::string& key,
+                                   const mir::SizedType& type,
+                                   const mir::detail::TupleLeaf* leaf) {
   std::vector<int64_t> dims;
   try {
     ExtentScope extents(data_extent_scope);
@@ -260,21 +268,40 @@ void Lowering::bind_declared_shape(const std::string& name,
   }
   int64_t size = 1;
   for (int64_t d : dims) size *= d;
+  const bool int_declared = type.base == "SInt" ||
+                            (type.base == "SArray" && type.elem_base == "SInt");
   if (size == 0) {
-    if (type.base == "SInt" ||
-        (type.base == "SArray" && type.elem_base == "SInt"))
-      reshaped_data.set_int_array(name, {}, std::move(dims));
+    if (int_declared)
+      reshaped_data->set_int_array(key, {}, std::move(dims));
     else
-      reshaped_data.set_real_array(name, {}, std::move(dims));
+      reshaped_data->set_real_array(key, {}, std::move(dims));
     return;
   }
-  if (!data.has(name)) return;
-  const DataMap::Entry& given = data.at(name);
-  if (!scalar_for_ones(dims, given)) return;
-  if (given.is_int)
-    reshaped_data.set_int_array(name, given.i, std::move(dims));
-  else
-    reshaped_data.set_real_array(name, given.r, std::move(dims));
+  if (!data.has(key)) return;
+  const DataMap::Entry& given = data.at(key);
+  if (!same_without_unit_extents(dims, given.dims)) return;
+  if (given.r.size() != static_cast<size_t>(size) ||
+      (given.is_int && given.i.size() != static_cast<size_t>(size)))
+    return;
+  const std::vector<size_t> order =
+      leaf ? mir::detail::reader_order(*leaf, dims) : std::vector<size_t>{};
+  if (given.dims == dims && order.empty()) return;
+  if (dims.empty()) {
+    if (given.is_int)
+      reshaped_data->set_int(key, given.i[0]);
+    else
+      reshaped_data->set_real(key, given.r[0]);
+    return;
+  }
+  if (given.is_int) {
+    std::vector<int> values = given.i;
+    for (size_t k = 0; k < order.size(); ++k) values[k] = given.i[order[k]];
+    reshaped_data->set_int_array(key, std::move(values), std::move(dims));
+  } else {
+    std::vector<double> values = given.r;
+    for (size_t k = 0; k < order.size(); ++k) values[k] = given.r[order[k]];
+    reshaped_data->set_real_array(key, std::move(values), std::move(dims));
+  }
 }
 void Lowering::bind_data(const mir::Program& p) {
   std::set<std::string> input_names;
@@ -284,7 +311,7 @@ void Lowering::bind_data(const mir::Program& p) {
     input_names.insert(name);
     // A tuple's leaf is read under its CmdStan key.
     const std::string& key = mir::detail::data_key(p, name);
-    bind_declared_shape(key, type);
+    bind_declared_shape(key, type, p.tuples ? p.tuples->leaf(name) : nullptr);
     if (!data_entry(key)) {
       all_inputs_bound = false;
       continue;
@@ -1503,37 +1530,6 @@ class WriteArrayLowering {
   LowerWorker worker_;
 };
 
-// CmdStan's JSON reader lays out an array of tuples element by element:
-// `z.2` of `array[3, 2] tuple(real, vector[4]) z` holds z[1, 1].2, then
-// z[2, 1].2, and so on, each vector whole. A leaf variable is an ordinary
-// array, which DataMap holds first index fastest across all its dimensions.
-std::optional<DataMap> tuple_data_in_array_order(const mir::Program& p,
-                                                 const DataMap& data) {
-  std::optional<DataMap> out;
-  if (!p.tuples) return out;
-  for (const auto& input : p.input_vars) {
-    const mir::detail::TupleLeaf* leaf = p.tuples->leaf(input.first);
-    if (!leaf || !data.has(leaf->key)) continue;
-    const std::string& key = leaf->key;
-    const DataMap::Entry& entry = data.at(key);
-    const std::vector<size_t> source =
-        mir::detail::reader_order(*leaf, entry.dims);
-    if (source.empty()) continue;
-    const int64_t len = (int64_t)source.size();
-    if (!out) out = data;
-    if (entry.is_int) {
-      std::vector<int> values((size_t)len);
-      for (int64_t k = 0; k < len; ++k) values[(size_t)k] = entry.i[source[k]];
-      out->set_int_array(key, std::move(values), entry.dims);
-    } else {
-      std::vector<double> values((size_t)len);
-      for (int64_t k = 0; k < len; ++k) values[(size_t)k] = entry.r[source[k]];
-      out->set_real_array(key, std::move(values), entry.dims);
-    }
-  }
-  return out;
-}
-
 // Whether a user function can reach itself through calls, directly or
 // through other functions. Any spelling of a defined function's key counts
 // as a call, which includes a callback passed to a higher-order function.
@@ -1617,10 +1613,7 @@ CompiledModel compile_model(const std::string& mir_text, const DataMap& data,
   }
   prep.plain("compile", "parse_mir", parse_time, PrepTrace::Extra::MirBytes,
              static_cast<int64_t>(mir_text.size()));
-  const std::optional<DataMap> reordered =
-      tuple_data_in_array_order(*prog, data);
-  const DataMap& model_data = reordered ? *reordered : data;
-  Lowering lo(model_data, prep, dumper, "log_prob", WaRng(seed));
+  Lowering lo(data, prep, dumper, "log_prob", WaRng(seed));
   lo.compile_options = options;
   if (const char* refuse = std::getenv("STANLI_NO_INTERPRETER");
       refuse != nullptr && refuse[0] != '\0' && std::strcmp(refuse, "0") != 0)
@@ -1630,7 +1623,7 @@ CompiledModel compile_model(const std::string& mir_text, const DataMap& data,
   // the models where preparation is the cost (nn_rbm1bJ100, 20.7 s).
   std::optional<WriteArrayLowering> wa_lowering;
   if (!prog->generate_quantities.empty()) {
-    wa_lowering.emplace(model_data, *prog, prep.enabled(), dumper,
+    wa_lowering.emplace(data, *prog, prep.enabled(), dumper,
                         parallel_write_array(options));
     lo.after_data_prepared = [&] { wa_lowering->begin(lo); };
   }
