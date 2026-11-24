@@ -1849,7 +1849,7 @@ Region map:
 
 | switch | effect | read in |
 | --- | --- | --- |
-| `STANLI_REGION_MAP=0` | never map a loop; any other value keeps the default | `lower_region_map.cpp` |
+| `STANLI_REGION_MAP=0` | never map a loop; `all` also maps loops that do not branch on a parameter (for measurement); any other value keeps the default | `lower_region_map.cpp` |
 | `STANLI_REGION_MAP_DIAGNOSTICS` | print why each loop was refused or mapped, and the form it got | `lower_region_map.cpp` |
 | `STANLI_REGION_MAP_LANES=0` | skip the lane form | `lower_region_map.cpp` |
 | `STANLI_REGION_MAP_SAVE_LIMIT=n` | the limit on saved cells for all iterations, default 2^24 | `lower_region_map.cpp` |

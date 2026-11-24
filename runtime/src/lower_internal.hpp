@@ -404,6 +404,8 @@ StructuredMode read_structured_mode();
 // STANLI_REGION_MAP=0 and STANLI_REGION_MAP_DIAGNOSTICS.
 struct RegionMapSwitches {
   bool off = false;
+  // STANLI_REGION_MAP=all also maps loops without parameter-dependent control.
+  bool all = false;
   bool diagnostics = false;
 };
 RegionMapSwitches read_region_map_switches();

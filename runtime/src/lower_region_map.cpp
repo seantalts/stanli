@@ -323,6 +323,7 @@ RegionMapSwitches read_region_map_switches() {
   const char* mode = debug_env("STANLI_REGION_MAP");
   RegionMapSwitches switches;
   switches.off = mode && std::string_view(mode) == "0";
+  switches.all = mode && std::string_view(mode) == "all";
   switches.diagnostics = debug_env("STANLI_REGION_MAP_DIAGNOSTICS") != nullptr;
   return switches;
 }
@@ -345,7 +346,8 @@ bool Lowering::lower_region_map(const mir::Stmt& s, long lo, long hi) {
     if (value != scope.end()) return !value->second.si.param_free;
     return !int_env.count(name) && !td.find(name);
   };
-  if (!ParameterControl(fun_defs, outer_dependent)(s))
+  if (!region_map_switches.all &&
+      !ParameterControl(fun_defs, outer_dependent)(s))
     return refuse("no parameter-dependent control");
   if (target_scale != 1.0) return refuse("enclosing target scaling");
   if (contains_multi_assign(s))
