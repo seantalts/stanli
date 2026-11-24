@@ -97,7 +97,8 @@ void print_instr(std::string& out, const Program& p, size_t i,
       appendf(out, " %s(", opcode_name(c.opcode));
       for (int k = 0; k < c.n_in; ++k)
         appendf(out, "%sr%d[len %d]", k ? ", " : "", c.in[k], c.in_len[k]);
-      appendf(out, ") -> r%d[len %d]", c.out, c.out_len);
+      appendf(out, ") -> r%d[len %d], input adjoints 0x%x", c.out, c.out_len,
+              (unsigned)(c.input_adjoint_mask & ((1u << c.n_in) - 1)));
       if (c.scratch_len)
         appendf(out, ", scratch r%d[len %d]", c.scratch, c.scratch_len);
       else
