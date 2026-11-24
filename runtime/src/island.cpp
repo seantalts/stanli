@@ -794,6 +794,26 @@ struct Carver {
     return inputs;
   }
 
+  // An instruction whose rule runs once per element (RANGE and the other
+  // ranged opcodes) counts its width; everything else counts 1.
+  template <class Code>
+  static int64_t instr_cost(const Code& code) {
+    int64_t instrs = 0;
+    for (const auto& I : code) instrs += touches_width(I.code) ? I.len : 1;
+    return instrs;
+  }
+
+  // The island's price without its adjoint: the value file, the forward
+  // instructions, each call's overhead and the packing of the live-ins.
+  int64_t forward_cost(const Compiler& cc, const IslandProg& prog,
+                       const std::vector<int>& live_in_slots) const {
+    return kValueRegWeight *
+               ((int64_t)prog.n_regs - cc.n_call_scratch - cc.n_const_regs) +
+           instr_cost(prog.code) +
+           (kOpCost - 1) * 2 * (int64_t)prog.calls.size() +
+           packing_cost(live_in_slots);
+  }
+
   // Compile and price [i, j) without touching the graph. label tags the
   // debug line so a liveness-piece compile does not read as the whole
   // span's own join-vs-leave estimate to a caller counting those lines.
@@ -852,6 +872,19 @@ struct Carver {
           may_forward_adjacent_copy_destination(cc.prog))
         c.destination_source = std::make_unique<IslandProg>(cc.prog);
       compact_island_gated(cc.prog, false);
+      // gen_adjoint keeps every forward instruction and only adds registers,
+      // so the forward part of the price is a lower bound on the whole. A
+      // run whose graph cost is below it stays on the graph without an
+      // adjoint. The debug estimate lines keep the full price.
+      if (!debug_env("STANLI_ISLAND_ALWAYS") &&
+          !debug_env("STANLI_DEBUG_ISLAND") &&
+          forward_cost(cc, cc.prog, cc.live_in_slots) > graph_cost(i, j)) {
+        c.compiled = true;
+        c.graph_cost = graph_cost(i, j);
+        c.prog = std::move(cc.prog);
+        c.live_in_slots = std::move(cc.live_in_slots);
+        return c;
+      }
       c.priced_gen = gen_adjoint(cc.prog);
       cc.prog.native_adj = c.priced_gen && !debug_env("STANLI_NO_NATIVE_ADJ");
       // A failed generated adjoint would make this optimization replay each
@@ -893,23 +926,14 @@ struct Carver {
     // pays the same kOpCost the graph side is charged -- without which a
     // region of nothing but CALLs reads as a win and measures a loss
     // (dugongs_model, 0.63x, the first sweep after the vocabulary widened).
-    const int64_t n_calls = (int64_t)c.prog.calls.size();
+    //
     // A rare program the generator refuses keeps the replay. Preserve its
     // old one-cell-per-value charge rather than treating an absent compact
     // adjoint program as a zero-sized file.
     const int64_t adj_regs = c.prog.adj.empty() ? (int64_t)c.prog.n_regs
                                                 : (int64_t)c.prog.adj.n_regs;
-    // An instruction whose rule runs once per element (RANGE and the other
-    // ranged opcodes) counts its width; everything else counts 1.
-    int64_t instrs = 0;
-    for (const auto& I : c.prog.code)
-      instrs += touches_width(I.code) ? I.len : 1;
-    for (const auto& I : c.prog.adj.code)
-      instrs += touches_width(I.code) ? I.len : 1;
-    c.island_cost = kValueRegWeight * ((int64_t)c.prog.n_regs -
-                                       cc.n_call_scratch - cc.n_const_regs) +
-                    adj_regs + instrs + (kOpCost - 1) * 2 * n_calls +
-                    packing_cost(c.live_in_slots);
+    c.island_cost = forward_cost(cc, c.prog, c.live_in_slots) + adj_regs +
+                    instr_cost(c.prog.adj.code);
     for (const auto& li : c.prog.ins) c.boundary += 2 * li.len;
     for (int o : c.live_outs) c.boundary += kOpCost + 3 * g.slots[o].len;
     if (debug_env("STANLI_ISLAND_ALWAYS")) {

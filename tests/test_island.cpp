@@ -3537,6 +3537,83 @@ static void test_sliding_window_reads_carved() {
     expect_close("window v" + std::to_string(i), got[i], want[i]);
 }
 
+// The carver leaves a run on the graph without generating its adjoint when
+// the forward part of the island's price already exceeds the graph's. With
+// STANLI_DEBUG_ISLAND set it prices every run in full, so the two carvings
+// must be the same, op for op, on runs that are left alone and on runs that
+// become islands.
+static std::string carved_ops(Graph g, Fills fills, std::vector<int> terms,
+                              bool cse_first) {
+  if (cse_first) cse(g, fills, terms, {});
+  const int carved = carve_islands(g, fills, terms, {});
+  std::string text = "carved=" + std::to_string(carved);
+  for (const Op& op : g.ops) {
+    text += "\n" + std::to_string((int)op.opcode) +
+            " out=" + std::to_string(op.out) +
+            " src=" + std::to_string(op.primal_source);
+    for (int k = 0; k < op.n_in; ++k) text += " " + std::to_string(op.in[k]);
+    if (op.opcode == OP_ISLAND) {
+      const auto* prog = static_cast<const IslandProg*>(op.udata);
+      text += " regs=" + std::to_string(prog->n_regs) +
+              " code=" + std::to_string(prog->code.size()) +
+              " adj=" + std::to_string(prog->adj.code.size());
+    }
+  }
+  return text;
+}
+
+static void test_forward_bound_carves_as_full_price() {
+  SKIP_WITHOUT_DEBUG_SWITCHES();
+  struct Case {
+    const char* name;
+    std::function<Graph(Fills&, std::vector<int>&)> build;
+    bool cse_first;
+  };
+  const std::vector<Case> cases = {
+      {"wide state", build_wide_state, false},
+      {"wide slices",
+       [](Fills&, std::vector<int>& terms) {
+         return build_slice_island(36, 4096, terms);
+       },
+       false},
+      {"narrow slices",
+       [](Fills&, std::vector<int>& terms) {
+         return build_slice_island(36, 40, terms);
+       },
+       false},
+      {"repeated exp with CSE",
+       [](Fills&, std::vector<int>& terms) {
+         return build_repeated_exp(terms);
+       },
+       true},
+      {"repeated exp",
+       [](Fills&, std::vector<int>& terms) {
+         return build_repeated_exp(terms);
+       },
+       false},
+      {"hmm",
+       [](Fills& fills, std::vector<int>& terms) {
+         HmmGraph h = build_hmm(8, 128);
+         fills = h.fills;
+         terms = h.terms;
+         return h.g;
+       },
+       false},
+  };
+  for (const Case& c : cases) {
+    Fills fills;
+    std::vector<int> terms;
+    const Graph g = c.build(fills, terms);
+    const std::string bounded = carved_ops(g, fills, terms, c.cse_first);
+    std::string full;
+    capture_island_debug(
+        [&] { full = carved_ops(g, fills, terms, c.cse_first); });
+    const std::string what =
+        std::string("forward bound carves as the full price: ") + c.name;
+    expect(what.c_str(), bounded == full);
+  }
+}
+
 int main() {
   test_register_fill_alignment();
   test_fill_sink();
@@ -3620,6 +3697,7 @@ int main() {
   test_shared_calls_stay_on_graph();
   test_split_run_reshares_primal();
   test_shared_copies_priced_at_half();
+  test_forward_bound_carves_as_full_price();
   if (failures) {
     std::printf("%d failures\n", failures);
     return 1;

@@ -1262,6 +1262,14 @@ cost, and a cost-neutral correction for calls to graph kernels. This is the
 same layout the native island backward allocates and clears, rather than a
 fixed weight per forward register.
 
+The adjoint generator keeps every forward instruction and only adds
+registers. So the forward part of the estimate is a lower bound on the
+whole, and a run whose graph cost is below that bound stays on the graph
+without generating its adjoint. The decision is the same as with the full
+estimate: no corpus model's prepared program changes. It takes the island
+pass on `examplemodels_ms` from 263 to 131 ms. `STANLI_DEBUG_ISLAND` prices
+every run in full, so its estimate lines keep their values.
+
 The constants behind that estimate (5 for `kOpCost`, 2 for `kValueRegWeight`,
 and a bare 3 for each live-out element in `island.cpp`) are calibrated on corpus
 timing, not on instruction dispatch. A micro-benchmark of one graph op
