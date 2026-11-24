@@ -1732,6 +1732,23 @@ def test_subprocess_compiler_contract():
                 raise AssertionError("compiler failure was ignored")
         assert len(calls) == 1, calls
 
+        # A compiler that is stopped before it prints anything leaves only
+        # its path and exit status to report.
+        def silent_run(argv, **kwargs):
+            return subprocess.CompletedProcess(argv, 3221225781, "", "")
+
+        with mock.patch.object(stanli, "_BIN", compiler_dir), \
+                mock.patch.object(stanli.subprocess, "run", silent_run):
+            try:
+                stanli._stanc_mir(source)
+            except RuntimeError as exc:
+                message = str(exc)
+                assert str(portable) in message, message
+                assert "3221225781" in message, message
+                assert "--force-reinstall stanli" in message, message
+            else:
+                raise AssertionError("a silent compiler failure was ignored")
+
         # A stock stanc beside the runtime is not a compiler stanli uses.
         portable.unlink()
         with mock.patch.object(stanli, "_BIN", compiler_dir):
