@@ -512,22 +512,38 @@ preserve_random_seed <- function(expr) {
   expr
 }
 
-# A tuple's slots, named as the runtime names them (`g.2:1.3`), as CmdStan's
-# JSON nests one value: an array of tuples is a list of its elements, first
-# index outermost, and each tuple a list keyed "1", "2", ....
+# A tuple's slots, named as the runtime names them (`g.2:1.3`), nested as the
+# JSON reader expects one value. A tuple is a list keyed "1", "2", .... An
+# array of tuples is nested lists with its first index outermost, but the
+# reader, like CmdStan's, takes their elements in the order that it visits
+# them as the array's elements first index fastest. So element k of that
+# order, counted first index fastest, goes at the k-th place that the reader
+# visits.
 tuple_init_value <- function(slots) {
-  steps <- lapply(names(slots), function(name) unlist(lapply(tuple_steps(name),
-    function(step) if (startsWith(step, "["))
-      paste0("[", strsplit(gsub("\\[|\\]", "", step), ",")[[1L]], "]")
-    else step)))
+  steps <- lapply(names(slots), tuple_steps)
   build <- function(entries, depth) {
     if (length(entries) == 1L && length(steps[[entries]]) < depth)
       return(slots[[entries]])
     keys <- vapply(entries, function(i) steps[[i]][depth], "")
     unique_keys <- unique(keys)
-    unique_keys <- unique_keys[order(as.integer(gsub("\\[|\\]", "", unique_keys)))]
-    out <- lapply(unique_keys, function(k) build(entries[keys == k], depth + 1L))
-    if (startsWith(unique_keys[1L], "[")) out else stats::setNames(out, unique_keys)
+    if (!startsWith(unique_keys[1L], "[")) {
+      unique_keys <- unique_keys[order(as.integer(unique_keys))]
+      return(stats::setNames(lapply(unique_keys, function(k)
+        build(entries[keys == k], depth + 1L)), unique_keys))
+    }
+    index <- do.call(rbind, lapply(strsplit(gsub("\\[|\\]", "", unique_keys),
+                                            ",", fixed = TRUE), as.integer))
+    dims <- apply(index, 2L, max)
+    serial <- as.vector((index - 1L) %*% cumprod(c(1, utils::head(dims, -1L))))
+    elements <- lapply(unique_keys[order(serial)], function(k)
+      build(entries[keys == k], depth + 1L))
+    visit <- function(offset, level) {
+      if (level > length(dims)) return(elements[[offset + 1L]])
+      stride <- prod(dims[-seq_len(level)])
+      lapply(seq_len(dims[level]) - 1L, function(a)
+        visit(offset + a * stride, level + 1L))
+    }
+    visit(0, 1L)
   }
   build(seq_along(slots), 1L)
 }

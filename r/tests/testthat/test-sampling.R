@@ -153,6 +153,21 @@ test_that("partial starting values keep each parameter's shape", {
                "dims declared=\\(2,3\\); dims found=\\(3,2\\)")
 })
 
+test_that("partial starting values put each drawn tuple in its own element", {
+  skip_without_runtime()
+  # The JSON reader, like CmdStan's, takes the elements of an array of tuples
+  # first index fastest, so a drawn value must come back where it was drawn.
+  for (code in c(
+    "parameters { real mu; array[2, 2] tuple(real, real) w; }",
+    "parameters { real mu; array[3, 2, 2] tuple(real, vector[2]) w; }",
+    "parameters { real mu; array[2, 3] tuple(real, array[2, 2] tuple(real, real)) n; }")) {
+    m <- stanli_model(code = paste(code, "model { mu ~ normal(0, 1); }"))
+    point <- local({ set.seed(5); stats::runif(m$n_unconstrained, -2, 2) })
+    got <- unconstrain(m, list(mu = 0.1), partial = TRUE, seed = 5)
+    expect_identical(got, c(0.1, point[-1]), label = code)
+  }
+})
+
 test_that("an empty value is a starting value for any zero-size parameter", {
   skip_without_runtime()
   m <- stanli_model(code = "
