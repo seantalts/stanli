@@ -145,18 +145,28 @@ test_that("a model reads zero-extent containers", {
   expect_equal(unname(fit$draws[1, 1, ]), c(2, 0, 0, 0, 0, 0))
 })
 
-test_that("a length-1 container needs array(x, 1), as in CmdStan", {
+test_that("a length-1 R vector fills a declaration whose extents are all 1", {
   skip_without_runtime()
-  code <- "data { vector[1] v; array[1] int k; }
-           parameters { real mu; } model { mu ~ normal(v[1] + k[1], 1); }"
-  expect_error(stanli_model(code = code, data = list(v = 0.5, k = 2L)),
-               "variable name=v; dims declared=(1); dims found=()",
+  # Issue #671: R writes seasons = 0 as a JSON scalar.
+  expect_s3_class(stanli_model(
+    code = "data { int<lower=1> K; array[K] real<lower=0> seasons; }
+            parameters { real mu; } model { mu ~ normal(0, 1); }",
+    data = list(K = 1, seasons = 0)), "stanli_model")
+  m <- stanli_model(code = "
+    data { int<lower=1> K; array[K] real<lower=0> seasons; vector[1] v;
+      array[1] int k; }
+    transformed data { real first = seasons[1]; }
+    parameters { vector[1] mu; }
+    model { mu ~ normal(0, 1); }
+    generated quantities { array[3] real out = {first, v[1], k[1]}; }",
+    data = list(K = 1L, seasons = 0.25, v = 0.5, k = 2L))
+  fit <- sample_model(m, fixed_param = TRUE, chains = 1, samples = 1,
+                      refresh = 0)
+  columns <- grep("^out\\[", fit$columns)
+  expect_equal(unname(fit$draws[1, 1, columns]), c(0.25, 0.5, 2))
+  expect_equal(unconstrain(m, list(mu = 0.75)), 0.75)
+  expect_error(stanli_model(code = "data { vector[2] v; }",
+                            data = list(v = 0.5)),
+               "variable name=v; dims declared=(2); dims found=()",
                fixed = TRUE)
-  expect_error(stanli_model(code = code,
-                            data = list(v = array(0.5, 1), k = 2L)),
-               "variable name=k; dims declared=(1); dims found=()",
-               fixed = TRUE)
-  m <- stanli_model(code = code,
-                    data = list(v = array(0.5, 1), k = array(2L, 1)))
-  expect_s3_class(m, "stanli_model")
 })

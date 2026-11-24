@@ -3017,6 +3017,29 @@ void expect_init_shapes_follow_cmdstan() {
   stanli_model_free(model);
 }
 
+// R writes a length-1 starting value as a scalar, so a scalar is accepted for
+// a parameter whose extents are all 1 and lands in its one element.
+void expect_scalar_init_for_length_one() {
+  stanli_model* model = from_stan(
+      "parameters { vector[1] v; array[1] real<lower=0> w; matrix[1, 1] m; }\n"
+      "model { v ~ normal(0, 1); w ~ exponential(1); to_vector(m) ~ "
+      "normal(0, 1); }\n");
+  if (model == nullptr) return;
+  std::vector<double> q(3);
+  char err[8192]{};
+  const bool accepted =
+      stanli_unconstrain_inits(model, R"({"v": 0.7, "w": 2.0, "m": -1.5})",
+                               q.data(), err, sizeof err) == 0;
+  expect_true(std::string("scalar inits for length-1 parameters: ") + err,
+              accepted);
+  if (accepted) {
+    expect_near("scalar init for vector[1]", q[0], 0.7);
+    expect_near("scalar init for array[1] real<lower=0>", q[1], std::log(2.0));
+    expect_near("scalar init for matrix[1, 1]", q[2], -1.5);
+  }
+  stanli_model_free(model);
+}
+
 // CmdStan evaluates a data-only expression in the model block on every
 // log density, so a print in an ODE right-hand side runs on every gradient
 // and never while the model is built. Preparation must not evaluate the
@@ -4159,6 +4182,7 @@ int main() {
   test_interpreter_probe_failure();
   expect_unconstrain_inits_round_trip();
   expect_init_shapes_follow_cmdstan();
+  expect_scalar_init_for_length_one();
   expect_callback_print_each_evaluation();
   expect_parameterless_unconstrain();
   expect_parameterless_sampling();

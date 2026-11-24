@@ -78,8 +78,8 @@ read_utf8_file <- function(path) {
 #'   matrix is an array of rows; an unnamed list is an array of its elements,
 #'   which is how to pass `array[K] matrix[N, M]`, `array[K] vector[N]` and
 #'   arrays of them. Zero-length extents are kept. A length-1 R vector
-#'   with no `dim` goes out as a scalar, as in rstan, so give a `vector[1]`
-#'   or `array[1]` as `array(x, 1)`.
+#'   works for a declaration whose extents are all 1, such as `vector[1]`
+#'   or `array[1] real`.
 #' @param mir Transformed MIR text, for a build without the embedded
 #'   compiler. Rarely needed.
 #' @param threads_per_chain Positive thread count for eligible native `reduce_sum`
@@ -444,9 +444,9 @@ parameter_names <- function(model, scalars = FALSE) {
 #' declared size. A missing,
 #' unknown, wrong-length, or out-of-support value is an error naming the
 #' parameter. Each value has its declared shape, as CmdStan requires of a
-#' starting value: a matrix as an R matrix, and a `vector[1]` as
-#' `array(x, 1)`. A flat vector for a matrix is an error. A zero-size
-#' parameter may be left out.
+#' starting value: a matrix as an R matrix. A length-1 R vector works for a
+#' parameter whose extents are all 1, such as `vector[1]`. A flat vector for
+#' a matrix is an error. A zero-size parameter may be left out.
 #'
 #' The result is what `sample_model(init = )` and `optimize_model(init = )`
 #' take, so unconstraining is a step per starting point rather than a second

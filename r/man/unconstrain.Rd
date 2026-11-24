@@ -42,9 +42,9 @@ Unless `partial = TRUE`, every declared parameter must appear, at its
 declared size. A missing,
 unknown, wrong-length, or out-of-support value is an error naming the
 parameter. Each value has its declared shape, as CmdStan requires of a
-starting value: a matrix as an R matrix, and a `vector[1]` as
-`array(x, 1)`. A flat vector for a matrix is an error. A zero-size
-parameter may be left out.
+starting value: a matrix as an R matrix. A length-1 R vector works for a
+parameter whose extents are all 1, such as `vector[1]`. A flat vector for
+a matrix is an error. A zero-size parameter may be left out.
 }
 \details{
 The result is what `sample_model(init = )` and `optimize_model(init = )`

@@ -83,6 +83,16 @@ class DataMap {
   std::map<std::string, Entry> m_;
 };
 
+// Whether `found` is a scalar given for a declaration of rank 1 or more whose
+// extents are all 1.
+inline bool scalar_for_ones(const std::vector<int64_t>& declared,
+                            const DataMap::Entry& found) {
+  if (!found.dims.empty() || declared.empty()) return false;
+  for (int64_t d : declared)
+    if (d != 1) return false;
+  return true;
+}
+
 // Which of CmdStan's var_context rules a value's dims are checked by.
 enum class VarStage { Data, ParameterInit };
 
@@ -93,8 +103,10 @@ enum class VarStage { Data, ParameterInit };
 // starting values it is stan::io::validate_dims, which has no such escape:
 // CmdStan rejects [] for a matrix[0, 3] and accepts only its absence. In
 // both, a transposed matrix or a flat list for an array is rejected rather
-// than read in the wrong order. `int_declared` adds Stan's check that an int
-// variable holds ints.
+// than read in the wrong order. Unlike CmdStan, stanli accepts a scalar for a
+// declaration whose extents are all 1, because R cannot write a length-1
+// array; the caller binds it with the declared dims. `int_declared` adds
+// Stan's check that an int variable holds ints.
 inline void check_declared_dims(VarStage stage, const std::string& name,
                                 const std::vector<int64_t>& declared,
                                 const DataMap::Entry& found,
@@ -119,15 +131,17 @@ inline void check_declared_dims(VarStage stage, const std::string& name,
                             " initialization; variable name=" + name;
   const std::string shapes = "; dims declared=" + tuple(declared) +
                              "; dims found=" + tuple(found.dims);
-  if (found.dims.size() != declared.size())
-    throw std::invalid_argument(
-        "mismatch in number dimensions declared and found in context" + where +
-        shapes);
-  for (size_t k = 0; k < declared.size(); ++k)
-    if (found.dims[k] != declared[k])
+  if (!scalar_for_ones(declared, found)) {
+    if (found.dims.size() != declared.size())
       throw std::invalid_argument(
-          "mismatch in dimension declared and found in context" + where +
-          "; position=" + std::to_string(k) + shapes);
+          "mismatch in number dimensions declared and found in context" +
+          where + shapes);
+    for (size_t k = 0; k < declared.size(); ++k)
+      if (found.dims[k] != declared[k])
+        throw std::invalid_argument(
+            "mismatch in dimension declared and found in context" + where +
+            "; position=" + std::to_string(k) + shapes);
+  }
   if (int_declared && !found.is_int)
     throw std::invalid_argument("int variable contained non-int values" +
                                 where + "; base type=int");

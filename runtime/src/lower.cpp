@@ -60,7 +60,7 @@ Lowering::Lowering(const DataMap& d, PrepTrace& p, PassDumper& dump_to,
   const auto env_copy_time = prep.start();
   copy_named(td.env(), prepared_context.environment, &prepared_context.names);
   count_data_copy(td.env());
-  zero_size_data = prepared_context.zero_size_data;
+  reshaped_data = prepared_context.reshaped_data;
   int_env = prepared_context.integers;
   copy_named(decls, prepared_context.declarations, &prepared_context.names);
   prepared_names = prepared_context.names;
@@ -72,7 +72,7 @@ Lowering::Lowering(Lowering& parent, RegionTrialTag,
                parent.td_rng,
                std::make_shared<ShapeInterner>(*parent.shape_pool)) {
   compile_options = parent.compile_options;
-  zero_size_data = parent.zero_size_data;
+  reshaped_data = parent.reshaped_data;
   fun_defs = parent.fun_defs;
   copy_named(decls, parent.decls, names);
   copy_named(td.env(), parent.td.env(), names);
@@ -91,8 +91,8 @@ Lowering::Lowering(Lowering& parent, RegionTrialTag,
 PreparedContext Lowering::prepared_context() {
   if (!data_prepared)
     throw std::logic_error("lowering has not prepared model data");
-  return {td_rng, shape_pool,     td.env(),      int_env_data,
-          decls,  zero_size_data, prepared_names};
+  return {td_rng, shape_pool,    td.env(),      int_env_data,
+          decls,  reshaped_data, prepared_names};
 }
 Lowering Lowering::fork_region_trial(const std::set<std::string>* names) {
   return Lowering(*this, RegionTrialTag{}, names);
@@ -151,7 +151,9 @@ void Lowering::observe_indexed_rhs(const mir::Expr& rhs, const Val& v) {
     // graph values and deliberately do not acquire a compile-time binding.
   }
 }
-// CmdStan checks every data variable's dims before it reads one.
+// CmdStan checks every data variable's dims before it reads one. stanli also
+// accepts a scalar where every declared extent is 1, because R cannot write
+// a length-1 array, and binds it with the declared dims. CmdStan rejects this.
 void Lowering::validate_data_dims(const std::string& name,
                                   const mir::SizedType& t) {
   if (!data.has(name)) return;
@@ -246,8 +248,8 @@ struct ExtentScope {
   ~ExtentScope() { flag = false; }
 };
 }  // namespace
-void Lowering::bind_zero_size(const std::string& name,
-                              const mir::SizedType& type) {
+void Lowering::bind_declared_shape(const std::string& name,
+                                   const mir::SizedType& type) {
   if (type.dims.empty()) return;
   std::vector<int64_t> dims;
   try {
@@ -258,12 +260,21 @@ void Lowering::bind_zero_size(const std::string& name,
   }
   int64_t size = 1;
   for (int64_t d : dims) size *= d;
-  if (size != 0) return;
-  if (type.base == "SInt" ||
-      (type.base == "SArray" && type.elem_base == "SInt"))
-    zero_size_data.set_int_array(name, {}, std::move(dims));
+  if (size == 0) {
+    if (type.base == "SInt" ||
+        (type.base == "SArray" && type.elem_base == "SInt"))
+      reshaped_data.set_int_array(name, {}, std::move(dims));
+    else
+      reshaped_data.set_real_array(name, {}, std::move(dims));
+    return;
+  }
+  if (!data.has(name)) return;
+  const DataMap::Entry& given = data.at(name);
+  if (!scalar_for_ones(dims, given)) return;
+  if (given.is_int)
+    reshaped_data.set_int_array(name, given.i, std::move(dims));
   else
-    zero_size_data.set_real_array(name, {}, std::move(dims));
+    reshaped_data.set_real_array(name, given.r, std::move(dims));
 }
 void Lowering::bind_data(const mir::Program& p) {
   std::set<std::string> input_names;
@@ -273,7 +284,7 @@ void Lowering::bind_data(const mir::Program& p) {
     input_names.insert(name);
     // A tuple's leaf is read under its CmdStan key.
     const std::string& key = mir::detail::data_key(p, name);
-    bind_zero_size(key, type);
+    bind_declared_shape(key, type);
     if (!data_entry(key)) {
       all_inputs_bound = false;
       continue;
@@ -1454,7 +1465,7 @@ class WriteArrayLowering {
         data_, trace_, dumper_, "write_array",
         PreparedContext{log_prob.td_rng, log_prob.shape_pool, no_environment,
                         log_prob.int_env_data, no_declarations,
-                        log_prob.zero_size_data, log_prob.prepared_names});
+                        log_prob.reshaped_data, log_prob.prepared_names});
     const auto select_time = trace_.start();
     // Moved, not copied: log_prob is done with them, and finish() moves
     // them back.
