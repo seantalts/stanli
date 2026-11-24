@@ -923,7 +923,7 @@ endif()
 # OPTIMIZED is for a test whose own code dominates its run time: it builds at
 # -O2 without the shared PCH, which costs a little compile time.
 function(stanli_add_test NAME)
-  cmake_parse_arguments(PARSE_ARGV 1 _test "OPTIMIZED" "" "")
+  cmake_parse_arguments(PARSE_ARGV 1 _test "OPTIMIZED" "" "ARGS")
   add_executable(${NAME} tests/${NAME}.cpp
     $<TARGET_OBJECTS:stanli_tbb_stub>)
   add_dependencies(${NAME} stanli_mir_fixtures)
@@ -945,7 +945,7 @@ function(stanli_add_test NAME)
       VERBATIM)
   endif()
   # Tests run from the repo root so fixture paths are stable.
-  add_test(NAME ${NAME} COMMAND ${NAME}
+  add_test(NAME ${NAME} COMMAND ${NAME} ${_test_ARGS}
            WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
 endfunction()
 
@@ -1403,7 +1403,7 @@ set(STANLI_TESTS
   test_data test_e2e
   test_reroll test_profile test_inplace test_pass_safety test_sampling
   test_ode_prog test_mir_program_conformance
-  test_structured_checks test_structured_loop
+  test_structured_checks
   test_mir_unary_fallback test_mir_binary_fallback test_mir_reduction_fallback
   test_constfold test_collapse test_cse test_fast_math test_graph_print test_pass_dump
   test_add_n_binding
@@ -1419,6 +1419,18 @@ set(STANLI_TESTS
   test_laplace)
 foreach(STANLI_TEST IN LISTS STANLI_TESTS)
   stanli_add_test(${STANLI_TEST})
+endforeach()
+# Large unrolled graphs need separate processes to release their allocations
+# before the next case. Serialize only these cases with each other, so a
+# parallel sanitizer run does not keep several large graphs live at once.
+stanli_add_test(test_structured_loop ARGS --without-large-loops)
+set(STANLI_STRUCTURED_LARGE_TESTS)
+foreach(_case recursion refused sized scratch)
+  set(_test test_structured_loop_large_${_case})
+  add_test(NAME ${_test} COMMAND test_structured_loop --large-loop-case ${_case}
+           WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
+  set_tests_properties(${_test} PROPERTIES RESOURCE_LOCK structured_large_graph)
+  list(APPEND STANLI_STRUCTURED_LARGE_TESTS ${_test})
 endforeach()
 # The bounded output-loop path is shipped behavior and must also run in
 # builds that disable the developer switches used by the rest of this suite.
@@ -1850,7 +1862,8 @@ endif()
 list(APPEND STANLI_DEBUG_SWITCH_TESTS
   test_execution_report test_sampler_parity test_lower test_region_map
   test_reroll test_inplace test_pass_safety test_structured_checks
-  test_structured_loop test_constfold test_collapse test_cse test_fast_math
+  test_structured_loop ${STANLI_STRUCTURED_LARGE_TESTS}
+  test_constfold test_collapse test_cse test_fast_math
   test_partition test_solve_reuse test_cross_path test_write_array
   test_island test_odevariadic test_algebra test_brmsmono
   test_wa_parallel_switches test_pass_dump_switches
@@ -1859,7 +1872,8 @@ list(APPEND STANLI_DEBUG_SWITCH_TESTS
   hypergeometric_1f0_structured_reference callback_geometry
   test_run_rng test_ctsem_engine test_data_loop_memo test_prep_work)
 list(APPEND STANLI_DEBUG_SWITCH_ONLY_TESTS
-  test_region_map test_structured_loop test_cross_path
+  test_region_map test_structured_loop ${STANLI_STRUCTURED_LARGE_TESTS}
+  test_cross_path
   test_wa_parallel_switches test_pass_dump_switches
   test_prep_profile_reroll_dispositions test_ctsem_engine
   test_data_loop_memo test_prep_work)
