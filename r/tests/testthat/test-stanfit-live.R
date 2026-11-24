@@ -136,3 +136,24 @@ test_that("forward transforms execute random GQ and inverse transforms ignore th
   expect_false(identical(first$y_rep, second$y_rep))
   expect_identical(rstan::unconstrain_pars(sf, first), 0)
 })
+
+test_that("unconstrain_pars takes back what constrain_pars gives for tuples", {
+  skip_without_runtime()
+  skip_if_not_installed("rstan")
+  model <- stanli_model(code = "
+    parameters { real mu; vector[1] b; matrix[0, 3] m0;
+      array[2] matrix[2, 3] A; tuple(real, vector[2]) tp;
+      array[2] tuple(real, vector[2]) g; array[2, 2] tuple(real, real) w; }
+    model { mu ~ normal(0, 1); b ~ normal(0, 1);
+      for (i in 1:2) to_vector(A[i]) ~ normal(0, 1);
+      tp.1 ~ normal(0, 1); tp.2 ~ normal(0, 1);
+      for (i in 1:2) { g[i].1 ~ normal(0, 1); g[i].2 ~ normal(0, 1);
+        for (j in 1:2) { w[i, j].1 ~ normal(0, 1); w[i, j].2 ~ normal(0, 1); } } }")
+  fit <- sample_model(model, chains = 1, warmup = 20, samples = 5, seed = 1,
+                      refresh = 0, show_messages = FALSE)
+  sf <- as_stanfit(fit)
+  u <- seq(-1, 1, length.out = rstan::get_num_upars(sf))
+  constrained <- rstan::constrain_pars(sf, u)
+  expect_identical(dim(constrained$m0), c(0L, 3L))
+  expect_equal(rstan::unconstrain_pars(sf, constrained), u, tolerance = 1e-14)
+})
