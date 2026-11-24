@@ -1,9 +1,91 @@
 # Changelog
 
-## Unreleased
+## 0.31.0
+
+33 more `_rng` functions run, including `multinomial_rng`, and R can start
+WALNUTS from Pathfinder. An audit of the runtime found thirteen wrong
+results or crashes, and this release fixes all of them. Starting values and
+data are now checked as CmdStan checks them, and a model's `fatal_error()`
+ends sampling as it does in Stan.
+
+### Performance
+
+- When stanli merges a loop into one vector operation, the gradient no
+  longer adds the terms in one serial chain, and sums of more than eight
+  terms are added pairwise, as in Stan Math. Per gradient, the `earn` and `logearn` models are 1.32x
+  to 1.43x faster, `nes`, `kidscore` and `radon_pooled` 1.37x to 1.46x
+  faster, and `arK` 1.29x faster. Over the corpus the
+  gradient is 1.01x faster in geomean (#629, #637).
+- A merged group of operations can now take more than six inputs. The
+  `hmm_drive` model compiles to 75 ops instead of 19,955, and
+  `hmm_gaussian` to 92 instead of 43,424, and the HMM models have a
+  gradient that is 1.23x to 1.31x faster (#629).
+- `mlumr_survival_mspline_relaxed` prepares 2.9x faster and
+  `ctsem_ctsm_post4_100` 1.80x faster. Each `if` and inlined call during
+  preparation no longer copies the data, which used 2.8 MB to 9.0 MB on the
+  test programs and now uses 256 kB (#629).
+- Loops in generated quantities that need no gradients use bounded
+  temporary memory. On a covariance model with N = 256, peak memory falls
+  from 364 MB to 187 MB, and the first draw is written in 14 ms instead of
+  64 ms (#659).
+
+### Features
+
+- 33 `_rng` functions that stanli did not support now run compiled,
+  including `multinomial_rng` (#660). The cross-covariance forms of
+  the GP kernels run too. `bernoulli_logit_glm_rng` with a row-vector
+  design, the array-of-vectors forms of `multi_student_t_rng`, and the
+  cross form of `gp_dot_prod_cov` are still unsupported (#629).
+- In R, `sample_walnuts(pathfinder_init = list(...))` starts WALNUTS chains
+  from Pathfinder draws, as `sample_model()` does (#658, #659).
+- `show_messages = FALSE` silences sampler notices and the model's own
+  `print()`. Sampler notices now print at `refresh = 0` (#629).
+- New C API functions. `stanli_grad_err` and `stanli_eval_status` say why an
+  evaluation failed. `stanli_n_output_columns` and
+  `stanli_output_column_name` name the output columns. Optimization,
+  Pathfinder starts and the Hessian can be interrupted.
+  `stanli_laplace_whiten` builds the Laplace whitening that R and Python
+  each used to build on their own. The ABI version stays 6 (#629).
 
 ### Fixes
 
+- `sum()` and `mean()` of more than 32 values use a compensated sum, which
+  stays accurate when the terms cancel. The column means that brms uses to
+  centre predictors are now 0.002 ULP from the exact value instead of 1 ULP
+  (#639).
+- A model's `fatal_error()` now ends sampling. NUTS and WALNUTS treated it
+  as a rejected proposal (#629).
+- A local variable that one branch on a parameter leaves unassigned no
+  longer reads as NaN. stanli now raises an error that names the variable
+  (#629).
+- These gave a wrong log density (#629):
+  - a `target += lp` that appears twice in a loop, which was counted once;
+  - an assignment that an optimization dropped although a later statement
+    still read it;
+  - `x[2:4] = x[1:3]` inside a branch on a parameter;
+  - `gp_exp_quad_cov` with an array of length scales, which used only the
+    first one;
+  - one shape of loop that carries an integer from one iteration to the
+    next.
+- These were accepted where Stan raises an error, and now raise one (#629):
+  - JSON data or starting values with the wrong shape. Starting values now
+    need the declared dimensions, as in CmdStan; flat values are no longer
+    accepted;
+  - a length-1 vector in a density where a scalar size does not match;
+  - `theta[4:]` past the end of `theta`.
+- These failed to load and now load (#629):
+  - zero-length bounds and multipliers;
+  - an integer error such as `5 %/% 0` in a branch that never runs. It now
+    fails only if the branch runs;
+  - an overloaded container function with an early `return`.
+- A user function with an early `return` in both arms of an `if` evaluated
+  the condition twice (#629).
+- `mean()`, `sd()` and `variance()` of an empty vector crashed or gave the
+  wrong error (#629).
+- `stanli_optimize` and `stanli_pathfinder_inits` crashed when they were
+  called from a thread that had never evaluated a model (#629).
+- In R and Python, `adapt_engaged` is now on unless warmup is 0. In Python,
+  each `Model` has its own lock (#629).
 - In webR, loading stanli no longer breaks compiled rstan models from other
   packages such as RBesT and OncoBayes2. The webR runtime exported its copy
   of Stan Math, Eigen and Boost, and those models then ran on stanli's copy.
@@ -36,6 +118,14 @@
   `docs/internal/artifacts/accuracy.json`.
 - `tools/corpus.py` prints its report and no longer writes
   `docs/corpus-status.md`.
+- The corpus has 39 more models (414 in total), from the Stan example
+  models, the Stan User's Guide, hBayesDM, bmgarch, walker and bayesdfa
+  (#629).
+- The ULP gate scales each difference by the largest magnitude computed
+  beside the value, and only `verify_refs.py` writes the ledger. Ledger
+  entries have a platform field and a stale check (#629, #630).
+- `ProgramCompiler` moved from a 5,451-line header into six source files
+  (#629).
 
 ## 0.30.1
 
