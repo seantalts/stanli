@@ -377,11 +377,12 @@ bool Lowering::needs_runtime_control(const mir::Stmt& s) {
 }
 // A user call is scanned as its inlined body would be. The formals take what
 // the scan can work out of the arguments, and the caller's names are out of
-// reach, as in lower_call_udf. So the answer depends only on the function and
-// what the formals hold, and a call with the same ones reuses it. A function
-// already being scanned is not entered again (stanc3 does not inline a
-// recursive call either). An answer that met such a call, or that the step
-// limit cut short, is not reused.
+// reach, as in lower_call_udf. So the answer depends only on the function,
+// what the formals hold and the few flags that eval_int and the interpreter
+// read, and a call with the same ones reuses it. A function already being
+// scanned is not entered again (stanc3 does not inline a recursive call
+// either). An answer that met such a call, or that the step limit cut short,
+// is not reused.
 bool Lowering::call_needs_runtime_control(const mir::Expr& e) {
   for (const auto& a : e.args)
     if (call_needs_runtime_control(a)) return true;
@@ -412,7 +413,9 @@ bool Lowering::call_needs_runtime_control(const mir::Expr& e) {
   };
   const mir::FunDef* const def = &f;
   append(&def, sizeof def);
+  const bool flags[2] = {region_current != nullptr, data_extent_scope};
   append(&while_unroll_depth, sizeof while_unroll_depth);
+  append(flags, sizeof flags);
   for (size_t k = 0; k < formals.size(); ++k) {
     const mir::Expr& a = e.args[k];
     if (mir::is_unsized(a, mir::UnsizedLeaf::Int)) {
