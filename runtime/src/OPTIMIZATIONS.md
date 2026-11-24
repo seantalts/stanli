@@ -266,6 +266,10 @@ Element reads and writes get special handling:
 - Reading arbitrary elements, like `mu[county[n]]`: one gather op. Its
   gradient step adds each element's contribution back to the right
   place, including repeated elements.
+- Reading a row or column at an offset that follows the data, like
+  `z[, subject[n]]`: one gather op over every lane's window. Nothing may
+  write the base inside the loop, so every lane reads what its scalar op
+  would have read.
 - Writing `v[0], v[1], ...` across lanes: one store op, or no op when
   the writes cover the whole vector (the computed vector simply becomes
   `v`). Writes stepping by a fixed stride (filling a matrix column by
@@ -281,6 +285,18 @@ Element reads and writes get special handling:
   the whole vector, a slice or a gather of it. A lane that reads another
   element (`mu[n] = mu[n - 1] + ...`) is a recurrence and stays scalar.
   Rows of a matrix follow the same rule.
+
+A dot product of two row-wide operands, like `X[n] * (beta + z[, s[n]])`,
+becomes one `OP_GROUP_DOT`. Constant folding leaves each data row `X[n]` as
+its own constant, and those constants pack into one data matrix like the
+per-lane scalar constants above. The lanes pack row-major, so each lane's
+two rows are one contiguous group, and the group dot sums each group with
+the same Eigen expression as `OP_DOT` (variant `kGroupDotAsDot`). Each
+lane's value is therefore bitwise the scalar one. The gradient adds each
+lane's contribution to a shared vector such as `beta`, or to a gathered
+element of `z`, in a different order than the scalar lanes did. On issue
+657's model (N = 5000) the folded loop drops from 20,014 log-density ops
+to 25 and keeps the same accuracy against an 80-digit reference.
 
 Densities get two more rewrites, depending on where their results go.
 If every lane's density result goes straight into the target, N scalar
