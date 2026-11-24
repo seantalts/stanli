@@ -832,7 +832,7 @@
      "lp": {
       "bound": 3982,
       "closer": "stanli",
-      "reason": "measured on Darwin arm64; the 80-digit evaluation timed out, so the reference is an exact sum (math.fsum) of the log density's 60,008 terms, each computed in double by an independent program. At points 0, 1 and 2, stanli is 15, 0 and 1 ULP from it and CmdStan 719, 11 and 3,983 ULP; stanli is closer. The program budget keeps the 60,000-row loop as OP_LOOP, which adds the row terms with compensation, where CmdStan adds one term at a time (issue #657)"
+      "reason": "measured on Darwin arm64; not an 80-digit reference, which timed out. The evidence is an exact sum (math.fsum) of the 60,008 double-precision terms of the log density, which an independent program computed. At points 0, 1 and 2, stanli is 15, 0 and 1 ULP from that sum and CmdStan 719, 11 and 3,983 ULP; stanli is closer. The program budget keeps the 60,000-row loop as OP_LOOP, which adds the row terms with compensation, where CmdStan adds one term at a time (issue #657)"
      }
     },
     "normal_mixture_k": {
