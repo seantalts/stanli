@@ -46,11 +46,16 @@ error, "Variable 'x' has NA values.", as in cmdstanr. These differ:
   `vector[N]`, and `array(x, 1)` works for a `real`. cmdstanr wraps only a
   length-1 value for a declaration with one dimension. A transposed matrix or
   a flat vector for a matrix is an error in both.
-- A list named `"1"`, `"2"`, ... is a tuple. `split(x, g)` with the groups 1,
-  2, ... gives such names, so pass `unname(split(x, g))` for an array.
-- `NaN` goes out as Stan's NaN. cmdstanr rejects it with the `NA` error.
+- stanli writes the data before it reads the model's declarations, so it
+  cannot use them the way cmdstanr does. A tuple is a list named `"1"`,
+  `"2"`, ...; cmdstanr 1.0 also takes an unnamed list for a tuple, which
+  stanli writes as an array. `split(x, g)` with the groups 1, 2, ... gives
+  tuple names, so pass `unname(split(x, g))` for an array.
+- A factor goes out as its codes whatever the declaration. cmdstanr 1.0
+  refuses a factor for a variable that is not declared `int`.
 - cmdstanr truncates a non-integer value for an `int` with a warning. stanli
   rejects it, as CmdStan does.
+- `NaN` goes out as Stan's NaN. cmdstanr rejects it with the `NA` error.
 
 ## Initialization and saved warmup
 
