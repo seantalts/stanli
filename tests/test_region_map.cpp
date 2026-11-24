@@ -3017,6 +3017,38 @@ void test_unroll_ceiling() {
         "region_map_branch: a parameter-branch loop keeps its form");
 }
 
+// A loop that the budget chooses but no compact form takes stays unrolled:
+// the second lowering stops at that loop and gives up, and the first graph
+// is kept. A loop past the unroll ceiling that no compact form takes still
+// unrolls on the last attempt.
+void test_budget_without_compact_form() {
+  const int n = 256;
+  const CompiledModel off =
+      compile_env("budget_mix", n, {{"STANLI_PROGRAM_BUDGET", "0"}});
+  const CompiledModel refused =
+      compile_env("budget_mix", n,
+                  {{"STANLI_PROGRAM_BUDGET", "65536"},
+                   {"STANLI_LOOP_BUDGET", "1000000000"},
+                   {"STANLI_REGION_MAP_LANES", "0"}});
+  check(histogram(refused) == histogram(off),
+        "budget_mix: with no compact form the loop stays unrolled");
+  expect_same_gradients("budget_mix refused vs unrolled", refused, off,
+                        mix_points);
+  const CompiledModel capped = compile_env("budget_mix", 2000,
+                                           {{"STANLI_PROGRAM_BUDGET", "0"},
+                                            {"STANLI_UNROLL_CEILING", "1000"},
+                                            {"STANLI_REGION_MAP", "0"},
+                                            {"STANLI_STRUCTURED_LOOPS", "0"}});
+  const CompiledModel capped_off =
+      compile_env("budget_mix", 2000, {{"STANLI_PROGRAM_BUDGET", "0"}});
+  check(count_opcode(capped, OP_REGION_MAP) == 0 &&
+            count_opcode(capped, OP_LOOP) == 0 &&
+            histogram(capped) == histogram(capped_off),
+        "budget_mix: a loop past the ceiling with no compact form unrolls");
+  expect_same_gradients("budget_mix ceiling, no compact form", capped,
+                        capped_off, mix_points);
+}
+
 // A budget fallback adds a long target sum with compensation
 // (pairwise_sum.hpp). The terms below nearly cancel, so a sum in plain order,
 // which the unrolled graph uses, is about 1e-9 off in relative terms. Each
@@ -3158,6 +3190,7 @@ int main() {
   test_budget_carried_loop();
   test_unroll_ceiling();
   test_budget_fallback_sums_accurately();
+  test_budget_without_compact_form();
   test_setenv("STANLI_REGION_MAP_LANES", "0", 1);
   test_large_body_recomputes_by_default();
   test_clear_strategy_follows_mode();

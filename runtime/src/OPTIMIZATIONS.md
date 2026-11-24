@@ -1287,24 +1287,33 @@ describe. So does a loop that prints, rejects or counts into an integer
 declared outside it.
 
 The two budgets come from measurements of the corpus models that a single
-8 MiB budget would change (2026-11-24, Apple M3 Ultra; time per gradient,
-unrolled over compact, each copy on its own thread):
+8 MiB budget would change (2026-11-24, Apple M3 Ultra, load 6 to 19 on 32
+cores; time per gradient of the compact form against the unrolled one, with
+each copy on its own thread). The rows marked * were measured on the build
+with only the 8 MiB budget and plain sums, before these models stopped
+changing; the others on the final build. The
+`examplemodels_probit_multi_good` row was measured again on main at
+5fcbdee5a. On the earlier base it was 1.45x, 1.33x and 2.60x faster. In a
+profile on 5fcbdee5a, the Eigen matrix product in the lane form's register
+program takes about a sixth of its gradient.
 
 | model | unrolled program | compact form | 1 copy | 4 copies | 12 copies |
 | --- | ---: | --- | ---: | ---: | ---: |
-| `examplemodels_probit_multi_good` | 12.9 MB | lane form | 1.49x faster | 1.34x faster | 2.61x faster |
-| `hbayesdm_prl_rp` | 9.0 MB | `OP_LOOP` | 1.29x slower | 1.39x slower | 1.08x faster |
-| `iohmm_reg` | 17.3 MB | `OP_LOOP` | 1.18x slower | 1.32x slower | 2.35x faster |
-| `examplemodels_cjs_cov_raneff` | 22.0 MB | `OP_LOOP` | 1.17x slower | 1.16x slower | 2.81x faster |
-| `ch14_m14_11` | 30.0 MB | `OP_LOOP` | 1.52x slower | 1.27x faster | 1.33x faster |
-| `ch12_m12_6` | 44.3 MB | `OP_LOOP` | 1.02x faster | 1.87x faster | 2.26x faster |
-| `nn_rbm1bJ100` | 59.2 MB | `OP_LOOP` | 1.03x slower | not measured | 1.00x |
-| `examplemodels_ms` | 66.7 MB | `OP_LOOP` | 1.20x faster | 1.48x faster | 1.43x faster |
+| `examplemodels_probit_multi_good` | 12.9 MB | lane form | 1.09x faster | 1.01x faster | 2.00x faster |
+| `hbayesdm_prl_rp` * | 9.0 MB | `OP_LOOP` | 1.29x slower | 1.39x slower | 1.08x faster |
+| `iohmm_reg` * | 17.3 MB | `OP_LOOP` | 1.18x slower | 1.32x slower | 2.35x faster |
+| `examplemodels_cjs_cov_raneff` * | 22.0 MB | `OP_LOOP` | 1.17x slower | 1.16x slower | 2.81x faster |
+| `ch14_m14_11` * | 30.0 MB | `OP_LOOP` | 1.52x slower | 1.27x faster | 1.33x faster |
+| `ch12_m12_6` | 44.3 MB | `OP_LOOP` | 1.01x slower | 1.84x faster | 2.31x faster |
+| `nn_rbm1bJ100` | 59.2 MB | `OP_LOOP` | 1.00x | 1.04x slower | 1.00x |
+| `examplemodels_ms` | 66.7 MB | `OP_LOOP` | 1.20x faster | 1.69x faster | 1.55x faster |
 
-The lane form was faster at every count of copies. `OP_LOOP` was faster at
-twelve copies for every model, but slower than unrolling on one and four
-copies for the programs of 9 to 30 MB. Four chains are the common case, so
-`OP_LOOP` waits for the second budget. With both budgets, four corpus models
+The lane form was about as fast as unrolling on four copies and faster on one
+and twelve. For the programs of 9 to 30 MB, `OP_LOOP` was 1.2x to 1.5x slower
+than unrolling on one copy and mostly on four, though faster at twelve. For the programs of 44 to 67 MB it
+was within 4% of unrolling or faster on one and four copies, and 1.0x to
+2.3x faster at twelve. Four chains are the common case, so `OP_LOOP` waits
+for the second budget. With both budgets, four corpus models
 change: `examplemodels_probit_multi_good` takes the lane form, and
 `ch12_m12_6`, `examplemodels_ms` and `nn_rbm1bJ100` take `OP_LOOP`. Their
 log-density programs shrink from 13 to 67 MB to under 0.2 MB. The models that

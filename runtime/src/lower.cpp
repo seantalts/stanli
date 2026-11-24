@@ -1286,9 +1286,9 @@ std::optional<CompiledModel> try_bounded_specialization(Lowering& lo,
 // cost 1.1-1.3x (notes/triage/2026-11-24-issue-657-region-map-boundary.md).
 // Past the budget, loops take the region map's lane form, which was faster
 // than unrolling at 1, 4 and 12 chains. OP_LOOP was 1.2-1.5x slower than
-// unrolling on 1 and 4 chains for the corpus programs of 9-30 MB, and as
-// fast or faster for those of 44-67 MB, so loops take it only past the
-// second budget. STANLI_PROGRAM_BUDGET and STANLI_LOOP_BUDGET override them
+// unrolling on 1 chain for the corpus programs of 9-30 MB, and within 4% or
+// faster on 1 and 4 chains for those of 44-67 MB, so loops take it only past
+// the second budget. STANLI_PROGRAM_BUDGET and STANLI_LOOP_BUDGET override them
 // in bytes; 0 turns the first off.
 constexpr int64_t kProgramBudgetBytes = int64_t{8} << 20;
 constexpr int64_t kLoopBudgetBytes = int64_t{32} << 20;
