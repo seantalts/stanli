@@ -981,19 +981,27 @@ only if its checks hold without it. Some cases that compare a run with and
 without a switch are like that today: they pass by comparing the default with
 itself, and only an ON build tests them.
 
-Nine tests and the 22 cogmod runs of the cross-path matrix
+Thirteen tests and the 22 cogmod runs of the cross-path matrix
 (`test_cross_path_cm_*`) are disabled in an OFF build, because almost every
 case in them needs a switch. They are in `STANLI_DEBUG_SWITCH_ONLY_TESTS`, and CTest
 reports `Not Run (Disabled)`: `test_cross_path`, `test_structured_loop`,
 `test_region_map`, `test_wa_parallel_switches`, `test_pass_dump_switches`,
 `test_prep_profile_reroll_dispositions`, `test_prep_work`, `test_ctsem_engine`
-and `test_data_loop_memo`. CTest reports those 31 as disabled in an OFF build.
+and `test_data_loop_memo`. The four `test_structured_loop_large_*` cases are
+also disabled.
+CTest reports those 35 as disabled in an OFF build.
+
+The structured-loop suite runs its four large-graph cases in separate
+processes. They share the `structured_large_graph` CTest resource lock, so
+parallel runs release one case's graphs before starting another. The ordinary
+suite and the switch-free forward suite remain separate. Running
+`test_structured_loop` directly without arguments still runs every case.
 
 CI runs CTest in the shipped OFF `build-rel/` on every platform, so the
 switch-free cases of the pass, lowering, write_array and sampler-parity tests
 run on macOS, Linux aarch64 and Windows x64 as well. The manylinux job's
 differential step builds ON and runs `ctest -L debug_switches`, which is
-where the skipped cases and the nine disabled tests run. The
+where the skipped cases and the thirteen disabled tests run. The
 AddressSanitizer job and the Windows ARM64 setup job, which run after a merge,
 also build ON. Locally:
 

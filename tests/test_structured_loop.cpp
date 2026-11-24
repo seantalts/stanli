@@ -2764,35 +2764,43 @@ static DataMap large_loop_data(const char* length, int trips, int states) {
 // A serial recursion large enough that unrolling it is slower than keeping
 // it as a loop, and a loop of the same size whose iterations are
 // independent once its scratch array is accounted for.
-static void large_loop_tests() {
+static DataMap large_recursion_data(int trips) {
   const int states = 5;
-  const auto recursion = [&](int trips) {
-    DataMap data = large_loop_data("T", trips, states);
-    std::vector<double> log_gamma;
-    for (int k = 0; k < states; ++k)
-      for (int j = 0; j < states; ++j)
-        log_gamma.push_back(std::log(j == k ? .6 : .1));
-    data.set_real_array("log_gamma", std::move(log_gamma), {states, states});
-    return data;
-  };
-  const auto small =
-      compile_fixture("structured_large_recursion", recursion(200), Mode::Auto);
+  DataMap data = large_loop_data("T", trips, states);
+  std::vector<double> log_gamma;
+  for (int k = 0; k < states; ++k)
+    for (int j = 0; j < states; ++j)
+      log_gamma.push_back(std::log(j == k ? .6 : .1));
+  data.set_real_array("log_gamma", std::move(log_gamma), {states, states});
+  return data;
+}
+
+static DataMap large_grouped_data() {
+  DataMap grouped = large_recursion_data(4500);
+  std::vector<int> group(4500);
+  for (size_t t = 0; t < group.size(); ++t) group[t] = 1 + int(t * t % 5);
+  grouped.set_int_array("group", std::move(group));
+  return grouped;
+}
+
+static void large_recursion_tests() {
+  const auto small = compile_fixture("structured_large_recursion",
+                                     large_recursion_data(200), Mode::Auto);
   check(retained(small) == nullptr, "a small recursion is unrolled");
   const auto large = compile_fixture("structured_large_recursion",
-                                     recursion(4500), Mode::Auto);
+                                     large_recursion_data(4500), Mode::Auto);
   check(retained(large) != nullptr, "a large recursion is kept as a loop");
-  const auto unrolled =
-      compile_fixture("structured_large_recursion", recursion(4500), Mode::Off);
+  const auto unrolled = compile_fixture("structured_large_recursion",
+                                        large_recursion_data(4500), Mode::Off);
   check(retained(unrolled) == nullptr, "structured loops off unrolls it");
   compare_gradients(large, unrolled,
                     {{.1, -.2, .3, .5, -.4, .2}, {1, 0, -1, 2, -2, -.5}},
                     "retained recursion target matches unrolled",
                     "retained recursion gradient matches unrolled");
+}
 
-  DataMap grouped = recursion(4500);
-  std::vector<int> group(4500);
-  for (size_t t = 0; t < group.size(); ++t) group[t] = 1 + int(t * t % 5);
-  grouped.set_int_array("group", std::move(group));
+static void large_refused_tests() {
+  const DataMap grouped = large_grouped_data();
   // A slice of varying length makes the retained loop refuse, so the loop
   // is unrolled a second time. That must start from the data accumulator's
   // value before the loop, not after it.
@@ -2802,6 +2810,10 @@ static void large_loop_tests() {
       {{.1, -.2, .3, .5, -.4, .2}},
       "target after a refused large loop matches unrolled",
       "gradient after a refused large loop matches unrolled");
+}
+
+static void large_sized_tests() {
+  const DataMap grouped = large_grouped_data();
   // Counts kept by a retained loop would exist only at run time, too late
   // to size the vector declared after it.
   const auto sized =
@@ -2812,7 +2824,9 @@ static void large_loop_tests() {
       sized, compile_fixture("structured_large_sized", grouped, Mode::Off),
       {{.1, -.2, .3, .5, -.4, .2}}, "target sized by loop counts",
       "gradient sized by loop counts");
+}
 
+static void large_scratch_tests() {
   const int trips = 13000;
   DataMap mixture = large_loop_data("N", trips, 6);
   mixture.set_real_array("w", std::vector<double>(6, 1.0 / 6));
@@ -2834,6 +2848,16 @@ static void large_loop_tests() {
             field("delta") >= 32 * size_t(trips),
         "the scratch loop is large enough to be kept otherwise");
 }
+
+struct LargeLoopCase {
+  const char* name;
+  void (*run)();
+};
+static const LargeLoopCase large_loop_cases[] = {
+    {"recursion", large_recursion_tests},
+    {"refused", large_refused_tests},
+    {"sized", large_sized_tests},
+    {"scratch", large_scratch_tests}};
 
 static void automatic_policy_tests() {
   const auto small_auto = compile_fixture("structured_counted", 4, Mode::Auto);
@@ -8973,6 +8997,17 @@ int main(int argc, char** argv) {
       std::printf("test_structured_loop forward-without-history OK\n");
     return failures != 0;
   }
+  const bool without_large_loops =
+      argc == 2 && std::string(argv[1]) == "--without-large-loops";
+  const bool large_loop_case =
+      argc == 3 && std::string(argv[1]) == "--large-loop-case";
+  if (argc != 1 && !without_large_loops && !large_loop_case) {
+    std::fprintf(stderr,
+                 "usage: test_structured_loop [--forward-without-history | "
+                 "--without-large-loops | --large-loop-case "
+                 "recursion|refused|sized|scratch]\n");
+    return 2;
+  }
   // This suite exercises retained plans, including their automatic selector.
   // Whole-program specialization has its own differential tests in test_lower.
   test_setenv("STANLI_BOUNDED_SPECIALIZATION", "0");
@@ -8980,6 +9015,17 @@ int main(int argc, char** argv) {
   test_unsetenv("STANLI_STRUCTURED_LOOP_DIAGNOSTICS");
   test_unsetenv("STANLI_STRUCTURED_FRAMES");
   test_setenv("STANLI_STRUCTURED_CHECK_REMAP", "1");
+  if (large_loop_case) {
+    for (const auto& test : large_loop_cases) {
+      if (test.name != std::string(argv[2])) continue;
+      test.run();
+      if (failures == 0)
+        std::printf("test_structured_loop large %s OK\n", test.name);
+      return failures != 0;
+    }
+    std::fprintf(stderr, "unknown large-loop case: %s\n", argv[2]);
+    return 2;
+  }
   if (std::getenv("STANLI_FUZZ_SEEDS")) {
     data_loop_memo_fuzz_tests();
     return failures != 0;
@@ -9021,7 +9067,8 @@ int main(int argc, char** argv) {
   refusal_tests();
   automatic_policy_tests();
   loop_carry_tests();
-  large_loop_tests();
+  if (!without_large_loops)
+    for (const auto& test : large_loop_cases) test.run();
   region_range_cache_tests();
   row_index_tests();
   prefer_parent_tests();
