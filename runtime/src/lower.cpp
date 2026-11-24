@@ -1346,6 +1346,39 @@ std::set<const mir::Stmt*> loops_over_budget(
   return chosen;
 }
 
+// Lowers log_prob again in a fresh Lowering that shares `lo`'s prepared
+// data, with `compact` lowered compact and `required` of them refused with
+// CompactRefused when no compact form takes them.
+CompiledModel lower_again(Lowering& lo, const mir::Program& p,
+                          const char* graph_name,
+                          const std::set<const mir::Stmt*>& compact,
+                          const std::set<const mir::Stmt*>& required,
+                          size_t ceiling, bool op_loop) {
+  // The prepared data can be as large as the graph, so the new Lowering
+  // borrows it from `lo` instead of copying it, and gives it back.
+  std::map<std::string, DataMap::Entry> lent;
+  for (const std::string& name : lo.prepared_names)
+    if (auto node = lo.td.env().extract(name)) lent.insert(std::move(node));
+  Lowering trial(lo.data, lo.prep, lo.dumper, graph_name,
+                 lo.prepared_context());
+  trial.td.env().merge(lent);
+  const ScopeExit give_back{[&] {
+    trial.restore_shadowed_prepared();
+    for (const std::string& name : lo.prepared_names)
+      if (auto node = trial.td.env().extract(name))
+        lo.td.env().insert(std::move(node));
+  }};
+  trial.compile_options = lo.compile_options;
+  trial.int_env_data = lo.int_env_data;
+  trial.data_prepared = true;
+  trial.out.transformed_data_draws = lo.out.transformed_data_draws;
+  trial.compact_loops = compact;
+  trial.required_compact = required;
+  trial.compact_op_loop = op_loop;
+  trial.unroll_ceiling = ceiling;
+  return trial.run(p);
+}
+
 // Lowers log_prob again with `chosen` (the budget's loops) and `capped`
 // (loops past the unroll ceiling) compact. A loop that passes the ceiling
 // joins `capped` and the lowering starts over; the last attempt has no
@@ -1361,18 +1394,9 @@ std::optional<CompiledModel> lower_compact(Lowering& lo, const mir::Program& p,
     if (chosen.empty() && capped.empty()) return std::nullopt;
     std::set<const mir::Stmt*> loops = chosen;
     loops.insert(capped.begin(), capped.end());
-    Lowering trial(lo.data, lo.prep, lo.dumper, "budget_log_prob",
-                   lo.prepared_context());
-    trial.compile_options = lo.compile_options;
-    trial.int_env_data = lo.int_env_data;
-    trial.data_prepared = true;
-    trial.out.transformed_data_draws = lo.out.transformed_data_draws;
-    trial.compact_loops = loops;
-    trial.required_compact = chosen;
-    trial.compact_op_loop = op_loop;
-    trial.unroll_ceiling = attempt < kAttempts ? ceiling : 0;
     try {
-      return trial.run(p);
+      return lower_again(lo, p, "budget_log_prob", loops, chosen,
+                         attempt < kAttempts ? ceiling : 0, op_loop);
     } catch (const Lowering::UnrollCeiling& c) {
       capped.insert(c.loop);
     } catch (const Lowering::CompactRefused& c) {
@@ -1687,14 +1711,19 @@ CompiledModel compile_model(const std::string& mir_text, const DataMap& data,
   if (!lowered) {
     lowered = lower_compact(lo, *prog, {}, {past_ceiling}, ceiling, true);
   } else if (!specialized_path) {
-    const bool op_loop = Executor::program_bytes(lowered->graph) > loop_budget;
+    const int64_t first_bytes = Executor::program_bytes(lowered->graph);
+    const bool op_loop = first_bytes > loop_budget;
     const auto loops =
         loops_over_budget(lo.unrolled_loops, lowered->graph, budget, op_loop);
     if (!loops.empty()) {
-      auto compact = lower_compact(lo, *prog, loops, {}, ceiling, op_loop);
-      if (compact && Executor::program_bytes(compact->graph) <
-                         Executor::program_bytes(lowered->graph))
-        lowered = std::move(compact);
+      // Hold one graph at a time: free the first, and lower it again if
+      // the compact graph is not smaller.
+      lowered.reset();
+      lowered = lower_compact(lo, *prog, loops, {}, ceiling, op_loop);
+      if (lowered && Executor::program_bytes(lowered->graph) >= first_bytes)
+        lowered.reset();
+      if (!lowered)
+        lowered = lower_again(lo, *prog, "log_prob", {}, {}, 0, false);
     }
   }
   CompiledModel cm = std::move(*lowered);

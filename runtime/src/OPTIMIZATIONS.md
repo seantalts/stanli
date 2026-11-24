@@ -1338,8 +1338,15 @@ included. The largest loop in the corpus unrolls to about 180,000 ops, so
 the ceiling stops only much larger loops, such as one over ten million rows.
 If no compact form takes such a loop, the last attempt unrolls it anyway.
 
-The cost is a second lowering for the models over the budget. An
-out-of-range index raises the same error in every form of a loop: each
+The cost is a second lowering for the models over the budget. It runs
+after the first graph is freed and borrows the prepared data from the first
+lowering instead of copying it, so the two graphs and two copies of the data
+are never held at once. When the compact graph is not smaller, log_prob is
+lowered a third time without the budget. On `nn_rbm1bJ100` (184 MB of data
+as JSON), peak memory during preparation stays at 3.3 GB, as without the
+budget, and preparation takes 2.8 s.
+
+An out-of-range index raises the same error in every form of a loop: each
 dynamic index read carries the label of Stan's error for its selector
 (`label_dynamic_index` in `structured_loop.cpp`), so the region map and
 `OP_LOOP` raise the error that the unrolled graph raises, such as

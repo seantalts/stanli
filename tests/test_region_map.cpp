@@ -3033,7 +3033,8 @@ void test_budget_without_compact_form() {
                   {{"STANLI_PROGRAM_BUDGET", "65536"},
                    {"STANLI_LOOP_BUDGET", "1000000000"},
                    {"STANLI_REGION_MAP_LANES", "0"}});
-  check(histogram(refused) == histogram(off),
+  check(histogram(refused) == histogram(off) &&
+            program_bytes(refused) == program_bytes(off),
         "budget_mix: with no compact form the loop stays unrolled");
   expect_same_gradients("budget_mix refused vs unrolled", refused, off,
                         mix_points);
@@ -3141,6 +3142,54 @@ void test_budget_index_errors() {
     expect_same_index_error("region_map_oob N=" + std::to_string(rows),
                             "region_map_oob", rows, branch_forms, "",
                             {0.3, -0.5}, "vector[uni] indexing");
+}
+
+// The second lowering borrows the prepared data and gives it back, so
+// write_array, lowered after it, and the write_array interpreter read the
+// same data and transformed data as without a budget.
+std::vector<double> write_array_row(const char* interp, const char* budget,
+                                    const Params& p) {
+  std::vector<std::pair<const char*, const char*>> env = {
+      {"STANLI_PROGRAM_BUDGET", budget}};
+  if (interp) env.push_back({"STANLI_WA_FORCE_INTERP", "1"});
+  CompiledModel cm = compile_env("budget_gq", 256, env);
+  check(count_opcode(cm, OP_REGION_MAP) == (budget[0] == '0' ? 0 : 1),
+        std::string("budget_gq: budget ") + budget + " form");
+  Executor ex(cm.graph);
+  cm.bind(ex);
+  (void)evaluate(ex, p);
+  std::vector<double> row;
+  if (!cm.write_array) {
+    check(false, "budget_gq: no write_array");
+    return row;
+  }
+  stanli::WaRng rng(7);
+  if (interp) {
+    check(cm.write_array->interp != nullptr, "budget_gq: interpreter");
+    if (!cm.write_array->interp) return row;
+    return cm.write_array->interp->eval(cm.constrained_env(ex), rng);
+  }
+  Executor wex(cm.write_array->graph);
+  cm.write_array->bind(wex);
+  std::copy(ex.params_data(), ex.params_data() + p.size(), wex.params_data());
+  wex.run_forward_only(stanli::EvalState{&rng});
+  for (const auto& c : cm.write_array->columns) {
+    const double* v = std::as_const(wex).value_ptr(c.slot);
+    row.insert(row.end(), v, v + c.len);
+  }
+  return row;
+}
+
+void test_budget_returns_prepared_data() {
+  const Params p = {0.2, -0.5, 0.3, -0.1};
+  for (const char* interp : {(const char*)nullptr, "1"}) {
+    const std::string what =
+        std::string("budget_gq write_array") + (interp ? " interpreter" : "");
+    const std::vector<double> off = write_array_row(interp, "0", p);
+    const std::vector<double> on = write_array_row(interp, "65536", p);
+    check(!off.empty() && on == off,
+          what + ": same values with and without the budget");
+  }
 }
 
 // A budget fallback adds a long target sum with compensation
@@ -3286,6 +3335,7 @@ int main() {
   test_budget_fallback_sums_accurately();
   test_budget_without_compact_form();
   test_budget_index_errors();
+  test_budget_returns_prepared_data();
   test_setenv("STANLI_REGION_MAP_LANES", "0", 1);
   test_large_body_recomputes_by_default();
   test_clear_strategy_follows_mode();
