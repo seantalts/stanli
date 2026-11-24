@@ -103,13 +103,15 @@ std::vector<double> InitInterp::eval(
     const auto it = inits.find(p.key);
     if (it == inits.end()) {
       // CmdStan draws a parameter that the inits leave out. A zero-size one
-      // has nothing to draw, and absence is the only way to give one of rank
-      // 2 or more, because the check below rejects [] for it, as CmdStan does.
+      // has nothing to draw.
       if (p.constrained_len == 0) continue;
       refuse("no starting value for parameter " + p.key);
     }
+    // The data rule: any value with no elements, or a scalar, satisfies a
+    // zero-size parameter and gives it no values.
     check_declared_dims(VarStage::ParameterInit, p.key, p.dims, it->second,
                         false);
+    if (p.constrained_len == 0) continue;
     const int64_t got =
         (int64_t)std::max(it->second.r.size(), it->second.i.size());
     if (got != p.constrained_len)
@@ -132,6 +134,7 @@ std::vector<double> InitInterp::eval(
     const auto given = inits.find(p.key);
     DataMap::Entry e = given == inits.end() ? DataMap::Entry{} : given->second;
     if (e.r.empty() && !e.i.empty()) e.r.assign(e.i.begin(), e.i.end());
+    if (p.constrained_len == 0) e.r.clear();
     if (const mir::detail::TupleLeaf* leaf =
             mir::detail::tuple_leaf(*prog_, p.name)) {
       const std::vector<size_t> source =

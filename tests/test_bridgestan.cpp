@@ -1245,6 +1245,34 @@ void test_whitened_manifest() {
     fail("a whitening with a zero diagonal was accepted");
 }
 
+// Real BridgeStan reads bs_param_unconstrain_json with the data rule, so []
+// stands for any zero-size parameter, which is all that Python and R can
+// write for a matrix[0, 3].
+void test_unconstrain_json_zero_size() {
+  const std::string mir = slurp("tests/fixtures/zero_size_params.tmir.sexp");
+  char* err = nullptr;
+  bs_model* m = bs_model_from_mir(mir.c_str(), "{}", 1, &err);
+  if (m == nullptr) {
+    fail(std::string("zero-size construct: ") + (err ? err : "(no message)"));
+    bs_free_error_msg(err);
+    return;
+  }
+  std::vector<double> back((size_t)bs_param_unc_num(m), 0.0);
+  err = nullptr;
+  const int rc = bs_param_unconstrain_json(
+      m, R"({"mu": 0.1, "m0": [], "a0": [], "b": [0.2]})", back.data(), &err);
+  expect_eq_int(std::string("bs_param_unconstrain_json with [] for zero-size "
+                            "parameters: ") +
+                    (err ? err : ""),
+                rc, 0);
+  bs_free_error_msg(err);
+  if (rc == 0 && back.size() == 2) {
+    expect_bitwise("zero-size unconstrain mu", back[0], 0.1);
+    expect_bitwise("zero-size unconstrain b", back[1], 0.2);
+  }
+  bs_model_destruct(m);
+}
+
 void test_construct_errors() {
   char* err = nullptr;
   // A model that cannot be compiled fails as a null return with a message,
@@ -1401,6 +1429,7 @@ int main() {
   test_embedded_manifest();
   test_whitened_manifest();
   test_construct_errors();
+  test_unconstrain_json_zero_size();
   if (failures == 0) std::printf("test_bridgestan OK\n");
   return failures == 0 ? 0 : 1;
 }

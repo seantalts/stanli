@@ -2900,10 +2900,11 @@ Compilation compile(const std::string& code, const char* filename) {
   return out;
 }
 
-// A starting value's shape follows CmdStan's rule for inits, which differs
-// from its rule for data: the dims must match exactly, and an empty value
-// does not stand in for a zero-size parameter of another rank. A zero-size
-// parameter may be left out. Each expected message is the one CmdStan 2.38
+// A starting value's shape follows the rule for data: the dims must match,
+// apart from extents of 1, and any value with no elements stands in for a
+// zero-size parameter, because R and numpy can only write [] for one.
+// CmdStan's sampler accepts only the exact rank there. A zero-size parameter
+// may also be left out. Each expected message is the one CmdStan 2.38
 // printed for the same document.
 void expect_init_shapes_follow_cmdstan() {
   if (!stanli_has_embedded_stanc()) return;
@@ -2973,22 +2974,14 @@ void expect_init_shapes_follow_cmdstan() {
        dim + "variable name=atp.2; position=1; dims declared=(2,2); dims "
              "found=(2,1)"},
       {"an empty vector[0]", {{"z", "[]"}}, ""},
-      {"a scalar for vector[0]",
-       {{"z", "1.0"}},
-       ndims + "variable name=z; dims declared=(0); dims found=()"},
-      {"an empty matrix[0, 3]",
-       {{"Z", "[]"}},
-       ndims + "variable name=Z; dims declared=(0,3); dims found=(0)"},
-      {"rows for matrix[0, 3]",
-       {{"Z", "[[], [], []]"}},
-       dim + "variable name=Z; position=0; dims declared=(0,3); dims "
-             "found=(3,0)"},
-      {"an empty array[0] vector[3]",
-       {{"a0", "[]"}},
-       ndims + "variable name=a0; dims declared=(0,3); dims found=(0)"},
-      {"an empty array[2] vector[0]",
-       {{"a20", "[]"}},
-       ndims + "variable name=a20; dims declared=(2,0); dims found=(0)"},
+      {"a scalar for vector[0]", {{"z", "1.0"}}, ""},
+      {"an empty matrix[0, 3]", {{"Z", "[]"}}, ""},
+      {"rows for matrix[0, 3]", {{"Z", "[[], [], []]"}}, ""},
+      {"an empty array[0] vector[3]", {{"a0", "[]"}}, ""},
+      {"an empty array[2] vector[0]", {{"a20", "[]"}}, ""},
+      {"every zero-size parameter empty",
+       {{"z", "[]"}, {"Z", "[]"}, {"a0", "[]"}, {"a20", "[]"}},
+       ""},
       {"array[2] vector[0] nested", {{"a20", "[[], []]"}}, ""},
   };
   std::vector<double> q((size_t)stanli_n_unconstrained(model));

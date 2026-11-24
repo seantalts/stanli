@@ -555,9 +555,8 @@ complete_partial_inits <- function(model, values, init_radius, seed) {
                        length(columns))
   declared <- column_variables(variables)
   filled <- split(drawn, factor(declared, levels = names(variables)))
-  # Each drawn value in its declared shape, which CmdStan requires of a
-  # starting value. A zero-size parameter is left out: [] cannot give the
-  # shape of one with two or more dimensions.
+  # Each drawn value in its declared shape. A zero-size parameter has no
+  # drawn values, so it is left out.
   filled <- Map(function(value, dims) {
     if (length(dims) && prod(dims) == 0) NULL
     else if (length(dims)) array(value, dim = dims) else value

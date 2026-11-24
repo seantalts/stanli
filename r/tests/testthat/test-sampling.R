@@ -153,6 +153,21 @@ test_that("partial starting values keep each parameter's shape", {
                "dims declared=\\(2,3\\); dims found=\\(3,2\\)")
 })
 
+test_that("an empty value is a starting value for any zero-size parameter", {
+  skip_without_runtime()
+  m <- stanli_model(code = "
+    parameters { real mu; matrix[0, 3] m0; array[0] vector[2] a0;
+      vector[0] z0; vector[1] b; }
+    model { mu ~ normal(0, 1); b ~ normal(0, 1); }")
+  expect_equal(unconstrain(m, list(mu = 0.1, m0 = matrix(0, 0, 3),
+                                   a0 = array(0, c(0, 2)), z0 = numeric(0),
+                                   b = 0.2)), c(0.1, 0.2))
+  expect_equal(unconstrain(m, list(mu = 0.1, m0 = matrix(0, 0, 3)),
+                           partial = TRUE, seed = 1)[1], 0.1)
+  expect_equal(unconstrain(m, list(mu = 0.1, a0 = list()), partial = TRUE,
+                           seed = 1)[1], 0.1)
+})
+
 test_that("unconstrain can drop names that are not parameters", {
   skip_without_runtime()
   m <- stanli_model(code = "
