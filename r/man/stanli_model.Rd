@@ -22,7 +22,9 @@ stanli_model(
 \item{code}{Model source, as an alternative to `file`.}
 
 \item{data}{A named list of data, or a path to a JSON data file. The
-  values are written as cmdstanr's `write_stan_json()` writes them. An R
+  values are written much as cmdstanr's `write_stan_json()` writes them,
+  but without the data declarations, so a few spellings differ; the
+  stanli guide for cmdstanr users lists them. An R
   array of any rank is written with its first index outermost, so a
   matrix is an array of rows. A list is an array of its elements, whatever
   its names, so `array[K] vector[N]` can be a list of K vectors or a

@@ -11,7 +11,8 @@ json_scalar <- function(x) {
 
 # Stan's JSON data format, written without a JSON dependency: the values
 # are numbers, strings, and arrays nested to any depth, a small enough
-# grammar to emit directly. The rules follow cmdstanr's write_stan_json: a
+# grammar to emit directly. The rules follow cmdstanr's write_stan_json where
+# they do not need the declarations: a
 # factor goes out as its integer codes, a data frame as data.matrix() makes
 # it, a logical as 1 or 0, and a list as an array of its elements, whatever
 # its names. The one exception is a list named "1", "2", ..., which is a
@@ -99,7 +100,9 @@ read_utf8_file <- function(path) {
 #' @param file Path to a `.stan` file.
 #' @param code Model source, as an alternative to `file`.
 #' @param data A named list of data, or a path to a JSON data file. The
-#'   values are written as cmdstanr's `write_stan_json()` writes them. An R
+#'   values are written much as cmdstanr's `write_stan_json()` writes them,
+#'   but without the data declarations, so a few spellings differ; the
+#'   stanli guide for cmdstanr users lists them. An R
 #'   array of any rank is written with its first index outermost, so a
 #'   matrix is an array of rows. A list is an array of its elements, whatever
 #'   its names, so `array[K] vector[N]` can be a list of K vectors or a
