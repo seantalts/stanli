@@ -276,6 +276,71 @@ test_that("a failing compiler is not hidden by partial output", {
     "source-bearing syntax error")
 })
 
+test_that("a compiler that never starts names its path, status and warning", {
+  compiler <- file.path("C:", "stanli", "lib", "stanli-compile.exe")
+  run_stanc <- function(compiler, args, stdout, stderr) {
+    warning("running command 'x' had status 127")
+    127L
+  }
+
+  expect_no_warning(
+    err <- expect_error(
+      stanli:::mir_from_binary(compiler, "model {}", run_stanc = run_stanc)))
+  msg <- conditionMessage(err)
+  expect_match(msg, compiler, fixed = TRUE)
+  expect_match(msg, "status 127", fixed = TRUE)
+  expect_match(msg, "running command 'x' had status 127", fixed = TRUE)
+  expect_match(msg, "R could not run the program", fixed = TRUE)
+  expect_match(msg, "stanli::stanli_install(overwrite = TRUE)", fixed = TRUE)
+  expect_match(msg, "antivirus", fixed = TRUE)
+  expect_no_match(msg, "produced no MIR", fixed = TRUE)
+})
+
+test_that("a compiler that exits cleanly with no output names its path", {
+  run_stanc <- function(compiler, args, stdout, stderr) {
+    file.create(stdout, stderr)
+    0L
+  }
+
+  err <- expect_error(
+    stanli:::mir_from_binary("/opt/stanli/stanli-compile", "model {}",
+                             run_stanc = run_stanc))
+  msg <- conditionMessage(err)
+  expect_match(msg, "/opt/stanli/stanli-compile", fixed = TRUE)
+  expect_match(msg, "status 0", fixed = TRUE)
+  expect_match(msg, "stanli::stanli_install(overwrite = TRUE)", fixed = TRUE)
+  expect_no_match(msg, "R could not run the program", fixed = TRUE)
+})
+
+test_that("compiler diagnostics on stderr are reported unchanged", {
+  run_stanc <- function(compiler, args, stdout, stderr) {
+    warning("running command 'x' had status 1")
+    writeLines("Syntax error in 'model.stan', line 1", stderr)
+    1L
+  }
+
+  expect_no_warning(
+    err <- expect_error(
+      stanli:::mir_from_binary("fake-stanli-compile", "bad model",
+                               run_stanc = run_stanc)))
+  expect_identical(conditionMessage(err),
+                   "stanc failed:\nSyntax error in 'model.stan', line 1\n")
+})
+
+test_that("a warning from a successful compiler run is not shown", {
+  run_stanc <- function(compiler, args, stdout, stderr) {
+    warning("unrelated system2 warning")
+    writeChar("STANLI5:ZmFrZQ==", stdout, eos = NULL, useBytes = TRUE)
+    file.create(stderr)
+    write_messages(args)
+    0L
+  }
+
+  expect_no_warning(
+    stanli:::mir_from_binary("fake-stanli-compile", "model {}",
+                             run_stanc = run_stanc))
+})
+
 test_that("native discovery finds stanli-compile beside the runtime only", {
   work <- tempfile("stanli-compiler-discovery-")
   dir.create(work)

@@ -216,6 +216,30 @@ js_string_literal <- function(value) {
   encodeString(enc2utf8(value), quote = "'")
 }
 
+# The compiler prints every error of its own to stderr, so a failure with
+# empty stderr means that the program did not run to completion.
+silent_compiler_failure <- function(compiler, status, r_warnings) {
+  status <- as.integer(status)
+  shown_status <- if (length(status) == 1L && !is.na(status))
+    as.character(status) else "unknown"
+  paste0(
+    "stanc failed: the Stan compiler exited with status ", shown_status,
+    " and printed no error message.\n",
+    "Compiler: ", compiler, "\n",
+    if (length(r_warnings))
+      paste0("R reported: ", paste(r_warnings, collapse = "\n"), "\n"),
+    if (identical(status, 127L))
+      "Status 127 means that R could not run the program.\n",
+    "The compiler prints an error for every problem that it finds, so this ",
+    "means that the program did not start or was stopped before it ",
+    "finished.\n",
+    "To fix this:\n",
+    "1. In a fresh R session, run stanli::stanli_install(overwrite = TRUE) ",
+    "to download the runtime again.\n",
+    "2. If it still fails, check whether security or antivirus software on ",
+    "this machine blocked or removed ", compiler, ", and allow it.")
+}
+
 mir_from_binary <- function(compiler, code, run_stanc = system2,
                             include_paths = character(), fast_math = FALSE,
                             file = NULL) {
@@ -235,19 +259,25 @@ mir_from_binary <- function(compiler, code, run_stanc = system2,
   name_args <- if (is.null(file)) character() else c("--filename", shQuote(file))
   args <- c(if (fast_math) "--fast-math", name_args, include_args,
             "--messages-json", shQuote(messages_file), shQuote(source))
+  r_warnings <- character()
   status <- tryCatch(
-    suppressWarnings(run_stanc(compiler, args, stdout = stdout_file,
-                               stderr = stderr_file)),
+    withCallingHandlers(
+      run_stanc(compiler, args, stdout = stdout_file, stderr = stderr_file),
+      warning = function(w) {
+        r_warnings <<- c(r_warnings, conditionMessage(w))
+        invokeRestart("muffleWarning")
+      }),
     error = function(e) {
       stop("could not run the bundled Stan compiler: ", conditionMessage(e),
            call. = FALSE)
     })
   out <- read_compiler_output(stdout_file)
   diagnostics <- read_compiler_output(stderr_file)
-  if (!identical(as.integer(status), 0L) || !nzchar(out))
-    stop("stanc failed:\n",
-         if (nzchar(diagnostics)) diagnostics else "stanc produced no MIR",
-         call. = FALSE)
+  if (!identical(as.integer(status), 0L) || !nzchar(out)) {
+    if (nzchar(diagnostics))
+      stop("stanc failed:\n", diagnostics, call. = FALSE)
+    stop(silent_compiler_failure(compiler, status, r_warnings), call. = FALSE)
+  }
   messages <- jsonlite::fromJSON(read_compiler_output(messages_file),
                                  simplifyVector = TRUE)
   warn_compiler(as.character(messages$warnings))
