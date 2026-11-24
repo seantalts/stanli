@@ -98,13 +98,24 @@ read_utf8_file <- function(path) {
 #'
 #' @param file Path to a `.stan` file.
 #' @param code Model source, as an alternative to `file`.
-#' @param data A named list of data, or a path to a JSON data file. An R
+#' @param data A named list of data, or a path to a JSON data file. The
+#'   values are written as cmdstanr's `write_stan_json()` writes them. An R
 #'   array of any rank is written with its first index outermost, so a
-#'   matrix is an array of rows; an unnamed list is an array of its elements,
-#'   which is how to pass `array[K] matrix[N, M]`, `array[K] vector[N]` and
-#'   arrays of them. Zero-length extents are kept. A length-1 R vector
-#'   works for a declaration whose extents are all 1, such as `vector[1]`
-#'   or `array[1] real`.
+#'   matrix is an array of rows. A list is an array of its elements, whatever
+#'   its names, so `array[K] vector[N]` can be a list of K vectors or a
+#'   K x N matrix. A list named `"1"`, `"2"`, ... is a tuple instead, so give
+#'   `unname(split(x, g))` when the groups are the numbers 1, 2 and so on.
+#'   A factor is written
+#'   as its integer codes, a data frame as `data.matrix()` makes it and a
+#'   logical as 1 or 0. `NA` is an error; `NaN` is Stan's NaN. Zero-length
+#'   extents are kept.
+#'
+#'   The dims of each value must match its declaration, except that extents
+#'   of 1 may be added or left out, because R drops and adds them: a
+#'   length-1 vector works for `vector[1]` or `array[1] real`, `scale(x)`
+#'   for `vector[N]`, `list(1, 2, 3)` for `array[3] vector[1]`, and
+#'   `array(x, 1)` for a `real`. A transposed matrix or a flat vector for a
+#'   matrix is an error, as in CmdStan.
 #' @param mir Transformed MIR text, for a build without the embedded
 #'   compiler. Rarely needed.
 #' @param threads_per_chain Positive thread count for eligible native `reduce_sum`
@@ -468,10 +479,12 @@ parameter_names <- function(model, scalars = FALSE) {
 #' Unless `partial = TRUE`, every declared parameter must appear, at its
 #' declared size. A missing,
 #' unknown, wrong-length, or out-of-support value is an error naming the
-#' parameter. Each value has its declared shape, as CmdStan requires of a
-#' starting value: a matrix as an R matrix. A length-1 R vector works for a
-#' parameter whose extents are all 1, such as `vector[1]`. A flat vector for
-#' a matrix is an error. A zero-size parameter may be left out.
+#' parameter. Each value has its declared shape: a matrix as an R matrix.
+#' As for data, extents of 1 may
+#' be added or left out, so a length-1 R vector works for `vector[1]` and a
+#' 1 x 1 matrix for a `real`. A flat vector for a matrix is an error. A
+#' zero-size parameter may be left out or given any empty value, such as
+#' `matrix(0, 0, 3)` or `list()`.
 #'
 #' The result is what `sample_model(init = )` and `optimize_model(init = )`
 #' take, so unconstraining is a step per starting point rather than a second

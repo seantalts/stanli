@@ -41,10 +41,12 @@ A numeric vector of length `model$n_unconstrained`.
 Unless `partial = TRUE`, every declared parameter must appear, at its
 declared size. A missing,
 unknown, wrong-length, or out-of-support value is an error naming the
-parameter. Each value has its declared shape, as CmdStan requires of a
-starting value: a matrix as an R matrix. A length-1 R vector works for a
-parameter whose extents are all 1, such as `vector[1]`. A flat vector for
-a matrix is an error. A zero-size parameter may be left out.
+parameter. Each value has its declared shape: a matrix as an R matrix.
+As for data, extents of 1 may
+be added or left out, so a length-1 R vector works for `vector[1]` and a
+1 x 1 matrix for a `real`. A flat vector for a matrix is an error. A
+zero-size parameter may be left out or given any empty value, such as
+`matrix(0, 0, 3)` or `list()`.
 }
 \details{
 The result is what `sample_model(init = )` and `optimize_model(init = )`

@@ -33,6 +33,25 @@ RStan can use `as_stanfit()` or `as_rfit()`. The
 [fit adapters table](../r/README.md#fit-adapters) says what each returns,
 needs, and cannot do.
 
+## Data
+
+stanli writes an R data list the way cmdstanr's `write_stan_json()` does. A
+factor goes out as its integer codes, a data frame as `data.matrix()` makes
+it, a logical as 1 or 0 and a list as an array of its elements. `NA` is an
+error, "Variable 'x' has NA values.", as in cmdstanr. These differ:
+
+- stanli also accepts a value whose dims differ from the declared ones only
+  by extents of 1, because R drops and adds them. A length-1 vector works for
+  `vector[1]` and `matrix[1, 1]`, an N x 1 matrix such as `scale(x)` works for
+  `vector[N]`, and `array(x, 1)` works for a `real`. cmdstanr wraps only a
+  length-1 value for a declaration with one dimension. A transposed matrix or
+  a flat vector for a matrix is an error in both.
+- A list named `"1"`, `"2"`, ... is a tuple. `split(x, g)` with the groups 1,
+  2, ... gives such names, so pass `unname(split(x, g))` for an array.
+- `NaN` goes out as Stan's NaN. cmdstanr rejects it with the `NA` error.
+- cmdstanr truncates a non-integer value for an `int` with a warning. stanli
+  rejects it, as CmdStan does.
+
 ## Initialization and saved warmup
 
 In cmdstanr, initial values are constrained parameter lists, functions or

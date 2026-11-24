@@ -232,8 +232,10 @@ int64_t stanli_n_unconstrained(const stanli_model* m);
  * free values the samplers and stanli_grad read.
  *
  * `inits_json` is a CmdStan-style JSON object naming every declared
- * parameter, except that a zero-size one may be left out. Each value must
- * have its declared dims, checked as CmdStan checks a starting value. Writes
+ * parameter, except that a zero-size one may be left out. Each value is
+ * checked by CmdStan's rule for JSON data: its dims must be the declared
+ * ones, and any empty value, such as [], stands for a zero-size parameter.
+ * Unlike CmdStan, extents of 1 may also be added or left out. Writes
  * n_unconstrained doubles to `q`. Returns 0 on success, or nonzero with a
  * message in err: a missing, unknown, wrongly shaped, or out-of-support value
  * names the parameter, and a model whose MIR carries no inverse parameter
