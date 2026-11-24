@@ -119,6 +119,19 @@ int64_t index_read_positions(const DynamicIndexSpec& spec, const KernelCtx& c,
 
 void structured_loop_forward(KernelCtx& ctx);
 void structured_loop_backward(KernelCtx& ctx);
+
+// Whether the selection has no runtime count or extent, so that every read
+// through the spec has the same geometry and only its selectors vary.
+bool index_selection_static(const DynamicIndexSpec& spec);
+
+// index_read_positions and the OP_INDEX_DYNAMIC forward without their
+// checks, for a static selection whose selector values have already passed
+// them in a read bound the same way.
+int64_t index_trusted_positions(const DynamicIndexSpec& spec,
+                                const KernelCtx& c, double* positions,
+                                int64_t stride);
+void index_trusted_read(KernelCtx& c);
+
 void register_structured_loop_kernel();
 
 }  // namespace stanli

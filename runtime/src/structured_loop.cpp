@@ -3491,6 +3491,105 @@ int64_t index_read_positions(const DynamicIndexSpec& spec, const KernelCtx& c,
   return n;
 }
 
+bool index_selection_static(const DynamicIndexSpec& spec) {
+  return static_selection(spec);
+}
+
+namespace {
+// The positions of a static selection, in output order, without checks. Its
+// logical extents are the fixed capacities, so its strides are the spec's
+// own (validate_index proves that they match). The axes are walked as
+// selected_position consumes them, the first one fastest, with an odometer
+// instead of a division per axis and element.
+template <class F>
+int64_t trusted_positions(const DynamicIndexSpec& p, const KernelCtx& c,
+                          F&& f) {
+  const size_t rank = p.axes.size();
+  constexpr size_t kInline = 8;
+  size_t order_inline[kInline];
+  int64_t at_inline[kInline];
+  std::unique_ptr<size_t[]> order_heap;
+  std::unique_ptr<int64_t[]> at_heap;
+  size_t* order = order_inline;
+  int64_t* at = at_inline;
+  if (rank > kInline) {
+    order_heap.reset(new size_t[rank]);
+    at_heap.reset(new int64_t[rank]);
+    order = order_heap.get();
+    at = at_heap.get();
+  }
+  const size_t outer = rank - (p.matrix_leaf ? 2 : 0);
+  size_t k = 0;
+  if (p.matrix_leaf) {
+    order[k++] = outer;
+    order[k++] = outer + 1;
+  }
+  for (size_t d = outer; d-- > 0;) order[k++] = d;
+  const auto offset = [&](size_t d, int64_t ordinal) -> int64_t {
+    const auto& axis = p.axes[d];
+    const double* selector =
+        axis.kind == DynamicIndexSpec::Axis::All
+            ? nullptr
+            : c.in[axis.selector_input].data + axis.input_offset;
+    int64_t index = 0;
+    switch (axis.kind) {
+      case DynamicIndexSpec::Axis::All:
+        index = ordinal;
+        break;
+      case DynamicIndexSpec::Axis::Single:
+        index = static_cast<int64_t>(selector[0]) - 1;
+        break;
+      case DynamicIndexSpec::Axis::Multi:
+        index = static_cast<int64_t>(selector[ordinal]) - 1;
+        break;
+      case DynamicIndexSpec::Axis::Range:
+        index = static_cast<int64_t>(selector[0]) - 1 + ordinal;
+        break;
+    }
+    return index * axis.stride;
+  };
+  int64_t selected = 1, position = 0;
+  for (size_t d = 0; d < rank; ++d) {
+    selected *= p.axes[d].count;
+    at[d] = 0;
+  }
+  if (selected == 0) return 0;
+  for (size_t d = 0; d < rank; ++d) position += offset(d, 0);
+  for (int64_t i = 0;;) {
+    f(i, position);
+    if (++i == selected) break;
+    for (size_t j = 0; j < rank; ++j) {
+      const size_t d = order[j];
+      const int64_t before = offset(d, at[d]);
+      if (++at[d] < p.axes[d].count) {
+        position += offset(d, at[d]) - before;
+        break;
+      }
+      at[d] = 0;
+      position += offset(d, 0) - before;
+    }
+  }
+  return selected;
+}
+}  // namespace
+
+int64_t index_trusted_positions(const DynamicIndexSpec& spec,
+                                const KernelCtx& c, double* positions,
+                                int64_t stride) {
+  return trusted_positions(spec, c, [&](int64_t i, int64_t at) {
+    positions[i * stride] = static_cast<double>(at);
+  });
+}
+
+void index_trusted_read(KernelCtx& c) {
+  const auto& p = *static_cast<const DynamicIndexSpec*>(c.udata);
+  const double* in = c.in[0].data;
+  double* out = c.out.data;
+  const int64_t selected = trusted_positions(
+      p, c, [&](int64_t i, int64_t position) { out[i] = in[position]; });
+  std::fill(out + selected, out + c.out.len, 0.0);
+}
+
 void StructuredLoop::prepare() {
   initial_size = 0;
   for (auto& s : body.slots) {

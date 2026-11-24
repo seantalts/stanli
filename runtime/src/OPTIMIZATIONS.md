@@ -1225,6 +1225,17 @@ parameter reaches it, and the adjoint generator then clears the input adjoint
 of an index read or write, a dot product or a sum whose input no parameter
 reaches. Islands get the same masks from the carver's activity.
 
+The lane form checks the index of each read in every lane. The backward does
+not check again, because the forward of the same evaluation checked the same
+index values. The forward skips its checks too when the index values are the
+same in every evaluation: they come only from the loop variable, constants and
+data, and no branch on a parameter decides whether the read runs
+(`find_proven_gathers` in `region_map_lanes.cpp`). The first evaluation of each
+executor runs every check. When it succeeds, the region map sets one cell of
+its scratch, and later evaluations of that executor skip the checks. An
+out-of-range index therefore throws the same error at the same evaluation as
+before, and keeps throwing, because a failed evaluation never sets the cell.
+
 Each iteration computes the same scalar operations as the unrolled graph. The
 op adds the iteration terms in order and then adds that total to the rest of
 the target, which regroups the sum within the ULP policy. In the lane form,

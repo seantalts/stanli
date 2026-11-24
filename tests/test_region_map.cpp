@@ -2727,6 +2727,169 @@ void test_gather_out_of_range() {
   }
 }
 
+// Data indices in a mapped body (region_map_data_index.stan). The first
+// loop reads h[n], X[n], z[, g[n]] and w[h[n]] with data selectors. The second
+// reads z[j] with j computed from a parameter. The third reads z[, g[n]] on
+// every lane and X[n] only on the lanes that a parameter branch selects.
+std::string data_index_extra(int n, int J, int bad_row) {
+  std::ostringstream out;
+  out.precision(17);
+  out << "\"J\":" << J << ",\"K\":2,\"X\":[";
+  for (int i = 0; i < n; ++i)
+    out << (i ? ",[" : "[") << std::cos(0.3 * i) << ","
+        << std::sin(0.7 * i + 0.1) << "]";
+  out << "],\"g\":[";
+  for (int i = 0; i < n; ++i)
+    out << (i ? "," : "") << (i == bad_row ? J + 1 : (i * 7) % J + 1);
+  out << "],\"h\":[";
+  for (int i = 0; i < n; ++i)
+    out << (i ? ",[" : "[") << (i * 5) % J + 1 << "," << (i * 3 + 2) % J + 1
+        << "," << (i * 5) % J + 1 << "]";
+  out << "]";
+  return out.str();
+}
+
+std::vector<const stanli::RegionMapProg*> map_payloads(
+    const CompiledModel& cm) {
+  std::vector<const stanli::RegionMapProg*> maps;
+  for (const stanli::Op& op : cm.graph.ops)
+    if (op.opcode == OP_REGION_MAP)
+      maps.push_back(static_cast<const stanli::RegionMapProg*>(op.udata));
+  return maps;
+}
+
+// Whether each OP_INDEX_DYNAMIC read, keyed by its container's length, may
+// skip its checks once an evaluation has passed them.
+std::map<int, bool> proven_reads(const stanli::RegionMapProg& p) {
+  std::map<int, bool> by_len;
+  if (!p.lanes.active) return by_len;
+  for (size_t i = 0; i < p.calls.size(); ++i)
+    if (p.calls[i].opcode == stanli::OP_INDEX_DYNAMIC)
+      by_len[p.calls[i].in_len[0]] = p.lanes.calls[i].proven;
+  return by_len;
+}
+
+CompiledModel compile_data_index(int n, const std::string& extra,
+                                 const char* lanes) {
+  test_setenv("STANLI_REGION_MAP", "all", 1);
+  if (lanes) test_setenv("STANLI_REGION_MAP_LANES", lanes, 1);
+  try {
+    CompiledModel cm = stanli::compile_model(
+        fixture_mir("region_map_data_index"), make_data(n, extra));
+    test_unsetenv("STANLI_REGION_MAP");
+    if (lanes) test_unsetenv("STANLI_REGION_MAP_LANES");
+    return cm;
+  } catch (...) {
+    test_unsetenv("STANLI_REGION_MAP");
+    if (lanes) test_unsetenv("STANLI_REGION_MAP_LANES");
+    throw;
+  }
+}
+
+Params data_index_point(int J, double a, double ls) {
+  Params p = {a, ls};
+  for (int k = 0; k < 3 * J; ++k) p.push_back(0.3 * std::sin(1.3 * k + a));
+  return p;
+}
+
+void test_data_index_proven() {
+  const int J = 8;
+  for (int n : {64, 65, 200}) {
+    const std::string extra = data_index_extra(n, J, -1);
+    const std::string what = "region_map_data_index N=" + std::to_string(n);
+    CompiledModel lanes = compile_data_index(n, extra, nullptr);
+    CompiledModel scalar = compile_data_index(n, extra, "0");
+    CompiledModel off = compile_with("region_map_data_index", n,
+                                     "STANLI_REGION_MAP", "0", extra);
+    const auto maps = map_payloads(lanes);
+    check(maps.size() == 3, what + ": three maps");
+    check(count_opcode(off, OP_REGION_MAP) == 0, what + ": unmapped");
+    if (maps.size() != 3) continue;
+    for (const auto* m : maps) check(m->lanes.active, what + ": lane plans");
+    const auto first = proven_reads(*maps[0]);
+    const auto second = proven_reads(*maps[1]);
+    const auto third = proven_reads(*maps[2]);
+    check(first.size() == 4 && first.count(3 * n) && first.count(n * 2) &&
+              first.count(2 * J) && first.count(J),
+          what +
+              ": four reads in the first loop: h[n], X[n], z[, g[n]] and "
+              "w[h[n]]");
+    for (const auto& [len, proven] : first)
+      check(proven, what + ": the read of a container of " +
+                        std::to_string(len) + " has data selectors, proven");
+    check(second.size() == 1 && !second.begin()->second,
+          what + ": a selector computed from a parameter is checked");
+    check(third.size() == 2 && third.at(2 * J) && !third.at(n * 2),
+          what + ": a read under a parameter branch is checked");
+    Executor el(lanes.graph), es(scalar.graph), eo(off.graph);
+    lanes.bind(el);
+    scalar.bind(es);
+    off.bind(eo);
+    const std::vector<Params> points = {data_index_point(J, 0.4, -0.3),
+                                        data_index_point(J, -0.7, 0.2)};
+    for (size_t k = 0; k < points.size(); ++k) {
+      const std::string at = what + " point " + std::to_string(k);
+      const uint64_t before = stanli::region_map_proven_runs();
+      const Eval checked = evaluate(el, points[k]);
+      const uint64_t middle = stanli::region_map_proven_runs();
+      const Eval trusted = evaluate(el, points[k]);
+      const uint64_t after = stanli::region_map_proven_runs();
+      check(middle - before == (k == 0 ? 0u : 2u),
+            at + ": the first evaluation checks every selector");
+      check(after - middle == 2u,
+            at + ": later evaluations skip the checks in two maps");
+      const Eval want = evaluate(eo, points[k]);
+      expect_eval(at + " lanes", trusted, want);
+      const Eval sc = evaluate(es, points[k]);
+      bool same =
+          same_bits(checked.lp, trusted.lp) && same_bits(trusted.lp, sc.lp);
+      for (size_t i = 0; i < want.grad.size(); ++i)
+        same = same && same_bits(checked.grad[i], trusted.grad[i]) &&
+               same_bits(trusted.grad[i], sc.grad[i]);
+      check(same, at + ": checked, proven and scalar runs are bitwise equal");
+    }
+  }
+}
+
+// An out-of-range data index throws at every evaluation, as before the
+// checks could be skipped. The mapped forms throw the region map's own
+// message; the unrolled form throws Stan's, which names the container.
+void test_data_index_out_of_range() {
+  const int J = 8;
+  for (int n : {64, 65}) {
+    for (int bad : {5, n - 1}) {
+      const std::string extra = data_index_extra(n, J, bad);
+      const std::string what =
+          "region_map_data_index oob N=" + std::to_string(n) + " row " +
+          std::to_string(bad);
+      CompiledModel lanes = compile_data_index(n, extra, nullptr);
+      CompiledModel scalar = compile_data_index(n, extra, "0");
+      CompiledModel off = compile_with("region_map_data_index", n,
+                                       "STANLI_REGION_MAP", "0", extra);
+      check(map_payloads(lanes).size() == 3, what + ": three maps");
+      Executor el(lanes.graph), es(scalar.graph), eo(off.graph);
+      lanes.bind(el);
+      scalar.bind(es);
+      off.bind(eo);
+      const uint64_t before = stanli::region_map_proven_runs();
+      const Params p = data_index_point(J, 0.4, -0.3);
+      const Run first = try_evaluate(el, p);
+      for (int k = 0; k < 3; ++k) {
+        const Run a = try_evaluate(el, p);
+        const Run b = try_evaluate(es, p);
+        const Run c = try_evaluate(eo, p);
+        const std::string at = what + " evaluation " + std::to_string(k);
+        check(first.threw && a.threw && b.threw && c.threw,
+              at + ": every form throws");
+        check(a.what == first.what && a.what == b.what,
+              at + ": same exception: " + a.what + " | " + b.what);
+      }
+      check(stanli::region_map_proven_runs() == before,
+            what + ": a failed check never proves the selectors");
+    }
+  }
+}
+
 }  // namespace region_map_test
 
 int main() {
@@ -2785,6 +2948,8 @@ int main() {
   test_gather_parity();
   test_gather_lane_state_is_flat();
   test_gather_out_of_range();
+  test_data_index_proven();
+  test_data_index_out_of_range();
   test_setenv("STANLI_REGION_MAP_LANES", "0", 1);
   test_large_body_recomputes_by_default();
   test_clear_strategy_follows_mode();
