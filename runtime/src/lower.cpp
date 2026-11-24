@@ -342,23 +342,27 @@ void Lowering::bind_data(const mir::Program& p) {
     }
     td.env()[name] = std::move(dst);
   }
-  if (!all_inputs_bound) report_missing_data(p);
   use_prebound = use_prebound && all_inputs_bound;
   if (use_prebound) {
     // The generated reconstruction allocated the MIR-declared shape and
     // copied exactly that many flat elements. Normalize to the same shape;
-    // a malformed length falls back to that checked interpreter path.
+    // a malformed length or a size that cannot be computed, such as a
+    // negative one, falls back to that checked interpreter path.
     ExtentScope extents(data_extent_scope);
-    for (const auto& [name, type] : p.input_vars) {
-      DataMap::Entry& dst = td.env().at(name);
-      if (static_cast<int64_t>(dst.r.size()) !=
-          sized_len(type, nullptr, nullptr, name)) {
-        use_prebound = false;
-        break;
+    try {
+      for (const auto& [name, type] : p.input_vars) {
+        DataMap::Entry& dst = td.env().at(name);
+        if (static_cast<int64_t>(dst.r.size()) !=
+            sized_len(type, nullptr, nullptr, name)) {
+          use_prebound = false;
+          break;
+        }
+        dst.dims.clear();
+        if (type.base != "SInt" && type.base != "SReal")
+          for (const auto& d : type.dims) dst.dims.push_back(eval_int(d));
       }
-      dst.dims.clear();
-      if (type.base != "SInt" && type.base != "SReal")
-        for (const auto& d : type.dims) dst.dims.push_back(eval_int(d));
+    } catch (const std::exception&) {
+      use_prebound = false;
     }
   }
   if (use_prebound) {
@@ -378,38 +382,39 @@ void Lowering::bind_data(const mir::Program& p) {
     sh.si = view_of(type, true);
     decls[name] = sh;
   };
+  std::map<std::string, const mir::SizedType*> input_types;
   {
+    // Record each input's view now, for a program whose prepare_data does
+    // not declare it. A size that cannot be computed yet is reported at
+    // the input's declaration below, in CmdStan's order.
     ExtentScope extents(data_extent_scope);
     for (const auto& [name, type] : p.input_vars) {
+      input_types[name] = &type;
       try {
         record(name, type);
-        validate_data_dims(mir::detail::data_key(p, name), type);
       } catch (const std::exception&) {
-        // CmdStan computes each size, printing if it prints, before it
-        // checks that input. Print the sizes prepare_data computes ahead of
-        // the failing input's declaration, then report its error.
-        data_extent_scope = false;
-        for (const auto& st : p.prepare_data) {
-          if (st.kind != mir::Stmt::Decl) continue;
-          if (st.decl_id == name) break;
-          if (!st.has_init || input_names.count(st.decl_id) ||
-              expr_effects(st.init) != kMessageEffect)
-            continue;
-          try {
-            (void)td.exec(st);
-          } catch (const std::exception&) {
-            break;
-          }
-        }
-        throw;
       }
     }
   }
+  std::set<std::string> checked;
+  const auto check_input = [&](const std::string& name) {
+    if (!checked.insert(name).second) return;
+    const std::string& key = mir::detail::data_key(p, name);
+    if (!data_entry(key)) report_missing_data(p);
+    validate_data_dims(key, *input_types.at(name));
+  };
+  // CmdStan reads the data block in declaration order: it computes each
+  // variable's sizes, checks that the variable is there and has those dims,
+  // and checks its constraints before it moves to the next variable. So a
+  // variable's data is checked at its declaration here, after the
+  // statements before it, which compute its sizes and check the
+  // constraints of earlier variables.
   for (const auto& st : p.prepare_data) {
     if (st.kind == mir::Stmt::Decl) {
       if (input_names.count(st.decl_id)) {
         ExtentScope extents(data_extent_scope);
         record(st.decl_id, st.decl_type);
+        check_input(st.decl_id);
       } else {
         record(st.decl_id, st.decl_type);
       }
@@ -429,6 +434,10 @@ void Lowering::bind_data(const mir::Program& p) {
       continue;
     record_interpreter_event("prepare_data", "statement_entry");
     (void)td.exec(st);
+  }
+  {
+    ExtentScope extents(data_extent_scope);
+    for (const auto& input : p.input_vars) check_input(input.first);
   }
   // The interpreter keeps a block's locals after the block ends. Drop them,
   // so a later local of the same name cannot start from transformed data's
