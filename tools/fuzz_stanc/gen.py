@@ -889,6 +889,8 @@ class _Checker:
         if isinstance(s, Tilde) and s.fn is None and s.dist in DENSITIES \
                 and not positive_scale(s.args[1], p):
             self.bad("finite", f"{s.dist} scale {expr_str(s.args[1], p)}")
+        if isinstance(s, Target) and has_tuple(s.e.t):
+            self.bad("typed", "target += of a tuple")
         if isinstance(s, (Target, Tilde)) and not ctx["target"]:
             self.bad("block", "target increment outside the model block "
                      "and _lp functions")
@@ -2138,7 +2140,8 @@ class Gen:
             f = r.choice(lps)
             call = self.call_of(f, c, 2)
             if call is not None:
-                return call
+                return self.reduce_to_real(call) if has_tuple(call.t) \
+                    else call
         if r.random() < 0.3:
             dist = r.choice(DENSITIES)
             y = self.expr(r.choice([REAL, vec(self.sym())]), c, 2)

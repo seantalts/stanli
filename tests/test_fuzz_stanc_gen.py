@@ -83,6 +83,13 @@ class GeneratedProgramsTest(unittest.TestCase):
         for p in self.programs:
             self.assertEqual(g.check_rules(p), [], f"seed {p.seed}")
 
+    def test_lp_calls_returning_tuples_are_reduced_in_target(self):
+        # These seeds once wrote `target += f_lp(...)` for an _lp function
+        # that returns a tuple (#683).
+        for seed in (1950329, 1950969):
+            self.assertEqual(g.check_rules(g.generate(seed)), [],
+                             f"seed {seed}")
+
     def test_sizes_and_empty_containers(self):
         sizes = [v for p in self.programs for v in p.sizes]
         self.assertEqual(set(sizes), {0, 1, 2, 3})
@@ -277,6 +284,12 @@ class RuleTest(unittest.TestCase):
         self.assertEqual(rules(p), ["block"])
         p = program(gq=[g.Decl("y", g.REAL, [], rng())])
         self.assertEqual(rules(p), [])
+
+    def test_target_takes_no_tuple(self):
+        pair = g.Tup([P0, HALF], g.tup(g.REAL, g.REAL))
+        self.assertEqual(rules(program(model=[g.Target(pair)])), ["typed"])
+        first = g.Proj(pair, 1, g.REAL)
+        self.assertEqual(rules(program(model=[g.Target(first)])), [])
 
     def test_declared_sizes_match_the_type(self):
         def decl(size):
