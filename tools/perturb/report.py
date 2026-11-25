@@ -45,7 +45,19 @@ def ops_of(rec, side):
 def unexplained(rec):
     (b, _), (v, _) = ops_of(rec, "base"), ops_of(rec, "variant")
     grew = b and v and v > 1.1 * b
-    return not rec.get("new_declines") and not grew
+    return (not rec.get("new_declines") and not grew
+            and not lowering_change(rec))
+
+
+def lowering_change(rec):
+    """How the region opcodes differ from the base's, or ""."""
+    parts = []
+    for key, graph in (("lowering", "log_prob"), ("wa_lowering", "write_array")):
+        a = set((rec.get("base_program") or {}).get(key) or {})
+        b = set((rec.get("variant_program") or {}).get(key) or {})
+        parts += [f"{graph} +{x}" for x in sorted(b - a)]
+        parts += [f"{graph} -{x}" for x in sorted(a - b)]
+    return ", ".join(parts)
 
 
 def variant_report(records, meta, known):
@@ -82,6 +94,8 @@ def variant_report(records, meta, known):
                        f"{(r['meta'] or {}).get('description', '')}")
             for d in r.get("new_declines", []):
                 out.append(f"  - new decline: {d}")
+            if lowering_change(r):
+                out.append(f"  - lowering: {lowering_change(r)}")
             if r.get("copies"):
                 c = r["copies"]
                 out.append(f"  - {c['n']} concurrent copies: base "
@@ -112,7 +126,9 @@ def variant_report(records, meta, known):
         stanli = (r.get("confirm") or r.get("timing") or {}).get("ratio")
         cmd = (r.get("cmdstan") or {}).get("ratio")
         cliff = f"{r['cliff']:.2f}" if "cliff" in r else "-"
-        note = (r.get("reason") or "; ".join(r.get("new_declines", [])))
+        note = (r.get("reason") or "; ".join(
+            r.get("new_declines", []) + ([lowering_change(r)]
+                                         if lowering_change(r) else [])))
         out.append(f"| {r['seed']}/{r['variant']} | {r['class']} | {r['dose']} "
                    f"| {r['outcome']} | {arrow(bo, vo)} | {arrow(bw, vw)} "
                    f"| {ratio_text(stanli)} | {ratio_text(cmd)} | {cliff} "
@@ -159,14 +175,14 @@ def scaling_report(models, meta, known):
         out.append("")
     out += ["## Ladders", "",
             "| source | variable | kind | sizes | log_prob ops (first -> last) "
-            "| executor (last) | ns/grad (first -> last) | stop |",
-            "|---|---|---|---|---|---|---|---|"]
+            "| executor (last) | ns/grad (first -> last) | op jumps | stop |",
+            "|---|---|---|---|---|---|---|---|---|"]
     for x in models:
         for var, lad in (x.get("ladders") or {}).items():
             pts = [p for p in lad["points"] if p.get("ops") is not None]
             if not pts:
                 out.append(f"| {x['name']} | {var} | {lad['kind']} | - | - | - "
-                           f"| - | {lad.get('stop', '')} |")
+                           f"| - | - | {lad.get('stop', '')} |")
                 continue
             ns = [p for p in pts if p.get("ns")]
             nstext = (f"{ns[0]['ns']:.0f} -> {ns[-1]['ns']:.0f}" if ns else "-")
@@ -175,5 +191,12 @@ def scaling_report(models, meta, known):
                 f"| {pts[0]['size']}..{pts[-1]['size']} ({len(pts)}) "
                 f"| {pts[0]['ops']} -> {pts[-1]['ops']} "
                 f"| {mib(pts[-1].get('executor_bytes'))} | {nstext} "
-                f"| {lad.get('stop', '')} |")
+                f"| {jumps(lad, pts)} | {lad.get('stop', '')} |")
     return "\n".join(out) + "\n"
+
+
+def jumps(lad, pts):
+    """Each located op-count jump as "ops a at n -> ops b at n+1"."""
+    ops = {p["size"]: p["ops"] for p in pts}
+    return ", ".join(f"{ops.get(lo)} at {lo} -> {ops.get(hi)} at {hi}"
+                     for lo, hi in lad.get("thresholds", [])) or "-"
