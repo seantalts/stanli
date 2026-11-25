@@ -2290,45 +2290,6 @@ jobs:
             test "$WINDOWS_EMBED_RESULT" = skipped
           fi
 
-  # Nothing else tells anyone that main went red after a merge: the ASan job
-  # stayed red for 12 hours across three merges. This keeps one open issue per
-  # workflow while main is red, and closes it on the next run where nothing
-  # failed. A cancelled job neither opens nor closes it.
-  main-status:
-    name: report main status
-    if: always() && github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
-    needs: [changes, static_checks, no-stdio, build, windows, asan, tsan, wasm,
-            wasm-webr, browser-compiler, r-tests, r-platform-tests,
-            stanc-windows, windows-compiler, stanc-embed-windows, pages,
-            dev-runtime-release]
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    permissions:
-      issues: write
-    env:
-      GH_TOKEN: ${{ github.token }}
-      GH_REPO: ${{ github.repository }}
-      RESULTS: ${{ toJSON(needs) }}
-      RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-    steps:
-      - name: Open, update or close the issue
-        run: |
-          title="main is red: $GITHUB_WORKFLOW"
-          failed=$(jq -r 'to_entries[] | select(.value.result == "failure") | .key' <<<"$RESULTS" | paste -sd, -)
-          cancelled=$(jq -r 'to_entries[] | select(.value.result == "cancelled") | .key' <<<"$RESULTS")
-          number=$(gh issue list --state open --limit 100 --json number,title |
-                   jq -r --arg t "$title" '.[] | select(.title == $t) | .number' | head -n 1)
-          if [ -n "$failed" ]; then
-            body="Failed: $failed. Commit $GITHUB_SHA, run $RUN_URL"
-            if [ -n "$number" ]; then
-              gh issue comment "$number" --body "$body"
-            else
-              gh issue create --title "$title" --body "$body"
-            fi
-          elif [ -n "$number" ] && [ -z "$cancelled" ]; then
-            gh issue close "$number" --comment "Nothing failed in $RUN_URL (commit $GITHUB_SHA)."
-          fi
-
   # The public demo: web/ plus the runtime and compiler artifacts, deployed
   # to GitHub Pages on every main push.
   pages:

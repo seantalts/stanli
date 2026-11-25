@@ -742,7 +742,6 @@ tests. To run the post-merge jobs on a branch, use
 | signature watch | the signatures of upstream stanc3 | the signatures in the conformance baseline | nightly. It reports and does not fail | |
 | Safari 17 bundle check | the js_of_ocaml bundles | no line ending in `static` | PR | |
 | docs and formatting | stamped numbers, C/C++ formatting | their artifacts ([`tools/gen_docs.py --check`](tools/gen_docs.py)), the pinned formatter | every PR | |
-| red-main issue | whether any post-merge job of `wheels.yml` failed | nothing. It opens, updates or closes one GitHub issue, "main is red: wheels" | after each push to `main`, nightly run and manual run on `main` | a run in which a job is cancelled |
 
 <a id="installed-clients"></a>
 The wheel jobs run `tests/test_python.py`, `tests/test_bridgestan_embed.py`
@@ -959,7 +958,7 @@ the tests.
 The ledger has measurements for macOS arm64 only. A pull request can move a
 value by more than 10 ULP and still merge, if the value stays within 1e-9 and
 is not in a brms model or the `fixtures` corpus. The macOS run after the merge
-then fails and opens the red-main issue.
+then fails.
 
 To close this gap, someone needs to record a ledger section on Linux x86-64.
 After that, the separate brms limit is no longer needed.
