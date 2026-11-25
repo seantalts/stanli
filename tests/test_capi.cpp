@@ -4315,6 +4315,205 @@ void test_models_on_separate_threads() {
             same_bits(parallel[j].values, serial[j].values));
 }
 
+// Under STAN_THREADS each thread has its own autodiff stack, and a thread
+// that a binding starts has none. lkj_corr_cholesky uses the stack even in a
+// double evaluation, so the bound on b needs it to unconstrain an init. The
+// oversized local sends write_array to the interpreter, and construction
+// then evaluates the model to probe it. Each call runs on a new thread of its
+// own and must match the main thread.
+void test_evaluation_on_new_threads() {
+  if (!stanli_has_embedded_stanc()) return;
+  const char* code = R"(
+parameters {
+  cholesky_factor_corr[2] L;
+  real x;
+  real<lower=lkj_corr_cholesky_lpdf(L | 2)> b;
+}
+model {
+  L ~ lkj_corr_cholesky(2);
+  x ~ normal(L[2, 1], 1);
+  b ~ normal(3, 1);
+}
+generated quantities {
+  real s = 0;
+  if (L[2, 1] > 0) {
+    matrix[1100, 1000] big = rep_matrix(L[2, 1], 1100, 1000);
+    s = big[1, 1];
+  }
+}
+)";
+  const auto on_new_thread = [](const std::function<void()>& f) {
+    std::thread t(f);
+    t.join();
+  };
+  stanli_model* built = nullptr;
+  on_new_thread([&] { built = from_stan(code); });
+  expect_true("a model builds on a new thread", built != nullptr);
+  stanli_model_free(built);
+  stanli_model* m = from_stan(code);
+  if (m == nullptr) return;
+  const int64_t n = stanli_n_unconstrained(m);
+  const int64_t width = stanli_n_output_columns(m);
+  const char* inits = R"({"L":[[1,0],[0.6,0.8]],"x":0.3,"b":2})";
+  std::vector<double> q((size_t)n);
+  char err[4096]{};
+  stanli_unconstrain_inits(m, inits, q.data(), err, sizeof err);
+
+  // Each call returns its status and fills its output.
+  using Call = std::function<int(std::vector<double>&)>;
+  const std::vector<std::pair<const char*, Call>> calls = {
+      {"stanli_unconstrain_inits",
+       [&](std::vector<double>& out) {
+         out.assign((size_t)n, 0.0);
+         return stanli_unconstrain_inits(m, inits, out.data(), err, sizeof err);
+       }},
+      {"stanli_grad_err",
+       [&](std::vector<double>& out) {
+         out.assign((size_t)n + 1, 0.0);
+         return stanli_grad_err(m, q.data(), &out[(size_t)n], out.data(), err,
+                                sizeof err);
+       }},
+      {"stanli_grad_err without a gradient",
+       [&](std::vector<double>& out) {
+         out.assign(1, 0.0);
+         return stanli_grad_err(m, q.data(), out.data(), nullptr, err,
+                                sizeof err);
+       }},
+      {"stanli_grad",
+       [&](std::vector<double>& out) {
+         out.assign((size_t)n + 1, 0.0);
+         return stanli_grad(m, q.data(), &out[(size_t)n], out.data());
+       }},
+      {"stanli_hessian",
+       [&](std::vector<double>& out) {
+         out.assign((size_t)(n * n + 1), 0.0);
+         return stanli_hessian(m, q.data(), &out[(size_t)(n * n)], nullptr,
+                               out.data(), err, sizeof err);
+       }},
+      {"stanli_wa_row",
+       [&](std::vector<double>& out) {
+         out.assign((size_t)width, 0.0);
+         stanli_wa_seed(m, 7);
+         return stanli_wa_row(m, q.data(), out.data());
+       }},
+      {"stanli_constrain",
+       [&](std::vector<double>& out) {
+         out.assign((size_t)stanli_n_constrained(m), 0.0);
+         return stanli_constrain(m, q.data(), out.data());
+       }},
+      {"stanli_sample_stream_stats_init",
+       [&](std::vector<double>& out) {
+         out.assign((size_t)(10 * n), 0.0);
+         return stanli_sample_stream_stats_init(m, 3, 10, 10, 0.8, q.data(),
+                                                out.data(), nullptr, nullptr,
+                                                nullptr, err, sizeof err);
+       }},
+      {"stanli_sample_walnuts_stats_init",
+       [&](std::vector<double>& out) {
+         out.assign((size_t)(10 * n), 0.0);
+         return stanli_sample_walnuts_stats_init(
+             m, 3, 1, 10, 10, 0.0, 2.0, q.data(), out.data(), nullptr, nullptr,
+             nullptr, err, sizeof err);
+       }},
+      {"stanli_sample_multi_metric",
+       [&](std::vector<double>& out) {
+         stanli_sample_opts o;
+         stanli_sample_opts_init(&o);
+         o.seed = 3;
+         o.chains = 1;
+         o.warmup = 10;
+         o.samples = 10;
+         o.num_threads = 1;
+         out.assign((size_t)(stanli_n_stored_draws(&o) * width), 0.0);
+         return stanli_sample_multi_metric(
+             m, &o, nullptr, 0, nullptr, nullptr, out.data(), nullptr, nullptr,
+             nullptr, nullptr, nullptr, nullptr, err, sizeof err);
+       }},
+      {"stanli_laplace_whiten",
+       [&](std::vector<double>& out) {
+         const int64_t latent = 1;
+         stanli_whitening* w =
+             stanli_laplace_whiten(m, q.data(), 1, &latent, nullptr, nullptr,
+                                   nullptr, nullptr, err, sizeof err);
+         if (w == nullptr) return 1;
+         out.assign((size_t)(2 * (n - 1)), 0.0);
+         stanli_whitening_get_theta(w, &out[0], &out[(size_t)(n - 1)]);
+         stanli_whitening_free(w);
+         return 0;
+       }},
+  };
+  for (const auto& [name, call] : calls) {
+    std::vector<double> want, got;
+    const int want_status = call(want);
+    int got_status = -1;
+    on_new_thread([&] { got_status = call(got); });
+    expect_true(std::string(name) + " on a new thread matches the main thread",
+                want_status == 0 && got_status == 0 && same_bits(want, got));
+  }
+  stanli_model_free(m);
+
+  char* mir =
+      stanli_stan_to_mir_with_opts(code, nullptr, 0, 0, err, sizeof err);
+  char* payload = mir == nullptr ? nullptr
+                                 : stanli_bridgestan_data("{}", mir, "lkj", err,
+                                                          sizeof err);
+  stanli_string_free(mir);
+  if (payload == nullptr) return;
+  bs_model* bs = nullptr;
+  on_new_thread([&] { bs = bs_model_construct(payload, 1, nullptr); });
+  expect_true("a BridgeStan model builds on a new thread", bs != nullptr);
+  bs_model_destruct(bs);
+  bs = bs_model_construct(payload, 1, nullptr);
+  stanli_string_free(payload);
+  if (bs == nullptr) return;
+  const std::vector<std::pair<const char*, Call>> bs_calls = {
+      {"bs_log_density_gradient",
+       [&](std::vector<double>& out) {
+         out.assign((size_t)n + 1, 0.0);
+         return bs_log_density_gradient(bs, true, true, q.data(),
+                                        &out[(size_t)n], out.data(), nullptr);
+       }},
+      {"bs_param_constrain",
+       [&](std::vector<double>& out) {
+         out.assign((size_t)bs_param_num(bs, true, true), 0.0);
+         bs_rng* rng = bs_rng_construct(5, nullptr);
+         const int status = bs_param_constrain(bs, true, true, q.data(),
+                                               out.data(), rng, nullptr);
+         bs_rng_destruct(rng);
+         return status;
+       }},
+      {"bs_param_unconstrain",
+       [&](std::vector<double>& out) {
+         const double theta[] = {1, 0.6, 0, 0.8, 0.3, 2};
+         out.assign((size_t)n, 0.0);
+         return bs_param_unconstrain(bs, theta, out.data(), nullptr);
+       }},
+      {"bs_param_unconstrain_json",
+       [&](std::vector<double>& out) {
+         out.assign((size_t)n, 0.0);
+         return bs_param_unconstrain_json(bs, inits, out.data(), nullptr);
+       }},
+      {"bs_param_initialize",
+       [&](std::vector<double>& out) {
+         out.assign((size_t)n, 0.0);
+         bs_rng* rng = bs_rng_construct(5, nullptr);
+         const int status = bs_param_initialize(bs, inits, rng, 2.0, 100, true,
+                                                out.data(), nullptr);
+         bs_rng_destruct(rng);
+         return status;
+       }},
+  };
+  for (const auto& [name, call] : bs_calls) {
+    std::vector<double> want, got;
+    const int want_status = call(want);
+    int got_status = -1;
+    on_new_thread([&] { got_status = call(got); });
+    expect_true(std::string(name) + " on a new thread matches the main thread",
+                want_status == 0 && got_status == 0 && same_bits(want, got));
+  }
+  bs_model_destruct(bs);
+}
+
 // The single-chain entry points check their arguments by the same rules.
 void test_single_chain_arguments() {
   const std::string mir = slurp("tests/fixtures/es.mir");
@@ -4389,6 +4588,7 @@ int main() {
   test_output_columns();
   test_single_chain_arguments();
   test_models_on_separate_threads();
+  test_evaluation_on_new_threads();
   test_init_retries_only_rejections();
   test_out_of_range_accessors();
   test_grad_messages();

@@ -22,6 +22,7 @@
 #include "build_id.hpp"
 #include "mir_tuples.hpp"
 #include "copy_doubles.hpp"
+#include "lent_stack.hpp"
 #include "data_document.hpp"
 #include <rapidjson/stringbuffer.h>
 #include <rapidjson/writer.h>
@@ -57,19 +58,6 @@ void put_err(char* err, size_t err_len, const char* what) {
   std::strncpy(err, what, err_len - 1);
   err[err_len - 1] = '\0';
 }
-
-// An autodiff stack for the calling thread while a call runs, when that
-// thread has none: a binding may call from a thread of its own, and Stan's
-// services and its Hessian evaluate var expressions on the calling thread.
-class CallerTape {
- public:
-  CallerTape() {
-    if (stan::math::ChainableStack::instance_ == nullptr) tape_.emplace();
-  }
-
- private:
-  std::optional<stan::math::ChainableStack> tape_;
-};
 
 // Argument rules for every entry point, with one wording. The first broken
 // rule wins.
@@ -197,6 +185,8 @@ struct stanli_compilation {
 
 struct stanli_model {
   stanli::CompiledModel cm;  // graph moved out into ex
+  // Lent to a calling thread that has no autodiff stack; see HandleStack.
+  std::unique_ptr<stanli::LentStack> stack;
   // Declared before ex so the executor dies before its borrowed team.
   std::unique_ptr<stanli::ReduceExecutionContext> reduce_team;
   int threads_per_chain = 1;
@@ -232,6 +222,32 @@ struct stanli_model {
 namespace {
 
 using stanli::copy_doubles;
+
+// Lends the handle's stack to a calling thread that has none, for one call.
+// At most one evaluating call runs on a handle at a time, so the handle can
+// own it. A stack made for each call made a gradient 2.4x slower. The loan
+// ends without recovering the stack, as a call on the main thread leaves its
+// stack; the handle recovers it when it is freed.
+class HandleStack {
+ public:
+  explicit HandleStack(stanli_model& m) {
+    if (stan::math::ChainableStack::instance_ == nullptr) lend(m);
+  }
+  ~HandleStack() {
+    if (lent_ != nullptr) stan::math::ChainableStack::instance_ = nullptr;
+  }
+  HandleStack(const HandleStack&) = delete;
+  HandleStack& operator=(const HandleStack&) = delete;
+
+ private:
+  [[gnu::noinline]] void lend(stanli_model& m) {
+    if (!m.stack) m.stack = std::make_unique<stanli::LentStack>();
+    lent_ = m.stack.get();
+    stan::math::ChainableStack::instance_ = &lent_->storage;
+  }
+
+  stanli::LentStack* lent_ = nullptr;
+};
 
 void constrained_row(stanli::Executor& ex, const stanli::CompiledModel& cm,
                      const double* q, double* out) {
@@ -588,6 +604,8 @@ static stanli_model* model_new(const char* mir_text, const char* data_json,
     m->flat_names = stanli::CompiledModel::csv_names(m->cm.views);
     m->con_vars = variables_of(m->cm.views);
     annotate(m->con_vars, m->cm.annotations);
+    // compile_model makes its own stack. The probe below evaluates the model.
+    const HandleStack stack(*m);
     std::string probe_failure;
     if (m->cm.write_array) {
       auto& wa = *m->cm.write_array;
@@ -1487,6 +1505,7 @@ int stanli_grad_err(stanli_model* m, const double* q, double* lp, double* grad,
   copy_doubles(m->ex->params_data(), q, n);
   int status = STANLI_EVAL_OK;
   try {
+    const HandleStack stack(*m);
     *lp = grad == nullptr ? m->ex->forward() : m->ex->gradient(grad);
     return STANLI_EVAL_OK;
   } catch (const std::domain_error& e) {
@@ -1524,7 +1543,7 @@ int stanli_hessian_with_poll(stanli_model* m, const double* q, double* lp,
       throw std::invalid_argument(
           "stanli_hessian needs a model, a point, lp and a Hessian buffer");
     const int64_t n = m->ex->n_params();
-    const CallerTape tape;
+    const HandleStack stack(*m);
     stanli::detail::ServiceHooks hooks;
     if (poll != nullptr)
       hooks.poll = [poll, poll_user] { return poll(poll_user) != 0; };
@@ -1563,6 +1582,7 @@ int stanli_sample_stream_stats_init(stanli_model* m, uint32_t seed, int warmup,
                                     double* stats, stanli_draw_cb cb,
                                     void* user, char* err, size_t err_len) {
   try {
+    const HandleStack stack(*m);
     Rules rules;
     rules.at_least("warmup", warmup, 0);
     rules.at_least("samples", samples, 0);
@@ -1609,6 +1629,7 @@ int stanli_sample_walnuts_stats_init(stanli_model* m, uint32_t seed,
                                      double* stats, stanli_draw_cb cb,
                                      void* user, char* err, size_t err_len) {
   try {
+    const HandleStack stack(*m);
     Rules r;
     r.chain_ids(chain_id, 1);
     r.at_least("warmup", warmup, 0);
@@ -1662,7 +1683,7 @@ int stanli_run_pathfinder(stanli_model* m, uint32_t seed, int chain_id,
                           double* lp_approx, double* summary, stanli_path_cb cb,
                           void* user, char* err, size_t err_len) {
   try {
-    const CallerTape tape;
+    const HandleStack stack(*m);
     Rules rules;
     rules.chain_ids(chain_id, 1);
     rules.at_least("num_draws", num_draws, 1);
@@ -1722,7 +1743,7 @@ int stanli_pathfinder_inits_with_poll(stanli_model* m, uint32_t seed,
                                       char* err, size_t err_len) {
   if (interrupted != nullptr) *interrupted = 0;
   try {
-    const CallerTape tape;
+    const HandleStack stack(*m);
     Rules rules;
     rules.at_least("chains", chains, 1);
     rules.chain_ids(chain_id, 1);
@@ -1914,6 +1935,7 @@ int stanli_sample_multi_metric(stanli_model* m, const stanli_sample_opts* opts,
                                stanli_sample_report* reports, char* err,
                                size_t err_len) {
   try {
+    const HandleStack stack(*m);
     if (interrupted != nullptr) *interrupted = 0;
     if (opts == nullptr) {
       put_err(err, err_len, "null options");
@@ -2366,7 +2388,7 @@ int stanli_optimize_with_poll(stanli_model* m, const stanli_optimize_opts* opts,
                               int* interrupted, char* err, size_t err_len) {
   if (interrupted != nullptr) *interrupted = 0;
   try {
-    const CallerTape tape;
+    const HandleStack stack(*m);
     if (stanli_optimize_opts_check(opts, err, err_len) != 0) return 1;
     stanli::OptimizeConfig cfg;
     cfg.seed = opts->seed;
@@ -2432,7 +2454,7 @@ int stanli_fixed_param(stanli_model* m, const stanli_fixed_param_opts* opts,
                        void* poll_user, int* interrupted, char* err,
                        size_t err_len) {
   try {
-    const CallerTape tape;
+    const HandleStack stack(*m);
     if (interrupted != nullptr) *interrupted = 0;
     if (stanli_fixed_param_opts_check(opts, err, err_len) != 0) return 1;
     const stanli::AlgorithmHost host =
@@ -2497,7 +2519,7 @@ int stanli_laplace_sample(stanli_model* m, const stanli_laplace_opts* opts,
                           stanli_sample_poll_cb poll, void* poll_user,
                           int* interrupted, char* err, size_t err_len) {
   try {
-    const CallerTape tape;
+    const HandleStack stack(*m);
     if (interrupted != nullptr) *interrupted = 0;
     if (stanli_laplace_opts_check(opts, err, err_len) != 0) return 1;
     const stanli::AlgorithmHost host =
@@ -2562,7 +2584,7 @@ int stanli_pathfinder(stanli_model* m, const stanli_pathfinder_opts* opts,
                       void* poll_user, int* interrupted, char* err,
                       size_t err_len) {
   try {
-    const CallerTape tape;
+    const HandleStack stack(*m);
     if (interrupted != nullptr) *interrupted = 0;
     if (n_draws != nullptr) *n_draws = 0;
     if (stanli_pathfinder_opts_check(opts, err, err_len) != 0) return 1;
@@ -2614,7 +2636,7 @@ int stanli_variational(stanli_model* m, const stanli_variational_opts* opts,
                        stanli_sample_poll_cb poll, void* poll_user,
                        int* interrupted, char* err, size_t err_len) {
   try {
-    const CallerTape tape;
+    const HandleStack stack(*m);
     if (interrupted != nullptr) *interrupted = 0;
     if (stanli_variational_opts_check(opts, err, err_len) != 0) return 1;
     const stanli::AlgorithmHost host =
@@ -2896,6 +2918,7 @@ void stanli_wa_seed_chain(stanli_model* m, uint32_t seed, uint32_t chain) {
 int stanli_wa_row(stanli_model* m, const double* q, double* out) {
   if (!m->wa_interp && !m->wa_ex) return 1;
   try {
+    const HandleStack stack(*m);
     write_row(*m, *m->ex, m->wa_ex.get(), q, out, m->wa_rng);
     return 0;
   } catch (const std::exception&) {
@@ -2905,6 +2928,7 @@ int stanli_wa_row(stanli_model* m, const double* q, double* out) {
 
 int stanli_constrain(stanli_model* m, const double* q, double* out) {
   try {
+    const HandleStack stack(*m);
     constrained_row(*m->ex, m->cm, q, out);
     return 0;
   } catch (const std::exception&) {

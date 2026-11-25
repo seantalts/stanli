@@ -1,6 +1,6 @@
 #include <stanli/executor_pool.hpp>
 
-#include <stan/math/rev/core/chainable_alloc.hpp>
+#include "lent_stack.hpp"
 
 #include <atomic>
 
@@ -17,24 +17,10 @@ using stan::math::ChainableStack;
 }  // namespace
 
 struct ExecutorPool::Entry {
-  // The stack a thread without one installs for the span of its leases.
-  struct Tape {
-    ChainableStack::AutodiffStackStorage storage;
-
-    // What stan::math::recover_memory() does, on this storage rather than on
-    // the thread's current one.
-    void recover() {
-      storage.var_stack_.clear();
-      storage.var_nochain_stack_.clear();
-      for (auto* x : storage.var_alloc_stack_) delete x;
-      storage.var_alloc_stack_.clear();
-      storage.memalloc_.recover_all();
-    }
-  };
-
   alignas(128) std::atomic<bool> busy{true};
   std::unique_ptr<Executor> ex;
-  std::unique_ptr<Tape> tape;
+  // The stack a thread without one installs for the span of its leases.
+  std::unique_ptr<LentStack> tape;
 };
 
 struct ExecutorPool::Slot {
@@ -136,7 +122,7 @@ ExecutorPool::Lease ExecutorPool::acquire() {
     ++t.tape_leases;
     counted = true;
   } else if (ChainableStack::instance_ == nullptr) {
-    if (!e->tape) e->tape = std::make_unique<Entry::Tape>();
+    if (!e->tape) e->tape = std::make_unique<LentStack>();
     ChainableStack::instance_ = &e->tape->storage;
     t.tape_owner = e;
     t.tape_leases = 1;
