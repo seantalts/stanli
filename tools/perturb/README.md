@@ -39,6 +39,8 @@ python3 tools/perturb/run.py VARIANTS --out OUT --stage structure   # 1-2
 python3 tools/perturb/run.py VARIANTS --out OUT --stage timing      # 1-3
 python3 tools/perturb/run.py VARIANTS --out OUT [--copies 12]       # 1-5
 python3 tools/perturb/run.py VARIANTS --out OUT --stage scaling     # size ladders
+python3 tools/perturb/run.py VARIANTS --out OUT --stage datavalues  # same sizes, other values
+python3 tools/perturb/causes.py SCALING_OUT DATAVALUES_OUT           # findings by cause
 ```
 
 `--only TEXT` keeps the variants whose `seed/variant` contains TEXT, and
@@ -93,16 +95,33 @@ Stage 3 prints a warning in the report when the 1-minute load passed 6.
 ## Scaling
 
 `scale.py` reads the data block and finds the size variables: int scalars
-used as a dimension or as the `upper=` of an index array. It scales rows
-and columns by tiling or truncating every axis declared with that variable,
-and groups by replicating the data set with the index values offset per
-copy (or by keeping the first groups and their rows). It refuses what it
-cannot prove from the declarations, such as a variable inside `N + 1`, a
-container with two scaled axes, or ragged sizes that sum to N:
+used as a dimension or as the `upper=` of an index array. It grows rows
+and columns along every axis declared with that variable, and shrinks
+them by truncating. Groups grow by replicating the data set with the index
+values offset per copy, and shrink by keeping the first groups and their
+rows. There are two ways to grow:
+
+- `resample` (the ladder's default) draws the new rows with replacement
+  from the original ones and moves each real value by 1% of its column's
+  spread, inside the declared bounds and without changing its sign, so
+  the new rows are distinct. A constant column, such as an intercept,
+  stays constant. Integer and index values are copied as they are. Group
+  copies get the same noise.
+- `tile` repeats the rows cyclically, which makes exact duplicates.
+  Duplicate rows change what stanli's passes prove (see the data-value
+  stage), so a tiled ladder mixes two effects.
+
+scale.py refuses what it cannot prove from the declarations: a variable
+inside `N + 1`, a container with two scaled axes, a constrained type along
+the axis, an if-condition that compares the variable with another one
+(usually a check with `reject`), or ragged sizes: an int array that sums
+to the variable with values other than 0 and 1, or that the program uses
+to cut slices (`segment` or `a:b`). Equal values alone do not count as a
+relation.
 
 ```sh
 python3 tools/perturb/scale.py MODEL.stan DATA.json --list
-python3 tools/perturb/scale.py MODEL.stan DATA.json --set N=1000 --out OUT.json
+python3 tools/perturb/scale.py MODEL.stan DATA.json --set N=1000 [--mode tile] --out OUT.json
 ```
 
 `--stage scaling` sweeps every seed's base over every size variable that
@@ -113,8 +132,12 @@ and above where the program would cross the 8 MiB program budget, the
 32 MiB loop budget (`runtime/src/lower.cpp`) and the 2^20-op unroll
 ceiling, estimated from the growth of the last two points under each cap.
 A ladder stops before a size whose preparation is predicted to take more
-than `--max-seconds` (60) or to need more than `--max-rss-gb` (4), or whose
-data passes 400 MB. When the log-density op count more than doubles
+than `--max-seconds` (60) or to need more than `--max-rss-gb` (6), or whose
+data passes 400 MB, and once its share of `--model-seconds` (180 s for
+all of a model's ladders) is spent. Every tool process is killed when it
+passes `--timeout` seconds or `--memory-gb` of resident memory (6); a size
+killed for memory is recorded as `capped` and ends its ladder.
+`--growth tile` grows by tiling. When the log-density op count more than doubles
 between two adjacent sizes, the ladder bisects between them to find the
 size where it jumps. A size that the model rejects is recorded as
 `rejected` and is not a finding: a failed data or model check, a Stan Math
@@ -124,7 +147,10 @@ crash, a timeout, or stanli refusing to lower is a `failure`.
 
 Each point is checked at one point and prepared in parallel; then each is
 timed once (`bench_grad --timed`, fixed points), one process at a time.
-`--no-timing` stops after the structure. The findings:
+A size whose executor is larger than 4 MiB is also timed as 12 concurrent
+processes, as is any variant in stage 3 whose base or variant executor is.
+`--no-timing` stops after the structure and deletes the scaled data files.
+The findings:
 
 | kind | meaning |
 | --- | --- |
@@ -138,6 +164,38 @@ For `ops_grow` and `per_element_jump`, CmdStan is timed at the same two
 sizes, and the finding shows both slowdowns and their ratio, so a cache
 effect that both engines share is visible as such. `OUT/scaling.json` keeps
 every point and `OUT/scaling.md` has the findings and one row per ladder.
+
+## Data values
+
+`--stage datavalues` keeps each seed's source and sizes and changes the
+values of its base data, along every rows variable whose containers all
+have it as their first axis:
+
+| kind | values |
+| --- | --- |
+| `duplicate_rows` | 1%, 10% and 50% of the rows replaced by copies of other rows, and the first half tiled |
+| `discrete_covariate` | every real column rounded to its nearest of 2, 5 or 20 quantiles |
+| `constant_column`, `zero_column` | one real column set to its first value, or to 0 when the bounds allow it (up to 3 columns) |
+| `intercept_column` | a column of ones added to a matrix whose column count scale.py can grow |
+| `index_order` | rows sorted by a group index, reversed or shuffled; the index made constant; half the rows moved to group 1 |
+| `unbalanced_groups` | every group but one holds one row, and group 1 holds the rest |
+
+A perturbation whose log-density program grows 1.5x (and by 20 ops or
+more), or whose loops are lowered another way, than with the base data is
+a `data_value_changes_program` finding. For duplicate rows the count is
+bisected to the smallest number of duplicates that changes the program.
+`OUT/datavalues.json` keeps every perturbation and `OUT/datavalues.md`
+lists the findings. Timing and CmdStan confirmation are left to the
+variant stages.
+
+## Findings by cause
+
+`causes.py` gives every scaling and data-value finding its causes (a
+decline reason that is new at the larger size or with the changed data,
+or a new region opcode) and ranks the causes by the number of models that
+show them, with the collections and two examples each. Shape changes
+below size 8 are left out. It also counts the size variables that
+scale.py refused, by reason.
 
 ## Known cliffs
 
