@@ -199,14 +199,15 @@ def constant_lp_shift(pa, pb):
     return all(close(s, shifts[0]) for s in shifts)
 
 
-def compare_runs(a, b, tilde=False):
+def compare_runs(a, b, propto=False):
     """(differences, not_comparable_reason). a is none, b is o1; each is a
     (state, payload) from run_outcome.
 
-    `tilde` says the program has a `~` statement. `~` drops the terms that
-    are constant for the argument types it sees, and the optimizer can turn
-    an argument into data, so for such a program an lp that differs by the
-    same amount at every point, with the same gradient, agrees."""
+    `propto` says the program has a `~` statement or a `target +=` with a
+    `_lupdf` or `_lupmf` call. These drop the terms that are constant for
+    the argument types they see, and the optimizer can turn an argument
+    into data, so for such a program an lp that differs by the same amount
+    at every point, with the same gradient, agrees."""
     (sa, pa), (sb, pb) = a, b
     if sa == sb and sa in ("timeout", "crash", "refused"):
         return [], f"both_{sa}"
@@ -234,7 +235,7 @@ def compare_runs(a, b, tilde=False):
         diffs += compare_point(k, pa["points"][k], pb["points"][k],
                                pa["prints"].get(k, []),
                                pb["prints"].get(k, []))
-    if tilde and constant_lp_shift(pa, pb):
+    if propto and constant_lp_shift(pa, pb):
         diffs = [diff for diff in diffs if diff[0] != "lp"]
     if pa["prints"]["pre"] != pb["prints"]["pre"]:
         diffs.append(("output", {"point": "pre", **printed_diff(
@@ -365,12 +366,12 @@ def evaluate(ctx, source, data_file, work, passes, tag, reuse=None,
     return comp, run, engines
 
 
-def differences(base, other, tilde=False):
+def differences(base, other, propto=False):
     """Differences of `other` from `base`; each is evaluate()'s triple."""
     diffs, reason = compare_compiles(base[0], other[0])
     if diffs is not None:
         return diffs, reason
-    return compare_runs(base[1], other[1], tilde)
+    return compare_runs(base[1], other[1], propto)
 
 
 def bisect_steps():
@@ -416,15 +417,15 @@ def guilty_step(steps, target, target_detail=None):
     return "unreproduced"
 
 
-def bisect(ctx, source, data_file, work, none, o1, tilde=False):
+def bisect(ctx, source, data_file, work, none, o1, propto=False):
     """(guilty pass, steps) for a model whose o1 answer differs."""
-    o1_diffs = differences(none, o1, tilde)[0]
+    o1_diffs = differences(none, o1, propto)[0]
     target, target_detail = primary_kind(o1_diffs), detail(o1_diffs)
     steps, previous = [], none
     for i, (added, spec) in enumerate(bisect_steps()):
         result = evaluate(ctx, source, data_file, work, spec, f"step{i}",
                           reuse=previous)
-        diffs, reason = differences(none, result, tilde)
+        diffs, reason = differences(none, result, propto)
         steps.append({"added": added, "size": result[0]["size"],
                       "kinds": sorted({k for k, _ in diffs}),
                       "primary": primary_kind(diffs) if diffs else None,

@@ -41,9 +41,10 @@ kind in this list names it:
 | `error_message` | both sides throw with different messages |
 | `output` | printed output differs |
 
-Programs that use `~` agree when lp differs by the same amount at every
-point and the gradients agree, because `~` drops terms that the optimizer
-can make constant. The summary counts them.
+Programs that use `~`, or `_lupdf` and `_lupmf` calls in `target +=`,
+agree when lp differs by the same amount at every point and the gradients
+agree, because these drop terms that the optimizer can make constant. The
+summary counts them.
 
 Performance checks use the bucket prefix `o1`: `slow_compile`,
 `mir_growth` and `slow_gradient`. The thresholds are in the docstring of
