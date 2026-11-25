@@ -2561,11 +2561,10 @@ void clglm_rows_compensated(KernelCtx& ctx, sink& s, const std::vector<int>& y,
   Array<double, Dynamic, Dynamic> beta_y(rows, cols);
   for (int64_t i = 0; i < rows; ++i)
     beta_y.row(i) = beta_val.col(outcome(i) - 1);
-  x_partials = (beta_y - (exp_lin.matrix() * beta_val.transpose())
-                                 .array()
-                                 .colwise() *
-                             inv_sum_exp_lin)
-                   .matrix();
+  x_partials =
+      (beta_y - (exp_lin.matrix() * beta_val.transpose()).array().colwise() *
+                    inv_sum_exp_lin)
+          .matrix();
   Array<double, Dynamic, Dynamic> neg_softmax_lin =
       exp_lin.colwise() * -inv_sum_exp_lin;
   Eigen::Map<Eigen::VectorXd> alpha_partials(s.buf[1], classes);

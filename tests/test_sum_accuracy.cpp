@@ -128,9 +128,9 @@ void test_gather_adjoints() {
     std::vector<double> grad((size_t)c.slots);
     ex.gradient(grad.data());
     for (int64_t j = 0; j < c.slots; ++j)
-      expect_ulp(std::string("gather adjoint, ") + c.name + " " +
-                     std::to_string(j),
-                 grad[(size_t)j], want[(size_t)j].value(), kUlp);
+      expect_ulp(
+          std::string("gather adjoint, ") + c.name + " " + std::to_string(j),
+          grad[(size_t)j], want[(size_t)j].value(), kUlp);
   }
 }
 

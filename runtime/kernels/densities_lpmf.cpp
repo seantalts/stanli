@@ -32,9 +32,9 @@ stan::return_type_t<T_location, T_precision> neg_binomial_2_lpmf(
     const T_n& n, const T_location& mu, const T_precision& phi) {
   using stan::math::as_array_or_scalar;
   using stan::math::as_column_vector_or_scalar;
-  using stan::math::lbeta;
   using stan::math::digamma;
   using stan::math::include_summand;
+  using stan::math::lbeta;
   using stan::math::log1p;
   using stan::math::select;
   using stan::math::sum;
@@ -71,9 +71,9 @@ stan::return_type_t<T_location, T_precision> neg_binomial_2_lpmf(
   auto phi_term = -phi_val * log1p(mu_val / phi_val);
   auto choose_term = -lbeta(phi_val, value_of(n_vec) + 1.0) - log(n_plus_phi);
   if constexpr (include_location) {
-    auto n_term = value_of(n_vec) * select(mu_val > phi_val,
-                                           -log1p(phi_val / mu_val),
-                                           log(mu_val) - log_mu_plus_phi);
+    auto n_term =
+        value_of(n_vec) * select(mu_val > phi_val, -log1p(phi_val / mu_val),
+                                 log(mu_val) - log_mu_plus_phi);
     if constexpr (include_precision) {
       logp += sum(choose_term + n_term + phi_term);
     } else {
@@ -90,8 +90,8 @@ stan::return_type_t<T_location, T_precision> neg_binomial_2_lpmf(
     auto log_term = select(mu_val < phi_val, log1p(-mu_val / mu_plus_phi),
                            log(phi_val) - log_mu_plus_phi);
     stan::math::partials<1>(ops_partials) =
-        (mu_val - value_of(n_vec)) / mu_plus_phi + log_term -
-        digamma(phi_val) + digamma(n_plus_phi);
+        (mu_val - value_of(n_vec)) / mu_plus_phi + log_term - digamma(phi_val) +
+        digamma(n_plus_phi);
   }
   return ops_partials.build(logp);
 }
