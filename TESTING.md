@@ -175,7 +175,7 @@ closer in <!--gen:testing_values_cmdstan_closer-->16,631<!--/gen-->. The two eng
 distance away in the rest.
 
 We measured these numbers on macOS arm64 on <!--gen:testing_accuracy_date-->2026-11-25<!--/gen-->, at
-commit <!--gen:testing_accuracy_source-->`fdad2805`<!--/gen-->. CI does not measure them again.
+commit <!--gen:testing_accuracy_source-->`c2f6db4b`<!--/gen-->. CI does not measure them again.
 
 ### How to read the table
 
@@ -236,8 +236,8 @@ table and those files disagree.
 | `GLMM_Poisson_model` | posteriordb | 45 | 125 | 13.2 | 12.8 | 1.03 | 1.05 | 1.06 | 1.06 | 10 |  |
 | `gp_pois_regr` | posteriordb | 13 | 24 | 0.73 | 0.73 | 0.21 | 0.21 | 0.13 | 0.13 | 10 |  |
 | `gp_regr` | posteriordb | 3 | 3 | 0.80 | 0.80 | 0.69 | 0.69 | 0.17 | 0.17 | 10 |  |
-| `gpcm_latent_reg_irt` | posteriordb | 530 | 550 | 56.2 | 0.60 |  |  | 0.02 | 0.02 | lp 131, gradient 55 |  |
-| `grsm_latent_reg_irt` | posteriordb | 408 | 418 | 182 | 0.57 |  |  | <0.01 | <0.01 | lp 493, gradient 23 |  |
+| `gpcm_latent_reg_irt` | posteriordb | 530 | 550 | 56.2 | 0.94 |  |  | 0.02 | 0.02 | lp 132, gradient 55 |  |
+| `grsm_latent_reg_irt` | posteriordb | 408 | 418 | 182 | 1.55 |  |  | <0.01 | <0.01 | lp 493, gradient 23 |  |
 | `hier_2pl` | posteriordb | 669 | 804 | 602 | 602 |  |  | 0.01 | 0.01 | gradient 28 |  |
 | `hierarchical_gp` | posteriordb | 933 | 3279 | 0.33 | 0.66 |  |  | 0.29 | 0.29 | 10 |  |
 | `hmm_drive_0` | posteriordb | 6 | 429 | 32.6 | 32.9 | 10,568 | 10,568 | 0.09 | 0.09 | 10 |  |
@@ -422,7 +422,7 @@ table and those files disagree.
 | `sw_bernoulli` | brms | 3 | 5 | 0.59 | 0.59 | 1.74 | 1.12 | 0.27 | 0.15 | 10 | brms limit 10, gradient against its largest entry |
 | `sw_beta` | brms | 3 | 5 | 2.20 | 2.20 | 1.27 | 0.38 | 0.53 | 0.34 | 10 | brms limit 10 |
 | `sw_binomial` | brms | 2 | 4 | 4.55 | 5.89 | 0.60 | 0.48 | 0.49 | 0.24 | 10 | brms limit 10, gradient against its largest entry |
-| `sw_categorical` | brms | 4 | 7 | 3.64 | 0.64 | 1.55 | 1.08 | 0.37 | 0.19 | 10 | brms limit 10, gradient against its largest entry |
+| `sw_categorical` | brms | 4 | 7 | 3.64 | 0.97 | 1.55 | 1.08 | 0.37 | 0.19 | 10 | brms limit 10, gradient against its largest entry |
 | `sw_cens` | brms | 3 | 5 | 0.57 | 0.57 | 1.8e9 | 1.8e9 | 0.35 | 0.16 | 10 | brms limit 10, gradient against its largest entry |
 | `sw_cratio` | brms | 4 | 9 | 16.7 | 16.7 | 8.09 | 8.09 | 0.05 | 0.05 | 10 | brms limit 10, gradient against its largest entry |
 | `sw_cratio_cs` | brms | 7 | 12 | 3.18 | 3.18 | 4.86 | 4.86 | 0.03 | 0.03 | 10 | brms limit 10, gradient against its largest entry |

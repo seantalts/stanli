@@ -674,9 +674,9 @@
       "reason": "measured on Darwin arm64; cause not yet explained; the 80-digit run gives only directional derivatives for this model"
      },
      "lp": {
-      "bound": 131,
+      "bound": 132,
       "closer": "stanli",
-      "reason": "measured on Darwin arm64; 80-digit reference at point 2: stanli 1, CmdStan 130 scaled ULP from the true value; stanli is at least as close to it"
+      "reason": "measured on Darwin arm64; 80-digit reference at point 2: stanli 1.5, CmdStan 130.5 scaled ULP from the true value; stanli is at least as close to it; stanli adds the GLM's rows pairwise"
      }
     },
     "grsm_latent_reg_irt": {
