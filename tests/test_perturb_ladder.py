@@ -142,6 +142,56 @@ class CapSizes(unittest.TestCase):
         self.assertEqual(ladder.ladder_sizes(SV, [5, 3, 3]), [3, 5])
 
 
+def outcome(values):
+    """A differential.run_outcome payload with OK rows at the check points."""
+    return ("points", {"points": {k: {"status": ("OK", [str(v) for v in values[k]])}
+                                  for k in range(3)}, "prints": {}})
+
+
+class Variants(unittest.TestCase):
+    def test_work_not_dose_sets_the_expected_slowdown(self):
+        rec = {"meta": {"equivalent": False, "dose": 40, "work": 4},
+               "timing": {"ratio": 5.0}}
+        self.assertFalse(run.needs_cmdstan(rec))
+        rec["timing"]["ratio"] = 5.3
+        self.assertTrue(run.needs_cmdstan(rec))
+
+    def test_without_work_a_variant_always_goes_to_cmdstan(self):
+        for dose in (0, 40, None):
+            rec = {"meta": {"equivalent": False, "dose": dose},
+                   "timing": {"ratio": 1.0}}
+            self.assertTrue(run.needs_cmdstan(rec))
+
+    def test_work_of_zero_is_a_work_value(self):
+        self.assertEqual(run.expected_work({"work": 0}), 0.0)
+
+    def test_largest_difference(self):
+        a = outcome([[-10.0, 1.9e-3, 5.0]] * 3)
+        b = outcome([[-10.0, 1.9e-3 + 1e-11, 5.0]] * 3)
+        self.assertAlmostEqual(run.largest_difference(a, b, False), 1e-11 / 1.9e-3,
+                               delta=1e-12)
+        c = outcome([[-9.0, 1.9e-3, 5.0]] * 3)
+        self.assertEqual(run.largest_difference(a, c, True), 0.0)
+
+    def test_timing_cache_round_trip(self):
+        import tempfile, types
+        with tempfile.TemporaryDirectory() as d:
+            tools = types.SimpleNamespace(cache=pathlib.Path(d))
+            rec = {"outcome": "fine", "timing": {"ratio": 1.1}, "seed": "x"}
+            run.save_timed(tools, "ab" * 32, rec, "done")
+            got = run.load_timed(tools, "ab" * 32)
+            self.assertEqual(got, {"phase": "done", "outcome": "fine",
+                                   "timing": {"ratio": 1.1}})
+            self.assertIsNone(run.load_timed(tools, "cd" * 32))
+
+    def test_prep_cliff(self):
+        rec = {"meta": {"equivalent": True},
+               "base_program": {"prep_s": 0.048}, "variant_program": {"prep_s": 0.4}}
+        self.assertTrue(run.prep_cliff(rec))
+        rec["variant_program"]["prep_s"] = 0.12
+        self.assertFalse(run.prep_cliff(rec))
+
+
 class Text(unittest.TestCase):
     def test_ratio_text(self):
         self.assertEqual(run.ratio_text(2.0), "2.00x slower")
