@@ -85,12 +85,20 @@ class ClassifyCheck(unittest.TestCase):
         self.assertEqual(ladder.classify_check(("compile_fail", "index 3"), rec)[0],
                          "rejected")
 
+    def test_index_errors_stanli_finds_while_lowering_reject_the_size(self):
+        rec = Records({"ok": False, "stage": "model", "error": "compile_error"})
+        msg = ("vector[uni] assign: accessing element out of range. index 2 out "
+               "of range; expecting index to be between 1 and 1")
+        self.assertEqual(ladder.classify_check(("refused", msg), rec)[0], "rejected")
+
     def test_stanli_refusing_to_lower_is_a_failure(self):
         rec = Records({"ok": False, "stage": "lower", "error": "compile_error"})
         self.assertEqual(ladder.classify_check(("compile_fail", "no rule"), rec)[0],
                          "failure")
         self.assertEqual(ladder.classify_check(("crash", "exit -11"), Records(None))[0],
                          "failure")
+        self.assertEqual(ladder.classify_check(("refused", "no lane rule for OP_X"),
+                                               rec)[0], "failure")
 
 
 class CapSizes(unittest.TestCase):
