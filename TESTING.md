@@ -707,7 +707,7 @@ tests. To run the post-merge jobs on a branch, use
 | --- | --- | --- | --- | --- |
 | [cross-path matrix](#comparing-stanlis-execution-paths) | every fixture at 3 points and the 22 cogmod models at 13, under 19 execution configurations | each other, in every bit, with a ledger | PR on Linux x86-64, in the build with developer switches. Post-merge under AddressSanitizer and on Windows ARM64 | transformed data, which has one engine, and an error that every path shares |
 | [posteriordb cross-path](#comparing-stanlis-execution-paths) | the posteriordb models under the same configurations plus one pass-off set | each other, within 1e-11 | by hand after pass changes | an error present in both cells |
-| [compiler producer parity](#stan-language-coverage) | compact MIR bytes from the native, JavaScript and Windows compilers | each other, byte for byte | PR | numerical behavior |
+| [compiler producer parity](#stan-language-coverage) | compact MIR bytes from the native, JavaScript and Windows (`stanli-compile.exe`) compilers | each other, byte for byte | PR | numerical behavior |
 | stanc3 fuzzer ([`tools/fuzz_stanc`](tools/fuzz_stanc/README.md)) | random Stan programs compiled with and without stanc3's O1 passes: log density, gradient, `write_array`, printed output and errors at 3 points | each other | nightly, Linux x86-64 | programs that the generator cannot write |
 | Rethinking regeneration | the 62 Rethinking fixtures, regenerated from the book's code with pinned `rethinking` | the checked-in files, byte for byte | nightly, and pushes to `main` that touch them | |
 
@@ -735,7 +735,7 @@ tests. To run the post-merge jobs on a branch, use
 | AddressSanitizer | the CTest suite, compiling through `stanli-compile` | no diagnostics | post-merge except release tags | a stale `vari` that points into reused arena memory |
 | ThreadSanitizer | `test_capi`, `test_pool`, `test_multichain`, `test_wa_parallel`, `test_wa_parallel_abi` and `test_wa_parallel_switches` | no diagnostics | post-merge except release tags | the other tests |
 | bundled compiler | `r/inst/js/stanc.js`, and the compiler loaded in a browser worker, in webR and through V8 in R | a fresh build, byte for byte, and expected compile results | PR | |
-| Windows compiler | the Windows build of the compiler | expected results in `tests/test_windows_compiler.R`, and no integer folded past int32 | PR | |
+| Windows compiler | `stanli-compile.exe`, the Linux cross-build of the compiler for Windows (the release links the embedded compiler instead and does not ship it) | expected results in `tests/test_windows_compiler.R`, and no integer folded past int32 | PR | |
 | R ABI | the ABI constants in the runtime and in the R bridge | each other | PR and pushes that touch the R paths | |
 | `R CMD check` matrix | the R package without a runtime, on 4 OS and R combinations, warnings as errors | R's own checks | post-merge | sampling, which skips without a runtime |
 | packaging guards | glibc symbol versions, the macOS minimum version, the x86-64 instruction set of the Linux library | the wheel tag and the baseline ISA | every build | |
@@ -932,7 +932,7 @@ of known differences. A model fails if it does better or worse than its ledger
 entry. [`tests/stanc3_good/README.md`](tests/stanc3_good/README.md) has the
 details.
 
-The native, JavaScript and Windows compilers must emit the same bytes for the
+The native, JavaScript and Windows (`stanli-compile.exe`) compilers must emit the same bytes for the
 [compiler fixtures](tests/compiler/README.md).
 
 ### Developer switches

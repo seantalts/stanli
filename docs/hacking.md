@@ -110,7 +110,8 @@ Step by step:
    runtime's consumed slice. [`compiler/native/`](../compiler/native/) is the
    callback linked into native libraries; [`compiler/js/`](../compiler/js/)
    exports the same pipeline through js_of_ocaml and provides the CLI entry
-   point cross-built for Windows as `stanli-compile.exe`. The CLI prints MIR
+   point cross-built for Windows as `stanli-compile.exe` for the parity gate
+   (Windows ARM64 development builds compile it natively). The CLI prints MIR
    on stdout and messages for people on stderr; with `--messages-json PATH`
    it also writes `{"warnings": [...]}` to PATH, which the Python, R and
    native-tool callers read. `--passes none` gives the unoptimized MIR and
@@ -134,11 +135,16 @@ Step by step:
    a guess. Stock stanc's `--debug-optimized-mir` s-expressions are refused
    with a message that names the supported compilers.
 
-   The Windows wheel keeps the compiler outside `stanli.dll`: it packages
-   `stanli-compile.exe` as a short-lived subprocess, with no OCaml compiler
-   DLL. Native R without an embedded compiler uses `stanli-compile` beside
-   the runtime, and otherwise the bundled JavaScript compiler through V8. A
-   failure from the selected compiler is surfaced without trying another.
+   The Windows x64 wheel and R runtime link the compiler into `stanli.dll`
+   like the other releases, so no separate program is started (endpoint
+   security software blocked a shipped `stanli-compile.exe`, #669). The
+   `stanc-embed-windows` CI job builds the embed archive natively, and the
+   `win_amd64` job links it with MinGW GCC. The cross-built
+   `stanli-compile.exe` is still built for the parity gate but is not
+   packaged. Native R without an embedded compiler, such as a source build,
+   uses `stanli-compile` beside the runtime, and otherwise the bundled
+   JavaScript compiler through V8. A failure from the selected compiler is
+   surfaced without trying another.
 
 3. **[`lower.cpp`](../runtime/src/lower.cpp) turns MIR into the op
    graph.** Along the way: transformed data is evaluated once, at
@@ -202,7 +208,7 @@ ones through every stage, op list and register programs included.
 | [`runtime/src/adjoint.cpp`](../runtime/src/adjoint.cpp) | `gen_adjoint`: differentiates a register program into a second register program, so an island's backward is a second cheap pass rather than a replay under stan-math's `var`. Owns the checkpoint analysis (save a register before a later write destroys a value a derivative rule needs). `STANLI_NO_NATIVE_ADJ=1` restores the replay, which is the oracle it is tested against ([`test_adjoint.cpp`](../tests/test_adjoint.cpp)). |
 | [`runtime/src/nuts.cpp`](../runtime/src/nuts.cpp) | The sampler: Stan's own `adapt_diag_e_nuts`, configured to match CmdStan exactly. |
 | [`runtime/src/capi.cpp`](../runtime/src/capi.cpp), [`capi.h`](../runtime/include/stanli/capi.h) | The C ABI. [`python/stanli/__init__.py`](../python/stanli/__init__.py) is a thin ctypes wrapper over it. |
-| [`runtime/src/stanc_embed_c.cpp`](../runtime/src/stanc_embed_c.cpp), [`tools/stanc_embed/`](../tools/stanc_embed/) | The native OCaml-runtime bridge plus exact-source overlay, provenance, and Windows cross-build tooling. |
+| [`runtime/src/stanc_embed_c.cpp`](../runtime/src/stanc_embed_c.cpp), [`tools/stanc_embed/`](../tools/stanc_embed/) | The native OCaml-runtime bridge plus exact-source overlay, provenance, and the Windows cross-build and native embed tooling. |
 | [`js/`](../js/), [`web/`](../web/) | The npm package (a one-call `sample()` over a worker) and the demo page. The worker loads `stanli-compiler.js` when a request carries Stan source. [`tools/build_web.sh`](../tools/build_web.sh) builds the page from the package, so the two cannot drift. |
 | [`tools/`](../tools/) | Small programs and scripts; the important ones are listed below. |
 | [`harnesses/`](../harnesses/) | Corpus sweeps that need a local posteriordb: [`fn_sweep.py`](../harnesses/fn_sweep.py), benchmarks. |
@@ -731,7 +737,7 @@ fetches the pinned dependencies, builds, and runs the tests:
 
 ```
 ./tools/dev_setup.sh               # build + tests + source-pinned stanc3, embedded in the library
-./tools/dev_setup.sh --no-embed    # standalone stanli-compile instead (required on Windows ARM64)
+./tools/dev_setup.sh --no-embed    # standalone stanli-compile instead (required on Windows ARM64, which has no release build)
 ./tools/dev_setup.sh --corpus      # + posteriordb and CmdStan
 ./tools/dev_setup.sh --conformance # + the Stan conformance reference stack
 ./tools/dev_setup.sh --all
@@ -774,14 +780,16 @@ the CLANG64 directories on x86_64, or the CLANGARM64 directories on ARM64,
 to `PATH`. Pacman provides Git, Python, make, Clang, LLD and CMake, and a
 missing opam comes from winget. Windows ARM64 needs `--no-embed` because
 its OCaml compiler runs under x64 emulation while the runtime is native
-ARM64. MinGW `RelWithDebInfo` builds use `-g1` to keep objects and
+ARM64. On x64, `tools/dev_setup.sh --embed --no-build` under MSYS2 CLANG64
+is also how CI builds the embed archive that the release wheel links.
+MinGW `RelWithDebInfo` builds use `-g1` to keep objects and
 `.exe.debug` files small while retaining source lines and backtraces; use
 `-DCMAKE_BUILD_TYPE=Debug` for full variable and type information.
 
 Full native Windows setup runs in CI after pushes to `main` and on manual
 dispatch, covering x64 embedding and ARM64 standalone deployment. Pull
-requests run the fast setup contract tests and Windows compiler parity
-instead. Windows CI caches the OCaml toolchain and validated compiler
+requests run the fast setup contract tests, the `win_amd64` wheel build
+and Windows compiler parity instead. Windows CI caches the OCaml toolchain and validated compiler
 artifacts, keyed on compiler versions and the source pin, before building
 C++. A failed compiler launch keeps the cache and reports the error; only
 a successfully reported incompatible version replaces the switch. CI uses

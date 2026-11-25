@@ -19,6 +19,11 @@ let compile_tmir ~model_only ~fast_math ?passes ~filename ~include_paths
       ~model_name:"embedded_model" code
       ~include_source:
         (Frontend.Include_files.FileSystemPaths (Array.to_list include_paths)) in
+  (* stanc3 closes an #include file only from a GC finaliser on its lexbuf. A
+     one-shot compiler process exits first, but this runtime lives as long as
+     its host, and Windows refuses to delete or replace a file that is still
+     open. Collect now so every included file is closed before returning. *)
+  if Frontend.Preprocessor.included_files () <> [] then Gc.full_major ();
   let warnings =
     Array.of_list
       (List.map

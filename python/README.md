@@ -292,7 +292,9 @@ Wheels are available for macOS (arm64, x86_64), Linux (x86_64, aarch64,
 manylinux_2_28) and Windows (x86_64). The Windows wheel is built with
 mingw-w64, because stan-math does not build under MSVC (RStan ships through
 RTools for the same reason).
-On Windows the compiler runs as a short-lived `stanli-compile.exe` subprocess.
+Every wheel, Windows included, links the Stan compiler into the runtime, so
+compiling a model starts no separate program. Releases before the Windows
+wheel embedded the compiler shipped a `stanli-compile.exe` helper instead.
 
 ## Limits
 
