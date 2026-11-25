@@ -299,6 +299,19 @@ test_that("compiler diagnostics on stderr are reported unchanged", {
                    "stanc failed:\nSyntax error in 'model.stan', line 1\n")
 })
 
+test_that("Windows line endings in compiler diagnostics become newlines", {
+  run_stanc <- function(compiler, args, stdout, stderr) {
+    writeBin(charToRaw("Syntax error in 'model.stan', line 1\r\n"), stderr)
+    1L
+  }
+
+  err <- expect_error(
+    stanli:::mir_from_binary("fake-stanli-compile", "bad model",
+                             run_stanc = run_stanc))
+  expect_identical(conditionMessage(err),
+                   "stanc failed:\nSyntax error in 'model.stan', line 1\n")
+})
+
 test_that("a warning from a successful compiler run is not shown", {
   run_stanc <- function(compiler, args, stdout, stderr) {
     warning("unrelated system2 warning")
