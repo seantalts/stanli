@@ -1050,12 +1050,12 @@ struct Lowering {
   std::set<const mir::Stmt*> write_array_int_loops;
   std::set<const mir::Stmt*> write_array_unrolled_loops;
   bool write_array_unroll_int_loops = false;
-  // The program budget (compile_model). Each outermost log_prob loop that
-  // unrolled, with the slots its unroll created, so the ops that survive
-  // the passes can be charged to it. A retry lowers the loops in
-  // compact_loops in a compact form: the region map's lane form when one
-  // exists, else OP_LOOP. Loops that branch on a parameter are not
-  // recorded, so they keep their usual form.
+  // The program budget (compile_model). Each outermost loop that unrolled,
+  // with the slots its unroll created, so the ops that survive the passes
+  // can be charged to it. A retry lowers the loops in compact_loops in a
+  // compact form: in log_prob the region map's lane form when one exists,
+  // else OP_LOOP; in write_array OP_LOOP. Log_prob loops that branch on a
+  // parameter are not recorded, so they keep their usual form.
   struct UnrolledLoop {
     const mir::Stmt* loop = nullptr;
     int first_slot = 0, end_slot = 0;
@@ -1069,7 +1069,7 @@ struct Lowering {
   // budget allows it only for larger programs (compile_model).
   bool compact_op_loop = false;
   bool lowering_compact = false;
-  // The most ops an outermost log_prob loop may unroll to. A loop that
+  // The most ops an outermost loop may unroll to. A loop that
   // passes it stops the lowering with UnrollCeiling, and compile_model
   // lowers again with that loop in compact_loops. Zero means no ceiling.
   struct UnrollCeiling {

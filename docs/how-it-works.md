@@ -287,6 +287,13 @@ than 32 MiB. Below that size, a retained loop was slower than the unrolled
 loop on one and four chains. A loop that re-rolling folds is never changed,
 because the folded form is the fastest.
 
+The program that computes transformed parameters and generated quantities
+after each draw has the same check. There the compact form is always a
+retained loop, because the region map only takes loops that add to the log
+density. A retained loop makes its random draws in the same order as the
+unrolled loop and gets the same values, so a run with a fixed seed writes
+the same output.
+
 ### Partitioning loops using data
 
 Sometimes independent lanes are not next to each other, because the data

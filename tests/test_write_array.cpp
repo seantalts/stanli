@@ -1536,11 +1536,18 @@ void expect_rng_loop_parity(const std::string& label, int pad,
     test_setenv("STANLI_STRUCTURED_LOOPS", structured);
   else
     test_unsetenv("STANLI_STRUCTURED_LOOPS");
+  // The program budget would lower the padding loop compact, which leaves
+  // the graph too small for the loops below to be retained. With the budget,
+  // the draws must still match the unrolled loops.
+  CompiledModel budgeted = compile_model(text, data);
+  test_setenv("STANLI_PROGRAM_BUDGET", "0");
   CompiledModel retained = compile_model(text, data);
   test_setenv("STANLI_STRUCTURED_LOOPS", "0");
   CompiledModel unrolled = compile_model(text, data);
   test_unsetenv("STANLI_STRUCTURED_LOOPS");
+  test_unsetenv("STANLI_PROGRAM_BUDGET");
   if (!compiled_completely(retained, label) ||
+      !compiled_completely(budgeted, label + " budget") ||
       !compiled_completely(unrolled, label + " unrolled"))
     return;
   const size_t loops = retained_rng_loops(retained.write_array->graph);
@@ -1549,22 +1556,25 @@ void expect_rng_loop_parity(const std::string& label, int pad,
     std::printf("FAIL %s: %zu retained loops draw, want %zu\n", label.c_str(),
                 loops, want_loops);
   }
-  Executor rex(retained.write_array->graph), uex(unrolled.write_array->graph);
-  retained.write_array->bind(rex);
-  unrolled.write_array->bind(uex);
-  WaRng rrng(2026), urng(2026);
-  for (int draw = 0; draw < 200; ++draw) {
-    const double q[] = {0.8 * std::sin(0.37 * draw), 0.5 * std::cos(draw)};
-    for (Executor* ex : {&rex, &uex}) std::copy_n(q, 2, ex->params_data());
-    rex.run_forward_only(EvalState{&rrng});
-    uex.run_forward_only(EvalState{&urng});
-    const auto got = read_row(retained.write_array->columns, rex);
-    const auto want = read_row(unrolled.write_array->columns, uex);
-    if (!same_double_bytes(got, want)) {
-      ++failures;
-      std::printf("FAIL %s: draw %d differs from the unrolled loops\n",
-                  label.c_str(), draw);
-      return;
+  for (const CompiledModel* form : {&retained, &budgeted}) {
+    const std::string what = label + (form == &budgeted ? " budget" : "");
+    Executor rex(form->write_array->graph), uex(unrolled.write_array->graph);
+    form->write_array->bind(rex);
+    unrolled.write_array->bind(uex);
+    WaRng rrng(2026), urng(2026);
+    for (int draw = 0; draw < 200; ++draw) {
+      const double q[] = {0.8 * std::sin(0.37 * draw), 0.5 * std::cos(draw)};
+      for (Executor* ex : {&rex, &uex}) std::copy_n(q, 2, ex->params_data());
+      rex.run_forward_only(EvalState{&rrng});
+      uex.run_forward_only(EvalState{&urng});
+      const auto got = read_row(form->write_array->columns, rex);
+      const auto want = read_row(unrolled.write_array->columns, uex);
+      if (!same_double_bytes(got, want)) {
+        ++failures;
+        std::printf("FAIL %s: draw %d differs from the unrolled loops\n",
+                    what.c_str(), draw);
+        break;
+      }
     }
   }
 }
@@ -1594,10 +1604,14 @@ void expect_replayed_write_array_loops(const std::string& stem,
     for (int i = 0; i < n; ++i)
       x[static_cast<size_t>(i)] = 0.25 * (i % 5) - 0.5;
     data.set_real_array("x", x);
+    // The program budget would lower the padding loop compact, which leaves
+    // the graph too small for the carried loops to be retained.
+    test_setenv("STANLI_PROGRAM_BUDGET", "0");
     CompiledModel retained = compile_model(text, data);
     test_setenv("STANLI_STRUCTURED_LOOPS", "0");
     CompiledModel unrolled = compile_model(text, data);
     test_unsetenv("STANLI_STRUCTURED_LOOPS");
+    test_unsetenv("STANLI_PROGRAM_BUDGET");
     if (!compiled_completely(retained, label) ||
         !compiled_completely(unrolled, label + " unrolled"))
       continue;

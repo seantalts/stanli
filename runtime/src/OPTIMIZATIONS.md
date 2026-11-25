@@ -1351,6 +1351,36 @@ On `nn_rbm1bJ100` (184 MB of data as JSON), peak memory during preparation
 stays at 3.3 GB, as without the budget. `STANLI_FREE_FIRST_BYTES` sets the
 64 MiB in developer builds.
 
+The `write_array` graph, which computes the transformed parameters and
+generated quantities of each draw, has the same budgets, ceiling and retries.
+Its only compact form is `OP_LOOP`, because the region map only takes loops
+that add to the target. So a `write_array` loop changes only when the
+`write_array` program is larger than 32 MiB. A loop there may call `_rng`
+functions. `OP_LOOP` runs the body once per iteration in order and does not
+replay a body that draws, so it takes the same draws in the same order as
+the unrolled graph, with the same values. `test_budget_write_array`
+compares six draws in a row from one generator bit for bit, with
+`poisson_rng` and `gamma_rng`, which take a varying number of uniforms, and
+a draw under a parameter branch. A loop that prints, or that assigns an
+integer that a declared size reads, keeps its form. The compact graph
+replaces the first only if it has the same columns and a smaller program.
+
+Two corpus `write_array` graphs change. Time per draw is the median of 6
+alternating pairs, each copy with its own executor and generator on its own
+thread (2026-11-24, Apple M3 Ultra, load 6 to 11 on 32 cores):
+
+| model | program | 1 copy | 12 copies | preparation |
+| --- | ---: | ---: | ---: | ---: |
+| `examplemodels_ms` | 101.0 to 30.6 MB | 1.02x faster | 1.41x faster | 0.50 to 0.66 s |
+| `hmm_gaussian` | 42.5 to 5.9 MB | 2.38x slower | 1.14x faster | 0.11 to 0.16 s |
+
+Most of what remains of `examplemodels_ms` is one read per output value,
+which lays out the 72,000 elements of `ps` and `po` as columns. For
+`hmm_gaussian`, the 0.9 ms more per draw on one copy is about 1% of the
+time that the sampler spends on the gradients of a draw (about 320
+gradients of 0.21 ms). `hbayesdm_gng_m4` (50.3 MB) keeps its form, because
+`OP_LOOP` refuses its loop, as it does in the log density.
+
 An out-of-range index raises the same error in every form of a loop: each
 dynamic index read carries the label of Stan's error for its selector
 (`label_dynamic_index` in `structured_loop.cpp`), so the region map and
@@ -1363,7 +1393,7 @@ raises `structured index out of range`.
 | --- | --- | --- |
 | `STANLI_PROGRAM_BUDGET=n` | the program budget in bytes, default 8 MiB; 0 turns the budget off | `lower.cpp` |
 | `STANLI_LOOP_BUDGET=n` | the program size in bytes past which a loop may also become `OP_LOOP`, default 32 MiB | `lower.cpp` |
-| `STANLI_FREE_FIRST_BYTES=n` | the bytes of fills past which the first graph is freed before the budget lowers log_prob again, default 64 MiB | `lower.cpp` |
+| `STANLI_FREE_FIRST_BYTES=n` | the bytes of fills past which the first graph is freed before the budget lowers its section again, default 64 MiB | `lower.cpp` |
 | `STANLI_UNROLL_CEILING=n` | the most ops an outermost loop may unroll to before the passes, default 2^20; 0 means no ceiling | `lower.cpp` |
 
 ## Tape islands (`island.cpp`, disable: `STANLI_NO_ISLAND=1`)

@@ -3203,6 +3203,163 @@ void test_budget_returns_prepared_data() {
   }
 }
 
+// The program budget applies to the write_array graph too. Its only compact
+// form is OP_LOOP, so it changes the graph only past the second budget, and
+// the loop must take its draws in the order and with the values that the
+// unrolled graph takes them: a run of draws from one generator gives the
+// same rows bit for bit.
+using Env = std::vector<std::pair<const char*, const char*>>;
+
+Env with(Env env, const Env& more) {
+  env.insert(env.end(), more.begin(), more.end());
+  return env;
+}
+
+int count_wa_opcode(const CompiledModel& cm, uint16_t opcode) {
+  if (!cm.write_array) return -1;
+  const auto& ops = cm.write_array->graph.ops;
+  return static_cast<int>(
+      std::count_if(ops.begin(), ops.end(),
+                    [=](const stanli::Op& op) { return op.opcode == opcode; }));
+}
+
+int64_t wa_program_bytes(const CompiledModel& cm) {
+  return cm.write_array ? Executor::program_bytes(cm.write_array->graph) : -1;
+}
+
+std::map<uint16_t, int> wa_histogram(const CompiledModel& cm) {
+  std::map<uint16_t, int> h;
+  if (cm.write_array)
+    for (const stanli::Op& op : cm.write_array->graph.ops) ++h[op.opcode];
+  return h;
+}
+
+// The rows of `draws` consecutive draws from one generator, from the graph
+// or from the interpreter.
+std::vector<std::vector<double>> wa_rows(const CompiledModel& cm,
+                                         const Params& p, int draws,
+                                         bool interp) {
+  std::vector<std::vector<double>> rows;
+  if (!cm.write_array || cm.write_array->truncated) return rows;
+  Executor ex(cm.graph);
+  cm.bind(ex);
+  (void)evaluate(ex, p);
+  stanli::WaRng rng(11);
+  if (interp) {
+    if (!cm.write_array->interp) return rows;
+    for (int d = 0; d < draws; ++d)
+      rows.push_back(cm.write_array->interp->eval(cm.constrained_env(ex), rng));
+    return rows;
+  }
+  Executor wex(cm.write_array->graph);
+  cm.write_array->bind(wex);
+  std::copy(ex.params_data(), ex.params_data() + p.size(), wex.params_data());
+  for (int d = 0; d < draws; ++d) {
+    wex.run_forward_only(stanli::EvalState{&rng});
+    std::vector<double> row;
+    for (const auto& c : cm.write_array->columns) {
+      const double* v = std::as_const(wex).value_ptr(c.slot);
+      row.insert(row.end(), v, v + c.len);
+    }
+    rows.push_back(std::move(row));
+  }
+  return rows;
+}
+
+bool same_rows(const std::vector<std::vector<double>>& a,
+               const std::vector<std::vector<double>>& b) {
+  if (a.empty() || a.size() != b.size()) return false;
+  for (size_t d = 0; d < a.size(); ++d) {
+    if (a[d].size() != b[d].size()) return false;
+    for (size_t k = 0; k < a[d].size(); ++k)
+      if (!same_bits(a[d][k], b[d][k])) return false;
+  }
+  return true;
+}
+
+const std::vector<Params> wa_points = {{0.2, -0.5}, {-0.4, 0.3}};
+
+void expect_same_rows(const std::string& what, const CompiledModel& got,
+                      const CompiledModel& want, bool interp = false) {
+  for (size_t k = 0; k < wa_points.size(); ++k)
+    check(same_rows(wa_rows(got, wa_points[k], 6, false),
+                    wa_rows(want, wa_points[k], 6, interp)),
+          what + " point " + std::to_string(k) +
+              ": six draws in a row are equal bit for bit");
+}
+
+void test_budget_write_array() {
+  const int n = 300;
+  const Env small = {{"STANLI_PROGRAM_BUDGET", "65536"},
+                     {"STANLI_LOOP_BUDGET", "65536"}};
+  for (const char* parallel : {"0", "force"}) {
+    const std::string what =
+        std::string("budget_wa STANLI_PARALLEL_WA=") + parallel;
+    const Env par = {{"STANLI_PARALLEL_WA", parallel}};
+    const CompiledModel off = compile_env(
+        "budget_wa", n, with({{"STANLI_PROGRAM_BUDGET", "0"}}, par));
+    const CompiledModel on = compile_env("budget_wa", n, with(small, par));
+    check(count_wa_opcode(off, OP_LOOP) == 0 && wa_program_bytes(off) > 65536,
+          what + ": without a budget the loop unrolls, over the budget");
+    check(count_wa_opcode(on, OP_LOOP) == 1,
+          what + ": over budget, the write_array loop becomes OP_LOOP");
+    check(wa_program_bytes(on) < wa_program_bytes(off),
+          what + ": the compact write_array program is smaller");
+    check(histogram(on) == histogram(off) &&
+              program_bytes(on) == program_bytes(off),
+          what + ": the log density graph does not change");
+    expect_same_rows(what + " OP_LOOP vs unrolled", on, off);
+    // Under the second budget the only compact form is not used.
+    const CompiledModel under =
+        compile_env("budget_wa", n,
+                    with({{"STANLI_PROGRAM_BUDGET", "65536"},
+                          {"STANLI_LOOP_BUDGET", "1000000000"}},
+                         par));
+    check(wa_histogram(under) == wa_histogram(off),
+          what + ": under the OP_LOOP budget the loop stays unrolled");
+    // Freed first, the compact graph is still taken.
+    const CompiledModel freed =
+        compile_env("budget_wa", n,
+                    with(with(small, {{"STANLI_FREE_FIRST_BYTES", "0"}}), par));
+    check(count_wa_opcode(freed, OP_LOOP) == 1,
+          what + ": a freed first graph still takes OP_LOOP");
+    expect_same_rows(what + " freed vs unrolled", freed, off);
+    // With no compact form the graph is the unrolled one, kept or lowered
+    // again after it was freed.
+    for (const char* free_first : {"1000000000", "0"}) {
+      const CompiledModel refused = compile_env(
+          "budget_wa", n,
+          with(with(small, {{"STANLI_STRUCTURED_LOOPS", "0"},
+                            {"STANLI_FREE_FIRST_BYTES", free_first}}),
+               par));
+      const CompiledModel refused_off =
+          compile_env("budget_wa", n,
+                      with({{"STANLI_PROGRAM_BUDGET", "0"},
+                            {"STANLI_STRUCTURED_LOOPS", "0"}},
+                           par));
+      check(wa_histogram(refused) == wa_histogram(refused_off) &&
+                wa_program_bytes(refused) == wa_program_bytes(refused_off),
+            what + ": with no compact form the loop stays unrolled (free " +
+                free_first + ")");
+      expect_same_rows(what + " refused vs unrolled", refused, refused_off);
+    }
+    // A write_array loop past the unroll ceiling is lowered compact at once.
+    const CompiledModel capped = compile_env(
+        "budget_wa", n,
+        with({{"STANLI_PROGRAM_BUDGET", "0"}, {"STANLI_UNROLL_CEILING", "100"}},
+             par));
+    check(count_wa_opcode(capped, OP_LOOP) == 1,
+          what + ": a write_array loop past the ceiling becomes OP_LOOP");
+    expect_same_rows(what + " ceiling vs unrolled", capped, off);
+  }
+  // The interpreter takes the same draws.
+  const CompiledModel on = compile_env("budget_wa", n, small);
+  const CompiledModel interp = compile_env(
+      "budget_wa", n,
+      {{"STANLI_PROGRAM_BUDGET", "0"}, {"STANLI_WA_FORCE_INTERP", "1"}});
+  expect_same_rows("budget_wa OP_LOOP vs interpreter", on, interp, true);
+}
+
 // A budget fallback adds a long target sum with compensation
 // (pairwise_sum.hpp). The terms below nearly cancel, so a sum in plain order,
 // which the unrolled graph uses, is about 1e-9 off in relative terms. Each
@@ -3347,6 +3504,7 @@ int main() {
   test_budget_without_compact_form();
   test_budget_index_errors();
   test_budget_returns_prepared_data();
+  test_budget_write_array();
   test_setenv("STANLI_REGION_MAP_LANES", "0", 1);
   test_large_body_recomputes_by_default();
   test_clear_strategy_follows_mode();

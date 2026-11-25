@@ -1288,18 +1288,20 @@ std::optional<CompiledModel> try_bounded_specialization(Lowering& lo,
 // than unrolling at 1, 4 and 12 chains. OP_LOOP was 1.2-1.5x slower than
 // unrolling on 1 chain for the corpus programs of 9-30 MB, and within 4% or
 // faster on 1 and 4 chains for those of 44-67 MB, so loops take it only past
-// the second budget. STANLI_PROGRAM_BUDGET and STANLI_LOOP_BUDGET override them
-// in bytes; 0 turns the first off.
+// the second budget. The write_array graph has the same budgets, and its only
+// compact form is OP_LOOP. STANLI_PROGRAM_BUDGET and STANLI_LOOP_BUDGET
+// override them in bytes; 0 turns the first off.
 constexpr int64_t kProgramBudgetBytes = int64_t{8} << 20;
 constexpr int64_t kLoopBudgetBytes = int64_t{32} << 20;
 // The most ops one outermost loop may unroll to before the passes. The
 // largest corpus loop unrolls to about 180,000.
 constexpr size_t kUnrollCeilingOps = size_t{1} << 20;
 // A first graph whose fills (the data it holds) are larger than this is
-// freed before the budget lowers log_prob again.
+// freed before the budget lowers its section again.
 constexpr int64_t kFreeFirstBytes = int64_t{64} << 20;
 
-int64_t fill_bytes(const CompiledModel& cm) {
+template <class Lowered>
+int64_t fill_bytes(const Lowered& cm) {
   int64_t bytes = 0;
   for (const auto& fill : cm.fills)
     bytes += static_cast<int64_t>(fill.second.size() * sizeof(double));
@@ -1313,6 +1315,15 @@ int64_t switch_value(const char* name, int64_t fallback) {
   const char* v = debug_env(name);
   return v ? std::strtoll(v, nullptr, 10) : fallback;
 }
+
+// The three limits, read once per compile_model.
+struct ProgramBudget {
+  int64_t program = switch_value("STANLI_PROGRAM_BUDGET", kProgramBudgetBytes);
+  int64_t loop = switch_value("STANLI_LOOP_BUDGET", kLoopBudgetBytes);
+  size_t ceiling = static_cast<size_t>(std::max<int64_t>(
+      0, switch_value("STANLI_UNROLL_CEILING", (int64_t)kUnrollCeilingOps)));
+  int64_t free_first = switch_value("STANLI_FREE_FIRST_BYTES", kFreeFirstBytes);
+};
 
 // The outermost loops to lower compact so that the program fits `budget`.
 // Each loop is charged the ops that survived the passes and write a slot
@@ -1390,26 +1401,28 @@ CompiledModel lower_again(Lowering& lo, const mir::Program& p,
   return trial.run(p);
 }
 
-// Lowers log_prob again with `chosen` (the budget's loops) and `capped`
-// (loops past the unroll ceiling) compact. A loop that passes the ceiling
-// joins `capped` and the lowering starts over. A capped loop that no
-// compact form takes unrolls in the next attempt, which does not hold it to
-// the ceiling; the last attempt has no ceiling at all, which bounds the
-// retries when many loops pass it. A chosen loop that no compact form takes
-// leaves `chosen` and the lowering starts over, and with no loops left
-// there is nothing to gain.
-std::optional<CompiledModel> lower_compact(Lowering& lo, const mir::Program& p,
-                                           std::set<const mir::Stmt*> chosen,
-                                           std::set<const mir::Stmt*> capped,
-                                           size_t ceiling, bool op_loop) {
+// Lowers a graph again with `chosen` (the budget's loops) and `capped`
+// (loops past the unroll ceiling) compact: `lower(compact, required,
+// ceiling)` lowers it with `compact` lowered compact and `required` of them
+// refused with CompactRefused when no compact form takes them. A loop that
+// passes the ceiling joins `capped` and the lowering starts over. A capped
+// loop that no compact form takes unrolls in the next attempt, which does
+// not hold it to the ceiling; the last attempt has no ceiling at all, which
+// bounds the retries when many loops pass it. A chosen loop that no compact
+// form takes leaves `chosen` and the lowering starts over, and with no loops
+// left there is nothing to gain.
+template <class Lower>
+auto lower_compact(std::set<const mir::Stmt*> chosen,
+                   std::set<const mir::Stmt*> capped, size_t ceiling,
+                   const Lower& lower)
+    -> std::optional<decltype(lower(chosen, chosen, ceiling))> {
   constexpr int kAttempts = 8;
   for (int attempt = 1;; ++attempt) {
     if (chosen.empty() && capped.empty()) return std::nullopt;
     std::set<const mir::Stmt*> loops = chosen;
     loops.insert(capped.begin(), capped.end());
     try {
-      return lower_again(lo, p, "budget_log_prob", loops, chosen,
-                         attempt < kAttempts ? ceiling : 0, op_loop);
+      return lower(loops, chosen, attempt < kAttempts ? ceiling : 0);
     } catch (const Lowering::UnrollCeiling& c) {
       capped.insert(c.loop);
     } catch (const Lowering::CompactRefused& c) {
@@ -1454,12 +1467,13 @@ class WriteArrayLowering {
  public:
   WriteArrayLowering(const DataMap& data, const mir::Program& prog,
                      bool trace_prep, PassDumper& dumper,
-                     ParallelWriteArray policy)
+                     ParallelWriteArray policy, const ProgramBudget& budget)
       : data_(data),
         prog_(prog),
         trace_(trace_prep),
         dumper_(dumper),
-        policy_(policy) {}
+        policy_(policy),
+        budget_(budget) {}
 
   void begin(Lowering& log_prob) {
     for (const auto& e : log_prob.td.env()) bound_env_.push_back(e.first);
@@ -1467,20 +1481,35 @@ class WriteArrayLowering {
     if (!should_run_alongside(log_prob)) return;
     wa_.emplace(data_, trace_, off_, "write_array",
                 log_prob.prepared_context());
+    wa_->unroll_ceiling = budget_.ceiling;
     started_ = worker_.start([this] { result_ = wa_->run_write_array(prog_); });
   }
 
   CompiledModel::WriteArray finish(Lowering& log_prob, PrepTrace& prep) {
     CompiledModel::WriteArray w;
-    if (started_) {
-      worker_.rethrow_if_failed();
-      w = std::move(*result_);
-      w.lowered_in_parallel = true;
-    } else {
-      const bool lent = !wa_;
-      if (lent) build_after_log_prob(log_prob);
-      w = wa_->run_write_array(prog_);
-      if (lent) return_environment(log_prob);
+    const mir::Stmt* past_ceiling = nullptr;
+    try {
+      if (started_) {
+        worker_.rethrow_if_failed();
+        w = std::move(*result_);
+        w.lowered_in_parallel = true;
+      } else if (wa_) {
+        w = wa_->run_write_array(prog_);
+      } else {
+        w = lower(log_prob, {}, {}, budget_.ceiling);
+      }
+      fallbacks_ = wa_->out.interpreter_fallbacks;
+    } catch (const Lowering::UnrollCeiling& c) {
+      past_ceiling = c.loop;
+    }
+    if (past_ceiling) {
+      w = std::move(*lower_compact(
+          {}, {past_ceiling}, budget_.ceiling,
+          [&](const auto& compact, const auto& required, size_t ceiling) {
+            return lower(log_prob, compact, required, ceiling,
+                         "budget_write_array");
+          }));
+      fallbacks_ = wa_->out.interpreter_fallbacks;
     }
     // A size that reads an integer a retained loop produced cannot be laid
     // out. Lower write_array again with those loops unrolled, so the section
@@ -1493,21 +1522,93 @@ class WriteArrayLowering {
       unrolled.insert(wa_->write_array_int_loops.begin(),
                       wa_->write_array_int_loops.end());
       if (unrolled.size() == before) break;
-      build_after_log_prob(log_prob);
-      wa_->write_array_unrolled_loops = std::move(unrolled);
-      wa_->write_array_unroll_int_loops = attempt == 2;
-      w = wa_->run_write_array(prog_);
-      return_environment(log_prob);
+      unrolled_ = std::move(unrolled);
+      unroll_int_loops_ = attempt == 2;
+      w = lower(log_prob, {}, {}, 0);
+      fallbacks_ = wa_->out.interpreter_fallbacks;
     }
+    if (!w.truncated) keep_under_budget(log_prob, w);
     prep.append(std::move(trace_));
     return w;
   }
 
   const std::vector<std::string>& interpreter_fallbacks() const {
-    return wa_->out.interpreter_fallbacks;
+    return fallbacks_;
   }
 
  private:
+  // Lowers write_array again after log_prob, in a fresh Lowering that
+  // borrows log_prob's environment, with the loops that the attempts above
+  // unrolled and `compact` lowered compact (lower_compact).
+  CompiledModel::WriteArray lower(Lowering& log_prob,
+                                  const std::set<const mir::Stmt*>& compact,
+                                  const std::set<const mir::Stmt*>& required,
+                                  size_t ceiling,
+                                  const char* graph_name = "write_array") {
+    build_after_log_prob(log_prob, graph_name);
+    const ScopeExit give_back{[&] { return_environment(log_prob); }};
+    wa_->write_array_unrolled_loops = unrolled_;
+    wa_->write_array_unroll_int_loops = unroll_int_loops_;
+    wa_->compact_loops = compact;
+    wa_->required_compact = required;
+    wa_->unroll_ceiling = ceiling;
+    return wa_->run_write_array(prog_);
+  }
+
+  // The program budget of compile_model, for the write_array graph. Its
+  // only compact form is OP_LOOP, so it changes a graph only past the second
+  // budget. The compact graph replaces `w` when it lays out the same columns
+  // in a smaller program.
+  void keep_under_budget(Lowering& log_prob, CompiledModel::WriteArray& w) {
+    const int64_t first_bytes = Executor::program_bytes(w.graph);
+    const bool op_loop = first_bytes > budget_.loop;
+    const auto loops = loops_over_budget(wa_->unrolled_loops, w.graph,
+                                         budget_.program, op_loop);
+    if (loops.empty()) return;
+    const bool freed = fill_bytes(w) > budget_.free_first;
+    CompiledModel::WriteArray first;
+    if (freed) {
+      first.columns = std::move(w.columns);
+      first.n_tp_start = w.n_tp_start;
+      first.n_gq_start = w.n_gq_start;
+      first.n_unconstrained = w.n_unconstrained;
+      first.lowered_in_parallel = w.lowered_in_parallel;
+      w = CompiledModel::WriteArray{};
+    }
+    const CompiledModel::WriteArray& want = freed ? first : w;
+    auto compact = lower_compact(
+        loops, {}, budget_.ceiling,
+        [&](const auto& chosen, const auto& required, size_t ceiling) {
+          return lower(log_prob, chosen, required, ceiling,
+                       "budget_write_array");
+        });
+    if (compact && same_layout(*compact, want) &&
+        Executor::program_bytes(compact->graph) < first_bytes) {
+      compact->lowered_in_parallel = want.lowered_in_parallel;
+      w = std::move(*compact);
+      fallbacks_ = wa_->out.interpreter_fallbacks;
+      return;
+    }
+    if (freed) {
+      w = lower(log_prob, {}, {}, 0);
+      w.lowered_in_parallel = want.lowered_in_parallel;
+      fallbacks_ = wa_->out.interpreter_fallbacks;
+    }
+  }
+
+  static bool same_layout(const CompiledModel::WriteArray& a,
+                          const CompiledModel::WriteArray& b) {
+    if (a.truncated || a.n_unconstrained != b.n_unconstrained ||
+        a.n_tp_start != b.n_tp_start || a.n_gq_start != b.n_gq_start ||
+        a.columns.size() != b.columns.size())
+      return false;
+    for (size_t k = 0; k < a.columns.size(); ++k)
+      if (a.columns[k].name != b.columns[k].name ||
+          a.columns[k].len != b.columns[k].len)
+        return false;
+    return true;
+  }
+
   bool should_run_alongside(Lowering& log_prob) {
     const ParallelWriteArray policy = policy_;
     if (policy == ParallelWriteArray::Off || !thread_safe_build() ||
@@ -1526,11 +1627,11 @@ class WriteArrayLowering {
            work.of(prog_.log_prob) >= kParallelWriteArrayMinWork;
   }
 
-  void build_after_log_prob(Lowering& log_prob) {
+  void build_after_log_prob(Lowering& log_prob, const char* graph_name) {
     const std::map<std::string, DataMap::Entry> no_environment;
     const std::map<std::string, DeclView> no_declarations;
     wa_.emplace(
-        data_, trace_, dumper_, "write_array",
+        data_, trace_, dumper_, graph_name,
         PreparedContext{log_prob.td_rng, log_prob.shape_pool, no_environment,
                         log_prob.int_env_data, no_declarations,
                         log_prob.zero_size_data, log_prob.prepared_names});
@@ -1564,6 +1665,10 @@ class WriteArrayLowering {
   PassDumper off_{nullptr, nullptr};
   PassDumper& dumper_;
   ParallelWriteArray policy_;
+  ProgramBudget budget_;
+  std::set<const mir::Stmt*> unrolled_;
+  bool unroll_int_loops_ = false;
+  std::vector<std::string> fallbacks_;
   std::vector<std::string> bound_env_, bound_decls_;
   std::optional<Lowering> wa_;
   std::optional<CompiledModel::WriteArray> result_;
@@ -1696,19 +1801,17 @@ CompiledModel compile_model(const std::string& mir_text, const DataMap& data,
   // A second lowering, over the transformed data the first one already
   // interpreted: re-running prepare_data would double preparation time on
   // the models where preparation is the cost (nn_rbm1bJ100, 20.7 s).
+  const ProgramBudget limits;
   std::optional<WriteArrayLowering> wa_lowering;
   if (!prog->generate_quantities.empty()) {
     wa_lowering.emplace(model_data, *prog, prep.enabled(), dumper,
-                        parallel_write_array(options));
+                        parallel_write_array(options), limits);
     lo.after_data_prepared = [&] { wa_lowering->begin(lo); };
   }
   auto specialized = try_bounded_specialization(lo, *prog);
-  const int64_t budget =
-      switch_value("STANLI_PROGRAM_BUDGET", kProgramBudgetBytes);
-  const int64_t loop_budget =
-      switch_value("STANLI_LOOP_BUDGET", kLoopBudgetBytes);
-  const size_t ceiling = static_cast<size_t>(std::max<int64_t>(
-      0, switch_value("STANLI_UNROLL_CEILING", (int64_t)kUnrollCeilingOps)));
+  const int64_t budget = limits.program;
+  const int64_t loop_budget = limits.loop;
+  const size_t ceiling = limits.ceiling;
   std::optional<CompiledModel> lowered = std::move(specialized);
   const bool specialized_path = lowered.has_value();
   const mir::Stmt* past_ceiling = nullptr;
@@ -1722,7 +1825,12 @@ CompiledModel compile_model(const std::string& mir_text, const DataMap& data,
   }
   lo.restore_shadowed_prepared();
   if (!lowered) {
-    lowered = lower_compact(lo, *prog, {}, {past_ceiling}, ceiling, true);
+    lowered =
+        lower_compact({}, {past_ceiling}, ceiling,
+                      [&](const auto& compact, const auto& required, size_t c) {
+                        return lower_again(lo, *prog, "budget_log_prob",
+                                           compact, required, c, true);
+                      });
   } else if (!specialized_path) {
     const int64_t first_bytes = Executor::program_bytes(lowered->graph);
     const bool op_loop = first_bytes > loop_budget;
@@ -1735,10 +1843,13 @@ CompiledModel compile_model(const std::string& mir_text, const DataMap& data,
       // lowered again, and lowered a third time if the compact graph is
       // not smaller. A first graph that holds little is kept, since
       // lowering it again can take as long as the first lowering did.
-      if (fill_bytes(*lowered) >
-          switch_value("STANLI_FREE_FIRST_BYTES", kFreeFirstBytes))
-        lowered.reset();
-      auto compact = lower_compact(lo, *prog, loops, {}, ceiling, op_loop);
+      if (fill_bytes(*lowered) > limits.free_first) lowered.reset();
+      auto compact = lower_compact(
+          loops, {}, ceiling,
+          [&](const auto& chosen, const auto& required, size_t c) {
+            return lower_again(lo, *prog, "budget_log_prob", chosen, required,
+                               c, op_loop);
+          });
       if (compact && Executor::program_bytes(compact->graph) < first_bytes)
         lowered = std::move(compact);
       compact.reset();
