@@ -260,7 +260,29 @@ static void check_tail_glm(const std::string& tag, uint16_t opcode, bool propto,
     ref = scalar_y ? call(yy[0]) : call(yy);
     var scaled_cat = ref * seed;
     stan::math::grad(scaled_cat.vi_);
-    expect_eq_or_both_nan(tag + " total", got, scaled_cat.val());
+    if (rows <= kPlainSumMax) {
+      expect_eq_or_both_nan(tag + " total", got, scaled_cat.val());
+    } else {
+      // Past kPlainSumMax rows the kernel adds the rows' log probabilities
+      // with compensation rather than Stan Math's three sums.
+      ExactSum rows_lp;
+      for (int n = 0; n < rows; ++n) {
+        Eigen::VectorXd lin(beta_len / cols);
+        for (int j = 0; j < lin.size(); ++j) {
+          double v = 0.0;
+          for (int c = 0; c < cols; ++c)
+            v += X[(size_t)c * rows + n] * b[(size_t)j * cols + c];
+          lin(j) = v + a[(size_t)j];
+        }
+        rows_lp.add(stan::math::categorical_logit_lpmf(
+            scalar_y ? yy[0] : yy[(size_t)n], lin));
+      }
+      const double want = rows_lp.value() * seed;
+      if (std::isfinite(want) || std::isfinite(got))
+        expect_ulp(tag + " total", got, want, 2);
+      else
+        expect_eq_or_both_nan(tag + " total", got, want);
+    }
     size_t at = 0;
     for (size_t i = 0; i < X.size(); ++i)
       expect_eq_or_both_nan(tag + " dX" + std::to_string(i), grad[at++],
@@ -802,6 +824,65 @@ static void test_categorical_array_scaled() {
   stan::math::recover_memory();
 }
 
+// Stan Math adds the rows' log normalizers, maxima and selected logits as
+// three separate sums. With logits near 100 the second and third sums cancel
+// to the result's scale, and their rounding errors survive (7 ULP here, 25
+// ULP in grsm_latent_reg_irt). Every input and logit is exact in double, so
+// the 60-digit value below is the exact log density at these inputs.
+static void test_categorical_glm_long_sum() {
+  using namespace stanli;
+  using stan::math::var;
+  const int rows = 400, cats = 4;
+  std::vector<double> X(rows);
+  std::vector<int> idata;
+  for (int n = 0; n < rows; ++n) {
+    X[(size_t)n] = ((n * 37) % 101 - 50) / 64.0;
+    idata.push_back(1 + (n * 7) % 4);
+  }
+  append_glm_layout(idata, rows, 1, 0);
+  const double alpha[cats] = {100, 99.75, 99.5, 99.125};
+  const double beta[cats] = {0, 0.3125, 0.625, 0.9375};
+
+  Graph g;
+  const int Xs = g.add_slot(rows, true);
+  const int as = g.add_slot(cats, true);
+  const int bs = g.add_slot(cats, true);
+  const int lp = g.add_slot(1, false);
+  g.add_op(OP_CATEGORICAL_LOGIT_GLM_LPMF, {Xs, as, bs}, lp, idata);
+  g.result_slot = lp;
+  Executor ex(std::move(g));
+  std::copy(X.begin(), X.end(), ex.param_ptr(Xs));
+  std::copy(alpha, alpha + cats, ex.param_ptr(as));
+  std::copy(beta, beta + cats, ex.param_ptr(bs));
+  std::vector<double> grad(rows + 2 * cats);
+  const double got = ex.gradient(grad.data());
+  // mpmath, 60 digits: -579.532230417468898853401775812
+  expect_ulp("categorical glm long sum value", got, -579.5322304174689, 1);
+  expect_eq("categorical glm long sum value-only", ex.forward_value_only(),
+            got);
+
+  stan::math::nested_rev_autodiff nested;
+  Eigen::Matrix<var, -1, -1> Xv(rows, 1);
+  for (int n = 0; n < rows; ++n) Xv(n, 0) = X[(size_t)n];
+  Eigen::Matrix<var, -1, 1> av(cats);
+  Eigen::Matrix<var, -1, -1> bm(1, cats);
+  for (int j = 0; j < cats; ++j) {
+    av(j) = alpha[j];
+    bm(0, j) = beta[j];
+  }
+  std::vector<int> y(idata.begin(), idata.begin() + rows);
+  var ref = stan::math::categorical_logit_glm_lpmf<false>(y, Xv, av, bm);
+  stan::math::grad(ref.vi_);
+  for (int n = 0; n < rows; ++n)
+    expect_eq("categorical glm long sum dX", grad[(size_t)n], Xv(n, 0).adj());
+  for (int j = 0; j < cats; ++j) {
+    expect_eq("categorical glm long sum da", grad[(size_t)(rows + j)],
+              av(j).adj());
+    expect_eq("categorical glm long sum db", grad[(size_t)(rows + cats + j)],
+              bm(0, j).adj());
+  }
+}
+
 static void reference(const double* q, double* lp_out, double* grad_out) {
   using stan::math::var;
   using stanli::testmodels::LogisticGlm;
@@ -871,6 +952,7 @@ int main() {
   test_categorical_rows();
   test_categorical_logit_rows_bits();
   test_categorical_array_scaled();
+  test_categorical_glm_long_sum();
 
   return finish("test_glm");
 }

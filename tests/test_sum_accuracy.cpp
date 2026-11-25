@@ -97,6 +97,43 @@ void test_broadcast_scalar_adjoints() {
   }
 }
 
+// x[idx] with each element of a short x receiving hundreds of adjoints: idx
+// cycling over x, as reroll emits for log(theta[doc[n], k]) over n; idx
+// sorted, as for a group index; and x longer than scatter_add's lanes cover.
+void test_gather_adjoints() {
+  struct Case {
+    const char* name;
+    int64_t slots, n;
+    bool sorted;
+  };
+  const Case cases[] = {{"cycling", 3, kN, false},
+                        {"sorted", 4, kN, true},
+                        {"many slots", 600, 600 * 40, false}};
+  for (const Case& c : cases) {
+    const std::vector<double> w = terms(c.n, 0.7, 89);
+    std::vector<int> idx((size_t)c.n);
+    std::vector<ExactSum> want((size_t)c.slots);
+    for (int64_t i = 0; i < c.n; ++i) {
+      idx[(size_t)i] = (int)(c.sorted ? i * c.slots / c.n : i % c.slots);
+      want[(size_t)idx[(size_t)i]].add(w[(size_t)i]);
+    }
+    Graph g;
+    const int x = g.add_slot(c.slots, true), xs = g.add_slot(c.n, false);
+    const int ws = g.add_slot(c.n, false);
+    g.add_op(OP_GATHER, {x}, xs, idx);
+    weighted_sum(g, xs, ws);
+    Executor ex(std::move(g));
+    for (int64_t j = 0; j < c.slots; ++j) ex.param_ptr(x)[j] = 0.5 + j;
+    for (int64_t i = 0; i < c.n; ++i) ex.value_ptr(ws)[i] = w[(size_t)i];
+    std::vector<double> grad((size_t)c.slots);
+    ex.gradient(grad.data());
+    for (int64_t j = 0; j < c.slots; ++j)
+      expect_ulp(
+          std::string("gather adjoint, ") + c.name + " " + std::to_string(j),
+          grad[(size_t)j], want[(size_t)j].value(), kUlp);
+  }
+}
+
 // An elementwise density (out[n] is observation n's lp) with a broadcast
 // location: d/dmu of normal(y | mu = 0, sigma = 1) is y[n], so the adjoint
 // of mu is the sum of y.
@@ -418,6 +455,7 @@ void test_compensated_accumulator() {
 
 int main() {
   test_broadcast_scalar_adjoints();
+  test_gather_adjoints();
   test_elementwise_density_scalar_adjoint();
   test_ordered_logistic_cutpoints();
   test_merged_term_sum();

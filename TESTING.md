@@ -111,19 +111,19 @@ answers at 3 points for each model. That makes <!--gen:testing_points-->1242<!--
 and <!--gen:testing_values-->1,504,488<!--/gen--> values. CmdStan rejects <!--gen:testing_rejected_points-->6<!--/gen-->
 of the points.
 
-In <!--gen:testing_models_within-->331<!--/gen--> models, every value is within 10 ULP of
-CmdStan. The other <!--gen:testing_models_over-->83<!--/gen--> models have <!--gen:testing_entries-->179<!--/gen-->
-ledger entries. stanli is at least as close to the true value as CmdStan in <!--gen:testing_entries_stanli-->131<!--/gen-->
-of those entries. CmdStan is closer in <!--gen:testing_entries_cmdstan-->9<!--/gen-->. We
+In <!--gen:testing_models_within-->328<!--/gen--> models, every value is within 10 ULP of
+CmdStan. The other <!--gen:testing_models_over-->86<!--/gen--> models have <!--gen:testing_entries-->190<!--/gen-->
+ledger entries. stanli is at least as close to the true value as CmdStan in <!--gen:testing_entries_stanli-->145<!--/gen-->
+of those entries. CmdStan is closer in <!--gen:testing_entries_cmdstan-->6<!--/gen-->. We
 cannot tell for the other <!--gen:testing_entries_unknown-->39<!--/gen-->.
 
 <!--gen:testing_collections-->
 | source | models | models with a value over 10 ULP |
 | --- | ---: | ---: |
-| posteriordb | 119 | 41 |
+| posteriordb | 119 | 43 |
 | educational | 13 | 1 |
 | brms | 124 | 4 |
-| rethinking | 62 | 11 |
+| rethinking | 62 | 12 |
 | cogmod | 22 | 12 |
 | ctsem | 3 | 1 |
 | examplemodels | 23 | 5 |
@@ -142,7 +142,7 @@ cannot tell for the other <!--gen:testing_entries_unknown-->39<!--/gen-->.
 | walker | 2 | 0 |
 | bayesdfa | 2 | 0 |
 | regressions | 13 | 0 |
-| all | 414 | 83 |
+| all | 414 | 86 |
 <!--/gen-->
 
 The models come from posteriordb, brms formulas, the code of Statistical
@@ -165,17 +165,17 @@ This table counts the models where one engine has the smaller mean:
 
 | values | models scored | stanli closer | CmdStan closer | the same |
 | --- | ---: | ---: | ---: | ---: |
-| log density | <!--gen:testing_scored_lp-->370<!--/gen--> | <!--gen:testing_scored_lp_stanli-->88<!--/gen--> | <!--gen:testing_scored_lp_cmdstan-->68<!--/gen--> | <!--gen:testing_scored_lp_same-->214<!--/gen--> |
+| log density | <!--gen:testing_scored_lp-->370<!--/gen--> | <!--gen:testing_scored_lp_stanli-->92<!--/gen--> | <!--gen:testing_scored_lp_cmdstan-->68<!--/gen--> | <!--gen:testing_scored_lp_same-->210<!--/gen--> |
 | gradient | <!--gen:testing_scored_grad-->337<!--/gen--> | <!--gen:testing_scored_grad_stanli-->217<!--/gen--> | <!--gen:testing_scored_grad_cmdstan-->57<!--/gen--> | <!--gen:testing_scored_grad_same-->63<!--/gen--> |
-| outputs | <!--gen:testing_scored_wa-->367<!--/gen--> | <!--gen:testing_scored_wa_stanli-->99<!--/gen--> | <!--gen:testing_scored_wa_cmdstan-->16<!--/gen--> | <!--gen:testing_scored_wa_same-->252<!--/gen--> |
+| outputs | <!--gen:testing_scored_wa-->367<!--/gen--> | <!--gen:testing_scored_wa_stanli-->100<!--/gen--> | <!--gen:testing_scored_wa_cmdstan-->16<!--/gen--> | <!--gen:testing_scored_wa_same-->251<!--/gen--> |
 
 We scored <!--gen:testing_scored_values-->765,761<!--/gen--> values in total. stanli is closer to
-the true value in <!--gen:testing_values_stanli_closer-->16,058<!--/gen--> of them and CmdStan is
-closer in <!--gen:testing_values_cmdstan_closer-->16,739<!--/gen-->. The two engines are the same
+the true value in <!--gen:testing_values_stanli_closer-->16,225<!--/gen--> of them and CmdStan is
+closer in <!--gen:testing_values_cmdstan_closer-->16,631<!--/gen-->. The two engines are the same
 distance away in the rest.
 
-We measured these numbers on macOS arm64 on <!--gen:testing_accuracy_date-->2026-11-23<!--/gen-->, at
-commit <!--gen:testing_accuracy_source-->`caa6f407`<!--/gen-->. CI does not measure them again.
+We measured these numbers on macOS arm64 on <!--gen:testing_accuracy_date-->2026-11-25<!--/gen-->, at
+commit <!--gen:testing_accuracy_source-->`c2f6db4b`<!--/gen-->. CI does not measure them again.
 
 ### How to read the table
 
@@ -209,7 +209,7 @@ table and those files disagree.
 <!--gen:testing_corpus_table-->
 | model | source | parameters | outputs | lp: CmdStan | lp: stanli | gradient: CmdStan | gradient: stanli | outputs: CmdStan | outputs: stanli | limit | also |
 | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- | --- |
-| `2pl_latent_reg_irt` | posteriordb | 531 | 549 | 226 | 226 |  |  | 0.01 | 0.01 | 10 |  |
+| `2pl_latent_reg_irt` | posteriordb | 531 | 549 | 226 | 226 |  |  | 0.01 | 0.01 | gradient 29 |  |
 | `accel_gp` | posteriordb | 66 | 72 | 1.51 | 1.51 | 0.06 | 0.02 | 0.03 | 0.03 | 10 |  |
 | `accel_splines` | posteriordb | 82 | 160 | 0.58 | 0.58 | 0.09 | 0.07 | 0.05 | 0.05 | 10 |  |
 | `arK` | posteriordb | 7 | 7 | 3.76 | 1.82 | 0.56 | 0.18 | 0.03 | 0.03 | 10 |  |
@@ -217,8 +217,8 @@ table and those files disagree.
 | `blr` | posteriordb | 6 | 6 | 0.90 | 0.90 | 0.65 | 0.65 | 0.05 | 0.05 | 10 |  |
 | `bones_model` | posteriordb | 13 | 13 | 0.64 | 0.64 | 0.58 | 0.59 | <0.01 | <0.01 | 10 |  |
 | `bym2_offset_only` | posteriordb | 3845 | 9610 | 2.18 | 2.63 |  |  | 0.29 | 0.29 | 10 |  |
-| `covid19imperial_v2` | posteriordb | 51 | 8457 | 0.56 | 0.72 | 0.13 | 0.05 | 0.14 | 0.15 | 10 |  |
-| `covid19imperial_v3` | posteriordb | 51 | 8457 | 0.56 | 0.72 | 0.13 | 0.05 | 0.14 | 0.15 | 10 |  |
+| `covid19imperial_v2` | posteriordb | 51 | 8457 | 0.56 | 0.99 | 0.13 | 0.05 | 0.14 | 0.15 | 10 |  |
+| `covid19imperial_v3` | posteriordb | 51 | 8457 | 0.56 | 0.99 | 0.13 | 0.05 | 0.14 | 0.15 | 10 |  |
 | `diamonds` | posteriordb | 26 | 27 | 1.63 | 1.96 | 0.60 | 0.10 | 3.58 | 0.23 | outputs 168 |  |
 | `dogs` | posteriordb | 3 | 2253 | 25.1 | 1.51 | 4.55 | 0.21 | 0.03 | 0.03 | lp 59, gradient 14 |  |
 | `dogs_hierarchical` | posteriordb | 2 | 752 | 9.39 | 4.28 | 3.52 | 1.54 | 0.27 | 0.27 | lp 15 |  |
@@ -228,7 +228,7 @@ table and those files disagree.
 | `earn_height` | posteriordb | 3 | 3 | 3.33 | 3.33 | 0.91 | 0.91 | 0.05 | 0.05 | 10 |  |
 | `eight_schools_centered` | posteriordb | 10 | 10 | 0.70 | 0.70 | 0.06 | 0.06 | 0.01 | 0.01 | 10 |  |
 | `eight_schools_noncentered` | posteriordb | 10 | 18 | 0.56 | 0.56 | 0.10 | 0.10 | 0.13 | 0.13 | 10 |  |
-| `election88_full` | posteriordb | 90 | 11656 | 255 | 255 | 1.96 | 0.56 | 0.19 | 0.19 | gradient 91 |  |
+| `election88_full` | posteriordb | 90 | 11656 | 255 | 255 | 1.96 | 0.04 | 0.19 | 0.19 | outputs 91 |  |
 | `garch11` | posteriordb | 4 | 4 | 0.45 | 0.45 | 3.02 | 3.02 | 0.17 | 0.17 | 10 |  |
 | `GLM_Binomial_model` | posteriordb | 3 | 83 | 2.52 | 2.52 | 0.46 | 0.16 | 0.25 | 0.26 | 10 |  |
 | `GLM_Poisson_model` | posteriordb | 4 | 84 | 14.5 | 14.7 | 0.51 | 0.54 | 6.73 | 6.76 | 10 |  |
@@ -236,9 +236,9 @@ table and those files disagree.
 | `GLMM_Poisson_model` | posteriordb | 45 | 125 | 13.2 | 12.8 | 1.03 | 1.05 | 1.06 | 1.06 | 10 |  |
 | `gp_pois_regr` | posteriordb | 13 | 24 | 0.73 | 0.73 | 0.21 | 0.21 | 0.13 | 0.13 | 10 |  |
 | `gp_regr` | posteriordb | 3 | 3 | 0.80 | 0.80 | 0.69 | 0.69 | 0.17 | 0.17 | 10 |  |
-| `gpcm_latent_reg_irt` | posteriordb | 530 | 550 | 56.2 | 3.94 |  |  | 0.02 | 0.02 | lp 131, gradient 55 |  |
-| `grsm_latent_reg_irt` | posteriordb | 408 | 418 | 182 | 17.2 |  |  | <0.01 | <0.01 | lp 493, gradient 23 |  |
-| `hier_2pl` | posteriordb | 669 | 804 | 602 | 602 |  |  | 0.01 | 0.01 | 10 |  |
+| `gpcm_latent_reg_irt` | posteriordb | 530 | 550 | 56.2 | 0.94 |  |  | 0.02 | 0.02 | lp 132, gradient 55 |  |
+| `grsm_latent_reg_irt` | posteriordb | 408 | 418 | 182 | 1.55 |  |  | <0.01 | <0.01 | lp 493, gradient 23 |  |
+| `hier_2pl` | posteriordb | 669 | 804 | 602 | 602 |  |  | 0.01 | 0.01 | gradient 28 |  |
 | `hierarchical_gp` | posteriordb | 933 | 3279 | 0.33 | 0.66 |  |  | 0.29 | 0.29 | 10 |  |
 | `hmm_drive_0` | posteriordb | 6 | 429 | 32.6 | 32.9 | 10,568 | 10,568 | 0.09 | 0.09 | 10 |  |
 | `hmm_drive_1` | posteriordb | 6 | 429 | 36.7 | 37.0 | 55,945 | 55,945 | 0.09 | 0.09 | 10 |  |
@@ -256,7 +256,7 @@ table and those files disagree.
 | `kidscore_momiq` | posteriordb | 3 | 3 | 0.27 | 0.27 | 1.58 | 0.24 | 0.05 | 0.05 | 10 |  |
 | `kilpisjarvi` | posteriordb | 3 | 3 | 0.74 | 0.74 | 0.29 | 0.29 | 0.05 | 0.05 | 10 |  |
 | `kronecker_gp` | posteriordb | 438 | 0 | 5.35 | 6.68 |  |  |  |  | gradient 2.6e12 | known mismatch in grad[1], grad[2], which have their own relative limit |
-| `ldaK2` | posteriordb | 7 | 12 | 105 | 0.68 | 113 | 101 | 0.32 | 0.32 | lp 171, gradient 204 |  |
+| `ldaK2` | posteriordb | 7 | 12 | 105 | 0.68 | 113 | 3.08 | 0.32 | 0.32 | lp 171, gradient 509 |  |
 | `ldaK5` | posteriordb | 7714 | 7780 | 290 | 2.18 |  |  | 3.11 | 3.11 | lp 815, outputs 38 |  |
 | `log10earn_height` | posteriordb | 3 | 3 | 0.86 | 0.86 | 3.43 | 0.32 | 0.05 | 0.05 | gradient 20 |  |
 | `logearn_height` | posteriordb | 3 | 3 | 1.31 | 1.31 | 3.70 | 0.43 | 0.05 | 0.05 | gradient 15 |  |
@@ -411,18 +411,18 @@ table and those files disagree.
 | `s2_unstr` | brms | 31 | 161 | 0.99 | 0.99 | 0.27 | 0.25 | 0.17 | 0.15 | 10 | brms limit 10, gradient against its largest entry |
 | `s2_weights_trunc` | brms | 3 | 5 | 1.14 | 1.48 | 5.0e8 | 5.0e8 | 0.20 | 0.12 | 10 | brms limit 10, gradient against its largest entry |
 | `s2_wiener` | brms | 5 | 7 |  |  |  |  |  |  | 10 | brms limit 10, gradient against its largest entry |
-| `s2_zi_asymlaplace` | brms | 5 | 7 | 1.62 | 1.62 | 1.02 | 0.95 | 0.23 | 0.17 | 10 | brms limit 10 |
+| `s2_zi_asymlaplace` | brms | 5 | 7 | 1.62 | 1.62 | 1.02 | 1.03 | 0.23 | 0.17 | 10 | brms limit 10 |
 | `s2_zi_beta` | brms | 4 | 6 | 0.94 | 0.94 | 0.78 | 0.39 | 0.35 | 0.28 | 10 | brms limit 10, gradient against its largest entry |
 | `s2_zoi_beta` | brms | 5 | 7 | 1.01 | 1.68 | 0.60 | 0.20 | 0.34 | 0.29 | 10 | brms limit 10, gradient against its largest entry |
 | `sw_acat` | brms | 4 | 9 | 15.2 | 15.2 | 9.35 | 9.35 | 0.05 | 0.05 | 10 | brms limit 10, gradient against its largest entry |
 | `sw_acat_cs` | brms | 7 | 12 | 21.9 | 21.9 | 6.54 | 6.54 | 0.03 | 0.03 | 10 | brms limit 10, gradient against its largest entry |
 | `sw_ar` | brms | 4 | 6 | 0.93 | 0.93 | 0.68 | 0.74 | 0.37 | 0.19 | 10 | brms limit 10, gradient against its largest entry |
 | `sw_arma` | brms | 5 | 7 | 0.48 | 0.48 | 0.64 | 0.59 | 0.30 | 0.15 | 10 | brms limit 10, gradient against its largest entry |
-| `sw_asymlaplace` | brms | 4 | 6 | 0.37 | 0.71 | 0.96 | 0.94 | 0.32 | 0.17 | 10 | brms limit 10 |
+| `sw_asymlaplace` | brms | 4 | 6 | 0.37 | 0.71 | 0.96 | 1.02 | 0.32 | 0.17 | 10 | brms limit 10 |
 | `sw_bernoulli` | brms | 3 | 5 | 0.59 | 0.59 | 1.74 | 1.12 | 0.27 | 0.15 | 10 | brms limit 10, gradient against its largest entry |
 | `sw_beta` | brms | 3 | 5 | 2.20 | 2.20 | 1.27 | 0.38 | 0.53 | 0.34 | 10 | brms limit 10 |
 | `sw_binomial` | brms | 2 | 4 | 4.55 | 5.89 | 0.60 | 0.48 | 0.49 | 0.24 | 10 | brms limit 10, gradient against its largest entry |
-| `sw_categorical` | brms | 4 | 7 | 3.64 | 3.64 | 1.55 | 1.08 | 0.37 | 0.19 | 10 | brms limit 10, gradient against its largest entry |
+| `sw_categorical` | brms | 4 | 7 | 3.64 | 0.97 | 1.55 | 1.08 | 0.37 | 0.19 | 10 | brms limit 10, gradient against its largest entry |
 | `sw_cens` | brms | 3 | 5 | 0.57 | 0.57 | 1.8e9 | 1.8e9 | 0.35 | 0.16 | 10 | brms limit 10, gradient against its largest entry |
 | `sw_cratio` | brms | 4 | 9 | 16.7 | 16.7 | 8.09 | 8.09 | 0.05 | 0.05 | 10 | brms limit 10, gradient against its largest entry |
 | `sw_cratio_cs` | brms | 7 | 12 | 3.18 | 3.18 | 4.86 | 4.86 | 0.03 | 0.03 | 10 | brms limit 10, gradient against its largest entry |
@@ -467,8 +467,8 @@ table and those files disagree.
 | `sw_zi_poisson` | brms | 3 | 5 | 1.00 | 0.52 | 0.32 | 0.34 | 0.39 | 0.20 | 10 | brms limit 10, gradient against its largest entry |
 | `ch09_m5_8s` | rethinking | 4 | 4 | 0.57 | 0.57 | 0.52 | 0.34 | 0.07 | 0.07 | 10 |  |
 | `ch09_m5_8s2` | rethinking | 4 | 4 | 0.70 | 0.70 | 1.02 | 0.66 | 0.09 | 0.09 | 10 |  |
-| `ch09_m9_1` | rethinking | 5 | 5 | 0.22 | 0.22 | 0.43 | 0.22 | 0.05 | 0.05 | 10 |  |
-| `ch09_m9_1_chains4` | rethinking | 5 | 5 | 0.22 | 0.22 | 0.43 | 0.22 | 0.05 | 0.05 | 10 |  |
+| `ch09_m9_1` | rethinking | 5 | 5 | 0.22 | 0.22 | 0.43 | 0.19 | 0.05 | 0.05 | 10 |  |
+| `ch09_m9_1_chains4` | rethinking | 5 | 5 | 0.22 | 0.22 | 0.43 | 0.19 | 0.05 | 0.05 | 10 |  |
 | `ch09_m9_2` | rethinking | 2 | 2 | 0.63 | 0.63 | 0.71 | 0.71 | 0.11 | 0.11 | 10 |  |
 | `ch09_m9_3` | rethinking | 2 | 2 | 0.53 | 0.53 | 6.29 | 6.29 | 0.11 | 0.11 | 10 |  |
 | `ch09_m9_4` | rethinking | 3 | 3 | 0.90 | 0.90 | 1.62 | 1.62 | 0.05 | 0.05 | 10 |  |
@@ -476,15 +476,15 @@ table and those files disagree.
 | `ch09_mp` | rethinking | 2 | 2 | 0.36 | 0.36 | 0.09 | 0.09 | <0.01 | <0.01 | 10 |  |
 | `ch11_m11_10` | rethinking | 4 | 24 | 0.94 | 0.94 | 0.33 | 0.42 | 0.23 | 0.23 | 10 |  |
 | `ch11_m11_11` | rethinking | 5 | 25 | 1.86 | 1.86 | 0.79 | 0.60 | 0.58 | 0.58 | 10 |  |
-| `ch11_m11_4` | rethinking | 11 | 1019 | 12.9 | 12.9 | 0.77 | 0.61 | 0.26 | 0.26 | 10 |  |
-| `ch11_m11_5` | rethinking | 11 | 1019 | 15.1 | 15.4 | 1.73 | 0.50 | 0.27 | 0.27 | gradient 14 |  |
+| `ch11_m11_4` | rethinking | 11 | 1019 | 12.9 | 12.9 | 0.77 | 0.20 | 0.26 | 0.26 | 10 |  |
+| `ch11_m11_5` | rethinking | 11 | 1019 | 15.1 | 15.4 | 1.73 | 0.15 | 0.27 | 0.27 | gradient 14 |  |
 | `ch11_m11_6` | rethinking | 11 | 67 | 0.91 | 0.91 | 0.21 | 0.20 | 0.52 | 0.52 | 10 |  |
 | `ch11_m11_7` | rethinking | 2 | 2 | 0.70 | 0.70 | 0.35 | 0.29 | <0.01 | <0.01 | 10 |  |
 | `ch11_m11_8` | rethinking | 8 | 8 | 0.68 | 0.68 | 0.21 | 0.37 | <0.01 | <0.01 | 10 |  |
 | `ch11_m11_9` | rethinking | 1 | 12 | 9.65 | 9.65 | 0.62 | 0.62 | 0.33 | 0.33 | 10 |  |
 | `ch11_m_pois` | rethinking | 2 | 2 | 4.30 | 4.30 | 0.31 | 0.31 | <0.01 | <0.01 | 10 |  |
 | `ch12_m12_1` | rethinking | 3 | 4 | 1.30 | 1.30 | 4.20 | 3.93 | 0.06 | 0.06 | 10 |  |
-| `ch12_m12_2` | rethinking | 6 | 26 | 4.31 | 4.64 | 4.01 | 3.95 | 5.35 | 5.35 | 10 |  |
+| `ch12_m12_2` | rethinking | 6 | 26 | 4.31 | 0.48 | 4.01 | 0.31 | 5.35 | 0.47 | gradient 20, outputs 44 |  |
 | `ch12_m12_3` | rethinking | 2 | 2 | 24.9 | 0.50 | 24.4 | 0.99 | <0.01 | <0.01 | lp 35, gradient 78 |  |
 | `ch12_m12_3_alt` | rethinking | 2 | 2 | 14.0 | 0.50 | 81.9 | 0.99 | <0.01 | <0.01 | lp 20, gradient 138 |  |
 | `ch12_m12_4` | rethinking | 6 | 6 | 296 | 0.38 | 71.0 | 0.65 | 0.07 | 0.07 | lp 518, gradient 156 |  |
@@ -494,18 +494,18 @@ table and those files disagree.
 | `ch13_m13_1` | rethinking | 48 | 144 | 1.43 | 1.10 | 0.15 | 0.15 | 0.25 | 0.25 | 10 |  |
 | `ch13_m13_2` | rethinking | 50 | 146 | 1.20 | 0.87 | 0.09 | 0.09 | 0.25 | 0.25 | 10 |  |
 | `ch13_m13_3` | rethinking | 62 | 62 | 0.71 | 0.71 | 0.08 | 0.07 | 0.01 | 0.01 | 10 |  |
-| `ch13_m13_4` | rethinking | 20 | 1028 | 15.8 | 16.2 | 0.36 | 0.29 | 0.28 | 0.28 | 10 |  |
-| `ch13_m13_4b` | rethinking | 20 | 20 | 15.8 | 16.2 | 0.36 | 0.29 | 0.01 | 0.01 | 10 |  |
-| `ch13_m13_4nc` | rethinking | 20 | 33 | 9.02 | 9.02 | 0.45 | 0.31 | 0.07 | 0.07 | 10 |  |
-| `ch13_m13_5` | rethinking | 13 | 1021 | 21.4 | 21.8 | 0.85 | 0.47 | 0.25 | 0.25 | 10 |  |
-| `ch13_m13_6` | rethinking | 21 | 1029 | 15.7 | 16.1 | 0.35 | 0.28 | 0.28 | 0.28 | 10 |  |
+| `ch13_m13_4` | rethinking | 20 | 1028 | 15.8 | 16.2 | 0.36 | 0.13 | 0.28 | 0.28 | 10 |  |
+| `ch13_m13_4b` | rethinking | 20 | 20 | 15.8 | 16.2 | 0.36 | 0.13 | 0.01 | 0.01 | 10 |  |
+| `ch13_m13_4nc` | rethinking | 20 | 33 | 9.02 | 9.02 | 0.45 | 0.11 | 0.07 | 0.07 | 10 |  |
+| `ch13_m13_5` | rethinking | 13 | 1021 | 21.4 | 21.8 | 0.85 | 0.19 | 0.25 | 0.25 | 10 |  |
+| `ch13_m13_6` | rethinking | 21 | 1029 | 15.7 | 16.1 | 0.35 | 0.12 | 0.28 | 0.28 | 10 |  |
 | `ch13_m13_7` | rethinking | 2 | 2 | 5.07 | 5.07 | 0.25 | 0.25 | <0.01 | <0.01 | 10 |  |
 | `ch13_m13_7nc` | rethinking | 2 | 3 | 0.52 | 0.52 | 0.35 | 0.35 | 0.10 | 0.10 | 10 |  |
 | `ch14_m14_1` | rethinking | 46 | 49 | 0.50 | 0.50 | 0.04 | 0.04 | 0.02 | 0.02 | 10 |  |
 | `ch14_m14_10` | rethinking | 4 | 4 | 3.57 | 3.57 | 5.96 | 4.46 | 0.07 | 0.07 | 10 |  |
 | `ch14_m14_11` | rethinking | 5 | 5 | 6.71 | 6.71 | 6.32 | 6.41 | 0.10 | 0.10 | 10 |  |
-| `ch14_m14_2` | rethinking | 76 | 96 | 14.0 | 13.3 | 0.15 | 0.12 | 0.03 | 0.03 | 10 |  |
-| `ch14_m14_3` | rethinking | 76 | 1188 | 8.16 | 7.82 | 0.16 | 0.13 | 0.24 | 0.24 | 10 |  |
+| `ch14_m14_2` | rethinking | 76 | 96 | 14.0 | 13.3 | 0.15 | 0.11 | 0.03 | 0.03 | 10 |  |
+| `ch14_m14_3` | rethinking | 76 | 1188 | 8.16 | 7.82 | 0.16 | 0.12 | 0.24 | 0.24 | 10 |  |
 | `ch14_m14_4` | rethinking | 3 | 3 | 1.06 | 1.06 | 1.45 | 1.00 | 0.05 | 0.05 | 10 |  |
 | `ch14_m14_4x` | rethinking | 3 | 3 | 1.06 | 1.06 | 1.45 | 1.00 | 0.05 | 0.05 | 10 |  |
 | `ch14_m14_5` | rethinking | 4 | 4 | 1.41 | 1.41 | 1.20 | 0.46 | 0.07 | 0.07 | 10 |  |
@@ -527,7 +527,7 @@ table and those files disagree.
 | `ch16_m16_1` | rethinking | 3 | 3 | 0.40 | 1.06 | 2.96 | 2.33 | 0.21 | 0.21 | 10 |  |
 | `ch16_m16_4` | rethinking | 3 | 3 | 1.19 | 1.19 | 1.32 | 1.25 | 0.17 | 0.17 | 10 |  |
 | `extra_hurdle_poisson` | rethinking | 2 | 2 | 0.70 | 0.37 | 0.50 | 0.68 | 0.26 | 0.26 | 10 |  |
-| `cm_betadiscrete` | cogmod | 4 | 8 | 2.04 | 2.04 | 35.9 | 35.2 | 0.12 | 0.12 | 10 |  |
+| `cm_betadiscrete` | cogmod | 4 | 8 | 2.04 | 2.37 | 35.9 | 35.2 | 0.12 | 0.12 | 10 |  |
 | `cm_betagate` | cogmod | 5 | 10 | 1.37 | 1.08 | 1.41 | 0.71 | 0.14 | 0.14 | 10 |  |
 | `cm_bisa` | cogmod | 5 | 10 | 3.27 | 3.27 | 7.19 | 5.66 | 0.11 | 0.11 | gradient 18 |  |
 | `cm_choco` | cogmod | 9 | 18 | 0.64 | 0.64 | 1.98 | 0.50 | 0.04 | 0.04 | gradient 18 |  |
@@ -543,7 +543,7 @@ table and those files disagree.
 | `cm_lba2` | cogmod | 9 | 18 | 2.28 | 2.59 | 1.45 | 0.07 | 0.07 | 0.07 | gradient 19 |  |
 | `cm_lnr` | cogmod | 8 | 16 | 0.65 | 1.00 | 1.51 | 0.19 | 0.08 | 0.08 | gradient 32 |  |
 | `cm_lnr_bench` | cogmod | 9 | 16 | 10.6 | 10.6 | 3.68 | 3.36 | 1.37 | 1.37 | 10 |  |
-| `cm_loggamma` | cogmod | 6 | 12 | 44.8 | 45.4 | 18.5 | 18.5 | 0.07 | 0.07 | 10 |  |
+| `cm_loggamma` | cogmod | 6 | 12 | 44.8 | 45.4 | 18.5 | 18.4 | 0.07 | 0.07 | 10 |  |
 | `cm_lognormal` | cogmod | 6 | 12 | 1.84 | 2.24 | 0.85 | 0.57 | 0.07 | 0.07 | 10 |  |
 | `cm_logstudent` | cogmod | 6 | 12 | 1.61 | 1.94 | 3.22 | 1.37 | 0.07 | 0.07 | gradient 28 |  |
 | `cm_logweibull` | cogmod | 5 | 10 | 2.20 | 1.87 | 0.81 | 0.56 | 0.08 | 0.08 | 10 |  |
@@ -562,18 +562,18 @@ table and those files disagree.
 | `examplemodels_gp_fit_multi_output` | examplemodels | 311 | 326 | 1.8e7 | 1.8e7 |  |  | 0.01 | 0.01 | 10 | ill-conditioned, so the 1e-9 limit is 1.5e-6 for the gradient and 5e-8 for lp |
 | `examplemodels_hmm_marginal` | examplemodels | 10 | 0 |  |  |  |  |  |  | 10 |  |
 | `examplemodels_irt_1pl_hier` | examplemodels | 33 | 33 | 0.89 | 0.89 | 0.08 | 0.07 | 0.02 | 0.02 | 10 |  |
-| `examplemodels_irt_multilevel` | examplemodels | 55 | 55 | 6.15 | 6.48 | 0.09 | 0.08 | 0.04 | 0.04 | 10 |  |
+| `examplemodels_irt_multilevel` | examplemodels | 55 | 55 | 6.15 | 6.48 | 0.09 | 0.07 | 0.04 | 0.04 | 10 |  |
 | `examplemodels_kidney` | examplemodels | 46 | 51 | 1.07 | 1.07 | 0.08 | 0.08 | 0.01 | 0.01 | 10 |  |
 | `examplemodels_mr_ss` | examplemodels | 2 | 19602 | 14.7 | 14.4 | 277 | 110 | 0.14 | 0.14 | gradient 729 |  |
-| `examplemodels_ms` | examplemodels | 6 | 72036 | 7.19 | 7.19 | 36.4 | 13.3 | 0.05 | 0.05 | gradient 254 |  |
+| `examplemodels_ms` | examplemodels | 6 | 72036 | 7.19 | 1.01 | 36.4 | 13.3 | 0.05 | 0.05 | gradient 254 |  |
 | `examplemodels_ode_one_comp_mm` | examplemodels | 4 | 44 |  |  |  |  |  |  | gradient 30, outputs 13 |  |
-| `examplemodels_probit_multi_good` | examplemodels | 2038 | 2064 | 87.8 | 87.8 |  |  | 0.17 | 0.18 | lp 75 |  |
+| `examplemodels_probit_multi_good` | examplemodels | 2038 | 2064 | 87.8 | 61.1 |  |  | 0.17 | 0.18 | lp 75 |  |
 | `examplemodels_radon_group` | examplemodels | 92 | 92 | 4.99 | 4.33 | 0.09 | 0.08 | 0.15 | 0.14 | 10 |  |
 | `examplemodels_roaches_overdispersion` | examplemodels | 267 | 267 | 3.05 | 3.05 | 0.01 | 0.01 | 0.33 | 0.33 | 10 |  |
 | `examplemodels_ssm` | examplemodels | 28 | 55 | 1.92 | 1.83 | 1.13 | 1.13 | 0.24 | 0.24 | 10 |  |
 | `examplemodels_stagnant2` | examplemodels | 5 | 5 | 0.26 | 0.60 | 0.52 | 0.52 | 53.2 | 53.2 | 10 |  |
 | `examplemodels_stochvol_optimized` | examplemodels | 503 | 1003 | 1.05 | 1.05 |  |  | 0.14 | 0.14 | 10 |  |
-| `examplemodels_sum_to_zero_binomial` | examplemodels | 19 | 833 | 1.35 | 1.35 | 0.53 | 0.16 | 0.28 | 0.28 | 10 |  |
+| `examplemodels_sum_to_zero_binomial` | examplemodels | 19 | 833 | 1.35 | 1.35 | 0.53 | 0.14 | 0.28 | 0.28 | 10 |  |
 | `examplemodels_sur` | examplemodels | 27 | 33 | 0.29 | 0.29 | 0.22 | 0.22 | 0.03 | 0.03 | 10 |  |
 | `stanguide_changepoint` | stanguide | 2 | 114 | 3.37 | 3.37 | 138 | 138 | 3.15 | 3.15 | 10 |  |
 | `stanguide_cjs_history` | stanguide | 5 | 8 | 0.57 | 0.24 | 1.02 | 1.04 | 0.20 | 0.23 | 10 |  |
@@ -591,8 +591,8 @@ table and those files disagree.
 | `multinma_ndmm_mspline` | multinma | 62 | 956 |  |  |  |  |  |  | 10 |  |
 | `multinma_smoking_re` | multinma | 59 | 375 |  |  |  |  |  |  | 10 |  |
 | `epinow2_estimate_infections` | epinow2 | 24 | 352 | 1.4e6 | 1.4e6 | 1.6e6 | 1.6e6 | 5.4e5 | 5.4e5 | gradient 34,141, outputs 24 |  |
-| `epinow2_estimate_secondary` | epinow2 | 4 | 72 | 105 | 94.8 | 38.3 | 39.1 | 18.0 | 18.0 | lp 68, gradient 18 |  |
-| `mlumr_survival_mspline_relaxed` | mlumr | 32 | 1052 | 1.03 | 0.53 | 0.24 | 0.18 | 3.34 | 3.58 | outputs 128 |  |
+| `epinow2_estimate_secondary` | epinow2 | 4 | 72 | 105 | 4.27 | 38.3 | 10.9 | 18.0 | 18.0 | lp 216, gradient 172 |  |
+| `mlumr_survival_mspline_relaxed` | mlumr | 32 | 1052 | 1.03 | 0.53 | 0.24 | 0.18 | 3.34 | 3.57 | outputs 128 |  |
 | `mlumr_survival_relaxed` | mlumr | 12 | 925 | 1.52 | 2.23 | 0.69 | 0.69 | 1.71 | 1.70 | outputs 16 |  |
 | `rbioacc_odetk` | rbioacc | 3 | 124 |  |  |  |  |  |  | 10 |  |
 | `beeguts_guts_sd` | beeguts | 4 | 540 |  |  |  |  |  |  | 10 |  |
@@ -966,7 +966,7 @@ After that, the separate brms limit is no longer needed.
 
 ### stanli is less accurate than CmdStan for some values
 
-In <!--gen:testing_worse_models-->38<!--/gen--> models, <!--gen:testing_worse_values-->255<!--/gen--> values are
+In <!--gen:testing_worse_models-->35<!--/gen--> models, <!--gen:testing_worse_values-->246<!--/gen--> values are
 more than 10 ULP from the true value in stanli and farther from it than in
 CmdStan.
 

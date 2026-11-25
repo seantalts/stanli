@@ -16,6 +16,7 @@
 #include <stanli/legacy.hpp>
 #include <stanli/optable.hpp>
 #include <stanli/packet.hpp>
+#include <stanli/pairwise_sum.hpp>
 
 #include <stan/math.hpp>
 
@@ -2521,6 +2522,66 @@ double blglm_eval(KernelCtx& ctx) {
 void lkjcov_fwd(KernelCtx& ctx) { ctx.out.data[0] = lkjcov_eval<false>(ctx); }
 void lkjcov_bwd(KernelCtx& ctx) { lkjcov_eval<true>(ctx); }
 void blglm_fwd(KernelCtx& ctx) { ctx.out.data[0] = blglm_eval(ctx); }
+// Stan Math's categorical_logit_glm_lpmf with every operand active, except
+// for how the log density is summed. Stan Math adds sum(log normalizer),
+// -sum(row max) and sum(selected logit) one after another. When the logits
+// sit far from zero the last two cancel, and their rounding errors are left
+// at the scale of the result. Here each row's log probability is formed first
+// and the rows are added pairwise. The partials are Stan Math's
+// expressions.
+void clglm_rows_compensated(KernelCtx& ctx, sink& s, const std::vector<int>& y,
+                            bool scalar_y, int64_t rows, int64_t cols) {
+  using Eigen::Array;
+  using Eigen::Dynamic;
+  static constexpr const char* function = "categorical_logit_glm_lpmf";
+  const int64_t classes = ctx.in[1].len;
+  const CMapM x_val(ctx.in[0].data, rows, cols);
+  const CMapV alpha_val(ctx.in[1].data, classes);
+  const CMapM beta_val(ctx.in[2].data, cols, classes);
+  Eigen::ArrayXi outcome(rows);
+  if (scalar_y)
+    outcome.setConstant(y[0]);
+  else
+    outcome = Eigen::Map<const Eigen::ArrayXi>(y.data(), rows);
+  stan::math::check_bounded(function, "categorical outcome out of support",
+                            outcome, 1, static_cast<int>(classes));
+  Array<double, Dynamic, Dynamic> lin =
+      (x_val * beta_val).rowwise() + alpha_val.transpose();
+  Array<double, Dynamic, 1> lin_max = lin.rowwise().maxCoeff();
+  Array<double, Dynamic, Dynamic> exp_lin = exp(lin.colwise() - lin_max);
+  Array<double, Dynamic, 1> inv_sum_exp_lin = 1 / exp_lin.rowwise().sum();
+  Array<double, Dynamic, 1> row_lp = log(inv_sum_exp_lin);
+  for (int64_t i = 0; i < rows; ++i)
+    row_lp(i) += lin(i, outcome[i] - 1) - lin_max(i);
+  const double logp = pairwise_sum(row_lp.data(), rows);
+  if (!std::isfinite(logp)) {
+    stan::math::check_finite(function, "Weight vector", beta_val);
+    stan::math::check_finite(function, "Intercept", alpha_val);
+    stan::math::check_finite(function, "Matrix of independent variables",
+                             x_val);
+  }
+  Eigen::Map<Eigen::MatrixXd> x_partials(s.buf[0], rows, cols);
+  Array<double, Dynamic, Dynamic> beta_y(rows, cols);
+  for (int64_t i = 0; i < rows; ++i)
+    beta_y.row(i) = beta_val.col(outcome[i] - 1);
+  x_partials =
+      (beta_y - (exp_lin.matrix() * beta_val.transpose()).array().colwise() *
+                    inv_sum_exp_lin)
+          .matrix();
+  Array<double, Dynamic, Dynamic> neg_softmax_lin =
+      exp_lin.colwise() * -inv_sum_exp_lin;
+  Eigen::Map<Eigen::VectorXd> alpha_partials(s.buf[1], classes);
+  alpha_partials = neg_softmax_lin.colwise().sum().transpose().matrix();
+  for (int64_t i = 0; i < rows; ++i) alpha_partials[outcome[i] - 1] += 1;
+  Eigen::MatrixXd beta_derivative =
+      x_val.transpose() * neg_softmax_lin.matrix();
+  for (int64_t i = 0; i < rows; ++i)
+    beta_derivative.col(outcome[i] - 1) += x_val.row(i).transpose();
+  Eigen::Map<Eigen::MatrixXd>(s.buf[2], cols, classes) = beta_derivative;
+  s.value = logp;
+  s.deposited = true;
+  *s.connected = 1.0;
+}
 void clglm_fwd(KernelCtx& ctx) {
   const GlmLayout layout = glm_layout(ctx.idata, ctx.n_idata);
   const int64_t rows = layout.rows, cols = layout.cols;
@@ -2538,6 +2599,11 @@ void clglm_fwd(KernelCtx& ctx) {
                                                             alpha_d, beta_d);
       });
     });
+    ctx.out.data[0] = s.value;
+    return;
+  }
+  if (rows > kPlainSumMax && ctx.in[1].len > 1) {
+    clglm_rows_compensated(ctx, s, y, scalar_y, rows, cols);
     ctx.out.data[0] = s.value;
     return;
   }
