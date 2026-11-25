@@ -153,6 +153,8 @@ def scaling_report(models, meta, known):
             reasons[re.sub(r"`[^`]*`|'[^']*'", "_", why)[:120]] += 1
         if x.get("error"):
             reasons[x["error"][:120]] += 1
+        elif not x.get("ladders") and not x.get("refused"):
+            reasons["the data block has no int size variable"] += 1
     if reasons:
         out += ["Refused size variables, by reason:", ""]
         out += [f"- {n} x {why}" for why, n in reasons.most_common()]

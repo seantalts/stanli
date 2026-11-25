@@ -205,7 +205,9 @@ def parse_prep_trace(text):
 def lane_declines(stderr):
     records = [json.loads(line[len("LANES "):]) for line in stderr.splitlines()
                if line.startswith("LANES {")]
-    return sorted({f"{r['pass']}/{r['graph']}: {r['reason']}"
+    # bounded_log_prob and budget_log_prob are tries of the same graph.
+    return sorted({f"{r['pass']}/{re.sub(r'^.*log_prob$', 'log_prob', r['graph'])}: "
+                   f"{r['reason']}"
                    for r in first_per_position(records)})
 
 
@@ -247,9 +249,14 @@ def structure(tools, comp, data, prep_reps=3):
     if code != 0:
         return {"failure": "bench_grad --prep: " + failure_text(code, err)}
     trace = parse_prep_trace(err)
-    # A model whose log density is bounded-specialized lowers it as the
-    # graph bounded_log_prob instead.
-    lp = trace.get("bounded_log_prob") or trace.get("log_prob", {})
+    # Lowering may try the log density again under another name
+    # (bounded_log_prob, budget_log_prob); the last graph is the program.
+    tries = [g for name, g in trace.items()
+             if name.endswith("log_prob") and "ops" in g]
+    lp = dict(tries[-1]) if tries else {}
+    lp["lowered_ops"] = max((g.get("lowered_ops") or 0 for name, g in
+                             trace.items() if name.endswith("log_prob")),
+                            default=0)
     wag = trace.get("write_array", {})
     result.update(
         ops=lp.get("ops"), lowered_ops=lp.get("lowered_ops"),
