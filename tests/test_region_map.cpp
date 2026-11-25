@@ -2137,6 +2137,59 @@ void test_data_valued_locals_are_data_control() {
         "loops branched on data-valued locals keep the unmapped graph");
 }
 
+// Issue #654: the sum register is written only by its zero store when the
+// `target +=` sits under a branch that is never taken. That store must stay
+// in the body, because the lane kernel reads the sum after every iteration
+// and seeds only the registers that the body reads before it writes.
+void test_out_register_is_not_hoisted() {
+  const std::string minimal =
+      "parameters { real p; }\n"
+      "model { for (e in [1.0, 2.0]) {"
+      " if (0.49 < 0.47) { target += p > 0 ? 1 : 2; } } }\n";
+  const std::string prior_only =
+      "data { int N; vector[N] y; int prior_only; }\n"
+      "parameters { real mu; }\n"
+      "model { for (v in y) { if (!prior_only)"
+      " target += normal_lpdf(v | mu > 0 ? mu : -mu, 1); } }\n";
+  struct Case {
+    const char* name;
+    const std::string* source;
+    DataMap data;
+  };
+  const Case cases[] = {
+      {"region_map_out_reg_minimal", &minimal, DataMap::from_json("{}")},
+      {"region_map_out_reg_prior_only", &prior_only,
+       make_data(16, "\"prior_only\":1")},
+  };
+  for (const Case& c : cases) {
+    const std::string what(c.name);
+    const std::string path = std::filesystem::temp_directory_path().string() +
+                             "/" + c.name + "_" +
+                             std::to_string(std::random_device{}()) + ".stan";
+    std::ofstream(path) << *c.source;
+    const std::string mir =
+        stanli::tooling::run_emit_mir(STANLI_TEST_STANLI_CHECK, path, "none");
+    std::remove(path.c_str());
+    CompiledModel cm = stanli::compile_model(mir, c.data);
+    check(count_opcode(cm, OP_REGION_MAP) == 1, what + ": the loop is mapped");
+    const auto& p = map_payload(cm);
+    for (const auto& I : p.prologue)
+      for (int k = 0; k < stanli::program_output_len(I); ++k)
+        for (int out : p.out_regs)
+          check(I.dst + k != out,
+                what + ": the prologue does not write an out register");
+    Executor ex(cm.graph);
+    cm.bind(ex);
+    for (int rep = 0; rep < 4; ++rep)
+      for (double x : {-1.5, 0.0, 0.3, 2.0}) {
+        const Eval e = evaluate(ex, Params{x});
+        check(e.lp == 0.0 && e.grad[0] == 0.0,
+              what + ": lp is 0 at p=" + std::to_string(x) + " (got " +
+                  std::to_string(e.lp) + ")");
+      }
+  }
+}
+
 // Input points for each unary in STANLI_PROGRAM_UNARY_LIST. The last point
 // of each row lies near an edge of the function's domain or range.
 std::vector<double> unary_points(const std::string& fn) {
@@ -3486,6 +3539,7 @@ int main() {
   test_every_unary_in_lanes();
   test_extent_bound_is_data_control();
   test_data_valued_locals_are_data_control();
+  test_out_register_is_not_hoisted();
 #endif
   test_mode_policy();
   test_recompute_visits_taken_blocks();

@@ -104,14 +104,14 @@ class CompareRunsTest(unittest.TestCase):
         self.assertEqual(kinds(d.compare_runs(ran(none), ran(shifted))[0]),
                          ["lp", "lp", "lp"])
         self.assertEqual(
-            d.compare_runs(ran(none), ran(shifted), tilde=True), ([], None))
+            d.compare_runs(ran(none), ran(shifted), propto=True), ([], None))
         uneven = {**shifted, 1: body(-2.5)}
         self.assertEqual(
-            kinds(d.compare_runs(ran(none), ran(uneven), tilde=True)[0]),
+            kinds(d.compare_runs(ran(none), ran(uneven), propto=True)[0]),
             ["lp", "lp", "lp"])
         steeper = {**shifted, 2: body(-2.3, "0.5")}
         self.assertEqual(
-            kinds(d.compare_runs(ran(none), ran(steeper), tilde=True)[0]),
+            kinds(d.compare_runs(ran(none), ran(steeper), propto=True)[0]),
             ["lp", "lp", "lp", "grad"])
 
     def test_throws_and_messages(self):

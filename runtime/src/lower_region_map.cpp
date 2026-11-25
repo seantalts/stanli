@@ -230,6 +230,9 @@ void split_prologue(RegionMapProg& p) {
   std::vector<char> live((size_t)p.n_regs, 0);
   for (const auto& li : p.ins)
     for (int k = 0; k < li.len; ++k) live[(size_t)(li.reg + k)] = 1;
+  // The kernel reads each out register after every iteration, so its store
+  // stays in the body like a live-in's.
+  for (int reg : p.out_regs) live[(size_t)reg] = 1;
 
   std::vector<char> hoist(n, 0);
   for (size_t i = 0; i < n; ++i) {

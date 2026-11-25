@@ -42,6 +42,13 @@ class SeedsTest(unittest.TestCase):
             fuzz.parse_seeds("6:3")
 
 
+class ProptoTest(unittest.TestCase):
+    def test_tilde_and_lupdf_drop_constants(self):
+        self.assertTrue(fuzz.drops_constants(["t_real", "s_tilde"]))
+        self.assertTrue(fuzz.drops_constants(["s_lupdf"]))
+        self.assertFalse(fuzz.drops_constants(["s_target", "s_lupdf_user"]))
+
+
 class ProfileTest(unittest.TestCase):
     def test_totals(self):
         self.assertEqual(fuzz.profile_work(PROFILE),

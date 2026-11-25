@@ -1072,7 +1072,8 @@ FEATURES = (
     "s_nested_loop", "s_break", "s_continue", "s_early_return",
     "s_return_in_for", "s_return_in_while", "s_return_in_nested_loop",
     "s_void_return", "s_print", "s_reject", "s_block",
-    "s_target", "s_tilde", "s_tilde_user", "s_lupdf_user", "s_void_call",
+    "s_target", "s_tilde", "s_tilde_user", "s_lupdf", "s_lupdf_user",
+    "s_void_call",
     "c_literal_arg", "c_var_arg", "c_data_and_param_args", "c_expr_arg",
     "c_slice_arg", "c_multi_index_arg", "c_nested_call", "c_call_in_size",
     "c_call_loop_bound", "c_call_in_cond", "c_unused_result",
@@ -1210,9 +1211,11 @@ def _fb(body, out, where, loops, callers, p, readers):
         elif isinstance(s, Target):
             out.add("s_target")
             for x in walk_expr(s.e):
-                if isinstance(x, Call) and x.fn is not None and \
+                if isinstance(x, Call) and \
                         x.name.endswith(("_lupdf", "_lupmf")):
-                    out.add("s_lupdf_user")
+                    out.add("s_lupdf")
+                    if x.fn is not None:
+                        out.add("s_lupdf_user")
         elif isinstance(s, Tilde):
             out.add("s_target")
             out.add("s_tilde")

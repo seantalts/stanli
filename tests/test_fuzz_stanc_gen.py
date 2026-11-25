@@ -10,6 +10,7 @@ from __future__ import annotations
 import hashlib
 import os
 import pathlib
+import re
 import subprocess
 import sys
 import unittest
@@ -97,6 +98,13 @@ class GeneratedProgramsTest(unittest.TestCase):
     def test_tilde_feature_marks_every_tilde(self):
         for p in self.programs:
             self.assertEqual("s_tilde" in p.features(), "~" in p.source())
+
+    def test_lupdf_feature_marks_every_target_with_lupdf(self):
+        for p in self.programs:
+            lupdf = any("target +=" in line and
+                        re.search(r"_lup[dm]f\(", line)
+                        for line in p.source().splitlines())
+            self.assertEqual("s_lupdf" in p.features(), lupdf)
 
     def test_tuple_arguments_with_effects_are_common(self):
         n = sum("c_effect_in_tuple_arg" in p.features()
