@@ -144,10 +144,18 @@ stanmodel_data <- function(data, caller) {
     if (!all(found))
       stop("data variables not found: ", paste(data[!found], collapse = ", "),
            call. = FALSE)
-    return(stats::setNames(mget(data, envir = caller, inherits = TRUE), data))
+    data <- stats::setNames(mget(data, envir = caller, inherits = TRUE), data)
   }
-  if (is.environment(data)) return(as.list(data))
-  if (is.list(data)) return(data)
+  if (is.environment(data)) data <- as.list(data)
+  if (is.list(data)) {
+    # RStan's data_preprocess() drops a value that is not numeric, such as
+    # NULL, with this warning; cmdstanr and stanli_model() refuse NULL.
+    null <- vapply(data, is.null, logical(1))
+    for (name in names(data)[null])
+      warning("data with name ", name, " is not numeric and not used",
+              call. = FALSE)
+    return(data[!null])
+  }
   stop("data must be a list, an environment or a character vector of ",
        "variable names", call. = FALSE)
 }
