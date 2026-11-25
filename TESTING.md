@@ -106,12 +106,12 @@ that lists its exceptions.
 
 ## Every model
 
-The main corpus has <!--gen:testing_models-->414<!--/gen--> models. We recorded CmdStan's
-answers at 3 points for each model. That makes <!--gen:testing_points-->1242<!--/gen--> points
-and <!--gen:testing_values-->1,504,488<!--/gen--> values. CmdStan rejects <!--gen:testing_rejected_points-->6<!--/gen-->
+The main corpus has <!--gen:testing_models-->415<!--/gen--> models. We recorded CmdStan's
+answers at 3 points for each model. That makes <!--gen:testing_points-->1245<!--/gen--> points
+and <!--gen:testing_values-->1,504,551<!--/gen--> values. CmdStan rejects <!--gen:testing_rejected_points-->6<!--/gen-->
 of the points.
 
-In <!--gen:testing_models_within-->328<!--/gen--> models, every value is within 10 ULP of
+In <!--gen:testing_models_within-->329<!--/gen--> models, every value is within 10 ULP of
 CmdStan. The other <!--gen:testing_models_over-->86<!--/gen--> models have <!--gen:testing_entries-->190<!--/gen-->
 ledger entries. stanli is at least as close to the true value as CmdStan in <!--gen:testing_entries_stanli-->145<!--/gen-->
 of those entries. CmdStan is closer in <!--gen:testing_entries_cmdstan-->6<!--/gen-->. We
@@ -141,8 +141,8 @@ cannot tell for the other <!--gen:testing_entries_unknown-->39<!--/gen-->.
 | bmgarch | 2 | 0 |
 | walker | 2 | 0 |
 | bayesdfa | 2 | 0 |
-| regressions | 13 | 0 |
-| all | 414 | 86 |
+| regressions | 14 | 0 |
+| all | 415 | 86 |
 <!--/gen-->
 
 The models come from posteriordb, brms formulas, the code of Statistical
@@ -611,6 +611,7 @@ table and those files disagree.
 | `bayesdfa_dfa` | bayesdfa | 25 | 416 | 1.04 | 1.04 | 0.40 | 0.40 | 0.28 | 0.28 | 10 |  |
 | `bayesdfa_dfa_gp` | bayesdfa | 13 | 0 | 0.57 | 0.91 | 0.71 | 0.71 |  |  | 10 |  |
 | `empty_return_shape` | regressions | 3 | 4 |  |  |  |  |  |  | 10 |  |
+| `partition_shared_store` | regressions | 2 | 18 |  |  |  |  |  |  | 10 |  |
 | `rbmi_mmrm` | regressions | 4 | 15 |  |  |  |  |  |  | 10 |  |
 | `reject_udf_data_size` | regressions | 1 | 1 | 0.31 | 0.31 | 0.32 | 0.32 | <0.01 | <0.01 | 10 |  |
 | `tuple_array_params` | regressions | 54 | 109 |  |  |  |  |  |  | 10 |  |
@@ -688,7 +689,7 @@ tests. To run the post-merge jobs on a branch, use
 
 | check | compares | against | when | cannot see |
 | --- | --- | --- | --- | --- |
-| [corpus replay](#every-model) | log density, gradient and `write_array` rows of <!--gen:testing_models-->414<!--/gen--> models at 3 points | recorded CmdStan values, under [the rule](#the-rule) | PR on Linux x86-64, post-merge on macOS arm64 and x86-64, Linux aarch64 and Linux GCC | parameter values away from the 3 points, anything on Windows, and the 10 ULP rule on any platform but macOS arm64 |
+| [corpus replay](#every-model) | log density, gradient and `write_array` rows of <!--gen:testing_models-->415<!--/gen--> models at 3 points | recorded CmdStan values, under [the rule](#the-rule) | PR on Linux x86-64, post-merge on macOS arm64 and x86-64, Linux aarch64 and Linux GCC | parameter values away from the 3 points, anything on Windows, and the 10 ULP rule on any platform but macOS arm64 |
 | [fast-mode replay](#fast-mode) | the same models compiled in fast mode | the same references, fast-mode limits | PR and post-merge, Linux x86-64 only | macOS, Windows and ARM |
 | [local corpus replays](#the-local-corpora) | log density, gradient and outputs of the function, signature, fixture and other local models | recorded CmdStan values | PR (CTest) | signatures and sizes the generators exclude |
 | [stanc3 good models](#stan-language-coverage) | the 1,382 models in stanc3's `good` integration tests at up to 5 points | recorded CmdStan values and messages, within 1e-9, with a ledger of known differences | PR (CTest) | models whose generated data CmdStan rejects |

@@ -1630,6 +1630,13 @@
   "point": 0,
   "status": "VERIFIED"
  },
+ "partition_shared_store": {
+  "max_rel": 0.0,
+  "max_ulp": 0,
+  "n_values": 3,
+  "point": 0,
+  "status": "VERIFIED"
+ },
  "pilots": {
   "max_rel": 1.440544395073718e-16,
   "max_ulp": 2,
