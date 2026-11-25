@@ -310,7 +310,8 @@ def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("variants", type=pathlib.Path)
     ap.add_argument("--out", type=pathlib.Path, required=True)
-    ap.add_argument("--stage", choices=STAGES + ("scaling",), default="all")
+    ap.add_argument("--stage", choices=STAGES + ("scaling", "datavalues"),
+                    default="all")
     ap.add_argument("--jobs", type=int, default=28)
     ap.add_argument("--only", action="append",
                     help="only variants whose SEED/VARIANT contains this")
@@ -350,6 +351,13 @@ def main(argv=None):
             {**meta, "models": results}, indent=1) + "\n")
         text = report.scaling_report(results, meta, known)
         (args.out / "scaling.md").write_text(text)
+    elif args.stage == "datavalues":
+        import datavary
+        results, meta = datavary.run_datavalues(args, tools)
+        meta["seconds"] = time.monotonic() - started
+        (args.out / "datavalues.json").write_text(json.dumps(
+            {**meta, "models": results}, indent=1) + "\n")
+        (args.out / "datavalues.md").write_text(datavary.report(results, meta))
     else:
         records, meta = run_variants(args, tools)
         meta["seconds"] = time.monotonic() - started

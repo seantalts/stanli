@@ -1845,7 +1845,7 @@ if(Python3_Interpreter_FOUND)
              COMMAND ${Python3_EXECUTABLE} tests/test_fuzz_stanc_${_fuzz_test}.py
              WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
   endforeach()
-  foreach(_perturb_test scale ladder)
+  foreach(_perturb_test scale ladder datavary)
     add_test(NAME test_perturb_${_perturb_test}
              COMMAND ${Python3_EXECUTABLE} tests/test_perturb_${_perturb_test}.py
              WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
