@@ -771,7 +771,23 @@ def _stanc_mir(model_path: pathlib.Path, include_paths=(), fast_math=False,
             raise RuntimeError(
                 f"could not run the bundled Stan compiler: {exc}") from exc
         if r.returncode != 0 or not r.stdout:
-            raise RuntimeError(f"stanc failed:\n{r.stderr}")
+            if r.stderr:
+                raise RuntimeError(f"stanc failed:\n{r.stderr}")
+            # The compiler prints every error of its own to stderr, so a
+            # failure with empty stderr means that it did not finish.
+            raise RuntimeError(
+                f"stanc failed: the Stan compiler exited with status "
+                f"{r.returncode} and printed no error message.\n"
+                f"Compiler: {argv[0]}\n"
+                "The compiler prints an error for every problem that it "
+                "finds, so this means that the program did not start or was "
+                "stopped before it finished.\n"
+                "To fix this:\n"
+                "1. Run `pip install --force-reinstall stanli` to install "
+                "the compiler again.\n"
+                "2. If it still fails, check whether security or antivirus "
+                f"software on this machine blocked or removed {argv[0]}, "
+                "and allow it.")
         _warn_compiler_messages(_read_compiler_messages(messages))
     return r.stdout
 
