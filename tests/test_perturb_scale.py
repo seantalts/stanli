@@ -161,6 +161,20 @@ class SizeVariablesTest(unittest.TestCase):
             {"N": 2, "x": [1, 2]})
         self.assertIsNone(sv["N"].refused)
 
+    def test_compound_only_use_refused(self):
+        sv = scale.size_variables(
+            "data { int N; int family; vector[N] y; } "
+            "transformed data { vector[family == 3 ? N : 0] s; }",
+            {"N": 2, "family": 1, "y": [1, 2]})
+        self.assertTrue(sv["family"].refused.startswith("compound dimension"))
+        self.assertIn("family == 3 ? N : 0", sv["family"].refused)
+        self.assertIsNone(sv["N"].refused)
+
+    def test_info_ignores_absent_size_variables(self):
+        text = "data { int N; int M; vector[N] y; vector[M] z; }"
+        _, info = scale.scale(text, {"N": 2, "y": [1, 2]}, "N", 3)
+        self.assertEqual(info, {"N": 3})
+
     def test_scalar_bound_refused(self):
         sv = scale.size_variables(
             "data { int N; int<upper=N> k; vector[N] x; }",
