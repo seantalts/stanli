@@ -418,6 +418,24 @@ bool Lowering::lower_region_map(const mir::Stmt& s, long lo, long hi) {
     return abandon(e.what());
   }
   if (reg.in_slots.empty()) return abandon("no live-in values");
+  // Which live-ins carry a parameter, found the way the island carver finds
+  // it: from the parameter slots forward through the ops so far. The
+  // adjoint generator then requests no adjoint for a data container.
+  if (prog->ins.size() == reg.in_slots.size() + 1) {
+    std::vector<char> active(g.slots.size(), 0);
+    for (size_t k = 0; k < g.slots.size(); ++k)
+      active[k] = g.slots[k].is_param ? 1 : 0;
+    for (const Op& op : g.ops) {
+      bool any = false;
+      for (int j = 0; j < op.n_in && !any; ++j)
+        any = op.in[j] >= 0 && active[(size_t)op.in[j]];
+      if (!any) continue;
+      if (op.out >= 0) active[(size_t)op.out] = 1;
+      if (op.out2 >= 0) active[(size_t)op.out2] = 1;
+    }
+    for (size_t k = 0; k < reg.in_slots.size(); ++k)
+      prog->ins[k].active = active[(size_t)reg.in_slots[k]] != 0;
+  }
   if (island_has_effect(*prog)) return abandon("program has effects");
   prog->label = loop.loopvar;
   prog->check_clean = debug_env("STANLI_REGION_MAP_CHECK_CLEAN") != nullptr;

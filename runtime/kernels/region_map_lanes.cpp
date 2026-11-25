@@ -1000,12 +1000,6 @@ class Analysis {
 
   void build_windows() {
     plan_.calls.assign(p_.calls.size(), {});
-    for (const auto& I : p_.code)
-      if (I.code == Program::CALL) forward_window(I.a);
-    for (const auto& A : p_.adj.code)
-      if (A.code == Program::CALL) backward_window(A.a);
-    for (const auto& w : plan_.calls)
-      plan_.max_window = std::max({plan_.max_window, w.fwd_size, w.bwd_size});
     for (size_t i = 0; i < p_.calls.size(); ++i) {
       const Program::Call& call = p_.calls[i];
       auto& w = plan_.calls[i];
@@ -1022,12 +1016,30 @@ class Analysis {
         w.tile = tile_call_kind(call.opcode);
         ++plan_.tile_calls;
       }
-      w.index_sites =
-          call.opcode == OP_INDEX_DYNAMIC && call.udata_owner &&
-          call.backward != nullptr && call.scratch_len == 0 &&
-          (call.input_adjoint_mask & ((1u << call.n_in) - 1)) == 1u &&
-          w.adj_out_cell >= 0 && shared_adjoint_cell(call.bwd_adj_in[0]);
+      w.index_sites = index_sites_callable(call, w);
     }
+    for (const auto& I : p_.code)
+      if (I.code == Program::CALL) forward_window(I.a);
+    for (const auto& A : p_.adj.code)
+      if (A.code == Program::CALL) backward_window(A.a);
+    for (const auto& w : plan_.calls)
+      plan_.max_window = std::max({plan_.max_window, w.fwd_size, w.bwd_size});
+  }
+
+  // An index read from shared cells: its adjoint takes one dynamic site per
+  // selected element instead of a row for every input cell, and its forward
+  // reads the container in place. A data container takes no sites.
+  bool index_sites_callable(const Program::Call& call,
+                            const RegionMapLanePlan::CallWindow& w) const {
+    if (call.opcode != OP_INDEX_DYNAMIC || !call.udata_owner ||
+        call.forward == nullptr || call.backward == nullptr ||
+        call.scratch_len != 0)
+      return false;
+    if (call.input_adjoint_mask & ((1u << call.n_in) - 1) & ~1u) return false;
+    if (w.in_reg[0] >= 0 || w.val_in_reg[0] >= 0) return false;
+    if (w.out_reg < 0 || w.adj_out_cell < 0) return false;
+    return !(call.input_adjoint_mask & 1u) ||
+           shared_adjoint_cell(call.bwd_adj_in[0]);
   }
 
   bool tile_callable(const Program::Call& call,
@@ -1077,7 +1089,7 @@ class Analysis {
     for (int k = 0; k < call.n_in; ++k) {
       w.in_off[k] = at;
       w.fwd.in[k] = at;
-      at += call.in_len[k];
+      if (!(w.index_sites && k == 0)) at += call.in_len[k];
     }
     w.out_off = at;
     w.fwd.out = at;
@@ -1107,6 +1119,15 @@ class Analysis {
     if (overlaps(scratch, {call.bwd_value_out, call.out_len}))
       refuse("call scratch overlaps a value range");
     int at = 0;
+    if (w.index_sites) {
+      // Only the selectors: the container stays where it lies.
+      for (int k = 1; k < call.n_in; ++k) {
+        w.val_in_off[k] = at;
+        at += call.in_len[k];
+      }
+      w.bwd_size = at;
+      return;
+    }
     for (int k = 0; k < call.n_in; ++k) {
       w.val_in_off[k] = at;
       at += call.in_len[k];
@@ -1158,8 +1179,10 @@ class Analysis {
       } else if (A.code == Program::CALL) {
         const Program::Call& call = p_.calls[(size_t)A.a];
         if (plan_.calls[(size_t)A.a].index_sites) {
-          plan_.max_sites += call.out_len;
-          plan_.max_dynamic += call.out_len;
+          if (call.input_adjoint_mask & 1u) {
+            plan_.max_sites += call.out_len;
+            plan_.max_dynamic += call.out_len;
+          }
           continue;
         }
         for (int k = 0; k < call.n_in; ++k)
@@ -1562,7 +1585,12 @@ void lane_instruction(const RegionMapProg& p, const TileState& t, int pc,
         bind_call_fwd_ctx(w.fwd, window, call_ctx, state);
       }
       const double* const base = t.base();
-      for (int k = 0; k < call.n_in; ++k)
+      // An index read takes its container where it lies, so a lane costs
+      // the selection and not the container.
+      if (w.index_sites)
+        call_ctx.in[0] = Desc{const_cast<double*>(t.shared_regs()) + call.in[0],
+                              call.in_len[0]};
+      for (int k = w.index_sites ? 1 : 0; k < call.n_in; ++k)
         if (w.in_reg[k] < 0)
           std::copy_n(t.shared_regs() + call.in[k], call.in_len[k],
                       window + w.in_off[k]);
@@ -1878,9 +1906,17 @@ void tile_call_backward(const RegionMapLanePlan::CallWindow& w,
 void index_read_backward(const RegionMapLanePlan::CallWindow& w,
                          const Program::Call& call, AdjointTile& t, Mask m,
                          double* window, KernelCtx& ctx) {
+  double* const cbase = t.cells();
+  if (!(call.input_adjoint_mask & 1u)) {
+    // A data container takes no adjoint, so the read only clears its own.
+    for (int j = 0; j < call.out_len; ++j) {
+      double* const d = cbase + w.adj_out_cell + j * kTile;
+      t.each(m, [&](int l) { d[l] = 0.0; });
+    }
+    return;
+  }
   const TileState& f = t.forward();
   const double* const fbase = f.base();
-  double* const cbase = t.cells();
   const auto site = t.acc_dynamic(call.out_len);
   ctx.n_in = call.n_in;
   ctx.in[0] = Desc{nullptr, call.in_len[0]};
@@ -2163,11 +2199,11 @@ void lane_adjoint_instruction(const RegionMapProg& p, AdjointTile& t, int pc,
     case Program::CALL: {
       const Program::Call& call = p.calls[(size_t)I.a];
       const auto& w = p.lanes.calls[(size_t)I.a];
-      const TileState& f = t.forward();
       if (w.index_sites) {
         index_read_backward(w, call, t, m, window, ctx);
         return;
       }
+      const TileState& f = t.forward();
       double* rows[6] = {nullptr, nullptr, nullptr, nullptr, nullptr, nullptr};
       for (int k = 0; k < call.n_in; ++k)
         if ((call.input_adjoint_mask & (1u << k)) &&

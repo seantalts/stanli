@@ -13,6 +13,7 @@
 
 #include <stan/math.hpp>
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
@@ -2511,6 +2512,221 @@ void test_copy_propagation_in_map() {
   }
 }
 
+// Indexed reads of containers in a mapped body: X[n] reads a row of a data
+// matrix, z[, g[n]] a column of a parameter matrix, b[idx[n]] a gather with
+// repeated indices, and M[h[n]] a row of a matrix built in the body.
+struct Gather {
+  int n = 0, J = 0, K = 2;
+  std::vector<std::vector<double>> X, Zd;
+  std::vector<double> bd;
+  std::vector<int> g, h;
+  std::vector<std::array<int, 3>> idx;
+};
+
+Gather make_gather(int n, int J, int bad_row = -1) {
+  Gather d;
+  d.n = n;
+  d.J = J;
+  for (int i = 0; i < n; ++i) {
+    d.X.push_back({std::cos(0.3 * i), std::sin(0.7 * i + 0.1)});
+    const int g = (i * 7) % J + 1;
+    d.g.push_back(i == bad_row ? J + 1 : g);
+    d.idx.push_back({g, g, (i * 3) % J + 1});
+    d.h.push_back(i % 2 + 1);
+  }
+  for (int k = 0; k < d.K; ++k) {
+    d.Zd.emplace_back();
+    for (int j = 0; j < J; ++j)
+      d.Zd.back().push_back(std::sin(1.1 * k + 0.7 * j + 0.2));
+  }
+  for (int j = 0; j < J; ++j) d.bd.push_back(0.1 * std::cos((double)j));
+  return d;
+}
+
+std::string gather_extra(const Gather& d) {
+  std::ostringstream out;
+  out.precision(17);
+  const auto rows = [&](const std::vector<std::vector<double>>& m) {
+    out << "[";
+    for (size_t r = 0; r < m.size(); ++r) {
+      out << (r ? ",[" : "[");
+      for (size_t c = 0; c < m[r].size(); ++c) out << (c ? "," : "") << m[r][c];
+      out << "]";
+    }
+    out << "]";
+  };
+  out << "\"J\":" << d.J << ",\"K\":" << d.K << ",\"X\":";
+  rows(d.X);
+  out << ",\"Zd\":";
+  rows(d.Zd);
+  out << ",\"bd\":[";
+  for (int j = 0; j < d.J; ++j) out << (j ? "," : "") << d.bd[(size_t)j];
+  out << "],\"g\":[";
+  for (int i = 0; i < d.n; ++i) out << (i ? "," : "") << d.g[(size_t)i];
+  out << "],\"idx\":[";
+  for (int i = 0; i < d.n; ++i) {
+    const auto& t = d.idx[(size_t)i];
+    out << (i ? "," : "") << "[" << t[0] << "," << t[1] << "," << t[2] << "]";
+  }
+  out << "],\"h\":[";
+  for (int i = 0; i < d.n; ++i) out << (i ? "," : "") << d.h[(size_t)i];
+  out << "]";
+  return out.str();
+}
+
+Ref gather_ref(const Gather& d) {
+  return
+      [d](const std::vector<var>& p, const Series& s, std::vector<int>* taken) {
+        const var a = p[0], ls = p[1];
+        var lp = 0;
+        for (int i = 0; i < d.n; ++i) {
+          const int g = d.g[(size_t)i] - 1;
+          var m = d.X[(size_t)i][0] * (a * d.Zd[0][(size_t)g]) +
+                  d.X[(size_t)i][1] * (a * d.Zd[1][(size_t)g]);
+          m += d.h[(size_t)i] == 1 ? a * s.x[(size_t)i] + ls
+                                   : a + ls * s.x[(size_t)i];
+          const var r = s.y[(size_t)i] - m;
+          const bool low = r < ls;
+          if (taken) taken->push_back(low);
+          if (low) {
+            var b = 0;
+            for (int t : d.idx[(size_t)i]) b += ls * d.bd[(size_t)(t - 1)];
+            lp += -stan::math::square(r) + b;
+          } else {
+            lp += -0.5 * stan::math::square(r) + ls;
+          }
+        }
+        return lp;
+      };
+}
+
+const std::vector<Params> gather_points = {
+    {0.3, -0.2}, {-1.1, 0.4}, {0.8, 0.1}, {0.3, -0.2}};
+
+// Which map calls are OP_INDEX_DYNAMIC reads, keyed by the length of the
+// container they read.
+std::map<int, int> gather_calls(const stanli::RegionMapProg& p) {
+  std::map<int, int> by_len;
+  for (size_t i = 0; i < p.calls.size(); ++i)
+    if (p.calls[i].opcode == stanli::OP_INDEX_DYNAMIC)
+      by_len[p.calls[i].in_len[0]] = (int)i;
+  return by_len;
+}
+
+void test_gather_parity() {
+  for (int n : {37, 64, 65, 200}) {
+    const Gather d = make_gather(n, 8);
+    const std::string extra = gather_extra(d);
+    const std::string what = "region_map_gather N=" + std::to_string(n);
+    CompiledModel lanes =
+        compile_with("region_map_gather", n, nullptr, "0", extra);
+    CompiledModel scalar = compile_with("region_map_gather", n,
+                                        "STANLI_REGION_MAP_LANES", "0", extra);
+    expect_mapped(what, lanes);
+    expect_lane_parity(what, lanes, scalar, gather_points, true);
+    CompiledModel off =
+        compile_with("region_map_gather", n, "STANLI_REGION_MAP", "0", extra);
+    check(count_opcode(off, OP_REGION_MAP) == 0, what + ": unmapped");
+    Executor el(lanes.graph), es(scalar.graph), eo(off.graph);
+    lanes.bind(el);
+    scalar.bind(es);
+    off.bind(eo);
+    const Series s = make_series(n);
+    std::vector<std::vector<int>> taken(gather_points.size());
+    for (size_t k = 0; k < gather_points.size(); ++k) {
+      const std::string at = what + " point " + std::to_string(k);
+      const Eval ref = reference(gather_ref(d), s, gather_points[k], &taken[k]);
+      const Eval want = evaluate(eo, gather_points[k]);
+      expect_ulp(at + " unmapped lp vs Stan Math", want.lp, ref.lp, 10);
+      const Eval got = evaluate(el, gather_points[k]);
+      expect_eval(at + " lanes", got, want);
+      const Eval sc = evaluate(es, gather_points[k]);
+      expect_eval(at + " scalar", sc, want);
+      bool same = same_bits(got.lp, sc.lp);
+      for (size_t i = 0; i < got.grad.size(); ++i)
+        same = same && same_bits(got.grad[i], sc.grad[i]);
+      check(same, at + ": lanes bitwise equal to the scalar map");
+    }
+    check(flips(taken[0], taken[1]) > 0, what + ": points flip branches");
+  }
+}
+
+void test_gather_lane_state_is_flat() {
+  // The second model reads a data matrix twice as long and parameter
+  // containers four times as long.
+  const std::vector<std::pair<int, int>> shapes = {{64, 8}, {128, 32}};
+  std::vector<CompiledModel> models;
+  for (const auto& [n, J] : shapes)
+    models.push_back(compile_with("region_map_gather", n, nullptr, "0",
+                                  gather_extra(make_gather(n, J))));
+  const auto& small = map_payload(models[0]).lanes;
+  const auto& large = map_payload(models[1]).lanes;
+  check(small.active && large.active, "gather: lane plans active");
+  check(small.max_sites == large.max_sites,
+        "gather: adjoint sites do not grow with the containers (" +
+            std::to_string(small.max_sites) + " vs " +
+            std::to_string(large.max_sites) + ")");
+  check(small.max_dynamic == large.max_dynamic,
+        "gather: dynamic sites do not grow with the containers");
+  check(small.max_window == large.max_window,
+        "gather: call windows do not grow with the containers (" +
+            std::to_string(small.max_window) + " vs " +
+            std::to_string(large.max_window) + ")");
+  for (size_t m = 0; m < models.size(); ++m) {
+    const stanli::RegionMapProg& p = map_payload(models[m]);
+    const auto [n, J] = shapes[m];
+    const auto calls = gather_calls(p);
+    const auto row = calls.find(n * 2);  // X[n]: data
+    const auto col = calls.find(2 * J);  // z[, g[n]]: parameter
+    const auto many = calls.find(J);     // b[idx[n]]: parameter
+    const auto local = calls.find(4);    // M[h[n]]: built in the body
+    const bool found = row != calls.end() && col != calls.end() &&
+                       many != calls.end() && local != calls.end();
+    check(found, "gather: the four indexed reads are OP_INDEX_DYNAMIC calls");
+    if (!found) continue;
+    check(!(p.calls[(size_t)row->second].input_adjoint_mask & 1u),
+          "gather: no adjoint requested for the data matrix");
+    check(p.calls[(size_t)col->second].input_adjoint_mask & 1u,
+          "gather: adjoint requested for the parameter matrix");
+    check(p.calls[(size_t)many->second].input_adjoint_mask & 1u,
+          "gather: adjoint requested for the parameter vector");
+    check(p.lanes.calls[(size_t)row->second].index_sites &&
+              p.lanes.calls[(size_t)col->second].index_sites &&
+              p.lanes.calls[(size_t)many->second].index_sites,
+          "gather: reads of live-in containers take the lane gather");
+    check(!p.lanes.calls[(size_t)local->second].index_sites,
+          "gather: a container built in the body keeps the general call");
+  }
+}
+
+void test_gather_out_of_range() {
+  for (int n : {64, 65}) {
+    for (int bad : {5, n - 1}) {
+      const Gather d = make_gather(n, 8, bad);
+      const std::string extra = gather_extra(d);
+      const std::string what = "region_map_gather oob N=" + std::to_string(n) +
+                               " row " + std::to_string(bad);
+      CompiledModel lanes =
+          compile_with("region_map_gather", n, nullptr, "0", extra);
+      CompiledModel scalar = compile_with(
+          "region_map_gather", n, "STANLI_REGION_MAP_LANES", "0", extra);
+      CompiledModel off =
+          compile_with("region_map_gather", n, "STANLI_REGION_MAP", "0", extra);
+      Executor el(lanes.graph), es(scalar.graph), eo(off.graph);
+      lanes.bind(el);
+      scalar.bind(es);
+      off.bind(eo);
+      const Run a = try_evaluate(el, gather_points[0]);
+      const Run b = try_evaluate(es, gather_points[0]);
+      const Run c = try_evaluate(eo, gather_points[0]);
+      check(a.threw && b.threw && c.threw, what + ": every form throws");
+      check(a.what == b.what && b.what == c.what,
+            what + ": same exception: " + a.what + " | " + b.what + " | " +
+                c.what);
+    }
+  }
+}
+
 }  // namespace region_map_test
 
 int main() {
@@ -2566,6 +2782,9 @@ int main() {
   test_mode_policy();
   test_recompute_visits_taken_blocks();
   test_lane_reverse_order();
+  test_gather_parity();
+  test_gather_lane_state_is_flat();
+  test_gather_out_of_range();
   test_setenv("STANLI_REGION_MAP_LANES", "0", 1);
   test_large_body_recomputes_by_default();
   test_clear_strategy_follows_mode();
