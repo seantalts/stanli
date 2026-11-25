@@ -100,11 +100,22 @@ def table(scaling, datavalues, collection_of):
     return out
 
 
+REFUSALS = ("compound dimension only", "compound dimension", "empty containers",
+            "two scaled axes", "ragged group sizes", "checked relation",
+            "bound of", "constrained type", "index array", "replicating",
+            "non-numeric bound", "data has no", "shape mismatch",
+            "unsupported declaration")
+
+
+def refusal_kind(why):
+    return next((r for r in REFUSALS if why.startswith(r)), why.split(":")[0])
+
+
 def refusals(scaling):
     reasons = collections.Counter()
     for x in scaling:
         for why in (x.get("refused") or {}).values():
-            reasons[why.split(":")[0]] += 1
+            reasons[refusal_kind(why)] += 1
         if x.get("error"):
             reasons[x["error"].split(":")[0]] += 1
         elif not x.get("ladders") and not x.get("refused"):
