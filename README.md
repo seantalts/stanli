@@ -4,14 +4,11 @@ Stanli is a Stan Language Interpreter. It uses upstream Stan code from Stan
 Math, the Stan services and algorithms, and the Stan compiler, but it does not
 require a C++ toolchain. We benchmarked it on <!--gen:benchmark_models-->363<!--/gen-->
 real models. On the median model, gradients are **<!--gen:corpus_median-->2.16x<!--/gen-->**
-faster than CmdStan's and sampling is **<!--gen:corpus_total_median-->23x<!--/gen-->**
+faster than CmdStan's and total end-to-end compilation+sampling is **<!--gen:corpus_total_median-->23x<!--/gen-->**
 faster ([benchmarks](docs/benchmarks.md)).
 
-stanli turns each model into a graph of operations over precompiled Stan Math
-kernels. Stan's own NUTS sampler then runs on that graph. No model is compiled
-to C++. The sampling time includes setup and a full run of 1,000 warmup and
-1,000 sampling iterations. Sampling gains more than the gradient does, because
-CmdStan compiles C++ for each model and stanli does not. We check log
+stanli lowers each model into an optimized graph of operations over precompiled Stan Math
+kernels. Stan's own NUTS sampler then runs on that graph. We check log
 densities and gradients against CmdStan's on hundreds of models.
 
 [![PyPI](https://img.shields.io/pypi/v/stanli.svg)](https://pypi.org/project/stanli/)
@@ -23,11 +20,12 @@ densities and gradients against CmdStan's on hundreds of models.
 **Try it in your browser, no install:**
 [seantalts.github.io/stanli](https://seantalts.github.io/stanli/). The demo
 page compiles the Eight Schools model and draws 1,000 posterior samples in
-about 120 ms. Everything runs in your browser.
+about 120 ms, which is ~2x slower than native Python and R packages, but everything runs in your browser in the demo.
+There are also npm and webr packages to use the WASM build.
 
 ## Install
 
-There are three packages. Each one wraps the same shared library, so a
+There are several interface packages. Each one wraps the same shared library, so a
 model gives the same draws from any of them.
 
 | | | |
