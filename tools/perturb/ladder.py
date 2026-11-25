@@ -11,6 +11,7 @@ import concurrent.futures
 import json
 import math
 import pathlib
+import re
 import time
 
 import measure as m
@@ -33,6 +34,10 @@ PAIRS = 6
 MAX_DATA_BYTES = 400 << 20
 MAX_FIRST_GRADIENT_S = 5.0
 REJECTED = ("data", "model")  # the model or its data check rejects the size
+STAN_MATH_WORDING = re.compile(
+    r"accessing element out of range|index \d+ out of (range|bounds)|"
+    r"dimension mismatch|must be (greater|less|positive|finite)|"
+    r"size mismatch")
 DATA_ERRORS = ("domain_error", "out_of_range", "invalid_argument",
                "runtime_error")
 
@@ -78,6 +83,10 @@ def classify_check(outcome, records):
         if rec.get("stage") in REJECTED or rec.get("error") in DATA_ERRORS:
             return "rejected", str(payload)[:300]
         return "failure", f"compile: {payload}"[:300]
+    if state == "refused" and STAN_MATH_WORDING.search(str(payload)):
+        # stanli reports a transformed-data index error found while it
+        # lowers as compile_error; Stan Math's wording tells it apart.
+        return "rejected", str(payload)[:300]
     if state in ("crash", "timeout", "refused"):
         return "failure", f"{state}: {payload}"[:300]
     why = m.finite_values(outcome, points=(0,))
