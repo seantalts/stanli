@@ -77,7 +77,9 @@ python3 tools/perturb/run.py VARIANTS --out OUT --stage scaling     # size ladde
    CmdStan with 6. `cliff = (stanli variant/base) / (CmdStan variant/base)`;
    a cliff is reported at 1.3 or more. `--copies 12` also times 12
    concurrent copies of the variant and of the base, since a large program
-   mostly hurts when several chains share the caches.
+   mostly hurts when several chains share the caches. It runs only for
+   variants that stage 3 flagged, so a variant that is fast alone and slow
+   with 12 chains is missed unless it is also flagged.
 5. **Report.** `OUT/results.json` keeps every record. `OUT/report.md` lists
    the cliffs ranked by `cliff`, then the cliffs with no new decline reason
    and no op growth ("unexplained"), a table of outcomes per class, and
