@@ -1630,7 +1630,7 @@ void lane_instruction(const RegionMapProg& p, const TileState& t, int pc,
             const double raw = idx[l];
             if (!std::isfinite(raw) || std::trunc(raw) != raw || raw < 1.0 ||
                 raw > len)
-              throw ProgramIndexError();
+              throw_dyn_index_error(I.sub, raw, I.len);
             d[l] = read(static_cast<int32_t>(raw) - 1, l);
           });
         };

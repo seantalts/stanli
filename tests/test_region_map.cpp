@@ -1792,8 +1792,9 @@ void test_lane_exceptions() {
     check(r.threw == 4 && r.ok == 0,
           what + ": out of range index throws every time");
     const std::string mapped = outcome("region_map_oob", n, nullptr);
-    check(mapped.find("structured index out of range") != std::string::npos,
-          what + ": lane exception is the structured message: " + mapped);
+    check(mapped.find("vector[uni] indexing: accessing element out of "
+                      "range") != std::string::npos,
+          what + ": lane exception is Stan's error: " + mapped);
   }
   for (int n : {37, 64, 65, 200}) {
     const std::string what = "region_map_calldomain N=" + std::to_string(n);
@@ -2853,8 +2854,7 @@ void test_data_index_proven() {
 }
 
 // An out-of-range data index throws at every evaluation, as before the
-// checks could be skipped. The mapped forms throw the region map's own
-// message; the unrolled form throws Stan's, which names the container.
+// checks could be skipped. Every form throws Stan's error.
 void test_data_index_out_of_range() {
   const int J = 8;
   for (int n : {64, 65}) {
@@ -2882,8 +2882,9 @@ void test_data_index_out_of_range() {
         const std::string at = what + " evaluation " + std::to_string(k);
         check(first.threw && a.threw && b.threw && c.threw,
               at + ": every form throws");
-        check(a.what == first.what && a.what == b.what,
-              at + ": same exception: " + a.what + " | " + b.what);
+        check(a.what == first.what && a.what == b.what && a.what == c.what,
+              at + ": same exception: " + a.what + " | " + b.what + " | " +
+                  c.what);
       }
       check(stanli::region_map_proven_runs() == before,
             what + ": a failed check never proves the selectors");
@@ -2898,10 +2899,12 @@ void test_data_index_out_of_range() {
 // may unroll to before it is lowered compact at once.
 CompiledModel compile_env(
     const std::string& stem, int n,
-    const std::vector<std::pair<const char*, const char*>>& env) {
+    const std::vector<std::pair<const char*, const char*>>& env,
+    const std::string& extra = "") {
   for (const auto& [k, v] : env) test_setenv(k, v, 1);
   try {
-    CompiledModel cm = stanli::compile_model(fixture_mir(stem), make_data(n));
+    CompiledModel cm =
+        stanli::compile_model(fixture_mir(stem), make_data(n, extra));
     for (const auto& [k, v] : env) test_unsetenv(k);
     return cm;
   } catch (...) {
@@ -3049,6 +3052,97 @@ void test_budget_without_compact_form() {
                         capped_off, mix_points);
 }
 
+// An out-of-range data index raises the same error in every form of the
+// loop: unrolled, where the index is a constant and the lowering emits
+// Stan's error, and in the region map's lane and scalar forms and OP_LOOP,
+// which check the index when the loop runs.
+struct IndexForm {
+  const char* name;
+  std::vector<std::pair<const char*, const char*>> env;
+  uint16_t opcode;  // the opcode the form must contain, or 0 for unrolled
+};
+
+std::string index_error(const std::string& what, const std::string& stem, int n,
+                        const IndexForm& form, const std::string& extra,
+                        const Params& p) {
+  CompiledModel cm = compile_env(stem, n, form.env, extra);
+  const std::string at = what + " " + form.name;
+  if (form.opcode)
+    check(count_opcode(cm, form.opcode) > 0, at + ": the loop takes the form");
+  else
+    check(
+        count_opcode(cm, OP_REGION_MAP) == 0 && count_opcode(cm, OP_LOOP) == 0,
+        at + ": the loop unrolls");
+  Executor ex(cm.graph);
+  cm.bind(ex);
+  const Run r = try_evaluate(ex, p);
+  check(r.threw, at + ": throws");
+  return r.what;
+}
+
+void expect_same_index_error(const std::string& what, const std::string& stem,
+                             int n, const std::vector<IndexForm>& forms,
+                             const std::string& extra, const Params& p,
+                             const std::string& label) {
+  const std::string want = index_error(what, stem, n, forms[0], extra, p);
+  check(want.find(label + ": accessing element out of range") !=
+            std::string::npos,
+        what + ": the unrolled loop raises Stan's error: " + want);
+  for (size_t k = 1; k < forms.size(); ++k) {
+    const std::string got = index_error(what, stem, n, forms[k], extra, p);
+    check(got == want, what + " " + forms[k].name +
+                           ": same error as unrolled: " + got + " | " + want);
+  }
+}
+
+void test_budget_index_errors() {
+  const int n = 64, J = 8;
+  const std::vector<IndexForm> data_forms = {
+      {"unrolled",
+       {{"STANLI_PROGRAM_BUDGET", "0"},
+        {"STANLI_REGION_MAP", "0"},
+        {"STANLI_STRUCTURED_LOOPS", "0"}},
+       0},
+      {"budget lanes", {{"STANLI_PROGRAM_BUDGET", "1"}}, OP_REGION_MAP},
+      {"budget OP_LOOP",
+       {{"STANLI_PROGRAM_BUDGET", "1"},
+        {"STANLI_LOOP_BUDGET", "1"},
+        {"STANLI_REGION_MAP", "0"}},
+       OP_LOOP},
+      {"region map all", {{"STANLI_REGION_MAP", "all"}}, OP_REGION_MAP}};
+  // g[6] past J: z[, g[n]] in the first loop.
+  expect_same_index_error(
+      "region_map_data_index bad g", "region_map_data_index", n, data_forms,
+      data_index_extra(n, J, 5), data_index_point(J, 0.4, -0.3),
+      "matrix[..., uni] column indexing");
+  // h[6] past J: w[h[n]], a multi-index of a vector.
+  std::string bad_h = data_index_extra(n, J, -1);
+  const std::string h_row = "\"h\":[";
+  const size_t at = bad_h.find(h_row);
+  check(at != std::string::npos, "region_map_data_index: h in the data");
+  if (at != std::string::npos) {
+    size_t row = at + h_row.size();
+    for (int k = 0; k < 5; ++k) row = bad_h.find("],[", row) + 3;
+    bad_h.replace(row, bad_h.find(',', row) - row, std::to_string(J + 1));
+    expect_same_index_error(
+        "region_map_data_index bad h", "region_map_data_index", n, data_forms,
+        bad_h, data_index_point(J, 0.4, -0.3), "vector[multi] indexing");
+  }
+  // mu[n + 1] past the end in a loop that branches on a parameter, in the
+  // lane and scalar forms of the region map and in OP_LOOP.
+  const std::vector<IndexForm> branch_forms = {
+      {"unrolled",
+       {{"STANLI_REGION_MAP", "0"}, {"STANLI_STRUCTURED_LOOPS", "0"}},
+       0},
+      {"lanes", {}, OP_REGION_MAP},
+      {"scalar", {{"STANLI_REGION_MAP_LANES", "0"}}, OP_REGION_MAP},
+      {"OP_LOOP", {{"STANLI_REGION_MAP", "0"}}, OP_LOOP}};
+  for (int rows : {37, 64, 200})
+    expect_same_index_error("region_map_oob N=" + std::to_string(rows),
+                            "region_map_oob", rows, branch_forms, "",
+                            {0.3, -0.5}, "vector[uni] indexing");
+}
+
 // A budget fallback adds a long target sum with compensation
 // (pairwise_sum.hpp). The terms below nearly cancel, so a sum in plain order,
 // which the unrolled graph uses, is about 1e-9 off in relative terms. Each
@@ -3191,6 +3285,7 @@ int main() {
   test_unroll_ceiling();
   test_budget_fallback_sums_accurately();
   test_budget_without_compact_form();
+  test_budget_index_errors();
   test_setenv("STANLI_REGION_MAP_LANES", "0", 1);
   test_large_body_recomputes_by_default();
   test_clear_strategy_follows_mode();

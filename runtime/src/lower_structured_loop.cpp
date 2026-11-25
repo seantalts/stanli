@@ -1645,6 +1645,13 @@ Lowering::Val Lowering::region_index(const Val& base,
     spec->axes.push_back(axis);
   }
   spec->selected_size = selected;
+  if (!rhs)
+    label_dynamic_index(
+        *spec,
+        mat                                                       ? 2
+        : leaf == ViewKind::Vector || leaf == ViewKind::RowVector ? 1
+                                                                  : 0,
+        selectors.size());
   SlotInfo si = view_of(result_view);
   if (mir::is_unsized(result_view, mir::UnsizedLeaf::Matrix)) {
     if (output_dims.size() < 2) fail("structured matrix selection shape");

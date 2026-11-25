@@ -89,8 +89,9 @@ template <bool ReuseCallCtx>
 void run_once(const RegionMapProg& p, KernelCtx& ctx) {
   try {
     run_program_impl<ReuseCallCtx>(p, ctx.scratch, ctx.eval_state);
-  } catch (const ProgramIndexError&) {
-    throw std::out_of_range("structured index out of range");
+  } catch (const ProgramIndexError& e) {
+    throw std::out_of_range(e.labeled ? e.what()
+                                      : "structured index out of range");
   }
 }
 

@@ -32,6 +32,10 @@ struct DynamicIndexSpec {
     int selector_input = 1;
     int extent_input = 1;
     int count_input = 1;
+    // The label of Stan's error for a Single or Multi selector of a read
+    // that is out of range (label_dynamic_index), or null for the generic
+    // error.
+    const char* label = nullptr;
   };
   std::vector<Axis> axes;
   bool matrix_leaf = false;
@@ -135,6 +139,13 @@ int64_t index_trusted_positions(const DynamicIndexSpec& spec,
                                 const KernelCtx& c, double* positions,
                                 int64_t stride);
 void index_trusted_read(KernelCtx& c);
+
+// Gives each Single and Multi axis of a read the label that Stan's error
+// for it carries, as the unrolled graph reports it. `leaf_rank` is 2 for a
+// matrix leaf, 1 for a vector or row vector and 0 for a scalar, and
+// `selectors` is the number of selectors that the read wrote.
+void label_dynamic_index(DynamicIndexSpec& spec, int leaf_rank,
+                         size_t selectors);
 
 void register_structured_loop_kernel();
 

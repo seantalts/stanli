@@ -559,6 +559,17 @@ void linspaced_int_forward(KernelCtx& c) {
   throw std::out_of_range("structured index out of range");
 }
 
+// Stan's error for a labeled selector, else the generic one.
+[[noreturn]] __attribute__((noinline)) void index_out_of_range(
+    const DynamicIndexSpec::Axis& axis, double raw, int64_t extent) {
+  if (axis.label && std::isfinite(raw) && std::trunc(raw) == raw &&
+      std::fabs(raw) <= std::numeric_limits<int32_t>::max() &&
+      extent <= std::numeric_limits<int32_t>::max())
+    throw std::out_of_range(index_out_of_range_message(
+        axis.label, extent, static_cast<int64_t>(raw)));
+  index_out_of_range();
+}
+
 const Desc& index_input(const KernelCtx& c, int input, const char* what) {
   if (input < 0 || input >= c.n_in) index_fault(what, " input");
   return c.in[input];
@@ -672,7 +683,7 @@ int64_t selected_position(const DynamicIndexSpec& p,
     }
     if (!std::isfinite(raw) || std::trunc(raw) != raw || raw < 1 ||
         raw > static_cast<double>(state.extent))
-      index_out_of_range();
+      index_out_of_range(axis, raw, state.extent);
     result += (static_cast<int64_t>(raw) - 1) * state.stride;
   };
   const size_t outer = p.axes.size() - (p.matrix_leaf ? 2 : 0);
@@ -761,7 +772,7 @@ IndexRuntime validate_index(const DynamicIndexSpec& p, const KernelCtx& c,
                               : raw;
       if (!std::isfinite(raw) || std::trunc(raw) != raw || raw < 1 ||
           last > logical_extent)
-        index_out_of_range();
+        index_out_of_range(axis, raw, logical_extent);
     }
   }
   const size_t outer = p.axes.size() - (p.matrix_leaf ? 2 : 0);
@@ -820,7 +831,7 @@ int64_t fixed_scalar_index(const DynamicIndexSpec& p, const KernelCtx& c,
   const double raw = c.in[1].data[a.input_offset];
   if (!std::isfinite(raw) || std::trunc(raw) != raw || raw < 1 ||
       raw > a.extent)
-    index_out_of_range();
+    index_out_of_range(a, raw, a.extent);
   return static_cast<int64_t>(raw) - 1;
 }
 
@@ -855,7 +866,7 @@ int64_t whole_row_start(const DynamicIndexSpec& p, const KernelCtx& c) {
   const double raw = c.in[r.selector_input].data[r.input_offset];
   if (!std::isfinite(raw) || std::trunc(raw) != raw || raw < 1 ||
       raw > static_cast<double>(r.extent))
-    index_out_of_range();
+    index_out_of_range(r, raw, r.extent);
   return (static_cast<int64_t>(raw) - 1) * width;
 }
 
@@ -888,7 +899,7 @@ int64_t strided_run_start(const DynamicIndexSpec& p, const KernelCtx& c,
   const double raw = c.in[1].data[s.input_offset];
   if (!std::isfinite(raw) || std::trunc(raw) != raw || raw < 1 ||
       raw > static_cast<double>(s.extent))
-    index_out_of_range();
+    index_out_of_range(s, raw, s.extent);
   *step = a.stride;
   return (static_cast<int64_t>(raw) - 1) * s.stride;
 }
@@ -943,7 +954,7 @@ int64_t prepared_position(const DynamicIndexSpec& spec,
     const double raw = context.in[a.selector_input].data[a.input_offset];
     if (!std::isfinite(raw) || std::trunc(raw) != raw || raw < 1 ||
         raw > static_cast<double>(a.extent))
-      index_out_of_range();
+      index_out_of_range(a, raw, a.extent);
     position += (static_cast<int64_t>(raw) - 1) * a.stride;
   }
   return position;
@@ -983,7 +994,7 @@ void prepared_positions(const DynamicIndexSpec& p, const KernelCtx& c, F&& f) {
                               : raw;
       if (!std::isfinite(raw) || std::trunc(raw) != raw || raw < 1 ||
           last > static_cast<double>(axis.extent))
-        index_out_of_range();
+        index_out_of_range(axis, raw, axis.extent);
     }
   }
   selected_positions(p, runtime, f);
@@ -3591,6 +3602,37 @@ void index_trusted_read(KernelCtx& c) {
   const int64_t selected = trusted_positions(
       p, c, [&](int64_t i, int64_t position) { out[i] = in[position]; });
   std::fill(out + selected, out + c.out.len, 0.0);
+}
+
+void label_dynamic_index(DynamicIndexSpec& spec, int leaf_rank,
+                         size_t selectors) {
+  using Axis = DynamicIndexSpec::Axis;
+  const size_t outer = spec.axes.size() - static_cast<size_t>(leaf_rank);
+  for (size_t d = 0; d < spec.axes.size() && d < selectors; ++d) {
+    Axis& axis = spec.axes[d];
+    if (axis.kind == Axis::Multi) {
+      axis.label = d < outer        ? "array[..., ...] index"
+                   : leaf_rank == 1 ? "vector[multi] indexing"
+                                    : nullptr;
+      continue;
+    }
+    if (axis.kind != Axis::Single) continue;
+    if (d < outer || leaf_rank == 0) {
+      axis.label = "array[uni, ...] index";
+    } else if (leaf_rank == 1) {
+      axis.label = "vector[uni] indexing";
+    } else if (d == outer) {
+      const Axis::Kind column = spec.axes[outer + 1].kind;
+      axis.label = column == Axis::All      ? "matrix[uni] indexing"
+                   : column == Axis::Single ? "matrix[uni,uni] row indexing"
+                                            : nullptr;
+    } else {
+      const Axis::Kind row = spec.axes[outer].kind;
+      axis.label = row == Axis::Single  ? "matrix[uni,uni] column indexing"
+                   : row != Axis::Multi ? "matrix[..., uni] column indexing"
+                                        : nullptr;
+    }
+  }
 }
 
 void StructuredLoop::prepare() {

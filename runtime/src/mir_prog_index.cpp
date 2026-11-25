@@ -612,6 +612,8 @@ Range ProgramCompiler::dynamic_index(const Range& base,
     spec->axes.push_back(axis);
   }
   spec->selected_size = selected_size;
+  if (!rhs)
+    label_dynamic_index(*spec, static_cast<int>(leaf_rank), selectors.size());
   Range selected{0, selected_size};
   ViewKind result_leaf = leaf;
   if (leaf == ViewKind::Matrix)

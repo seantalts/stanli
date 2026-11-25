@@ -42,11 +42,18 @@
 
 namespace stanli {
 
-// A DYN_INDEX read outside its source container.
+// A DYN_INDEX read outside its source container. A read whose `sub` names
+// Stan's label (kDynIndexVector, kDynIndexArray) carries Stan's error.
 struct ProgramIndexError : std::out_of_range {
   ProgramIndexError()
       : std::out_of_range("register-program index out of range") {}
+  explicit ProgramIndexError(const std::string& stan_error)
+      : std::out_of_range(stan_error), labeled(true) {}
+  bool labeled = false;
 };
+constexpr uint8_t kDynIndexVector = 1;
+constexpr uint8_t kDynIndexArray = 2;
+[[noreturn]] void throw_dyn_index_error(uint8_t label, double raw, int32_t len);
 
 using KernelFn = void (*)(KernelCtx&);
 
@@ -685,7 +692,7 @@ __attribute__((aligned(64))) void run_program_impl(const Program& p, T* reg,
         const double raw = stan::math::value_of(rb());
         if (!std::isfinite(raw) || std::trunc(raw) != raw || raw < 1.0 ||
             raw > static_cast<double>(I.len))
-          throw ProgramIndexError();
+          throw_dyn_index_error(I.sub, raw, I.len);
         d() = reg[(size_t)(I.a + I.c + static_cast<int32_t>(raw) - 1)];
         break;
       }

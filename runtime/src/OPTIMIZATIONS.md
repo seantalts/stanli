@@ -1338,9 +1338,14 @@ included. The largest loop in the corpus unrolls to about 180,000 ops, so
 the ceiling stops only much larger loops, such as one over ten million rows.
 If no compact form takes such a loop, the last attempt unrolls it anyway.
 
-The cost is a second lowering for the models over the budget. A loop that
-the budget maps also loses Stan's error message for an out-of-range data
-index: the region map throws its own (`structured index out of range`).
+The cost is a second lowering for the models over the budget. An
+out-of-range index raises the same error in every form of a loop: each
+dynamic index read carries the label of Stan's error for its selector
+(`label_dynamic_index` in `structured_loop.cpp`), so the region map and
+`OP_LOOP` raise the error that the unrolled graph raises, such as
+`vector[uni] indexing: accessing element out of range`. In the region map
+and `OP_LOOP`, a range selector or an indexed assignment out of range still
+raises `structured index out of range`.
 
 | switch | effect | source |
 | --- | --- | --- |
