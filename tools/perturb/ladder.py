@@ -37,7 +37,8 @@ REJECTED = ("data", "model")  # the model or its data check rejects the size
 STAN_MATH_WORDING = re.compile(
     r"accessing element out of range|index \d+ out of (range|bounds)|"
     r"dimension mismatch|must be (greater|less|positive|finite)|"
-    r"size mismatch")
+    r"size mismatch|width mismatch|index out of bounds|gather out of bounds|"
+    r"gather index \d+ is outside")
 DATA_ERRORS = ("domain_error", "out_of_range", "invalid_argument",
                "runtime_error")
 

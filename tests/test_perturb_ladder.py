@@ -107,6 +107,10 @@ class ClassifyCheck(unittest.TestCase):
         msg = ("vector[uni] assign: accessing element out of range. index 2 out "
                "of range; expecting index to be between 1 and 1")
         self.assertEqual(ladder.classify_check(("refused", msg), rec)[0], "rejected")
+        msg = "assignment width mismatch for b"
+        self.assertEqual(ladder.classify_check(("refused", msg), rec)[0], "rejected")
+        msg = "index offset: dimension exceeds the graph immediate range"
+        self.assertEqual(ladder.classify_check(("refused", msg), rec)[0], "failure")
 
     def test_stanli_refusing_to_lower_is_a_failure(self):
         rec = Records({"ok": False, "stage": "lower", "error": "compile_error"})
