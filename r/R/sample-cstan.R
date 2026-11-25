@@ -13,12 +13,16 @@
 #' @param iter_warmup,iter_sampling Iterations per chain before thinning.
 #' @param seed Integer seed. If NULL, draw one from R's RNG.
 #' @param init Constrained parameter list, one list per chain, a
-#'   function returning a list (optionally accepting `chain_id`), or NULL for
-#'   random initialization. A list may leave parameters out; those start at
-#'   random within `init_radius`, as in CmdStan. Numeric radii and files are
-#'   unsupported; use `init_radius` for random initialization. Extra
-#'   non-parameter names (such as transformed parameters) are ignored, as in
-#'   CmdStanR.
+#'   function returning a list (optionally accepting `chain_id`), a number,
+#'   a `posterior` draws object, a fit from `sample_cstan()`, or NULL for
+#'   random initialization, as in cmdstanr. A list may leave parameters out;
+#'   those start at random within `init_radius`, as in CmdStan. A number is
+#'   the radius of that draw, so 0 starts at zero on the unconstrained
+#'   scale. Draws, or a fit's draws, give each chain one draw, recycled when
+#'   there are fewer draws than chains and otherwise drawn without
+#'   replacement. Files and fits from the approximate methods are
+#'   unsupported. Extra non-parameter names (such as transformed parameters)
+#'   are ignored, as in CmdStanR.
 #' @param adapt_delta Target acceptance probability.
 #' @param max_treedepth Maximum NUTS tree depth.
 #' @param thin Retain every thin-th iteration, separately in warmup and sampling.
@@ -66,8 +70,19 @@ sample_cstan <- function(model_code, data = list(), chains = 4, parallel_chains 
     stop("init_radius must be finite and nonnegative", call. = FALSE)
   if (!is.null(init) && !is.null(pathfinder_init))
     stop("init and pathfinder_init cannot be combined", call. = FALSE)
-  if (!is.null(init) && !is.list(init) && !is.function(init))
-    stop("init must be a constrained list or function", call. = FALSE)
+  # A number is a radius, as in cmdstanr.
+  if (is.numeric(init) && length(init) == 1L && !is.object(init)) {
+    init_radius <- init
+    init <- NULL
+    if (!is.finite(init_radius) || init_radius < 0)
+      stop("init must be finite and nonnegative when it is a number",
+           call. = FALSE)
+  }
+  draws_init <- inherits(init, c("draws", "stanli_cstanfit"))
+  if (!is.null(init) && !draws_init && (is.object(init) ||
+      (!is.list(init) && !is.function(init))))
+    stop("init must be a constrained list, a function, a number, a draws ",
+         "object or an MCMC fit", call. = FALSE)
   metric <- match.arg(metric)
   if (is.null(seed)) seed <- sample.int(.Machine$integer.max, 1)
   cstan_integer(seed, "seed", 0)
@@ -75,6 +90,7 @@ sample_cstan <- function(model_code, data = list(), chains = 4, parallel_chains 
                         threads_per_chain = threads_per_chain,
                         include_paths = include_paths)
   unconstrained <- NULL
+  if (draws_init) init <- draws_inits(model, init, chains, seed)
   if (!is.null(init)) {
     declared <- parameter_names(model)
     per_chain <- is.list(init) && is.null(names(init))
@@ -101,4 +117,51 @@ sample_cstan <- function(model_code, data = list(), chains = 4, parallel_chains 
     inv_metric = inv_metric, step_size = step_size,
     adapt_engaged = adapt_engaged, adapt_metric = adapt_metric,
     show_messages = show_messages))
+}
+
+# One constrained start per chain from draws, as cmdstanr 1.0 takes them:
+# recycled when there are fewer draws than chains, otherwise a sample
+# without replacement. A parameter whose columns are all there is given;
+# the rest start at random.
+draws_inits <- function(model, init, chains, seed) {
+  if (!requireNamespace("posterior", quietly = TRUE))
+    stop("draws as init need the posterior package", call. = FALSE)
+  if (inherits(init, "stanli_cstanfit")) init <- init$draws()
+  draws <- as.data.frame(posterior::as_draws_df(init))
+  if (!nrow(draws)) stop("init has no draws", call. = FALSE)
+  rows <- if (nrow(draws) < chains) rep_len(seq_len(nrow(draws)), chains) else
+    preserve_random_seed({
+      set.seed(seed)
+      sample.int(nrow(draws), chains)
+    })
+  variables <- runtime_variables(model$ptr, parameters = TRUE)
+  columns <- lapply(names(variables), function(name)
+    variable_columns(variables[name]))
+  names(columns) <- names(variables)
+  given <- vapply(columns, function(cols) length(cols) > 0L &&
+                    all(cols %in% names(draws)), logical(1))
+  used <- unlist(columns[given], use.names = FALSE)
+  bad <- vapply(used, function(col) any(!is.finite(draws[[col]][rows])),
+                logical(1))
+  if (any(bad)) {
+    names <- unique(variable_base(sub("\\[.*$", "", used[bad])))
+    stop(if (length(names) > 1) "Variables: " else "Variable: ",
+         paste(names, collapse = ", "), " contains NA or Inf values!",
+         call. = FALSE)
+  }
+  lapply(rows, function(row) {
+    values <- lapply(names(variables)[given], function(name) {
+      value <- vapply(columns[[name]], function(col) draws[[col]][row],
+                      numeric(1), USE.NAMES = FALSE)
+      dims <- variables[[name]]
+      if (length(dims)) array(value, dim = dims) else value
+    })
+    names(values) <- names(variables)[given]
+    bases <- variable_base(names(values))
+    lapply(stats::setNames(nm = unique(bases)), function(base) {
+      slots <- values[bases == base]
+      if (identical(names(slots), base)) slots[[1L]] else
+        tuple_init_value(slots, natural = TRUE)
+    })
+  })
 }

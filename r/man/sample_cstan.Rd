@@ -45,12 +45,16 @@ sample_cstan(
 \item{seed}{Integer seed. If NULL, draw one from R's RNG.}
 
 \item{init}{Constrained parameter list, one list per chain, a
-function returning a list (optionally accepting `chain_id`), or NULL for
-random initialization. A list may leave parameters out; those start at
-random within `init_radius`, as in CmdStan. Numeric radii and files are
-unsupported; use `init_radius` for random initialization. Extra
-non-parameter names (such as transformed parameters) are ignored, as in
-CmdStanR.}
+function returning a list (optionally accepting `chain_id`), a number,
+a `posterior` draws object, a fit from `sample_cstan()`, or NULL for
+random initialization, as in cmdstanr. A list may leave parameters out;
+those start at random within `init_radius`, as in CmdStan. A number is
+the radius of that draw, so 0 starts at zero on the unconstrained
+scale. Draws, or a fit's draws, give each chain one draw, recycled when
+there are fewer draws than chains and otherwise drawn without
+replacement. Files and fits from the approximate methods are
+unsupported. Extra non-parameter names (such as transformed parameters)
+are ignored, as in CmdStanR.}
 
 \item{adapt_delta}{Target acceptance probability.}
 

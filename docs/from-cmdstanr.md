@@ -74,7 +74,10 @@ apply `unconstrain()` to each list and combine the vectors with `rbind()`.
 Omit `init` for random starts. `init_radius = 0` starts at the unconstrained
 origin. `sample_cstan()` takes cmdstanr-style constrained lists directly.
 Both write a constrained list from the parameter declarations, the way the
-data is written, so a tuple can be an unnamed list.
+data is written, so a tuple can be an unnamed list. Like cmdstanr,
+`sample_cstan()` also takes a number as the radius, a `posterior` draws
+object, or a fit from `sample_cstan()`, one draw per chain. It does not take
+init files or fits from the approximate methods.
 
 With `save_warmup = TRUE`, the raw `fit$draws` and `fit$sampler` include the
 saved warmup. `summary(fit)` summarizes that raw array. `as_draws_array()`,
