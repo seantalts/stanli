@@ -64,16 +64,42 @@ def clean_env(extra=None):
     return env
 
 
+# Each tool process is killed when its resident memory passes this many
+# bytes (None: no limit). macOS does not enforce RLIMIT_AS, so run() polls.
+MEMORY_LIMIT = None
+POLL_S = 0.5
+
+
+def rss_bytes(pid):
+    r = subprocess.run(["ps", "-o", "rss=", "-p", str(pid)],
+                       capture_output=True, text=True)
+    return int(r.stdout.strip() or 0) * 1024
+
+
 def run(argv, timeout, env=None, cwd=None):
-    """(returncode, stdout, stderr, seconds); returncode None on timeout."""
+    """(returncode, stdout, stderr, seconds). returncode is None when the
+    process was killed, and stderr then says why: "timeout" or "memory
+    limit"."""
     started = time.monotonic()
-    try:
-        r = subprocess.run([str(a) for a in argv], capture_output=True,
-                           text=True, timeout=timeout, env=env or clean_env(),
-                           cwd=cwd)
-    except subprocess.TimeoutExpired:
-        return None, "", "timeout", time.monotonic() - started
-    return r.returncode, r.stdout, r.stderr, time.monotonic() - started
+    proc = subprocess.Popen([str(a) for a in argv], stdout=subprocess.PIPE,
+                            stderr=subprocess.PIPE, text=True,
+                            env=env or clean_env(), cwd=cwd)
+    killed = None
+    while True:
+        try:
+            out, err = proc.communicate(timeout=POLL_S)
+            break
+        except subprocess.TimeoutExpired:
+            elapsed = time.monotonic() - started
+            if elapsed > timeout:
+                killed = "timeout"
+            elif MEMORY_LIMIT and rss_bytes(proc.pid) > MEMORY_LIMIT:
+                killed = f"memory limit ({MEMORY_LIMIT / 2**30:.1f} GB)"
+            if killed:
+                proc.kill()
+                proc.communicate()
+                return None, "", killed, time.monotonic() - started
+    return proc.returncode, out, err, time.monotonic() - started
 
 
 def ratio_text(r):
@@ -94,7 +120,7 @@ def normalized_text(r):
 
 def failure_text(code, err):
     if code is None:
-        return "timeout"
+        return err if err.startswith("memory limit") else "timeout"
     lines = [x for x in err.strip().splitlines() if x.strip()]
     tail = lines[-1][:300] if lines else ""
     if "bad_alloc" in err:
@@ -373,6 +399,18 @@ def concurrent_copies(cmd, copies, timeout):
         t = parse_timed(out)
         means.append(statistics.fmean(t.values()))
     return statistics.median(means)
+
+
+# An executor this large is timed with several concurrent copies too: a
+# large program mostly hurts when chains share the caches (issue #657).
+BIG_EXECUTOR = 4 << 20
+COPIES = 12
+
+
+def copies_record(a, b, n, timeout):
+    """Per-copy ns of n concurrent processes of command a and of b."""
+    return {"n": n, "base_ns": concurrent_copies(a, n, timeout),
+            "variant_ns": concurrent_copies(b, n, timeout)}
 
 
 def load_average():

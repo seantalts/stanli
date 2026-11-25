@@ -170,7 +170,7 @@ def ops_jumps(points):
             and b["ops"] / a["ops"] > 2 * b["size"] / a["size"]]
 
 
-def run_ladder(tools, comp, text, data, var, sizes, work, args):
+def run_ladder(tools, comp, text, data, var, sizes, work, args, deadline=None):
     lad = {"points": [], "stop": ""}
 
     def at(size):
@@ -179,19 +179,28 @@ def run_ladder(tools, comp, text, data, var, sizes, work, args):
         if done or lad["stop"]:
             return done
         try:
-            new, info = scale.scale(text, data, var, size)
+            new, info = scale.scale(text, data, var, size,
+                                    mode=getattr(args, "growth", "resample"))
         except scale.Refused as e:
             lad["points"].append({"size": size, "status": "refused",
                                   "message": str(e)})
             return lad["points"][-1]
         blob = json.dumps(new)
         stop = predicted_stop(lad["points"], size, len(blob), args)
+        if deadline is not None and time.monotonic() > deadline:
+            stop = "the model's time budget is spent"
         if stop:
             lad["stop"] = f"stopped before {size}: {stop}"
             return None
         path = work / f"{var}-{size}.json"
         path.write_text(blob)
         point = measure_point(tools, comp, path, size)
+        if args.no_timing:
+            path.unlink()
+            point.pop("data")
+        if (point.get("message") or "").startswith("memory limit"):
+            point["status"] = "capped"
+            lad["stop"] = f"stopped at {size}: {point['message']}"
         point["scaled"] = info
         lad["points"].append(point)
         lad["points"].sort(key=lambda p: p["size"])
@@ -248,19 +257,25 @@ def structural(tools, source, args):
         return x
     try:
         found = scale.size_variables(text, data)
-    except scale.Refused as e:
+    except (scale.Refused, ValueError) as e:
         x["error"] = f"scale.py: {e}"
         return x
     work = tools.cache.parent / "scaling" / name.replace("/", "__")
     work.mkdir(parents=True, exist_ok=True)
+    todo = []
     for var, sv in sorted(found.items()):
         if wanted is not None and var not in wanted:
             continue
         if sv.refused:
             x["refused"][var] = sv.refused
-            continue
+        else:
+            todo.append((var, sv))
+    # The model's time budget is shared out among its ladders.
+    share = max(30.0, args.model_seconds / max(1, len(todo)))
+    for var, sv in todo:
         lad = run_ladder(tools, comp, text, data, var,
-                         ladder_sizes(sv, (wanted or {}).get(var)), work, args)
+                         ladder_sizes(sv, (wanted or {}).get(var)), work, args,
+                         deadline=time.monotonic() + share)
         lad.update(kind=sv.kind, value=sv.value, inferred=sv.inferred)
         x["ladders"][var] = lad
     x["structure_s"] = time.monotonic() - started
@@ -286,6 +301,10 @@ def time_ladders(tools, x, args, meta):
                 t = m.time_once(m.stanli_cmd(tools, comp, p["data"], None),
                                 tools.timeout)
                 p["ns"] = sum(t.values()) / len(t)
+                if (p.get("executor_bytes") or 0) > m.BIG_EXECUTOR:
+                    cmd = m.stanli_cmd(tools, comp, p["data"], None)
+                    p["copies"] = {"n": m.COPIES, "ns": m.concurrent_copies(
+                        cmd, m.COPIES, tools.timeout)}
             except RuntimeError as e:
                 p["timing"] = str(e)
     x["timing_s"] = time.monotonic() - started
