@@ -188,6 +188,12 @@ tuple_names <- function(x) {
 json_value <- function(x) {
   if (is.data.frame(x)) x <- data.matrix(x)
   if (is.factor(x)) x <- as.integer(x)
+  # CmdStan reads a complex number as the pair [re, im], as cmdstanr writes it.
+  if (is.complex(x)) {
+    parts <- c(Re(x), Im(x))
+    x <- if (is.null(dim(x)) && length(x) == 1L) parts else
+      array(parts, dim = c(if (is.null(dim(x))) length(x) else dim(x), 2L))
+  }
   if (is.list(x)) {
     if (tuple_names(x)) return(json_object(x))
     return(paste0("[", paste(vapply(unname(x), json_value, character(1)),

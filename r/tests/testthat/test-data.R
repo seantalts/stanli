@@ -323,3 +323,22 @@ test_that("compiler warnings reach the user once when data is written", {
   expect_identical(again$model_code, code)
   expect_true(is.character(bridgestan_data(m)))
 })
+
+test_that("complex data goes out as cmdstanr writes it and gets the runtime's message", {
+  expect_equal(stanli:::to_json(list(z = 1+2i)), "{\"z\": [1, 2]}")
+  expect_equal(stanli:::to_json(list(zv = c(3+4i, 5+6i))),
+               "{\"zv\": [[3, 4], [5, 6]]}")
+  expect_equal(stanli:::to_json(list(zm = matrix(c(1+2i, 3+4i), 1, 2))),
+               "{\"zm\": [[[1, 2], [3, 4]]]}")
+  skip_without_runtime()
+  for (case in list(
+    list("complex z;", list(z = 1+2i)),
+    list("complex_vector[2] z;", list(z = c(3+4i, 5+6i))),
+    list("array[2] complex_row_vector[3] z;",
+         list(z = matrix(complex(real = 1:6, imaginary = 6:1), 2, 3)))))
+    expect_error(stanli_model(code = paste("data {", case[[1]],
+                                           "} parameters { real mu; } model { mu ~ normal(0, 1); }"),
+                              data = case[[2]]),
+                 "complex numbers are not supported yet (in variable z)",
+                 fixed = TRUE)
+})

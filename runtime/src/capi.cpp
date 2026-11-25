@@ -30,6 +30,7 @@
 #include <stan/math/rev/functor/finite_diff_hessian_auto.hpp>
 
 #include <algorithm>
+#include <cctype>
 #include <atomic>
 #include <chrono>
 #include <cmath>
@@ -864,11 +865,55 @@ std::vector<int64_t> known_dims(const std::vector<stanli::mir::Expr>& dims,
   return out;
 }
 
+// The extents of a complex vector or matrix. The MIR keeps them only in the
+// declaration's own text, such as `(SComplexVector ((pattern (Lit Int 2))
+// (meta ...)))`, one `((pattern ...) ...)` group per extent after the type
+// name. An extent that is not a literal, or text that does not have this
+// form, gives -1.
+std::vector<int64_t> complex_extents(const std::string& raw, int64_t rank) {
+  std::vector<int64_t> out;
+  const size_t head = raw.find("(SComplex");
+  if (head != std::string::npos) {
+    int depth = 0;
+    for (size_t k = head; k < raw.size(); ++k) {
+      if (raw[k] == '(') {
+        ++depth;
+        if (depth == 2) {
+          const std::string literal = "((pattern (Lit Int ";
+          if (raw.compare(k, literal.size(), literal) == 0) {
+            const size_t start = k + literal.size();
+            size_t end = start;
+            while (end < raw.size() && std::isdigit((unsigned char)raw[end]))
+              ++end;
+            out.push_back(end > start && end < raw.size() && raw[end] == ')'
+                              ? std::stoll(raw.substr(start, end - start))
+                              : -1);
+          } else {
+            out.push_back(-1);
+          }
+        }
+      } else if (raw[k] == ')' && --depth == 0) {
+        break;
+      }
+    }
+  }
+  if ((int64_t)out.size() != rank) out.assign((size_t)rank, -1);
+  return out;
+}
+
 int64_t add_leaf_type(Declarations& d, const stanli::mir::SizedType& type,
                       size_t begin) {
   Declarations::Type t;
   t.kind = type_kind(type.base == "SArray" ? type.elem_base : type.base);
   t.dims = known_dims(type.dims, begin, type.dims.size());
+  // The MIR's dims of a complex container are those of the arrays around it.
+  if (t.kind == STANLI_TYPE_COMPLEX_VECTOR ||
+      t.kind == STANLI_TYPE_COMPLEX_ROW_VECTOR ||
+      t.kind == STANLI_TYPE_COMPLEX_MATRIX) {
+    const std::vector<int64_t> own =
+        complex_extents(type.raw, own_rank(t.kind));
+    t.dims.insert(t.dims.end(), own.begin(), own.end());
+  }
   t.n_array_dims = (int64_t)t.dims.size() - own_rank(t.kind);
   d.types.push_back(std::move(t));
   return (int64_t)d.types.size() - 1;

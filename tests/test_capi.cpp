@@ -3152,6 +3152,53 @@ void expect_parameter_declarations() {
   stanli_data_declarations_free(d);
 }
 
+// Complex data has its kind, rank and extents, though the runtime does not
+// yet read it.
+void expect_complex_data_declarations() {
+  if (!stanli_has_embedded_stanc()) return;
+  const Compilation c = compile(
+      "data { int N; complex z; complex_vector[2] zv; complex_row_vector[N] zr;"
+      "  complex_matrix[2, 3] zm; array[2] complex_row_vector[3] az;"
+      "  array[2, N] complex_matrix[4, 5] am; }\n"
+      "parameters { real mu; } model { mu ~ normal(0, 1); }\n",
+      "complex_declarations.stan");
+  char err[1024]{};
+  stanli_data_declarations* d =
+      c.ok ? stanli_data_declarations_new(c.mir.c_str(), err, sizeof err)
+           : nullptr;
+  if (d == nullptr) {
+    ++failures;
+    std::printf("FAIL complex declarations: %s %s\n", c.error.c_str(), err);
+    return;
+  }
+  struct Want {
+    stanli_type_kind kind;
+    int64_t n_array_dims;
+    std::vector<int64_t> dims;
+  };
+  const std::vector<Want> want = {
+      {STANLI_TYPE_INT, 0, {}},
+      {STANLI_TYPE_COMPLEX, 0, {}},
+      {STANLI_TYPE_COMPLEX_VECTOR, 0, {2}},
+      {STANLI_TYPE_COMPLEX_ROW_VECTOR, 0, {-1}},
+      {STANLI_TYPE_COMPLEX_MATRIX, 0, {2, 3}},
+      // The MIR keeps no extents for a complex container in an array.
+      {STANLI_TYPE_COMPLEX_ROW_VECTOR, 1, {2, -1}},
+      {STANLI_TYPE_COMPLEX_MATRIX, 2, {2, -1, -1, -1}}};
+  expect_true("complex declaration count",
+              stanli_data_declarations_n(d) == (int64_t)want.size());
+  for (size_t i = 0; i < want.size(); ++i) {
+    const int64_t t = stanli_data_declaration_type(d, (int64_t)i);
+    bool ok = stanli_type_kind_of(d, t) == want[i].kind &&
+              stanli_type_n_array_dims(d, t) == want[i].n_array_dims &&
+              stanli_type_n_dims(d, t) == (int64_t)want[i].dims.size();
+    for (size_t k = 0; ok && k < want[i].dims.size(); ++k)
+      ok = stanli_type_dim(d, t, (int64_t)k) == want[i].dims[k];
+    expect_true("complex declaration " + std::to_string(i), ok);
+  }
+  stanli_data_declarations_free(d);
+}
+
 // MIR compiled only to build a model may leave out a function the model
 // cannot reach, as stanli_model_new_from_stan does.
 void expect_compile_for_model_prunes_functions() {
@@ -4403,6 +4450,7 @@ int main() {
   expect_data_declarations();
   expect_compile_for_model_prunes_functions();
   expect_parameter_declarations();
+  expect_complex_data_declarations();
   expect_callback_print_each_evaluation();
   expect_parameterless_unconstrain();
   expect_parameterless_sampling();

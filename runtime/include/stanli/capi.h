@@ -193,11 +193,12 @@ stanli_compilation* stanli_compile_stan_for_model(
  * the types of its parts. A type's extents are those of the arrays around
  * it, then its own (one for a vector, two for a matrix); a tuple's are those
  * of the arrays of tuples around it, and each part's extents start after
- * them. An extent that depends on data is -1. A constrained type has the
- * kind it is stored as, so simplex[3] is a vector. Returns null with a
- * message in err when the MIR cannot be read. Strings are owned by the
- * result; free it with stanli_data_declarations_free. Out-of-range indices
- * return -1, STANLI_TYPE_NONE, 0 parts or null. */
+ * them. An extent that depends on data is -1, and so is the extent of a
+ * complex vector or matrix inside an array, which the MIR does not keep. A
+ * constrained type has the kind it is stored as, so simplex[3] is a vector.
+ * Returns null with a message in err when the MIR cannot be read. Strings are
+ * owned by the result; free it with stanli_data_declarations_free. Out-of-range
+ * indices return -1, STANLI_TYPE_NONE, 0 parts or null. */
 typedef enum {
   STANLI_TYPE_NONE = -1,
   STANLI_TYPE_INT = 0,

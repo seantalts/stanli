@@ -970,6 +970,9 @@ UnsizedView declared_view(const SizedType& type) {
   else if (base == "SMatrix")
     view.leaf = UnsizedLeaf::Matrix;
   if (type.base != "SArray") return view;
+  // A complex container has no view, in an array as on its own; the
+  // lowering reports that complex numbers are not supported yet.
+  if (base.rfind("SComplex", 0) == 0 && base != "SComplex") return view;
 
   size_t leaf_rank = 0;
   if (view.leaf == UnsizedLeaf::Matrix)
