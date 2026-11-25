@@ -1,13 +1,17 @@
 #!/usr/bin/env python3
 """Scale the data of a Stan model along one size variable.
 
-The model source stays the same; only the data JSON changes. Rows and
-columns are tiled cyclically or truncated. Groups are scaled by replicating
-every group together with the rows that point into it. Anything this cannot
-keep consistent is refused with a reason.
+The model source stays the same; only the data JSON changes. Growing rows
+or columns either tiles them cyclically (mode "tile"), which makes exact
+duplicate rows, or resamples them with replacement and adds small seeded
+noise to real values so that the new rows are distinct (mode "resample").
+Integer and index values are resampled as they are. Groups are scaled by
+replicating every group together with the rows that point into it, with
+the same noise on the real values of each copy in resample mode. Shrinking
+truncates. Anything this cannot keep consistent is refused with a reason.
 
   scale.py MODEL.stan DATA.json --list
-  scale.py MODEL.stan DATA.json --set N=1000 [--set J=64] --out OUT.json
+  scale.py MODEL.stan DATA.json --set N=1000 [--set J=64] [--mode tile] --out OUT.json
 """
 from __future__ import annotations
 
@@ -15,7 +19,9 @@ import argparse
 from dataclasses import dataclass, field
 import json
 import math
+import random
 import re
+import statistics
 import sys
 
 IDENT = r"[A-Za-z_]\w*"
@@ -32,6 +38,10 @@ CONSTRAINED = {"simplex", "unit_vector", "sum_to_zero_vector", "ordered",
                "positive_ordered", "sum_to_zero_matrix",
                "column_stochastic_matrix", "row_stochastic_matrix",
                "cholesky_factor_cov"} | SQUARE_TYPES
+MODES = ("tile", "resample")
+# Noise on a resampled real value, as a fraction of the spread of its column.
+NOISE = 0.01
+REAL_TYPES = {"real", "vector", "row_vector", "matrix"}
 KIND_ORDER = {"groups": 0, "rows": 1, "columns": 2}
 BLOCK_RE = re.compile(r"\b(functions|transformed\s+data|data|transformed\s+"
                       r"parameters|parameters|model|generated\s+quantities)"
@@ -424,10 +434,68 @@ def size_variables(stan_text, data):
     return Analysis(stan_text, data).vars
 
 
-def _resize(xs, n, name):
+def _resize(xs, n, name, picks=None, noisy=None):
+    """xs grown or truncated to n. Growth copies xs[i % len] (tile) or, with
+    picks, the rows picks[i - len] passed through noisy (resample)."""
     if n and not xs:
         raise Refused(f"cannot tile empty {name}")
-    return [xs[i % len(xs)] for i in range(n)]
+    if picks is None or n <= len(xs):
+        return [xs[i % len(xs)] for i in range(n)]
+    return xs + [noisy(xs[picks[i] % len(xs)]) for i in range(n - len(xs))]
+
+
+def _float_bound(expr):
+    try:
+        return float(expr) if expr is not None else None
+    except ValueError:
+        return None
+
+
+def _rows_at(value, depth):
+    """Every list element at `depth`, across the outer levels."""
+    if depth == 0:
+        return list(value) if isinstance(value, list) else []
+    return [r for x in value if isinstance(x, list) for r in _rows_at(x, depth - 1)]
+
+
+class Noise:
+    """Distinct copies of the real rows of one container along one axis:
+    each value moves by NOISE times the spread of its position across the
+    rows, unless that would leave the declared bounds or change its sign.
+    A constant position (an intercept column) stays constant."""
+
+    def __init__(self, decl, value, depth, rng):
+        self.rng = rng
+        self.lower, self.upper = _float_bound(decl.lower), _float_bound(decl.upper)
+        rows = [list(_flat(r)) for r in _rows_at(value, depth)]
+        width = max((len(r) for r in rows), default=0)
+        self.spread = [statistics.pstdev([r[q] for r in rows if q < len(r)])
+                       if rows else 0.0 for q in range(width)]
+        self.q = 0
+
+    def __call__(self, row):
+        self.q = 0
+        return self._walk(row)
+
+    def _walk(self, x):
+        if isinstance(x, list):
+            return [self._walk(v) for v in x]
+        q, self.q = self.q, self.q + 1
+        s = self.spread[q] if q < len(self.spread) else 0.0
+        if not isinstance(x, (int, float)) or s == 0:
+            return x
+        y = x + NOISE * s * self.rng.gauss(0, 1)
+        if ((self.lower is not None and y < self.lower)
+                or (self.upper is not None and y > self.upper)
+                or (x > 0 > y) or (x < 0 < y)):
+            return x
+        return y
+
+
+def _noise_for(an, d, data, depth, rng):
+    if d.basetype not in REAL_TYPES:
+        return lambda row: row
+    return Noise(d, data[d.name], depth, rng)
 
 
 def _check_target(sv, target):
@@ -439,16 +507,24 @@ def _check_target(sv, target):
                       f"{sv.upper}")
 
 
-def _scale_axis(an, data, var, target):
+def _scale_axis(an, data, var, target, mode="tile", seed=0):
+    old = an.value(var) or 0
+    picks = None
+    if mode == "resample" and target > old > 0:
+        rng = random.Random(f"{seed}/{var}")
+        picks = [rng.randrange(old) for _ in range(target - old)]
     for d, i in an.containers(var):
         if an.zero_sized(d, data):
             continue
-        data[d.name] = _at_depth(data[d.name], i,
-                                 lambda xs, n=d.name: _resize(xs, target, n))
+        noisy = (_noise_for(an, d, data, i, random.Random(f"{seed}/{var}/{d.name}"))
+                 if picks else None)
+        data[d.name] = _at_depth(
+            data[d.name], i,
+            lambda xs, n=d.name: _resize(xs, target, n, picks, noisy))
     data[var] = target
 
 
-def _scale_groups(an, data, var, target):
+def _scale_groups(an, data, var, target, mode="tile", seed=0):
     members = an.closure(var)
     old = {m: data[m] for m in members}
     k = max(1, math.ceil(target / max(old[var], 1)))
@@ -457,10 +533,15 @@ def _scale_groups(an, data, var, target):
         if not touched or d.name not in data:
             continue
         shift = old[an.index[d.name]] if an.index.get(d.name) in old else 0
+        noisy = lambda x: x  # noqa: E731
+        if mode == "resample":
+            noisy = _noise_for(an, d, data, touched[0],
+                               random.Random(f"{seed}/{var}/{d.name}"))
         data[d.name] = _at_depth(
             data[d.name], touched[0],
-            lambda xs, s=shift: [_shift(x, r * s) for r in range(k)
-                                 for x in xs])
+            lambda xs, s=shift, f=noisy: [
+                _shift(x if r == 0 else f(x), r * s)
+                for r in range(k) for x in xs])
     for m in members:
         data[m] = old[m] * k
     if target < data[var]:
@@ -508,7 +589,10 @@ def _problems(an, data):
     return found
 
 
-def scale_many(stan_text, data, targets):
+def scale_many(stan_text, data, targets, mode="tile", seed=0):
+    """Scale several size variables; mode is "tile" or "resample"."""
+    if mode not in MODES:
+        raise ValueError(f"mode is one of {MODES}")
     an = Analysis(stan_text, data)
     order = {n: i for i, n in enumerate(an.decls)}
     for var in targets:
@@ -530,9 +614,9 @@ def scale_many(stan_text, data, targets):
     for var in sorted(targets, key=lambda v: (KIND_ORDER[an.vars[v].kind],
                                               order[v])):
         if an.vars[var].kind == "groups":
-            _scale_groups(an, new, var, targets[var])
+            _scale_groups(an, new, var, targets[var], mode, seed)
         else:
-            _scale_axis(an, new, var, targets[var])
+            _scale_axis(an, new, var, targets[var], mode, seed)
     after = _problems(an, new) - before
     if after:
         raise Refused(f"scaled data is inconsistent: {sorted(after)[0]}")
@@ -540,8 +624,8 @@ def scale_many(stan_text, data, targets):
     return new, info
 
 
-def scale(stan_text, data, var, target):
-    return scale_many(stan_text, data, {var: target})
+def scale(stan_text, data, var, target, mode="tile", seed=0):
+    return scale_many(stan_text, data, {var: target}, mode, seed)
 
 
 def main(argv=None):
@@ -550,6 +634,8 @@ def main(argv=None):
     p.add_argument("data")
     p.add_argument("--list", action="store_true")
     p.add_argument("--set", action="append", default=[], metavar="VAR=N")
+    p.add_argument("--mode", choices=MODES, default="resample")
+    p.add_argument("--seed", type=int, default=0)
     p.add_argument("--out")
     args = p.parse_args(argv)
     with open(args.model) as f:
@@ -572,7 +658,7 @@ def main(argv=None):
         name, _, value = item.partition("=")
         targets[name] = int(float(value))
     try:
-        new, info = scale_many(text, data, targets)
+        new, info = scale_many(text, data, targets, args.mode, args.seed)
     except Refused as e:
         print(f"refused: {e.reason}", file=sys.stderr)
         return 1
