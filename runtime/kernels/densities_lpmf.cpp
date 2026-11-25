@@ -13,8 +13,107 @@ namespace dens {
 STANLI_LPMF_FWD(poisson_log_recorded_fwd, poisson_log_lpmf, 1)
 STANLI_LPMF_FWD(bernoulli_logit_recorded_fwd, bernoulli_logit_lpmf, 1)
 STANLI_LPMF_FWD(poisson_fwd, poisson_lpmf, 1)
-STANLI_LPMF_FWD(neg_binomial_2_fwd, neg_binomial_2_lpmf, 2)
 #undef STANLI_LPMF_FWD
+
+// Stan Math's neg_binomial_2_lpmf with three changes where its formula
+// loses bits for large n:
+//  - for mu > phi, n * log(mu) - n * log(mu + phi) becomes
+//    -n * log1p(phi / mu); at n = 2000, mu = 5000, phi = 1 the old form is
+//    about 1000 ULP off;
+//  - the mu partial n / mu - (n + phi) / (mu + phi) becomes
+//    (n - mu) / mu * phi / (mu + phi), which does not cancel;
+//  - binomial_coefficient_log(n + phi - 1, n) becomes
+//    -lbeta(phi, n + 1) - log(n + phi). The old form gets phi back as
+//    (n + phi - 1) - n + 1, which rounds it to the ULP of n.
+// When propto drops the location term the remaining -n * log(mu + phi)
+// stays as Stan Math has it.
+template <bool propto, typename T_n, typename T_location, typename T_precision>
+stan::return_type_t<T_location, T_precision> neg_binomial_2_lpmf(
+    const T_n& n, const T_location& mu, const T_precision& phi) {
+  using stan::math::as_array_or_scalar;
+  using stan::math::as_column_vector_or_scalar;
+  using stan::math::lbeta;
+  using stan::math::digamma;
+  using stan::math::include_summand;
+  using stan::math::log1p;
+  using stan::math::select;
+  using stan::math::sum;
+  using stan::math::value_of;
+  using std::log;
+  using T_partials_return =
+      stan::partials_return_t<T_n, T_location, T_precision>;
+  static constexpr const char* function = "neg_binomial_2_lpmf";
+  stan::math::check_consistent_sizes(function, "Failures variable", n,
+                                     "Location parameter", mu,
+                                     "Precision parameter", phi);
+  stan::ref_type_t<T_n> n_ref = n;
+  stan::ref_type_t<T_location> mu_ref = mu;
+  stan::ref_type_t<T_precision> phi_ref = phi;
+  stan::math::check_nonnegative(function, "Failures variable", n_ref);
+  stan::math::check_positive_finite(function, "Location parameter", mu_ref);
+  stan::math::check_positive_finite(function, "Precision parameter", phi_ref);
+  if (stan::math::size_zero(n, mu, phi)) return 0.0;
+  constexpr bool include_precision =
+      include_summand<propto, T_precision>::value;
+  constexpr bool include_location = include_summand<propto, T_location>::value;
+  if constexpr (!include_precision && !include_location) return 0.0;
+
+  T_partials_return logp(0.0);
+  auto ops_partials = stan::math::make_partials_propagator(mu_ref, phi_ref);
+  auto n_vec = as_array_or_scalar(as_column_vector_or_scalar(n_ref));
+  auto mu_vec = as_array_or_scalar(as_column_vector_or_scalar(mu_ref));
+  auto phi_vec = as_array_or_scalar(as_column_vector_or_scalar(phi_ref));
+  decltype(auto) mu_val = value_of(mu_vec);
+  decltype(auto) phi_val = value_of(phi_vec);
+  auto mu_plus_phi = mu_val + phi_val;
+  auto log_mu_plus_phi = log(mu_plus_phi);
+  auto n_plus_phi = value_of(n_vec) + phi_val;
+  auto phi_term = -phi_val * log1p(mu_val / phi_val);
+  auto choose_term = -lbeta(phi_val, value_of(n_vec) + 1.0) - log(n_plus_phi);
+  if constexpr (include_location) {
+    auto n_term = value_of(n_vec) * select(mu_val > phi_val,
+                                           -log1p(phi_val / mu_val),
+                                           log(mu_val) - log_mu_plus_phi);
+    if constexpr (include_precision) {
+      logp += sum(choose_term + n_term + phi_term);
+    } else {
+      logp += sum(n_term + phi_term);
+    }
+  } else {
+    logp += sum(choose_term + phi_term - value_of(n_vec) * log_mu_plus_phi);
+  }
+  if constexpr (stan::is_autodiff_v<T_location>) {
+    stan::math::partials<0>(ops_partials) =
+        (value_of(n_vec) - mu_val) / mu_val * (phi_val / mu_plus_phi);
+  }
+  if constexpr (stan::is_autodiff_v<T_precision>) {
+    auto log_term = select(mu_val < phi_val, log1p(-mu_val / mu_plus_phi),
+                           log(phi_val) - log_mu_plus_phi);
+    stan::math::partials<1>(ops_partials) =
+        (mu_val - value_of(n_vec)) / mu_plus_phi + log_term -
+        digamma(phi_val) + digamma(n_plus_phi);
+  }
+  return ops_partials.build(logp);
+}
+
+void neg_binomial_2_fwd(KernelCtx& ctx) {
+  if (density_mode(ctx).elementwise) {
+    density_fwd_elt<2, 3>(
+        ctx,
+        [&](int64_t n, const auto&... a) {
+          return neg_binomial_2_lpmf<true>(ctx.idata[n], a...);
+        },
+        [&](int64_t n, const auto&... a) {
+          return neg_binomial_2_lpmf<false>(ctx.idata[n], a...);
+        });
+    return;
+  }
+  Eigen::Map<const Eigen::VectorXi> y(ctx.idata,
+                                      static_cast<Eigen::Index>(ctx.n_idata));
+  density_fwd_v<2, 3>(
+      ctx, [&](const auto&... a) { return neg_binomial_2_lpmf<true>(y, a...); },
+      [&](const auto&... a) { return neg_binomial_2_lpmf<false>(y, a...); });
+}
 
 namespace {
 

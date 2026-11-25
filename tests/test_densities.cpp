@@ -1334,7 +1334,47 @@ static void check_density_modes() {
   expect_eq("elementwise alone sums to the full density", each.value, want);
 }
 
+// neg_binomial_2_lpmf at large n with mu much larger than phi. Stan Math
+// adds n * log(mu) and -n * log(mu + phi), two terms near 18000 that cancel
+// to about -1, so its value is ~1000 ULP off and its mu partial
+// n / mu - (n + phi) / (mu + phi) ~500 ULP off. At phi = 0.9608 its
+// binomial_coefficient_log(n + phi - 1, n) also rounds phi to the ULP of n.
+// The references are 60-digit mpmath values.
+static void check_neg_binomial_2_cancellation() {
+  using namespace stanli;
+  struct Case {
+    int n;
+    double mu, phi, value, dmu;
+  };
+  const Case cases[] = {
+      {2196, 4563.25, 1.0, -8.9071927253880491761, -0.00011365811223928233874},
+      {2000, 5000.5, 0.625, -9.078324514367591163, -0.000074988127171436421806},
+      {1931, 5201.5, 0.9608, -8.9370363792280788957,
+       -0.00011612072227810039074},
+  };
+  for (const Case& c : cases) {
+    const std::string tag = "neg_binomial_2 n=" + std::to_string(c.n);
+    const auto r = stanli::testutil::run_density(
+        OP_NEG_BINOMIAL_2_LPMF, {{c.mu}, {c.phi}}, {true, false}, {c.n});
+    expect_ulp(tag + " value", r.value, c.value, 4);
+    expect_ulp(tag + " dmu", r.grad[0], c.dmu, 8);
+    // With mu data and propto on, Stan Math drops n * log(mu) but keeps
+    // -n * log(mu + phi), about -17000. Folding the two terms here would
+    // shift lp by n * log(mu); only the binomial coefficient may differ.
+    const auto p = stanli::testutil::run_one_op(
+        OP_NEG_BINOMIAL_2_LPMF, {{c.mu}, {c.phi}}, {false, true}, {c.n},
+        DensityMode{0b10, false, true}.byte());
+    stan::math::var phi = c.phi;
+    stan::math::var lp = stan::math::neg_binomial_2_lpmf<true>(c.n, c.mu, phi);
+    lp.grad();
+    expect_ulp(tag + " propto phi-only value", p.value, lp.val(), 2);
+    expect_eq(tag + " propto phi-only dphi", p.grad[0], phi.adj());
+    stan::math::recover_memory();
+  }
+}
+
 int main() {
+  check_neg_binomial_2_cancellation();
   check_density_modes();
   check_scalar_poisson_lcdf();
   check_wiener_single_evaluation();
