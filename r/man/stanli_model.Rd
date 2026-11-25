@@ -21,19 +21,20 @@ stanli_model(
 
 \item{code}{Model source, as an alternative to `file`.}
 
-\item{data}{A named list of data, or a path to a JSON data file. The
-  values are written much as cmdstanr's `write_stan_json()` writes them,
-  but without the data declarations, so a few spellings differ; the
-  stanli guide for cmdstanr users lists them. An R
-  array of any rank is written with its first index outermost, so a
-  matrix is an array of rows. A list is an array of its elements, whatever
-  its names, so `array[K] vector[N]` can be a list of K vectors or a
-  K x N matrix. A list named `"1"`, `"2"`, ... is a tuple instead, so give
-  `unname(split(x, g))` when the groups are the numbers 1, 2 and so on.
-  A factor is written
-  as its integer codes, a data frame as `data.matrix()` makes it and a
-  logical as 1 or 0. `NA` is an error; `NaN` is Stan's NaN. Zero-length
-  extents are kept.
+\item{data}{A named list of data, or a path to a JSON data file. A list
+  is written from the data block's declarations, as cmdstanr 1.0's
+  `write_stan_json()` writes it. An R array of any rank is written with its
+  first index outermost, so a matrix is an array of rows. A list is an
+  array of its elements, whatever its names, so `array[K] vector[N]` can
+  be a list of K vectors, a K x N matrix or `split(x, g)`. A tuple is a
+  list of its parts, named or not. An array of tuples is a list of tuples,
+  with a dim for more than one array dimension, or nested lists with the
+  first index outermost. A factor is written as its integer codes, and is
+  an error for a variable that is not declared `int`. A data frame is
+  written as `data.matrix()` makes it and a logical as 1 or 0. `NA` is an
+  error; `NaN` is Stan's NaN. A non-integer value for an `int` is an
+  error, as in CmdStan, where cmdstanr truncates it. Zero-length extents
+  are kept.
 
   The dims of each value must match its declaration, except that extents
   of 1 may be added or left out, because R drops and adds them: a

@@ -252,3 +252,74 @@ test_that("a length-1 R vector fills a declaration whose extents are all 1", {
                "variable name=v; dims declared=(2); dims found=()",
                fixed = TRUE)
 })
+
+test_that("the data is written from its declarations, as cmdstanr 1.0 does", {
+  skip_without_runtime()
+  code <- "
+    data { array[2] vector[3] av; tuple(real, array[2] int) tp;
+      array[2, 2] tuple(real, real) w; array[2, 2] tuple(real, real) wn;
+      array[2] tuple(vector[1], real) tv; }
+    generated quantities {
+      array[16] real out = {av[1][3], av[2][1], tp.1, tp.2[2],
+        w[1, 2].1, w[2, 1].1, w[2, 2].2, wn[1, 2].1, wn[2, 1].1, wn[2, 2].2,
+        tv[1].1[1], tv[2].2, w[1, 1].2, wn[1, 1].2, av[1][1], av[2][3]};
+    }"
+  # A list with dim holds an array of tuples first index fastest, as in
+  # cmdstanr 1.0; nested lists give the same array first index outermost.
+  w <- vector("list", 4)
+  dim(w) <- c(2, 2)
+  for (i in 1:2) for (j in 1:2) w[[i, j]] <- list(10 * i + j, 100 + 10 * i + j)
+  wn <- lapply(1:2, function(i) lapply(1:2, function(j)
+    list(20 * i + j, 200 + 20 * i + j)))
+  m <- stanli_model(code = code, data = list(
+    av = split(c(1, 2, 3, 4, 5, 6), rep(1:2, each = 3)),
+    tp = list(1.5, c(3L, 4L)), w = w, wn = wn,
+    tv = list(list(0.5, 2), list(0.25, 7))))
+  expect_equal(echo_draw(m, "out"),
+               c(3, 4, 1.5, 4, 12, 21, 122, 22, 41, 242, 0.5, 7, 111, 221,
+                 1, 6))
+  expect_true(m$source$is_mir)
+  expect_identical(m$model_code, code)
+})
+
+test_that("a factor for a variable that is not an int is an error, as in cmdstanr", {
+  skip_without_runtime()
+  expect_error(stanli_model(code = "data { vector[2] x; }",
+                            data = list(x = factor(c("a", "b")))),
+               "A factor was supplied for 'x', which is declared as 'vector'.",
+               fixed = TRUE)
+  expect_error(stanli_model(code = "data { tuple(real, int) t; }",
+                            data = list(t = 1)),
+               "Variable 't' is declared as a tuple and must be a list.",
+               fixed = TRUE)
+  expect_error(stanli_model(code = "data { tuple(real, int) t; }",
+                            data = list(t = list(1))),
+               "Variable 't' is a tuple with 2 elements, but 1 were supplied.",
+               fixed = TRUE)
+  # cmdstanr truncates 2.5 with a warning; CmdStan and stanli reject it.
+  expect_error(stanli_model(code = "data { int n; }", data = list(n = 2.5)),
+               "int variable contained non-int values")
+})
+
+test_that("compiler warnings reach the user once when data is written", {
+  skip_without_runtime()
+  code <- "data { int n; } transformed data { int k = n / 2; real r = normal_rng(0, 1); } parameters { real mu; } model { mu ~ normal(k + r, 1); }"
+  warnings <- character()
+  withCallingHandlers(m <- stanli_model(code = code, data = list(n = 4L)),
+                      warning = function(w) {
+                        warnings <<- c(warnings, conditionMessage(w))
+                        invokeRestart("muffleWarning")
+                      })
+  expect_length(grep("integer division", warnings), 1L)
+  # A rebuild under another seed reuses the MIR and warns again for nothing.
+  warnings <- character()
+  withCallingHandlers(again <- stanli:::with_run_seed(m, 2),
+                      warning = function(w) {
+                        warnings <<- c(warnings, conditionMessage(w))
+                        invokeRestart("muffleWarning")
+                      })
+  expect_length(warnings, 0L)
+  expect_identical(again$seed, 2)
+  expect_identical(again$model_code, code)
+  expect_true(is.character(bridgestan_data(m)))
+})

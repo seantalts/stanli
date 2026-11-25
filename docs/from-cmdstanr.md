@@ -35,10 +35,13 @@ needs, and cannot do.
 
 ## Data
 
-stanli writes an R data list the way cmdstanr's `write_stan_json()` does. A
-factor goes out as its integer codes, a data frame as `data.matrix()` makes
-it, a logical as 1 or 0 and a list as an array of its elements. `NA` is an
-error, "Variable 'x' has NA values.", as in cmdstanr. These differ:
+stanli writes an R data list from the data block's declarations, the way
+cmdstanr 1.0's `write_stan_json()` does. A tuple is a list of its parts, an
+array of tuples a list of tuples (with a dim for more than one array
+dimension), a factor goes out as its integer codes and only for an `int`, a
+data frame as `data.matrix()` makes it, a logical as 1 or 0 and any other
+list as an array of its elements. `NA` is an error, "Variable 'x' has NA
+values.", as in cmdstanr. These differ:
 
 - stanli also accepts a value whose dims differ from the declared ones only
   by extents of 1, because R drops and adds them. A length-1 vector works for
@@ -46,13 +49,11 @@ error, "Variable 'x' has NA values.", as in cmdstanr. These differ:
   `vector[N]`, and `array(x, 1)` works for a `real`. cmdstanr wraps only a
   length-1 value for a declaration with one dimension. A transposed matrix or
   a flat vector for a matrix is an error in both.
-- stanli writes the data before it reads the model's declarations, so it
-  cannot use them the way cmdstanr does. A tuple is a list named `"1"`,
-  `"2"`, ...; cmdstanr 1.0 also takes an unnamed list for a tuple, which
-  stanli writes as an array. `split(x, g)` with the groups 1, 2, ... gives
-  tuple names, so pass `unname(split(x, g))` for an array.
-- A factor goes out as its codes whatever the declaration. cmdstanr 1.0
-  refuses a factor for a variable that is not declared `int`.
+- An array of tuples of two or more dimensions may also be nested lists with
+  the first index outermost. stanli puts each tuple in its own element
+  either way. cmdstanr 1.0 writes a list with a dim first index outermost,
+  and CmdStan's JSON reader takes that order as first index fastest, so the
+  tuples land in the wrong elements there.
 - cmdstanr truncates a non-integer value for an `int` with a warning. stanli
   rejects it, as CmdStan does.
 - `NaN` goes out as Stan's NaN. cmdstanr rejects it with the `NA` error.

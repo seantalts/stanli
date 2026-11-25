@@ -11,8 +11,8 @@ json_scalar <- function(x) {
 
 # Stan's JSON data format, written without a JSON dependency: the values
 # are numbers, strings, and arrays nested to any depth, a small enough
-# grammar to emit directly. The rules follow cmdstanr's write_stan_json where
-# they do not need the declarations: a
+# grammar to emit directly. data_to_json() first applies the rules that
+# need the declarations; the rules here follow cmdstanr's write_stan_json: a
 # factor goes out as its integer codes, a data frame as data.matrix() makes
 # it, a logical as 1 or 0, and a list as an array of its elements, whatever
 # its names. The one exception is a list named "1", "2", ..., which is a
@@ -38,6 +38,134 @@ has_na <- function(x) {
   if (is.list(x)) return(any(vapply(x, has_na, logical(1))))
   if (!is.numeric(x)) return(anyNA(x))
   any(is.na(x) & !is.nan(x))
+}
+
+# The data list as cmdstanr 1.0's write_stan_json() writes it, using each
+# variable's declaration (`declarations`, from the MIR): a tuple from a
+# list, a factor only for an int, and a list as an array otherwise. Unlike
+# cmdstanr, a non-integer value for an int is passed on for the runtime to
+# reject, as CmdStan does, and NaN goes out as Stan's NaN. A runtime that
+# cannot give the declarations gets the data written without them.
+data_to_json <- function(data, declarations) {
+  if (is.null(declarations) || !length(data) || is.null(names(data)))
+    return(to_json(data))
+  for (name in names(data)) {
+    if (is.na(name) || !nzchar(name)) next
+    data[name] <- list(declared_value(data[[name]], name,
+                                      declarations[[name]]))
+  }
+  to_json(data)
+}
+
+declared_value <- function(var, name, declaration) {
+  if (is.null(var)) stop("Variable '", name, "' is NULL.", call. = FALSE)
+  if (is.list(declaration$type))
+    return(declared_tuple(var, name, declaration))
+  if (!(is.numeric(var) || is.factor(var) || is.logical(var) ||
+        is.complex(var) || is.data.frame(var) || is.list(var)))
+    stop("Variable '", name, "' is of invalid type.", call. = FALSE)
+  is_factor <- is.factor(var) ||
+    (is.data.frame(var) && any(vapply(var, is.factor, logical(1))))
+  if (identical(declaration$type, "int")) {
+    if (is.factor(var)) var <- as.integer(var)
+  } else if (!is.null(declaration) && is_factor) {
+    stop("A factor was supplied for '", name, "', which is declared as '",
+         declaration$type, "'.", call. = FALSE)
+  }
+  if (is.data.frame(var)) {
+    invalid <- !vapply(var, function(column) is.numeric(column) ||
+                         is.factor(column) || is.logical(column), logical(1))
+    if (any(invalid))
+      stop("Variable '", name, "' has columns of invalid type: ",
+           paste(names(var)[invalid], collapse = ", "), ".", call. = FALSE)
+    var <- data.matrix(var)
+  } else if (is.list(var)) {
+    # Not a tuple, so an array of the elements whatever their names.
+    var <- unname_lists(var)
+  }
+  var
+}
+
+unname_lists <- function(x) {
+  if (!is.list(x) || is.data.frame(x)) return(x)
+  lapply(unname(x), unname_lists)
+}
+
+# A tuple is a list of its parts, by position; a list named "1", "2", ...
+# in another order is put in order first. An array of tuples is a list of
+# tuples with a dim, which holds them first index fastest, or nested lists
+# with the first index outermost.
+declared_tuple <- function(var, name, declaration) {
+  if (!is.list(var) || is.data.frame(var))
+    stop("Variable '", name, "' is declared as a tuple and must be a list.",
+         call. = FALSE)
+  rank <- declaration$dimensions
+  if (rank > 0) {
+    element <- list(type = declaration$type, dimensions = 0L)
+    cells <- if (!is.null(dim(var)) && length(dim(var)) == rank) {
+      list(values = lapply(seq_along(var), function(k) var[[k]]),
+           dims = dim(var))
+    } else {
+      nested_cells(var, rank, name)
+    }
+    values <- lapply(cells$values, declared_tuple, name = name,
+                     declaration = element)
+    return(reader_nest(values, cells$dims))
+  }
+  parts <- declaration$type
+  if (length(var) != length(parts))
+    stop("Variable '", name, "' is a tuple with ", length(parts),
+         " elements, but ", length(var), " were supplied.", call. = FALSE)
+  if (!is.null(names(var)) &&
+      setequal(names(var), as.character(seq_along(var))) &&
+      !anyDuplicated(names(var)))
+    var <- var[as.character(seq_along(var))]
+  out <- lapply(seq_along(var), function(k)
+    declared_value(var[[k]], paste0(name, ":", k), parts[[k]]))
+  names(out) <- as.character(seq_along(out))
+  out
+}
+
+# The cells of `rank` levels of nested lists, first index fastest, and the
+# extents of those levels.
+nested_cells <- function(var, rank, name) {
+  dims <- integer(rank)
+  values <- list()
+  index <- list()
+  walk <- function(x, level, at) {
+    if (level > rank) {
+      values[[length(values) + 1L]] <<- x
+      index[[length(index) + 1L]] <<- at
+      return(invisible())
+    }
+    if (!is.list(x) || is.data.frame(x))
+      stop("Variable '", name, "' must be ", rank,
+           " levels of lists of tuples.", call. = FALSE)
+    if (dims[level] == 0L) dims[level] <<- length(x)
+    if (length(x) != dims[level])
+      stop("Variable '", name, "' is a ragged array of tuples.", call. = FALSE)
+    for (i in seq_along(x)) walk(x[[i]], level + 1L, c(at, i))
+  }
+  walk(var, 1L, integer())
+  if (!length(values)) return(list(values = list(), dims = dims))
+  serial <- vapply(index, function(at)
+    sum((at - 1L) * cumprod(c(1, utils::head(dims, -1L)))), numeric(1))
+  list(values = values[order(serial)], dims = dims)
+}
+
+# An array of tuples nested as the JSON reader expects it. The reader, like
+# CmdStan's, takes the elements in the order that it visits them as the
+# array's elements first index fastest, so element k of `values`, counted
+# first index fastest, goes at the k-th place that the reader visits.
+reader_nest <- function(values, dims) {
+  visit <- function(offset, level) {
+    if (level > length(dims)) return(values[[offset + 1L]])
+    stride <- prod(dims[-seq_len(level)])
+    lapply(seq_len(dims[level]) - 1L, function(a)
+      visit(offset + a * stride, level + 1L))
+  }
+  if (!length(values)) return(list())
+  visit(0, 1L)
 }
 
 json_object <- function(x) {
@@ -99,19 +227,20 @@ read_utf8_file <- function(path) {
 #'
 #' @param file Path to a `.stan` file.
 #' @param code Model source, as an alternative to `file`.
-#' @param data A named list of data, or a path to a JSON data file. The
-#'   values are written much as cmdstanr's `write_stan_json()` writes them,
-#'   but without the data declarations, so a few spellings differ; the
-#'   stanli guide for cmdstanr users lists them. An R
-#'   array of any rank is written with its first index outermost, so a
-#'   matrix is an array of rows. A list is an array of its elements, whatever
-#'   its names, so `array[K] vector[N]` can be a list of K vectors or a
-#'   K x N matrix. A list named `"1"`, `"2"`, ... is a tuple instead, so give
-#'   `unname(split(x, g))` when the groups are the numbers 1, 2 and so on.
-#'   A factor is written
-#'   as its integer codes, a data frame as `data.matrix()` makes it and a
-#'   logical as 1 or 0. `NA` is an error; `NaN` is Stan's NaN. Zero-length
-#'   extents are kept.
+#' @param data A named list of data, or a path to a JSON data file. A list
+#'   is written from the data block's declarations, as cmdstanr 1.0's
+#'   `write_stan_json()` writes it. An R array of any rank is written with its
+#'   first index outermost, so a matrix is an array of rows. A list is an
+#'   array of its elements, whatever its names, so `array[K] vector[N]` can
+#'   be a list of K vectors, a K x N matrix or `split(x, g)`. A tuple is a
+#'   list of its parts, named or not. An array of tuples is a list of tuples,
+#'   with a dim for more than one array dimension, or nested lists with the
+#'   first index outermost. A factor is written as its integer codes, and is
+#'   an error for a variable that is not declared `int`. A data frame is
+#'   written as `data.matrix()` makes it and a logical as 1 or 0. `NA` is an
+#'   error; `NaN` is Stan's NaN. A non-integer value for an `int` is an
+#'   error, as in CmdStan, where cmdstanr truncates it. Zero-length extents
+#'   are kept.
 #'
 #'   The dims of each value must match its declaration, except that extents
 #'   of 1 may be added or left out, because R drops and adds them: a
@@ -179,12 +308,14 @@ stanli_model <- function(file = NULL, code = NULL, data = NULL, mir = NULL,
     paths <- character()
     if (has_includes || !is.null(include_paths))
       paths <- stan_include_paths(include_paths, source_file)
-    if (has_includes || fast_math) {
-      mir <- with_commit_note(if (.Call("stanli_r_has_embedded_stanc"))
-        embedded_mir(code, paths, fast_math, source_file) else
-        stanc_mir(code, include_paths = paths, fast_math = fast_math,
-                  file = source_file))
-    }
+    # Compile once, to MIR, so that the data can be written from its
+    # declarations; the model is then built from that MIR. A runtime
+    # without the embedded compiler uses the stanc binary beside it or the
+    # bundled JavaScript compiler.
+    mir <- with_commit_note(if (.Call("stanli_r_has_embedded_stanc"))
+      embedded_mir(code, paths, fast_math, source_file, model_only = TRUE) else
+      stanc_mir(code, include_paths = paths, fast_math = fast_math,
+                file = source_file))
   }
   data_json <- if (is.null(data)) {
     "{}"
@@ -194,16 +325,9 @@ stanli_model <- function(file = NULL, code = NULL, data = NULL, mir = NULL,
     if (looks_like_path(data)) stop("data file not found: ", data, call. = FALSE)
     data
   } else {
-    to_json(as.list(data))
+    data_to_json(as.list(data), .Call("stanli_r_data_declarations", mir))
   }
-  is_mir <- !is.null(mir)
-  if (!is_mir && !.Call("stanli_r_has_embedded_stanc")) {
-    # A runtime without the embedded compiler needs the MIR handed to it.
-    # The release builds embed stanc3; a source build and the Windows
-    # runtime do not, and ship a stanc binary beside the library instead.
-    mir <- with_commit_note(stanc_mir(code, file = source_file))
-    is_mir <- TRUE
-  }
+  is_mir <- TRUE
   model <- with_commit_note(build_model(
     if (is_mir) mir else code, data_json, is_mir, seed,
     model_name = if (is.null(file)) "stanli_model" else
@@ -241,8 +365,9 @@ stanli_check_syntax <- function(code, include_paths = NULL) {
   invisible(TRUE)
 }
 
-embedded_mir <- function(code, paths, fast_math, file) {
-  mir <- .Call("stanli_r_stan_to_mir", code, paths, fast_math, file)
+embedded_mir <- function(code, paths, fast_math, file, model_only = FALSE) {
+  mir <- .Call("stanli_r_stan_to_mir", code, paths, fast_math, file,
+               model_only)
   warn_compiler_messages(attr(mir, "messages", exact = TRUE))
   attr(mir, "messages") <- NULL
   mir
@@ -554,12 +679,8 @@ preserve_random_seed <- function(expr) {
 }
 
 # A tuple's slots, named as the runtime names them (`g.2:1.3`), nested as the
-# JSON reader expects one value. A tuple is a list keyed "1", "2", .... An
-# array of tuples is nested lists with its first index outermost, but the
-# reader, like CmdStan's, takes their elements in the order that it visits
-# them as the array's elements first index fastest. So element k of that
-# order, counted first index fastest, goes at the k-th place that the reader
-# visits.
+# JSON reader expects one value: a tuple is a list keyed "1", "2", ..., and
+# an array of tuples is nested as reader_nest() says.
 tuple_init_value <- function(slots) {
   steps <- lapply(names(slots), tuple_steps)
   build <- function(entries, depth) {
@@ -576,15 +697,8 @@ tuple_init_value <- function(slots) {
                                             ",", fixed = TRUE), as.integer))
     dims <- apply(index, 2L, max)
     serial <- as.vector((index - 1L) %*% cumprod(c(1, utils::head(dims, -1L))))
-    elements <- lapply(unique_keys[order(serial)], function(k)
-      build(entries[keys == k], depth + 1L))
-    visit <- function(offset, level) {
-      if (level > length(dims)) return(elements[[offset + 1L]])
-      stride <- prod(dims[-seq_len(level)])
-      lapply(seq_len(dims[level]) - 1L, function(a)
-        visit(offset + a * stride, level + 1L))
-    }
-    visit(0, 1L)
+    reader_nest(lapply(unique_keys[order(serial)], function(k)
+      build(entries[keys == k], depth + 1L)), dims)
   }
   build(seq_along(slots), 1L)
 }

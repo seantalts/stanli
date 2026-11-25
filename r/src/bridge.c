@@ -269,6 +269,21 @@ static void* (*p_model_new_from_stan_named)(const char*, const char*,
                                             size_t);
 static void* (*p_compile_stan)(const char*, const char*, const char* const*,
                                size_t, int);
+/* Optional: runtimes before stanli_compile_stan_for_model and the data
+ * declarations fall back to stanli_compile_stan and to writing data
+ * without its declarations. */
+static void* (*p_compile_stan_for_model)(const char*, const char*,
+                                         const char* const*, size_t, int);
+static void* (*p_data_declarations_new)(const char*, char*, size_t);
+static void (*p_data_declarations_free)(void*);
+static int64_t (*p_data_declarations_n)(const void*);
+static const char* (*p_data_declaration_name)(const void*, int64_t);
+static int64_t (*p_data_declaration_type)(const void*, int64_t);
+static int (*p_type_kind_of)(const void*, int64_t);
+static int64_t (*p_type_n_dims)(const void*, int64_t);
+static int64_t (*p_type_dim)(const void*, int64_t, int64_t);
+static int64_t (*p_type_n_parts)(const void*, int64_t);
+static int64_t (*p_type_part)(const void*, int64_t, int64_t);
 static const char* (*p_compilation_mir)(const void*);
 static const char* (*p_compilation_error)(const void*);
 static int64_t (*p_compilation_n_messages)(const void*);
@@ -567,6 +582,17 @@ SEXP stanli_bridge_load(SEXP path) {
   BIND("stanli_model_new_with_opts", p_model_new_with_opts);
   BIND("stanli_model_new_from_stan_named", p_model_new_from_stan_named);
   BIND("stanli_compile_stan", p_compile_stan);
+  BIND_OPTIONAL("stanli_compile_stan_for_model", p_compile_stan_for_model);
+  BIND_OPTIONAL("stanli_data_declarations_new", p_data_declarations_new);
+  BIND_OPTIONAL("stanli_data_declarations_free", p_data_declarations_free);
+  BIND_OPTIONAL("stanli_data_declarations_n", p_data_declarations_n);
+  BIND_OPTIONAL("stanli_data_declaration_name", p_data_declaration_name);
+  BIND_OPTIONAL("stanli_data_declaration_type", p_data_declaration_type);
+  BIND_OPTIONAL("stanli_type_kind_of", p_type_kind_of);
+  BIND_OPTIONAL("stanli_type_n_dims", p_type_n_dims);
+  BIND_OPTIONAL("stanli_type_dim", p_type_dim);
+  BIND_OPTIONAL("stanli_type_n_parts", p_type_n_parts);
+  BIND_OPTIONAL("stanli_type_part", p_type_part);
   BIND("stanli_compilation_mir", p_compilation_mir);
   BIND("stanli_compilation_error", p_compilation_error);
   BIND("stanli_compilation_n_messages", p_compilation_n_messages);
@@ -823,15 +849,18 @@ SEXP stanli_r_has_embedded_stanc(void) {
 }
 
 SEXP stanli_r_stan_to_mir(SEXP code, SEXP include_paths, SEXP fast_math,
-                          SEXP file) {
+                          SEXP file, SEXP model_only) {
   require_loaded();
   const size_t count = (size_t)XLENGTH(include_paths);
   const char** paths = (const char**)R_alloc(count, sizeof(char*));
   for (size_t i = 0; i < count; ++i)
     paths[i] = Rf_translateCharUTF8(STRING_ELT(include_paths, i));
-  void* c = p_compile_stan(Rf_translateCharUTF8(STRING_ELT(code, 0)),
-                           file_label(file), paths, count,
-                           asLogical(fast_math) == TRUE);
+  void* (*compile)(const char*, const char*, const char* const*, size_t, int) =
+      asLogical(model_only) == TRUE && p_compile_stan_for_model != NULL
+          ? p_compile_stan_for_model
+          : p_compile_stan;
+  void* c = compile(Rf_translateCharUTF8(STRING_ELT(code, 0)), file_label(file),
+                    paths, count, asLogical(fast_math) == TRUE);
   flush_messages();
   if (c == NULL) error("stanli: out of memory compiling Stan source");
   const char* mir = p_compilation_mir(c);
@@ -852,6 +881,69 @@ SEXP stanli_r_stan_to_mir(SEXP code, SEXP include_paths, SEXP fast_math,
   UNPROTECT(2);
   return result;
 }
+/* One declared type as cmdstanr's model$variables() gives it: `type` is
+ * the kind's name, or for a tuple a list of its parts' declarations, and
+ * `dimensions` is the number of extents. `dims` holds the extents, NA for
+ * one that depends on data. */
+static const char* const kind_names[] = {
+    "int",           "real",   "complex",        "vector",
+    "row_vector",    "matrix", "complex_vector", "complex_row_vector",
+    "complex_matrix"};
+
+static SEXP declared_type(const void* d, int64_t type) {
+  const int kind = p_type_kind_of(d, type);
+  const int64_t n_dims = p_type_n_dims(d, type);
+  const char* fields[] = {"type", "dimensions", "dims", ""};
+  SEXP out = PROTECT(mkNamed(VECSXP, fields));
+  if (kind == 9) {
+    const int64_t n = p_type_n_parts(d, type);
+    SEXP parts = PROTECT(allocVector(VECSXP, (R_xlen_t)n));
+    for (int64_t k = 0; k < n; ++k)
+      SET_VECTOR_ELT(parts, (R_xlen_t)k,
+                     declared_type(d, p_type_part(d, type, k)));
+    SET_VECTOR_ELT(out, 0, parts);
+    UNPROTECT(1);
+  } else if (kind >= 0 && kind <= 8) {
+    SET_VECTOR_ELT(out, 0, mkString(kind_names[kind]));
+  } else {
+    UNPROTECT(1);
+    error("stanli: a data declaration has an unknown type");
+  }
+  SET_VECTOR_ELT(out, 1, ScalarInteger((int)n_dims));
+  SEXP dims = PROTECT(allocVector(INTSXP, (R_xlen_t)n_dims));
+  for (int64_t k = 0; k < n_dims; ++k) {
+    const int64_t extent = p_type_dim(d, type, k);
+    INTEGER(dims)[k] = extent < 0 ? NA_INTEGER : (int)extent;
+  }
+  SET_VECTOR_ELT(out, 2, dims);
+  UNPROTECT(2);
+  return out;
+}
+
+/* The data block's declarations, by name, or NULL for a runtime without
+ * them. */
+SEXP stanli_r_data_declarations(SEXP mir) {
+  require_loaded();
+  if (p_data_declarations_new == NULL) return R_NilValue;
+  char err[8192];
+  err[0] = '\0';
+  void* d = p_data_declarations_new(CHAR(STRING_ELT(mir, 0)), err, sizeof err);
+  if (d == NULL) error("%s", err[0] ? err : "stanli: cannot read the MIR");
+  const int64_t n = p_data_declarations_n(d);
+  SEXP out = PROTECT(allocVector(VECSXP, (R_xlen_t)n));
+  SEXP names = PROTECT(allocVector(STRSXP, (R_xlen_t)n));
+  for (int64_t i = 0; i < n; ++i) {
+    SET_STRING_ELT(names, (R_xlen_t)i,
+                   mkCharCE(p_data_declaration_name(d, i), CE_UTF8));
+    SET_VECTOR_ELT(out, (R_xlen_t)i,
+                   declared_type(d, p_data_declaration_type(d, i)));
+  }
+  setAttrib(out, R_NamesSymbol, names);
+  p_data_declarations_free(d);
+  UNPROTECT(2);
+  return out;
+}
+
 SEXP stanli_r_exact_lp(void) {
   require_loaded();
   return ScalarLogical(p_exact_lp());
