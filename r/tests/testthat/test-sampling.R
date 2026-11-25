@@ -168,6 +168,44 @@ test_that("partial starting values put each drawn tuple in its own element", {
   }
 })
 
+test_that("starting values are written from the parameter declarations", {
+  skip_without_runtime()
+  m <- stanli_model(code = "
+    parameters { real mu; tuple(real, vector[2]) tp;
+      array[2, 2] tuple(real, real) w; }
+    model { mu ~ normal(0, 1); }")
+  start_of <- function(q) {
+    fit <- sample_model(m, chains = 1, samples = 1, fixed_param = TRUE,
+                        init = q, refresh = 0)
+    fit$draws[1, 1, ]
+  }
+  w <- vector("list", 4)
+  dim(w) <- c(2, 2)
+  for (i in 1:2) for (j in 1:2) w[[i, j]] <- list(10 * i + j, 100 + 10 * i + j)
+  nested <- lapply(1:2, function(i) lapply(1:2, function(j)
+    list(10 * i + j, 100 + 10 * i + j)))
+  want <- c("tp:1" = 0.2, "tp:2[2]" = 0.4, "w[1,2:1]" = 12, "w[2,1:1]" = 21,
+            "w[2,2:2]" = 122)
+  pick <- function(draw) draw[c("tp:1", "tp:2[2]", "w[1,2:1]", "w[2,1:1]",
+                                "w[2,2:2]")]
+  # cmdstanr 1.0 takes a tuple as an unnamed list and an array of tuples as
+  # a list with a dim; nested lists work too.
+  for (value in list(w, nested)) {
+    q <- unconstrain(m, list(mu = 0.1, tp = list(0.2, c(0.3, 0.4)), w = value))
+    expect_equal(unname(pick(start_of(q))), unname(want))
+  }
+  q <- unconstrain(m, list(tp = list(0.2, c(0.3, 0.4)), w = w),
+                   partial = TRUE, seed = 1)
+  expect_equal(unname(pick(start_of(q))), unname(want))
+  fit <- sample_cstan(m$model_code, chains = 2, iter_warmup = 5,
+                      iter_sampling = 1, refresh = 0, seed = 1,
+                      init = function() list(tp = list(0.2, c(0.3, 0.4))))
+  expect_s3_class(fit, "stanli_cstanfit")
+  expect_error(unconstrain(m, list(mu = 0.1, tp = 0.2, w = w)),
+               "Variable 'tp' is declared as a tuple and must be a list.",
+               fixed = TRUE)
+})
+
 test_that("an empty value is a starting value for any zero-size parameter", {
   skip_without_runtime()
   m <- stanli_model(code = "

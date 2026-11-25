@@ -275,6 +275,7 @@ static void* (*p_compile_stan)(const char*, const char*, const char* const*,
 static void* (*p_compile_stan_for_model)(const char*, const char*,
                                          const char* const*, size_t, int);
 static void* (*p_data_declarations_new)(const char*, char*, size_t);
+static void* (*p_parameter_declarations_new)(const char*, char*, size_t);
 static void (*p_data_declarations_free)(void*);
 static int64_t (*p_data_declarations_n)(const void*);
 static const char* (*p_data_declaration_name)(const void*, int64_t);
@@ -584,6 +585,8 @@ SEXP stanli_bridge_load(SEXP path) {
   BIND("stanli_compile_stan", p_compile_stan);
   BIND_OPTIONAL("stanli_compile_stan_for_model", p_compile_stan_for_model);
   BIND_OPTIONAL("stanli_data_declarations_new", p_data_declarations_new);
+  BIND_OPTIONAL("stanli_parameter_declarations_new",
+                p_parameter_declarations_new);
   BIND_OPTIONAL("stanli_data_declarations_free", p_data_declarations_free);
   BIND_OPTIONAL("stanli_data_declarations_n", p_data_declarations_n);
   BIND_OPTIONAL("stanli_data_declaration_name", p_data_declaration_name);
@@ -920,14 +923,13 @@ static SEXP declared_type(const void* d, int64_t type) {
   return out;
 }
 
-/* The data block's declarations, by name, or NULL for a runtime without
- * them. */
-SEXP stanli_r_data_declarations(SEXP mir) {
+/* A block's declarations, by name, or NULL for a runtime without them. */
+static SEXP declarations(SEXP mir, void* (*make)(const char*, char*, size_t)) {
   require_loaded();
-  if (p_data_declarations_new == NULL) return R_NilValue;
+  if (make == NULL || p_data_declarations_n == NULL) return R_NilValue;
   char err[8192];
   err[0] = '\0';
-  void* d = p_data_declarations_new(CHAR(STRING_ELT(mir, 0)), err, sizeof err);
+  void* d = make(CHAR(STRING_ELT(mir, 0)), err, sizeof err);
   if (d == NULL) error("%s", err[0] ? err : "stanli: cannot read the MIR");
   const int64_t n = p_data_declarations_n(d);
   SEXP out = PROTECT(allocVector(VECSXP, (R_xlen_t)n));
@@ -942,6 +944,14 @@ SEXP stanli_r_data_declarations(SEXP mir) {
   p_data_declarations_free(d);
   UNPROTECT(2);
   return out;
+}
+
+SEXP stanli_r_data_declarations(SEXP mir) {
+  return declarations(mir, p_data_declarations_new);
+}
+
+SEXP stanli_r_parameter_declarations(SEXP mir) {
+  return declarations(mir, p_parameter_declarations_new);
 }
 
 SEXP stanli_r_exact_lp(void) {

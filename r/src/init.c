@@ -14,6 +14,7 @@ extern SEXP stanli_r_reduce_sum_fallbacks(SEXP);
 extern SEXP stanli_r_has_embedded_stanc(void);
 extern SEXP stanli_r_stan_to_mir(SEXP, SEXP, SEXP, SEXP, SEXP);
 extern SEXP stanli_r_data_declarations(SEXP);
+extern SEXP stanli_r_parameter_declarations(SEXP);
 extern SEXP stanli_r_exact_lp(void);
 extern SEXP stanli_r_thread_safe(void);
 extern SEXP stanli_r_build_id(void);
@@ -58,6 +59,8 @@ static const R_CallMethodDef CallEntries[] = {
     {"stanli_r_has_embedded_stanc", (DL_FUNC)&stanli_r_has_embedded_stanc, 0},
     {"stanli_r_stan_to_mir", (DL_FUNC)&stanli_r_stan_to_mir, 5},
     {"stanli_r_data_declarations", (DL_FUNC)&stanli_r_data_declarations, 1},
+    {"stanli_r_parameter_declarations",
+     (DL_FUNC)&stanli_r_parameter_declarations, 1},
     {"stanli_r_exact_lp", (DL_FUNC)&stanli_r_exact_lp, 0},
     {"stanli_r_thread_safe", (DL_FUNC)&stanli_r_thread_safe, 0},
     {"stanli_r_build_id", (DL_FUNC)&stanli_r_build_id, 0},

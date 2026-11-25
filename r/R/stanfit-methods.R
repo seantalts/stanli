@@ -137,7 +137,9 @@ stanfit_unconstrain_pars <- function(object, pars) {
   # back together, unless the tuple itself is given.
   bases <- variable_base(names(pars))
   slot <- bases %in% declared & names(pars) != bases & !(bases %in% names(pars))
-  tuples <- lapply(split(pars[slot], bases[slot]), tuple_init_value)
+  natural <- !is.null(parameter_declarations(model))
+  tuples <- lapply(split(pars[slot], bases[slot]), tuple_init_value,
+                   natural = natural)
   # RStan's initialization context ignores non-parameter entries, including
   # transformed parameters and GQ returned by constrain_pars().
   values <- c(pars[intersect(names(pars), declared)], tuples)

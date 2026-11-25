@@ -406,7 +406,8 @@ build_model <- function(code, data_json, is_mir, seed,
                  reduce_sum_count = .Call("stanli_r_reduce_sum_count", ptr),
                  reduce_sum_fallbacks =
                    .Call("stanli_r_reduce_sum_fallbacks", ptr),
-                 whitening = whitening),
+                 whitening = whitening,
+                 cache = new.env(parent = emptyenv())),
             class = "stanli_model")
 }
 
@@ -612,7 +613,10 @@ parameter_names <- function(model, scalars = FALSE) {
 #' be added or left out, so a length-1 R vector works for `vector[1]` and a
 #' 1 x 1 matrix for a `real`. A flat vector for a matrix is an error. A
 #' zero-size parameter may be left out or given any empty value, such as
-#' `matrix(0, 0, 3)` or `list()`.
+#' `matrix(0, 0, 3)` or `list()`. A list is written from the parameter
+#' declarations, as data is (see [stanli_model()]): a tuple is a list of its
+#' parts, named or not, and an array of tuples a list of tuples, with a dim
+#' for more than one array dimension, or nested lists.
 #'
 #' The result is what `sample_model(init = )` and `optimize_model(init = )`
 #' take, so unconstraining is a step per starting point rather than a second
@@ -647,14 +651,29 @@ unconstrain <- function(model, values, partial = FALSE, init_radius = 2,
     check_start_names(values)
     values <- values[names(values) %in% parameter_names(model)]
   }
+  declarations <- if (is.list(values)) parameter_declarations(model)
   if (partial && is.list(values))
-    values <- complete_partial_inits(model, values, init_radius, seed)
+    values <- complete_partial_inits(model, values, init_radius, seed,
+                                     natural = !is.null(declarations))
   json <- if (is.character(values) && length(values) == 1) {
     values
   } else {
-    to_json(values)
+    data_to_json(values, declarations)
   }
   .Call("stanli_r_unconstrain_inits", model$ptr, json)
+}
+
+# The parameters block's declarations, read from the model's MIR once and
+# kept with the model, or NULL for a model or runtime without them.
+parameter_declarations <- function(model) {
+  cache <- model$cache
+  if (is.environment(cache) && exists("parameters", envir = cache,
+                                      inherits = FALSE))
+    return(get("parameters", envir = cache))
+  found <- if (isTRUE(model$source$is_mir))
+    .Call("stanli_r_parameter_declarations", model$source$code)
+  if (is.environment(cache)) assign("parameters", found, envir = cache)
+  found
 }
 
 # Fill the parameters a starting list leaves out the way Stan does: draw every
@@ -678,10 +697,12 @@ preserve_random_seed <- function(expr) {
   expr
 }
 
-# A tuple's slots, named as the runtime names them (`g.2:1.3`), nested as the
-# JSON reader expects one value: a tuple is a list keyed "1", "2", ..., and
-# an array of tuples is nested as reader_nest() says.
-tuple_init_value <- function(slots) {
+# A tuple's slots, named as the runtime names them (`g.2:1.3`), as one
+# value: a tuple is a list keyed "1", "2", .... With `natural`, an array of
+# tuples is a list of tuples with a dim, the R form that the declarations
+# turn into JSON; otherwise it is nested as reader_nest() says, ready for
+# the JSON reader.
+tuple_init_value <- function(slots, natural = FALSE) {
   steps <- lapply(names(slots), tuple_steps)
   build <- function(entries, depth) {
     if (length(entries) == 1L && length(steps[[entries]]) < depth)
@@ -697,13 +718,17 @@ tuple_init_value <- function(slots) {
                                             ",", fixed = TRUE), as.integer))
     dims <- apply(index, 2L, max)
     serial <- as.vector((index - 1L) %*% cumprod(c(1, utils::head(dims, -1L))))
-    reader_nest(lapply(unique_keys[order(serial)], function(k)
-      build(entries[keys == k], depth + 1L)), dims)
+    elements <- lapply(unique_keys[order(serial)], function(k)
+      build(entries[keys == k], depth + 1L))
+    if (!natural) return(reader_nest(elements, dims))
+    dim(elements) <- dims
+    elements
   }
   build(seq_along(slots), 1L)
 }
 
-complete_partial_inits <- function(model, values, init_radius, seed) {
+complete_partial_inits <- function(model, values, init_radius, seed,
+                                   natural = FALSE) {
   check_start_names(values)
   if (length(init_radius) != 1L || !is.numeric(init_radius) ||
       !is.finite(init_radius) || init_radius < 0)
@@ -736,7 +761,8 @@ complete_partial_inits <- function(model, values, init_radius, seed) {
   bases <- variable_base(names(filled))
   filled <- lapply(stats::setNames(nm = unique(bases)), function(base) {
     slots <- filled[bases == base]
-    if (identical(names(slots), base)) slots[[1L]] else tuple_init_value(slots)
+    if (identical(names(slots), base)) slots[[1L]] else
+      tuple_init_value(slots, natural)
   })
   filled[intersect(names(values), names(filled))] <-
     values[intersect(names(values), names(filled))]
