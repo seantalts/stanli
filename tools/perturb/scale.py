@@ -254,7 +254,7 @@ def _int_bound(expr):
         return None
     if re.fullmatch(r"-?\d+", expr):
         return int(expr)
-    raise Refused(f"non-numeric bound {expr}")
+    raise Refused(f"non-numeric bound: {expr}")
 
 
 class Analysis:
@@ -304,10 +304,11 @@ class Analysis:
                 self.inferred.add(d.name)
 
     def zero_sized(self, d, data):
-        """Stan JSON may write a container with a zero dimension as []."""
+        """Stan JSON may write a container with a zero dimension as [].
+        A dimension given by an expression may be that zero."""
         return data.get(d.name) == [] and any(
             a == "0" or (a in self.scalars and data.get(a) == 0)
-            for a in d.axes)
+            or not re.fullmatch(rf"\d+|{IDENT}", a) for a in d.axes)
 
     def containers(self, var):
         """(decl, axis position) for every bare use of var as an axis."""
@@ -330,8 +331,7 @@ class Analysis:
             else:
                 self._check_axes(name, {name})
         except Refused as e:
-            sv.refused = f"{name}: {e.reason}" if e.reason.startswith(
-                "non-numeric") else e.reason
+            sv.refused = e.reason
         return sv
 
     def _check_basic(self, var):

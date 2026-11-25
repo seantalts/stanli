@@ -232,6 +232,20 @@ class SizeVariablesTest(unittest.TestCase):
         new, _ = scale.scale(text, data, "N", 5)
         self.assertEqual(new["t"], [])
 
+    def test_empty_container_with_expression_dimension(self):
+        text = ("data { int S; array[3] int n; "
+                "array[S] vector[max(n)] w; vector[S] v; }")
+        data = {"S": 1, "n": [0, 0, 0], "w": [], "v": [1.0]}
+        self.assertIsNone(scale.size_variables(text, data)["S"].refused)
+        new, _ = scale.scale(text, data, "S", 2)
+        self.assertEqual(new["w"], [])
+
+    def test_non_numeric_bound_reason(self):
+        sv = scale.size_variables("data { int n; int<lower=n> S; "
+                                  "vector[S] v; }",
+                                  {"n": 1, "S": 1, "v": [1.0]})
+        self.assertTrue(sv["S"].refused.startswith("non-numeric bound"))
+
     def test_flags_of_zero_or_one_are_not_relations(self):
         text = "data { int K; int use_normal; vector[K] v; }"
         sv = scale.size_variables(text, {"K": 1, "use_normal": 1, "v": [1]})
