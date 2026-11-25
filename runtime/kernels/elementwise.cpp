@@ -3,6 +3,7 @@
 #include <stanli/extrema_grouping.hpp>
 #include <stanli/graph.hpp>
 #include <stanli/optable.hpp>
+#include <stanli/pairwise_sum.hpp>
 
 #include <stan/math/prim/fun/prod.hpp>
 #include <stan/math/prim/fun/max.hpp>
@@ -316,12 +317,22 @@ void gather_fwd(KernelCtx& ctx) {
   for (int64_t k = 0; k < ctx.out.len; ++k)
     ctx.out.data[k] = ctx.in[0].data[ctx.idata[k]];
 }
+// When the source elements receive more than kPlainSumMax adjoints each on
+// average, as theta does in log(theta[doc[n], k]) once reroll merges the loop
+// over n, the sums are compensated; a plain running sum lost up to 300 scaled
+// ULP on ldaK2's gradient.
 STANLI_ALIGN_FUNCTION_64 void gather_bwd(KernelCtx& ctx) {
   if (!ctx.in_adj[0].data) return;
   double* in_adj = ctx.in_adj[0].data;
   const double* out_adj = ctx.out_adj_vec.data;
   const int* idata = ctx.idata;
   const int64_t n = ctx.out.len;
+  if (n > kPlainSumMax * ctx.in[0].len) {
+    scatter_add(
+        in_adj, ctx.in[0].len, n, [idata](int64_t k) { return idata[k]; },
+        [out_adj](int64_t k) { return out_adj[k]; });
+    return;
+  }
   int64_t k = 0;
   while (k < n) {
     const int idx = idata[k];

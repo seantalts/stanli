@@ -111,16 +111,16 @@ answers at 3 points for each model. That makes <!--gen:testing_points-->1242<!--
 and <!--gen:testing_values-->1,504,488<!--/gen--> values. CmdStan rejects <!--gen:testing_rejected_points-->6<!--/gen-->
 of the points.
 
-In <!--gen:testing_models_within-->331<!--/gen--> models, every value is within 10 ULP of
-CmdStan. The other <!--gen:testing_models_over-->83<!--/gen--> models have <!--gen:testing_entries-->179<!--/gen-->
-ledger entries. stanli is at least as close to the true value as CmdStan in <!--gen:testing_entries_stanli-->131<!--/gen-->
-of those entries. CmdStan is closer in <!--gen:testing_entries_cmdstan-->9<!--/gen-->. We
+In <!--gen:testing_models_within-->329<!--/gen--> models, every value is within 10 ULP of
+CmdStan. The other <!--gen:testing_models_over-->85<!--/gen--> models have <!--gen:testing_entries-->186<!--/gen-->
+ledger entries. stanli is at least as close to the true value as CmdStan in <!--gen:testing_entries_stanli-->140<!--/gen-->
+of those entries. CmdStan is closer in <!--gen:testing_entries_cmdstan-->7<!--/gen-->. We
 cannot tell for the other <!--gen:testing_entries_unknown-->39<!--/gen-->.
 
 <!--gen:testing_collections-->
 | source | models | models with a value over 10 ULP |
 | --- | ---: | ---: |
-| posteriordb | 119 | 41 |
+| posteriordb | 119 | 43 |
 | educational | 13 | 1 |
 | brms | 124 | 4 |
 | rethinking | 62 | 11 |
@@ -142,7 +142,7 @@ cannot tell for the other <!--gen:testing_entries_unknown-->39<!--/gen-->.
 | walker | 2 | 0 |
 | bayesdfa | 2 | 0 |
 | regressions | 13 | 0 |
-| all | 414 | 83 |
+| all | 414 | 85 |
 <!--/gen-->
 
 The models come from posteriordb, brms formulas, the code of Statistical
@@ -209,7 +209,7 @@ table and those files disagree.
 <!--gen:testing_corpus_table-->
 | model | source | parameters | outputs | lp: CmdStan | lp: stanli | gradient: CmdStan | gradient: stanli | outputs: CmdStan | outputs: stanli | limit | also |
 | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- | --- |
-| `2pl_latent_reg_irt` | posteriordb | 531 | 549 | 226 | 226 |  |  | 0.01 | 0.01 | 10 |  |
+| `2pl_latent_reg_irt` | posteriordb | 531 | 549 | 226 | 226 |  |  | 0.01 | 0.01 | gradient 29 |  |
 | `accel_gp` | posteriordb | 66 | 72 | 1.51 | 1.51 | 0.06 | 0.02 | 0.03 | 0.03 | 10 |  |
 | `accel_splines` | posteriordb | 82 | 160 | 0.58 | 0.58 | 0.09 | 0.07 | 0.05 | 0.05 | 10 |  |
 | `arK` | posteriordb | 7 | 7 | 3.76 | 1.82 | 0.56 | 0.18 | 0.03 | 0.03 | 10 |  |
@@ -228,7 +228,7 @@ table and those files disagree.
 | `earn_height` | posteriordb | 3 | 3 | 3.33 | 3.33 | 0.91 | 0.91 | 0.05 | 0.05 | 10 |  |
 | `eight_schools_centered` | posteriordb | 10 | 10 | 0.70 | 0.70 | 0.06 | 0.06 | 0.01 | 0.01 | 10 |  |
 | `eight_schools_noncentered` | posteriordb | 10 | 18 | 0.56 | 0.56 | 0.10 | 0.10 | 0.13 | 0.13 | 10 |  |
-| `election88_full` | posteriordb | 90 | 11656 | 255 | 255 | 1.96 | 0.56 | 0.19 | 0.19 | gradient 91 |  |
+| `election88_full` | posteriordb | 90 | 11656 | 255 | 255 | 1.96 | 0.56 | 0.19 | 0.19 | outputs 91 |  |
 | `garch11` | posteriordb | 4 | 4 | 0.45 | 0.45 | 3.02 | 3.02 | 0.17 | 0.17 | 10 |  |
 | `GLM_Binomial_model` | posteriordb | 3 | 83 | 2.52 | 2.52 | 0.46 | 0.16 | 0.25 | 0.26 | 10 |  |
 | `GLM_Poisson_model` | posteriordb | 4 | 84 | 14.5 | 14.7 | 0.51 | 0.54 | 6.73 | 6.76 | 10 |  |
@@ -238,7 +238,7 @@ table and those files disagree.
 | `gp_regr` | posteriordb | 3 | 3 | 0.80 | 0.80 | 0.69 | 0.69 | 0.17 | 0.17 | 10 |  |
 | `gpcm_latent_reg_irt` | posteriordb | 530 | 550 | 56.2 | 3.94 |  |  | 0.02 | 0.02 | lp 131, gradient 55 |  |
 | `grsm_latent_reg_irt` | posteriordb | 408 | 418 | 182 | 17.2 |  |  | <0.01 | <0.01 | lp 493, gradient 23 |  |
-| `hier_2pl` | posteriordb | 669 | 804 | 602 | 602 |  |  | 0.01 | 0.01 | 10 |  |
+| `hier_2pl` | posteriordb | 669 | 804 | 602 | 602 |  |  | 0.01 | 0.01 | gradient 28 |  |
 | `hierarchical_gp` | posteriordb | 933 | 3279 | 0.33 | 0.66 |  |  | 0.29 | 0.29 | 10 |  |
 | `hmm_drive_0` | posteriordb | 6 | 429 | 32.6 | 32.9 | 10,568 | 10,568 | 0.09 | 0.09 | 10 |  |
 | `hmm_drive_1` | posteriordb | 6 | 429 | 36.7 | 37.0 | 55,945 | 55,945 | 0.09 | 0.09 | 10 |  |
@@ -256,7 +256,7 @@ table and those files disagree.
 | `kidscore_momiq` | posteriordb | 3 | 3 | 0.27 | 0.27 | 1.58 | 0.24 | 0.05 | 0.05 | 10 |  |
 | `kilpisjarvi` | posteriordb | 3 | 3 | 0.74 | 0.74 | 0.29 | 0.29 | 0.05 | 0.05 | 10 |  |
 | `kronecker_gp` | posteriordb | 438 | 0 | 5.35 | 6.68 |  |  |  |  | gradient 2.6e12 | known mismatch in grad[1], grad[2], which have their own relative limit |
-| `ldaK2` | posteriordb | 7 | 12 | 105 | 0.68 | 113 | 101 | 0.32 | 0.32 | lp 171, gradient 204 |  |
+| `ldaK2` | posteriordb | 7 | 12 | 105 | 0.68 | 113 | 101 | 0.32 | 0.32 | lp 171, gradient 509 |  |
 | `ldaK5` | posteriordb | 7714 | 7780 | 290 | 2.18 |  |  | 3.11 | 3.11 | lp 815, outputs 38 |  |
 | `log10earn_height` | posteriordb | 3 | 3 | 0.86 | 0.86 | 3.43 | 0.32 | 0.05 | 0.05 | gradient 20 |  |
 | `logearn_height` | posteriordb | 3 | 3 | 1.31 | 1.31 | 3.70 | 0.43 | 0.05 | 0.05 | gradient 15 |  |
