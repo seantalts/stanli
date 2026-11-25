@@ -3100,6 +3100,58 @@ void expect_unit_extent_inits() {
   stanli_model_free(corr);
 }
 
+// The parameters block's declarations, read the same way, leave out
+// transformed parameters and generated quantities.
+void expect_parameter_declarations() {
+  if (!stanli_has_embedded_stanc()) return;
+  const Compilation c = compile(
+      "data { int N; }\n"
+      "parameters { real mu; vector[N] v; tuple(real, vector[2]) tp;"
+      "  array[2, 2] tuple(real, real) w; cholesky_factor_corr[3] L; }\n"
+      "transformed parameters { real t = mu; }\n"
+      "model { mu ~ normal(0, 1); }\n"
+      "generated quantities { real g = mu; }\n",
+      "parameter_declarations.stan");
+  char err[1024]{};
+  stanli_data_declarations* d =
+      c.ok ? stanli_parameter_declarations_new(c.mir.c_str(), err, sizeof err)
+           : nullptr;
+  if (d == nullptr) {
+    ++failures;
+    std::printf("FAIL parameter declarations: %s %s\n", c.error.c_str(), err);
+    return;
+  }
+  const std::vector<std::string> names = {"mu", "v", "tp", "w", "L"};
+  expect_true("parameter declaration count",
+              stanli_data_declarations_n(d) == (int64_t)names.size());
+  for (size_t i = 0; i < names.size(); ++i) {
+    const char* name = stanli_data_declaration_name(d, (int64_t)i);
+    expect_true("parameter declaration name " + names[i],
+                name != nullptr && names[i] == name);
+  }
+  const int64_t v = stanli_data_declaration_type(d, 1);
+  expect_true("v is a vector whose size comes from data",
+              stanli_type_kind_of(d, v) == STANLI_TYPE_VECTOR &&
+                  stanli_type_dim(d, v, 0) == -1);
+  const int64_t tp = stanli_data_declaration_type(d, 2);
+  expect_true("tp is a tuple of two parts",
+              stanli_type_kind_of(d, tp) == STANLI_TYPE_TUPLE &&
+                  stanli_type_n_parts(d, tp) == 2 &&
+                  stanli_type_kind_of(d, stanli_type_part(d, tp, 1)) ==
+                      STANLI_TYPE_VECTOR);
+  const int64_t w = stanli_data_declaration_type(d, 3);
+  expect_true("w is an array[2, 2] of tuples",
+              stanli_type_kind_of(d, w) == STANLI_TYPE_TUPLE &&
+                  stanli_type_n_array_dims(d, w) == 2 &&
+                  stanli_type_dim(d, w, 1) == 2);
+  const int64_t L = stanli_data_declaration_type(d, 4);
+  expect_true("a Cholesky factor is stored as a 3 x 3 matrix",
+              stanli_type_kind_of(d, L) == STANLI_TYPE_MATRIX &&
+                  stanli_type_dim(d, L, 0) == 3 &&
+                  stanli_type_dim(d, L, 1) == 3);
+  stanli_data_declarations_free(d);
+}
+
 // MIR compiled only to build a model may leave out a function the model
 // cannot reach, as stanli_model_new_from_stan does.
 void expect_compile_for_model_prunes_functions() {
@@ -4350,6 +4402,7 @@ int main() {
   expect_unit_extent_inits();
   expect_data_declarations();
   expect_compile_for_model_prunes_functions();
+  expect_parameter_declarations();
   expect_callback_print_each_evaluation();
   expect_parameterless_unconstrain();
   expect_parameterless_sampling();

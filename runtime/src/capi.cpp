@@ -911,24 +911,35 @@ const Declarations::Type* declared_type(const Declarations* d, int64_t type) {
   return &d->types[(size_t)type];
 }
 
-}  // namespace
-
-extern "C" {
-
-stanli_data_declarations* stanli_data_declarations_new(const char* mir,
-                                                       char* err,
-                                                       size_t err_len) {
+// The declarations of the data block, or of the parameters block. A tuple
+// variable appears in the program as its leaves, which are put back together.
+stanli_data_declarations* declarations_new(const char* mir, bool parameters,
+                                           char* err, size_t err_len) {
   try {
     if (mir == nullptr) throw std::invalid_argument("mir is null");
     const stanli::mir::Program p = stanli::decode_program(mir);
+    std::vector<std::pair<std::string, const stanli::mir::SizedType*>> vars;
+    if (parameters) {
+      for (const stanli::mir::OutputVar& out : p.output_vars)
+        if (out.block == stanli::mir::OutputVar::Block::Parameters)
+          vars.emplace_back(out.name, &out.type);
+    } else {
+      for (const auto& [name, type] : p.input_vars)
+        vars.emplace_back(name, &type);
+    }
     auto d = std::make_unique<Declarations>();
     std::set<std::string> done;
-    for (const auto& [name, type] : p.input_vars) {
+    for (const auto& [name, type] : vars) {
       const stanli::mir::detail::TupleLeaf* leaf =
           p.tuples ? p.tuples->leaf(name) : nullptr;
+      // An output tuple keeps its own name; its leaves say its type.
+      if (leaf == nullptr && p.tuples && p.tuples->leaves_of.count(name)) {
+        const std::vector<std::string>& of = p.tuples->leaves_of.at(name);
+        if (!of.empty()) leaf = p.tuples->leaf(of.front());
+      }
       if (leaf == nullptr) {
         d->names.push_back(name);
-        d->roots.push_back(add_leaf_type(*d, type, 0));
+        d->roots.push_back(add_leaf_type(*d, *type, 0));
         continue;
       }
       if (!done.insert(leaf->base).second) continue;
@@ -943,6 +954,22 @@ stanli_data_declarations* stanli_data_declarations_new(const char* mir,
     put_err(err, err_len, e.what());
     return nullptr;
   }
+}
+
+}  // namespace
+
+extern "C" {
+
+stanli_data_declarations* stanli_data_declarations_new(const char* mir,
+                                                       char* err,
+                                                       size_t err_len) {
+  return declarations_new(mir, false, err, err_len);
+}
+
+stanli_data_declarations* stanli_parameter_declarations_new(const char* mir,
+                                                            char* err,
+                                                            size_t err_len) {
+  return declarations_new(mir, true, err, err_len);
 }
 
 void stanli_data_declarations_free(stanli_data_declarations* d) { delete d; }

@@ -215,6 +215,13 @@ typedef struct stanli_data_declarations stanli_data_declarations;
 stanli_data_declarations* stanli_data_declarations_new(const char* mir,
                                                        char* err,
                                                        size_t err_len);
+/* The parameters block's declarations, read with the same accessors. A
+ * parameter's type is the one it is stored as, so cholesky_factor_corr[3]
+ * is a 3 x 3 matrix. Transformed parameters and generated quantities are
+ * not included. */
+stanli_data_declarations* stanli_parameter_declarations_new(const char* mir,
+                                                            char* err,
+                                                            size_t err_len);
 void stanli_data_declarations_free(stanli_data_declarations* d);
 int64_t stanli_data_declarations_n(const stanli_data_declarations* d);
 const char* stanli_data_declaration_name(const stanli_data_declarations* d,
