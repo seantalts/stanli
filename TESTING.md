@@ -111,22 +111,22 @@ answers at 3 points for each model. That makes <!--gen:testing_points-->1242<!--
 and <!--gen:testing_values-->1,504,488<!--/gen--> values. CmdStan rejects <!--gen:testing_rejected_points-->6<!--/gen-->
 of the points.
 
-In <!--gen:testing_models_within-->333<!--/gen--> models, every value is within 10 ULP of
-CmdStan. The other <!--gen:testing_models_over-->81<!--/gen--> models have <!--gen:testing_entries-->177<!--/gen-->
-ledger entries. stanli is at least as close to the true value as CmdStan in <!--gen:testing_entries_stanli-->129<!--/gen-->
+In <!--gen:testing_models_within-->331<!--/gen--> models, every value is within 10 ULP of
+CmdStan. The other <!--gen:testing_models_over-->83<!--/gen--> models have <!--gen:testing_entries-->179<!--/gen-->
+ledger entries. stanli is at least as close to the true value as CmdStan in <!--gen:testing_entries_stanli-->131<!--/gen-->
 of those entries. CmdStan is closer in <!--gen:testing_entries_cmdstan-->9<!--/gen-->. We
 cannot tell for the other <!--gen:testing_entries_unknown-->39<!--/gen-->.
 
 <!--gen:testing_collections-->
 | source | models | models with a value over 10 ULP |
 | --- | ---: | ---: |
-| posteriordb | 119 | 40 |
+| posteriordb | 119 | 41 |
 | educational | 13 | 1 |
 | brms | 124 | 4 |
 | rethinking | 62 | 11 |
 | cogmod | 22 | 12 |
 | ctsem | 3 | 1 |
-| examplemodels | 23 | 4 |
+| examplemodels | 23 | 5 |
 | stanguide | 6 | 1 |
 | oncobayes2 | 3 | 1 |
 | rstanarm | 4 | 0 |
@@ -142,7 +142,7 @@ cannot tell for the other <!--gen:testing_entries_unknown-->39<!--/gen-->.
 | walker | 2 | 0 |
 | bayesdfa | 2 | 0 |
 | regressions | 13 | 0 |
-| all | 414 | 81 |
+| all | 414 | 83 |
 <!--/gen-->
 
 The models come from posteriordb, brms formulas, the code of Statistical
@@ -286,7 +286,7 @@ table and those files disagree.
 | `nes` | posteriordb | 10 | 10 | 2.64 | 2.64 | 1.51 | 0.21 | 0.01 | 0.01 | 10 |  |
 | `nes_logit_model` | posteriordb | 2 | 2 | 17.8 | 17.8 | 4.04 | 4.04 | <0.01 | <0.01 | 10 |  |
 | `nn_rbm1bJ10` | posteriordb | 7951 | 7951 | 21.1 | 21.1 |  |  | <0.01 | <0.01 | 10 |  |
-| `nn_rbm1bJ100` | posteriordb | 79411 | 79411 |  |  |  |  |  |  | 10 |  |
+| `nn_rbm1bJ100` | posteriordb | 79411 | 79411 |  |  |  |  |  |  | lp 3,982 |  |
 | `normal_mixture` | posteriordb | 3 | 3 | 4.11 | 0.26 | 7.44 | 6.98 | 0.14 | 0.14 | 10 |  |
 | `normal_mixture_k` | posteriordb | 14 | 15 | 7.20 | 6.53 | 14.9 | 15.0 | 0.24 | 0.23 | gradient 15 |  |
 | `one_comp_mm_elim_abs` | posteriordb | 4 | 44 |  |  |  |  |  |  | outputs 245 |  |
@@ -567,7 +567,7 @@ table and those files disagree.
 | `examplemodels_mr_ss` | examplemodels | 2 | 19602 | 14.7 | 14.4 | 277 | 110 | 0.14 | 0.14 | gradient 729 |  |
 | `examplemodels_ms` | examplemodels | 6 | 72036 | 7.19 | 7.19 | 36.4 | 13.3 | 0.05 | 0.05 | gradient 254 |  |
 | `examplemodels_ode_one_comp_mm` | examplemodels | 4 | 44 |  |  |  |  |  |  | gradient 30, outputs 13 |  |
-| `examplemodels_probit_multi_good` | examplemodels | 2038 | 2064 | 87.8 | 87.8 |  |  | 0.17 | 0.18 | 10 |  |
+| `examplemodels_probit_multi_good` | examplemodels | 2038 | 2064 | 87.8 | 87.8 |  |  | 0.17 | 0.18 | lp 75 |  |
 | `examplemodels_radon_group` | examplemodels | 92 | 92 | 4.99 | 4.33 | 0.09 | 0.08 | 0.15 | 0.14 | 10 |  |
 | `examplemodels_roaches_overdispersion` | examplemodels | 267 | 267 | 3.05 | 3.05 | 0.01 | 0.01 | 0.33 | 0.33 | 10 |  |
 | `examplemodels_ssm` | examplemodels | 28 | 55 | 1.92 | 1.83 | 1.13 | 1.13 | 0.24 | 0.24 | 10 |  |
@@ -707,7 +707,7 @@ tests. To run the post-merge jobs on a branch, use
 | --- | --- | --- | --- | --- |
 | [cross-path matrix](#comparing-stanlis-execution-paths) | every fixture at 3 points and the 22 cogmod models at 13, under 19 execution configurations | each other, in every bit, with a ledger | PR on Linux x86-64, in the build with developer switches. Post-merge under AddressSanitizer and on Windows ARM64 | transformed data, which has one engine, and an error that every path shares |
 | [posteriordb cross-path](#comparing-stanlis-execution-paths) | the posteriordb models under the same configurations plus one pass-off set | each other, within 1e-11 | by hand after pass changes | an error present in both cells |
-| [compiler producer parity](#stan-language-coverage) | compact MIR bytes from the native, JavaScript and Windows compilers | each other, byte for byte | PR | numerical behavior |
+| [compiler producer parity](#stan-language-coverage) | compact MIR bytes from the native, JavaScript and Windows (`stanli-compile.exe`) compilers | each other, byte for byte | PR | numerical behavior |
 | stanc3 fuzzer ([`tools/fuzz_stanc`](tools/fuzz_stanc/README.md)) | random Stan programs compiled with and without stanc3's O1 passes: log density, gradient, `write_array`, printed output and errors at 3 points | each other | nightly, Linux x86-64 | programs that the generator cannot write |
 | Rethinking regeneration | the 62 Rethinking fixtures, regenerated from the book's code with pinned `rethinking` | the checked-in files, byte for byte | nightly, and pushes to `main` that touch them | |
 
@@ -735,7 +735,7 @@ tests. To run the post-merge jobs on a branch, use
 | AddressSanitizer | the CTest suite, compiling through `stanli-compile` | no diagnostics | post-merge except release tags | a stale `vari` that points into reused arena memory |
 | ThreadSanitizer | `test_capi`, `test_pool`, `test_multichain`, `test_wa_parallel`, `test_wa_parallel_abi` and `test_wa_parallel_switches` | no diagnostics | post-merge except release tags | the other tests |
 | bundled compiler | `r/inst/js/stanc.js`, and the compiler loaded in a browser worker, in webR and through V8 in R | a fresh build, byte for byte, and expected compile results | PR | |
-| Windows compiler | the Windows build of the compiler | expected results in `tests/test_windows_compiler.R`, and no integer folded past int32 | PR | |
+| Windows compiler | `stanli-compile.exe`, the Linux cross-build of the compiler for Windows (the release links the embedded compiler instead and does not ship it) | expected results in `tests/test_windows_compiler.R`, and no integer folded past int32 | PR | |
 | R ABI | the ABI constants in the runtime and in the R bridge | each other | PR and pushes that touch the R paths | |
 | `R CMD check` matrix | the R package without a runtime, on 4 OS and R combinations, warnings as errors | R's own checks | post-merge | sampling, which skips without a runtime |
 | packaging guards | glibc symbol versions, the macOS minimum version, the x86-64 instruction set of the Linux library | the wheel tag and the baseline ISA | every build | |
@@ -932,7 +932,7 @@ of known differences. A model fails if it does better or worse than its ledger
 entry. [`tests/stanc3_good/README.md`](tests/stanc3_good/README.md) has the
 details.
 
-The native, JavaScript and Windows compilers must emit the same bytes for the
+The native, JavaScript and Windows (`stanli-compile.exe`) compilers must emit the same bytes for the
 [compiler fixtures](tests/compiler/README.md).
 
 ### Developer switches

@@ -371,11 +371,19 @@ void dot_bwd(KernelCtx& ctx) {
 // below reference-CSV precision. Self forms pass the one input twice and the
 // backward accumulates both terms, the same convention OP_DOT's dot_self
 // call relies on.
+// Variant kGroupDotAsDot reduces each contiguous group with OP_DOT's own
+// expression, so a re-rolled run of scalar dots keeps their values.
 void group_dot_fwd(KernelCtx& ctx) {
   const int64_t groups = ctx.idata[0], width = ctx.idata[1];
   const int64_t gs = ctx.idata[2], cs = ctx.idata[3];
   const double* a = ctx.in[0].data;
   const double* b = ctx.in[1].data;
+  if ((ctx.variant & kGroupDotAsDot) && cs == 1) {
+    for (int64_t g = 0; g < groups; ++g)
+      ctx.out.data[g] =
+          (CMapA(a + g * gs, width) * CMapA(b + g * gs, width)).sum();
+    return;
+  }
   for (int64_t g = 0; g < groups; ++g) {
     double sum = 0.0;
     for (int64_t k = 0; k < width; ++k)

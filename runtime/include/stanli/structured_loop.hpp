@@ -32,6 +32,10 @@ struct DynamicIndexSpec {
     int selector_input = 1;
     int extent_input = 1;
     int count_input = 1;
+    // The label of Stan's error for a Single or Multi selector of a read
+    // that is out of range (label_dynamic_index), or null for the generic
+    // error.
+    const char* label = nullptr;
   };
   std::vector<Axis> axes;
   bool matrix_leaf = false;
@@ -98,6 +102,10 @@ struct StructuredLoop {
   // recording a reusable path costs more when local extents change per draw.
   // Existing loop plans retain their replay policy.
   bool cache_execution_path = true;
+  // Add the target terms with compensation once there are more than
+  // kPlainSumMax of them (pairwise_sum.hpp), as the unrolled graph does. Set
+  // for a loop that the program budget keeps instead of unrolling.
+  bool compensated_target = false;
   Node root;
   int64_t initial_size = 0;
   int64_t workspace_size = 0;
@@ -119,6 +127,26 @@ int64_t index_read_positions(const DynamicIndexSpec& spec, const KernelCtx& c,
 
 void structured_loop_forward(KernelCtx& ctx);
 void structured_loop_backward(KernelCtx& ctx);
+
+// Whether the selection has no runtime count or extent, so that every read
+// through the spec has the same geometry and only its selectors vary.
+bool index_selection_static(const DynamicIndexSpec& spec);
+
+// index_read_positions and the OP_INDEX_DYNAMIC forward without their
+// checks, for a static selection whose selector values have already passed
+// them in a read bound the same way.
+int64_t index_trusted_positions(const DynamicIndexSpec& spec,
+                                const KernelCtx& c, double* positions,
+                                int64_t stride);
+void index_trusted_read(KernelCtx& c);
+
+// Gives each Single and Multi axis of a read the label that Stan's error
+// for it carries, as the unrolled graph reports it. `leaf_rank` is 2 for a
+// matrix leaf, 1 for a vector or row vector and 0 for a scalar, and
+// `selectors` is the number of selectors that the read wrote.
+void label_dynamic_index(DynamicIndexSpec& spec, int leaf_rank,
+                         size_t selectors);
+
 void register_structured_loop_kernel();
 
 }  // namespace stanli

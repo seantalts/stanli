@@ -836,7 +836,7 @@ void frame_outputs(LoopState& s, KernelCtx& ctx) {
     tape.target_work.resize(tape.targets.size());
     for (size_t k = 0; k < tape.targets.size(); ++k)
       tape.target_work[k] = *tape.targets[k];
-    ctx.out.data[at] = reduce_target(tape.target_work);
+    ctx.out.data[at] = reduce_target(tape.target_work, s.p.compensated_target);
   }
 }
 

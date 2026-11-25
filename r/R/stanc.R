@@ -4,7 +4,7 @@
 # OCaml compiler in, so `stanli_model(code = ...)` hands the source
 # straight to it and none of this runs.
 #
-# When it does not (a source build, or the Windows runtime), native hosts
+# When it does not (a source build without embedding), native hosts
 # first use the stanli-compile executable beside the runtime, which emits
 # portable MIR through the shared OCaml pipeline. Without it, the fallback is
 # the same compiler built to JavaScript and run through V8. js_of_ocaml turns

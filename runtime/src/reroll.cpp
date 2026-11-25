@@ -29,9 +29,13 @@
 // convention (row-major or column-major, whichever its first wide row op
 // commits to): a SLICE or SLICE_STRIDED reading row `lane` of an invariant
 // base, lanes covering every row, elides to the base the same way a plain
-// OP_INDEX does; a row that does not cover the base, or an OP_GATHER whose
-// lanes' indices are together one affine run, packs through one OP_SLICE or
-// OP_GATHER instead; constants and lpmf outcomes pack in the region's
+// OP_INDEX does; rows at any other offsets, which follow the data
+// (`z[, s[i]]`), pack through one OP_GATHER of every lane's window, and an
+// OP_GATHER whose lanes' indices are together one affine run packs through
+// one OP_SLICE; an OP_DOT of two row-wide operands (`X[i] * v`, whose data
+// row constant folding left as one fill per lane) becomes one OP_GROUP_DOT
+// over row-major lanes, summing each lane as OP_DOT does; constants and lpmf
+// outcomes pack in the region's
 // convention; an invariant operand as wide as the row tiles via OP_REP_MAT;
 // a density whose row-wide lp feeds another op folds back with one
 // OP_SUM_ROWS per lane (repacked first when the convention is column-major,
@@ -154,17 +158,12 @@ bool ops_match(const Graph& g, const Op& a, const Op& b,
   if (a.opcode == OP_INDEX || a.opcode == OP_SET_INDEX ||
       a.opcode == OP_SET_INDEX_INPLACE)
     return a.n_idata == 1 && b.n_idata == 1;
-  if (a_row_read) {
-    if (a.n_idata != b.n_idata) return false;
-    bool same = true;
-    for (int64_t k = 0; k < a.n_idata; ++k)
-      same = same && a.idata[k] == b.idata[k];
-    if (same) return true;
-    if (is_strided(a.opcode))
-      return b.idata[0] == a.idata[0] + lane_distance &&
-             b.idata[1] == a.idata[1];
-    return b.idata[0] == a.idata[0] + lane_distance * g.slots[a.out].len;
-  }
+  // A row read may start anywhere in the same base (a strided one with the
+  // same stride): classification decides whether the lanes' windows elide,
+  // pack through one gather, or neither.
+  if (a_row_read)
+    return a.n_idata == b.n_idata &&
+           (!is_strided(a.opcode) || b.idata[1] == a.idata[1]);
   if (a_row_store) {
     if (a.n_idata != b.n_idata) return false;
     if (is_strided(a.opcode))
@@ -1010,7 +1009,8 @@ RerollStats reroll(Graph& g,
         for (int p = 0; p < P; ++p) {
           const Op& t0 = op_at(p, base);
           if (t0.opcode == OP_INDEX || t0.opcode == OP_CONCAT2 ||
-              is_element_store(t0) || is_row_store(t0) || is_row_read(t0) ||
+              t0.opcode == OP_DOT || is_element_store(t0) || is_row_store(t0) ||
+              is_row_read(t0) ||
               has_op_trait(t0.opcode, op_trait::kRerollAnyDensity) ||
               has_op_trait(t0.opcode, op_trait::kRerollWidenable))
             continue;
@@ -1476,8 +1476,43 @@ RerollStats reroll(Graph& g,
                 prefix = std::min(prefix, br_row < Luse ? br_row : (int64_t)0);
               }
             } else {
-              refuse(LaneDecline::kRowShape, t);
-              prefix = std::min(prefix, br_row < Luse ? br_row : (int64_t)0);
+              // Windows at offsets that follow the data (`z[, s[i]]`): one
+              // OP_GATHER of every lane's window, in the region's packing
+              // order. Every lane must read what its scalar op would have,
+              // so nothing may write the base inside the region. Offsets
+              // that advance by a fixed amount (a partial block of rows)
+              // stay with partition.cpp, which already packs that shape.
+              const int64_t step = strided ? t.idata[1] : 1;
+              const int64_t advance = op_at(p, 1).idata[0] - t.idata[0];
+              bool in_range = true, affine = true;
+              for (int64_t l = 0; l < Luse && in_range; ++l) {
+                const int64_t off = op_at(p, l).idata[0];
+                in_range = off >= 0 && off + (w - 1) * step < blen;
+                affine = affine && off == t.idata[0] + l * advance;
+              }
+              if (affine) {
+                refuse(LaneDecline::kRowShape, t);
+                prefix = std::min(prefix, br_row < Luse ? br_row : (int64_t)0);
+              } else if (!in_range ||
+                         any_in_range_but(writers[(size_t)t.in[0]], i,
+                                          region_end,
+                                          [](size_t) { return false; })) {
+                refuse(LaneDecline::kRowShape, t);
+                prefix = 0;
+              } else {
+                if (w > 1 && !layout_set) {
+                  layout_set = true;
+                  layout_cols = false;
+                }
+                const LaneLayout lay =
+                    layout_cols ? LaneLayout{1, Luse} : LaneLayout{w, 1};
+                ap.gather_idx.assign((size_t)(Luse * w), 0);
+                for (int64_t l = 0; l < Luse; ++l)
+                  for (int64_t k = 0; k < w; ++k)
+                    ap.gather_idx[(size_t)lay.flat_at(l, k)] =
+                        (int)(op_at(p, l).idata[0] + k * step);
+                ap.width = w;
+              }
             }
           } else if (t.opcode == OP_GATHER && t.n_in == 1) {
             // A per-lane gather of an invariant base: lowering's read-side
@@ -1627,6 +1662,29 @@ RerollStats reroll(Graph& g,
               layout_set = true;
               layout_cols = true;
               ap.width = g.slots[t.out].len;
+            }
+          } else if (t.opcode == OP_DOT && t.n_in == 2 && t.variant == 0) {
+            // `X[i] * v`: two w-wide operands and one value per lane. Packed
+            // row-major, each lane's operands are one contiguous group, and
+            // one OP_GROUP_DOT sums each group the way OP_DOT does.
+            const int64_t w = g.slots[t.in[0]].len;
+            const int64_t io_ok = std::min(br_internal, br_nonterm);
+            ap.width = w;
+            if (io_ok < Luse) {
+              refuse(br_internal < Luse ? LaneDecline::kEscapes
+                                        : LaneDecline::kMixedTerms,
+                     t);
+              prefix = std::min(prefix, io_ok);
+            } else if (w < 2 || g.slots[t.in[1]].len != w ||
+                       (layout_set && layout_cols) || !row_operands_ok(ap, t)) {
+              refuse(LaneDecline::kWidth, t);
+              prefix = 0;
+            } else {
+              layout_set = true;
+              layout_cols = false;
+              ap.group_dot = true;
+              ap.rows = w;
+              ap.width = 1;
             }
           } else if (has_op_trait(t.opcode, op_trait::kRerollWidenable)) {
             if (ap.width > 1 &&

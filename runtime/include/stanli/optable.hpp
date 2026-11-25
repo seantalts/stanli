@@ -587,6 +587,13 @@ enum AddVariant : uint8_t {
   kAddTransposeLeft = 2,
 };
 
+// GROUP_DOT over contiguous groups (cell_stride 1), each summed the way
+// OP_DOT sums one vector instead of strictly in order. Re-roll emits it
+// for lanes that each ran OP_DOT, so every lane keeps its scalar value.
+enum GroupDotVariant : uint8_t {
+  kGroupDotAsDot = 1,
+};
+
 // Which DIV reverse-mode grouping an instruction carries: a Program::Instr's
 // `len` (scalar) or a RANGE's `law` (ranged), as for PowZeroBaseLaw.
 enum DivLaw : uint8_t {

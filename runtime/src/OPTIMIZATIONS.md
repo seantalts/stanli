@@ -266,6 +266,10 @@ Element reads and writes get special handling:
 - Reading arbitrary elements, like `mu[county[n]]`: one gather op. Its
   gradient step adds each element's contribution back to the right
   place, including repeated elements.
+- Reading a row or column at an offset that follows the data, like
+  `z[, subject[n]]`: one gather op over every lane's window. Nothing may
+  write the base inside the loop, so every lane reads what its scalar op
+  would have read.
 - Writing `v[0], v[1], ...` across lanes: one store op, or no op when
   the writes cover the whole vector (the computed vector simply becomes
   `v`). Writes stepping by a fixed stride (filling a matrix column by
@@ -281,6 +285,18 @@ Element reads and writes get special handling:
   the whole vector, a slice or a gather of it. A lane that reads another
   element (`mu[n] = mu[n - 1] + ...`) is a recurrence and stays scalar.
   Rows of a matrix follow the same rule.
+
+A dot product of two row-wide operands, like `X[n] * (beta + z[, s[n]])`,
+becomes one `OP_GROUP_DOT`. Constant folding leaves each data row `X[n]` as
+its own constant, and those constants pack into one data matrix like the
+per-lane scalar constants above. The lanes pack row-major, so each lane's
+two rows are one contiguous group, and the group dot sums each group with
+the same Eigen expression as `OP_DOT` (variant `kGroupDotAsDot`). Each
+lane's value is therefore bitwise the scalar one. The gradient adds each
+lane's contribution to a shared vector such as `beta`, or to a gathered
+element of `z`, in a different order than the scalar lanes did. On issue
+657's model (N = 5000) the folded loop drops from 20,014 log-density ops
+to 25 and keeps the same accuracy against an 80-digit reference.
 
 Densities get two more rewrites, depending on where their results go.
 If every lane's density result goes straight into the target, N scalar
@@ -1198,6 +1214,30 @@ the second limit). Lowering tries the lane form first and falls back to the othe
 lane plan refuses the program, for example because it holds an opcode that the
 lanes do not batch. `STANLI_REGION_MAP_LANES=0` skips the lane form.
 
+A read such as `X[n]` or `z[, g[n]]` of a container that every iteration
+shares reads the selected elements where the container lies in the lane form,
+and its backward logs one addition per selected element (below). Neither the
+forward nor the backward copies the container into the call's window, so the
+work per lane grows with the number of selected elements and does not depend
+on the container's length. A container that no parameter reaches gets no
+adjoint at all. Lowering marks a live-in of the map active only when a
+parameter reaches it, and the adjoint generator then clears the input adjoint
+of an index read or write, a dot product or a sum whose input no parameter
+reaches. Islands get the same masks from the carver's activity. Re-rolling
+folds issue #657's loop, so for that loop the lane form is only the fallback
+(below).
+
+The lane form checks the index of each read in every lane. The backward does
+not check again, because the forward of the same evaluation checked the same
+index values. The forward skips its checks too when the index values are the
+same in every evaluation: they come only from the loop variable, constants and
+data, and no branch on a parameter decides whether the read runs
+(`find_proven_gathers` in `region_map_lanes.cpp`). The first evaluation of each
+executor runs every check. When it succeeds, the region map sets one cell of
+its scratch, and later evaluations of that executor skip the checks. An
+out-of-range index therefore throws the same error at the same evaluation as
+before, and keeps throwing, because a failed evaluation never sets the cell.
+
 Each iteration computes the same scalar operations as the unrolled graph. The
 op adds the iteration terms in order and then adds that total to the rest of
 the target, which regroups the sum within the ULP policy. In the lane form,
@@ -1212,6 +1252,149 @@ lane plan and the measurements are in
 [`2026-10-02-region-map-lanes.md`](../../notes/execution/2026-10-02-region-map-lanes.md)
 and
 [`notes/performance/2026-10-03-cogmod-sampling.md`](../../notes/performance/2026-10-03-cogmod-sampling.md).
+
+## Keeping each chain's program small (`lower.cpp`, disable: `STANLI_PROGRAM_BUDGET=0`)
+
+Every chain has its own executor, and every executor holds its own copy of
+the program: for each op, the op itself, a 336-byte kernel context, a forward
+entry and a backward step, about 450 bytes in all (`Executor::program_bytes`).
+Values and adjoints come on top. A loop that unrolls to 100,000 ops therefore
+costs about 45 MB in every chain. With twelve chains on one machine, unrolled
+programs of 10 to 24 MB per executor made each gradient 2.4 to 3.0 times as
+slow as one chain alone, while programs up to 5 MB cost 1.1 to 1.3 times
+([boundary study](../../notes/triage/2026-11-24-issue-657-region-map-boundary.md),
+issue #657).
+
+Lowering chooses the form of each outermost loop in this order:
+
+1. It unrolls the loop and lets the passes fold it. When re-rolling folds the
+   loop into vector ops, the program no longer grows with the data, and this
+   is the fastest form on one chain and on twelve.
+2. After the passes, if the program of the log-density graph is larger than
+   8 MiB, lowering charges each unrolled loop the ops that it produced and
+   that survived the passes. Then it lowers the graph again with the largest
+   of these loops in a compact form, until the rest fits. It keeps the second
+   graph only if its program is smaller.
+3. The compact form is the region map's lane form, when the region map can
+   take the loop's shape. Here the loop does not need to branch on a
+   parameter.
+4. If the program is larger than 32 MiB, a loop that the lane form refuses
+   becomes `OP_LOOP` instead.
+5. Otherwise the loop stays unrolled.
+
+A loop that branches on a parameter keeps the form that the sections above
+describe. So does a loop that prints, rejects or counts into an integer
+declared outside it.
+
+The two budgets come from measurements of the corpus models that a single
+8 MiB budget would change (2026-11-24, Apple M3 Ultra, load 6 to 19 on 32
+cores; time per gradient of the compact form against the unrolled one, with
+each copy on its own thread). The rows marked * were measured on the build
+with only the 8 MiB budget and plain sums, before these models stopped
+changing; the others on the final build. The
+`examplemodels_probit_multi_good` row was measured again on main at
+5fcbdee5a. On the earlier base it was 1.45x, 1.33x and 2.60x faster. In a
+profile on 5fcbdee5a, the Eigen matrix product in the lane form's register
+program takes about a sixth of its gradient.
+
+| model | unrolled program | compact form | 1 copy | 4 copies | 12 copies |
+| --- | ---: | --- | ---: | ---: | ---: |
+| `examplemodels_probit_multi_good` | 12.9 MB | lane form | 1.09x faster | 1.01x faster | 2.00x faster |
+| `hbayesdm_prl_rp` * | 9.0 MB | `OP_LOOP` | 1.29x slower | 1.39x slower | 1.08x faster |
+| `iohmm_reg` * | 17.3 MB | `OP_LOOP` | 1.18x slower | 1.32x slower | 2.35x faster |
+| `examplemodels_cjs_cov_raneff` * | 22.0 MB | `OP_LOOP` | 1.17x slower | 1.16x slower | 2.81x faster |
+| `ch14_m14_11` * | 30.0 MB | `OP_LOOP` | 1.52x slower | 1.27x faster | 1.33x faster |
+| `ch12_m12_6` | 44.3 MB | `OP_LOOP` | 1.01x slower | 1.84x faster | 2.31x faster |
+| `nn_rbm1bJ100` | 59.2 MB | `OP_LOOP` | 1.00x | 1.04x slower | 1.00x |
+| `examplemodels_ms` | 66.7 MB | `OP_LOOP` | 1.20x faster | 1.69x faster | 1.55x faster |
+
+The lane form was about as fast as unrolling on four copies and faster on one
+and twelve. For the programs of 9 to 30 MB, `OP_LOOP` was 1.2x to 1.5x slower
+than unrolling on one copy and mostly on four, though faster at twelve. For the programs of 44 to 67 MB it
+was within 4% of unrolling or faster on one and four copies, and 1.0x to
+2.3x faster at twelve. Four chains are the common case, so `OP_LOOP` waits
+for the second budget. With both budgets, four corpus models
+change: `examplemodels_probit_multi_good` takes the lane form, and
+`ch12_m12_6`, `examplemodels_ms` and `nn_rbm1bJ100` take `OP_LOOP`. Their
+log-density programs shrink from 13 to 67 MB to under 0.2 MB. The models that
+stay over 8 MiB have no loop that a compact form takes: the loop is nested
+inside another loop, or the compact forms refuse it.
+
+The compact forms add the iteration terms with compensation once there are
+more than 32 of them (`CompensatedSum` in `pairwise_sum.hpp`), not in plain
+order. On a loop whose terms nearly cancel, plain order is off by about
+1e-9 in relative terms and the compensated sum by about 1e-12. The unrolled
+graph adds such terms in plain order, so a compact form can move the log
+density by more than 10 ULP from CmdStan while moving it closer to the exact
+value. `tests/ulp_ledger.json` lists the two corpus models where this
+happens on Darwin arm64. For `examplemodels_probit_multi_good`, the 80-digit
+reference puts stanli 150 and CmdStan 225 ULP from the true log density. For
+`nn_rbm1bJ100`, where the 80-digit evaluation timed out, an exact sum of the
+60,008 terms puts stanli 0 to 15 ULP and CmdStan 11 to 3,983 ULP from it.
+
+A loop that unrolls to more than 2^20 ops before the passes stops the first
+lowering, which starts again with that loop in a compact form, `OP_LOOP`
+included. The largest loop in the corpus unrolls to about 180,000 ops, so
+the ceiling stops only much larger loops, such as one over ten million rows.
+If no compact form takes such a loop, the next attempt unrolls it without
+the ceiling. The eighth attempt has no ceiling at all, so a model with many
+such loops is lowered at most nine times.
+
+The cost is a second lowering for the models over the budget. It borrows
+the prepared data from the first lowering instead of copying it. A first
+graph whose fills hold more than 64 MiB of data is freed before the second
+lowering and lowered a third time if the compact graph is not smaller, so
+two copies of that data are never held at once; a smaller first graph is
+kept, because lowering it again can take as long as the first lowering
+(4.7 s for `examplemodels_mr_ss`, whose chosen loop no compact form takes).
+On `nn_rbm1bJ100` (184 MB of data as JSON), peak memory during preparation
+stays at 3.3 GB, as without the budget. `STANLI_FREE_FIRST_BYTES` sets the
+64 MiB in developer builds.
+
+The `write_array` graph, which computes the transformed parameters and
+generated quantities of each draw, has the same budgets, ceiling and retries.
+Its only compact form is `OP_LOOP`, because the region map only takes loops
+that add to the target. So a `write_array` loop changes only when the
+`write_array` program is larger than 32 MiB. A loop there may call `_rng`
+functions. `OP_LOOP` runs the body once per iteration in order and does not
+replay a body that draws, so it takes the same draws in the same order as
+the unrolled graph, with the same values. `test_budget_write_array`
+compares six draws in a row from one generator bit for bit, with
+`poisson_rng` and `gamma_rng`, which take a varying number of uniforms, and
+a draw under a parameter branch. A loop that prints, or that assigns an
+integer that a declared size reads, keeps its form. The compact graph
+replaces the first only if it has the same columns and a smaller program.
+
+Two corpus `write_array` graphs change. Time per draw is the median of 6
+alternating pairs, each copy with its own executor and generator on its own
+thread (2026-11-24, Apple M3 Ultra, load 6 to 11 on 32 cores):
+
+| model | program | 1 copy | 12 copies | preparation |
+| --- | ---: | ---: | ---: | ---: |
+| `examplemodels_ms` | 101.0 to 30.6 MB | 1.02x faster | 1.41x faster | 0.50 to 0.66 s |
+| `hmm_gaussian` | 42.5 to 5.9 MB | 2.38x slower | 1.14x faster | 0.11 to 0.16 s |
+
+Most of what remains of `examplemodels_ms` is one read per output value,
+which lays out the 72,000 elements of `ps` and `po` as columns. For
+`hmm_gaussian`, the 0.9 ms more per draw on one copy is about 1% of the
+time that the sampler spends on the gradients of a draw (about 320
+gradients of 0.21 ms). `hbayesdm_gng_m4` (50.3 MB) keeps its form, because
+`OP_LOOP` refuses its loop, as it does in the log density.
+
+An out-of-range index raises the same error in every form of a loop: each
+dynamic index read carries the label of Stan's error for its selector
+(`label_dynamic_index` in `structured_loop.cpp`), so the region map and
+`OP_LOOP` raise the error that the unrolled graph raises, such as
+`vector[uni] indexing: accessing element out of range`. In the region map
+and `OP_LOOP`, a range selector or an indexed assignment out of range still
+raises `structured index out of range`.
+
+| switch | effect | source |
+| --- | --- | --- |
+| `STANLI_PROGRAM_BUDGET=n` | the program budget in bytes, default 8 MiB; 0 turns the budget off | `lower.cpp` |
+| `STANLI_LOOP_BUDGET=n` | the program size in bytes past which a loop may also become `OP_LOOP`, default 32 MiB | `lower.cpp` |
+| `STANLI_FREE_FIRST_BYTES=n` | the bytes of fills past which the first graph is freed before the budget lowers its section again, default 64 MiB | `lower.cpp` |
+| `STANLI_UNROLL_CEILING=n` | the most ops an outermost loop may unroll to before the passes, default 2^20; 0 means no ceiling | `lower.cpp` |
 
 ## Tape islands (`island.cpp`, disable: `STANLI_NO_ISLAND=1`)
 
@@ -1833,7 +2016,7 @@ Region map:
 
 | switch | effect | read in |
 | --- | --- | --- |
-| `STANLI_REGION_MAP=0` | never map a loop; any other value keeps the default | `lower_region_map.cpp` |
+| `STANLI_REGION_MAP=0` | never map a loop; `all` also maps loops that do not branch on a parameter (for measurement); any other value keeps the default | `lower_region_map.cpp` |
 | `STANLI_REGION_MAP_DIAGNOSTICS` | print why each loop was refused or mapped, and the form it got | `lower_region_map.cpp` |
 | `STANLI_REGION_MAP_LANES=0` | skip the lane form | `lower_region_map.cpp` |
 | `STANLI_REGION_MAP_SAVE_LIMIT=n` | the limit on saved cells for all iterations, default 2^24 | `lower_region_map.cpp` |
@@ -1841,6 +2024,7 @@ Region map:
 | `STANLI_REGION_MAP_TILE_CALLS=0` | turn off the tiled form of kernel calls in the lane form | `region_map_lanes.cpp` |
 | `STANLI_REGION_MAP_TILE_CELLS=n` | recompute each tile's forward registers in the backward when it needs more than `n` registers, instead of saving every tile's | `region_map_lanes.cpp` |
 | `STANLI_REGION_MAP_PROFILE` | print occupancy and per-opcode counts for the lane form when the process exits | `region_map_lanes.cpp` |
+| `STANLI_PROGRAM_BUDGET`, `STANLI_LOOP_BUDGET`, `STANLI_UNROLL_CEILING` | the program budget, the size past which a loop may become `OP_LOOP`, and the most ops one loop may unroll to (see [Keeping each chain's program small](#keeping-each-chains-program-small-lowercpp-disable-stanli_program_budget0)) | `lower.cpp` |
 
 Lowering policy and write_array:
 

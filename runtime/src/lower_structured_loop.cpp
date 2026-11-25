@@ -1645,6 +1645,13 @@ Lowering::Val Lowering::region_index(const Val& base,
     spec->axes.push_back(axis);
   }
   spec->selected_size = selected;
+  if (!rhs)
+    label_dynamic_index(
+        *spec,
+        mat                                                       ? 2
+        : leaf == ViewKind::Vector || leaf == ViewKind::RowVector ? 1
+                                                                  : 0,
+        selectors.size());
   SlotInfo si = view_of(result_view);
   if (mir::is_unsized(result_view, mir::UnsizedLeaf::Matrix)) {
     if (output_dims.size() < 2) fail("structured matrix selection shape");
@@ -3173,6 +3180,7 @@ bool Lowering::try_lower_region(
       trial.region_parameter_control = false;
       auto p = std::make_shared<StructuredLoop>();
       p->cache_execution_path = !output_references;
+      p->compensated_target = lowering_compact && !in_write_array;
       trial.region_current = &p->root;
       std::map<int, int> imported;
       std::map<int, bool> import_active, import_data_only;

@@ -1100,9 +1100,8 @@ jobs:
           runtime_path="$PWD/rt/${{ matrix.library }}"
           if [ "$RUNNER_OS" = Windows ]; then runtime_path=$(cygpath -m "$runtime_path"); fi
           echo "STANLI_RUNTIME=$runtime_path" >> "$GITHUB_ENV"
-          # The independent Windows CLI discovers stanli-compile.exe beside
-          # itself. Use the runtime's complete deployment directory, which
-          # already contains that compiler and its supporting DLLs.
+          # Every CLI links the embedded compiler. Run it from the runtime's
+          # deployment directory, as a user would.
           cp "r-oracle-cli/${{ matrix.cli }}" "rt/${{ matrix.cli }}"
           cli_path="$PWD/rt/${{ matrix.cli }}"
           if [ "$RUNNER_OS" = Windows ]; then cli_path=$(cygpath -m "$cli_path"); fi
@@ -1134,11 +1133,11 @@ jobs:
           name: r-first-posterior-${{ matrix.runtime }}
           path: r-first-posterior.csv
 
-  # The Windows wheel cannot embed the native compiler yet. Cross-build
-  # stanli's portable-MIR executable, which the wheel ships, and stock stanc,
-  # which the Windows test build uses for its MIR fixtures, from the same
-  # stanc3 fork revision the other wheels embed, using stanc3's own
-  # Linux-to-Windows recipe. Their provenance is checked before packaging.
+  # Cross-build stanli's portable-MIR executable and stock stanc from the
+  # same stanc3 fork revision the wheels embed, using stanc3's own
+  # Linux-to-Windows recipe. The Windows wheel no longer ships this
+  # executable (it embeds the compiler; see stanc-embed-windows), but the
+  # parity job below keeps checking it against the JavaScript producer.
   stanc-windows:
     name: cross-build Windows compilers
     needs: changes
@@ -1323,11 +1322,146 @@ jobs:
           Rscript tests/test_windows_compiler.R \
             windows-compilers/stanli-compile.exe
 
+  # Build the embedded stanc3 archive (deps/stanc3/embed/<key>/) and stock
+  # stanc.exe natively, as tools/dev_setup.sh does on a developer's machine:
+  # an MSYS2 CLANG64 toolchain plus a native opam switch. The cross-built
+  # OCaml in stanc-windows cannot produce this archive. win_amd64 links it
+  # into stanli.dll with UCRT64 GCC, so the runtime never starts a separate
+  # compiler process, which endpoint security can block (issue #669).
+  stanc-embed-windows:
+    name: build Windows embedded compiler
+    needs: changes
+    if: >-
+      github.event_name != 'pull_request' ||
+      needs.changes.outputs.heavy == 'true'
+    runs-on: windows-2022
+    timeout-minutes: 120
+    env:
+      OPAMROOT: C:\opam
+      OPAM_VERSION: 2.5.2
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: msys2/setup-msys2@v2
+        id: msys2
+        continue-on-error: true
+        with:
+          msystem: CLANG64
+          update: true
+          # Keep the action-installed opam on PATH in the MSYS2 shell.
+          path-type: inherit
+          install: git make curl mingw-w64-x86_64-gcc
+          pacboy: clang:p lld:p llvm-tools:p cmake:p python:p
+
+      - name: Set up MSYS2 again after a failed attempt
+        if: steps.msys2.outcome == 'failure'
+        id: msys2-retry
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: CLANG64
+          update: true
+          path-type: inherit
+          install: git make curl mingw-w64-x86_64-gcc
+          pacboy: clang:p lld:p llvm-tools:p cmake:p python:p
+
+      - name: Identify compiler cache inputs
+        id: toolchain
+        shell: msys2 {0}
+        run: |
+          source tools/stanc_embed/provenance.sh
+          echo "id=$(clang --version | sha256sum | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
+          echo "ocaml=$(stanc_embed_read_setup OCAML_VERSION)" >> "$GITHUB_OUTPUT"
+          echo "switch=$(stanc_embed_read_setup OPAM_SWITCH)" >> "$GITHUB_OUTPUT"
+          echo "stanc=$(stanc_embed_read_setup STANC3_SRC_SHA)" >> "$GITHUB_OUTPUT"
+
+      - name: Install opam and configure PATH
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $opamDir = Join-Path $env:RUNNER_TEMP 'opam-bin'
+          New-Item -ItemType Directory -Force -Path $opamDir | Out-Null
+          $opamExe = Join-Path $opamDir 'opam.exe'
+          Invoke-WebRequest -UseBasicParsing -Uri "https://github.com/ocaml/opam/releases/download/${env:OPAM_VERSION}/opam-${env:OPAM_VERSION}-x86_64-windows.exe" -OutFile $opamExe
+          $opamDir | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+          $msysRoot = '${{ steps.msys2-retry.outputs.msys2-location || steps.msys2.outputs.msys2-location }}'
+          Join-Path $msysRoot 'usr\bin' | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+          Join-Path $msysRoot 'clang64\bin' | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+
+      - name: Restore opam switch and packages
+        id: opam-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ env.OPAMROOT }}
+          key: windows-opam-v2-windows-2022-CLANG64-${{ env.OPAM_VERSION }}-${{ steps.toolchain.outputs.ocaml }}-${{ steps.toolchain.outputs.switch }}-${{ steps.toolchain.outputs.stanc }}
+          restore-keys: |
+            windows-opam-v2-windows-2022-CLANG64-${{ env.OPAM_VERSION }}-${{ steps.toolchain.outputs.ocaml }}-${{ steps.toolchain.outputs.switch }}-
+
+      - name: Validate the restored OCaml switch
+        if: steps.opam-cache.outputs.cache-matched-key != ''
+        shell: msys2 {0}
+        run: bash tools/stanc_embed/validate_cached_switch.sh
+
+      - name: Restore the built compilers and source state
+        id: stanc-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            deps/stanc3
+            deps/stanc3-src
+          key: windows-embed-v1-windows-2022-${{ steps.toolchain.outputs.id }}-${{ env.OPAM_VERSION }}-${{ steps.toolchain.outputs.ocaml }}-${{ steps.toolchain.outputs.stanc }}-${{ hashFiles('compiler/**', 'tools/stanc_embed/**', 'harnesses/conformance/build_stanc.sh', 'tools/dev_setup.sh', 'tools/dev_setup_windows.sh', 'deps/pins.env') }}
+          restore-keys: windows-embed-v1-windows-2022-${{ steps.toolchain.outputs.id }}-${{ env.OPAM_VERSION }}-${{ steps.toolchain.outputs.ocaml }}-${{ steps.toolchain.outputs.stanc }}-
+
+      - name: Build and validate the compilers
+        run: bash tools/dev_setup.sh --embed --no-build
+        shell: pwsh
+
+      - name: Save the prepared opam switch and packages
+        if: steps.opam-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ env.OPAMROOT }}
+          key: ${{ steps.opam-cache.outputs.cache-primary-key }}
+
+      - name: Save the built compilers and source state
+        if: steps.stanc-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            deps/stanc3
+            deps/stanc3-src
+          key: ${{ steps.stanc-cache.outputs.cache-primary-key }}
+
+      - name: Validate the embedded stanc3 archive
+        shell: msys2 {0}
+        run: |
+          source tools/stanc_embed/provenance.sh
+          embed_dir=$(stanc_embed_dir)
+          stanc_embed_artifact_matches "$embed_dir/stanc_embed.o"
+          test -d "$embed_dir/include/caml"
+          test -x "$embed_dir/stanli-vectorize-probe"
+          symbols=$(nm -g "$embed_dir/stanc_embed.o")
+          for symbol in caml_c_thread_register caml_c_thread_unregister; do
+            # A here-string, not a pipe: grep -q stops at the first match,
+            # and under pipefail the writer's SIGPIPE fails the step.
+            grep -Eq " T ${symbol}$" <<<"$symbols"
+          done
+          test "$(cat deps/stanc3/stanc.src)" = "$(stanc_embed_read_setup STANC3_SRC_SHA)"
+          ./deps/stanc3/stanc.exe --version
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-embedded-compiler
+          if-no-files-found: error
+          path: |
+            deps/stanc3/stanc.exe
+            deps/stanc3/stanc.src
+            deps/stanc3/embed/
+
   # Source PRs require the same Windows wheel build, CTest suite, and installed
   # Python checks that main, nightly, manual, and release runs exercise.
   windows:
     name: win_amd64
-    needs: [changes, stanc-windows, windows-compiler]
+    needs: [changes, stanc-embed-windows]
     if: >-
       github.event_name != 'pull_request' ||
       needs.changes.outputs.heavy == 'true'
@@ -1404,17 +1538,19 @@ jobs:
           git -C deps/stanc3-src sparse-checkout set test/integration
           git -C deps/stanc3-src checkout -q --detach "$STANC3_SRC_SHA"
 
-      - name: Install the source-built compilers
+      - name: Install the embedded compiler and stock stanc
         uses: actions/download-artifact@v4
         with:
-          name: windows-compilers
+          name: windows-embedded-compiler
           path: deps/stanc3
 
+      # This job has no opam switch, so the helper checks every
+      # source-derived field of the stamp and the configured OCaml version.
       - name: Check compiler provenance
         run: |
-          bash tools/check_windows_compiler_provenance.sh deps/stanc3
-          chmod +x deps/stanc3/stanc deps/stanc3/stanli-compile
-          cp deps/stanc3/stanc deps/stanc3/stanc.exe
+          source tools/stanc_embed/provenance.sh
+          stanc_embed_artifact_matches "$(stanc_embed_dir)/stanc_embed.o"
+          test "$(cat deps/stanc3/stanc.src)" = "$STANC3_SRC_SHA"
           ./deps/stanc3/stanc.exe --version
 
       - name: Configure, build, test
@@ -1424,6 +1560,7 @@ jobs:
           cmake -B build-rel -G Ninja -DCMAKE_BUILD_TYPE=Release \
             -DSTANLI_STAN_DENSITY_ORACLE=OFF \
             -DSTANLI_DEBUG_SWITCHES=OFF \
+            -DSTANLI_EMBED_STANC=ON \
             -DCMAKE_C_COMPILER_LAUNCHER=ccache \
             -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
           cmake --build build-rel -j4
@@ -1435,8 +1572,18 @@ jobs:
           python3 -m pip install --upgrade wheel
           ./tools/build_wheel.sh
           test -f python/stanli/_bin/stanli.dll
-          test -f python/stanli/_bin/stanli-compile.exe
-          unzip -l dist/*.whl | grep -F 'stanli/_bin/stanli-compile.exe'
+          # The compiler is linked into stanli.dll; no separate program ships.
+          test ! -e python/stanli/_bin/stanli-compile.exe
+          if unzip -l dist/*.whl | grep -F 'stanli-compile'; then
+            echo "the Windows wheel must not ship stanli-compile" >&2
+            exit 1
+          fi
+          objdump -p python/stanli/_bin/stanli.dll | grep 'DLL Name'
+          if objdump -p python/stanli/_bin/stanli.dll |
+               grep -Ei 'DLL Name: *(lib|msvcrt)'; then
+            echo "stanli.dll must not depend on MinGW runtime DLLs" >&2
+            exit 1
+          fi
 
       # The wheel must work from python.org's CPython, not just msys2's:
       # that is the interpreter Windows users actually have.
@@ -1469,8 +1616,8 @@ jobs:
           name: wheel-win_amd64
           path: dist/*.whl
 
-      # As above, for the R package. This _bin/ has stanli-compile.exe as
-      # well as the DLL, because the Windows build does not embed a compiler.
+      # As above, for the R package. Like the Unix runtimes, this _bin/
+      # holds only the library, which embeds the compiler.
       - name: Runtime tarball
         run: |
           mkdir -p runtime-dist
@@ -1479,10 +1626,8 @@ jobs:
           members=$(tar tzf \
             runtime-dist/stanli-runtime-windows-x86_64.tar.gz)
           printf '%s\n' "$members"
-          for file in stanli.dll stanli-compile.exe; do
-            printf '%s\n' "$members" | grep -Eq "(^|/)${file}$"
-          done
-          test "$(printf '%s\n' "$members" | grep -vc '/$')" -eq 2
+          printf '%s\n' "$members" | grep -Eq '(^|/)stanli\.dll$'
+          test "$(printf '%s\n' "$members" | grep -vc '/$')" -eq 1
 
       - uses: actions/upload-artifact@v4
         with:
@@ -2096,7 +2241,7 @@ jobs:
     name: manylinux_2_28_x86_64
     if: always() && github.event_name == 'pull_request'
     needs: [changes, static_checks, build, windows, browser-compiler, r-tests,
-            stanc-windows, windows-compiler]
+            stanc-windows, windows-compiler, stanc-embed-windows]
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -2112,6 +2257,7 @@ jobs:
           R_RESULT: ${{ needs.r-tests.result }}
           STANC_WINDOWS_RESULT: ${{ needs.stanc-windows.result }}
           WINDOWS_COMPILER_RESULT: ${{ needs.windows-compiler.result }}
+          WINDOWS_EMBED_RESULT: ${{ needs.stanc-embed-windows.result }}
         run: |
           test "$CHANGE_RESULT" = success
           test "$STATIC_RESULT" = success
@@ -2124,6 +2270,7 @@ jobs:
             test "$COMPILER_RESULT" = skipped
             test "$STANC_WINDOWS_RESULT" = skipped
             test "$WINDOWS_COMPILER_RESULT" = skipped
+            test "$WINDOWS_EMBED_RESULT" = skipped
           elif [ "$HEAVY" = true ]; then
             test "$BUILD_RESULT" = success
             test "$WINDOWS_RESULT" = success
@@ -2131,6 +2278,7 @@ jobs:
             test "$R_RESULT" = success
             test "$STANC_WINDOWS_RESULT" = success
             test "$WINDOWS_COMPILER_RESULT" = success
+            test "$WINDOWS_EMBED_RESULT" = success
           else
             test "$HEAVY" = false
             test "$BUILD_RESULT" = skipped
@@ -2139,6 +2287,7 @@ jobs:
             test "$R_RESULT" = skipped
             test "$STANC_WINDOWS_RESULT" = skipped
             test "$WINDOWS_COMPILER_RESULT" = skipped
+            test "$WINDOWS_EMBED_RESULT" = skipped
           fi
 
   # Nothing else tells anyone that main went red after a merge: the ASan job
@@ -2150,7 +2299,8 @@ jobs:
     if: always() && github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
     needs: [changes, static_checks, no-stdio, build, windows, asan, tsan, wasm,
             wasm-webr, browser-compiler, r-tests, r-platform-tests,
-            stanc-windows, windows-compiler, pages, dev-runtime-release]
+            stanc-windows, windows-compiler, stanc-embed-windows, pages,
+            dev-runtime-release]
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:

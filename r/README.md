@@ -468,11 +468,13 @@ stan-math, the density kernels and the interpreter. The package and the
 runtime each carry a layout version. If the versions do not match, stanli
 stops with a message that says which one to update.
 
-The macOS and Linux runtimes include the Stan compiler. On Windows the
-compiler is a separate short-lived program, `stanli-compile.exe`, in the same
-folder as the runtime. If neither is available,
-R uses the bundled JavaScript build of the same compiler through V8. webR
-uses that build too.
+The macOS, Linux and Windows x86_64 runtimes include the Stan compiler, which
+runs in the R process; no separate program is started. (Older Windows
+runtimes shipped a `stanli-compile.exe` beside the runtime, which some
+endpoint security software blocked. A source build without the embedded
+compiler still uses a `stanli-compile` executable in the runtime's folder.)
+If neither is available, R uses the bundled JavaScript build of the same
+compiler through V8. webR uses that build too.
 
 ## Limits
 

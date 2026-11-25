@@ -599,7 +599,15 @@ function(stanli_embed_stanc TGT)
       # This artifact is an archive on Windows. Treating it as a source
       # nests it inside CMake's objects.a with Makefile generators, which
       # the final linker cannot consume as an object member.
-      target_link_libraries(${TGT} PRIVATE ${STANLI_EMBED_OBJECT})
+      if(MINGW AND NOT CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
+        # GNU ld does not rescan the archive for __imp_ import stubs that
+        # members pulled in late reference (OCaml's unix stubs); a group
+        # makes it iterate until the references settle.
+        target_link_libraries(${TGT} PRIVATE
+          -Wl,--start-group ${STANLI_EMBED_OBJECT} -Wl,--end-group)
+      else()
+        target_link_libraries(${TGT} PRIVATE ${STANLI_EMBED_OBJECT})
+      endif()
     else()
       target_sources(${TGT} PRIVATE ${STANLI_EMBED_OBJECT})
     endif()
@@ -1837,6 +1845,8 @@ if(Python3_Interpreter_FOUND)
              COMMAND ${Python3_EXECUTABLE} tests/test_fuzz_stanc_${_fuzz_test}.py
              WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
   endforeach()
+  # test_generation_is_fast times the generator against a fixed budget.
+  set_tests_properties(test_fuzz_stanc_gen PROPERTIES RUN_SERIAL TRUE)
   # It picks the passes, so it needs the compiler executable.
   set(_stanli_compile
       "${CMAKE_CURRENT_SOURCE_DIR}/deps/stanc3/stanli-compile${CMAKE_EXECUTABLE_SUFFIX}")

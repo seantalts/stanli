@@ -150,7 +150,7 @@ download.file(paste0("https://github.com/seantalts/stanli/releases/download/", t
 ```
 
 Copy the tarball to the lab. Before you load stanli, extract all of its
-files. On Windows, the compiler and supporting DLLs must stay in the same
+files. On Windows, the supporting DLLs must stay in the same
 folder as the runtime:
 
 ```r

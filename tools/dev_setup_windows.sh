@@ -36,6 +36,29 @@ fi
 msys_root=${msys_root%/}
 [[ -x "$msys_root/usr/bin/pacman.exe" ]] || windows_install MSYS2.MSYS2
 
+# Git for Windows and MSYS2 ship different builds of the msys runtime. A
+# process that one runtime starts directly from the other receives almost no
+# environment (COMSPEC, TEMP, TMP, LOCALAPPDATA and the user's PATH are all
+# missing), which breaks opam ("Exec format error") and dune. Everything below
+# runs MSYS2 tools, so from Git Bash restart this script under MSYS2's bash.
+# PowerShell is a native process, so it passes the whole environment along.
+if [[ ! -x /usr/bin/pacman.exe && -x "$msys_root/usr/bin/bash.exe" ]]; then
+  if [[ -n ${STANLI_SETUP_REEXEC:-} ]]; then
+    echo "could not start dev_setup.sh under MSYS2's bash ($msys_root)" >&2
+    exit 1
+  fi
+  step "restarting under MSYS2 bash ($(cygpath -m "$msys_root"))"
+  STANLI_SETUP_REEXEC=1 MSYSTEM=${msys_env^^} \
+  STANLI_SETUP_BASH=$(cygpath -w "$msys_root/usr/bin/bash.exe") \
+  STANLI_SETUP_SCRIPT=$(cygpath -w "$REPO/tools/dev_setup.sh") \
+  STANLI_SETUP_ARGS="$*" \
+    powershell.exe -NoProfile -NonInteractive -Command \
+      '& $env:STANLI_SETUP_BASH $env:STANLI_SETUP_SCRIPT @($env:STANLI_SETUP_ARGS -split " " | Where-Object { $_ }); exit $LASTEXITCODE'
+  exit 0
+fi
+
+# winget puts opam on the user PATH, which an older shell may not have yet.
+have opam || windows_refresh_path
 have opam || windows_install OCaml.opam
 export PATH="$msys_root/$msys_env/bin:$msys_root/usr/bin:$PATH"
 for tool in git make; do

@@ -2,14 +2,16 @@
 
 `.github/workflows/wheels.yml` builds five wheels: macOS arm64 and x86_64,
 manylinux_2_28 x86_64 and aarch64, and Windows x86_64. Pull requests with
-source changes run the manylinux x86_64 build plus a compiler-only Windows
-gate that cross-builds both compiler artifacts and byte-compares the
-portable producer with the JavaScript producer. Prose-only changes and the
-generated browser page take a static check path. The allowlist fails
-closed, so an unfamiliar path gets the full build. All five builds run
-after merge, nightly, and on release tags.
-The four Unix wheels link the embedded compiler; Windows packages
-`stanli-compile.exe` and stock `stanc.exe` beside `stanli.dll`. Every wheel
+source changes run the manylinux x86_64 build plus the Windows x86_64
+build, and a Windows gate that cross-builds `stanli-compile.exe` and
+byte-compares the portable producer with the JavaScript producer.
+Prose-only changes and the generated browser page take a static check
+path. The allowlist fails closed, so an unfamiliar path gets the full
+build. All five builds run after merge, nightly, and on release tags.
+All five wheels link the embedded compiler. The Windows wheel links an embed
+archive that the `stanc-embed-windows` job builds natively (MSYS2 CLANG64 and
+a native opam switch), so it ships no `stanli-compile.exe`; that executable
+is still built for the parity gate but is not packaged. Every wheel
 runs the test suite, checks its platform contract, and samples eight
 schools from a clean installed environment.
 

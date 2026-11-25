@@ -3063,8 +3063,10 @@ static void row_index_tests() {
   } catch (const std::exception& e) {
     error = e.what();
   }
-  check(error == "structured index out of range",
-        "row index past the end reports the structured index error");
+  check(error ==
+            "array[uni, ...] index: accessing element out of range. index 7 "
+            "out of range; expecting index to be between 1 and 6",
+        "row index past the end reports Stan's error, as unrolled");
   test_unsetenv("STANLI_STRUCTURED_LOOPS");
 }
 

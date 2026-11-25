@@ -59,6 +59,9 @@ struct Pos {
                                 //   OP_SUM_ROWS; ap.width becomes 1 after
   bool term_widen = false;      // widenable, every lane's out a target term
                                 //   -> widen + OP_SUM_VEC, swap the terms
+  bool group_dot = false;       // OP_DOT of two `rows`-wide row-major lane
+                                //   operands -> one OP_GROUP_DOT, one value
+                                //   per lane
   std::vector<int> gather_idx;  // OP_INDEX with a data-driven index
   int store_vec = -1;           // element write filling a window of this
   int store_start = 0;          //   vector, starting here,
@@ -167,6 +170,9 @@ inline bool profitable(const Graph& g, const CandidatePlan& plan,
     } else if (ap.term_widen) {
       ops_out += 2;
       lane_elems += 2 * ap.width;
+    } else if (ap.group_dot) {
+      ++ops_out;
+      lane_elems += 2 * ap.rows;
     } else if (ap.store_vec >= 0) {
       if (ap.repack) {
         ++ops_out;
@@ -476,6 +482,20 @@ inline void SelectedPlan::emit(Graph& g, Fills& fills, TermRetirement& retired,
         case InKind::kBad:
           break;  // unreachable: classification succeeded
       }
+    }
+    if (ap.group_dot) {
+      // Each lane's two rows sit contiguously (row-major), so group l is
+      // the cells l*rows .. l*rows+rows-1 of both packed operands, summed
+      // as OP_DOT sums them.
+      op.opcode = OP_GROUP_DOT;
+      op.variant = kGroupDotAsDot;
+      g.idata_pool.push_back({(int)Luse, (int)ap.rows, (int)ap.rows, 1});
+      op.idata = g.idata_pool.back().data();
+      op.n_idata = 4;
+      op.out = g.add_slot(Luse, false);
+      pos_out[(size_t)p] = op.out;
+      result.push_back(op);
+      continue;
     }
     // Swap the Luse lane terms for one replacement, at the first
     // lane's position (term_density and term_widen both end here).
