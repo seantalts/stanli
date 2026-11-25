@@ -8,7 +8,7 @@ import math
 import pathlib
 import sys
 import time
-from typing import Dict, Mapping, Optional, Tuple
+from typing import Dict, List, Mapping, Optional, Sequence, Tuple
 
 from .catalog import ConstructCase, ConstructCatalog
 from .compare import (DEFAULT_GATE, Expectation, Gate, Observation,
@@ -60,6 +60,37 @@ def _profile_points(profile: Optional[str], width: int) \
     second = tuple(0.1 + 0.05 * (index % 7) - 0.15 * (index % 3)
                    for index in range(width))
     return (zero, first, second)
+
+
+def _apply_divergent_points(case: ConstructCase,
+                            outcomes: Sequence[OutcomeComparison]) \
+        -> List[OutcomeComparison]:
+    """Accept the cataloged mismatches, and fail once one of them agrees.
+
+    A divergent point is one where the reference and stanli are expected
+    to differ for a recorded cause, such as a branch on a sum that is
+    exactly zero. If the point starts to agree, the entry is out of date.
+    """
+    result = []
+    for outcome in outcomes:
+        index = outcome.details.get("point_index")
+        cause = case.divergent_points.get(index)
+        if cause is None:
+            result.append(outcome)
+        elif outcome.status == ResultStatus.MISMATCH:
+            result.append(dataclasses.replace(
+                outcome, status=ResultStatus.VERIFIED,
+                reason=f"point {index} differs as cataloged: {cause}",
+                details={**outcome.details, "divergence": cause,
+                         "divergence_reason": outcome.reason}))
+        elif outcome.status == ResultStatus.VERIFIED:
+            result.append(dataclasses.replace(
+                outcome, status=ResultStatus.MISMATCH,
+                reason=(f"point {index} is listed in divergent_points but "
+                        "now agrees with the reference; remove the entry")))
+        else:
+            result.append(outcome)
+    return result
 
 
 def _observation(response: Mapping[str, object]) -> Observation:
@@ -274,6 +305,7 @@ def _evaluate_case(case: ConstructCase, reference: ReferenceBuild,
                     details={"point_index": index, "point": list(point),
                              **dict(comparison.details)}))
 
+            outcomes = _apply_divergent_points(case, outcomes)
             chosen = min(outcomes, key=lambda item: _PRECEDENCE[item.status])
             status = chosen.status
             reason = chosen.reason
