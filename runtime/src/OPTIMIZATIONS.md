@@ -1214,6 +1214,17 @@ the second limit). Lowering tries the lane form first and falls back to the othe
 lane plan refuses the program, for example because it holds an opcode that the
 lanes do not batch. `STANLI_REGION_MAP_LANES=0` skips the lane form.
 
+A read such as `X[n]` or `z[, g[n]]` of a container that every iteration
+shares reads the selected elements where the container lies in the lane form,
+and its backward logs one addition per selected element (below). Neither the
+forward nor the backward copies the container into the call's window, so the
+work per lane grows with the number of selected elements and does not depend
+on the container's length. A container that no parameter reaches gets no
+adjoint at all. Lowering marks a live-in of the map active only when a
+parameter reaches it, and the adjoint generator then clears the input adjoint
+of an index read or write, a dot product or a sum whose input no parameter
+reaches. Islands get the same masks from the carver's activity.
+
 Each iteration computes the same scalar operations as the unrolled graph. The
 op adds the iteration terms in order and then adds that total to the rest of
 the target, which regroups the sum within the ULP policy. In the lane form,

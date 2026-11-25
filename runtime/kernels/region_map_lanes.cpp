@@ -1585,8 +1585,9 @@ void lane_instruction(const RegionMapProg& p, const TileState& t, int pc,
         bind_call_fwd_ctx(w.fwd, window, call_ctx, state);
       }
       const double* const base = t.base();
-      // An index read takes its container where it lies, so a lane costs
-      // the selection and not the container.
+      // An index read takes its container where it lies. The work per lane
+      // grows with the number of selected elements, whatever the container's
+      // size.
       if (w.index_sites)
         call_ctx.in[0] = Desc{const_cast<double*>(t.shared_regs()) + call.in[0],
                               call.in_len[0]};
