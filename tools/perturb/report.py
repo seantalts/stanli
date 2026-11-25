@@ -5,7 +5,8 @@ import json
 import re
 from collections import Counter, defaultdict
 
-from run import FLAG_RATIO, LOAD_WARNING, ratio_text
+from measure import normalized_text, ratio_text
+from run import FLAG_RATIO, LOAD_WARNING
 
 OUTCOMES = ("invalid", "same_program", "fine", "flagged_cmdstan_equal",
             "cliff", "failure", "flagged", "valid", "error")
@@ -86,7 +87,7 @@ def variant_report(records, meta, known):
                 f"| {arrow(mib(r['base_program'].get('executor_bytes')), mib(r['variant_program'].get('executor_bytes')))} "
                 f"| {ratio_text(r['confirm']['ratio'])} "
                 f"| {ratio_text(r['cmdstan']['ratio'])} "
-                f"| {r['cliff']:.2f} | {ratio_text(r['stanli_vs_cmdstan'])} "
+                f"| {normalized_text(r['cliff'])} | {ratio_text(r['stanli_vs_cmdstan'])} "
                 f"| {known_reason('cliff', r, known) or 'new'} |")
         out.append("")
         for r in rows:
@@ -125,7 +126,7 @@ def variant_report(records, meta, known):
         (bo, bw), (vo, vw) = ops_of(r, "base"), ops_of(r, "variant")
         stanli = (r.get("confirm") or r.get("timing") or {}).get("ratio")
         cmd = (r.get("cmdstan") or {}).get("ratio")
-        cliff = f"{r['cliff']:.2f}" if "cliff" in r else "-"
+        cliff = normalized_text(r.get("cliff"))
         note = (r.get("reason") or "; ".join(
             r.get("new_declines", []) + ([lowering_change(r)]
                                          if lowering_change(r) else [])))

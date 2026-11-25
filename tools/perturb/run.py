@@ -42,11 +42,7 @@ INVALID_KINDS = ("lp", "grad", "one_side_threw", "crash", "timeout")
 PROPTO = re.compile(r"~|_lupdf\b|_lupmf\b")
 
 
-def ratio_text(r):
-    """A time ratio new/old as "N.NNx slower" or "N.NNx faster"."""
-    if r is None or not math.isfinite(r) or r <= 0:
-        return "-"
-    return f"{r:.2f}x slower" if r >= 1 else f"{1 / r:.2f}x faster"
+ratio_text = m.ratio_text
 
 
 # ---------------------------------------------------------------------------
@@ -298,7 +294,7 @@ def run_variants(args, tools):
                 rec["outcome"], rec["reason"] = "error", f"cmdstan: {e!r}"
             rec["cmdstan_s"] = time.monotonic() - started
             print(f"{rec['outcome']:7s} {rec['seed']}/{rec['variant']}: "
-                  f"cliff {rec.get('cliff', float('nan')):.2f}", flush=True)
+                  f"{m.normalized_text(rec.get('cliff'))}", flush=True)
     return records, meta
 
 

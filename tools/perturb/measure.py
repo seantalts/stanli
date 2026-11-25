@@ -76,6 +76,22 @@ def run(argv, timeout, env=None, cwd=None):
     return r.returncode, r.stdout, r.stderr, time.monotonic() - started
 
 
+def ratio_text(r):
+    """A time ratio new/old as "N.NNx slower" or "N.NNx faster"."""
+    if r is None or not math.isfinite(r) or r <= 0:
+        return "-"
+    return f"{r:.2f}x slower" if r >= 1 else f"{1 / r:.2f}x faster"
+
+
+def normalized_text(r):
+    """stanli's slowdown over CmdStan's, said without a ratio below 1."""
+    if r is None or not math.isfinite(r) or r <= 0:
+        return "-"
+    if r >= 1:
+        return f"stanli slows {r:.2f}x more"
+    return f"CmdStan slows {1 / r:.2f}x more"
+
+
 def failure_text(code, err):
     if code is None:
         return "timeout"
