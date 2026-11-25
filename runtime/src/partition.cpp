@@ -131,7 +131,8 @@ struct PosIn {
   InKind kind = InKind::kInvariant;
   int producer = -1;           // kLaneLocal: position within the lane
   std::vector<double> values;  // kConstLanes: one value per lane
-  bool tile_wide = false;      // kInvariant/shared, len == width: OP_REP_MAT
+  bool tile_wide = false;      // kInvariant/shared, len == width: OP_REP_MAT;
+                               // a shared stored value: OP_REP_VEC
 };
 
 enum class Emit {
@@ -876,6 +877,10 @@ PartitionStats partition_lanes(Graph& g, Fills& fills,
           decline(LaneDecline::kStoreShape, t.opcode);
           break;
         }
+        // A value that hoisted to one scalar (exp(a) in every row) is
+        // broadcast to the L elements the store writes (#690).
+        ap.ins[1].tile_wide = ap.ins[1].kind == InKind::kLaneLocal &&
+                              pos[(size_t)ap.ins[1].producer].shared;
         ap.emit = Emit::kStore;
         ap.width = 1;
         ap.idx.assign(1, (int)start);
@@ -932,6 +937,7 @@ PartitionStats partition_lanes(Graph& g, Fills& fills,
              !(t.variant & kCategoricalRows) &&
              ap.ins[0].kind == InKind::kConstLanes &&
              ap.ins[1].kind == InKind::kLaneLocal &&
+             !pos[(size_t)ap.ins[1].producer].shared &&
              width == g.slots[(size_t)t.in[1]].len;
         if (!ok) {
           decline(LaneDecline::kDensityForm, t.opcode);
@@ -1148,14 +1154,15 @@ PartitionStats partition_lanes(Graph& g, Fills& fills,
       // case, elementwise.cpp's rep_mat_fwd). partition's fused reads are
       // always lane-major (an explicit index list or a lane-major base), so
       // this is the only mode a bucket ever needs.
+      // A scalar (a stored value) becomes OP_REP_VEC.
       const auto tile_wide = [&](int base) {
         const int64_t w = g.slots[(size_t)base].len;
         Op rep;
-        rep.opcode = OP_REP_MAT;
+        rep.opcode = w == 1 ? OP_REP_VEC : OP_REP_MAT;
         rep.n_in = 1;
         rep.in[0] = base;
         rep.out = g.add_slot(L * w, false);
-        attach_idata(rep, std::vector<int>{(int)w, (int)L, 1});
+        if (w != 1) attach_idata(rep, std::vector<int>{(int)w, (int)L, 1});
         out_ops.push_back(rep);
         return rep.out;
       };

@@ -17,6 +17,7 @@
 #include <chrono>
 #include <cmath>
 #include <cstdio>
+#include <exception>
 #include <memory>
 #include <string>
 #include <vector>
@@ -919,6 +920,56 @@ static void test_store_delimited_lanes() {
   expect_same_grad("store", std::move(g), f2, tt, want);
 }
 
+// Issue #690: every lane stores exp(p), which is the same in every lane, so
+// the value hoists to one scalar. The fused slice store still has to write
+// all L elements, whether the indices march by one or by a stride, and
+// whether the elements it skips would hold zeros or values written earlier.
+static void test_store_shared_value() {
+  const int L = 16, N = 40, START = 4;
+  for (int step : {1, 2}) {
+    for (bool initialised : {false, true}) {
+      Graph g;
+      Fills fills;
+      const int p = g.add_slot(1, true);
+      const int vec = g.add_slot(N, false);
+      if (initialised) {
+        std::vector<double> vals((size_t)N);
+        for (int i = 0; i < N; ++i) vals[(size_t)i] = -0.5 + 0.05 * i;
+        fills.emplace_back(vec, vals);
+      }
+      for (int l = 0; l < L; ++l) {
+        const int m = g.add_slot(1, false);
+        g.add_op(OP_EXPV, {p}, m);
+        g.add_op(OP_SET_INDEX_INPLACE, {vec, m}, vec, {START + step * l});
+      }
+      const int lse = g.add_slot(1, false);
+      g.add_op(OP_LOG_SUM_EXP, {vec}, lse);
+      const std::vector<int> terms{lse};
+      const std::vector<double> want = reference(g, fills, terms);
+
+      std::vector<int> tt = terms;
+      Fills f2 = fills;
+      const PartitionStats st = partition_lanes(g, f2, tt, {});
+      const std::string tag = std::string("shared store step ") +
+                              std::to_string(step) +
+                              (initialised ? " initialised" : " zeros");
+      expect((tag + " one group").c_str(), st.groups == 1 && st.lanes == L);
+      const uint16_t slice =
+          step == 1 ? OP_SET_SLICE_INPLACE : OP_SET_SLICE_STRIDED_INPLACE;
+      int stores = 0;
+      for (const Op& op : g.ops) {
+        if (op.opcode != slice) continue;
+        ++stores;
+        expect((tag + " store writes L elements").c_str(),
+               g.slots[(size_t)op.in[1]].len == L);
+      }
+      expect((tag + " one slice store").c_str(),
+             stores == 1 && count_opcode(g, OP_SET_INDEX_INPLACE) == 0);
+      expect_same_grad(tag, std::move(g), f2, tt, want);
+    }
+  }
+}
+
 // multi_occupancy's branch structure: two templates chosen by a data
 // condition, alternating, the second a prefix-extension of the first. The
 // fingerprint separates them. The extended template uses sigma twice, so
@@ -1432,6 +1483,40 @@ static void test_irt_refuse_near_miss(double lead, bool concat) {
          st.groups == 0 && g.ops.size() == before && tt == terms);
 }
 
+// A one-element row of logits that hoists to one scalar: exp(p) in every
+// lane. The fused categorical would read L rows out of that one element, so
+// the bucket must decline and keep the per-lane form.
+static void test_categorical_shared_row_declines() {
+  const int L = 12;
+  Graph g;
+  Fills fills;
+  const int p = g.add_slot(1, true);
+  std::vector<int> terms;
+  for (int l = 0; l < L; ++l) {
+    const int y = g.add_slot(1, false);
+    fills.emplace_back(y, std::vector<double>{1.0});
+    const int row = g.add_slot(1, false);
+    g.add_op(OP_EXPV, {p}, row);
+    const int lp = g.add_slot(1, false);
+    g.add_op(OP_CATEGORICAL, {y, row}, lp);
+    g.ops.back().variant =
+        kCategoricalScalarOutcome | kCategoricalLogit | kCategoricalArgAutodiff;
+    terms.push_back(lp);
+  }
+  const std::vector<double> want = reference(g, fills, terms);
+
+  std::vector<int> tt = terms;
+  Fills f2 = fills;
+  const PartitionStats st = partition_lanes(g, f2, tt, {});
+  expect("categorical shared row declines", st.groups == 0);
+  try {
+    expect_same_grad("categorical shared row", std::move(g), f2, tt, want);
+  } catch (const std::exception& e) {
+    ++failures;
+    std::printf("FAIL categorical shared row threw: %s\n", e.what());
+  }
+}
+
 // ---- categorical rows -------------------------------------------------------
 
 // brms categorical: row l of a matrix of logits, sliced, and one
@@ -1702,6 +1787,7 @@ int main() {
   test_beta_binomial_elt_fusion();
   test_listed_densities_have_both_forms();
   test_store_delimited_lanes();
+  test_store_shared_value();
   test_two_templates_interleaved();
   test_hoisted_shared_scalar_reads();
   test_mid_bucket_writer_split();
@@ -1715,6 +1801,7 @@ int main() {
   test_irt_refuse_near_miss(1.5, true);
   test_categorical_rows();
   test_categorical_array_rows_refuse();
+  test_categorical_shared_row_declines();
   test_cost_declines();
   test_scaling();
   test_bucket_term_scaling();
