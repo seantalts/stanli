@@ -206,6 +206,26 @@ test_that("starting values are written from the parameter declarations", {
                fixed = TRUE)
 })
 
+test_that("partial starting values keep a zero-size part of a tuple", {
+  skip_without_runtime()
+  skip_if_not_installed("posterior")
+  for (code in c(
+    "parameters { tuple(real, vector[0]) t; real s; } model { s ~ normal(0, 1); }",
+    "parameters { array[2] tuple(real, vector[0]) t; real s; } model { s ~ normal(0, 1); }",
+    "parameters { array[2, 2] tuple(matrix[0, 3], real) t; real s; } model { s ~ normal(0, 1); }")) {
+    m <- stanli_model(code = code)
+    point <- local({ set.seed(2); stats::runif(m$n_unconstrained, -2, 2) })
+    got <- unconstrain(m, list(s = 1), partial = TRUE, seed = 2)
+    expect_identical(got, c(point[-m$n_unconstrained], 1), label = code)
+    fit <- sample_cstan(code, chains = 2, iter_warmup = 5, iter_sampling = 3,
+                        refresh = 0, seed = 1, init = list(s = 1))
+    expect_s3_class(fit, "stanli_cstanfit")
+    again <- sample_cstan(code, chains = 2, iter_warmup = 5, iter_sampling = 1,
+                          refresh = 0, seed = 2, init = fit)
+    expect_s3_class(again, "stanli_cstanfit")
+  }
+})
+
 test_that("an empty value is a starting value for any zero-size parameter", {
   skip_without_runtime()
   m <- stanli_model(code = "

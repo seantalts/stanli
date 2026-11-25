@@ -752,11 +752,14 @@ complete_partial_inits <- function(model, values, init_radius, seed,
   declared <- column_variables(variables)
   filled <- split(drawn, factor(declared, levels = names(variables)))
   # Each drawn value in its declared shape. A zero-size parameter has no
-  # drawn values, so it is left out.
-  filled <- Map(function(value, dims) {
-    if (length(dims) && prod(dims) == 0) NULL
-    else if (length(dims)) array(value, dim = dims) else value
-  }, filled, variables)
+  # drawn values, so it is left out, but a zero-size part of a tuple is kept
+  # as an empty value, since the tuple needs every part.
+  filled <- Map(function(value, dims, name) {
+    if (length(dims) && prod(dims) == 0) {
+      if (variable_base(name) == name) NULL
+      else array(numeric(0), dim = dims)
+    } else if (length(dims)) array(value, dim = dims) else value
+  }, filled, variables, names(variables))
   filled <- filled[!vapply(filled, is.null, logical(1))]
   bases <- variable_base(names(filled))
   filled <- lapply(stats::setNames(nm = unique(bases)), function(base) {

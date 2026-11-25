@@ -138,8 +138,13 @@ draws_inits <- function(model, init, chains, seed) {
   columns <- lapply(names(variables), function(name)
     variable_columns(variables[name]))
   names(columns) <- names(variables)
-  given <- vapply(columns, function(cols) length(cols) > 0L &&
-                    all(cols %in% names(draws)), logical(1))
+  # A zero-size parameter has no columns. It is left out, except as a part
+  # of a tuple, which is given only when every part is.
+  bases <- variable_base(names(variables))
+  given <- vapply(seq_along(columns), function(k)
+    (length(columns[[k]]) > 0L || bases[k] != names(variables)[k]) &&
+      all(columns[[k]] %in% names(draws)), logical(1))
+  for (base in unique(bases)) given[bases == base] <- all(given[bases == base])
   used <- unlist(columns[given], use.names = FALSE)
   bad <- vapply(used, function(col) any(!is.finite(draws[[col]][rows])),
                 logical(1))
@@ -153,6 +158,7 @@ draws_inits <- function(model, init, chains, seed) {
     values <- lapply(names(variables)[given], function(name) {
       value <- vapply(columns[[name]], function(col) draws[[col]][row],
                       numeric(1), USE.NAMES = FALSE)
+      if (!length(value)) value <- numeric(0)
       dims <- variables[[name]]
       if (length(dims)) array(value, dim = dims) else value
     })
