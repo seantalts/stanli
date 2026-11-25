@@ -36,6 +36,23 @@ class Detectors(unittest.TestCase):
         [f] = ladder.prep_superlinear("N", pts)
         self.assertIn("exponent 2.00", f["detail"])
 
+    def test_prep_exponent_skips_close_sizes(self):
+        pts = [point(100, prep_s=0.1), point(1000, prep_s=1.0),
+               point(1030, prep_s=1.2)]
+        self.assertEqual(ladder.prep_superlinear("N", pts), [])
+
+    def test_write_array_growth_is_not_timed(self):
+        pts = [point(n, wa_ops=3 * n) for n in (8, 100, 1000)]
+        [f] = ladder.ops_grow("N", pts)
+        self.assertEqual(f["graph"], "write_array")
+        self.assertIsNone(f["pair"])
+
+    def test_op_jumps_ignore_proportional_growth(self):
+        linear = [point(n, ops=3 * n) for n in (100, 1000)]
+        self.assertEqual(ladder.ops_jumps(linear), [])
+        jump = [point(100, ops=27), point(1000, ops=1118)]
+        self.assertEqual(ladder.ops_jumps(jump), [(100, 1000)])
+
     def test_prep_linear_is_fine(self):
         pts = [point(n, prep_s=1e-5 * n) for n in (100, 1000, 10000)]
         self.assertEqual(ladder.prep_superlinear("N", pts), [])

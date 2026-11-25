@@ -166,8 +166,8 @@ def ops_jumps(points):
     than doubles, with nothing measured between them."""
     pts = [p for p in points if p["status"] == "ok" and p.get("ops")]
     return [(a["size"], b["size"]) for a, b in zip(pts, pts[1:])
-            if b["size"] - a["size"] > 1 and b["ops"] > 2 * a["ops"]
-            and b["ops"] - a["ops"] >= 100]
+            if b["size"] - a["size"] > 1 and b["ops"] - a["ops"] >= 100
+            and b["ops"] / a["ops"] > 2 * b["size"] / a["size"]]
 
 
 def run_ladder(tools, comp, text, data, var, sizes, work, args):
@@ -205,8 +205,9 @@ def run_ladder(tools, comp, text, data, var, sizes, work, args):
         if size < max(sizes) * 4:
             lad["cap_points"].append({"size": size, "cap": why})
             at(size)
-    lad["stop"] = lad["stop"] or stop
-    # Locate each jump in the op count to one size, by bisection.
+    # Locate each jump in the op count to one size, by bisection. The sizes
+    # lie between measured ones, so the stop does not apply to them.
+    stop, lad["stop"] = lad["stop"] or stop, ""
     lad["thresholds"] = []
     for lo, hi in ops_jumps(lad["points"]):
         ops_lo = next(p["ops"] for p in lad["points"] if p["size"] == lo)
@@ -222,6 +223,7 @@ def run_ladder(tools, comp, text, data, var, sizes, work, args):
             else:
                 lo = mid
         lad["thresholds"].append([lo, hi])
+    lad["stop"] = lad["stop"] or stop
     return lad
 
 
@@ -311,11 +313,14 @@ def ops_grow(var, points):
             continue
         s = slope(pts, key)
         if s >= GROW_SLOPE and pts[-1][key] >= 2 * pts[0][key]:
+            # Only the log density runs in a gradient, so only its growth
+            # is timed against CmdStan.
+            pair = [pts[0]["size"], pts[-1]["size"]] if key == "ops" else None
             out.append({"kind": "ops_grow", "var": var, "graph": graph,
                         "slope": s, "sizes": f"{pts[0]['size']} -> {pts[-1]['size']}",
                         "detail": f"{graph} ops {pts[0][key]} -> {pts[-1][key]}, "
                                   f"log-log slope {s:.2f}",
-                        "pair": [pts[0]["size"], pts[-1]["size"]]})
+                        "pair": pair})
     return out
 
 
@@ -329,9 +334,12 @@ def exponent(a, b, key, base=0.0):
 def prep_superlinear(var, points):
     pts = [p for p in points if p["status"] == "ok" and p["size"] > 0
            and p.get("prep_s") is not None]
-    if len(pts) < 3:
+    b = pts[-1] if pts else None
+    # Close sizes, such as the points around a cap, give a noisy exponent.
+    smaller = [p for p in pts if p["size"] * 2 <= (b or {}).get("size", 0)]
+    if len(pts) < 3 or not smaller:
         return []
-    a, b = pts[-2], pts[-1]
+    a = smaller[-1]
     out = []
     e = exponent(a, b, "prep_s")
     if e is not None and e > PREP_EXPONENT and b["prep_s"] >= PREP_FLOOR_S:
@@ -442,7 +450,7 @@ def confirm(tools, x, f, lad, driver):
     f["stanli_vs_cmdstan_at_larger"] = st["b_ns"] / cs["b_ns"]
     f["cmdstan"] = (f"stanli {m_ratio(st['ratio'])}, CmdStan "
                     f"{m_ratio(cs['ratio'])} from {a['size']} to {b['size']}; "
-                    f"normalized {f['normalized']:.2f}; at {b['size']} stanli "
+                    f"{m.normalized_text(f['normalized'])}; at {b['size']} stanli "
                     f"is {m_ratio(f['stanli_vs_cmdstan_at_larger'])} than CmdStan")
 
 
