@@ -1,5 +1,1 @@
-[
- {"bucket": "function_inlining:compile_fail_o1", "match": "assignment logical view mismatch for (tuple\\.)?inline_", "reason": "the inliner declares its return and argument temporaries with zero sizes (UPSTREAM_BUGS.md in seantalts/stanc3, Open), and a runtime region refuses to assign a value of another shape, such as array[0] vector[1], to such a temporary"},
- {"bucket": "function_inlining:error_message", "match": "\"none\": \"(r\\d+)0\", \"o1\": \"\\1-0\"", "reason": "a reject message prints 0 unoptimized and -0 at o1 for a product with a zero factor"},
- {"bucket": "function_inlining:output", "match": "\"none\": \\[\"(p\\d+=\\[?)-?0(\\]?)\"\\], \"o1\": \\[\"\\1-?0\\2\"\\]", "reason": "a print shows 0 on one side and -0 on the other: inlining and folding change the sign of a zero result"}
-]
+[]
