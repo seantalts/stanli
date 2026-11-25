@@ -27,8 +27,10 @@ corpus models in as seeds. `equivalent: true` says that the parameters block
 is unchanged and the log density and gradient equal the base's at the same
 unconstrained points. When either source has `~`, `_lupdf` or `_lupmf`, lp
 may differ by the same constant at every point. A non-equivalent variant
-changes the model or the data; `dose` is how much more work it should be,
-such as 16 for data rows tiled 16 times. A meta file may also name
+changes the model or the data. Its optional `work` is how much more work
+it should be, such as 16 for data rows tiled 16 times; `dose` is a label
+that groups the doses of one family of variants in the report, such as a
+lag of 40 or K = 8. A meta file may also name
 `"sizes": {"N": [...]}` to sweep that variant in the scaling stage.
 
 ## Stages
@@ -52,7 +54,10 @@ python3 tools/perturb/causes.py SCALING_OUT DATAVALUES_OUT           # findings 
    base's lp and gradient under `tools/fuzz_stanc/differential.py`'s rules
    (relative 1e-10); other variants must give a finite lp and gradient.
    Differences in write_array, printed output or error wording do not count.
-   Anything else is `invalid`, with the reason on one line. This stage
+   Anything else is `invalid`, with the reason on one line, except that an
+   equivalent variant whose lp and gradient are within 1e-7 relative of
+   the base's is `near_equivalent` and goes on to the next stages with that
+   label. This stage
    takes about a second for 30 variants once the binaries are warm, so
    authors can use it as their check.
 2. **Structure.** For base and variant: op counts of the log-density and
@@ -64,24 +69,29 @@ python3 tools/perturb/causes.py SCALING_OUT DATAVALUES_OUT           # findings 
    write_array op, plus 16 bytes per slot element for values and adjoints.
    No tool prints this, so the constants are in `measure.py`. An equivalent
    variant whose prepared program equals the base's (`dump_ops` and
-   `dump_islands` output) is `same_program` and is not timed.
+   `dump_islands` output) is `same_program` and is not timed. Otherwise
+   stage 2 prints which parts differ (log_prob program, write_array program,
+   islands), the final op count (the program that runs), the op count
+   before the passes (which explains preparation time), and the preparation
+   time. An equivalent variant that prepares 3x as long as the base, and
+   100 ms longer, is a `prep_cliff`.
 3. **Timing**, one process at a time: six interleaved pairs of fresh
    `bench_grad --timed` processes, base and variant, alternating which goes
    first. An equivalent variant uses the seed's committed benchmark points
    when the base files match the committed hashes, otherwise the fixed
    points. A non-equivalent variant uses the fixed points on both sides.
    The ratio is the median over the pairs. An equivalent variant is flagged
-   at 1.3x slower; a variant with a dose when it is more than 1.3 times the
-   dose slower; a variant without a dose always goes on to stage 4.
+   at 1.3x slower; a variant with `work` when it is more than 1.3 times
+   `work` slower; a variant without `work` always goes on to stage 4.
 4. **CmdStan**, for flagged variants: the CmdStan gradient driver
    (`tools/bench_cmdstan_grad.cpp`) is built for both sources in parallel,
    cached in `OUT/cache/cmdstan`. Stanli is timed again with 24 pairs and
    CmdStan with 6. `cliff = (stanli variant/base) / (CmdStan variant/base)`;
    a cliff is reported at 1.3 or more. `--copies 12` also times 12
    concurrent copies of the variant and of the base, since a large program
-   mostly hurts when several chains share the caches. It runs only for
-   variants that stage 3 flagged, so a variant that is fast alone and slow
-   with 12 chains is missed unless it is also flagged.
+   mostly hurts when several chains share the caches. Stage 3 already does
+   this, flagged or not, for every variant whose base or variant executor
+   is larger than 4 MiB.
 5. **Report.** `OUT/results.json` keeps every record. `OUT/report.md` lists
    the cliffs ranked by `cliff`, then the cliffs with no new decline reason
    and no op growth ("unexplained"), a table of outcomes per class, and
@@ -91,6 +101,9 @@ python3 tools/perturb/causes.py SCALING_OUT DATAVALUES_OUT           # findings 
    harness or a build failed).
 
 Stage 3 prints a warning in the report when the 1-minute load passed 6.
+Stages 3 and 4 keep each variant's results in `OUT/cache/timing`, under a
+hash of its sources, data, meta and the `bench_grad` binary, so running
+the same command again after an interruption resumes where it stopped.
 
 ## Scaling
 
