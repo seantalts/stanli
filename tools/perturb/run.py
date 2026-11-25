@@ -182,6 +182,10 @@ def time_variant(tools, rec, paths):
     a = m.stanli_cmd(tools, base_c, base_data, points)
     b = m.stanli_cmd(tools, var_c, data, points)
     rec["timing"] = m.paired_ratio(a, b, SCREEN_ROUNDS, tools.timeout)
+    big = max((rec.get(f"{side}_program") or {}).get("executor_bytes") or 0
+              for side in ("base", "variant"))
+    if big > m.BIG_EXECUTOR:
+        rec["copies"] = m.copies_record(a, b, m.COPIES, tools.timeout)
     return a, b, points
 
 
@@ -199,11 +203,8 @@ def normalize(tools, rec, paths, cmds, args):
                                     SCREEN_ROUNDS, tools.timeout)
     rec["cliff"] = rec["confirm"]["ratio"] / rec["cmdstan"]["ratio"]
     rec["stanli_vs_cmdstan"] = rec["confirm"]["b_ns"] / rec["cmdstan"]["b_ns"]
-    if args.copies:
-        rec["copies"] = {
-            "n": args.copies,
-            "base_ns": m.concurrent_copies(a, args.copies, tools.timeout),
-            "variant_ns": m.concurrent_copies(b, args.copies, tools.timeout)}
+    if args.copies and "copies" not in rec:
+        rec["copies"] = m.copies_record(a, b, args.copies, tools.timeout)
     if rec["cliff"] >= FLAG_RATIO:
         return "cliff"
     if rec["confirm"]["ratio"] < FLAG_RATIO * float(rec["meta"].get("dose") or 1):
@@ -322,13 +323,22 @@ def main(argv=None):
     ap.add_argument("--max-seconds", type=float, default=60.0,
                     help="scaling: stop a ladder when preparation or one "
                     "check is predicted to take longer than this")
-    ap.add_argument("--max-rss-gb", type=float, default=4.0,
+    ap.add_argument("--max-rss-gb", type=float, default=6.0,
                     help="scaling: stop a ladder before peak RSS passes this")
     ap.add_argument("--no-timing", action="store_true",
-                    help="scaling: structural ladder only")
+                    help="scaling: structural ladder only; scaled data "
+                    "files are deleted after they are measured")
+    ap.add_argument("--growth", choices=("resample", "tile"),
+                    default="resample",
+                    help="scaling: how a ladder grows an axis")
+    ap.add_argument("--model-seconds", type=float, default=180.0,
+                    help="scaling: time budget for one model's ladders")
+    ap.add_argument("--memory-gb", type=float, default=6.0,
+                    help="kill any tool process whose RSS passes this")
     args = ap.parse_args(argv)
     args.out.mkdir(parents=True, exist_ok=True)
     tools = m.Tools(args.build, args.out, args.timeout)
+    m.MEMORY_LIMIT = int(args.memory_gb * 2**30) if args.memory_gb else None
     known = json.loads(args.known.read_text())["known"]
     started = time.monotonic()
     import report
