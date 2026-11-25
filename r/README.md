@@ -135,9 +135,10 @@ fit <- sample_model(m, seed = 2, metric = "dense_e", warmup = 0,
 ```
 
 With fewer than 150 warmup iterations, Stan does not adapt the metric and
-keeps any metric that you supplied. With `warmup = 0` and no `adapt_engaged`
-given, sampling runs at exactly `step_size`; `adapt_engaged = TRUE` with
-`warmup = 0` is an error, as in CmdStan.
+keeps any metric that you supplied. `warmup = 0` needs `adapt_engaged =
+FALSE`, as in the example, and then sampling runs at exactly `step_size`.
+With adaptation left on, `warmup = 0` is an error, as in CmdStan and
+cmdstanr.
 
 `sample_more(fit, samples = 1000)` continues each chain from where it
 stopped. Each chain keeps its step size, metric and random stream, and there
