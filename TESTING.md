@@ -171,11 +171,11 @@ This table counts the models where one engine has the smaller mean:
 
 We scored <!--gen:testing_scored_values-->765,761<!--/gen--> values in total. stanli is closer to
 the true value in <!--gen:testing_values_stanli_closer-->16,225<!--/gen--> of them and CmdStan is
-closer in <!--gen:testing_values_cmdstan_closer-->16,629<!--/gen-->. The two engines are the same
+closer in <!--gen:testing_values_cmdstan_closer-->16,631<!--/gen-->. The two engines are the same
 distance away in the rest.
 
 We measured these numbers on macOS arm64 on <!--gen:testing_accuracy_date-->2026-11-25<!--/gen-->, at
-commit <!--gen:testing_accuracy_source-->`a7d7ae64`<!--/gen-->. CI does not measure them again.
+commit <!--gen:testing_accuracy_source-->`fdad2805`<!--/gen-->. CI does not measure them again.
 
 ### How to read the table
 
@@ -476,7 +476,7 @@ table and those files disagree.
 | `ch09_mp` | rethinking | 2 | 2 | 0.36 | 0.36 | 0.09 | 0.09 | <0.01 | <0.01 | 10 |  |
 | `ch11_m11_10` | rethinking | 4 | 24 | 0.94 | 0.94 | 0.33 | 0.42 | 0.23 | 0.23 | 10 |  |
 | `ch11_m11_11` | rethinking | 5 | 25 | 1.86 | 1.86 | 0.79 | 0.60 | 0.58 | 0.58 | 10 |  |
-| `ch11_m11_4` | rethinking | 11 | 1019 | 12.9 | 12.9 | 0.77 | 0.18 | 0.26 | 0.26 | 10 |  |
+| `ch11_m11_4` | rethinking | 11 | 1019 | 12.9 | 12.9 | 0.77 | 0.20 | 0.26 | 0.26 | 10 |  |
 | `ch11_m11_5` | rethinking | 11 | 1019 | 15.1 | 15.4 | 1.73 | 0.15 | 0.27 | 0.27 | gradient 14 |  |
 | `ch11_m11_6` | rethinking | 11 | 67 | 0.91 | 0.91 | 0.21 | 0.20 | 0.52 | 0.52 | 10 |  |
 | `ch11_m11_7` | rethinking | 2 | 2 | 0.70 | 0.70 | 0.35 | 0.29 | <0.01 | <0.01 | 10 |  |
@@ -496,8 +496,8 @@ table and those files disagree.
 | `ch13_m13_3` | rethinking | 62 | 62 | 0.71 | 0.71 | 0.08 | 0.07 | 0.01 | 0.01 | 10 |  |
 | `ch13_m13_4` | rethinking | 20 | 1028 | 15.8 | 16.2 | 0.36 | 0.13 | 0.28 | 0.28 | 10 |  |
 | `ch13_m13_4b` | rethinking | 20 | 20 | 15.8 | 16.2 | 0.36 | 0.13 | 0.01 | 0.01 | 10 |  |
-| `ch13_m13_4nc` | rethinking | 20 | 33 | 9.02 | 9.02 | 0.45 | 0.13 | 0.07 | 0.07 | 10 |  |
-| `ch13_m13_5` | rethinking | 13 | 1021 | 21.4 | 21.8 | 0.85 | 0.16 | 0.25 | 0.25 | 10 |  |
+| `ch13_m13_4nc` | rethinking | 20 | 33 | 9.02 | 9.02 | 0.45 | 0.11 | 0.07 | 0.07 | 10 |  |
+| `ch13_m13_5` | rethinking | 13 | 1021 | 21.4 | 21.8 | 0.85 | 0.19 | 0.25 | 0.25 | 10 |  |
 | `ch13_m13_6` | rethinking | 21 | 1029 | 15.7 | 16.1 | 0.35 | 0.12 | 0.28 | 0.28 | 10 |  |
 | `ch13_m13_7` | rethinking | 2 | 2 | 5.07 | 5.07 | 0.25 | 0.25 | <0.01 | <0.01 | 10 |  |
 | `ch13_m13_7nc` | rethinking | 2 | 3 | 0.52 | 0.52 | 0.35 | 0.35 | 0.10 | 0.10 | 10 |  |
@@ -562,7 +562,7 @@ table and those files disagree.
 | `examplemodels_gp_fit_multi_output` | examplemodels | 311 | 326 | 1.8e7 | 1.8e7 |  |  | 0.01 | 0.01 | 10 | ill-conditioned, so the 1e-9 limit is 1.5e-6 for the gradient and 5e-8 for lp |
 | `examplemodels_hmm_marginal` | examplemodels | 10 | 0 |  |  |  |  |  |  | 10 |  |
 | `examplemodels_irt_1pl_hier` | examplemodels | 33 | 33 | 0.89 | 0.89 | 0.08 | 0.07 | 0.02 | 0.02 | 10 |  |
-| `examplemodels_irt_multilevel` | examplemodels | 55 | 55 | 6.15 | 6.48 | 0.09 | 0.08 | 0.04 | 0.04 | 10 |  |
+| `examplemodels_irt_multilevel` | examplemodels | 55 | 55 | 6.15 | 6.48 | 0.09 | 0.07 | 0.04 | 0.04 | 10 |  |
 | `examplemodels_kidney` | examplemodels | 46 | 51 | 1.07 | 1.07 | 0.08 | 0.08 | 0.01 | 0.01 | 10 |  |
 | `examplemodels_mr_ss` | examplemodels | 2 | 19602 | 14.7 | 14.4 | 277 | 110 | 0.14 | 0.14 | gradient 729 |  |
 | `examplemodels_ms` | examplemodels | 6 | 72036 | 7.19 | 1.01 | 36.4 | 13.3 | 0.05 | 0.05 | gradient 254 |  |
@@ -966,7 +966,7 @@ After that, the separate brms limit is no longer needed.
 
 ### stanli is less accurate than CmdStan for some values
 
-In <!--gen:testing_worse_models-->35<!--/gen--> models, <!--gen:testing_worse_values-->244<!--/gen--> values are
+In <!--gen:testing_worse_models-->35<!--/gen--> models, <!--gen:testing_worse_values-->246<!--/gen--> values are
 more than 10 ULP from the true value in stanli and farther from it than in
 CmdStan.
 

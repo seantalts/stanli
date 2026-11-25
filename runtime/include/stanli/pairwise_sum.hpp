@@ -181,6 +181,9 @@ void add_sum(double& acc, int64_t n, const Term& term) {
 }
 
 inline constexpr int kScatterLanes = 4;
+// Within a run of values for one slot, up to this many values in a lane are
+// added plainly before their sum enters the compensated sum.
+inline constexpr int64_t kScatterRunBlock = 8;
 // Up to this many slots, scatter_add_lanes keeps four lanes per slot; their
 // sums and errors then take 32 KiB.
 inline constexpr int64_t kScatterLaneSlotsMax = 512;
@@ -189,10 +192,11 @@ inline constexpr int64_t kScatterLaneSlotsMax = 512;
 // more, by Knuth's two-sum into a sum and an error per slot. With few slots
 // the same slot comes back within a few values, and each addition would wait
 // for the previous one through memory, so value k goes to lane k % 4, each
-// lane keeps its own sum and error for every slot, and a group of four
-// values for one slot, as in an index sorted by group, is summed in
-// registers. At the end each slot adds its lanes and all their errors. With
-// more slots, one lane adds into the slots in place.
+// lane keeps its own sum and error for every slot. At the end each slot adds
+// its lanes and all their errors. With more slots, one lane adds into the
+// slots in place. In both cases a run of values for one slot, as in an index
+// sorted by group, is added plainly in registers in blocks of
+// kScatterRunBlock per lane, and only the block sums take the two-sum.
 template <typename Slot, typename Value>
 void scatter_add_dense(double* slots, int64_t n_slots, int64_t n,
                        const Slot& slot, const Value& value) {
@@ -202,9 +206,14 @@ void scatter_add_dense(double* slots, int64_t n_slots, int64_t n,
     if (buffer.size() < size) buffer.resize(size);
     double* error = buffer.data();
     std::fill(error, error + size, 0.0);
-    for (int64_t k = 0; k < n; ++k) {
+    int64_t k = 0;
+    while (k < n) {
       const auto s = static_cast<int64_t>(slot(k));
-      two_sum_into(slots[s], value(k), error[s]);
+      const int64_t end = std::min(n, k + kScatterRunBlock);
+      double r = value(k);
+      for (++k; k < end && static_cast<int64_t>(slot(k)) == s; ++k)
+        r += value(k);
+      two_sum_into(slots[s], r, error[s]);
     }
     for (int64_t s = 0; s < n_slots; ++s)
       if (std::isfinite(slots[s])) slots[s] += error[s];
@@ -222,16 +231,25 @@ void scatter_add_dense(double* slots, int64_t n_slots, int64_t n,
     for (int l = 0; l < L; ++l) s[l] = static_cast<int64_t>(slot(k + l));
     if (s[0] == s[1] && s[0] == s[2] && s[0] == s[3]) {
       const int64_t run = s[0];
-      double r[L] = {}, e[L] = {};
+      double r[L] = {}, c[L] = {}, e[L] = {};
+      int64_t block = 0;
       do {
-        for (int l = 0; l < L; ++l) two_sum_into(r[l], value(k + l), e[l]);
+        for (int l = 0; l < L; ++l) r[l] += value(k + l);
         k += L;
+        if (++block == kScatterRunBlock) {
+          for (int l = 0; l < L; ++l) {
+            two_sum_into(c[l], r[l], e[l]);
+            r[l] = 0.0;
+          }
+          block = 0;
+        }
       } while (k + L <= n && static_cast<int64_t>(slot(k)) == run &&
                static_cast<int64_t>(slot(k + 1)) == run &&
                static_cast<int64_t>(slot(k + 2)) == run &&
                static_cast<int64_t>(slot(k + 3)) == run);
       for (int l = 0; l < L; ++l) {
-        two_sum_into(sum[l * n_slots + run], r[l], error[l * n_slots + run]);
+        two_sum_into(c[l], r[l], e[l]);
+        two_sum_into(sum[l * n_slots + run], c[l], error[l * n_slots + run]);
         error[l * n_slots + run] += e[l];
       }
       continue;
