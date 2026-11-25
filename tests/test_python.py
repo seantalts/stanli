@@ -371,6 +371,27 @@ def test_log_prob_grad():
     assert np.isfinite(grad).all(), grad
 
 
+def test_unconstrain_accepts_empty_zero_size_and_unit_extents():
+    # numpy can only write [] for a matrix[0, 3], and a value that differs
+    # from its declaration only by extents of 1 lands in its one element.
+    m = stanli.Model(stan_code=(
+        "parameters { real mu; matrix[0, 3] m0; array[0] vector[2] a0;"
+        "  vector[1] b; real s; }"
+        "model { mu ~ normal(0, 1); b ~ normal(0, 1); s ~ normal(0, 1); }"))
+    back = m.unconstrain({"mu": 0.1, "m0": np.zeros((0, 3)),
+                          "a0": np.zeros((0, 2)), "b": np.array([[0.2]]),
+                          "s": [0.3]})
+    assert np.array_equal(back, [0.1, 0.2, 0.3]), back
+    back = m.unconstrain({"mu": 0.1, "b": 0.2, "s": 0.3})
+    assert np.array_equal(back, [0.1, 0.2, 0.3]), back
+    try:
+        m.unconstrain({"mu": 0.1, "b": [0.2, 0.3], "s": 0.3})
+    except ValueError as e:
+        assert "variable name=b" in str(e), str(e)
+    else:
+        raise AssertionError("expected ValueError for two values for b")
+
+
 def test_unconstrain_round_trip():
     # The forward direction is the oracle: constrain a free point into the
     # CSV row, hand the constrained parameters back by name, and require the

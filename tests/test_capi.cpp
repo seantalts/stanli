@@ -2895,10 +2895,11 @@ Compilation compile(const std::string& code, const char* filename) {
   return out;
 }
 
-// A starting value's shape follows CmdStan's rule for inits, which differs
-// from its rule for data: the dims must match exactly, and an empty value
-// does not stand in for a zero-size parameter of another rank. A zero-size
-// parameter may be left out. Each expected message is the one CmdStan 2.38
+// A starting value's shape follows the rule for data: the dims must match,
+// apart from extents of 1, and any value with no elements stands in for a
+// zero-size parameter, because R and numpy can only write [] for one.
+// CmdStan's sampler accepts only the exact rank there. A zero-size parameter
+// may also be left out. Each expected message is the one CmdStan 2.38
 // printed for the same document.
 void expect_init_shapes_follow_cmdstan() {
   if (!stanli_has_embedded_stanc()) return;
@@ -2949,9 +2950,7 @@ void expect_init_shapes_follow_cmdstan() {
        {{"P", "[[1, 2, 3]]"}},
        dim + "variable name=P; position=0; dims declared=(2,3); dims "
              "found=(1,3)"},
-      {"a scalar as a list",
-       {{"s", "[0.5]"}},
-       ndims + "variable name=s; dims declared=(); dims found=(1)"},
+      {"a scalar as a list", {{"s", "[0.5]"}}, ""},
       {"a flat array of vectors",
        {{"av", "[1, 2, 3, 4, 5, 6]"}},
        ndims + "variable name=av; dims declared=(2,3); dims found=(6)"},
@@ -2964,28 +2963,20 @@ void expect_init_shapes_follow_cmdstan() {
        ndims + "variable name=tp.2; dims declared=(2); dims found=()"},
       {"a list tuple slot for a scalar",
        {{"tp", R"({"1": [0.1], "2": [0.2, 0.3]})"}},
-       ndims + "variable name=tp.1; dims declared=(); dims found=(1)"},
+       ""},
       {"a short slot in an array of tuples",
        {{"atp", R"([{"1": 0.1, "2": [0.2]}, {"1": 0.4, "2": [0.5]}])"}},
        dim + "variable name=atp.2; position=1; dims declared=(2,2); dims "
              "found=(2,1)"},
       {"an empty vector[0]", {{"z", "[]"}}, ""},
-      {"a scalar for vector[0]",
-       {{"z", "1.0"}},
-       ndims + "variable name=z; dims declared=(0); dims found=()"},
-      {"an empty matrix[0, 3]",
-       {{"Z", "[]"}},
-       ndims + "variable name=Z; dims declared=(0,3); dims found=(0)"},
-      {"rows for matrix[0, 3]",
-       {{"Z", "[[], [], []]"}},
-       dim + "variable name=Z; position=0; dims declared=(0,3); dims "
-             "found=(3,0)"},
-      {"an empty array[0] vector[3]",
-       {{"a0", "[]"}},
-       ndims + "variable name=a0; dims declared=(0,3); dims found=(0)"},
-      {"an empty array[2] vector[0]",
-       {{"a20", "[]"}},
-       ndims + "variable name=a20; dims declared=(2,0); dims found=(0)"},
+      {"a scalar for vector[0]", {{"z", "1.0"}}, ""},
+      {"an empty matrix[0, 3]", {{"Z", "[]"}}, ""},
+      {"rows for matrix[0, 3]", {{"Z", "[[], [], []]"}}, ""},
+      {"an empty array[0] vector[3]", {{"a0", "[]"}}, ""},
+      {"an empty array[2] vector[0]", {{"a20", "[]"}}, ""},
+      {"every zero-size parameter empty",
+       {{"z", "[]"}, {"Z", "[]"}, {"a0", "[]"}, {"a20", "[]"}},
+       ""},
       {"array[2] vector[0] nested", {{"a20", "[[], []]"}}, ""},
   };
   std::vector<double> q((size_t)stanli_n_unconstrained(model));
@@ -3010,6 +3001,301 @@ void expect_init_shapes_follow_cmdstan() {
     }
   }
   stanli_model_free(model);
+}
+
+// R writes a length-1 starting value as a scalar, so a scalar is accepted for
+// a parameter whose extents are all 1 and lands in its one element.
+void expect_scalar_init_for_length_one() {
+  stanli_model* model = from_stan(
+      "parameters { vector[1] v; array[1] real<lower=0> w; matrix[1, 1] m; }\n"
+      "model { v ~ normal(0, 1); w ~ exponential(1); to_vector(m) ~ "
+      "normal(0, 1); }\n");
+  if (model == nullptr) return;
+  std::vector<double> q(3);
+  char err[8192]{};
+  const bool accepted =
+      stanli_unconstrain_inits(model, R"({"v": 0.7, "w": 2.0, "m": -1.5})",
+                               q.data(), err, sizeof err) == 0;
+  expect_true(std::string("scalar inits for length-1 parameters: ") + err,
+              accepted);
+  if (accepted) {
+    expect_near("scalar init for vector[1]", q[0], 0.7);
+    expect_near("scalar init for array[1] real<lower=0>", q[1], std::log(2.0));
+    expect_near("scalar init for matrix[1, 1]", q[2], -1.5);
+  }
+  stanli_model_free(model);
+}
+
+// A starting value whose dims differ from the declared ones only by extents
+// of 1 is accepted, and each value lands in its own element. Every parameter
+// here is unconstrained, so the free vector holds the values themselves.
+void expect_unit_extent_inits() {
+  stanli_model* model = from_stan(
+      "parameters { vector[1] v; row_vector[1] rv; array[1] real a1;"
+      "  array[1] vector[1] av; array[3] vector[1] a3; vector[3] c;"
+      "  array[3] real r3; matrix[1, 1] m; real s;"
+      "  array[2] tuple(vector[1], real) t;"
+      "  array[1, 2] tuple(real, vector[3]) z; }\n"
+      "model { s ~ normal(0, 1); }\n");
+  if (model == nullptr) return;
+  std::vector<double> q((size_t)stanli_n_unconstrained(model));
+  char err[8192]{};
+  const char* json =
+      R"({"v": [[1]], "rv": [[2]], "a1": [[3]], "av": [4], "a3": [5, 6, 7],)"
+      R"( "c": [[8], [9], [10]], "r3": [[11, 12, 13]], "m": [14], "s": [15],)"
+      R"( "t": [{"1": 16, "2": 17}, {"1": 18, "2": 19}],)"
+      R"( "z": [{"1": 20, "2": [21, 22, 23]}, {"1": 24, "2": [25, 26, 27]}]})";
+  const bool accepted =
+      stanli_unconstrain_inits(model, json, q.data(), err, sizeof err) == 0;
+  expect_true(std::string("inits that differ by extents of 1: ") + err,
+              accepted);
+  // The free vector takes an array of tuples element by element, so the
+  // values are 1, 2, ..., 27 in order.
+  std::vector<double> want(27);
+  for (size_t k = 0; k < want.size(); ++k) want[k] = (double)(k + 1);
+  expect_true("unit-extent inits fill every coordinate",
+              q.size() == want.size());
+  if (accepted && q.size() == want.size())
+    for (size_t k = 0; k < want.size(); ++k)
+      expect_near("unit-extent init coordinate " + std::to_string(k), q[k],
+                  want[k]);
+  for (const char* bad :
+       {R"({"v": [1], "rv": [2], "a1": [3], "av": [4], "a3": [5, 6, 7],)"
+        R"( "c": [8, 9, 10], "r3": [11, 12, 13], "m": [14], "s": 15,)"
+        R"( "t": [{"1": 16, "2": 17}, {"1": 18, "2": 19}],)"
+        R"( "z": [[{"1": 20, "2": [21, 22]}, {"1": 24, "2": [25, 26]}]]})"}) {
+    err[0] = '\0';
+    expect_true(
+        "a short tuple part is still refused",
+        stanli_unconstrain_inits(model, bad, q.data(), err, sizeof err) != 0);
+  }
+  stanli_model_free(model);
+  stanli_model* corr = from_stan(
+      "parameters { cholesky_factor_corr[2] L; array[2, 3, 1] real p; }\n"
+      "model { }\n");
+  if (corr == nullptr) return;
+  std::vector<double> qc((size_t)stanli_n_unconstrained(corr));
+  struct Bad {
+    const char* json;
+    const char* want;
+  };
+  for (
+      const Bad& b :
+      {Bad{R"({"L": [1, 0.6, 0, 0.8], "p": [[[1], [2], [3]], [[4], [5], [6]]]})",
+           "variable name=L; dims declared=(2,2); dims found=(4)"},
+       Bad{R"({"L": [[1, 0], [0.6, 0.8]], "p": [[[1], [2]], [[3], [4]], [[5], [6]]]})",
+           "variable name=p; position=0; dims declared=(2,3,1); dims "
+           "found=(3,2,1)"}}) {
+    err[0] = '\0';
+    const bool refused =
+        stanli_unconstrain_inits(corr, b.json, qc.data(), err, sizeof err) != 0;
+    expect_true(std::string("refuse ") + b.want + "; got: " + err,
+                refused && std::string(err).find(b.want) != std::string::npos);
+  }
+  stanli_model_free(corr);
+}
+
+// The parameters block's declarations, read the same way, leave out
+// transformed parameters and generated quantities.
+void expect_parameter_declarations() {
+  if (!stanli_has_embedded_stanc()) return;
+  const Compilation c = compile(
+      "data { int N; }\n"
+      "parameters { real mu; vector[N] v; tuple(real, vector[2]) tp;"
+      "  array[2, 2] tuple(real, real) w; cholesky_factor_corr[3] L; }\n"
+      "transformed parameters { real t = mu; }\n"
+      "model { mu ~ normal(0, 1); }\n"
+      "generated quantities { real g = mu; }\n",
+      "parameter_declarations.stan");
+  char err[1024]{};
+  stanli_data_declarations* d =
+      c.ok ? stanli_parameter_declarations_new(c.mir.c_str(), err, sizeof err)
+           : nullptr;
+  if (d == nullptr) {
+    ++failures;
+    std::printf("FAIL parameter declarations: %s %s\n", c.error.c_str(), err);
+    return;
+  }
+  const std::vector<std::string> names = {"mu", "v", "tp", "w", "L"};
+  expect_true("parameter declaration count",
+              stanli_data_declarations_n(d) == (int64_t)names.size());
+  for (size_t i = 0; i < names.size(); ++i) {
+    const char* name = stanli_data_declaration_name(d, (int64_t)i);
+    expect_true("parameter declaration name " + names[i],
+                name != nullptr && names[i] == name);
+  }
+  const int64_t v = stanli_data_declaration_type(d, 1);
+  expect_true("v is a vector whose size comes from data",
+              stanli_type_kind_of(d, v) == STANLI_TYPE_VECTOR &&
+                  stanli_type_dim(d, v, 0) == -1);
+  const int64_t tp = stanli_data_declaration_type(d, 2);
+  expect_true("tp is a tuple of two parts",
+              stanli_type_kind_of(d, tp) == STANLI_TYPE_TUPLE &&
+                  stanli_type_n_parts(d, tp) == 2 &&
+                  stanli_type_kind_of(d, stanli_type_part(d, tp, 1)) ==
+                      STANLI_TYPE_VECTOR);
+  const int64_t w = stanli_data_declaration_type(d, 3);
+  expect_true("w is an array[2, 2] of tuples",
+              stanli_type_kind_of(d, w) == STANLI_TYPE_TUPLE &&
+                  stanli_type_n_array_dims(d, w) == 2 &&
+                  stanli_type_dim(d, w, 1) == 2);
+  const int64_t L = stanli_data_declaration_type(d, 4);
+  expect_true("a Cholesky factor is stored as a 3 x 3 matrix",
+              stanli_type_kind_of(d, L) == STANLI_TYPE_MATRIX &&
+                  stanli_type_dim(d, L, 0) == 3 &&
+                  stanli_type_dim(d, L, 1) == 3);
+  stanli_data_declarations_free(d);
+}
+
+// Complex data has its kind, rank and extents, though the runtime does not
+// yet read it.
+void expect_complex_data_declarations() {
+  if (!stanli_has_embedded_stanc()) return;
+  const Compilation c = compile(
+      "data { int N; complex z; complex_vector[2] zv; complex_row_vector[N] zr;"
+      "  complex_matrix[2, 3] zm; array[2] complex_row_vector[3] az;"
+      "  array[2, N] complex_matrix[4, 5] am; }\n"
+      "parameters { real mu; } model { mu ~ normal(0, 1); }\n",
+      "complex_declarations.stan");
+  char err[1024]{};
+  stanli_data_declarations* d =
+      c.ok ? stanli_data_declarations_new(c.mir.c_str(), err, sizeof err)
+           : nullptr;
+  if (d == nullptr) {
+    ++failures;
+    std::printf("FAIL complex declarations: %s %s\n", c.error.c_str(), err);
+    return;
+  }
+  struct Want {
+    stanli_type_kind kind;
+    int64_t n_array_dims;
+    std::vector<int64_t> dims;
+  };
+  const std::vector<Want> want = {
+      {STANLI_TYPE_INT, 0, {}},
+      {STANLI_TYPE_COMPLEX, 0, {}},
+      {STANLI_TYPE_COMPLEX_VECTOR, 0, {2}},
+      {STANLI_TYPE_COMPLEX_ROW_VECTOR, 0, {-1}},
+      {STANLI_TYPE_COMPLEX_MATRIX, 0, {2, 3}},
+      // The MIR keeps no extents for a complex container in an array.
+      {STANLI_TYPE_COMPLEX_ROW_VECTOR, 1, {2, -1}},
+      {STANLI_TYPE_COMPLEX_MATRIX, 2, {2, -1, -1, -1}}};
+  expect_true("complex declaration count",
+              stanli_data_declarations_n(d) == (int64_t)want.size());
+  for (size_t i = 0; i < want.size(); ++i) {
+    const int64_t t = stanli_data_declaration_type(d, (int64_t)i);
+    bool ok = stanli_type_kind_of(d, t) == want[i].kind &&
+              stanli_type_n_array_dims(d, t) == want[i].n_array_dims &&
+              stanli_type_n_dims(d, t) == (int64_t)want[i].dims.size();
+    for (size_t k = 0; ok && k < want[i].dims.size(); ++k)
+      ok = stanli_type_dim(d, t, (int64_t)k) == want[i].dims[k];
+    expect_true("complex declaration " + std::to_string(i), ok);
+  }
+  stanli_data_declarations_free(d);
+}
+
+// MIR compiled only to build a model may leave out a function the model
+// cannot reach, as stanli_model_new_from_stan does.
+void expect_compile_for_model_prunes_functions() {
+  if (!stanli_has_embedded_stanc()) return;
+  const char* code =
+      "functions { real never_called_from_the_model(real x) { return x; } }\n"
+      "parameters { real mu; } model { mu ~ normal(0, 1); }\n";
+  stanli_compilation* full = stanli_compile_stan(code, nullptr, nullptr, 0, 0);
+  stanli_compilation* model =
+      stanli_compile_stan_for_model(code, nullptr, nullptr, 0, 0);
+  const char* a = full ? stanli_compilation_mir(full) : nullptr;
+  const char* b = model ? stanli_compilation_mir(model) : nullptr;
+  expect_true("both compilations give MIR", a != nullptr && b != nullptr);
+  if (a != nullptr && b != nullptr) {
+    expect_true("the model MIR leaves the function out",
+                std::strlen(b) < std::strlen(a));
+  }
+  stanli_compilation_free(full);
+  stanli_compilation_free(model);
+}
+
+// The data block's declarations come from the MIR before any data: each
+// variable's kind, rank and the extents that do not depend on data, with a
+// tuple's parts as their own types.
+void expect_data_declarations() {
+  if (!stanli_has_embedded_stanc()) return;
+  const Compilation c = compile(
+      "data { int N; array[N] int y; real s; vector[3] v; row_vector[N] rv;"
+      "  matrix[2, N] M; array[2, 3] vector[4] av; simplex[3] sx;"
+      "  tuple(real, array[2] int) tp;"
+      "  array[N] tuple(vector[2], tuple(int, matrix[2, 2])) atp;"
+      "  array[2, 2] tuple(real, real) w; }\n"
+      "parameters { real mu; } model { mu ~ normal(0, 1); }\n",
+      "declarations.stan");
+  char err[1024]{};
+  stanli_data_declarations* d =
+      c.ok ? stanli_data_declarations_new(c.mir.c_str(), err, sizeof err)
+           : nullptr;
+  if (d == nullptr) {
+    ++failures;
+    std::printf("FAIL data declarations: %s %s\n", c.error.c_str(), err);
+    return;
+  }
+  struct Want {
+    const char* name;
+    stanli_type_kind kind;
+    int64_t n_array_dims;
+    std::vector<int64_t> dims;
+  };
+  const std::vector<Want> want = {{"N", STANLI_TYPE_INT, 0, {}},
+                                  {"y", STANLI_TYPE_INT, 1, {-1}},
+                                  {"s", STANLI_TYPE_REAL, 0, {}},
+                                  {"v", STANLI_TYPE_VECTOR, 0, {3}},
+                                  {"rv", STANLI_TYPE_ROW_VECTOR, 0, {-1}},
+                                  {"M", STANLI_TYPE_MATRIX, 0, {2, -1}},
+                                  {"av", STANLI_TYPE_VECTOR, 2, {2, 3, 4}},
+                                  {"sx", STANLI_TYPE_VECTOR, 0, {3}},
+                                  {"tp", STANLI_TYPE_TUPLE, 0, {}},
+                                  {"atp", STANLI_TYPE_TUPLE, 1, {-1}},
+                                  {"w", STANLI_TYPE_TUPLE, 2, {2, 2}}};
+  const auto check = [&](const std::string& what, int64_t type,
+                         stanli_type_kind kind, int64_t n_array_dims,
+                         const std::vector<int64_t>& dims) {
+    bool ok = stanli_type_kind_of(d, type) == kind &&
+              stanli_type_n_array_dims(d, type) == n_array_dims &&
+              stanli_type_n_dims(d, type) == (int64_t)dims.size();
+    for (size_t k = 0; ok && k < dims.size(); ++k)
+      ok = stanli_type_dim(d, type, (int64_t)k) == dims[k];
+    expect_true("data declaration " + what, ok);
+  };
+  expect_true("data declaration count",
+              stanli_data_declarations_n(d) == (int64_t)want.size());
+  for (size_t i = 0;
+       i < want.size() && i < (size_t)stanli_data_declarations_n(d); ++i) {
+    const char* name = stanli_data_declaration_name(d, (int64_t)i);
+    expect_true(std::string("data declaration name ") + want[i].name,
+                name != nullptr && std::string(name) == want[i].name);
+    check(want[i].name, stanli_data_declaration_type(d, (int64_t)i),
+          want[i].kind, want[i].n_array_dims, want[i].dims);
+  }
+  const int64_t tp = stanli_data_declaration_type(d, 8);
+  expect_true("tp has two parts", stanli_type_n_parts(d, tp) == 2);
+  check("tp.1", stanli_type_part(d, tp, 0), STANLI_TYPE_REAL, 0, {});
+  check("tp.2", stanli_type_part(d, tp, 1), STANLI_TYPE_INT, 1, {2});
+  const int64_t atp = stanli_data_declaration_type(d, 9);
+  check("atp.1", stanli_type_part(d, atp, 0), STANLI_TYPE_VECTOR, 0, {2});
+  const int64_t inner = stanli_type_part(d, atp, 1);
+  check("atp.2", inner, STANLI_TYPE_TUPLE, 0, {});
+  check("atp.2.1", stanli_type_part(d, inner, 0), STANLI_TYPE_INT, 0, {});
+  check("atp.2.2", stanli_type_part(d, inner, 1), STANLI_TYPE_MATRIX, 0,
+        {2, 2});
+  expect_true("a scalar has no parts", stanli_type_n_parts(d, 0) == 0);
+  expect_true("an index past the end",
+              stanli_data_declaration_name(d, 99) == nullptr &&
+                  stanli_type_kind_of(d, 9999) == STANLI_TYPE_NONE &&
+                  stanli_type_part(d, tp, 5) == -1);
+  stanli_data_declarations_free(d);
+  err[0] = '\0';
+  expect_true("nonsense MIR is refused",
+              stanli_data_declarations_new("(not a program)", err,
+                                           sizeof err) == nullptr &&
+                  err[0] != '\0');
 }
 
 // CmdStan evaluates a data-only expression in the model block on every
@@ -4131,6 +4417,12 @@ int main() {
   test_interpreter_probe_failure();
   expect_unconstrain_inits_round_trip();
   expect_init_shapes_follow_cmdstan();
+  expect_scalar_init_for_length_one();
+  expect_unit_extent_inits();
+  expect_data_declarations();
+  expect_compile_for_model_prunes_functions();
+  expect_parameter_declarations();
+  expect_complex_data_declarations();
   expect_callback_print_each_evaluation();
   expect_parameterless_unconstrain();
   expect_parameterless_sampling();

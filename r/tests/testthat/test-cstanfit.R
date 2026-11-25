@@ -164,7 +164,8 @@ test_that("sample_cstan refuses unsupported options before preparing a model", {
   expect_error(sample_cstan("invalid",iter_sampling=0),"iter_sampling")
   expect_error(sample_cstan("invalid",thin=1.5),"thin")
   expect_error(sample_cstan("invalid",adapt_delta=1),"adapt_delta")
-  expect_error(sample_cstan("invalid",init=0),"constrained")
+  expect_error(sample_cstan("invalid",init="inits.json"),"constrained")
+  expect_error(sample_cstan("invalid",init=-1),"nonnegative")
   expect_error(sample_cstan("invalid",init=list(a=0),pathfinder_init=list()),"cannot be combined")
 })
 
@@ -269,4 +270,41 @@ test_that("sample_cstan prints the shared sampling warnings", {
   expect_match(text, paste0(
     "Warning: [0-9]+ of 500 \\([0-9]+\\.[0-9]%\\) transitions ended with a ",
     "divergence\\.\nSee https://mc-stan.org/misc/warnings for details\\."))
+})
+
+test_that("sample_cstan takes cmdstanr 1.0's other init spellings", {
+  skip_without_runtime()
+  skip_if_not_installed("posterior")
+  code <- "parameters { real mu; vector[2] v; tuple(real, vector[2]) tp; }
+    model { mu ~ normal(0, 1); v ~ normal(0, 1); tp.1 ~ normal(0, 1);
+      tp.2 ~ normal(0, 1); }"
+  # A number is a radius, as in cmdstanr; 0 starts every chain at zero.
+  zero <- sample_cstan(code, chains = 2, iter_warmup = 0, iter_sampling = 1,
+                       adapt_engaged = FALSE, step_size = 1e-12, seed = 1,
+                       refresh = 0, init = 0)
+  expect_equal(unname(as.vector(zero$draws("mu"))), c(0, 0), tolerance = 1e-9)
+  fit <- sample_cstan(code, chains = 2, iter_warmup = 50, iter_sampling = 20,
+                      seed = 2, refresh = 0)
+  m <- stanli_model(code = code)
+  # A draws object or an MCMC fit gives one draw per chain, all parameters.
+  for (source in list(fit, fit$draws(), posterior::as_draws_df(fit$draws()))) {
+    starts <- stanli:::draws_inits(m, source, chains = 3, seed = 4)
+    expect_length(starts, 3L)
+    pool <- posterior::as_draws_df(if (inherits(source, "stanli_cstanfit"))
+      source$draws() else source)
+    for (s in starts) {
+      row <- which(abs(pool$mu - s$mu) < 1e-15)
+      expect_length(row, 1L)
+      expect_equal(as.vector(s$v), c(pool[["v[1]"]][row], pool[["v[2]"]][row]))
+      expect_equal(as.vector(s$tp[[2]]),
+                   c(pool[["tp:2[1]"]][row], pool[["tp:2[2]"]][row]))
+    }
+    expect_s3_class(sample_cstan(code, chains = 2, iter_warmup = 5,
+                                 iter_sampling = 1, seed = 3, refresh = 0,
+                                 init = source), "stanli_cstanfit")
+  }
+  bad <- posterior::as_draws_df(fit$draws())
+  bad$mu[] <- NA
+  expect_error(stanli:::draws_inits(m, bad, chains = 2, seed = 1),
+               "Variable: mu contains NA or Inf values!", fixed = TRUE)
 })

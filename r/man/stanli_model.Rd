@@ -21,13 +21,27 @@ stanli_model(
 
 \item{code}{Model source, as an alternative to `file`.}
 
-\item{data}{A named list of data, or a path to a JSON data file. An R
-array of any rank is written with its first index outermost, so a
-matrix is an array of rows; an unnamed list is an array of its elements,
-which is how to pass `array[K] matrix[N, M]`, `array[K] vector[N]` and
-arrays of them. Zero-length extents are kept. A length-1 R vector
-with no `dim` goes out as a scalar, as in rstan, so give a `vector[1]`
-or `array[1]` as `array(x, 1)`.}
+\item{data}{A named list of data, or a path to a JSON data file. A list
+  is written from the data block's declarations, as cmdstanr 1.0's
+  `write_stan_json()` writes it. An R array of any rank is written with its
+  first index outermost, so a matrix is an array of rows. A list is an
+  array of its elements, whatever its names, so `array[K] vector[N]` can
+  be a list of K vectors, a K x N matrix or `split(x, g)`. A tuple is a
+  list of its parts, named or not. An array of tuples is a list of tuples,
+  with a dim for more than one array dimension, or nested lists with the
+  first index outermost. A factor is written as its integer codes, and is
+  an error for a variable that is not declared `int`. A data frame is
+  written as `data.matrix()` makes it and a logical as 1 or 0. `NA` is an
+  error; `NaN` is Stan's NaN. A non-integer value for an `int` is an
+  error, as in CmdStan, where cmdstanr truncates it. Zero-length extents
+  are kept.
+
+  The dims of each value must match its declaration, except that extents
+  of 1 may be added or left out, because R drops and adds them: a
+  length-1 vector works for `vector[1]` or `array[1] real`, `scale(x)`
+  for `vector[N]`, `list(1, 2, 3)` for `array[3] vector[1]`, and
+  `array(x, 1)` for a `real`. A transposed matrix or a flat vector for a
+  matrix is an error, as in CmdStan.}
 
 \item{mir}{Portable MIR text from stanli's compiler, for example the
 output of \code{stanli-compile} or Python's \code{stan_to_mir()}, for a build

@@ -153,6 +153,94 @@ test_that("partial starting values keep each parameter's shape", {
                "dims declared=\\(2,3\\); dims found=\\(3,2\\)")
 })
 
+test_that("partial starting values put each drawn tuple in its own element", {
+  skip_without_runtime()
+  # The JSON reader, like CmdStan's, takes the elements of an array of tuples
+  # first index fastest, so a drawn value must come back where it was drawn.
+  for (code in c(
+    "parameters { real mu; array[2, 2] tuple(real, real) w; }",
+    "parameters { real mu; array[3, 2, 2] tuple(real, vector[2]) w; }",
+    "parameters { real mu; array[2, 3] tuple(real, array[2, 2] tuple(real, real)) n; }")) {
+    m <- stanli_model(code = paste(code, "model { mu ~ normal(0, 1); }"))
+    point <- local({ set.seed(5); stats::runif(m$n_unconstrained, -2, 2) })
+    got <- unconstrain(m, list(mu = 0.1), partial = TRUE, seed = 5)
+    expect_identical(got, c(0.1, point[-1]), label = code)
+  }
+})
+
+test_that("starting values are written from the parameter declarations", {
+  skip_without_runtime()
+  m <- stanli_model(code = "
+    parameters { real mu; tuple(real, vector[2]) tp;
+      array[2, 2] tuple(real, real) w; }
+    model { mu ~ normal(0, 1); }")
+  start_of <- function(q) {
+    fit <- sample_model(m, chains = 1, samples = 1, fixed_param = TRUE,
+                        init = q, refresh = 0)
+    fit$draws[1, 1, ]
+  }
+  w <- vector("list", 4)
+  dim(w) <- c(2, 2)
+  for (i in 1:2) for (j in 1:2) w[[i, j]] <- list(10 * i + j, 100 + 10 * i + j)
+  nested <- lapply(1:2, function(i) lapply(1:2, function(j)
+    list(10 * i + j, 100 + 10 * i + j)))
+  want <- c("tp:1" = 0.2, "tp:2[2]" = 0.4, "w[1,2:1]" = 12, "w[2,1:1]" = 21,
+            "w[2,2:2]" = 122)
+  pick <- function(draw) draw[c("tp:1", "tp:2[2]", "w[1,2:1]", "w[2,1:1]",
+                                "w[2,2:2]")]
+  # cmdstanr 1.0 takes a tuple as an unnamed list and an array of tuples as
+  # a list with a dim; nested lists work too.
+  for (value in list(w, nested)) {
+    q <- unconstrain(m, list(mu = 0.1, tp = list(0.2, c(0.3, 0.4)), w = value))
+    expect_equal(unname(pick(start_of(q))), unname(want))
+  }
+  q <- unconstrain(m, list(tp = list(0.2, c(0.3, 0.4)), w = w),
+                   partial = TRUE, seed = 1)
+  expect_equal(unname(pick(start_of(q))), unname(want))
+  fit <- sample_cstan(m$model_code, chains = 2, iter_warmup = 5,
+                      iter_sampling = 1, refresh = 0, seed = 1,
+                      init = function() list(tp = list(0.2, c(0.3, 0.4))))
+  expect_s3_class(fit, "stanli_cstanfit")
+  expect_error(unconstrain(m, list(mu = 0.1, tp = 0.2, w = w)),
+               "Variable 'tp' is declared as a tuple and must be a list.",
+               fixed = TRUE)
+})
+
+test_that("partial starting values keep a zero-size part of a tuple", {
+  skip_without_runtime()
+  skip_if_not_installed("posterior")
+  for (code in c(
+    "parameters { tuple(real, vector[0]) t; real s; } model { s ~ normal(0, 1); }",
+    "parameters { array[2] tuple(real, vector[0]) t; real s; } model { s ~ normal(0, 1); }",
+    "parameters { array[2, 2] tuple(matrix[0, 3], real) t; real s; } model { s ~ normal(0, 1); }")) {
+    m <- stanli_model(code = code)
+    point <- local({ set.seed(2); stats::runif(m$n_unconstrained, -2, 2) })
+    got <- unconstrain(m, list(s = 1), partial = TRUE, seed = 2)
+    expect_identical(got, c(point[-m$n_unconstrained], 1), label = code)
+    fit <- sample_cstan(code, chains = 2, iter_warmup = 5, iter_sampling = 3,
+                        refresh = 0, seed = 1, init = list(s = 1))
+    expect_s3_class(fit, "stanli_cstanfit")
+    again <- sample_cstan(code, chains = 2, iter_warmup = 5, iter_sampling = 1,
+                          refresh = 0, seed = 2, init = fit)
+    expect_s3_class(again, "stanli_cstanfit")
+  }
+})
+
+test_that("an empty value is a starting value for any zero-size parameter", {
+  skip_without_runtime()
+  m <- stanli_model(code = "
+    parameters { real mu; matrix[0, 3] m0; array[0] vector[2] a0;
+      vector[0] z0; vector[1] b; }
+    model { mu ~ normal(0, 1); b ~ normal(0, 1); }")
+  expect_equal(unconstrain(m, list(mu = 0.1, m0 = matrix(0, 0, 3),
+                                   a0 = array(0, c(0, 2)), z0 = numeric(0),
+                                   b = 0.2)), c(0.1, 0.2))
+  expect_equal(unconstrain(m, list(mu = 0.1, m0 = matrix(0, 0, 3)),
+                           partial = TRUE, seed = 1)[1], 0.1)
+  expect_equal(unconstrain(m, list(mu = 0.1, a0 = list()), partial = TRUE,
+                           seed = 1)[1], 0.1)
+})
+
 test_that("unconstrain can drop names that are not parameters", {
   skip_without_runtime()
   m <- stanli_model(code = "
@@ -206,7 +294,8 @@ test_that("sample_model rejects bad counts and options by name", {
       case[[2]], fixed = TRUE)
   expect_no_warning(try(sample_model(m, seed = "a", warmup = 5, samples = 5,
                                      refresh = 0), silent = TRUE))
-  fit <- sample_model(m, chains = 1, warmup = 0, samples = 3, refresh = 0)
+  fit <- sample_model(m, chains = 1, warmup = 0, samples = 3, refresh = 0,
+                      adapt_engaged = FALSE)
   expect_equal(dim(fit$draws)[1], 3)
 })
 
@@ -653,18 +742,29 @@ test_that("adapt_metric = FALSE adapts only the step size", {
   expect_false(fit$adapt_metric)
 })
 
-test_that("warmup = 0 runs at the given step size unless adaptation is asked for", {
+test_that("warmup = 0 needs adaptation turned off, as in cmdstanr", {
   skip_without_runtime()
   m <- metric_model()
   fixed <- sample_model(m, chains = 1, seed = 3, warmup = 0, samples = 10,
-                        step_size = 0.25, refresh = 0)
+                        step_size = 0.25, adapt_engaged = FALSE, refresh = 0)
   expect_true(all(fixed$sampler[, , "stepsize__"] == 0.25))
   expect_false(fixed$adapt_engaged)
-  expect_error(
-    sample_model(m, chains = 1, seed = 3, warmup = 0, samples = 10,
-                 adapt_engaged = TRUE, refresh = 0),
-    "warmup must be an integer >= 1 when adaptation is engaged",
-    fixed = TRUE)
+  # CmdStan's error, which cmdstanr shows for iter_warmup = 0.
+  cmdstan <- paste("The number of warmup samples (num_warmup) must be",
+                   "greater than zero if adaptation is enabled.")
+  for (engaged in list(NULL, TRUE))
+    expect_error(
+      sample_model(m, chains = 1, seed = 3, warmup = 0, samples = 10,
+                   adapt_engaged = engaged, refresh = 0),
+      cmdstan, fixed = TRUE)
+  expect_error(sample_cstan("parameters { real mu; } model { mu ~ normal(0, 1); }",
+                            chains = 1, iter_warmup = 0, iter_sampling = 5,
+                            refresh = 0),
+               cmdstan, fixed = TRUE)
+  # fixed_param has no adaptation. RStan's sampling() runs warmup = 0
+  # without it, as RStan does (test-stanmodel.R).
+  expect_s3_class(sample_model(m, chains = 1, warmup = 0, samples = 2,
+                               fixed_param = TRUE, refresh = 0), "stanli_fit")
   adapted <- sample_model(m, chains = 1, seed = 3, warmup = 20, samples = 10,
                           refresh = 0)
   expect_true(adapted$adapt_engaged)

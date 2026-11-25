@@ -112,9 +112,15 @@ stanfit_constrain_pars <- function(object, upars) {
   out <- vector("list", length(parameters))
   names(out) <- parameters
   end <- cumsum(sizes)
+  # The output columns keep only one extent of an empty parameter, so its
+  # dims come from the parameter declarations.
+  declared <- runtime_variables(model$ptr, parameters = TRUE)
   for (i in seq_along(parameters)) {
     block <- values[end[i] - sizes[i] + seq_len(sizes[i])]
-    out[[i]] <- if (length(dimensions[[i]])) array(block, dimensions[[i]]) else block
+    dims <- dimensions[[i]]
+    if (sizes[i] == 0 && !is.null(declared[[parameters[i]]]))
+      dims <- declared[[parameters[i]]]
+    out[[i]] <- if (length(dims)) array(block, dims) else block
   }
   out
 }
@@ -126,9 +132,17 @@ stanfit_unconstrain_pars <- function(object, pars) {
        any(!nzchar(names(pars))) || anyDuplicated(names(pars)))))
     stop("pars must be a list with unique parameter names", call. = FALSE)
   declared <- parameter_names(model)
+  # constrain_pars() gives each slot of a tuple parameter on its own, named
+  # as the runtime names it (`tp:1`, `g.2:1`). Put the slots of each tuple
+  # back together, unless the tuple itself is given.
+  bases <- variable_base(names(pars))
+  slot <- bases %in% declared & names(pars) != bases & !(bases %in% names(pars))
+  natural <- !is.null(parameter_declarations(model))
+  tuples <- lapply(split(pars[slot], bases[slot]), tuple_init_value,
+                   natural = natural)
   # RStan's initialization context ignores non-parameter entries, including
   # transformed parameters and GQ returned by constrain_pars().
-  values <- pars[intersect(names(pars), declared)]
+  values <- c(pars[intersect(names(pars), declared)], tuples)
   unconstrain(model, values)
 }
 

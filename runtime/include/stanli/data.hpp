@@ -41,8 +41,9 @@ class DataMap {
     e.r = {v};
     m_[name] = std::move(e);
   }
-  // `dims` defaults to one axis; pass it for a nested array, whose values
-  // are the first-index-fastest flattening the JSON reader also produces --
+  // `dims` defaults to one axis of length v.size(), so a scalar needs
+  // set_int or set_real instead. Pass `dims` for a nested array, whose values
+  // are the first-index-fastest flattening the JSON reader also produces:
   // one convention for every rank, which the lowering permutes into graph
   // order once, at materialization.
   void set_int_array(const std::string& name, std::vector<int> v,
@@ -83,29 +84,50 @@ class DataMap {
   std::map<std::string, Entry> m_;
 };
 
-// Which of CmdStan's var_context rules a value's dims are checked by.
+// Whether two lists of dims are equal once every extent of 1 is removed from
+// both. Removing an axis of length 1 does not change the order in which the
+// values are stored, so a value that passes holds the declared elements in
+// the declared order.
+inline bool same_without_unit_extents(const std::vector<int64_t>& a,
+                                      const std::vector<int64_t>& b) {
+  size_t i = 0, j = 0;
+  for (;;) {
+    while (i < a.size() && a[i] == 1) ++i;
+    while (j < b.size() && b[j] == 1) ++j;
+    if (i == a.size() || j == b.size()) return i == a.size() && j == b.size();
+    if (a[i++] != b[j++]) return false;
+  }
+}
+
+// Which stage a value belongs to. It only changes the message, as in
+// CmdStan's "processing stage=data initialization".
 enum class VarStage { Data, ParameterInit };
 
-// CmdStan's check of a value's dims against its declaration, with Stan's
-// messages. For data it is stan::json::json_data::validate_dims: a scalar
-// counts as zero elements, and any empty value satisfies a declaration with
-// a zero extent, because JSON's [] cannot say which axis is empty. For
-// starting values it is stan::io::validate_dims, which has no such escape:
-// CmdStan rejects [] for a matrix[0, 3] and accepts only its absence. In
-// both, a transposed matrix or a flat list for an array is rejected rather
-// than read in the wrong order. `int_declared` adds Stan's check that an int
-// variable holds ints.
+// CmdStan's check of a data value's dims against its declaration, with
+// Stan's messages: stan::json::json_data::validate_dims. A scalar counts as
+// zero elements, and any value with no elements satisfies a declaration with
+// a zero extent, because JSON's [] cannot say which axis is empty. A
+// transposed matrix or a flat list for an array is rejected rather than read
+// in the wrong order. stanli checks starting values by the same rule.
+// CmdStan's sampler checks them with stan::io::validate_dims instead, which
+// accepts only an absent value for a matrix[0, 3], but R and numpy can only
+// write [] for one, and BridgeStan reads its starting values as JSON data.
+//
+// Unlike CmdStan, stanli also accepts any value whose dims differ from the
+// declared ones only by extents of 1, such as a scalar for vector[1], [x]
+// for a real or an N x 1 matrix for vector[N]. R drops or adds such extents
+// (a length-1 vector has no dim, and scale(x) returns a matrix), so R users
+// cannot always control them. The caller binds the value with the declared
+// dims. `int_declared` adds Stan's check that an int variable holds ints.
 inline void check_declared_dims(VarStage stage, const std::string& name,
                                 const std::vector<int64_t>& declared,
                                 const DataMap::Entry& found,
                                 bool int_declared) {
-  if (stage == VarStage::Data) {
-    int64_t want = 1;
-    for (int64_t d : declared) want *= d;
-    int64_t have = found.dims.empty() ? 0 : 1;
-    for (int64_t d : found.dims) have *= d;
-    if (have == 0 && want == 0) return;
-  }
+  int64_t want = 1;
+  for (int64_t d : declared) want *= d;
+  int64_t have = found.dims.empty() ? 0 : 1;
+  for (int64_t d : found.dims) have *= d;
+  if (have == 0 && want == 0) return;
   const auto tuple = [](const std::vector<int64_t>& dims) {
     std::string s = "(";
     for (size_t k = 0; k < dims.size(); ++k) {
@@ -119,15 +141,17 @@ inline void check_declared_dims(VarStage stage, const std::string& name,
                             " initialization; variable name=" + name;
   const std::string shapes = "; dims declared=" + tuple(declared) +
                              "; dims found=" + tuple(found.dims);
-  if (found.dims.size() != declared.size())
-    throw std::invalid_argument(
-        "mismatch in number dimensions declared and found in context" + where +
-        shapes);
-  for (size_t k = 0; k < declared.size(); ++k)
-    if (found.dims[k] != declared[k])
+  if (!same_without_unit_extents(declared, found.dims)) {
+    if (found.dims.size() != declared.size())
       throw std::invalid_argument(
-          "mismatch in dimension declared and found in context" + where +
-          "; position=" + std::to_string(k) + shapes);
+          "mismatch in number dimensions declared and found in context" +
+          where + shapes);
+    for (size_t k = 0; k < declared.size(); ++k)
+      if (found.dims[k] != declared[k])
+        throw std::invalid_argument(
+            "mismatch in dimension declared and found in context" + where +
+            "; position=" + std::to_string(k) + shapes);
+  }
   if (int_declared && !found.is_int)
     throw std::invalid_argument("int variable contained non-int values" +
                                 where + "; base type=int");

@@ -520,3 +520,27 @@ test_that("a plain stanfit can have its model attached again", {
   expect_s4_class(restored, "stanli_stanfit")
   expect_equal(rstan::log_prob(restored, c(0, 0)), rstan::log_prob(fit, c(0, 0)))
 })
+
+test_that("sampling() runs warmup = 0 without adaptation, as RStan does", {
+  skip_without_runtime()
+  skip_if_not_installed("rstan")
+  m <- as_stanmodel("parameters { real mu; } model { mu ~ normal(0, 1); }")
+  fit <- rstan::sampling(m, chains = 1, iter = 5, warmup = 0, seed = 1,
+                         refresh = 0)
+  expect_equal(dim(draws_of(fit))[1], 5)
+})
+
+test_that("sampling() drops a NULL data element with RStan's warning", {
+  skip_without_runtime()
+  skip_if_not_installed("rstan")
+  m <- as_stanmodel("data { real x; } parameters { real mu; } model { mu ~ normal(x, 1); }")
+  expect_warning(
+    fit <- rstan::sampling(m, data = list(x = 1, d = NULL), chains = 1,
+                           iter = 20, seed = 1, refresh = 0),
+    "data with name d is not numeric and not used", fixed = TRUE)
+  expect_equal(dim(draws_of(fit))[1], 10)
+  # stanli_model() refuses it, as cmdstanr 1.0 does.
+  expect_error(stanli_model(code = "data { real x; }",
+                            data = list(x = 1, d = NULL)),
+               "Variable 'd' is NULL.", fixed = TRUE)
+})

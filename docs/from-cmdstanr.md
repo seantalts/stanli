@@ -33,6 +33,31 @@ RStan can use `as_stanfit()` or `as_rfit()`. The
 [fit adapters table](../r/README.md#fit-adapters) says what each returns,
 needs, and cannot do.
 
+## Data
+
+stanli writes an R data list from the data block's declarations, the way
+cmdstanr 1.0's `write_stan_json()` does. A tuple is a list of its parts, an
+array of tuples a list of tuples (with a dim for more than one array
+dimension), a factor goes out as its integer codes and only for an `int`, a
+data frame as `data.matrix()` makes it, a logical as 1 or 0 and any other
+list as an array of its elements. `NA` is an error, "Variable 'x' has NA
+values.", as in cmdstanr. These differ:
+
+- stanli also accepts a value whose dims differ from the declared ones only
+  by extents of 1, because R drops and adds them. A length-1 vector works for
+  `vector[1]` and `matrix[1, 1]`, an N x 1 matrix such as `scale(x)` works for
+  `vector[N]`, and `array(x, 1)` works for a `real`. cmdstanr wraps only a
+  length-1 value for a declaration with one dimension. A transposed matrix or
+  a flat vector for a matrix is an error in both.
+- An array of tuples of two or more dimensions may also be nested lists with
+  the first index outermost. stanli puts each tuple in its own element
+  either way. cmdstanr 1.0 writes a list with a dim first index outermost,
+  and CmdStan's JSON reader takes that order as first index fastest, so the
+  tuples land in the wrong elements there.
+- cmdstanr truncates a non-integer value for an `int` with a warning. stanli
+  rejects it, as CmdStan does.
+- `NaN` goes out as Stan's NaN. cmdstanr rejects it with the `NA` error.
+
 ## Initialization and saved warmup
 
 In cmdstanr, initial values are constrained parameter lists, functions or
@@ -48,6 +73,11 @@ The names must match your model. To start each chain at a different point,
 apply `unconstrain()` to each list and combine the vectors with `rbind()`.
 Omit `init` for random starts. `init_radius = 0` starts at the unconstrained
 origin. `sample_cstan()` takes cmdstanr-style constrained lists directly.
+Both write a constrained list from the parameter declarations, the way the
+data is written, so a tuple can be an unnamed list. Like cmdstanr,
+`sample_cstan()` also takes a number as the radius, a `posterior` draws
+object, or a fit from `sample_cstan()`, one draw per chain. It does not take
+init files or fits from the approximate methods.
 
 With `save_warmup = TRUE`, the raw `fit$draws` and `fit$sampler` include the
 saved warmup. `summary(fit)` summarizes that raw array. `as_draws_array()`,

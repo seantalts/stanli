@@ -60,7 +60,7 @@ Lowering::Lowering(const DataMap& d, PrepTrace& p, PassDumper& dump_to,
   const auto env_copy_time = prep.start();
   copy_named(td.env(), prepared_context.environment, &prepared_context.names);
   count_data_copy(td.env());
-  zero_size_data = prepared_context.zero_size_data;
+  reshaped_data = prepared_context.reshaped_data;
   int_env = prepared_context.integers;
   copy_named(decls, prepared_context.declarations, &prepared_context.names);
   prepared_names = prepared_context.names;
@@ -72,7 +72,7 @@ Lowering::Lowering(Lowering& parent, RegionTrialTag,
                parent.td_rng,
                std::make_shared<ShapeInterner>(*parent.shape_pool)) {
   compile_options = parent.compile_options;
-  zero_size_data = parent.zero_size_data;
+  reshaped_data = parent.reshaped_data;
   fun_defs = parent.fun_defs;
   copy_named(decls, parent.decls, names);
   copy_named(td.env(), parent.td.env(), names);
@@ -91,8 +91,8 @@ Lowering::Lowering(Lowering& parent, RegionTrialTag,
 PreparedContext Lowering::prepared_context() {
   if (!data_prepared)
     throw std::logic_error("lowering has not prepared model data");
-  return {td_rng, shape_pool,     td.env(),      int_env_data,
-          decls,  zero_size_data, prepared_names};
+  return {td_rng, shape_pool,    td.env(),      int_env_data,
+          decls,  reshaped_data, prepared_names};
 }
 Lowering Lowering::fork_region_trial(const std::set<std::string>* names) {
   return Lowering(*this, RegionTrialTag{}, names);
@@ -151,7 +151,10 @@ void Lowering::observe_indexed_rhs(const mir::Expr& rhs, const Val& v) {
     // graph values and deliberately do not acquire a compile-time binding.
   }
 }
-// CmdStan checks every data variable's dims before it reads one.
+// CmdStan checks every data variable's dims before it reads one. stanli also
+// accepts dims that differ from the declared ones only by extents of 1,
+// because R drops and adds such extents, and bind_declared_shape binds the
+// value with the declared dims. CmdStan rejects these.
 void Lowering::validate_data_dims(const std::string& name,
                                   const mir::SizedType& t) {
   if (!data.has(name)) return;
@@ -178,9 +181,16 @@ struct ExtentScope {
   ~ExtentScope() { flag = false; }
 };
 }  // namespace
-void Lowering::bind_zero_size(const std::string& name,
-                              const mir::SizedType& type) {
-  if (type.dims.empty()) return;
+// CmdStan's JSON reader lays out a leaf of an array of tuples element by
+// element: `z.2` of `array[3, 2] tuple(real, vector[4]) z` holds z[1, 1].2,
+// then z[2, 1].2, and so on, each vector whole. A leaf variable is an ordinary
+// array, which DataMap holds first index fastest across all its dimensions,
+// so `leaf` reorders the values. This needs the declared dims: a value given
+// without an outer extent of 1 has found dims that put the tuple boundary in
+// the wrong place.
+void Lowering::bind_declared_shape(const std::string& key,
+                                   const mir::SizedType& type,
+                                   const mir::detail::TupleLeaf* leaf) {
   std::vector<int64_t> dims;
   try {
     ExtentScope extents(data_extent_scope);
@@ -190,12 +200,40 @@ void Lowering::bind_zero_size(const std::string& name,
   }
   int64_t size = 1;
   for (int64_t d : dims) size *= d;
-  if (size != 0) return;
-  if (type.base == "SInt" ||
-      (type.base == "SArray" && type.elem_base == "SInt"))
-    zero_size_data.set_int_array(name, {}, std::move(dims));
-  else
-    zero_size_data.set_real_array(name, {}, std::move(dims));
+  const bool int_declared = type.base == "SInt" ||
+                            (type.base == "SArray" && type.elem_base == "SInt");
+  if (size == 0) {
+    if (int_declared)
+      reshaped_data->set_int_array(key, {}, std::move(dims));
+    else
+      reshaped_data->set_real_array(key, {}, std::move(dims));
+    return;
+  }
+  if (!data.has(key)) return;
+  const DataMap::Entry& given = data.at(key);
+  if (!same_without_unit_extents(dims, given.dims)) return;
+  if (given.r.size() != static_cast<size_t>(size) ||
+      (given.is_int && given.i.size() != static_cast<size_t>(size)))
+    return;
+  const std::vector<size_t> order =
+      leaf ? mir::detail::reader_order(*leaf, dims) : std::vector<size_t>{};
+  if (given.dims == dims && order.empty()) return;
+  if (dims.empty()) {
+    if (given.is_int)
+      reshaped_data->set_int(key, given.i[0]);
+    else
+      reshaped_data->set_real(key, given.r[0]);
+    return;
+  }
+  if (given.is_int) {
+    std::vector<int> values = given.i;
+    for (size_t k = 0; k < order.size(); ++k) values[k] = given.i[order[k]];
+    reshaped_data->set_int_array(key, std::move(values), std::move(dims));
+  } else {
+    std::vector<double> values = given.r;
+    for (size_t k = 0; k < order.size(); ++k) values[k] = given.r[order[k]];
+    reshaped_data->set_real_array(key, std::move(values), std::move(dims));
+  }
 }
 void Lowering::bind_data(const mir::Program& p) {
   std::set<std::string> input_names;
@@ -205,7 +243,7 @@ void Lowering::bind_data(const mir::Program& p) {
     input_names.insert(name);
     // A tuple's leaf is read under its CmdStan key.
     const std::string& key = mir::detail::data_key(p, name);
-    bind_zero_size(key, type);
+    bind_declared_shape(key, type, p.tuples ? p.tuples->leaf(name) : nullptr);
     if (!data_entry(key)) {
       all_inputs_bound = false;
       continue;
@@ -236,23 +274,27 @@ void Lowering::bind_data(const mir::Program& p) {
     }
     td.env()[name] = std::move(dst);
   }
-  if (!all_inputs_bound) report_missing_data(p);
   use_prebound = use_prebound && all_inputs_bound;
   if (use_prebound) {
     // The generated reconstruction allocated the MIR-declared shape and
     // copied exactly that many flat elements. Normalize to the same shape;
-    // a malformed length falls back to that checked interpreter path.
+    // a malformed length or a size that cannot be computed, such as a
+    // negative one, falls back to that checked interpreter path.
     ExtentScope extents(data_extent_scope);
-    for (const auto& [name, type] : p.input_vars) {
-      DataMap::Entry& dst = td.env().at(name);
-      if (static_cast<int64_t>(dst.r.size()) !=
-          sized_len(type, nullptr, nullptr, name)) {
-        use_prebound = false;
-        break;
+    try {
+      for (const auto& [name, type] : p.input_vars) {
+        DataMap::Entry& dst = td.env().at(name);
+        if (static_cast<int64_t>(dst.r.size()) !=
+            sized_len(type, nullptr, nullptr, name)) {
+          use_prebound = false;
+          break;
+        }
+        dst.dims.clear();
+        if (type.base != "SInt" && type.base != "SReal")
+          for (const auto& d : type.dims) dst.dims.push_back(eval_int(d));
       }
-      dst.dims.clear();
-      if (type.base != "SInt" && type.base != "SReal")
-        for (const auto& d : type.dims) dst.dims.push_back(eval_int(d));
+    } catch (const std::exception&) {
+      use_prebound = false;
     }
   }
   if (use_prebound) {
@@ -272,38 +314,39 @@ void Lowering::bind_data(const mir::Program& p) {
     sh.si = view_of(type, true);
     decls[name] = sh;
   };
+  std::map<std::string, const mir::SizedType*> input_types;
   {
+    // Record each input's view now, for a program whose prepare_data does
+    // not declare it. A size that cannot be computed yet is reported at
+    // the input's declaration below, in CmdStan's order.
     ExtentScope extents(data_extent_scope);
     for (const auto& [name, type] : p.input_vars) {
+      input_types[name] = &type;
       try {
         record(name, type);
-        validate_data_dims(mir::detail::data_key(p, name), type);
       } catch (const std::exception&) {
-        // CmdStan computes each size, printing if it prints, before it
-        // checks that input. Print the sizes prepare_data computes ahead of
-        // the failing input's declaration, then report its error.
-        data_extent_scope = false;
-        for (const auto& st : p.prepare_data) {
-          if (st.kind != mir::Stmt::Decl) continue;
-          if (st.decl_id == name) break;
-          if (!st.has_init || input_names.count(st.decl_id) ||
-              expr_effects(st.init) != kMessageEffect)
-            continue;
-          try {
-            (void)td.exec(st);
-          } catch (const std::exception&) {
-            break;
-          }
-        }
-        throw;
       }
     }
   }
+  std::set<std::string> checked;
+  const auto check_input = [&](const std::string& name) {
+    if (!checked.insert(name).second) return;
+    const std::string& key = mir::detail::data_key(p, name);
+    if (!data_entry(key)) report_missing_data(p);
+    validate_data_dims(key, *input_types.at(name));
+  };
+  // CmdStan reads the data block in declaration order: it computes each
+  // variable's sizes, checks that the variable is there and has those dims,
+  // and checks its constraints before it moves to the next variable. So a
+  // variable's data is checked at its declaration here, after the
+  // statements before it, which compute its sizes and check the
+  // constraints of earlier variables.
   for (const auto& st : p.prepare_data) {
     if (st.kind == mir::Stmt::Decl) {
       if (input_names.count(st.decl_id)) {
         ExtentScope extents(data_extent_scope);
         record(st.decl_id, st.decl_type);
+        check_input(st.decl_id);
       } else {
         record(st.decl_id, st.decl_type);
       }
@@ -320,6 +363,10 @@ void Lowering::bind_data(const mir::Program& p) {
       continue;
     record_interpreter_event("prepare_data", "statement_entry");
     (void)td.exec(st);
+  }
+  {
+    ExtentScope extents(data_extent_scope);
+    for (const auto& input : p.input_vars) check_input(input.first);
   }
   // The interpreter keeps a block's locals after the block ends. Drop them,
   // so a later local of the same name cannot start from transformed data's
@@ -1634,7 +1681,7 @@ class WriteArrayLowering {
         data_, trace_, dumper_, graph_name,
         PreparedContext{log_prob.td_rng, log_prob.shape_pool, no_environment,
                         log_prob.int_env_data, no_declarations,
-                        log_prob.zero_size_data, log_prob.prepared_names});
+                        log_prob.reshaped_data, log_prob.prepared_names});
     const auto select_time = trace_.start();
     // Moved, not copied: log_prob is done with them, and finish() moves
     // them back.
@@ -1675,37 +1722,6 @@ class WriteArrayLowering {
   bool started_ = false;
   LowerWorker worker_;
 };
-
-// CmdStan's JSON reader lays out an array of tuples element by element:
-// `z.2` of `array[3, 2] tuple(real, vector[4]) z` holds z[1, 1].2, then
-// z[2, 1].2, and so on, each vector whole. A leaf variable is an ordinary
-// array, which DataMap holds first index fastest across all its dimensions.
-std::optional<DataMap> tuple_data_in_array_order(const mir::Program& p,
-                                                 const DataMap& data) {
-  std::optional<DataMap> out;
-  if (!p.tuples) return out;
-  for (const auto& input : p.input_vars) {
-    const mir::detail::TupleLeaf* leaf = p.tuples->leaf(input.first);
-    if (!leaf || !data.has(leaf->key)) continue;
-    const std::string& key = leaf->key;
-    const DataMap::Entry& entry = data.at(key);
-    const std::vector<size_t> source =
-        mir::detail::reader_order(*leaf, entry.dims);
-    if (source.empty()) continue;
-    const int64_t len = (int64_t)source.size();
-    if (!out) out = data;
-    if (entry.is_int) {
-      std::vector<int> values((size_t)len);
-      for (int64_t k = 0; k < len; ++k) values[(size_t)k] = entry.i[source[k]];
-      out->set_int_array(key, std::move(values), entry.dims);
-    } else {
-      std::vector<double> values((size_t)len);
-      for (int64_t k = 0; k < len; ++k) values[(size_t)k] = entry.r[source[k]];
-      out->set_real_array(key, std::move(values), entry.dims);
-    }
-  }
-  return out;
-}
 
 // Whether a user function can reach itself through calls, directly or
 // through other functions. Any spelling of a defined function's key counts
@@ -1790,10 +1806,7 @@ CompiledModel compile_model(const std::string& mir_text, const DataMap& data,
   }
   prep.plain("compile", "parse_mir", parse_time, PrepTrace::Extra::MirBytes,
              static_cast<int64_t>(mir_text.size()));
-  const std::optional<DataMap> reordered =
-      tuple_data_in_array_order(*prog, data);
-  const DataMap& model_data = reordered ? *reordered : data;
-  Lowering lo(model_data, prep, dumper, "log_prob", WaRng(seed));
+  Lowering lo(data, prep, dumper, "log_prob", WaRng(seed));
   lo.compile_options = options;
   if (const char* refuse = std::getenv("STANLI_NO_INTERPRETER");
       refuse != nullptr && refuse[0] != '\0' && std::strcmp(refuse, "0") != 0)
@@ -1804,7 +1817,7 @@ CompiledModel compile_model(const std::string& mir_text, const DataMap& data,
   const ProgramBudget limits;
   std::optional<WriteArrayLowering> wa_lowering;
   if (!prog->generate_quantities.empty()) {
-    wa_lowering.emplace(model_data, *prog, prep.enabled(), dumper,
+    wa_lowering.emplace(data, *prog, prep.enabled(), dumper,
                         parallel_write_array(options), limits);
     lo.after_data_prepared = [&] { wa_lowering->begin(lo); };
   }

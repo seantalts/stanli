@@ -109,9 +109,9 @@ the starting point of the step size search and of dual averaging.}
 \item{adapt_engaged}{`TRUE` adapts the step size and, unless
 `metric = "unit_e"`, the metric during warmup. `FALSE` runs no adaptation:
 `warmup` iterations are ordinary transitions and `inv_metric` and
-`step_size` are used as given. The default, `NULL`, means `TRUE` unless
-`warmup = 0`, which then runs at exactly `step_size`; an explicit
-`adapt_engaged = TRUE` with `warmup = 0` is an error, as in CmdStan.}
+`step_size` are used as given. The default, `NULL`, means `TRUE`, so
+`warmup = 0` is an error, as in CmdStan and cmdstanr, unless
+`adapt_engaged = FALSE`, which then runs at exactly `step_size`.}
 
 \item{adapt_metric}{`TRUE` (the default) adapts the metric during warmup
 when `adapt_engaged` is `TRUE`. `FALSE` adapts only the step size and

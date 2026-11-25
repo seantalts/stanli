@@ -179,6 +179,66 @@ stanli_compiler_message_kind stanli_compilation_message_kind(
     const stanli_compilation* c, int64_t i);
 const char* stanli_compilation_message(const stanli_compilation* c, int64_t i);
 void stanli_compilation_free(stanli_compilation* c);
+/* stanli_compile_stan for MIR that only builds a model, as
+ * stanli_model_new_from_stan does: the compiler may remove functions that
+ * the model cannot reach, which standalone functions would need. */
+stanli_compilation* stanli_compile_stan_for_model(
+    const char* stan_code, const char* filename,
+    const char* const* include_paths, size_t include_path_count, int fast_math);
+
+/* The data block's declarations, read from MIR before any data, so that a
+ * host can write each value the way its declaration needs. Variable i has a
+ * name and a type, and each type has a kind, its extents and, for a tuple,
+ * the types of its parts. A type's extents are those of the arrays around
+ * it, then its own (one for a vector, two for a matrix); a tuple's are those
+ * of the arrays of tuples around it, and each part's extents start after
+ * them. An extent that depends on data is -1, and so is the extent of a
+ * complex vector or matrix inside an array, which the MIR does not keep. A
+ * constrained type has the kind it is stored as, so simplex[3] is a vector.
+ * Returns null with a message in err when the MIR cannot be read. Strings are
+ * owned by the result; free it with stanli_data_declarations_free. Out-of-range
+ * indices return -1, STANLI_TYPE_NONE, 0 parts or null. */
+typedef enum {
+  STANLI_TYPE_NONE = -1,
+  STANLI_TYPE_INT = 0,
+  STANLI_TYPE_REAL = 1,
+  STANLI_TYPE_COMPLEX = 2,
+  STANLI_TYPE_VECTOR = 3,
+  STANLI_TYPE_ROW_VECTOR = 4,
+  STANLI_TYPE_MATRIX = 5,
+  STANLI_TYPE_COMPLEX_VECTOR = 6,
+  STANLI_TYPE_COMPLEX_ROW_VECTOR = 7,
+  STANLI_TYPE_COMPLEX_MATRIX = 8,
+  STANLI_TYPE_TUPLE = 9
+} stanli_type_kind;
+typedef struct stanli_data_declarations stanli_data_declarations;
+stanli_data_declarations* stanli_data_declarations_new(const char* mir,
+                                                       char* err,
+                                                       size_t err_len);
+/* The parameters block's declarations, read with the same accessors. A
+ * parameter's type is the one it is stored as, so cholesky_factor_corr[3]
+ * is a 3 x 3 matrix. Transformed parameters and generated quantities are
+ * not included. */
+stanli_data_declarations* stanli_parameter_declarations_new(const char* mir,
+                                                            char* err,
+                                                            size_t err_len);
+void stanli_data_declarations_free(stanli_data_declarations* d);
+int64_t stanli_data_declarations_n(const stanli_data_declarations* d);
+const char* stanli_data_declaration_name(const stanli_data_declarations* d,
+                                         int64_t i);
+int64_t stanli_data_declaration_type(const stanli_data_declarations* d,
+                                     int64_t i);
+stanli_type_kind stanli_type_kind_of(const stanli_data_declarations* d,
+                                     int64_t type);
+/* The number of extents that come from arrays: all of a tuple's. */
+int64_t stanli_type_n_array_dims(const stanli_data_declarations* d,
+                                 int64_t type);
+int64_t stanli_type_n_dims(const stanli_data_declarations* d, int64_t type);
+int64_t stanli_type_dim(const stanli_data_declarations* d, int64_t type,
+                        int64_t k);
+int64_t stanli_type_n_parts(const stanli_data_declarations* d, int64_t type);
+int64_t stanli_type_part(const stanli_data_declarations* d, int64_t type,
+                         int64_t k);
 
 /* Frees a string this library returned ownership of. */
 void stanli_string_free(char* p);
@@ -231,8 +291,10 @@ int64_t stanli_n_unconstrained(const stanli_model* m);
  * free values the samplers and stanli_grad read.
  *
  * `inits_json` is a CmdStan-style JSON object naming every declared
- * parameter, except that a zero-size one may be left out. Each value must
- * have its declared dims, checked as CmdStan checks a starting value. Writes
+ * parameter, except that a zero-size one may be left out. Each value is
+ * checked by CmdStan's rule for JSON data: its dims must be the declared
+ * ones, and any empty value, such as [], stands for a zero-size parameter.
+ * Unlike CmdStan, extents of 1 may also be added or left out. Writes
  * n_unconstrained doubles to `q`. Returns 0 on success, or nonzero with a
  * message in err: a missing, unknown, wrongly shaped, or out-of-support value
  * names the parameter, and a model whose MIR carries no inverse parameter
