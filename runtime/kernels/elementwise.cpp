@@ -317,10 +317,9 @@ void gather_fwd(KernelCtx& ctx) {
   for (int64_t k = 0; k < ctx.out.len; ++k)
     ctx.out.data[k] = ctx.in[0].data[ctx.idata[k]];
 }
-// When the source elements receive more than kPlainSumMax adjoints each on
-// average, as theta does in log(theta[doc[n], k]) once reroll merges the loop
-// over n, the sums are compensated; a plain running sum lost up to 300 scaled
-// ULP on ldaK2's gradient.
+// A source element that receives many adjoints, as theta does in
+// log(theta[doc[n], k]) once reroll merges the loop over n, needs a
+// compensated sum.
 STANLI_ALIGN_FUNCTION_64 void gather_bwd(KernelCtx& ctx) {
   if (!ctx.in_adj[0].data) return;
   double* in_adj = ctx.in_adj[0].data;

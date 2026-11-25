@@ -18,8 +18,7 @@ STANLI_LPMF_FWD(poisson_fwd, poisson_lpmf, 1)
 // Stan Math's neg_binomial_2_lpmf with three changes where its formula
 // loses bits for large n:
 //  - for mu > phi, n * log(mu) - n * log(mu + phi) becomes
-//    -n * log1p(phi / mu); at n = 2000, mu = 5000, phi = 1 the old form is
-//    about 1000 ULP off;
+//    -n * log1p(phi / mu);
 //  - the mu partial n / mu - (n + phi) / (mu + phi) becomes
 //    (n - mu) / mu * phi / (mu + phi), which does not cancel;
 //  - binomial_coefficient_log(n + phi - 1, n) becomes

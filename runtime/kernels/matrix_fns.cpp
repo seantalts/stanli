@@ -2528,7 +2528,7 @@ void blglm_fwd(KernelCtx& ctx) { ctx.out.data[0] = blglm_eval(ctx); }
 // sit far from zero the last two cancel, and their rounding errors are left
 // at the scale of the result. Here each row's log probability is formed first
 // and the rows are added with compensation. The partials are Stan Math's
-// expressions, so they are bit for bit the same.
+// expressions.
 void clglm_rows_compensated(KernelCtx& ctx, sink& s, const std::vector<int>& y,
                             bool scalar_y, int64_t rows, int64_t cols) {
   using Eigen::Array;
