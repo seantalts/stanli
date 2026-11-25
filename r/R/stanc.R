@@ -189,7 +189,8 @@ read_compiler_output <- function(path) {
   if (is.na(size) || size == 0) return("")
   value <- rawToChar(readBin(path, "raw", n = size))
   Encoding(value) <- "UTF-8"
-  value
+  # The Windows compiler writes CRLF line endings.
+  gsub("\r\n", "\n", value, fixed = TRUE)
 }
 
 write_utf8_file <- function(path, value) {
