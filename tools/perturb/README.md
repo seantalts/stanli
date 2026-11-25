@@ -112,8 +112,13 @@ and above where the program would cross the 8 MiB program budget, the
 ceiling, estimated from the growth of the last two points under each cap.
 A ladder stops before a size whose preparation is predicted to take more
 than `--max-seconds` (60) or to need more than `--max-rss-gb` (4), or whose
-data passes 400 MB. A size that the model or its data checks reject is
-recorded as `rejected` and is not a finding.
+data passes 400 MB. When the log-density op count more than doubles
+between two adjacent sizes, the ladder bisects between them to find the
+size where it jumps. A size that the model rejects is recorded as
+`rejected` and is not a finding: a failed data or model check, a Stan Math
+error while transformed data runs (often a relation the declarations do
+not state, such as brms's `Kc == K - 1`), or a non-finite lp. Only a
+crash, a timeout, or stanli refusing to lower is a `failure`.
 
 Each point is checked at one point and prepared in parallel; then each is
 timed once (`bench_grad --timed`, fixed points), one process at a time.
@@ -123,7 +128,7 @@ timed once (`bench_grad --timed`, fixed points), one process at a time.
 | --- | --- |
 | `ops_grow` | the log-density or write_array op count grows with the size: log-log slope 0.5 or more over sizes 8 and up |
 | `prep_superlinear` | preparation time, or peak RSS above the smallest size's, grows with an exponent above 1.15 between the two largest sizes |
-| `per_element_jump` | ns per gradient divided by the size rises 1.3x or more between adjacent sizes; confirmed with 6 interleaved pairs |
+| `per_element_jump` | ns per gradient divided by the size rises 1.3x or more between adjacent sizes of 2 or more; confirmed with 6 interleaved pairs |
 | `program_changes_shape` | the decline reasons or the region opcodes change between adjacent sizes |
 | `failure` | a crash, timeout, bad_alloc or refusal at some sizes only |
 
