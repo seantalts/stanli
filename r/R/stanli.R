@@ -821,9 +821,9 @@ complete_partial_inits <- function(model, values, init_radius, seed) {
 #' @param adapt_engaged `TRUE` adapts the step size and, unless
 #'   `metric = "unit_e"`, the metric during warmup. `FALSE` runs no adaptation:
 #'   `warmup` iterations are ordinary transitions and `inv_metric` and
-#'   `step_size` are used as given. The default, `NULL`, means `TRUE` unless
-#'   `warmup = 0`, which then runs at exactly `step_size`; an explicit
-#'   `adapt_engaged = TRUE` with `warmup = 0` is an error, as in CmdStan.
+#'   `step_size` are used as given. The default, `NULL`, means `TRUE`, so
+#'   `warmup = 0` is an error, as in CmdStan and cmdstanr, unless
+#'   `adapt_engaged = FALSE`, which then runs at exactly `step_size`.
 #' @param adapt_metric `TRUE` (the default) adapts the metric during warmup
 #'   when `adapt_engaged` is `TRUE`. `FALSE` adapts only the step size and
 #'   keeps `inv_metric` (the identity when `NULL`) as given. It has no effect
@@ -880,7 +880,13 @@ sample_model <- function(model, chains = 4, seed = 1, warmup = 1000,
                       !adapt_metric))
     stop("metric, inv_metric, step_size, adapt_engaged and adapt_metric do ",
          "not apply with fixed_param = TRUE", call. = FALSE)
-  if (is.null(adapt_engaged)) adapt_engaged <- opts$warmup != 0L
+  # CmdStan, and so cmdstanr, refuses warmup = 0 while adaptation is on,
+  # which it is unless the caller turns it off.
+  if (is.null(adapt_engaged))
+    adapt_engaged <- if (fixed_param) opts$warmup != 0L else TRUE
+  if (adapt_engaged && !fixed_param && opts$warmup == 0L)
+    stop("The number of warmup samples (num_warmup) must be greater than ",
+         "zero if adaptation is enabled.", call. = FALSE)
   if (fixed_param && !is.null(pathfinder_init))
     stop("pathfinder_init does not apply with fixed_param = TRUE",
          call. = FALSE)

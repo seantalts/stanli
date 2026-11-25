@@ -306,7 +306,10 @@ stanmodel_sampling <- function(object, data = list(), pars = NA, chains = 4,
                      init_radius = start$init_radius,
                      parallel_chains = min(cores, chains), refresh = refresh,
                      metric = settings$metric, step_size = settings$step_size,
-                     adapt_engaged = settings$adapt_engaged,
+                     # RStan runs warmup = 0 without adaptation.
+                     adapt_engaged = if (is.null(settings$adapt_engaged) &&
+                                         warmup == 0) FALSE else
+                       settings$adapt_engaged,
                      adapt_metric = settings$adapt_metric,
                      chain_id = chain_id)
       }

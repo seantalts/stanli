@@ -236,7 +236,8 @@ test_that("sample_model rejects bad counts and options by name", {
       case[[2]], fixed = TRUE)
   expect_no_warning(try(sample_model(m, seed = "a", warmup = 5, samples = 5,
                                      refresh = 0), silent = TRUE))
-  fit <- sample_model(m, chains = 1, warmup = 0, samples = 3, refresh = 0)
+  fit <- sample_model(m, chains = 1, warmup = 0, samples = 3, refresh = 0,
+                      adapt_engaged = FALSE)
   expect_equal(dim(fit$draws)[1], 3)
 })
 
@@ -683,18 +684,29 @@ test_that("adapt_metric = FALSE adapts only the step size", {
   expect_false(fit$adapt_metric)
 })
 
-test_that("warmup = 0 runs at the given step size unless adaptation is asked for", {
+test_that("warmup = 0 needs adaptation turned off, as in cmdstanr", {
   skip_without_runtime()
   m <- metric_model()
   fixed <- sample_model(m, chains = 1, seed = 3, warmup = 0, samples = 10,
-                        step_size = 0.25, refresh = 0)
+                        step_size = 0.25, adapt_engaged = FALSE, refresh = 0)
   expect_true(all(fixed$sampler[, , "stepsize__"] == 0.25))
   expect_false(fixed$adapt_engaged)
-  expect_error(
-    sample_model(m, chains = 1, seed = 3, warmup = 0, samples = 10,
-                 adapt_engaged = TRUE, refresh = 0),
-    "warmup must be an integer >= 1 when adaptation is engaged",
-    fixed = TRUE)
+  # CmdStan's error, which cmdstanr shows for iter_warmup = 0.
+  cmdstan <- paste("The number of warmup samples (num_warmup) must be",
+                   "greater than zero if adaptation is enabled.")
+  for (engaged in list(NULL, TRUE))
+    expect_error(
+      sample_model(m, chains = 1, seed = 3, warmup = 0, samples = 10,
+                   adapt_engaged = engaged, refresh = 0),
+      cmdstan, fixed = TRUE)
+  expect_error(sample_cstan("parameters { real mu; } model { mu ~ normal(0, 1); }",
+                            chains = 1, iter_warmup = 0, iter_sampling = 5,
+                            refresh = 0),
+               cmdstan, fixed = TRUE)
+  # fixed_param has no adaptation. RStan's sampling() runs warmup = 0
+  # without it, as RStan does (test-stanmodel.R).
+  expect_s3_class(sample_model(m, chains = 1, warmup = 0, samples = 2,
+                               fixed_param = TRUE, refresh = 0), "stanli_fit")
   adapted <- sample_model(m, chains = 1, seed = 3, warmup = 20, samples = 10,
                           refresh = 0)
   expect_true(adapted$adapt_engaged)
