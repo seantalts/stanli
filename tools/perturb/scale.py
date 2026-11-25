@@ -263,7 +263,8 @@ class Analysis:
     def __init__(self, stan_text, data):
         self.decls = {d.name: d for d in parse_data_block(stan_text)}
         self.data = data
-        elsewhere = set().union(*map(_idents, parse_dims_elsewhere(stan_text)))
+        self.elsewhere = parse_dims_elsewhere(stan_text)
+        elsewhere = set().union(*map(_idents, self.elsewhere))
         self.scalars = [n for n, d in self.decls.items()
                         if d.basetype == "int" and not d.axes
                         and not d.unsupported]
@@ -325,6 +326,13 @@ class Analysis:
                                                  for a in into))
         try:
             sv.lower, sv.upper = _int_bound(d.lower), _int_bound(d.upper)
+            if not into and not self.containers(name) and (
+                    name not in self.elsewhere):
+                dims = [a for x in self.decls.values() for a in x.axes]
+                expr = next(a for a in dims + self.elsewhere
+                            if name in _idents(a))
+                raise Refused(f"compound dimension only: {name} sizes "
+                              f"nothing directly, only {expr}")
             self._check_basic(name)
             if kind == "groups":
                 self.closure(name)
@@ -528,7 +536,7 @@ def scale_many(stan_text, data, targets):
     after = _problems(an, new) - before
     if after:
         raise Refused(f"scaled data is inconsistent: {sorted(after)[0]}")
-    info = {n: new[n] for n in an.vars if new[n] != data[n]}
+    info = {n: new[n] for n in an.vars if new.get(n) != data.get(n)}
     return new, info
 
 
