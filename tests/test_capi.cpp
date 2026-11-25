@@ -3100,6 +3100,110 @@ void expect_unit_extent_inits() {
   stanli_model_free(corr);
 }
 
+// MIR compiled only to build a model may leave out a function the model
+// cannot reach, as stanli_model_new_from_stan does.
+void expect_compile_for_model_prunes_functions() {
+  if (!stanli_has_embedded_stanc()) return;
+  const char* code =
+      "functions { real never_called_from_the_model(real x) { return x; } }\n"
+      "parameters { real mu; } model { mu ~ normal(0, 1); }\n";
+  stanli_compilation* full = stanli_compile_stan(code, nullptr, nullptr, 0, 0);
+  stanli_compilation* model =
+      stanli_compile_stan_for_model(code, nullptr, nullptr, 0, 0);
+  const char* a = full ? stanli_compilation_mir(full) : nullptr;
+  const char* b = model ? stanli_compilation_mir(model) : nullptr;
+  expect_true("both compilations give MIR", a != nullptr && b != nullptr);
+  if (a != nullptr && b != nullptr) {
+    expect_true("the model MIR leaves the function out",
+                std::strlen(b) < std::strlen(a));
+  }
+  stanli_compilation_free(full);
+  stanli_compilation_free(model);
+}
+
+// The data block's declarations come from the MIR before any data: each
+// variable's kind, rank and the extents that do not depend on data, with a
+// tuple's parts as their own types.
+void expect_data_declarations() {
+  if (!stanli_has_embedded_stanc()) return;
+  const Compilation c = compile(
+      "data { int N; array[N] int y; real s; vector[3] v; row_vector[N] rv;"
+      "  matrix[2, N] M; array[2, 3] vector[4] av; simplex[3] sx;"
+      "  tuple(real, array[2] int) tp;"
+      "  array[N] tuple(vector[2], tuple(int, matrix[2, 2])) atp;"
+      "  array[2, 2] tuple(real, real) w; }\n"
+      "parameters { real mu; } model { mu ~ normal(0, 1); }\n",
+      "declarations.stan");
+  char err[1024]{};
+  stanli_data_declarations* d =
+      c.ok ? stanli_data_declarations_new(c.mir.c_str(), err, sizeof err)
+           : nullptr;
+  if (d == nullptr) {
+    ++failures;
+    std::printf("FAIL data declarations: %s %s\n", c.error.c_str(), err);
+    return;
+  }
+  struct Want {
+    const char* name;
+    stanli_type_kind kind;
+    int64_t n_array_dims;
+    std::vector<int64_t> dims;
+  };
+  const std::vector<Want> want = {{"N", STANLI_TYPE_INT, 0, {}},
+                                  {"y", STANLI_TYPE_INT, 1, {-1}},
+                                  {"s", STANLI_TYPE_REAL, 0, {}},
+                                  {"v", STANLI_TYPE_VECTOR, 0, {3}},
+                                  {"rv", STANLI_TYPE_ROW_VECTOR, 0, {-1}},
+                                  {"M", STANLI_TYPE_MATRIX, 0, {2, -1}},
+                                  {"av", STANLI_TYPE_VECTOR, 2, {2, 3, 4}},
+                                  {"sx", STANLI_TYPE_VECTOR, 0, {3}},
+                                  {"tp", STANLI_TYPE_TUPLE, 0, {}},
+                                  {"atp", STANLI_TYPE_TUPLE, 1, {-1}},
+                                  {"w", STANLI_TYPE_TUPLE, 2, {2, 2}}};
+  const auto check = [&](const std::string& what, int64_t type,
+                         stanli_type_kind kind, int64_t n_array_dims,
+                         const std::vector<int64_t>& dims) {
+    bool ok = stanli_type_kind_of(d, type) == kind &&
+              stanli_type_n_array_dims(d, type) == n_array_dims &&
+              stanli_type_n_dims(d, type) == (int64_t)dims.size();
+    for (size_t k = 0; ok && k < dims.size(); ++k)
+      ok = stanli_type_dim(d, type, (int64_t)k) == dims[k];
+    expect_true("data declaration " + what, ok);
+  };
+  expect_true("data declaration count",
+              stanli_data_declarations_n(d) == (int64_t)want.size());
+  for (size_t i = 0;
+       i < want.size() && i < (size_t)stanli_data_declarations_n(d); ++i) {
+    const char* name = stanli_data_declaration_name(d, (int64_t)i);
+    expect_true(std::string("data declaration name ") + want[i].name,
+                name != nullptr && std::string(name) == want[i].name);
+    check(want[i].name, stanli_data_declaration_type(d, (int64_t)i),
+          want[i].kind, want[i].n_array_dims, want[i].dims);
+  }
+  const int64_t tp = stanli_data_declaration_type(d, 8);
+  expect_true("tp has two parts", stanli_type_n_parts(d, tp) == 2);
+  check("tp.1", stanli_type_part(d, tp, 0), STANLI_TYPE_REAL, 0, {});
+  check("tp.2", stanli_type_part(d, tp, 1), STANLI_TYPE_INT, 1, {2});
+  const int64_t atp = stanli_data_declaration_type(d, 9);
+  check("atp.1", stanli_type_part(d, atp, 0), STANLI_TYPE_VECTOR, 0, {2});
+  const int64_t inner = stanli_type_part(d, atp, 1);
+  check("atp.2", inner, STANLI_TYPE_TUPLE, 0, {});
+  check("atp.2.1", stanli_type_part(d, inner, 0), STANLI_TYPE_INT, 0, {});
+  check("atp.2.2", stanli_type_part(d, inner, 1), STANLI_TYPE_MATRIX, 0,
+        {2, 2});
+  expect_true("a scalar has no parts", stanli_type_n_parts(d, 0) == 0);
+  expect_true("an index past the end",
+              stanli_data_declaration_name(d, 99) == nullptr &&
+                  stanli_type_kind_of(d, 9999) == STANLI_TYPE_NONE &&
+                  stanli_type_part(d, tp, 5) == -1);
+  stanli_data_declarations_free(d);
+  err[0] = '\0';
+  expect_true("nonsense MIR is refused",
+              stanli_data_declarations_new("(not a program)", err,
+                                           sizeof err) == nullptr &&
+                  err[0] != '\0');
+}
+
 // CmdStan evaluates a data-only expression in the model block on every
 // log density, so a print in an ODE right-hand side runs on every gradient
 // and never while the model is built. Preparation must not evaluate the
@@ -4244,6 +4348,8 @@ int main() {
   expect_init_shapes_follow_cmdstan();
   expect_scalar_init_for_length_one();
   expect_unit_extent_inits();
+  expect_data_declarations();
+  expect_compile_for_model_prunes_functions();
   expect_callback_print_each_evaluation();
   expect_parameterless_unconstrain();
   expect_parameterless_sampling();

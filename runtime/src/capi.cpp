@@ -7,6 +7,7 @@
 #include <stanli/estimate.hpp>
 #include <stanli/graph.hpp>
 #include <stanli/message_sink.hpp>
+#include <stanli/mir_decode.hpp>
 #include <stanli/nuts.hpp>
 #include <stanli/optable.hpp>
 #include <stanli/stanc_result.hpp>
@@ -19,6 +20,7 @@
 #include <stanli/whiten.hpp>
 
 #include "build_id.hpp"
+#include "mir_tuples.hpp"
 #include "copy_doubles.hpp"
 #include "data_document.hpp"
 #include <rapidjson/stringbuffer.h>
@@ -36,6 +38,7 @@
 #include <cstdio>
 #include <cstring>
 #include <map>
+#include <set>
 #include <limits>
 #include <memory>
 #include <mutex>
@@ -716,11 +719,11 @@ stanli_model* stanli_model_new_from_stan_named(const char* stan_code,
   return model_new_from_stan(stan_code, filename, data_json, o, err, err_len);
 }
 
-stanli_compilation* stanli_compile_stan(const char* stan_code,
+static stanli_compilation* compile_stan(const char* stan_code,
                                         const char* filename,
                                         const char* const* include_paths,
                                         size_t include_path_count,
-                                        int fast_math) {
+                                        int fast_math, int flags) {
   try {
     auto c = std::make_unique<stanli_compilation>();
     if (stan_code == nullptr ||
@@ -737,13 +740,14 @@ stanli_compilation* stanli_compile_stan(const char* stan_code,
 #ifdef STANLI_EMBED_STANC
     stanli::StancResult compiled = stanli::embedded_stanc_compile(
         stan_code, filename, include_paths, include_path_count,
-        fast_math ? stanli::kStancFastMath : 0);
+        flags | (fast_math ? stanli::kStancFastMath : 0));
     c->messages = compiler_messages(compiled);
     c->mir = std::move(compiled.mir);
     c->error = std::move(compiled.error);
 #else
     (void)filename;
     (void)fast_math;
+    (void)flags;
     c->error = "this build does not embed stanc3";
 #endif
     return c.release();
@@ -784,7 +788,216 @@ const char* stanli_compilation_message(const stanli_compilation* c, int64_t i) {
   return c->messages[(size_t)i].text.c_str();
 }
 
+stanli_compilation* stanli_compile_stan(const char* stan_code,
+                                        const char* filename,
+                                        const char* const* include_paths,
+                                        size_t include_path_count,
+                                        int fast_math) {
+  return compile_stan(stan_code, filename, include_paths, include_path_count,
+                      fast_math, 0);
+}
+
+stanli_compilation* stanli_compile_stan_for_model(
+    const char* stan_code, const char* filename,
+    const char* const* include_paths, size_t include_path_count,
+    int fast_math) {
+  return compile_stan(stan_code, filename, include_paths, include_path_count,
+                      fast_math, stanli::kStancModelOnly);
+}
+
 void stanli_compilation_free(stanli_compilation* c) { delete c; }
+
+}  // extern "C"
+
+// One type in a data declaration: its kind, its extents (-1 for one that
+// depends on data) and, for a tuple, the types of its parts.
+struct stanli_data_declarations {
+  struct Type {
+    stanli_type_kind kind = STANLI_TYPE_NONE;
+    std::vector<int64_t> dims;
+    int64_t n_array_dims = 0;
+    std::vector<int64_t> parts;
+  };
+  std::vector<std::string> names;
+  std::vector<int64_t> roots;
+  std::vector<Type> types;
+};
+
+namespace {
+
+using Declarations = stanli_data_declarations;
+
+stanli_type_kind type_kind(const std::string& base) {
+  if (base == "SInt") return STANLI_TYPE_INT;
+  if (base == "SReal") return STANLI_TYPE_REAL;
+  if (base == "SComplex") return STANLI_TYPE_COMPLEX;
+  if (base == "SVector") return STANLI_TYPE_VECTOR;
+  if (base == "SRowVector") return STANLI_TYPE_ROW_VECTOR;
+  if (base == "SMatrix") return STANLI_TYPE_MATRIX;
+  if (base == "SComplexVector") return STANLI_TYPE_COMPLEX_VECTOR;
+  if (base == "SComplexRowVector") return STANLI_TYPE_COMPLEX_ROW_VECTOR;
+  if (base == "SComplexMatrix") return STANLI_TYPE_COMPLEX_MATRIX;
+  throw std::invalid_argument("data declaration of unknown type " + base);
+}
+
+int64_t own_rank(stanli_type_kind kind) {
+  switch (kind) {
+    case STANLI_TYPE_VECTOR:
+    case STANLI_TYPE_ROW_VECTOR:
+    case STANLI_TYPE_COMPLEX_VECTOR:
+    case STANLI_TYPE_COMPLEX_ROW_VECTOR:
+      return 1;
+    case STANLI_TYPE_MATRIX:
+    case STANLI_TYPE_COMPLEX_MATRIX:
+      return 2;
+    default:
+      return 0;
+  }
+}
+
+std::vector<int64_t> known_dims(const std::vector<stanli::mir::Expr>& dims,
+                                size_t begin, size_t end) {
+  std::vector<int64_t> out;
+  for (size_t k = begin; k < end && k < dims.size(); ++k)
+    out.push_back(dims[k].kind == stanli::mir::Expr::LitInt ? dims[k].lit_i
+                                                            : -1);
+  return out;
+}
+
+int64_t add_leaf_type(Declarations& d, const stanli::mir::SizedType& type,
+                      size_t begin) {
+  Declarations::Type t;
+  t.kind = type_kind(type.base == "SArray" ? type.elem_base : type.base);
+  t.dims = known_dims(type.dims, begin, type.dims.size());
+  t.n_array_dims = (int64_t)t.dims.size() - own_rank(t.kind);
+  d.types.push_back(std::move(t));
+  return (int64_t)d.types.size() - 1;
+}
+
+// The tuple at `depth` of the leaves' paths. Each leaf's type has the
+// extents of every enclosing array of tuples, then its own; its path says
+// where each array of tuples ends.
+int64_t add_tuple_type(
+    Declarations& d,
+    const std::vector<const stanli::mir::detail::TupleLeaf*>& leaves,
+    size_t depth) {
+  const auto* first = leaves.front();
+  const size_t begin = depth == 0 ? 0 : first->path[depth - 1].before;
+  Declarations::Type t;
+  t.kind = STANLI_TYPE_TUPLE;
+  t.dims = known_dims(first->type.dims, begin, first->path[depth].before);
+  t.n_array_dims = (int64_t)t.dims.size();
+  std::vector<int64_t> parts;
+  for (size_t k = 0; k < leaves.size();) {
+    const int component = leaves[k]->path[depth].component;
+    std::vector<const stanli::mir::detail::TupleLeaf*> group;
+    for (; k < leaves.size() && leaves[k]->path[depth].component == component;
+         ++k)
+      group.push_back(leaves[k]);
+    if (group.size() == 1 && group[0]->path.size() == depth + 1)
+      parts.push_back(
+          add_leaf_type(d, group[0]->type, group[0]->path[depth].before));
+    else
+      parts.push_back(add_tuple_type(d, group, depth + 1));
+  }
+  t.parts = std::move(parts);
+  d.types.push_back(std::move(t));
+  return (int64_t)d.types.size() - 1;
+}
+
+const Declarations::Type* declared_type(const Declarations* d, int64_t type) {
+  if (d == nullptr || type < 0 || type >= (int64_t)d->types.size())
+    return nullptr;
+  return &d->types[(size_t)type];
+}
+
+}  // namespace
+
+extern "C" {
+
+stanli_data_declarations* stanli_data_declarations_new(const char* mir,
+                                                       char* err,
+                                                       size_t err_len) {
+  try {
+    if (mir == nullptr) throw std::invalid_argument("mir is null");
+    const stanli::mir::Program p = stanli::decode_program(mir);
+    auto d = std::make_unique<Declarations>();
+    std::set<std::string> done;
+    for (const auto& [name, type] : p.input_vars) {
+      const stanli::mir::detail::TupleLeaf* leaf =
+          p.tuples ? p.tuples->leaf(name) : nullptr;
+      if (leaf == nullptr) {
+        d->names.push_back(name);
+        d->roots.push_back(add_leaf_type(*d, type, 0));
+        continue;
+      }
+      if (!done.insert(leaf->base).second) continue;
+      std::vector<const stanli::mir::detail::TupleLeaf*> leaves;
+      for (const std::string& v : p.tuples->leaves_of.at(leaf->base))
+        leaves.push_back(p.tuples->leaf(v));
+      d->names.push_back(leaf->base);
+      d->roots.push_back(add_tuple_type(*d, leaves, 0));
+    }
+    return d.release();
+  } catch (const std::exception& e) {
+    put_err(err, err_len, e.what());
+    return nullptr;
+  }
+}
+
+void stanli_data_declarations_free(stanli_data_declarations* d) { delete d; }
+
+int64_t stanli_data_declarations_n(const stanli_data_declarations* d) {
+  return d == nullptr ? 0 : (int64_t)d->names.size();
+}
+
+const char* stanli_data_declaration_name(const stanli_data_declarations* d,
+                                         int64_t i) {
+  if (d == nullptr || i < 0 || i >= (int64_t)d->names.size()) return nullptr;
+  return d->names[(size_t)i].c_str();
+}
+
+int64_t stanli_data_declaration_type(const stanli_data_declarations* d,
+                                     int64_t i) {
+  if (d == nullptr || i < 0 || i >= (int64_t)d->roots.size()) return -1;
+  return d->roots[(size_t)i];
+}
+
+stanli_type_kind stanli_type_kind_of(const stanli_data_declarations* d,
+                                     int64_t type) {
+  const auto* t = declared_type(d, type);
+  return t == nullptr ? STANLI_TYPE_NONE : t->kind;
+}
+
+int64_t stanli_type_n_array_dims(const stanli_data_declarations* d,
+                                 int64_t type) {
+  const auto* t = declared_type(d, type);
+  return t == nullptr ? -1 : t->n_array_dims;
+}
+
+int64_t stanli_type_n_dims(const stanli_data_declarations* d, int64_t type) {
+  const auto* t = declared_type(d, type);
+  return t == nullptr ? -1 : (int64_t)t->dims.size();
+}
+
+int64_t stanli_type_dim(const stanli_data_declarations* d, int64_t type,
+                        int64_t k) {
+  const auto* t = declared_type(d, type);
+  if (t == nullptr || k < 0 || k >= (int64_t)t->dims.size()) return -1;
+  return t->dims[(size_t)k];
+}
+
+int64_t stanli_type_n_parts(const stanli_data_declarations* d, int64_t type) {
+  const auto* t = declared_type(d, type);
+  return t == nullptr ? 0 : (int64_t)t->parts.size();
+}
+
+int64_t stanli_type_part(const stanli_data_declarations* d, int64_t type,
+                         int64_t k) {
+  const auto* t = declared_type(d, type);
+  if (t == nullptr || k < 0 || k >= (int64_t)t->parts.size()) return -1;
+  return t->parts[(size_t)k];
+}
 
 char* stanli_stan_to_mir_with_opts(const char* stan_code,
                                    const char* const* include_paths,
