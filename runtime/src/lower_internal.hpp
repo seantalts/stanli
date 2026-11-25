@@ -404,6 +404,8 @@ StructuredMode read_structured_mode();
 // STANLI_REGION_MAP=0 and STANLI_REGION_MAP_DIAGNOSTICS.
 struct RegionMapSwitches {
   bool off = false;
+  // STANLI_REGION_MAP=all also maps loops without parameter-dependent control.
+  bool all = false;
   bool diagnostics = false;
 };
 RegionMapSwitches read_region_map_switches();
@@ -1048,6 +1050,40 @@ struct Lowering {
   std::set<const mir::Stmt*> write_array_int_loops;
   std::set<const mir::Stmt*> write_array_unrolled_loops;
   bool write_array_unroll_int_loops = false;
+  // The program budget (compile_model). Each outermost loop that unrolled,
+  // with the slots its unroll created, so the ops that survive the passes
+  // can be charged to it. A retry lowers the loops in compact_loops in a
+  // compact form: in log_prob the region map's lane form when one exists,
+  // else OP_LOOP; in write_array OP_LOOP. Log_prob loops that branch on a
+  // parameter are not recorded, so they keep their usual form.
+  struct UnrolledLoop {
+    const mir::Stmt* loop = nullptr;
+    int first_slot = 0, end_slot = 0;
+    // Whether the region map could take the loop's shape (region_map_shape).
+    bool lane_shape = false;
+  };
+  std::vector<UnrolledLoop> unrolled_loops;
+  std::set<const mir::Stmt*> compact_loops;
+  // Whether a loop in compact_loops may become OP_LOOP when the lane form
+  // refuses it. OP_LOOP is slower than unrolling on one chain, so the
+  // budget allows it only for larger programs (compile_model).
+  bool compact_op_loop = false;
+  bool lowering_compact = false;
+  // The most ops an outermost loop may unroll to. A loop that
+  // passes it stops the lowering with UnrollCeiling, and compile_model
+  // lowers again with that loop in compact_loops. Zero means no ceiling.
+  struct UnrollCeiling {
+    const mir::Stmt* loop;
+  };
+  // The loops of compact_loops that the budget chose. One that no compact
+  // form takes stops the lowering with CompactRefused, so that compile_model
+  // does not finish a graph it would throw away.
+  std::set<const mir::Stmt*> required_compact;
+  struct CompactRefused {
+    const mir::Stmt* loop;
+  };
+  size_t unroll_ceiling = 0;
+  bool loop_has_parameter_control(const mir::Stmt& s);
   // The names that a declared size in write_array reads. A loop that
   // assigns one of them is unrolled on the first attempt.
   std::set<std::string> write_array_size_names;
@@ -1985,6 +2021,11 @@ struct Lowering {
   std::vector<int> pack_island_inputs(IslandProg& prog,
                                       std::vector<int> inputs);
   bool lower_region_map(const mir::Stmt& s, long lo, long hi);
+  // Why the region map cannot take the loop, from its MIR alone, or empty.
+  // Sets the real that collects the terms, if the body does not add to the
+  // target directly.
+  std::string region_map_shape(const mir::Stmt& s, std::string* accumulator,
+                               const mir::Expr** accumulator_read);
 
   // The OP_ISLAND for a compiled region, plus one extraction per live-out.
   void emit_island(const std::shared_ptr<IslandProg>& prog,

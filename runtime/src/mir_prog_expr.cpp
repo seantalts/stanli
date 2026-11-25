@@ -229,8 +229,9 @@ Range ProgramCompiler::expr(const mir::Expr& e) {
         const Range iv = expr(e.args[1].args[0]);
         if (!is_scalar(iv)) bail("runtime index is not scalar");
         const int r = alloc(1);
-        p.code.push_back(
-            Program::Instr{Program::DYN_INDEX, r, b.reg, iv.reg, 0, b.len});
+        Program::Instr read{Program::DYN_INDEX, r, b.reg, iv.reg, 0, b.len};
+        read.sub = b.kind == ViewKind::Flat ? kDynIndexArray : kDynIndexVector;
+        p.code.push_back(read);
         return {r, 1};
       }
 
@@ -284,9 +285,14 @@ Range ProgramCompiler::expr(const mir::Expr& e) {
         const Range iv = expr(e.args[runtime_dim + 1].args[0]);
         if (!is_scalar(iv)) bail("runtime array index is not scalar");
         const int r = alloc(1);
-        p.code.push_back(Program::Instr{Program::DYN_INDEX, r, b.reg, iv.reg,
-                                        (int32_t)base_offsets[0],
-                                        (int32_t)dims[runtime_dim]});
+        Program::Instr read{Program::DYN_INDEX,
+                            r,
+                            b.reg,
+                            iv.reg,
+                            (int32_t)base_offsets[0],
+                            (int32_t)dims[runtime_dim]};
+        read.sub = kDynIndexArray;
+        p.code.push_back(read);
         return {r, 1};
       }
       const size_t leaf_axes =

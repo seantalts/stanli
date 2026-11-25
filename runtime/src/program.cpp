@@ -19,6 +19,7 @@
 // is refused when its block starts or ends strictly inside a range, and the
 // renumbering only drops registers nothing names.
 #include <stanli/debug_switch.hpp>
+#include <stanli/builtin_registry.hpp>
 #include <stanli/program.hpp>
 
 #include <cmath>
@@ -28,6 +29,17 @@
 #include <vector>
 
 namespace stanli {
+
+void throw_dyn_index_error(uint8_t label, double raw, int32_t len) {
+  const char* stan_label = label == kDynIndexVector  ? "vector[uni] indexing"
+                           : label == kDynIndexArray ? "array[uni, ...] index"
+                                                     : nullptr;
+  if (stan_label && std::isfinite(raw) && std::trunc(raw) == raw &&
+      std::fabs(raw) <= std::numeric_limits<int32_t>::max())
+    throw ProgramIndexError(
+        index_out_of_range_message(stan_label, len, static_cast<int64_t>(raw)));
+  throw ProgramIndexError();
+}
 
 namespace {
 

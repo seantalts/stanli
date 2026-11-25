@@ -111,22 +111,22 @@ answers at 3 points for each model. That makes <!--gen:testing_points-->1242<!--
 and <!--gen:testing_values-->1,504,488<!--/gen--> values. CmdStan rejects <!--gen:testing_rejected_points-->6<!--/gen-->
 of the points.
 
-In <!--gen:testing_models_within-->333<!--/gen--> models, every value is within 10 ULP of
-CmdStan. The other <!--gen:testing_models_over-->81<!--/gen--> models have <!--gen:testing_entries-->177<!--/gen-->
-ledger entries. stanli is at least as close to the true value as CmdStan in <!--gen:testing_entries_stanli-->129<!--/gen-->
+In <!--gen:testing_models_within-->331<!--/gen--> models, every value is within 10 ULP of
+CmdStan. The other <!--gen:testing_models_over-->83<!--/gen--> models have <!--gen:testing_entries-->179<!--/gen-->
+ledger entries. stanli is at least as close to the true value as CmdStan in <!--gen:testing_entries_stanli-->131<!--/gen-->
 of those entries. CmdStan is closer in <!--gen:testing_entries_cmdstan-->9<!--/gen-->. We
 cannot tell for the other <!--gen:testing_entries_unknown-->39<!--/gen-->.
 
 <!--gen:testing_collections-->
 | source | models | models with a value over 10 ULP |
 | --- | ---: | ---: |
-| posteriordb | 119 | 40 |
+| posteriordb | 119 | 41 |
 | educational | 13 | 1 |
 | brms | 124 | 4 |
 | rethinking | 62 | 11 |
 | cogmod | 22 | 12 |
 | ctsem | 3 | 1 |
-| examplemodels | 23 | 4 |
+| examplemodels | 23 | 5 |
 | stanguide | 6 | 1 |
 | oncobayes2 | 3 | 1 |
 | rstanarm | 4 | 0 |
@@ -142,7 +142,7 @@ cannot tell for the other <!--gen:testing_entries_unknown-->39<!--/gen-->.
 | walker | 2 | 0 |
 | bayesdfa | 2 | 0 |
 | regressions | 13 | 0 |
-| all | 414 | 81 |
+| all | 414 | 83 |
 <!--/gen-->
 
 The models come from posteriordb, brms formulas, the code of Statistical
@@ -286,7 +286,7 @@ table and those files disagree.
 | `nes` | posteriordb | 10 | 10 | 2.64 | 2.64 | 1.51 | 0.21 | 0.01 | 0.01 | 10 |  |
 | `nes_logit_model` | posteriordb | 2 | 2 | 17.8 | 17.8 | 4.04 | 4.04 | <0.01 | <0.01 | 10 |  |
 | `nn_rbm1bJ10` | posteriordb | 7951 | 7951 | 21.1 | 21.1 |  |  | <0.01 | <0.01 | 10 |  |
-| `nn_rbm1bJ100` | posteriordb | 79411 | 79411 |  |  |  |  |  |  | 10 |  |
+| `nn_rbm1bJ100` | posteriordb | 79411 | 79411 |  |  |  |  |  |  | lp 3,982 |  |
 | `normal_mixture` | posteriordb | 3 | 3 | 4.11 | 0.26 | 7.44 | 6.98 | 0.14 | 0.14 | 10 |  |
 | `normal_mixture_k` | posteriordb | 14 | 15 | 7.20 | 6.53 | 14.9 | 15.0 | 0.24 | 0.23 | gradient 15 |  |
 | `one_comp_mm_elim_abs` | posteriordb | 4 | 44 |  |  |  |  |  |  | outputs 245 |  |
@@ -567,7 +567,7 @@ table and those files disagree.
 | `examplemodels_mr_ss` | examplemodels | 2 | 19602 | 14.7 | 14.4 | 277 | 110 | 0.14 | 0.14 | gradient 729 |  |
 | `examplemodels_ms` | examplemodels | 6 | 72036 | 7.19 | 7.19 | 36.4 | 13.3 | 0.05 | 0.05 | gradient 254 |  |
 | `examplemodels_ode_one_comp_mm` | examplemodels | 4 | 44 |  |  |  |  |  |  | gradient 30, outputs 13 |  |
-| `examplemodels_probit_multi_good` | examplemodels | 2038 | 2064 | 87.8 | 87.8 |  |  | 0.17 | 0.18 | 10 |  |
+| `examplemodels_probit_multi_good` | examplemodels | 2038 | 2064 | 87.8 | 87.8 |  |  | 0.17 | 0.18 | lp 75 |  |
 | `examplemodels_radon_group` | examplemodels | 92 | 92 | 4.99 | 4.33 | 0.09 | 0.08 | 0.15 | 0.14 | 10 |  |
 | `examplemodels_roaches_overdispersion` | examplemodels | 267 | 267 | 3.05 | 3.05 | 0.01 | 0.01 | 0.33 | 0.33 | 10 |  |
 | `examplemodels_ssm` | examplemodels | 28 | 55 | 1.92 | 1.83 | 1.13 | 1.13 | 0.24 | 0.24 | 10 |  |

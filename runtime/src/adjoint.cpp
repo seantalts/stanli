@@ -356,6 +356,15 @@ bool gen_adjoint(IslandProg& p, bool keep_every_clear) {
   // executor reads. Read at the density rather than after the sweep, because
   // registers are cells: one holding data here may hold a parameter later.
   std::vector<uint8_t> dmask(orig.size(), 0xf);
+  // The same set narrows the input adjoints of the calls whose backward
+  // skips a null input adjoint and whose variant says nothing about which
+  // inputs are active. These are the masks that ProgramCompiler fixes per
+  // opcode, so a data container read by index gets no adjoint.
+  std::vector<uint8_t> cmask(orig.size(), 0x3f);
+  const auto narrows = [](uint16_t opcode) {
+    return opcode == OP_INDEX_DYNAMIC || opcode == OP_SET_INDEX_DYNAMIC ||
+           opcode == OP_DOT || opcode == OP_GROUP_DOT || opcode == OP_SUM_VEC;
+  };
   {
     std::vector<char> active((size_t)n0, 0);
     for (const auto& li : p.ins)
@@ -374,7 +383,15 @@ bool gen_adjoint(IslandProg& p, bool keep_every_clear) {
       any = false;
       if (I.code == Program::CALL) {
         const Program::Call& call = fwd.calls[(size_t)I.a];
-        for (int j = 0; j < call.n_in; ++j) read(call.in[j], call.in_len[j]);
+        uint8_t m = 0;
+        for (int j = 0; j < call.n_in; ++j) {
+          const bool before = any;
+          any = false;
+          read(call.in[j], call.in_len[j]);
+          if (any) m |= (uint8_t)(1u << j);
+          any = any || before;
+        }
+        if (narrows(call.opcode)) cmask[i] = m;
         if (!any) continue;
         write(call.out, call.out_len);
         write(call.scratch, call.scratch_len);
@@ -556,6 +573,7 @@ bool gen_adjoint(IslandProg& p, bool keep_every_clear) {
     }
     if (I.code == Program::CALL) {
       Program::Call call = fwd.calls[(size_t)I.a];
+      call.input_adjoint_mask &= cmask[(size_t)i];
       // Metadata describes the registered implementation, not an arbitrary
       // CALL payload.  A private/replaced function therefore keeps the old
       // save-everything behavior even when it borrows a known opcode.

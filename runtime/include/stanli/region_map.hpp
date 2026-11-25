@@ -76,6 +76,11 @@ struct RegionMapLanePlan {
     // An index read from shared cells: its adjoint takes one dynamic site
     // per selected element instead of a row for every input cell.
     bool index_sites = false;
+    // An index read whose selectors take the same values in every
+    // evaluation: they come from data and the loop variable, and no
+    // parameter decides whether the read runs. Once an evaluation has checked
+    // them, later evaluations of the same executor skip the checks.
+    bool proven = false;
   };
   struct Operands {
     int32_t dst = -1, a = -1, b = -1, c = -1;
@@ -95,6 +100,7 @@ struct RegionMapLanePlan {
   int max_sites = 0;
   int max_dynamic = 0;
   int tile_calls = 0;
+  int proven_calls = 0;
   std::vector<int32_t> reg_slot;
   std::vector<int32_t> seed_regs;
   std::vector<int32_t> cell_slot;
@@ -125,6 +131,10 @@ struct RegionMapProg : IslandProg {
   // Check after each backward iteration that the adjoint cells it should
   // have cleared are zero (STANLI_REGION_MAP_CHECK_CLEAN, read at lowering).
   bool check_clean = false;
+  // Add the iteration terms with compensation once there are more than
+  // kPlainSumMax of them (pairwise_sum.hpp). Set for a loop that the program
+  // budget maps instead of unrolling.
+  bool compensated = false;
   RegionMapLanePlan lanes;
   std::string label;
 };
@@ -136,6 +146,9 @@ uint64_t region_map_lane_runs();
 
 uint64_t region_map_tile_call_runs();
 
+// Forward runs of a lane plan that skipped the checks of proven gathers.
+uint64_t region_map_proven_runs();
+
 std::string region_map_call_summary(const RegionMapProg& p);
 
 int64_t region_map_lane_cells(const RegionMapProg& p);
@@ -144,8 +157,10 @@ int64_t region_map_lane_cells(const RegionMapProg& p);
 double* region_map_lane_region(const RegionMapProg& p, double* scratch);
 std::vector<char> region_map_clean_exempt_cells(const RegionMapProg& p);
 
+// `proven`: an earlier evaluation of this executor checked the selectors
+// of the proven gathers, so this one skips their checks.
 void region_map_lanes_forward(const RegionMapProg& p, KernelCtx& ctx,
-                              double* region);
+                              double* region, bool proven);
 
 void region_map_lanes_backward(const RegionMapProg& p, KernelCtx& ctx,
                                double* region, double* adj);

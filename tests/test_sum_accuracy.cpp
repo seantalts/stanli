@@ -11,6 +11,7 @@
 #include <stanli/graph.hpp>
 #include <stanli/kernel_types.hpp>
 #include <stanli/optable.hpp>
+#include <stanli/pairwise_sum.hpp>
 #include <stan/math.hpp>
 
 #include <cmath>
@@ -385,6 +386,36 @@ void test_summed_densities() {
 
 }  // namespace
 
+// CompensatedSum adds terms one at a time and returns what compensated_sum
+// returns for the same terms in the same order, bit for bit, so a kernel
+// that sees its terms one by one sums them as the vector kernels do.
+void test_compensated_accumulator() {
+  std::vector<std::pair<std::string, std::vector<double>>> cases = {
+      {"empty", {}}, {"three", {1.0, 1e-17, -1.0}}};
+  for (int64_t n : {1, 4, 5, 33, 1000, 4003}) {
+    std::vector<double> x((size_t)n);
+    for (int64_t i = 0; i < n; ++i)
+      x[(size_t)i] = 1e6 * std::sin(0.37 * i) + 1.0 / (3 + i % 7);
+    cases.push_back({"n=" + std::to_string(n), x});
+  }
+  std::vector<double> special(40, 1.0);
+  special[7] = std::numeric_limits<double>::infinity();
+  cases.push_back({"inf", special});
+  special[9] = std::numeric_limits<double>::quiet_NaN();
+  cases.push_back({"nan", special});
+  for (const auto& [name, terms] : cases) {
+    CompensatedSum acc;
+    for (double v : terms) acc.add(v);
+    const double want = compensated_sum(terms.data(), (int64_t)terms.size());
+    const double got = acc.result();
+    if (std::isnan(want))
+      expect_eq_or_both_nan("CompensatedSum " + name, got, want);
+    else
+      expect_true("CompensatedSum " + name + " equals compensated_sum",
+                  got == want && std::signbit(got) == std::signbit(want));
+  }
+}
+
 int main() {
   test_broadcast_scalar_adjoints();
   test_elementwise_density_scalar_adjoint();
@@ -393,5 +424,6 @@ int main() {
   test_summed_densities();
   test_sum_and_mean_values();
   test_compensated_sum_edges();
+  test_compensated_accumulator();
   return finish("test_sum_accuracy");
 }

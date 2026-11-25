@@ -912,6 +912,14 @@ int64_t Executor::storage_bytes() const {
          bytes(fwd_fn_) + bytes(bwd_);
 }
 
+int64_t Executor::program_bytes(const Graph& g) {
+  const int64_t per_op =
+      static_cast<int64_t>(sizeof(Op) + sizeof(KernelCtx) +
+                           sizeof(void (*)(KernelCtx&))) +
+      (g.forward_only ? 0 : static_cast<int64_t>(sizeof(BwdStep)));
+  return static_cast<int64_t>(g.ops.size()) * per_op;
+}
+
 bool share_across_chains(const Executor& ex, int chains) {
   if (const char* forced = debug_env("STANLI_SHARE_WRITE_ARRAY"))
     return chains > 1 && forced[0] == '1';

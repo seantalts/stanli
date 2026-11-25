@@ -8,11 +8,13 @@
 #include <stanli/ode_adjoint.hpp>
 #include <stanli/optable.hpp>
 #include <stanli/structured_loop.hpp>
+#include <stanli/pairwise_sum.hpp>
 #include <stanli/region_map.hpp>
 #include <stanli/wa_interp.hpp>
 
 #include <stan/math.hpp>
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
@@ -1790,8 +1792,9 @@ void test_lane_exceptions() {
     check(r.threw == 4 && r.ok == 0,
           what + ": out of range index throws every time");
     const std::string mapped = outcome("region_map_oob", n, nullptr);
-    check(mapped.find("structured index out of range") != std::string::npos,
-          what + ": lane exception is the structured message: " + mapped);
+    check(mapped.find("vector[uni] indexing: accessing element out of "
+                      "range") != std::string::npos,
+          what + ": lane exception is Stan's error: " + mapped);
   }
   for (int n : {37, 64, 65, 200}) {
     const std::string what = "region_map_calldomain N=" + std::to_string(n);
@@ -2511,6 +2514,927 @@ void test_copy_propagation_in_map() {
   }
 }
 
+// Indexed reads of containers in a mapped body: X[n] reads a row of a data
+// matrix, z[, g[n]] a column of a parameter matrix, b[idx[n]] a gather with
+// repeated indices, and M[h[n]] a row of a matrix built in the body.
+struct Gather {
+  int n = 0, J = 0, K = 2;
+  std::vector<std::vector<double>> X, Zd;
+  std::vector<double> bd;
+  std::vector<int> g, h;
+  std::vector<std::array<int, 3>> idx;
+};
+
+Gather make_gather(int n, int J, int bad_row = -1) {
+  Gather d;
+  d.n = n;
+  d.J = J;
+  for (int i = 0; i < n; ++i) {
+    d.X.push_back({std::cos(0.3 * i), std::sin(0.7 * i + 0.1)});
+    const int g = (i * 7) % J + 1;
+    d.g.push_back(i == bad_row ? J + 1 : g);
+    d.idx.push_back({g, g, (i * 3) % J + 1});
+    d.h.push_back(i % 2 + 1);
+  }
+  for (int k = 0; k < d.K; ++k) {
+    d.Zd.emplace_back();
+    for (int j = 0; j < J; ++j)
+      d.Zd.back().push_back(std::sin(1.1 * k + 0.7 * j + 0.2));
+  }
+  for (int j = 0; j < J; ++j) d.bd.push_back(0.1 * std::cos((double)j));
+  return d;
+}
+
+std::string gather_extra(const Gather& d) {
+  std::ostringstream out;
+  out.precision(17);
+  const auto rows = [&](const std::vector<std::vector<double>>& m) {
+    out << "[";
+    for (size_t r = 0; r < m.size(); ++r) {
+      out << (r ? ",[" : "[");
+      for (size_t c = 0; c < m[r].size(); ++c) out << (c ? "," : "") << m[r][c];
+      out << "]";
+    }
+    out << "]";
+  };
+  out << "\"J\":" << d.J << ",\"K\":" << d.K << ",\"X\":";
+  rows(d.X);
+  out << ",\"Zd\":";
+  rows(d.Zd);
+  out << ",\"bd\":[";
+  for (int j = 0; j < d.J; ++j) out << (j ? "," : "") << d.bd[(size_t)j];
+  out << "],\"g\":[";
+  for (int i = 0; i < d.n; ++i) out << (i ? "," : "") << d.g[(size_t)i];
+  out << "],\"idx\":[";
+  for (int i = 0; i < d.n; ++i) {
+    const auto& t = d.idx[(size_t)i];
+    out << (i ? "," : "") << "[" << t[0] << "," << t[1] << "," << t[2] << "]";
+  }
+  out << "],\"h\":[";
+  for (int i = 0; i < d.n; ++i) out << (i ? "," : "") << d.h[(size_t)i];
+  out << "]";
+  return out.str();
+}
+
+Ref gather_ref(const Gather& d) {
+  return
+      [d](const std::vector<var>& p, const Series& s, std::vector<int>* taken) {
+        const var a = p[0], ls = p[1];
+        var lp = 0;
+        for (int i = 0; i < d.n; ++i) {
+          const int g = d.g[(size_t)i] - 1;
+          var m = d.X[(size_t)i][0] * (a * d.Zd[0][(size_t)g]) +
+                  d.X[(size_t)i][1] * (a * d.Zd[1][(size_t)g]);
+          m += d.h[(size_t)i] == 1 ? a * s.x[(size_t)i] + ls
+                                   : a + ls * s.x[(size_t)i];
+          const var r = s.y[(size_t)i] - m;
+          const bool low = r < ls;
+          if (taken) taken->push_back(low);
+          if (low) {
+            var b = 0;
+            for (int t : d.idx[(size_t)i]) b += ls * d.bd[(size_t)(t - 1)];
+            lp += -stan::math::square(r) + b;
+          } else {
+            lp += -0.5 * stan::math::square(r) + ls;
+          }
+        }
+        return lp;
+      };
+}
+
+const std::vector<Params> gather_points = {
+    {0.3, -0.2}, {-1.1, 0.4}, {0.8, 0.1}, {0.3, -0.2}};
+
+// Which map calls are OP_INDEX_DYNAMIC reads, keyed by the length of the
+// container they read.
+std::map<int, int> gather_calls(const stanli::RegionMapProg& p) {
+  std::map<int, int> by_len;
+  for (size_t i = 0; i < p.calls.size(); ++i)
+    if (p.calls[i].opcode == stanli::OP_INDEX_DYNAMIC)
+      by_len[p.calls[i].in_len[0]] = (int)i;
+  return by_len;
+}
+
+void test_gather_parity() {
+  for (int n : {37, 64, 65, 200}) {
+    const Gather d = make_gather(n, 8);
+    const std::string extra = gather_extra(d);
+    const std::string what = "region_map_gather N=" + std::to_string(n);
+    CompiledModel lanes =
+        compile_with("region_map_gather", n, nullptr, "0", extra);
+    CompiledModel scalar = compile_with("region_map_gather", n,
+                                        "STANLI_REGION_MAP_LANES", "0", extra);
+    expect_mapped(what, lanes);
+    expect_lane_parity(what, lanes, scalar, gather_points, true);
+    CompiledModel off =
+        compile_with("region_map_gather", n, "STANLI_REGION_MAP", "0", extra);
+    check(count_opcode(off, OP_REGION_MAP) == 0, what + ": unmapped");
+    Executor el(lanes.graph), es(scalar.graph), eo(off.graph);
+    lanes.bind(el);
+    scalar.bind(es);
+    off.bind(eo);
+    const Series s = make_series(n);
+    std::vector<std::vector<int>> taken(gather_points.size());
+    for (size_t k = 0; k < gather_points.size(); ++k) {
+      const std::string at = what + " point " + std::to_string(k);
+      const Eval ref = reference(gather_ref(d), s, gather_points[k], &taken[k]);
+      const Eval want = evaluate(eo, gather_points[k]);
+      expect_ulp(at + " unmapped lp vs Stan Math", want.lp, ref.lp, 10);
+      const Eval got = evaluate(el, gather_points[k]);
+      expect_eval(at + " lanes", got, want);
+      const Eval sc = evaluate(es, gather_points[k]);
+      expect_eval(at + " scalar", sc, want);
+      bool same = same_bits(got.lp, sc.lp);
+      for (size_t i = 0; i < got.grad.size(); ++i)
+        same = same && same_bits(got.grad[i], sc.grad[i]);
+      check(same, at + ": lanes bitwise equal to the scalar map");
+    }
+    check(flips(taken[0], taken[1]) > 0, what + ": points flip branches");
+  }
+}
+
+void test_gather_lane_state_is_flat() {
+  // The second model reads a data matrix twice as long and parameter
+  // containers four times as long.
+  const std::vector<std::pair<int, int>> shapes = {{64, 8}, {128, 32}};
+  std::vector<CompiledModel> models;
+  for (const auto& [n, J] : shapes)
+    models.push_back(compile_with("region_map_gather", n, nullptr, "0",
+                                  gather_extra(make_gather(n, J))));
+  const auto& small = map_payload(models[0]).lanes;
+  const auto& large = map_payload(models[1]).lanes;
+  check(small.active && large.active, "gather: lane plans active");
+  check(small.max_sites == large.max_sites,
+        "gather: adjoint sites do not grow with the containers (" +
+            std::to_string(small.max_sites) + " vs " +
+            std::to_string(large.max_sites) + ")");
+  check(small.max_dynamic == large.max_dynamic,
+        "gather: dynamic sites do not grow with the containers");
+  check(small.max_window == large.max_window,
+        "gather: call windows do not grow with the containers (" +
+            std::to_string(small.max_window) + " vs " +
+            std::to_string(large.max_window) + ")");
+  for (size_t m = 0; m < models.size(); ++m) {
+    const stanli::RegionMapProg& p = map_payload(models[m]);
+    const auto [n, J] = shapes[m];
+    const auto calls = gather_calls(p);
+    const auto row = calls.find(n * 2);  // X[n]: data
+    const auto col = calls.find(2 * J);  // z[, g[n]]: parameter
+    const auto many = calls.find(J);     // b[idx[n]]: parameter
+    const auto local = calls.find(4);    // M[h[n]]: built in the body
+    const bool found = row != calls.end() && col != calls.end() &&
+                       many != calls.end() && local != calls.end();
+    check(found, "gather: the four indexed reads are OP_INDEX_DYNAMIC calls");
+    if (!found) continue;
+    check(!(p.calls[(size_t)row->second].input_adjoint_mask & 1u),
+          "gather: no adjoint requested for the data matrix");
+    check(p.calls[(size_t)col->second].input_adjoint_mask & 1u,
+          "gather: adjoint requested for the parameter matrix");
+    check(p.calls[(size_t)many->second].input_adjoint_mask & 1u,
+          "gather: adjoint requested for the parameter vector");
+    check(p.lanes.calls[(size_t)row->second].index_sites &&
+              p.lanes.calls[(size_t)col->second].index_sites &&
+              p.lanes.calls[(size_t)many->second].index_sites,
+          "gather: reads of live-in containers take the lane gather");
+    check(!p.lanes.calls[(size_t)local->second].index_sites,
+          "gather: a container built in the body keeps the general call");
+  }
+}
+
+void test_gather_out_of_range() {
+  for (int n : {64, 65}) {
+    for (int bad : {5, n - 1}) {
+      const Gather d = make_gather(n, 8, bad);
+      const std::string extra = gather_extra(d);
+      const std::string what = "region_map_gather oob N=" + std::to_string(n) +
+                               " row " + std::to_string(bad);
+      CompiledModel lanes =
+          compile_with("region_map_gather", n, nullptr, "0", extra);
+      CompiledModel scalar = compile_with(
+          "region_map_gather", n, "STANLI_REGION_MAP_LANES", "0", extra);
+      CompiledModel off =
+          compile_with("region_map_gather", n, "STANLI_REGION_MAP", "0", extra);
+      Executor el(lanes.graph), es(scalar.graph), eo(off.graph);
+      lanes.bind(el);
+      scalar.bind(es);
+      off.bind(eo);
+      const Run a = try_evaluate(el, gather_points[0]);
+      const Run b = try_evaluate(es, gather_points[0]);
+      const Run c = try_evaluate(eo, gather_points[0]);
+      check(a.threw && b.threw && c.threw, what + ": every form throws");
+      check(a.what == b.what && b.what == c.what,
+            what + ": same exception: " + a.what + " | " + b.what + " | " +
+                c.what);
+    }
+  }
+}
+
+// Data indices in a mapped body (region_map_data_index.stan). The first
+// loop reads h[n], X[n], z[, g[n]] and w[h[n]] with data selectors. The second
+// reads z[j] with j computed from a parameter. The third reads z[, g[n]] on
+// every lane and X[n] only on the lanes that a parameter branch selects.
+std::string data_index_extra(int n, int J, int bad_row) {
+  std::ostringstream out;
+  out.precision(17);
+  out << "\"J\":" << J << ",\"K\":2,\"X\":[";
+  for (int i = 0; i < n; ++i)
+    out << (i ? ",[" : "[") << std::cos(0.3 * i) << ","
+        << std::sin(0.7 * i + 0.1) << "]";
+  out << "],\"g\":[";
+  for (int i = 0; i < n; ++i)
+    out << (i ? "," : "") << (i == bad_row ? J + 1 : (i * 7) % J + 1);
+  out << "],\"h\":[";
+  for (int i = 0; i < n; ++i)
+    out << (i ? ",[" : "[") << (i * 5) % J + 1 << "," << (i * 3 + 2) % J + 1
+        << "," << (i * 5) % J + 1 << "]";
+  out << "]";
+  return out.str();
+}
+
+std::vector<const stanli::RegionMapProg*> map_payloads(
+    const CompiledModel& cm) {
+  std::vector<const stanli::RegionMapProg*> maps;
+  for (const stanli::Op& op : cm.graph.ops)
+    if (op.opcode == OP_REGION_MAP)
+      maps.push_back(static_cast<const stanli::RegionMapProg*>(op.udata));
+  return maps;
+}
+
+// Whether each OP_INDEX_DYNAMIC read, keyed by its container's length, may
+// skip its checks once an evaluation has passed them.
+std::map<int, bool> proven_reads(const stanli::RegionMapProg& p) {
+  std::map<int, bool> by_len;
+  if (!p.lanes.active) return by_len;
+  for (size_t i = 0; i < p.calls.size(); ++i)
+    if (p.calls[i].opcode == stanli::OP_INDEX_DYNAMIC)
+      by_len[p.calls[i].in_len[0]] = p.lanes.calls[i].proven;
+  return by_len;
+}
+
+CompiledModel compile_data_index(int n, const std::string& extra,
+                                 const char* lanes) {
+  test_setenv("STANLI_REGION_MAP", "all", 1);
+  if (lanes) test_setenv("STANLI_REGION_MAP_LANES", lanes, 1);
+  try {
+    CompiledModel cm = stanli::compile_model(
+        fixture_mir("region_map_data_index"), make_data(n, extra));
+    test_unsetenv("STANLI_REGION_MAP");
+    if (lanes) test_unsetenv("STANLI_REGION_MAP_LANES");
+    return cm;
+  } catch (...) {
+    test_unsetenv("STANLI_REGION_MAP");
+    if (lanes) test_unsetenv("STANLI_REGION_MAP_LANES");
+    throw;
+  }
+}
+
+Params data_index_point(int J, double a, double ls) {
+  Params p = {a, ls};
+  for (int k = 0; k < 3 * J; ++k) p.push_back(0.3 * std::sin(1.3 * k + a));
+  return p;
+}
+
+void test_data_index_proven() {
+  const int J = 8;
+  for (int n : {64, 65, 200}) {
+    const std::string extra = data_index_extra(n, J, -1);
+    const std::string what = "region_map_data_index N=" + std::to_string(n);
+    CompiledModel lanes = compile_data_index(n, extra, nullptr);
+    CompiledModel scalar = compile_data_index(n, extra, "0");
+    CompiledModel off = compile_with("region_map_data_index", n,
+                                     "STANLI_REGION_MAP", "0", extra);
+    const auto maps = map_payloads(lanes);
+    check(maps.size() == 3, what + ": three maps");
+    check(count_opcode(off, OP_REGION_MAP) == 0, what + ": unmapped");
+    if (maps.size() != 3) continue;
+    for (const auto* m : maps) check(m->lanes.active, what + ": lane plans");
+    const auto first = proven_reads(*maps[0]);
+    const auto second = proven_reads(*maps[1]);
+    const auto third = proven_reads(*maps[2]);
+    check(first.size() == 4 && first.count(3 * n) && first.count(n * 2) &&
+              first.count(2 * J) && first.count(J),
+          what +
+              ": four reads in the first loop: h[n], X[n], z[, g[n]] and "
+              "w[h[n]]");
+    for (const auto& [len, proven] : first)
+      check(proven, what + ": the read of a container of " +
+                        std::to_string(len) + " has data selectors, proven");
+    check(second.size() == 1 && !second.begin()->second,
+          what + ": a selector computed from a parameter is checked");
+    check(third.size() == 2 && third.at(2 * J) && !third.at(n * 2),
+          what + ": a read under a parameter branch is checked");
+    Executor el(lanes.graph), es(scalar.graph), eo(off.graph);
+    lanes.bind(el);
+    scalar.bind(es);
+    off.bind(eo);
+    const std::vector<Params> points = {data_index_point(J, 0.4, -0.3),
+                                        data_index_point(J, -0.7, 0.2)};
+    for (size_t k = 0; k < points.size(); ++k) {
+      const std::string at = what + " point " + std::to_string(k);
+      const uint64_t before = stanli::region_map_proven_runs();
+      const Eval checked = evaluate(el, points[k]);
+      const uint64_t middle = stanli::region_map_proven_runs();
+      const Eval trusted = evaluate(el, points[k]);
+      const uint64_t after = stanli::region_map_proven_runs();
+      check(middle - before == (k == 0 ? 0u : 2u),
+            at + ": the first evaluation checks every selector");
+      check(after - middle == 2u,
+            at + ": later evaluations skip the checks in two maps");
+      const Eval want = evaluate(eo, points[k]);
+      expect_eval(at + " lanes", trusted, want);
+      const Eval sc = evaluate(es, points[k]);
+      bool same =
+          same_bits(checked.lp, trusted.lp) && same_bits(trusted.lp, sc.lp);
+      for (size_t i = 0; i < want.grad.size(); ++i)
+        same = same && same_bits(checked.grad[i], trusted.grad[i]) &&
+               same_bits(trusted.grad[i], sc.grad[i]);
+      check(same, at + ": checked, proven and scalar runs are bitwise equal");
+    }
+  }
+}
+
+// An out-of-range data index throws at every evaluation, as before the
+// checks could be skipped. Every form throws Stan's error.
+void test_data_index_out_of_range() {
+  const int J = 8;
+  for (int n : {64, 65}) {
+    for (int bad : {5, n - 1}) {
+      const std::string extra = data_index_extra(n, J, bad);
+      const std::string what =
+          "region_map_data_index oob N=" + std::to_string(n) + " row " +
+          std::to_string(bad);
+      CompiledModel lanes = compile_data_index(n, extra, nullptr);
+      CompiledModel scalar = compile_data_index(n, extra, "0");
+      CompiledModel off = compile_with("region_map_data_index", n,
+                                       "STANLI_REGION_MAP", "0", extra);
+      check(map_payloads(lanes).size() == 3, what + ": three maps");
+      Executor el(lanes.graph), es(scalar.graph), eo(off.graph);
+      lanes.bind(el);
+      scalar.bind(es);
+      off.bind(eo);
+      const uint64_t before = stanli::region_map_proven_runs();
+      const Params p = data_index_point(J, 0.4, -0.3);
+      const Run first = try_evaluate(el, p);
+      for (int k = 0; k < 3; ++k) {
+        const Run a = try_evaluate(el, p);
+        const Run b = try_evaluate(es, p);
+        const Run c = try_evaluate(eo, p);
+        const std::string at = what + " evaluation " + std::to_string(k);
+        check(first.threw && a.threw && b.threw && c.threw,
+              at + ": every form throws");
+        check(a.what == first.what && a.what == b.what && a.what == c.what,
+              at + ": same exception: " + a.what + " | " + b.what + " | " +
+                  c.what);
+      }
+      check(stanli::region_map_proven_runs() == before,
+            what + ": a failed check never proves the selectors");
+    }
+  }
+}
+
+// The program budget. A graph whose program bytes exceed it is lowered
+// again with its largest loops in a compact form: the region map's lane
+// form when one exists, else OP_LOOP. STANLI_PROGRAM_BUDGET sets the budget
+// in bytes (0 turns it off) and STANLI_UNROLL_CEILING the most ops a loop
+// may unroll to before it is lowered compact at once.
+CompiledModel compile_env(
+    const std::string& stem, int n,
+    const std::vector<std::pair<const char*, const char*>>& env,
+    const std::string& extra = "") {
+  for (const auto& [k, v] : env) test_setenv(k, v, 1);
+  try {
+    CompiledModel cm =
+        stanli::compile_model(fixture_mir(stem), make_data(n, extra));
+    for (const auto& [k, v] : env) test_unsetenv(k);
+    return cm;
+  } catch (...) {
+    for (const auto& [k, v] : env) test_unsetenv(k);
+    throw;
+  }
+}
+
+int64_t program_bytes(const CompiledModel& cm) {
+  return Executor::program_bytes(cm.graph);
+}
+
+void expect_same_gradients(const std::string& what, const CompiledModel& got,
+                           const CompiledModel& want,
+                           const std::vector<Params>& points) {
+  Executor eg(got.graph), ew(want.graph);
+  got.bind(eg);
+  want.bind(ew);
+  for (size_t k = 0; k < points.size(); ++k)
+    expect_eval(what + " point " + std::to_string(k), evaluate(eg, points[k]),
+                evaluate(ew, points[k]));
+}
+
+const std::vector<Params> mix_points = {{0.2, -0.5, 0.3, -0.1},
+                                        {-0.4, 0.3, 0.8, 0.2}};
+
+void test_budget_uses_lanes() {
+  const int n = 256;
+  const CompiledModel off =
+      compile_env("budget_mix", n, {{"STANLI_PROGRAM_BUDGET", "0"}});
+  const CompiledModel on =
+      compile_env("budget_mix", n, {{"STANLI_PROGRAM_BUDGET", "65536"}});
+  check(count_opcode(off, OP_REGION_MAP) == 0 && off.graph.ops.size() > 1000,
+        "budget_mix: without a budget the loop unrolls");
+  check(program_bytes(off) > 65536, "budget_mix: unrolled, it is over budget");
+  check(count_opcode(on, OP_REGION_MAP) == 1 && map_payload(on).lanes.active,
+        "budget_mix: over budget, the loop takes the lane form");
+  check(program_bytes(on) <= 65536, "budget_mix: the fallback fits");
+  expect_same_gradients("budget_mix lanes vs unrolled", on, off, mix_points);
+}
+
+void test_budget_program_does_not_grow() {
+  // With the shipped budget, the program of a loop that reroll cannot fold
+  // stops growing with the data once it would pass the budget.
+  const CompiledModel small = compile_env("budget_mix", 4000, {});
+  const CompiledModel large = compile_env("budget_mix", 8000, {});
+  check(count_opcode(small, OP_REGION_MAP) == 1 &&
+            count_opcode(large, OP_REGION_MAP) == 1,
+        "budget_mix N=4000, 8000: the loop takes the lane form");
+  check(program_bytes(small) == program_bytes(large) &&
+            small.graph.ops.size() == large.graph.ops.size(),
+        "budget_mix: program bytes and ops do not grow from N=4000 to 8000 (" +
+            std::to_string(program_bytes(small)) + ", " +
+            std::to_string(program_bytes(large)) + ")");
+  const CompiledModel fits = compile_env("budget_mix", 64, {});
+  check(count_opcode(fits, OP_REGION_MAP) == 0,
+        "budget_mix N=64: under budget the loop unrolls as before");
+}
+
+void test_budget_keeps_folded_loops() {
+  const CompiledModel off =
+      compile_env("budget_lin", 4000, {{"STANLI_PROGRAM_BUDGET", "0"}});
+  const CompiledModel on =
+      compile_env("budget_lin", 4000, {{"STANLI_PROGRAM_BUDGET", "65536"}});
+  check(histogram(on) == histogram(off) &&
+            count_opcode(on, OP_REGION_MAP) == 0 &&
+            count_opcode(on, OP_LOOP) == 0,
+        "budget_lin: a loop that reroll folds keeps its folded form");
+}
+
+void test_budget_carried_loop() {
+  const int n = 300;
+  const CompiledModel off =
+      compile_env("budget_carry", n, {{"STANLI_PROGRAM_BUDGET", "0"}});
+  const CompiledModel on = compile_env(
+      "budget_carry", n,
+      {{"STANLI_PROGRAM_BUDGET", "65536"}, {"STANLI_LOOP_BUDGET", "65536"}});
+  const CompiledModel between =
+      compile_env("budget_carry", n,
+                  {{"STANLI_PROGRAM_BUDGET", "65536"},
+                   {"STANLI_LOOP_BUDGET", "1000000000"}});
+  check(count_opcode(off, OP_LOOP) == 0,
+        "budget_carry: without a budget the loop unrolls");
+  check(histogram(between) == histogram(off),
+        "budget_carry: under the OP_LOOP budget a carried loop stays "
+        "unrolled");
+  check(count_opcode(on, OP_REGION_MAP) == 0 && count_opcode(on, OP_LOOP) == 1,
+        "budget_carry: a carried loop over budget becomes OP_LOOP");
+  check(program_bytes(on) < program_bytes(off),
+        "budget_carry: the fallback is smaller");
+  expect_same_gradients("budget_carry OP_LOOP vs unrolled", on, off,
+                        {{0.3, -0.2}, {-0.5, 0.1}});
+}
+
+void test_unroll_ceiling() {
+  const int n = 2000;
+  const CompiledModel off =
+      compile_env("budget_mix", n, {{"STANLI_PROGRAM_BUDGET", "0"}});
+  const CompiledModel capped = compile_env(
+      "budget_mix", n,
+      {{"STANLI_PROGRAM_BUDGET", "0"}, {"STANLI_UNROLL_CEILING", "1000"}});
+  check(count_opcode(capped, OP_REGION_MAP) == 1,
+        "budget_mix: a loop past the unroll ceiling is lowered compact");
+  expect_same_gradients("budget_mix ceiling vs unrolled", capped, off,
+                        mix_points);
+  // A parameter-branch loop keeps today's form under any budget.
+  const CompiledModel branch_off =
+      compile_env("region_map_branch", 64, {{"STANLI_PROGRAM_BUDGET", "0"}});
+  const CompiledModel branch_on = compile_env(
+      "region_map_branch", 64,
+      {{"STANLI_PROGRAM_BUDGET", "1"}, {"STANLI_UNROLL_CEILING", "4"}});
+  check(histogram(branch_on) == histogram(branch_off),
+        "region_map_branch: a parameter-branch loop keeps its form");
+}
+
+// A loop that the budget chooses but no compact form takes stays unrolled:
+// the second lowering stops at that loop and gives up, and the first graph
+// is kept, or lowered again when it was freed. A loop past the unroll
+// ceiling that no compact form takes unrolls in the retry, which does not
+// hold it to the ceiling.
+void test_budget_without_compact_form() {
+  const int n = 256;
+  const CompiledModel off =
+      compile_env("budget_mix", n, {{"STANLI_PROGRAM_BUDGET", "0"}});
+  const CompiledModel refused =
+      compile_env("budget_mix", n,
+                  {{"STANLI_PROGRAM_BUDGET", "65536"},
+                   {"STANLI_LOOP_BUDGET", "1000000000"},
+                   {"STANLI_REGION_MAP_LANES", "0"}});
+  check(histogram(refused) == histogram(off) &&
+            program_bytes(refused) == program_bytes(off),
+        "budget_mix: with no compact form the loop stays unrolled");
+  expect_same_gradients("budget_mix refused vs unrolled", refused, off,
+                        mix_points);
+  // Freed first, the graph is lowered a third time, to the same graph.
+  const CompiledModel freed = compile_env("budget_mix", n,
+                                          {{"STANLI_PROGRAM_BUDGET", "65536"},
+                                           {"STANLI_LOOP_BUDGET", "1000000000"},
+                                           {"STANLI_REGION_MAP_LANES", "0"},
+                                           {"STANLI_FREE_FIRST_BYTES", "0"}});
+  check(histogram(freed) == histogram(off) &&
+            program_bytes(freed) == program_bytes(off),
+        "budget_mix: a freed first graph is lowered again unchanged");
+  expect_same_gradients("budget_mix freed vs unrolled", freed, off, mix_points);
+  const CompiledModel capped = compile_env("budget_mix", 2000,
+                                           {{"STANLI_PROGRAM_BUDGET", "0"},
+                                            {"STANLI_UNROLL_CEILING", "1000"},
+                                            {"STANLI_REGION_MAP", "0"},
+                                            {"STANLI_STRUCTURED_LOOPS", "0"}});
+  const CompiledModel capped_off =
+      compile_env("budget_mix", 2000, {{"STANLI_PROGRAM_BUDGET", "0"}});
+  check(count_opcode(capped, OP_REGION_MAP) == 0 &&
+            count_opcode(capped, OP_LOOP) == 0 &&
+            histogram(capped) == histogram(capped_off),
+        "budget_mix: a loop past the ceiling with no compact form unrolls");
+  expect_same_gradients("budget_mix ceiling, no compact form", capped,
+                        capped_off, mix_points);
+}
+
+// An out-of-range data index raises the same error in every form of the
+// loop: unrolled, where the index is a constant and the lowering emits
+// Stan's error, and in the region map's lane and scalar forms and OP_LOOP,
+// which check the index when the loop runs.
+struct IndexForm {
+  const char* name;
+  std::vector<std::pair<const char*, const char*>> env;
+  uint16_t opcode;  // the opcode the form must contain, or 0 for unrolled
+};
+
+std::string index_error(const std::string& what, const std::string& stem, int n,
+                        const IndexForm& form, const std::string& extra,
+                        const Params& p) {
+  CompiledModel cm = compile_env(stem, n, form.env, extra);
+  const std::string at = what + " " + form.name;
+  if (form.opcode)
+    check(count_opcode(cm, form.opcode) > 0, at + ": the loop takes the form");
+  else
+    check(
+        count_opcode(cm, OP_REGION_MAP) == 0 && count_opcode(cm, OP_LOOP) == 0,
+        at + ": the loop unrolls");
+  Executor ex(cm.graph);
+  cm.bind(ex);
+  const Run r = try_evaluate(ex, p);
+  check(r.threw, at + ": throws");
+  return r.what;
+}
+
+void expect_same_index_error(const std::string& what, const std::string& stem,
+                             int n, const std::vector<IndexForm>& forms,
+                             const std::string& extra, const Params& p,
+                             const std::string& label) {
+  const std::string want = index_error(what, stem, n, forms[0], extra, p);
+  check(want.find(label + ": accessing element out of range") !=
+            std::string::npos,
+        what + ": the unrolled loop raises Stan's error: " + want);
+  for (size_t k = 1; k < forms.size(); ++k) {
+    const std::string got = index_error(what, stem, n, forms[k], extra, p);
+    check(got == want, what + " " + forms[k].name +
+                           ": same error as unrolled: " + got + " | " + want);
+  }
+}
+
+void test_budget_index_errors() {
+  const int n = 64, J = 8;
+  const std::vector<IndexForm> data_forms = {
+      {"unrolled",
+       {{"STANLI_PROGRAM_BUDGET", "0"},
+        {"STANLI_REGION_MAP", "0"},
+        {"STANLI_STRUCTURED_LOOPS", "0"}},
+       0},
+      {"budget lanes", {{"STANLI_PROGRAM_BUDGET", "1"}}, OP_REGION_MAP},
+      {"budget OP_LOOP",
+       {{"STANLI_PROGRAM_BUDGET", "1"},
+        {"STANLI_LOOP_BUDGET", "1"},
+        {"STANLI_REGION_MAP", "0"}},
+       OP_LOOP},
+      {"region map all", {{"STANLI_REGION_MAP", "all"}}, OP_REGION_MAP}};
+  // g[6] past J: z[, g[n]] in the first loop.
+  expect_same_index_error(
+      "region_map_data_index bad g", "region_map_data_index", n, data_forms,
+      data_index_extra(n, J, 5), data_index_point(J, 0.4, -0.3),
+      "matrix[..., uni] column indexing");
+  // h[6] past J: w[h[n]], a multi-index of a vector.
+  std::string bad_h = data_index_extra(n, J, -1);
+  const std::string h_row = "\"h\":[";
+  const size_t at = bad_h.find(h_row);
+  check(at != std::string::npos, "region_map_data_index: h in the data");
+  if (at != std::string::npos) {
+    size_t row = at + h_row.size();
+    for (int k = 0; k < 5; ++k) row = bad_h.find("],[", row) + 3;
+    bad_h.replace(row, bad_h.find(',', row) - row, std::to_string(J + 1));
+    expect_same_index_error(
+        "region_map_data_index bad h", "region_map_data_index", n, data_forms,
+        bad_h, data_index_point(J, 0.4, -0.3), "vector[multi] indexing");
+  }
+  // mu[n + 1] past the end in a loop that branches on a parameter, in the
+  // lane and scalar forms of the region map and in OP_LOOP.
+  const std::vector<IndexForm> branch_forms = {
+      {"unrolled",
+       {{"STANLI_REGION_MAP", "0"}, {"STANLI_STRUCTURED_LOOPS", "0"}},
+       0},
+      {"lanes", {}, OP_REGION_MAP},
+      {"scalar", {{"STANLI_REGION_MAP_LANES", "0"}}, OP_REGION_MAP},
+      {"OP_LOOP", {{"STANLI_REGION_MAP", "0"}}, OP_LOOP}};
+  for (int rows : {37, 64, 200})
+    expect_same_index_error("region_map_oob N=" + std::to_string(rows),
+                            "region_map_oob", rows, branch_forms, "",
+                            {0.3, -0.5}, "vector[uni] indexing");
+}
+
+// The second lowering borrows the prepared data and gives it back, so
+// write_array, lowered after it, and the write_array interpreter read the
+// same data and transformed data as without a budget.
+std::vector<double> write_array_row(const char* interp, const char* budget,
+                                    const Params& p) {
+  std::vector<std::pair<const char*, const char*>> env = {
+      {"STANLI_PROGRAM_BUDGET", budget}};
+  if (interp) env.push_back({"STANLI_WA_FORCE_INTERP", "1"});
+  CompiledModel cm = compile_env("budget_gq", 256, env);
+  check(count_opcode(cm, OP_REGION_MAP) == (budget[0] == '0' ? 0 : 1),
+        std::string("budget_gq: budget ") + budget + " form");
+  Executor ex(cm.graph);
+  cm.bind(ex);
+  (void)evaluate(ex, p);
+  std::vector<double> row;
+  if (!cm.write_array) {
+    check(false, "budget_gq: no write_array");
+    return row;
+  }
+  stanli::WaRng rng(7);
+  if (interp) {
+    check(cm.write_array->interp != nullptr, "budget_gq: interpreter");
+    if (!cm.write_array->interp) return row;
+    return cm.write_array->interp->eval(cm.constrained_env(ex), rng);
+  }
+  Executor wex(cm.write_array->graph);
+  cm.write_array->bind(wex);
+  std::copy(ex.params_data(), ex.params_data() + p.size(), wex.params_data());
+  wex.run_forward_only(stanli::EvalState{&rng});
+  for (const auto& c : cm.write_array->columns) {
+    const double* v = std::as_const(wex).value_ptr(c.slot);
+    row.insert(row.end(), v, v + c.len);
+  }
+  return row;
+}
+
+void test_budget_returns_prepared_data() {
+  const Params p = {0.2, -0.5, 0.3, -0.1};
+  for (const char* interp : {(const char*)nullptr, "1"}) {
+    const std::string what =
+        std::string("budget_gq write_array") + (interp ? " interpreter" : "");
+    const std::vector<double> off = write_array_row(interp, "0", p);
+    const std::vector<double> on = write_array_row(interp, "65536", p);
+    check(!off.empty() && on == off,
+          what + ": same values with and without the budget");
+  }
+}
+
+// The program budget applies to the write_array graph too. Its only compact
+// form is OP_LOOP, so it changes the graph only past the second budget, and
+// the loop must take its draws in the order and with the values that the
+// unrolled graph takes them: a run of draws from one generator gives the
+// same rows bit for bit.
+using Env = std::vector<std::pair<const char*, const char*>>;
+
+Env with(Env env, const Env& more) {
+  env.insert(env.end(), more.begin(), more.end());
+  return env;
+}
+
+int count_wa_opcode(const CompiledModel& cm, uint16_t opcode) {
+  if (!cm.write_array) return -1;
+  const auto& ops = cm.write_array->graph.ops;
+  return static_cast<int>(
+      std::count_if(ops.begin(), ops.end(),
+                    [=](const stanli::Op& op) { return op.opcode == opcode; }));
+}
+
+int64_t wa_program_bytes(const CompiledModel& cm) {
+  return cm.write_array ? Executor::program_bytes(cm.write_array->graph) : -1;
+}
+
+std::map<uint16_t, int> wa_histogram(const CompiledModel& cm) {
+  std::map<uint16_t, int> h;
+  if (cm.write_array)
+    for (const stanli::Op& op : cm.write_array->graph.ops) ++h[op.opcode];
+  return h;
+}
+
+// The rows of `draws` consecutive draws from one generator, from the graph
+// or from the interpreter.
+std::vector<std::vector<double>> wa_rows(const CompiledModel& cm,
+                                         const Params& p, int draws,
+                                         bool interp) {
+  std::vector<std::vector<double>> rows;
+  if (!cm.write_array || cm.write_array->truncated) return rows;
+  Executor ex(cm.graph);
+  cm.bind(ex);
+  (void)evaluate(ex, p);
+  stanli::WaRng rng(11);
+  if (interp) {
+    if (!cm.write_array->interp) return rows;
+    for (int d = 0; d < draws; ++d)
+      rows.push_back(cm.write_array->interp->eval(cm.constrained_env(ex), rng));
+    return rows;
+  }
+  Executor wex(cm.write_array->graph);
+  cm.write_array->bind(wex);
+  std::copy(ex.params_data(), ex.params_data() + p.size(), wex.params_data());
+  for (int d = 0; d < draws; ++d) {
+    wex.run_forward_only(stanli::EvalState{&rng});
+    std::vector<double> row;
+    for (const auto& c : cm.write_array->columns) {
+      const double* v = std::as_const(wex).value_ptr(c.slot);
+      row.insert(row.end(), v, v + c.len);
+    }
+    rows.push_back(std::move(row));
+  }
+  return rows;
+}
+
+bool same_rows(const std::vector<std::vector<double>>& a,
+               const std::vector<std::vector<double>>& b) {
+  if (a.empty() || a.size() != b.size()) return false;
+  for (size_t d = 0; d < a.size(); ++d) {
+    if (a[d].size() != b[d].size()) return false;
+    for (size_t k = 0; k < a[d].size(); ++k)
+      if (!same_bits(a[d][k], b[d][k])) return false;
+  }
+  return true;
+}
+
+const std::vector<Params> wa_points = {{0.2, -0.5}, {-0.4, 0.3}};
+
+void expect_same_rows(const std::string& what, const CompiledModel& got,
+                      const CompiledModel& want, bool interp = false) {
+  for (size_t k = 0; k < wa_points.size(); ++k)
+    check(same_rows(wa_rows(got, wa_points[k], 6, false),
+                    wa_rows(want, wa_points[k], 6, interp)),
+          what + " point " + std::to_string(k) +
+              ": six draws in a row are equal bit for bit");
+}
+
+void test_budget_write_array() {
+  const int n = 300;
+  const Env small = {{"STANLI_PROGRAM_BUDGET", "65536"},
+                     {"STANLI_LOOP_BUDGET", "65536"}};
+  for (const char* parallel : {"0", "force"}) {
+    const std::string what =
+        std::string("budget_wa STANLI_PARALLEL_WA=") + parallel;
+    const Env par = {{"STANLI_PARALLEL_WA", parallel}};
+    const CompiledModel off = compile_env(
+        "budget_wa", n, with({{"STANLI_PROGRAM_BUDGET", "0"}}, par));
+    const CompiledModel on = compile_env("budget_wa", n, with(small, par));
+    check(count_wa_opcode(off, OP_LOOP) == 0 && wa_program_bytes(off) > 65536,
+          what + ": without a budget the loop unrolls, over the budget");
+    check(count_wa_opcode(on, OP_LOOP) == 1,
+          what + ": over budget, the write_array loop becomes OP_LOOP");
+    check(wa_program_bytes(on) < wa_program_bytes(off),
+          what + ": the compact write_array program is smaller");
+    check(histogram(on) == histogram(off) &&
+              program_bytes(on) == program_bytes(off),
+          what + ": the log density graph does not change");
+    expect_same_rows(what + " OP_LOOP vs unrolled", on, off);
+    // Under the second budget the only compact form is not used.
+    const CompiledModel under =
+        compile_env("budget_wa", n,
+                    with({{"STANLI_PROGRAM_BUDGET", "65536"},
+                          {"STANLI_LOOP_BUDGET", "1000000000"}},
+                         par));
+    check(wa_histogram(under) == wa_histogram(off),
+          what + ": under the OP_LOOP budget the loop stays unrolled");
+    // Freed first, the compact graph is still taken.
+    const CompiledModel freed =
+        compile_env("budget_wa", n,
+                    with(with(small, {{"STANLI_FREE_FIRST_BYTES", "0"}}), par));
+    check(count_wa_opcode(freed, OP_LOOP) == 1,
+          what + ": a freed first graph still takes OP_LOOP");
+    expect_same_rows(what + " freed vs unrolled", freed, off);
+    // With no compact form the graph is the unrolled one, kept or lowered
+    // again after it was freed.
+    for (const char* free_first : {"1000000000", "0"}) {
+      const CompiledModel refused = compile_env(
+          "budget_wa", n,
+          with(with(small, {{"STANLI_STRUCTURED_LOOPS", "0"},
+                            {"STANLI_FREE_FIRST_BYTES", free_first}}),
+               par));
+      const CompiledModel refused_off =
+          compile_env("budget_wa", n,
+                      with({{"STANLI_PROGRAM_BUDGET", "0"},
+                            {"STANLI_STRUCTURED_LOOPS", "0"}},
+                           par));
+      check(wa_histogram(refused) == wa_histogram(refused_off) &&
+                wa_program_bytes(refused) == wa_program_bytes(refused_off),
+            what + ": with no compact form the loop stays unrolled (free " +
+                free_first + ")");
+      expect_same_rows(what + " refused vs unrolled", refused, refused_off);
+    }
+    // A write_array loop past the unroll ceiling is lowered compact at once.
+    const CompiledModel capped = compile_env(
+        "budget_wa", n,
+        with({{"STANLI_PROGRAM_BUDGET", "0"}, {"STANLI_UNROLL_CEILING", "100"}},
+             par));
+    check(count_wa_opcode(capped, OP_LOOP) == 1,
+          what + ": a write_array loop past the ceiling becomes OP_LOOP");
+    expect_same_rows(what + " ceiling vs unrolled", capped, off);
+  }
+  // The interpreter takes the same draws.
+  const CompiledModel on = compile_env("budget_wa", n, small);
+  const CompiledModel interp = compile_env(
+      "budget_wa", n,
+      {{"STANLI_PROGRAM_BUDGET", "0"}, {"STANLI_WA_FORCE_INTERP", "1"}});
+  expect_same_rows("budget_wa OP_LOOP vs interpreter", on, interp, true);
+}
+
+// A budget fallback adds a long target sum with compensation
+// (pairwise_sum.hpp). The terms below nearly cancel, so a sum in plain order,
+// which the unrolled graph uses, is about 1e-9 off in relative terms. Each
+// reference adds the same terms, computed here in double, with compensation.
+double normal_lpdf_d(double y, double mu, double sigma) {
+  const double z = (y - mu) / sigma;
+  return -0.5 * z * z - std::log(sigma) - 0.5 * std::log(2 * M_PI);
+}
+
+double log_sum_exp_d(double a, double b) {
+  const double m = std::max(a, b);
+  return m + std::log1p(std::exp(-std::fabs(a - b)));
+}
+
+double mix_sum_reference(const Series& s, const Params& u) {
+  const double theta = 1 / (1 + std::exp(-u[0]));
+  const double mu1 = u[1], mu2 = u[1] + std::exp(u[2]);
+  const double sigma = std::exp(u[3]);
+  stanli::CompensatedSum sum;
+  sum.add(std::log(theta) + std::log1p(-theta) + u[2] + u[3]);
+  for (size_t i = 0; i < s.y.size(); ++i)
+    sum.add(
+        log_sum_exp_d(std::log(theta) + normal_lpdf_d(s.y[i], mu1, sigma),
+                      std::log1p(-theta) + normal_lpdf_d(s.y[i], mu2, sigma)) +
+        1e6 * s.x[i] * theta);
+  return sum.result();
+}
+
+double carry_sum_reference(const Series& s, const Params& u) {
+  const double p = 1 / (1 + std::exp(-u[0]));
+  const double rho = -1 + 2 * p, sigma = std::exp(u[1]);
+  stanli::CompensatedSum sum;
+  sum.add(std::log(2.0) + std::log(p) + std::log1p(-p) + u[1]);
+  double m = 0;
+  for (size_t i = 0; i < s.y.size(); ++i) {
+    sum.add(normal_lpdf_d(s.y[i], rho * m, sigma) + 1e6 * s.x[i] * (1 + rho));
+    m = 0.5 * m + rho * s.y[i];
+  }
+  return sum.result();
+}
+
+void test_budget_fallback_sums_accurately() {
+  const auto lp = [](const CompiledModel& cm, const Params& p) {
+    Executor ex(cm.graph);
+    cm.bind(ex);
+    return evaluate(ex, p).lp;
+  };
+  const auto close = [](const std::string& what, double got, double want) {
+    check(std::fabs(got - want) <= 1e-12 * std::fabs(want),
+          what + ": got " + std::to_string(got) + " want " +
+              std::to_string(want) + " (relative error " +
+              std::to_string(std::fabs(got - want) / std::fabs(want)) + ")");
+  };
+  const std::vector<std::pair<const char*, const char*>> small = {
+      {"STANLI_PROGRAM_BUDGET", "65536"}, {"STANLI_LOOP_BUDGET", "65536"}};
+  const int n = 4000;
+  const Series s = make_series(n);
+  {
+    const CompiledModel lanes = compile_env("budget_mix_sum", n, small);
+    check(count_opcode(lanes, OP_REGION_MAP) == 1 &&
+              map_payload(lanes).lanes.active,
+          "budget_mix_sum: lane form");
+    for (const Params& p : mix_points)
+      close("budget_mix_sum lane form lp", lp(lanes, p),
+            mix_sum_reference(s, p));
+  }
+  {
+    const CompiledModel loop = compile_env("budget_carry_sum", n, small);
+    check(count_opcode(loop, OP_LOOP) == 1, "budget_carry_sum: OP_LOOP");
+    for (const Params& p : std::vector<Params>{{0.3, -0.2}, {-0.5, 0.1}})
+      close("budget_carry_sum OP_LOOP lp", lp(loop, p),
+            carry_sum_reference(s, p));
+  }
+}
+
 }  // namespace region_map_test
 
 int main() {
@@ -2566,6 +3490,21 @@ int main() {
   test_mode_policy();
   test_recompute_visits_taken_blocks();
   test_lane_reverse_order();
+  test_gather_parity();
+  test_gather_lane_state_is_flat();
+  test_gather_out_of_range();
+  test_data_index_proven();
+  test_data_index_out_of_range();
+  test_budget_uses_lanes();
+  test_budget_program_does_not_grow();
+  test_budget_keeps_folded_loops();
+  test_budget_carried_loop();
+  test_unroll_ceiling();
+  test_budget_fallback_sums_accurately();
+  test_budget_without_compact_form();
+  test_budget_index_errors();
+  test_budget_returns_prepared_data();
+  test_budget_write_array();
   test_setenv("STANLI_REGION_MAP_LANES", "0", 1);
   test_large_body_recomputes_by_default();
   test_clear_strategy_follows_mode();

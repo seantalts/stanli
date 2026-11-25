@@ -626,6 +626,13 @@
       "reason": "measured on Darwin arm64; cause not yet explained; the value comes from ode_bdf_tol at tolerances of 1e-8; the 80-digit evaluator covers lp and gradient only"
      }
     },
+    "examplemodels_probit_multi_good": {
+     "lp": {
+      "bound": 75,
+      "closer": "stanli",
+      "reason": "measured on Darwin arm64; 80-digit reference at point 2: stanli 150, CmdStan 225 ULP of the log density from the true value; stanli is closer. The program budget maps the 500-row loop to the region map's lane form, which adds the 500 row terms with compensation, where CmdStan adds one term at a time (issue #657)"
+     }
+    },
     "gpcm_latent_reg_irt": {
      "grad[14]": {
       "bound": 18,
@@ -819,6 +826,13 @@
       "bound": 24,
       "closer": "stanli",
       "reason": "measured on Darwin arm64; 80-digit reference at point 0: stanli 4, CmdStan 28 scaled ULP from the true value; stanli is at least as close to it"
+     }
+    },
+    "nn_rbm1bJ100": {
+     "lp": {
+      "bound": 3982,
+      "closer": "stanli",
+      "reason": "measured on Darwin arm64; not an 80-digit reference, which timed out. The evidence is an exact sum (math.fsum) of the 60,008 double-precision terms of the log density, which an independent program computed. At points 0, 1 and 2, stanli is 15, 0 and 1 ULP from that sum and CmdStan 719, 11 and 3,983 ULP; stanli is closer. The program budget keeps the 60,000-row loop as OP_LOOP, which adds the row terms with compensation, where CmdStan adds one term at a time (issue #657)"
      }
     },
     "normal_mixture_k": {

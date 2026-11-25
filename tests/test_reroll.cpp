@@ -30,6 +30,7 @@
 #include <new>
 #include <sstream>
 #include <string>
+#include <utility>
 #include <vector>
 
 static std::atomic<size_t> largest_request{0};
@@ -3036,6 +3037,331 @@ static void test_shared_vector_mean_row_major() {
                  want[i]);
 }
 
+// ---- per-lane data rows and irregular row reads (issue 657) ---------------
+
+// Gradient at the file's evaluation point, then the values of `slots`, in
+// order.
+static std::vector<double> values_after_grad(Graph g, const Fills& fills,
+                                             const std::vector<int>& slots) {
+  std::vector<int64_t> lens;
+  for (int s : slots) lens.push_back(g.slots[(size_t)s].len);
+  Executor ex(std::move(g));
+  for (const auto& f : fills) {
+    double* p = ex.value_ptr(f.first);
+    for (size_t j = 0; j < f.second.size(); ++j) p[j] = f.second[j];
+  }
+  for (int64_t i = 0; i < ex.n_params(); ++i) ex.params_data()[i] = fill_at(i);
+  std::vector<double> grad((size_t)ex.n_params());
+  ex.gradient(grad.data());
+  std::vector<double> out;
+  for (size_t k = 0; k < slots.size(); ++k) {
+    const double* v = std::as_const(ex).value_ptr(slots[k]);
+    out.insert(out.end(), v, v + lens[k]);
+  }
+  return out;
+}
+
+static int count_op(const Graph& g, uint16_t opcode) {
+  int n = 0;
+  for (const Op& op : g.ops) n += op.opcode == opcode;
+  return n;
+}
+
+static int out_of_first(const Graph& g, uint16_t opcode) {
+  for (const Op& op : g.ops)
+    if (op.opcode == opcode) return op.out;
+  return -1;
+}
+
+// Data rows as constant folding leaves them: one fill per distinct row,
+// shared by lanes with equal rows as the deduplicated pool does.
+static std::vector<int> data_rows(Graph& g, Fills& fills, int n, int K) {
+  std::vector<int> rows;
+  for (int r = 0; r < n; ++r) {
+    const int s = g.add_slot(K, false);
+    std::vector<double> v((size_t)K);
+    for (int k = 0; k < K; ++k)
+      v[(size_t)k] = std::sin(1.3 * r + 0.7 * k) * (1.0 + 0.37 * k);
+    fills.emplace_back(s, std::move(v));
+    rows.push_back(s);
+  }
+  return rows;
+}
+
+static int const_scalar(Graph& g, Fills& fills, double v) {
+  const int s = g.add_slot(1, false);
+  fills.emplace_back(s, std::vector<double>{v});
+  return s;
+}
+
+// `y[i] ~ normal(X[i] * beta, sigma)` after constant folding: every lane
+// reads its own data row. The rows pack into one data matrix and the lanes'
+// dots become one OP_GROUP_DOT. K=5 is wider than any packet, so the per-lane
+// dots match the scalar OP_DOT only if they reduce the same way.
+static void test_data_rows_dot_parameter() {
+  const int L = 12, K = 5;
+  Graph g;
+  Fills fills;
+  const int beta = g.add_slot(K, true);
+  const int sigma = g.add_slot(1, true);
+  const std::vector<int> rows = data_rows(g, fills, 7, K);
+  std::vector<int> terms, dots;
+  for (int l = 0; l < L; ++l) {
+    const int d = g.add_slot(1, false);
+    g.add_op(OP_DOT, {rows[(size_t)((5 * l) % 7)], beta}, d);
+    dots.push_back(d);
+    const int lp = g.add_slot(1, false);
+    const int id = stanli::testutil::add_density(
+        g, OP_NORMAL_LPDF, {const_scalar(g, fills, 0.3 * l - 1.0), d, sigma},
+        lp);
+    g.ops[(size_t)id].variant = 0x06;
+    terms.push_back(lp);
+  }
+  Graph ref = g;
+  reduce_into_result(ref, terms);
+  const std::vector<double> want_dots = values_after_grad(ref, fills, dots);
+  const std::vector<double> want = run_grad(std::move(ref), fills);
+
+  std::vector<int> tt = terms;
+  Fills f2 = fills;
+  const RerollStats st = reroll(g, f2, tt, {});
+  expect("data rows: one region", st.regions == 1);
+  expect("data rows: no scalar dot left", count_op(g, OP_DOT) == 0);
+  expect("data rows: one grouped dot", count_op(g, OP_GROUP_DOT) == 1);
+  expect("data rows: one term", tt.size() == 1);
+  reduce_into_result(g, tt);
+  const int grouped = out_of_first(g, OP_GROUP_DOT);
+  if (grouped >= 0)
+    expect("data rows: dots bitwise equal to the scalar lanes",
+           values_after_grad(g, f2, {grouped}) == want_dots);
+  const std::vector<double> got = run_grad(std::move(g), f2);
+  expect("data rows sizes", got.size() == want.size());
+  for (size_t i = 0; i < want.size() && i < got.size(); ++i)
+    expect_close(("data rows v" + std::to_string(i)).c_str(), got[i], want[i]);
+}
+
+// `y[i] ~ normal(X[i] * beta + a[s[i]], sigma)`: a data row and an irregular
+// scalar index of a parameter vector in one lane.
+static void test_data_rows_with_scalar_gather() {
+  const int L = 14, K = 3, J = 4;
+  const int s[L] = {2, 0, 3, 3, 1, 0, 2, 1, 1, 3, 0, 2, 0, 1};
+  Graph g;
+  Fills fills;
+  const int beta = g.add_slot(K, true);
+  const int a = g.add_slot(J, true);
+  const int sigma = g.add_slot(1, true);
+  const std::vector<int> rows = data_rows(g, fills, L, K);
+  std::vector<int> terms;
+  for (int l = 0; l < L; ++l) {
+    const int d = g.add_slot(1, false);
+    g.add_op(OP_DOT, {rows[(size_t)l], beta}, d);
+    const int ai = g.add_slot(1, false);
+    g.add_op(OP_INDEX, {a}, ai, {s[l]});
+    const int mu = g.add_slot(1, false);
+    g.add_op(OP_ADD, {d, ai}, mu);
+    const int lp = g.add_slot(1, false);
+    const int id = stanli::testutil::add_density(
+        g, OP_NORMAL_LPDF, {const_scalar(g, fills, 0.2 * l - 0.9), mu, sigma},
+        lp);
+    g.ops[(size_t)id].variant = 0x06;
+    terms.push_back(lp);
+  }
+  Graph ref = g;
+  reduce_into_result(ref, terms);
+  const std::vector<double> want = run_grad(std::move(ref), fills);
+
+  std::vector<int> tt = terms;
+  Fills f2 = fills;
+  const RerollStats st = reroll(g, f2, tt, {});
+  expect("rows + gather: one region", st.regions == 1);
+  expect("rows + gather: no scalar dot left", count_op(g, OP_DOT) == 0);
+  expect("rows + gather: one grouped dot", count_op(g, OP_GROUP_DOT) == 1);
+  expect("rows + gather: one gather", count_op(g, OP_GATHER) == 1);
+  reduce_into_result(g, tt);
+  const std::vector<double> got = run_grad(std::move(g), f2);
+  expect("rows + gather sizes", got.size() == want.size());
+  for (size_t i = 0; i < want.size() && i < got.size(); ++i)
+    expect_close(("rows + gather v" + std::to_string(i)).c_str(), got[i],
+                 want[i]);
+}
+
+// One lane of the issue 657 loop, `mu[i] = X[i] * (beta + z[, s[i]])`,
+// with unsorted subjects. Each lane slices column s[i] of a computed matrix
+// at an offset that follows the data irregularly. The slices become one
+// OP_GATHER, the dots one OP_GROUP_DOT, and the element stores fill mu.
+// The first lane writes mu functionally and the rest in place, so it stays
+// scalar.
+struct RowGatherLanes {
+  Graph g;
+  Fills fills;
+  std::vector<int> terms;
+  int mu_in = -1;  // the density's mean, read back after the pass
+};
+
+static RowGatherLanes row_gather_lanes(int L, int K, int J, const int* subj,
+                                       bool write_z) {
+  RowGatherLanes b;
+  Graph& g = b.g;
+  const int z_raw = g.add_slot(K * J, true);
+  const int tau = g.add_slot(1, true);
+  const int beta = g.add_slot(K, true);
+  const int sigma = g.add_slot(1, true);
+  const int z = g.add_slot(K * J, false);
+  g.add_op(OP_MUL, {z_raw, tau}, z);
+  const std::vector<int> rows = data_rows(g, b.fills, L, K);
+  const int mu0 = g.add_slot(L, false);
+  b.fills.emplace_back(mu0, std::vector<double>((size_t)L, std::nan("")));
+  int mu = -1;
+  for (int l = 0; l < L; ++l) {
+    const int col = g.add_slot(K, false);
+    g.add_op(OP_SLICE, {z}, col, {K * subj[l]});
+    const int sum = g.add_slot(K, false);
+    g.add_op(OP_ADD, {beta, col}, sum);
+    const int d = g.add_slot(1, false);
+    g.add_op(OP_DOT, {rows[(size_t)l], sum}, d);
+    if (l == 0) {
+      mu = g.add_slot(L, false);
+      g.add_op(OP_SET_INDEX, {mu0, d}, mu, {0});
+    } else {
+      g.add_op(OP_SET_INDEX_INPLACE, {mu, d}, mu, {l});
+    }
+    if (write_z) g.add_op(OP_SET_INDEX_INPLACE, {z, d}, z, {K * subj[l]});
+  }
+  const int y = g.add_slot(L, false);
+  std::vector<double> yv((size_t)L);
+  for (int l = 0; l < L; ++l) yv[(size_t)l] = 0.4 * std::cos(0.9 * l);
+  b.fills.emplace_back(y, std::move(yv));
+  const int lp = g.add_slot(1, false);
+  const int id =
+      stanli::testutil::add_density(g, OP_NORMAL_LPDF, {y, mu, sigma}, lp);
+  g.ops[(size_t)id].variant = 0x06;
+  b.terms.push_back(lp);
+  b.mu_in = mu;
+  return b;
+}
+
+static int density_mean(const Graph& g) {
+  for (const Op& op : g.ops)
+    if (op.opcode == OP_NORMAL_LPDF) return op.in[1];
+  return -1;
+}
+
+static void test_row_gather_dot() {
+  const int L = 16, K = 4, J = 5;
+  const int subj[L] = {3, 0, 4, 4, 1, 0, 2, 3, 1, 4, 0, 2, 2, 3, 1, 0};
+  RowGatherLanes b = row_gather_lanes(L, K, J, subj, false);
+  Graph ref = b.g;
+  reduce_into_result(ref, b.terms);
+  const std::vector<double> want_mu =
+      values_after_grad(ref, b.fills, {density_mean(ref)});
+  const std::vector<double> want = run_grad(std::move(ref), b.fills);
+
+  Graph& g = b.g;
+  std::vector<int> tt = b.terms;
+  Fills f2 = b.fills;
+  const RerollStats st = reroll(g, f2, tt, {});
+  expect("row gather: one region", st.regions == 1);
+  expect("row gather: one gather", count_op(g, OP_GATHER) == 1);
+  expect("row gather: one grouped dot", count_op(g, OP_GROUP_DOT) == 1);
+  expect("row gather: only the first lane slices", count_op(g, OP_SLICE) == 1);
+  expect("row gather: only the first lane dots", count_op(g, OP_DOT) == 1);
+  expect("row gather: no scalar store after the first lane",
+         count_op(g, OP_SET_INDEX_INPLACE) == 0);
+  reduce_into_result(g, tt);
+  const int mean = density_mean(g);
+  if (mean >= 0)
+    expect("row gather: mu bitwise equal to the scalar lanes",
+           values_after_grad(g, f2, {mean}) == want_mu);
+  const std::vector<double> got = run_grad(std::move(g), f2);
+  expect("row gather sizes", got.size() == want.size());
+  for (size_t i = 0; i < want.size() && i < got.size(); ++i)
+    expect_close(("row gather v" + std::to_string(i)).c_str(), got[i], want[i]);
+}
+
+// The same lanes, but each also writes into z at its own column: a later
+// lane's slice then reads what an earlier lane wrote. Gathering every
+// column up front would read z before those writes.
+static void test_row_gather_written_base_declines() {
+  const int L = 16, K = 4, J = 5;
+  const int subj[L] = {3, 0, 4, 4, 1, 0, 2, 3, 1, 4, 0, 2, 2, 3, 1, 0};
+  RowGatherLanes b = row_gather_lanes(L, K, J, subj, true);
+  Graph ref = b.g;
+  reduce_into_result(ref, b.terms);
+  const std::vector<double> want = run_grad(std::move(ref), b.fills);
+  Graph& g = b.g;
+  const size_t before = g.ops.size();
+  std::vector<int> tt = b.terms;
+  Fills f2 = b.fills;
+  const RerollStats st = reroll(g, f2, tt, {});
+  expect("written base declines", st.regions == 0 && g.ops.size() == before);
+  reduce_into_result(g, tt);
+  expect("written base unchanged", run_grad(std::move(g), f2) == want);
+}
+
+// Rows read at offsets that advance by a fixed step, but not every row of
+// the base: a partial block. Reroll leaves this shape to partition.cpp,
+// which packs it already, so the models that fold there keep their graphs.
+static void test_partial_row_block_declines() {
+  const int L = 60, R = 80, W = 3;
+  Graph g;
+  Fills fills;
+  const int base = g.add_slot(R * W, true);
+  const int mu = g.add_slot(1, true);
+  const int sigma = g.add_slot(1, true);
+  std::vector<int> terms;
+  for (int l = 0; l < L; ++l) {
+    const int row = g.add_slot(W, false);
+    g.add_op(OP_SLICE, {base}, row, {l * W});
+    const int lp = g.add_slot(1, false);
+    const int id =
+        stanli::testutil::add_density(g, OP_NORMAL_LPDF, {row, mu, sigma}, lp);
+    g.ops[(size_t)id].variant = 0x07;
+    terms.push_back(lp);
+  }
+  const size_t before = g.ops.size();
+  std::vector<int> tt = terms;
+  Fills f2 = fills;
+  const RerollStats st = reroll(g, f2, tt, {});
+  expect("partial row block declines",
+         st.regions == 0 && g.ops.size() == before && tt.size() == (size_t)L);
+  bool row_shape = false;
+  for (const LaneDeclineRecord& d : st.declines)
+    row_shape = row_shape || d.why == LaneDecline::kRowShape;
+  expect("partial row block names the row shape", row_shape);
+}
+
+// Each lane dots its data row with a different parameter vector. Those
+// vectors are neither constants nor values computed in the lane, so there
+// is nothing to pack them into.
+static void test_row_dot_varying_parameter_declines() {
+  const int L = 10, K = 3;
+  Graph g;
+  Fills fills;
+  const int sigma = g.add_slot(1, true);
+  const std::vector<int> rows = data_rows(g, fills, L, K);
+  std::vector<int> terms;
+  for (int l = 0; l < L; ++l) {
+    const int w = g.add_slot(K, true);
+    const int d = g.add_slot(1, false);
+    g.add_op(OP_DOT, {rows[(size_t)l], w}, d);
+    const int lp = g.add_slot(1, false);
+    const int id = stanli::testutil::add_density(
+        g, OP_NORMAL_LPDF, {const_scalar(g, fills, 0.1 * l), d, sigma}, lp);
+    g.ops[(size_t)id].variant = 0x06;
+    terms.push_back(lp);
+  }
+  const size_t before = g.ops.size();
+  std::vector<int> tt = terms;
+  Fills f2 = fills;
+  const RerollStats st = reroll(g, f2, tt, {});
+  expect("varying parameter declines",
+         st.regions == 0 && g.ops.size() == before && tt.size() == (size_t)L);
+  bool all_varying = !st.declines.empty();
+  for (const LaneDeclineRecord& d : st.declines)
+    all_varying = all_varying && d.why == LaneDecline::kVaryingSlot;
+  expect("varying parameter names the varying slot", all_varying);
+}
+
 // ---- end to end through compile_model ------------------------------------
 
 static std::string slurp(const char* p) {
@@ -3253,6 +3579,118 @@ static void test_random_effect_loops_fully_rerolled() {
   std::printf("rmw_re_adjacent: %zu ops, %d scalar stores or islands\n",
               cm.graph.ops.size(), scalar);
   expect("random-effect loops: no scalar lanes left", scalar == 0);
+}
+
+static std::string json_matrix(int rows, int cols, double (*f)(int, int)) {
+  std::string s = "[";
+  for (int i = 0; i < rows; ++i) {
+    s += i ? ",[" : "[";
+    for (int k = 0; k < cols; ++k)
+      s += (k ? "," : "") + std::to_string(f(i, k));
+    s += "]";
+  }
+  return s + "]";
+}
+
+static double row_value(int i, int k) {
+  return k == 0 ? 1.0 : std::sin(0.37 * i + 1.1 * k) * (1.0 + 0.5 * k);
+}
+
+static std::string row_gather_json(int N) {
+  return "{\"N\":" + std::to_string(N) + ",\"J\":7,\"K\":4,\"subject\":" +
+         json_int_array(N, [](int i) { return (i * 5 + i / 3) % 7 + 1; }) +
+         ",\"X\":" + json_matrix(N, 4, row_value) + ",\"y\":" +
+         json_array(N, [](int i) { return 0.6 * std::cos(0.8 * i); }) + "}";
+}
+
+static std::string loglik_json(int N) {
+  return "{\"N\":" + std::to_string(N) +
+         ",\"J\":5,\"K\":4,\"X\":" + json_matrix(N, 4, row_value) + ",\"s\":" +
+         json_int_array(N, [](int i) { return (i * 7 + i / 2) % 5 + 1; }) +
+         ",\"y\":" +
+         json_array(N, [](int i) { return 0.3 * std::sin(1.3 * i); }) + "}";
+}
+
+// The issue 657 loop through the whole pipeline: constant folding turns each
+// X[i] into its own fill and each z column read is a slice at a data-driven
+// offset. Unrolled, the loop is four ops per row; folded, the op count must
+// not grow with N, and the gradient must match the unrolled one.
+static void test_row_gather_model() {
+  SKIP_WITHOUT_DEBUG_SWITCHES();
+  const char* sexp = "tests/fixtures/reroll_row_gather.mir";
+  size_t small = 0, large = 0, unrolled = 0;
+  const std::string json24 = row_gather_json(24), json96 = row_gather_json(96);
+  test_setenv("STANLI_NO_REROLL", "1", 1);
+  test_setenv("STANLI_NO_PARTITION", "1", 1);
+  test_setenv("STANLI_NO_ISLAND", "1", 1);
+  const std::vector<double> want = e2e_grad(sexp, json96.c_str(), &unrolled);
+  test_unsetenv("STANLI_NO_REROLL");
+  test_unsetenv("STANLI_NO_PARTITION");
+  const std::vector<double> got = e2e_grad(sexp, json96.c_str(), &large);
+  e2e_grad(sexp, json24.c_str(), &small);
+  test_unsetenv("STANLI_NO_ISLAND");
+  std::printf(
+      "reroll_row_gather: unrolled %zu ops, N=24 %zu ops, N=96 %zu ops\n",
+      unrolled, small, large);
+  expect("row gather model sizes", got.size() == want.size());
+  for (size_t i = 0; i < want.size() && i < got.size(); ++i)
+    expect_close(("row gather model v" + std::to_string(i)).c_str(), got[i],
+                 want[i]);
+  expect("row gather model: op count independent of N", small == large);
+  expect("row gather model: collapsed", large * 4 < unrolled);
+
+  CompiledModel cm =
+      compile_model(slurp(sexp), DataMap::from_json(json96.c_str()));
+  expect("row gather model: one grouped dot",
+         count_op(cm.graph, OP_GROUP_DOT) == 1);
+}
+
+static std::vector<double> loglik_columns(const std::string& json,
+                                          size_t* wa_ops, int* dots) {
+  CompiledModel cm = compile_model(slurp("tests/fixtures/reroll_loglik.mir"),
+                                   DataMap::from_json(json));
+  std::vector<double> out;
+  if (!cm.write_array || cm.write_array->truncated) return out;
+  *wa_ops = cm.write_array->graph.ops.size();
+  *dots = count_op(cm.write_array->graph, OP_DOT);
+  Executor wex(std::move(cm.write_array->graph));
+  cm.write_array->bind(wex);
+  for (int64_t i = 0; i < wex.n_params(); ++i)
+    wex.params_data()[i] = 0.1 + 0.05 * (i % 7) - 0.15 * (i % 3);
+  wex.run_forward_only();
+  for (const auto& col : cm.write_array->columns) {
+    const double* v = std::as_const(wex).value_ptr(col.slot);
+    out.insert(out.end(), v, v + col.len);
+  }
+  return out;
+}
+
+// `log_lik[i] = normal_lpdf(y[i] | X[i] * beta + a[s[i]], sigma)` in
+// generated quantities: the same data rows and irregular index in the
+// write_array graph. Every output column must be bitwise the unrolled one.
+static void test_loglik_write_array() {
+  SKIP_WITHOUT_DEBUG_SWITCHES();
+  size_t unrolled = 0, small = 0, large = 0;
+  int dots_unrolled = 0, dots_small = 0, dots_large = 0;
+  test_setenv("STANLI_NO_REROLL", "1", 1);
+  const std::vector<double> want =
+      loglik_columns(loglik_json(96), &unrolled, &dots_unrolled);
+  test_unsetenv("STANLI_NO_REROLL");
+  const std::vector<double> got =
+      loglik_columns(loglik_json(96), &large, &dots_large);
+  loglik_columns(loglik_json(24), &small, &dots_small);
+  std::printf(
+      "reroll_loglik write_array: unrolled %zu ops (%d dots), "
+      "N=24 %zu ops, N=96 %zu ops (%d dots)\n",
+      unrolled, dots_unrolled, small, large, dots_large);
+  expect("loglik columns present", !want.empty() && got.size() == want.size());
+  expect("loglik columns bitwise equal", got == want);
+  expect("loglik write_array: op count independent of N", small == large);
+  // The first lane writes log_lik functionally from its declaration and the
+  // last one into the output column; the element-store rule leaves both
+  // scalar, as it does for every store run. The lanes between them fold.
+  expect("loglik write_array: only the end lanes stay scalar",
+         dots_large == dots_small && dots_large <= 2);
 }
 
 // Signature prefilter: op_signature(a) != op_signature(b) must prove
@@ -3712,9 +4150,17 @@ int main() {
   test_row_lane_shared_read();
   test_gather_lane_partial_row();
   test_shared_vector_mean_row_major();
+  test_data_rows_dot_parameter();
+  test_data_rows_with_scalar_gather();
+  test_row_gather_dot();
+  test_row_gather_written_base_declines();
+  test_row_dot_varying_parameter_declines();
+  test_partial_row_block_declines();
   test_e2e_fixtures();
   test_read_modify_write_models();
   test_random_effect_loops_fully_rerolled();
+  test_row_gather_model();
+  test_loglik_write_array();
   test_signature_soundness();
   if (failures) {
     std::printf("%d failures\n", failures);

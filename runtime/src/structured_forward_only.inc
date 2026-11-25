@@ -12,6 +12,7 @@ struct ForwardLoopExecution {
   std::vector<double> invariant_values;
   std::vector<int64_t> invariant_offsets, node_generation, loop_generation;
   double target = 0.0;
+  CompensatedSum compensated;
   enum Flow { Normal, Break, Continue };
 
   ForwardLoopExecution(LoopState& state, KernelCtx& context)
@@ -162,8 +163,10 @@ struct ForwardLoopExecution {
       case Node::Continue:
         return Continue;
       case Node::Target:
-        // reduce_target uses exactly this source-order scalar addition.
+        // reduce_target uses exactly this source-order scalar addition, or
+        // a compensated sum of all the terms.
         target += value(n.src)[0];
+        if (p.compensated_target) compensated.add(value(n.src)[0]);
         return Normal;
     }
     throw std::logic_error("invalid structured node");
@@ -180,6 +183,10 @@ struct ForwardLoopExecution {
       std::copy_n(value(slot), length(p, slot), outer.out.data + pos);
       pos += length(p, slot);
     }
-    if (p.has_target) outer.out.data[pos] = target;
+    if (p.has_target)
+      outer.out.data[pos] =
+          p.compensated_target && compensated.count() > kPlainSumMax
+              ? compensated.result()
+              : target;
   }
 };

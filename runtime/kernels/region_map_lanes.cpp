@@ -2,6 +2,7 @@
 #include <stanli/rejection.hpp>
 #include <stanli/adjoint.hpp>
 #include <stanli/adjoint_rules.hpp>
+#include <stanli/pairwise_sum.hpp>
 #include <stanli/program_density.hpp>
 #include <stanli/region_map.hpp>
 #include <stanli/structured_loop.hpp>
@@ -222,6 +223,7 @@ class Analysis {
     decode_operands();
     collect_seeds();
     build_windows();
+    find_proven_gathers();
     count_sites();
     size_tiles();
   }
@@ -1000,12 +1002,6 @@ class Analysis {
 
   void build_windows() {
     plan_.calls.assign(p_.calls.size(), {});
-    for (const auto& I : p_.code)
-      if (I.code == Program::CALL) forward_window(I.a);
-    for (const auto& A : p_.adj.code)
-      if (A.code == Program::CALL) backward_window(A.a);
-    for (const auto& w : plan_.calls)
-      plan_.max_window = std::max({plan_.max_window, w.fwd_size, w.bwd_size});
     for (size_t i = 0; i < p_.calls.size(); ++i) {
       const Program::Call& call = p_.calls[i];
       auto& w = plan_.calls[i];
@@ -1022,11 +1018,91 @@ class Analysis {
         w.tile = tile_call_kind(call.opcode);
         ++plan_.tile_calls;
       }
-      w.index_sites =
-          call.opcode == OP_INDEX_DYNAMIC && call.udata_owner &&
-          call.backward != nullptr && call.scratch_len == 0 &&
-          (call.input_adjoint_mask & ((1u << call.n_in) - 1)) == 1u &&
-          w.adj_out_cell >= 0 && shared_adjoint_cell(call.bwd_adj_in[0]);
+      w.index_sites = index_sites_callable(call, w);
+    }
+    for (const auto& I : p_.code)
+      if (I.code == Program::CALL) forward_window(I.a);
+    for (const auto& A : p_.adj.code)
+      if (A.code == Program::CALL) backward_window(A.a);
+    for (const auto& w : plan_.calls)
+      plan_.max_window = std::max({plan_.max_window, w.fwd_size, w.bwd_size});
+  }
+
+  // An index read from shared cells: its adjoint takes one dynamic site per
+  // selected element instead of a row for every input cell, and its forward
+  // reads the container in place. A data container takes no sites.
+  bool index_sites_callable(const Program::Call& call,
+                            const RegionMapLanePlan::CallWindow& w) const {
+    if (call.opcode != OP_INDEX_DYNAMIC || !call.udata_owner ||
+        call.forward == nullptr || call.backward == nullptr ||
+        call.scratch_len != 0)
+      return false;
+    if (call.input_adjoint_mask & ((1u << call.n_in) - 1) & ~1u) return false;
+    if (w.in_reg[0] >= 0 || w.val_in_reg[0] >= 0) return false;
+    if (w.out_reg < 0 || w.adj_out_cell < 0) return false;
+    return !(call.input_adjoint_mask & 1u) ||
+           shared_adjoint_cell(call.bwd_adj_in[0]);
+  }
+
+  // Which gathers read selectors that take the same values in every
+  // evaluation. A register varies when a parameter reaches it or when it is
+  // written where a varying jump may skip. A jump varies when its condition
+  // does or when a varying jump may skip it. The loop variable and the
+  // live-ins that no parameter reaches do not vary.
+  void find_proven_gathers() {
+    const size_t n_code = p_.code.size();
+    std::vector<char> varies((size_t)p_.n_regs, 0);
+    for (const auto& li : p_.ins)
+      if (li.active)
+        for (int k = 0; k < li.len; ++k) varies[(size_t)(li.reg + k)] = 1;
+    std::vector<char> skipped(n_code, 0), jump_varies(n_code, 0);
+    for (bool changed = true; changed;) {
+      changed = false;
+      for (size_t pc = 0; pc < n_code; ++pc) {
+        const Program::Instr& I = p_.code[pc];
+        bool v = skipped[pc] != 0;
+        each_body_read(I, [&](int reg, int len) {
+          for (int k = 0; k < len; ++k) v = v || varies[(size_t)(reg + k)];
+        });
+        if (!v) continue;
+        if (I.code == Program::JZ || I.code == Program::JMP) {
+          if (jump_varies[pc]) continue;
+          jump_varies[pc] = 1;
+          for (size_t q = pc + 1; q < (size_t)I.dst && q < n_code; ++q)
+            skipped[q] = 1;
+          changed = true;
+          continue;
+        }
+        each_instr_write(I, [&](int reg, int len) {
+          for (int k = 0; k < len; ++k)
+            if (!varies[(size_t)(reg + k)]) {
+              varies[(size_t)(reg + k)] = 1;
+              changed = true;
+            }
+        });
+      }
+    }
+    std::vector<char> seen(p_.calls.size(), 0), proven_call(p_.calls.size(), 0);
+    for (size_t pc = 0; pc < n_code; ++pc) {
+      const Program::Instr& I = p_.code[pc];
+      if (I.code != Program::CALL) continue;
+      const auto& w = plan_.calls[(size_t)I.a];
+      const Program::Call& call = p_.calls[(size_t)I.a];
+      bool proven =
+          w.index_sites && !skipped[pc] &&
+          index_selection_static(
+              *static_cast<const DynamicIndexSpec*>(call.udata_owner.get()));
+      for (int k = 1; proven && k < call.n_in; ++k)
+        for (int j = 0; proven && j < call.in_len[k]; ++j)
+          proven = !varies[(size_t)(call.in[k] + j)];
+      // A call that several instructions run is proven only if each is.
+      proven_call[(size_t)I.a] =
+          (seen[(size_t)I.a] ? proven_call[(size_t)I.a] : 1) && proven;
+      seen[(size_t)I.a] = 1;
+    }
+    for (size_t i = 0; i < p_.calls.size(); ++i) {
+      plan_.calls[i].proven = proven_call[i] != 0;
+      plan_.proven_calls += proven_call[i] ? 1 : 0;
     }
   }
 
@@ -1077,7 +1153,7 @@ class Analysis {
     for (int k = 0; k < call.n_in; ++k) {
       w.in_off[k] = at;
       w.fwd.in[k] = at;
-      at += call.in_len[k];
+      if (!(w.index_sites && k == 0)) at += call.in_len[k];
     }
     w.out_off = at;
     w.fwd.out = at;
@@ -1107,6 +1183,15 @@ class Analysis {
     if (overlaps(scratch, {call.bwd_value_out, call.out_len}))
       refuse("call scratch overlaps a value range");
     int at = 0;
+    if (w.index_sites) {
+      // Only the selectors: the container stays where it lies.
+      for (int k = 1; k < call.n_in; ++k) {
+        w.val_in_off[k] = at;
+        at += call.in_len[k];
+      }
+      w.bwd_size = at;
+      return;
+    }
     for (int k = 0; k < call.n_in; ++k) {
       w.val_in_off[k] = at;
       at += call.in_len[k];
@@ -1158,8 +1243,10 @@ class Analysis {
       } else if (A.code == Program::CALL) {
         const Program::Call& call = p_.calls[(size_t)A.a];
         if (plan_.calls[(size_t)A.a].index_sites) {
-          plan_.max_sites += call.out_len;
-          plan_.max_dynamic += call.out_len;
+          if (call.input_adjoint_mask & 1u) {
+            plan_.max_sites += call.out_len;
+            plan_.max_dynamic += call.out_len;
+          }
           continue;
         }
         for (int k = 0; k < call.n_in; ++k)
@@ -1245,6 +1332,11 @@ class TileState {
 
   int lanes() const { return n_; }
 
+  // Whether an earlier evaluation of this executor has checked the
+  // selectors of every proven gather.
+  bool proven() const { return proven_; }
+  void set_proven(bool proven) { proven_ = proven; }
+
   template <typename F>
   void each(Mask m, F&& f) const {
     if (m == full_) {
@@ -1298,6 +1390,7 @@ class TileState {
   double* fwd_;
   int n_;
   Mask full_;
+  bool proven_ = false;
 };
 
 std::atomic<uint64_t> tile_call_runs{0};
@@ -1537,7 +1630,7 @@ void lane_instruction(const RegionMapProg& p, const TileState& t, int pc,
             const double raw = idx[l];
             if (!std::isfinite(raw) || std::trunc(raw) != raw || raw < 1.0 ||
                 raw > len)
-              throw ProgramIndexError();
+              throw_dyn_index_error(I.sub, raw, I.len);
             d[l] = read(static_cast<int32_t>(raw) - 1, l);
           });
         };
@@ -1562,7 +1655,13 @@ void lane_instruction(const RegionMapProg& p, const TileState& t, int pc,
         bind_call_fwd_ctx(w.fwd, window, call_ctx, state);
       }
       const double* const base = t.base();
-      for (int k = 0; k < call.n_in; ++k)
+      // An index read takes its container where it lies. The work per lane
+      // grows with the number of selected elements, whatever the container's
+      // size.
+      if (w.index_sites)
+        call_ctx.in[0] = Desc{const_cast<double*>(t.shared_regs()) + call.in[0],
+                              call.in_len[0]};
+      for (int k = w.index_sites ? 1 : 0; k < call.n_in; ++k)
         if (w.in_reg[k] < 0)
           std::copy_n(t.shared_regs() + call.in[k], call.in_len[k],
                       window + w.in_off[k]);
@@ -1572,13 +1671,15 @@ void lane_instruction(const RegionMapProg& p, const TileState& t, int pc,
             for (int j = 0; j < call.in_len[k]; ++j)
               window[w.in_off[k] + j] = base[w.in_reg[k] + j * kTile + l];
       };
+      const KernelFn forward =
+          w.proven && t.proven() ? index_trusted_read : call.forward;
       t.each(m, [&](int l) {
         in_regs(l);
         for (int j = 0; j < call.out_len; ++j)
           window[w.out_off + j] = base[w.out_reg + j * kTile + l];
         for (int j = 0; j < call.scratch_len; ++j)
           window[w.scratch_off + j] = base[w.scratch_reg + j * kTile + l];
-        call.forward(call_ctx);
+        forward(call_ctx);
         double* const out = t.mutable_base();
         for (int j = 0; j < call.out_len; ++j)
           out[w.out_reg + j * kTile + l] = window[w.out_off + j];
@@ -1878,9 +1979,17 @@ void tile_call_backward(const RegionMapLanePlan::CallWindow& w,
 void index_read_backward(const RegionMapLanePlan::CallWindow& w,
                          const Program::Call& call, AdjointTile& t, Mask m,
                          double* window, KernelCtx& ctx) {
+  double* const cbase = t.cells();
+  if (!(call.input_adjoint_mask & 1u)) {
+    // A data container takes no adjoint, so the read only clears its own.
+    for (int j = 0; j < call.out_len; ++j) {
+      double* const d = cbase + w.adj_out_cell + j * kTile;
+      t.each(m, [&](int l) { d[l] = 0.0; });
+    }
+    return;
+  }
   const TileState& f = t.forward();
   const double* const fbase = f.base();
-  double* const cbase = t.cells();
   const auto site = t.acc_dynamic(call.out_len);
   ctx.n_in = call.n_in;
   ctx.in[0] = Desc{nullptr, call.in_len[0]};
@@ -1893,12 +2002,16 @@ void index_read_backward(const RegionMapLanePlan::CallWindow& w,
   ctx.out = Desc{nullptr, call.out_len};
   const auto& spec =
       *static_cast<const DynamicIndexSpec*>(call.udata_owner.get());
+  // This evaluation's forward checked these selectors.
+  const bool trusted = index_selection_static(spec);
   t.each(m, [&](int l) {
     for (int k = 1; k < call.n_in; ++k)
       if (w.val_in_reg[k] >= 0)
         for (int j = 0; j < call.in_len[k]; ++j)
           window[w.val_in_off[k] + j] = fbase[w.val_in_reg[k] + j * kTile + l];
-    const int64_t n = index_read_positions(spec, ctx, site.index + l, kTile);
+    const int64_t n =
+        trusted ? index_trusted_positions(spec, ctx, site.index + l, kTile)
+                : index_read_positions(spec, ctx, site.index + l, kTile);
     for (int64_t j = 0; j < n; ++j)
       site.index[j * kTile + l] += call.bwd_adj_in[0];
     for (int j = 0; j < call.out_len; ++j) {
@@ -2163,11 +2276,11 @@ void lane_adjoint_instruction(const RegionMapProg& p, AdjointTile& t, int pc,
     case Program::CALL: {
       const Program::Call& call = p.calls[(size_t)I.a];
       const auto& w = p.lanes.calls[(size_t)I.a];
-      const TileState& f = t.forward();
       if (w.index_sites) {
         index_read_backward(w, call, t, m, window, ctx);
         return;
       }
+      const TileState& f = t.forward();
       double* rows[6] = {nullptr, nullptr, nullptr, nullptr, nullptr, nullptr};
       for (int k = 0; k < call.n_in; ++k)
         if ((call.input_adjoint_mask & (1u << k)) &&
@@ -2384,6 +2497,12 @@ uint64_t region_map_tile_call_runs() {
   return tile_call_runs.load(std::memory_order_relaxed);
 }
 
+std::atomic<uint64_t> proven_runs{0};
+
+uint64_t region_map_proven_runs() {
+  return proven_runs.load(std::memory_order_relaxed);
+}
+
 uint64_t region_map_lane_runs() {
   return lane_runs.load(std::memory_order_relaxed);
 }
@@ -2434,8 +2553,9 @@ static TileState seeded_tile(const RegionMapProg& p, double* reg, double* base,
 }
 
 void region_map_lanes_forward(const RegionMapProg& p, KernelCtx& ctx,
-                              double* region) {
+                              double* region, bool proven) {
   lane_runs.fetch_add(1, std::memory_order_relaxed);
+  if (proven) proven_runs.fetch_add(1, std::memory_order_relaxed);
   const auto& plan = p.lanes;
   double* tiles = region;
   double* window = region + plan.storage;
@@ -2444,6 +2564,7 @@ void region_map_lanes_forward(const RegionMapProg& p, KernelCtx& ctx,
   std::vector<Mask> entry;
   entry.reserve(plan.blocks.size() + 1);
   double total = 0.0;
+  CompensatedSum compensated;
   const int target = p.out_regs[0];
   RegionMapTally tally;
   RegionMapTally* counting = plan.profile ? &tally : nullptr;
@@ -2452,17 +2573,21 @@ void region_map_lanes_forward(const RegionMapProg& p, KernelCtx& ctx,
     const int lanes = (int)std::min<int64_t>(kTile, p.count - first);
     double* base = tile_base(plan, tiles, tile);
     TileState t = seeded_tile(p, reg, base, first, lanes);
+    t.set_proven(proven);
     lane_tile_forward(p, t, window, call_ctx, ctx.eval_state, entry,
                       segment_masks(plan, region, tile), counting);
     const double* out = t.slot(target);
     for (int l = 0; l < lanes; ++l) total += out[l];
+    if (p.compensated)
+      for (int l = 0; l < lanes; ++l) compensated.add(out[l]);
   }
   if (counting) {
     tally.evaluations = 1;
     tally.tiles = (uint64_t)plan.tiles;
     merge_tally(*plan.profile, tally);
   }
-  ctx.out.data[0] = total;
+  ctx.out.data[0] =
+      p.compensated && p.count > kPlainSumMax ? compensated.result() : total;
 }
 
 void region_map_lanes_backward(const RegionMapProg& p, KernelCtx& ctx,
@@ -2503,6 +2628,8 @@ void region_map_lanes_backward(const RegionMapProg& p, KernelCtx& ctx,
     TileState fwd = plan.tile_recompute
                         ? seeded_tile(p, ctx.scratch, base, first, lanes)
                         : TileState(p, ctx.scratch, base, lanes);
+    // The forward of this evaluation checked every selector.
+    fwd.set_proven(true);
     if (plan.tile_recompute)
       lane_tile_forward(p, fwd, window, call_ctx, ctx.eval_state, entry,
                         segment_masks(plan, region, tile), counting);
