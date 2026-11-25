@@ -39,6 +39,33 @@
    },
    "functions": {},
    "main": {
+    "2pl_latent_reg_irt": {
+     "grad[17]": {
+      "bound": 19,
+      "closer": "stanli",
+      "reason": "measured on Darwin arm64; 80-digit reference at point 0: stanli 1, CmdStan 18 scaled ULP from the true value; stanli is at least as close to it; the adjoints that a gather adds into one element are compensated in stanli, while CmdStan adds one call at a time"
+     },
+     "grad[20]": {
+      "bound": 17,
+      "closer": "stanli",
+      "reason": "measured on Darwin arm64; 80-digit reference at point 0: stanli 2, CmdStan 19 scaled ULP from the true value; stanli is at least as close to it; the adjoints that a gather adds into one element are compensated in stanli, while CmdStan adds one call at a time"
+     },
+     "grad[25]": {
+      "bound": 12,
+      "closer": "stanli",
+      "reason": "measured on Darwin arm64; 80-digit reference at point 1: stanli 0, CmdStan 12 scaled ULP from the true value; stanli is at least as close to it; the adjoints that a gather adds into one element are compensated in stanli, while CmdStan adds one call at a time"
+     },
+     "grad[26]": {
+      "bound": 12,
+      "closer": "stanli",
+      "reason": "measured on Darwin arm64; 80-digit reference at point 1: stanli 0, CmdStan 12 scaled ULP from the true value; stanli is at least as close to it; the adjoints that a gather adds into one element are compensated in stanli, while CmdStan adds one call at a time"
+     },
+     "grad[27]": {
+      "bound": 29,
+      "closer": "stanli",
+      "reason": "measured on Darwin arm64; 80-digit reference at point 0: stanli 1, CmdStan 30 scaled ULP from the true value; stanli is at least as close to it; the adjoints that a gather adds into one element are compensated in stanli, while CmdStan adds one call at a time"
+     }
+    },
     "GLMM1_model": {
      "lp": {
       "bound": 44,
@@ -159,9 +186,9 @@
       "reason": "measured on Darwin arm64; 80-digit reference at point 1: stanli 2, CmdStan 15 scaled ULP from the true value; stanli is at least as close to it"
      },
      "grad[9]": {
-      "bound": 11,
+      "bound": 13,
       "closer": "stanli",
-      "reason": "measured on Darwin arm64; 80-digit reference at point 1: stanli 2, CmdStan 13 scaled ULP from the true value; stanli is at least as close to it"
+      "reason": "measured on Darwin arm64; 80-digit reference at point 1: stanli 0, CmdStan 13 scaled ULP from the true value; stanli is at least as close to it; the adjoints that a gather adds into one element are compensated in stanli, while CmdStan adds one call at a time"
      }
     },
     "ch12_m12_3": {
@@ -453,45 +480,10 @@
      }
     },
     "election88_full": {
-     "grad[1]": {
-      "bound": 11,
-      "closer": "stanli",
-      "reason": "measured on Darwin arm64; 80-digit reference at point 1: stanli 2, CmdStan 9 scaled ULP from the true value; stanli is at least as close to it; the merged loop's sums are pairwise or compensated in stanli, while CmdStan adds one call at a time"
-     },
-     "grad[2]": {
-      "bound": 16,
-      "closer": "stanli",
-      "reason": "measured on Darwin arm64; 80-digit reference at point 1: stanli 7, CmdStan 9 scaled ULP from the true value; stanli is at least as close to it; the merged loop's sums are pairwise or compensated in stanli, while CmdStan adds one call at a time"
-     },
-     "grad[6]": {
-      "bound": 15,
-      "closer": "stanli",
-      "reason": "measured on Darwin arm64; 80-digit reference at point 1: stanli 6, CmdStan 21 scaled ULP from the true value; stanli is at least as close to it; the merged loop's sums are pairwise or compensated in stanli, while CmdStan adds one call at a time"
-     },
-     "grad[7]": {
-      "bound": 16,
-      "closer": "stanli",
-      "reason": "measured on Darwin arm64; 80-digit reference at point 1: stanli 1, CmdStan 15 scaled ULP from the true value; stanli is at least as close to it; the merged loop's sums are pairwise or compensated in stanli, while CmdStan adds one call at a time"
-     },
-     "grad[81]": {
+     "grad": {
       "bound": 91,
       "closer": "stanli",
-      "reason": "measured on Darwin arm64; 80-digit reference at point 1: stanli 1, CmdStan 90 scaled ULP from the true value; stanli is at least as close to it; the merged loop's sums are pairwise or compensated in stanli, while CmdStan adds one call at a time"
-     },
-     "grad[82]": {
-      "bound": 11,
-      "closer": "stanli",
-      "reason": "measured on Darwin arm64; no 80-digit value for this entry; the merged loop's sums are pairwise or compensated in stanli, while CmdStan adds one call at a time; 80-digit value on 2026-11-23, at point 0: stanli 0.1, CmdStan 10.9 scaled ULP from it"
-     },
-     "grad[83]": {
-      "bound": 43,
-      "closer": "stanli",
-      "reason": "measured on Darwin arm64; 80-digit reference at point 1: stanli 0, CmdStan 43 scaled ULP from the true value; stanli is at least as close to it; the merged loop's sums are pairwise or compensated in stanli, while CmdStan adds one call at a time"
-     },
-     "grad[84]": {
-      "bound": 65,
-      "closer": "stanli",
-      "reason": "measured on Darwin arm64; 80-digit reference at point 0: stanli 0, CmdStan 64 scaled ULP from the true value; stanli is at least as close to it; the merged loop's sums are pairwise or compensated in stanli, while CmdStan adds one call at a time"
+      "reason": "measured on Darwin arm64; 80-digit reference at point 1: stanli 1, CmdStan 90 scaled ULP from the true value; stanli is at least as close to it; the adjoints that a gather adds into one element are compensated in stanli, while CmdStan adds one call at a time; 9 grad values over 10"
      }
     },
     "epinow2_estimate_infections": {
@@ -682,6 +674,43 @@
       "reason": "measured on Darwin arm64; 80-digit reference at point 2: stanli 8, CmdStan 485 scaled ULP from the true value; stanli is at least as close to it"
      }
     },
+    "hier_2pl": {
+     "grad[633]": {
+      "bound": 11,
+      "closer": "stanli",
+      "reason": "measured on Darwin arm64; 80-digit reference at point 0: stanli 0, CmdStan 11 scaled ULP from the true value; stanli is at least as close to it; the adjoints that a gather adds into one element are compensated in stanli, while CmdStan adds one call at a time"
+     },
+     "grad[638]": {
+      "bound": 18,
+      "closer": "stanli",
+      "reason": "measured on Darwin arm64; 80-digit reference at point 1: stanli 0, CmdStan 18 scaled ULP from the true value; stanli is at least as close to it; the adjoints that a gather adds into one element are compensated in stanli, while CmdStan adds one call at a time"
+     },
+     "grad[641]": {
+      "bound": 12,
+      "closer": "stanli",
+      "reason": "measured on Darwin arm64; 80-digit reference at point 0: stanli 0, CmdStan 11 scaled ULP from the true value; stanli is at least as close to it; the adjoints that a gather adds into one element are compensated in stanli, while CmdStan adds one call at a time"
+     },
+     "grad[643]": {
+      "bound": 27,
+      "closer": "stanli",
+      "reason": "measured on Darwin arm64; 80-digit reference at point 1: stanli 0, CmdStan 27 scaled ULP from the true value; stanli is at least as close to it; the adjoints that a gather adds into one element are compensated in stanli, while CmdStan adds one call at a time"
+     },
+     "grad[653]": {
+      "bound": 28,
+      "closer": "stanli",
+      "reason": "measured on Darwin arm64; 80-digit reference at point 1: stanli 0, CmdStan 28 scaled ULP from the true value; stanli is at least as close to it; the adjoints that a gather adds into one element are compensated in stanli, while CmdStan adds one call at a time"
+     },
+     "grad[655]": {
+      "bound": 12,
+      "closer": "stanli",
+      "reason": "measured on Darwin arm64; 80-digit reference at point 1: stanli 0, CmdStan 11 scaled ULP from the true value; stanli is at least as close to it; the adjoints that a gather adds into one element are compensated in stanli, while CmdStan adds one call at a time"
+     },
+     "grad[663]": {
+      "bound": 16,
+      "closer": "stanli",
+      "reason": "measured on Darwin arm64; 80-digit reference at point 1: stanli 0, CmdStan 16 scaled ULP from the true value; stanli is at least as close to it; the adjoints that a gather adds into one element are compensated in stanli, while CmdStan adds one call at a time"
+     }
+    },
     "i320_pois_trunc_both": {
      "grad[4]": {
       "bound": 16,
@@ -710,29 +739,39 @@
     },
     "ldaK2": {
      "grad[1]": {
-      "bound": 153,
+      "bound": 509,
       "closer": "stanli",
-      "reason": "measured on Darwin arm64; 80-digit reference at point 1: stanli 352, CmdStan 505 scaled ULP from the true value; stanli is at least as close to it; the merged loop's sums are pairwise or compensated in stanli, while CmdStan adds one call at a time"
+      "reason": "measured on Darwin arm64; 80-digit reference at point 1: stanli 4, CmdStan 505 scaled ULP from the true value; stanli is at least as close to it; the adjoints that a gather adds into one element are compensated in stanli, while CmdStan adds one call at a time"
+     },
+     "grad[2]": {
+      "bound": 238,
+      "closer": "stanli",
+      "reason": "measured on Darwin arm64; 80-digit reference at point 1: stanli 7, CmdStan 231 scaled ULP from the true value; stanli is at least as close to it; the adjoints that a gather adds into one element are compensated in stanli, while CmdStan adds one call at a time"
+     },
+     "grad[3]": {
+      "bound": 368,
+      "closer": "stanli",
+      "reason": "measured on Darwin arm64; 80-digit reference at point 1: stanli 13, CmdStan 380 scaled ULP from the true value; stanli is at least as close to it; the adjoints that a gather adds into one element are compensated in stanli, while CmdStan adds one call at a time"
      },
      "grad[4]": {
-      "bound": 51,
+      "bound": 102,
       "closer": "stanli",
-      "reason": "measured on Darwin arm64; 80-digit reference at point 1: stanli 58, CmdStan 109 scaled ULP from the true value; stanli is at least as close to it; the merged loop's sums are pairwise or compensated in stanli, while CmdStan adds one call at a time"
+      "reason": "measured on Darwin arm64; 80-digit reference at point 1: stanli 8, CmdStan 110 scaled ULP from the true value; stanli is at least as close to it; the adjoints that a gather adds into one element are compensated in stanli, while CmdStan adds one call at a time"
      },
      "grad[5]": {
-      "bound": 30,
-      "closer": "cmdstan",
-      "reason": "measured on Darwin arm64; 80-digit reference at point 1: stanli 137, CmdStan 108 scaled ULP from the true value; stanli is farther from it than CmdStan; cause not yet explained"
+      "bound": 147,
+      "closer": "stanli",
+      "reason": "measured on Darwin arm64; 80-digit reference at point 0: stanli 4, CmdStan 143 scaled ULP from the true value; stanli is at least as close to it; the adjoints that a gather adds into one element are compensated in stanli, while CmdStan adds one call at a time"
      },
      "grad[6]": {
-      "bound": 204,
+      "bound": 232,
       "closer": "stanli",
-      "reason": "measured on Darwin arm64; 80-digit reference at point 1: stanli 34, CmdStan 238 scaled ULP from the true value; stanli is at least as close to it; the merged loop's sums are pairwise or compensated in stanli, while CmdStan adds one call at a time"
+      "reason": "measured on Darwin arm64; 80-digit reference at point 1: stanli 6, CmdStan 238 scaled ULP from the true value; stanli is at least as close to it; the adjoints that a gather adds into one element are compensated in stanli, while CmdStan adds one call at a time"
      },
      "grad[7]": {
-      "bound": 125,
-      "closer": "cmdstan",
-      "reason": "measured on Darwin arm64; 80-digit reference at point 1: stanli 301, CmdStan 177 scaled ULP from the true value; stanli is farther from it than CmdStan; cause not yet explained"
+      "bound": 174,
+      "closer": "stanli",
+      "reason": "measured on Darwin arm64; 80-digit reference at point 1: stanli 3, CmdStan 177 scaled ULP from the true value; stanli is at least as close to it; the adjoints that a gather adds into one element are compensated in stanli, while CmdStan adds one call at a time"
      },
      "lp": {
       "bound": 171,

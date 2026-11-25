@@ -13,6 +13,7 @@
 #define STANLI_PAIRWISE_SUM_HPP
 
 #include <cmath>
+#include <algorithm>
 #include <cstdint>
 #include <vector>
 
@@ -171,18 +172,106 @@ void add_sum(double& acc, int64_t n, const Term& term) {
   acc += pairwise_sum(0, n, term);
 }
 
-// slots[slot(k)] += value(k) for k in [0, n), in the order of k. Grouping
-// the values by slot for a pairwise sum would cost time in proportion to the
-// number of slots on every call, so a slot keeps the rounding error of its
-// running sum by Neumaier's rule instead, and the error is added at the end
-// to a slot that received more than kPairwiseBlock values. A slot that
-// received fewer ends on the plain running sum. slot(k) must lie in
-// [0, n_slots).
+// Knuth's two-sum: sum = fl(a + b), and error += the exact rounding error.
+[[gnu::always_inline]] inline void two_sum_into(double& sum, double b,
+                                                double& error) {
+  const double next = sum + b, b_part = next - sum;
+  error += (sum - (next - b_part)) + (b - b_part);
+  sum = next;
+}
+
+inline constexpr int kScatterLanes = 4;
+// Up to this many slots, scatter_add_lanes keeps four lanes per slot; their
+// sums and errors then take 32 KiB.
+inline constexpr int64_t kScatterLaneSlotsMax = 512;
+
+// scatter_add when every slot receives kScatterLanes values on average or
+// more, by Knuth's two-sum into a sum and an error per slot. With few slots
+// the same slot comes back within a few values, and each addition would wait
+// for the previous one through memory, so value k goes to lane k % 4, each
+// lane keeps its own sum and error for every slot, and a group of four
+// values for one slot, as in an index sorted by group, is summed in
+// registers. At the end each slot adds its lanes and all their errors. With
+// more slots, one lane adds into the slots in place.
+template <typename Slot, typename Value>
+void scatter_add_dense(double* slots, int64_t n_slots, int64_t n,
+                       const Slot& slot, const Value& value) {
+  thread_local std::vector<double> buffer;
+  if (n_slots > kScatterLaneSlotsMax) {
+    const auto size = static_cast<size_t>(n_slots);
+    if (buffer.size() < size) buffer.resize(size);
+    double* error = buffer.data();
+    std::fill(error, error + size, 0.0);
+    for (int64_t k = 0; k < n; ++k) {
+      const auto s = static_cast<int64_t>(slot(k));
+      two_sum_into(slots[s], value(k), error[s]);
+    }
+    for (int64_t s = 0; s < n_slots; ++s)
+      if (std::isfinite(slots[s])) slots[s] += error[s];
+    return;
+  }
+  constexpr int L = kScatterLanes;
+  const auto size = static_cast<size_t>(2 * L * n_slots);
+  if (buffer.size() < size) buffer.resize(size);
+  double* sum = buffer.data();
+  double* error = sum + L * n_slots;
+  std::fill(sum, sum + size, 0.0);
+  int64_t k = 0;
+  while (k + L <= n) {
+    int64_t s[L];
+    for (int l = 0; l < L; ++l) s[l] = static_cast<int64_t>(slot(k + l));
+    if (s[0] == s[1] && s[0] == s[2] && s[0] == s[3]) {
+      const int64_t run = s[0];
+      double r[L] = {}, e[L] = {};
+      do {
+        for (int l = 0; l < L; ++l) two_sum_into(r[l], value(k + l), e[l]);
+        k += L;
+      } while (k + L <= n && static_cast<int64_t>(slot(k)) == run &&
+               static_cast<int64_t>(slot(k + 1)) == run &&
+               static_cast<int64_t>(slot(k + 2)) == run &&
+               static_cast<int64_t>(slot(k + 3)) == run);
+      for (int l = 0; l < L; ++l) {
+        two_sum_into(sum[l * n_slots + run], r[l], error[l * n_slots + run]);
+        error[l * n_slots + run] += e[l];
+      }
+      continue;
+    }
+    for (int l = 0; l < L; ++l)
+      two_sum_into(sum[l * n_slots + s[l]], value(k + l),
+                   error[l * n_slots + s[l]]);
+    k += L;
+  }
+  for (; k < n; ++k) {
+    const auto s = static_cast<int64_t>(slot(k));
+    two_sum_into(sum[s], value(k), error[s]);
+  }
+  for (int64_t s = 0; s < n_slots; ++s) {
+    double total = slots[s], e = 0.0;
+    for (int l = 0; l < L; ++l) {
+      two_sum_into(total, sum[l * n_slots + s], e);
+      e += error[l * n_slots + s];
+    }
+    slots[s] = std::isfinite(total) ? total + e : total;
+  }
+}
+
+// slots[slot(k)] += value(k) for k in [0, n). The sum for each slot is
+// compensated, so that a slot that receives thousands of values stays within
+// a few ULP of their exact sum. When the values are few for the number of
+// slots, grouping them by slot would cost time in proportion to the number
+// of slots on every call, so a slot keeps the rounding error of its running
+// sum by Neumaier's rule instead, and the error is added at the end to a
+// slot that received more than kPairwiseBlock values. A slot that received
+// fewer ends on the plain running sum. slot(k) must lie in [0, n_slots).
 template <typename Slot, typename Value>
 void scatter_add(double* slots, int64_t n_slots, int64_t n, const Slot& slot,
                  const Value& value) {
   if (n <= kPairwiseBlock) {  // no slot can receive a long sum
     for (int64_t k = 0; k < n; ++k) slots[slot(k)] += value(k);
+    return;
+  }
+  if (n >= kScatterLanes * n_slots) {
+    scatter_add_dense(slots, n_slots, n, slot, value);
     return;
   }
   struct Correction {
