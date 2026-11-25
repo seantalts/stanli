@@ -296,6 +296,8 @@ oracle_gate = "write_array"
 expected_accept = true
 point_profile = "zeros-and-asymmetric"
 numeric_policy = "cancelling-reduction-order"
+# The same entry as tests/stanc3_good/ledger.json has for this model.
+divergent_points = { "1" = "tp_matrix_aos_from_mix takes a branch on sum(soa_x) > 0 over 50 values. At point 1 the values cancel exactly: the exact sum is 0, the reference's in-order sum is 6.9e-18 and stanli's compensated sum is 0. The reference takes aos_x + aos_y and stanli takes aos_y, which is the branch of the exact sum." }
 
 [[case]]
 id = "stanc3.cholesky-covariance-parameters"

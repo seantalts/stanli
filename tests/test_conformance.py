@@ -26,9 +26,11 @@ sys.path.insert(0, str(REPO / "harnesses"))
 from conformance.aggregate import aggregate_reports, manifest_case_ids
 from conformance.catalog import CatalogError, load_construct_catalog
 from conformance.compare import (Expectation, Gate, Observation,
+                                 OutcomeComparison,
                                  compare_numeric, compare_observations,
                                  ulp_distance)
-from conformance.construct_runner import (_construction_outcome,
+from conformance.construct_runner import (_apply_divergent_points,
+                                          _construction_outcome,
                                           _profile_points,
                                           _stanli_transport_outcome)
 from conformance.evaluate import evaluate_generated_case
@@ -341,6 +343,52 @@ class ConstructCatalogTests(unittest.TestCase):
         # the evaluation comparison instead.
         self.assertEqual(outcome.status, ResultStatus.UNEXPECTED_UNSUPPORTED)
         self.assertIn("cataloged evaluation phase", outcome.reason)
+
+    def test_divergent_points_accept_only_their_recorded_mismatch(self):
+        catalog = load_construct_catalog(DEFAULT_CONSTRUCTS, REPO)
+        case = next(case for case in catalog.cases
+                    if case.id == "stanc3.reduction-autodiff-levels")
+        self.assertIn("exact sum", case.divergent_points[1])
+
+        def outcome(index, status):
+            return OutcomeComparison(status, status.value,
+                                     {"point_index": index})
+
+        applied = _apply_divergent_points(case, [
+            outcome(0, ResultStatus.VERIFIED),
+            outcome(1, ResultStatus.MISMATCH),
+            outcome(2, ResultStatus.MISMATCH)])
+        self.assertEqual([item.status for item in applied],
+                         [ResultStatus.VERIFIED, ResultStatus.VERIFIED,
+                          ResultStatus.MISMATCH])
+        self.assertIn("exact sum", applied[1].details["divergence"])
+        # Once the listed point agrees, the entry is out of date.
+        stale = _apply_divergent_points(case, [
+            outcome(1, ResultStatus.VERIFIED)])
+        self.assertEqual(stale[0].status, ResultStatus.MISMATCH)
+        self.assertIn("remove the entry", stale[0].reason)
+        crashed = _apply_divergent_points(case, [
+            outcome(1, ResultStatus.CRASHED)])
+        self.assertEqual(crashed[0].status, ResultStatus.CRASHED)
+
+    def test_catalog_rejects_divergent_points_without_a_cause(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp)
+            (root / "m.stan").write_text("parameters { real x; }\n")
+            (root / "d.json").write_text("{}")
+            catalog = root / "c.toml"
+            for table, message in (('{ "1" = "" }', "needs a cause"),
+                                   ('{ "one" = "x" }', "not a point index")):
+                catalog.write_text(
+                    'schema_version = 1\ncatalog_version = "t"\n'
+                    '[[case]]\nid = "c"\ncategory = "k"\n'
+                    'description = "d"\nsource = "m.stan"\n'
+                    'data = "d.json"\noracle_gate = "write_array"\n'
+                    'expected_accept = true\n'
+                    'point_profile = "zeros-and-asymmetric"\n'
+                    f'divergent_points = {table}\n')
+                with self.assertRaisesRegex(CatalogError, message):
+                    load_construct_catalog(catalog, root)
 
     def test_stanli_process_failure_blocks_as_a_crash(self):
         catalog = load_construct_catalog(DEFAULT_CONSTRUCTS, REPO)

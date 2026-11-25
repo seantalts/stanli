@@ -105,3 +105,18 @@ id = "cancelling-reduction-order"
 reason = "write_array sums that cancel to ~0; stanli reduces sequentially for lp parity, CmdStan's double path uses Eigen's redux."
 name_regex = "^sum$"
 abs_tol = 1e-15
+
+# stanli's neg_binomial_2_lpmf computes the mu partial as
+# (n - mu) / mu * phi / (mu + phi) (#645). Stan Math computes
+# n / mu - (n + phi) / (mu + phi), and the two terms cancel. At the
+# probe's point 2 (n = 3, mu = 2.049375, phi = 1.284375) they are 1.46
+# and 1.29, and their difference is 0.179. Against 80-digit values,
+# stanli's mu gradient is 0.06 to 0.47 ULP away on all six signatures
+# that the nightly of 2026-11-25 flagged, and the reference is 12.4 to
+# 15.1 ULP away. The gate measures the reference's error. 32 ULP
+# leaves twice the largest gap that was measured.
+[[numeric_gate]]
+id = "neg-binomial-2-mu-partial-cancellation"
+reason = "Stan Math's mu partial n/mu - (n+phi)/(mu+phi) cancels; stanli's is within 0.5 ULP of the 80-digit value and the reference up to 15 ULP from it."
+name_regex = "^neg_binomial_2_lpmf$"
+max_ulp = 32

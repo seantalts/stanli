@@ -25,6 +25,7 @@ CASE_FIELDS = frozenset({
     "point_profile",
     "census_reason",
     "numeric_policy",
+    "divergent_points",
 })
 
 
@@ -45,6 +46,8 @@ class ConstructCase:
     numeric_policy: Optional[str]
     source_sha256: str
     data_sha256: str
+    divergent_points: Mapping[int, str] = dataclasses.field(
+        default_factory=dict)
 
     @property
     def case_id(self) -> str:
@@ -76,6 +79,8 @@ class ConstructCase:
             "point_profile": self.point_profile,
             "census_reason": self.census_reason,
             "numeric_policy": self.numeric_policy,
+            "divergent_points": {str(index): cause for index, cause
+                                 in sorted(self.divergent_points.items())},
             "source_sha256": self.source_sha256,
             "data_sha256": self.data_sha256,
         }
@@ -147,6 +152,24 @@ def _points(raw: object, label: str) -> Tuple[Tuple[float, ...], ...]:
     if len(widths) > 1:
         raise CatalogError(f"{label}: deterministic points have mixed widths")
     return tuple(points)
+
+
+def _divergent_points(raw: object, label: str) -> Dict[int, str]:
+    if raw is None:
+        return {}
+    if not isinstance(raw, dict):
+        raise CatalogError(
+            f"{label}: divergent_points must map point indices to causes")
+    divergent = {}
+    for key, cause in raw.items():
+        if not str(key).isdigit():
+            raise CatalogError(
+                f"{label}: divergent point {key!r} is not a point index")
+        if not isinstance(cause, str) or not cause.strip():
+            raise CatalogError(
+                f"{label}: divergent point {key} needs a cause")
+        divergent[int(key)] = cause.strip()
+    return divergent
 
 
 def load_construct_catalog(path: pathlib.Path,
@@ -231,6 +254,12 @@ def load_construct_catalog(path: pathlib.Path,
             raise CatalogError(
                 f"construct case {case_id}: numeric_policy requires a numeric "
                 "or write_array gate")
+        divergent = _divergent_points(row.get("divergent_points"),
+                                      f"construct case {case_id}")
+        if divergent and gate not in {"numeric", "write_array"}:
+            raise CatalogError(
+                f"construct case {case_id}: divergent_points requires a "
+                "numeric or write_array gate")
         if gate in {"numeric", "write_array", "semantic"} \
                 and not points and not profile:
             raise CatalogError(
@@ -254,7 +283,7 @@ def load_construct_catalog(path: pathlib.Path,
         cases.append(ConstructCase(
             case_id, category, description, source_path, data_path, gate,
             expected_accept, phase, exception, points, profile, census_reason,
-            numeric_policy, source_sha, data_sha))
+            numeric_policy, source_sha, data_sha, divergent))
     ids = [case.id for case in cases]
     duplicates = sorted(case_id for case_id in set(ids)
                         if ids.count(case_id) > 1)
