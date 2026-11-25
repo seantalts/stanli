@@ -160,8 +160,8 @@ stanli_model <- function(file = NULL, code = NULL, data = NULL, mir = NULL,
   is_mir <- !is.null(mir)
   if (!is_mir && !.Call("stanli_r_has_embedded_stanc")) {
     # A runtime without the embedded compiler needs the MIR handed to it.
-    # The release builds embed stanc3; a source build and the Windows
-    # runtime do not, and ship stanli-compile beside the library instead.
+    # The release builds embed stanc3; a source build may not, and then
+    # stanli-compile sits beside the library instead.
     mir <- with_commit_note(stanc_mir(code, file = source_file))
     is_mir <- TRUE
   }

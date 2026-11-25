@@ -88,6 +88,8 @@ opam_init_args=(--bare --no-setup)
 opam_root=${OPAMROOT:-$HOME/.opam}
 case "$(uname -s)" in
   MINGW*|MSYS*|CYGWIN*)
+    # opam's default root on Windows is %LOCALAPPDATA%\opam, not ~/.opam.
+    [[ -n ${OPAMROOT:-} || -z ${LOCALAPPDATA:-} ]] || opam_root=$LOCALAPPDATA/opam
     opam_root=$(cygpath -u "$opam_root")
     # Reuse the Unix tools and Git on PATH instead of creating internal Cygwin.
     opam_init_args+=(--cygwin-local-install)

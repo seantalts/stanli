@@ -1782,11 +1782,11 @@ def test_subprocess_source_is_exact_utf8_and_fully_cleaned_up():
 
 
 def test_windows_wheel_compiler_executes():
+    # The x64 Windows wheel links the compiler into stanli.dll, so no separate
+    # program is started; endpoint security can block one (issue #669). A
+    # source build without the embedded compiler still uses stanli-compile.exe.
     if sys.platform != "win32":
         return
-
-    packaged_portable = stanli._BIN / "stanli-compile.exe"
-    assert packaged_portable.is_file(), "Windows wheel lacks stanli-compile.exe"
 
     unicode_text = "π ☃ é 👋"
     code = ("transformed data {\r\n"
@@ -1794,22 +1794,30 @@ def test_windows_wheel_compiler_executes():
             "}\r\n"
             "parameters { real x; }\r\n"
             "model { x ~ normal(0, 1); }\r\n")
-    with tempfile.TemporaryDirectory(
-            prefix="stanli compiler π ") as tmp:
-        compiler_dir = pathlib.Path(tmp)
-        portable = compiler_dir / packaged_portable.name
-        shutil.copy2(packaged_portable, portable)
+    packaged_portable = stanli._BIN / "stanli-compile.exe"
+    if stanli._lib.stanli_has_embedded_stanc():
+        assert not packaged_portable.exists(), \
+            "an embedded-compiler wheel must not ship stanli-compile.exe"
+        mir = stanli.stan_to_mir(code)
+        assert unicode_text.encode("utf-8") in _portable_payload(mir)
+    else:
+        assert packaged_portable.is_file(), "Windows wheel lacks stanli-compile.exe"
+        with tempfile.TemporaryDirectory(
+                prefix="stanli compiler π ") as tmp:
+            compiler_dir = pathlib.Path(tmp)
+            portable = compiler_dir / packaged_portable.name
+            shutil.copy2(packaged_portable, portable)
 
-        with mock.patch.object(stanli, "_BIN", compiler_dir):
-            portable_mir = stanli._subprocess_mir(code)
-            payload = _portable_payload(portable_mir)
-            assert not portable_mir.endswith(("\n", "\r"))
-            assert unicode_text.encode("utf-8") in payload
+            with mock.patch.object(stanli, "_BIN", compiler_dir):
+                mir = stanli._subprocess_mir(code)
+                payload = _portable_payload(mir)
+                assert not mir.endswith(("\n", "\r"))
+                assert unicode_text.encode("utf-8") in payload
 
-        model = stanli.Model(mir=portable_mir)
-        lp, grad = model.log_prob_grad(np.array([0.25]))
-        assert np.isfinite(lp)
-        assert np.isfinite(grad).all()
+    model = stanli.Model(mir=mir)
+    lp, grad = model.log_prob_grad(np.array([0.25]))
+    assert np.isfinite(lp)
+    assert np.isfinite(grad).all()
 
 
 def test_embedded_stanc_from_concurrent_python_threads():

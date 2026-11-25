@@ -125,7 +125,8 @@ class CiPolicyTest(unittest.TestCase):
                                  "1" if after_merge else "")
 
     def test_windows_wheel_and_prerequisites_follow_source_scope(self):
-        for name in ("stanc-windows", "windows-compiler", "windows"):
+        for name in ("stanc-windows", "windows-compiler", "stanc-embed-windows",
+                     "windows"):
             job = self.jobs[name]
             self.assertIn("changes", job["needs"])
             for heavy in ("true", "false"):
@@ -138,10 +139,10 @@ class CiPolicyTest(unittest.TestCase):
                                             ref="refs/tags/v1.0.0"))
 
     def test_windows_wheel_keeps_compiler_and_release_dependencies(self):
-        # The required wheel consumes fresh compiler artifacts and waits for
-        # native/JavaScript parity. Release publishers must keep that chain.
-        for dependency in ("stanc-windows", "windows-compiler"):
-            self.assertIn(dependency, self.jobs["windows"]["needs"])
+        # The required wheel links a freshly built embedded compiler; the
+        # cross-built executable keeps its native/JavaScript parity check.
+        # Release publishers must keep that chain.
+        self.assertIn("stanc-embed-windows", self.jobs["windows"]["needs"])
         for dependency in ("stanc-windows", "browser-compiler"):
             self.assertIn(dependency, self.jobs["windows-compiler"]["needs"])
         for publisher in ("publish", "runtime-release", "dev-runtime-release"):
@@ -282,7 +283,8 @@ class CiPolicyTest(unittest.TestCase):
                         "browser-compiler": "success" if heavy == "true" else "skipped",
                         "r-tests": "success" if heavy == "true" else "skipped",
                         "stanc-windows": "success" if heavy == "true" else "skipped",
-                        "windows-compiler": "success" if heavy == "true" else "skipped"}
+                        "windows-compiler": "success" if heavy == "true" else "skipped",
+                        "stanc-embed-windows": "success" if heavy == "true" else "skipped"}
             self.assertEqual(self.gate(heavy, expected), 0)
             for job in expected:
                 for result in ("success", "failure", "cancelled", "skipped", ""):
@@ -297,7 +299,8 @@ class CiPolicyTest(unittest.TestCase):
         expected = {"changes": "success", "static_checks": "success",
                     "build": "skipped", "windows": "skipped",
                     "browser-compiler": "skipped", "r-tests": "success",
-                    "stanc-windows": "skipped", "windows-compiler": "skipped"}
+                    "stanc-windows": "skipped", "windows-compiler": "skipped",
+                    "stanc-embed-windows": "skipped"}
         self.assertEqual(self.gate("false", expected, "101"), 0)
         self.assertNotEqual(self.gate("true", expected, "101"), 0)
         for job in expected:
