@@ -205,11 +205,31 @@ class SizeVariablesTest(unittest.TestCase):
         self.assertEqual(sv["N"].refused,
                          "ragged group sizes s sum to N")
 
-    def test_same_value_scalar_refused(self):
+    def test_same_value_alone_is_not_a_relation(self):
         sv = scale.size_variables(
             "data { int N; int n_obs; vector[N] y; }",
             {"N": 3, "n_obs": 3, "y": [1, 2, 3]})
+        self.assertIsNone(sv["N"].refused)
+
+    def test_checked_relation_refused(self):
+        text = ("data { int N; int n_obs; vector[N] y; } transformed data {"
+                " if (n_obs != N) reject(\"n_obs must equal N\"); }")
+        sv = scale.size_variables(text, {"N": 3, "n_obs": 3, "y": [1, 2, 3]})
         self.assertIn("n_obs", sv["N"].refused)
+
+    def test_flag_sums_are_not_ragged(self):
+        sv = scale.size_variables(
+            "data { int N; array[4] int f; vector[N] y; }",
+            {"N": 2, "f": [1, 0, 1, 0], "y": [1, 2]})
+        self.assertIsNone(sv["N"].refused)
+
+    def test_sliced_sizes_refused_even_without_matching_sum(self):
+        text = ("data { int N; int G; array[G] int s; vector[N] y; } model {"
+                " int pos = 1; for (g in 1:G) { segment(y, pos, s[g]); "
+                "pos += s[g]; } }")
+        sv = scale.size_variables(
+            text, {"N": 6, "G": 2, "s": [2, 3], "y": [1, 2, 3, 4, 5, 6]})
+        self.assertIn("ragged", sv["N"].refused)
 
     def test_same_value_size_variable_is_fine(self):
         sv = scale.size_variables(
