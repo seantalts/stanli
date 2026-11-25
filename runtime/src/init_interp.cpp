@@ -4,11 +4,15 @@
 
 #include <stanli/compile.hpp>
 #include <stanli/mir_interp.hpp>
+#include <stanli/threading.hpp>
 #include <stanli/unconstrain.hpp>
+
+#include <stan/math/rev/core/chainablestack.hpp>
 
 #include <algorithm>
 #include <functional>
 #include <map>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <utility>
@@ -283,6 +287,13 @@ const InitInterp& transform_inits_interp(const CompiledModel& cm) {
 void unconstrain_inits(const CompiledModel& cm,
                        const std::map<std::string, DataMap::Entry>& inits,
                        double* out) {
+  // A thread that a binding starts has no autodiff stack, and a bound can
+  // call a kernel that uses one, such as lkj_corr_cholesky_lpdf. A BridgeStan
+  // handle serves many threads at once and has no stack to lend, so this
+  // call makes its own, as compile_model does.
+  std::optional<stan::math::ChainableStack> autodiff_stack_of_caller;
+  if (thread_safe_build() && stan::math::ChainableStack::instance_ == nullptr)
+    autodiff_stack_of_caller.emplace();
   const std::vector<double> unc = transform_inits_interp(cm).eval(inits);
   if ((int64_t)unc.size() != cm.n_unconstrained)
     throw std::runtime_error("the inverse transforms produced " +
