@@ -1,5 +1,151 @@
 # Changelog
 
+## 0.32.0
+
+On Windows x64 the Stan compiler is now part of `stanli.dll`, so
+`stanli_model()` works on machines where security software blocked
+`stanli-compile.exe`. In R, data and starting values can be written in the
+forms that cmdstanr accepts, so a plain number works for `array[1] real`
+again. Models with a large loop over the data slow down much less when many
+chains run at once.
+
+### Performance
+
+- Models with a large loop over the data keep a small program for each
+  chain. On the model from #657, with 12 chains at once, each chain's
+  gradient is 5.76x faster (377.1 µs to 65.5 µs), and with one chain it is
+  2.11x faster. With 12 chains at once, `examplemodels_probit_multi_good` is
+  2.00x faster, `ch12_m12_6` 2.14x faster and `examplemodels_ms` 1.60x
+  faster. On a selective benchmark of 55 models, stanli is 1.04x faster with
+  12 copies at once and 1.01x faster on one thread. The generated quantities
+  of `hmm_gaussian` are 2.41x slower on one chain, which adds about 0.9 ms
+  per draw (#677).
+- Every model now compiles with stanc3's O1 optimizations. Before, 8 models
+  in the corpus and tests that would grow too large after stanc3 inlined
+  their functions fell back to unoptimized code. User functions now stay
+  calls in the compiled model, and stanli inlines them when it loads the
+  model with the data. Over 402 corpus models, compiling is 1.14x faster,
+  preparing the model 1.031x faster, the gradient 1.006x faster and the
+  total estimated sampling time 1.028x faster in geomean (#672).
+- Models with a scalar recursion that reads the same value several times
+  have a faster gradient: `iohmm_reg` 1.83x, `examplemodels_cjs_cov_raneff`
+  1.90x and `rstanarm_polr` 1.25x (#672).
+- Some loops that stanli runs for many iterations at once were much slower
+  than the same loop run one iteration at a time. On test programs, a loop
+  that reads a matrix row at an index known only at run time is 43x to 233x
+  faster, and a loop that branches only on data is 13.5x to 14x faster
+  (#672).
+- `mlumr_survival_mspline_relaxed` prepares in 99 ms instead of 174 ms and
+  peaks at 36 MB instead of 52 MB (#672).
+
+### Features
+
+- The Windows x64 wheel and `stanli-runtime-windows-x86_64.tar.gz` now
+  contain only `stanli.dll`, with the Stan compiler inside it, as on Linux
+  and macOS. R and Python compile models in the same process and no longer
+  start `stanli-compile.exe`. Windows ARM64 still has no release build
+  (#676).
+- stanli accepts a value whose shape differs from the declaration only by
+  extents of 1. A plain number works for `array[1] real`, `vector[1]` and
+  `matrix[1, 1]`, a 1 x 1 matrix for `vector[1]`, `list(1, 2, 3)` for
+  `array[3] vector[1]`, and an N x 1 matrix such as `scale(x)` for
+  `vector[N]`. An empty value works for any declaration of size zero. A
+  transposed or flat matrix and a permuted or ragged array are still
+  rejected with CmdStan's messages. The rule is the same for data and
+  starting values, and in R, Python, the C API and BridgeStan (#674).
+- In R, stanli reads the model's declarations and writes data and starting
+  values as cmdstanr v1.0 does. `sample_cstan(init =)` also takes a number
+  as the radius, a draws object from the posterior package, or a fit.
+  `docs/from-cmdstanr.md` lists where stanli and cmdstanr still differ
+  (#674).
+- New C API functions `stanli_data_declarations_new` and
+  `stanli_parameter_declarations_new` return the declarations of data and
+  parameters. The ABI version stays 6 (#674).
+### Fixes
+
+- When the Stan compiler exits without printing an error, R and Python now
+  say so. The R error gives the compiler's path and exit status, and two
+  steps to try: install the runtime again, then check whether security
+  software blocked the file. Before, R showed only "stanc produced no MIR"
+  (#670).
+- On Windows, compiler errors in R no longer end each line with a stray
+  carriage return (#678).
+- In R, these failed or gave wrong values, and now work (#674):
+  - an empty `[]` starting value for a zero-size parameter of rank 2 or
+    more. Because of this, the rstan adapter's
+    `unconstrain_pars(constrain_pars(...))` round trip failed. loo moment
+    matching and bridgesampling make that round trip for every draw;
+  - partial starting values for arrays of tuples of rank 2 or more, which
+    put drawn values in the wrong elements;
+  - tuple parameters in the rstan adapter's `unconstrain_pars`, which were
+    dropped, and the dims of a `matrix[0, 3]` in `constrain_pars`, which
+    were lost;
+  - factors, which were written as their labels, data frames and `split()`
+    lists, which failed, and NA in real data, which gave an integer error.
+- In R, `warmup = 0` with adaptation on ran at step size 1. Adaptation is on
+  by default, so `sample_model(warmup = 0)` and
+  `sample_cstan(iter_warmup = 0)` now stop with CmdStan's error. Pass `adapt_engaged = FALSE` to run
+  without warmup. RStan-style `sampling()` still runs it, as RStan does
+  (#674).
+- Data errors now come in CmdStan's order. A missing variable later in the
+  block was reported before a bad shape earlier in it (#674).
+- C API calls that evaluate a model crashed on a thread that a binding
+  started, under `STAN_THREADS`, for models that use the autodiff stack,
+  such as one with `lkj_corr_cholesky`. This affected `stanli_grad`,
+  `stanli_grad_err`, `stanli_constrain`, `stanli_wa_row`,
+  `stanli_laplace_whiten`, `stanli_unconstrain_inits`, the samplers called
+  with one thread, and BridgeStan's `bs_param_unconstrain`,
+  `bs_param_unconstrain_json` and `bs_param_initialize` (#685).
+- These gave wrong results:
+  - a function's local that was declared without a value read the data
+    variable of the same name. `foo(1)` gave 7 where CmdStan gives NaN
+    (#672);
+  - a density in the same loop as a call such as `foo_lp(y[n]);` was moved
+    in front of the loop, so a `foo_lp` that reads `target()` read the wrong
+    value (#672);
+  - a loop whose `target +=` sits under a branch that never runs, such as
+    `if (!prior_only) target += ...` with `prior_only = 1`, gave a log
+    density that changed from run to run (8, NaN or a tiny number). The
+    gradient was right (#682).
+- Some models failed to load when stanc3 did not inline their functions, for
+  example with `&&` or `||` on parameters, a user function call in an
+  integer size or index, or a function that returns a tuple from inside a
+  branch or loop. They now load (#672).
+- `neg_binomial_2_lpmf`, `categorical_logit_glm_lpmf` with more than 32
+  rows, and the gradient of an indexed read that a loop repeats many times
+  are more accurate. In mean ULP from the exact value, the log density of
+  `epinow2_estimate_secondary` moves from 94.8 to 4.3 (CmdStan 105.3), that
+  of `grsm_latent_reg_irt` from 17.2 to 1.6 (CmdStan 181.5), and the
+  gradient of `ldaK2` from 100.7 to 3.1 (CmdStan 113.4). `ldaK2` is also
+  1.11x faster. The other values in #643 to #651 come from rounding that the
+  model's own formula magnifies, in CmdStan as well (#679).
+
+### Removed
+
+- The O1 fallback is gone, because every model now compiles at O1. So are
+  `STANLI_NO_O1_FALLBACK`, `o1_fallback` in `stanli-compile --messages-json`,
+  `STANLI_COMPILER_O1_FALLBACK` in C, `O1FallbackWarning` in Python, the
+  `stanli_o1_fallback` condition class in R and `o1Fallback` in npm (#672).
+- stanli reads only portable MIR. Other text is rejected with "mir: not
+  portable MIR". This includes the output of stock stanc's
+  `--debug-optimized-mir` and `--debug-transformed-mir` given to Python
+  `Model(mir=...)`, R `stanli_model(mir = ...)`, npm `mir` or BridgeStan's
+  `bs_model_from_mir`. The installed header `stanli/sexp.hpp` is removed
+  (#672).
+
+### Docs and internal
+
+- The README was revised (#681).
+- The stanc3 pin moves to seantalts/stanc3 b7997915, with three fixes to the
+  fork. stanli's tests use `tests/fixtures/*.mir`, `tools/gen_fixtures.sh`
+  takes `STANLI_CHECK` instead of `STANC`, and `stanli_check --stanc` and
+  `stanli_run --stanc` are removed (#672).
+- New developer switches `STANLI_REGION_MAP=all`, `STANLI_PROGRAM_BUDGET`,
+  `STANLI_LOOP_BUDGET` and `STANLI_UNROLL_CEILING` (#677).
+- `tools/dev_setup.sh` works from Git Bash on Windows (#676).
+- Fixes to CI, to the nightly conformance run against Stan Math, and to the
+  fuzzer (#664, #680, #682, #684).
+
 ## 0.31.0
 
 33 more `_rng` functions run, including `multinomial_rng`, and R can start
