@@ -113,7 +113,7 @@
      "wa alpha.4": {
       "bound": 14,
       "closer": "cmdstan",
-      "reason": "measured on Darwin arm64; cause not yet explained; the 80-digit evaluator covers lp and gradient only; 80-digit value on 2026-11-23, at point 0: stanli 11, CmdStan 3 scaled ULP from it"
+      "reason": "measured on Darwin arm64; 80-digit value at point 0: stanli 11, CmdStan 3 scaled ULP from it; logit of the constrained probability, which equals the parameter; stanli's e/(1+e) puts p 0.64 ULP from the true value and CmdStan's 1/(1+exp(-x)) 0.36 ULP, and logit multiplies that by about 16; neither formula is closer over a wider range of inputs"
      }
     },
     "Mth_model": {
@@ -130,7 +130,7 @@
      "wa mean_lp.4": {
       "bound": 14,
       "closer": "cmdstan",
-      "reason": "measured on Darwin arm64; cause not yet explained; the 80-digit evaluator covers lp and gradient only; 80-digit value on 2026-11-23, at point 0: stanli 11, CmdStan 3 scaled ULP from it"
+      "reason": "measured on Darwin arm64; 80-digit value at point 0: stanli 11, CmdStan 3 scaled ULP from it; logit of the constrained probability, which equals the parameter; stanli's e/(1+e) puts p 0.64 ULP from the true value and CmdStan's 1/(1+exp(-x)) 0.36 ULP, and logit multiplies that by about 16; neither formula is closer over a wider range of inputs"
      }
     },
     "Survey_model": {
@@ -833,7 +833,7 @@
      "wa": {
       "bound": 128,
       "closer": "cmdstan",
-      "reason": "measured on Darwin arm64; cause not yet explained; the 80-digit evaluator covers lp and gradient only; 80-digit value on 2026-11-23, at point 1: stanli 123.6, CmdStan 4.4 scaled ULP from it"
+      "reason": "measured on Darwin arm64; 80-digit value at point 1: stanli 69.2, CmdStan 58.8 scaled ULP from it; loghr is the difference of two log hazards near 4.3, so one ULP of a log hazard is 64 scaled ULP; the log hazards come from dot products that stanli sums in packets and CmdStan in order, and stanli's are closer (0.42 vs 0.50 mean ULP over 600 dots); a correctly rounded log hazard still leaves up to 60 scaled ULP"
      }
     },
     "mlumr_survival_relaxed": {
