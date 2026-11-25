@@ -1249,7 +1249,7 @@ void test_whitened_manifest() {
 // stands for any zero-size parameter, which is all that Python and R can
 // write for a matrix[0, 3].
 void test_unconstrain_json_zero_size() {
-  const std::string mir = slurp("tests/fixtures/zero_size_params.tmir.sexp");
+  const std::string mir = slurp("tests/fixtures/zero_size_params.mir");
   char* err = nullptr;
   bs_model* m = bs_model_from_mir(mir.c_str(), "{}", 1, &err);
   if (m == nullptr) {
