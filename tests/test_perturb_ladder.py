@@ -71,6 +71,28 @@ class Detectors(unittest.TestCase):
         self.assertEqual(ladder.failures("N", [point(8), rej]), [])
 
 
+class Records:
+    def __init__(self, compile):
+        self.compile = compile
+
+
+class ClassifyCheck(unittest.TestCase):
+    def test_stan_math_errors_in_transformed_data_reject_the_size(self):
+        rec = Records({"ok": False, "stage": "model", "error": "out_of_range"})
+        self.assertEqual(ladder.classify_check(("compile_fail", "index 3"), rec)[0],
+                         "rejected")
+        rec = Records({"ok": False, "stage": "lower", "error": "out_of_range"})
+        self.assertEqual(ladder.classify_check(("compile_fail", "index 3"), rec)[0],
+                         "rejected")
+
+    def test_stanli_refusing_to_lower_is_a_failure(self):
+        rec = Records({"ok": False, "stage": "lower", "error": "compile_error"})
+        self.assertEqual(ladder.classify_check(("compile_fail", "no rule"), rec)[0],
+                         "failure")
+        self.assertEqual(ladder.classify_check(("crash", "exit -11"), Records(None))[0],
+                         "failure")
+
+
 class CapSizes(unittest.TestCase):
     def test_points_bracket_the_program_budget(self):
         per = 448

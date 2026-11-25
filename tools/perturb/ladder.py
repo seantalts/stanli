@@ -33,6 +33,8 @@ PAIRS = 6
 MAX_DATA_BYTES = 400 << 20
 MAX_FIRST_GRADIENT_S = 5.0
 REJECTED = ("data", "model")  # the model or its data check rejects the size
+DATA_ERRORS = ("domain_error", "out_of_range", "invalid_argument",
+               "runtime_error")
 
 
 # ---------------------------------------------------------------------------
@@ -69,8 +71,11 @@ def classify_check(outcome, records):
     this size: not a finding), or failure."""
     state, payload = outcome
     if state == "compile_fail":
-        stage = (records.compile or {}).get("stage")
-        if stage in REJECTED:
+        rec = records.compile or {}
+        # Stan Math's errors, raised while transformed data runs, say the
+        # data is inconsistent (such as brms's Kc == K - 1); compile_error
+        # and mir_error say stanli cannot run the model.
+        if rec.get("stage") in REJECTED or rec.get("error") in DATA_ERRORS:
             return "rejected", str(payload)[:300]
         return "failure", f"compile: {payload}"[:300]
     if state in ("crash", "timeout", "refused"):
@@ -103,17 +108,23 @@ def measure_point(tools, comp, data_path, size):
 def predicted_stop(points, size, data_bytes, args):
     """Why the next size would pass a limit, judged from the last good
     point, or None."""
-    good = [p for p in points if p["status"] == "ok" and p["size"] > 0]
-    if not good:
-        return None
-    last = good[-1]
-    grow = size / last["size"]
-    if last["prep_s"] * grow > args.max_seconds:
-        return f"preparation predicted over {args.max_seconds:.0f} s"
-    if last["peak_rss"] * grow > args.max_rss_gb * 2**30:
-        return f"peak RSS predicted over {args.max_rss_gb:.0f} GB"
     if data_bytes > MAX_DATA_BYTES:
         return f"data over {MAX_DATA_BYTES >> 20} MB"
+    good = [p for p in points if p["status"] == "ok" and p["size"] > 0
+            and p["size"] < size]
+    if len(good) < 2:
+        return None
+    a, b = good[0], good[-1]
+
+    def predict(key):
+        """Linear extrapolation from the smallest and the last size."""
+        per = (b[key] - a[key]) / (b["size"] - a["size"])
+        return b[key] + max(per, 0.0) * (size - b["size"])
+
+    if predict("prep_s") > args.max_seconds:
+        return f"preparation predicted over {args.max_seconds:.0f} s"
+    if predict("peak_rss") > args.max_rss_gb * 2**30:
+        return f"peak RSS predicted over {args.max_rss_gb:.0f} GB"
     return None
 
 
@@ -207,8 +218,10 @@ def run_ladder(tools, comp, text, data, var, sizes, work, args):
 
 def ladder_sizes(sv, wanted):
     lower = sv.lower if sv.lower is not None else 1
+    upper = getattr(sv, "upper", None)
     sizes = wanted or LADDER
-    return [s for s in sorted(set(int(x) for x in sizes)) if s >= max(lower, 0)]
+    return [s for s in sorted(set(int(x) for x in sizes))
+            if s >= max(lower, 0) and (upper is None or s <= upper)]
 
 
 def structural(tools, source, args):
@@ -331,7 +344,8 @@ def prep_superlinear(var, points):
 
 def per_element_jumps(var, points):
     """Adjacent timed sizes where ns per element rises by JUMP or more."""
-    pts = [p for p in points if p.get("ns") and p["size"] > 0]
+    # From size 2 up: one element is often a special case of its own.
+    pts = [p for p in points if p.get("ns") and p["size"] >= 2]
     out = []
     for a, b in zip(pts, pts[1:]):
         rise = (b["ns"] / b["size"]) / (a["ns"] / a["size"])
