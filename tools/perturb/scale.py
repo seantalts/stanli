@@ -303,6 +303,12 @@ class Analysis:
                 self.index[d.name] = hits[0]
                 self.inferred.add(d.name)
 
+    def zero_sized(self, d, data):
+        """Stan JSON may write a container with a zero dimension as []."""
+        return data.get(d.name) == [] and any(
+            a == "0" or (a in self.scalars and data.get(a) == 0)
+            for a in d.axes)
+
     def containers(self, var):
         """(decl, axis position) for every bare use of var as an axis."""
         return [(d, i) for d in self.decls.values()
@@ -350,20 +356,23 @@ class Analysis:
             if d.name not in self.data:
                 raise Refused(f"data has no value for {d.name}, which "
                               f"{var} sizes")
+            if self.zero_sized(d, self.data):
+                continue
             bad = [n for n in _lengths(self.data[d.name], i) if n != value]
             if bad:
                 raise Refused(f"shape mismatch: {d.name} has length {bad[0]} "
                               f"along {var}, which is {value}")
         if value == 0 and self.containers(var):
-            raise Refused(f"{var} is 0, so its containers are empty and "
-                          f"cannot be tiled")
+            raise Refused(f"empty containers: {var} is 0, so there is "
+                          f"nothing to tile")
         for d in self.decls.values():
             if (d.basetype == "int" and d.array_dims and not d.unsupported
                     and d.name not in self.index and d.name in self.data
-                    and sum(_flat(self.data[d.name])) == value):
+                    and value > 0 and sum(_flat(self.data[d.name])) == value):
                 raise Refused(f"ragged group sizes {d.name} sum to {var}")
         for other in self.scalars:
-            if other not in self.candidates and self.value(other) == value:
+            if (other not in self.candidates and value > 1
+                    and self.value(other) == value):
                 raise Refused(f"undeclared relation: {other} has the same "
                               f"value as {var} ({value})")
 
@@ -371,12 +380,13 @@ class Analysis:
         for d in self.decls.values():
             touched = [i for i, a in enumerate(d.axes) if a in members]
             if len(touched) > 1:
-                raise Refused(f"{d.name} has more than one axis that "
-                              f"scaling {var} would change")
+                raise Refused(f"two scaled axes: {d.name} has more than one "
+                              f"axis that scaling {var} would change")
             if (touched and d.basetype in CONSTRAINED
                     and touched[0] >= len(d.array_dims)):
-                raise Refused(f"{d.basetype} {d.name} would not stay valid "
-                              f"if tiled along {d.axes[touched[0]]}")
+                raise Refused(f"constrained type: {d.basetype} {d.name} "
+                              f"would not stay valid if tiled along "
+                              f"{d.axes[touched[0]]}")
 
     def closure(self, var):
         members, todo = [var], [var]
@@ -423,6 +433,8 @@ def _check_target(sv, target):
 
 def _scale_axis(an, data, var, target):
     for d, i in an.containers(var):
+        if an.zero_sized(d, data):
+            continue
         data[d.name] = _at_depth(data[d.name], i,
                                  lambda xs, n=d.name: _resize(xs, target, n))
     data[var] = target
@@ -465,6 +477,8 @@ def _shrink(an, data, var, members, target):
         if m in an.vars:
             _check_target(an.vars[m], data[m])
     for d, i in an.containers(var):
+        if an.zero_sized(d, data):
+            continue
         data[d.name] = _at_depth(data[d.name], i, lambda xs: xs[:target])
     data[var] = target
 
@@ -472,7 +486,7 @@ def _shrink(an, data, var, members, target):
 def _problems(an, data):
     found = set()
     for d in an.decls.values():
-        if d.unsupported or d.name not in data:
+        if d.unsupported or d.name not in data or an.zero_sized(d, data):
             continue
         for i, a in enumerate(d.axes):
             if a in an.scalars and isinstance(data.get(a), int):

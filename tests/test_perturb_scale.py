@@ -224,6 +224,24 @@ class SizeVariablesTest(unittest.TestCase):
                                   {"N": 3, "y": [1, 2]})
         self.assertIn("y", sv["N"].refused)
 
+    def test_zero_size_container_written_empty(self):
+        text = "data { int N; int<lower=0> P; array[N] vector[P] t; }"
+        data = {"N": 3, "P": 0, "t": []}
+        sv = scale.size_variables(text, data)
+        self.assertIsNone(sv["N"].refused)
+        new, _ = scale.scale(text, data, "N", 5)
+        self.assertEqual(new["t"], [])
+
+    def test_flags_of_zero_or_one_are_not_relations(self):
+        text = "data { int K; int use_normal; vector[K] v; }"
+        sv = scale.size_variables(text, {"K": 1, "use_normal": 1, "v": [1]})
+        self.assertIsNone(sv["K"].refused)
+        text = ("data { int<lower=0> P; int N; array[N] int z; vector[N] y;"
+                " } parameters { vector[P] nu; }")
+        sv = scale.size_variables(
+            text, {"P": 0, "N": 2, "z": [0, 0], "y": [1, 2]})
+        self.assertIsNone(sv["P"].refused)
+
     def test_inference_needs_unique_match(self):
         data = dict(BRMS_DATA, K=3, X=[[1, 0, 0]] * 4)
         sv = scale.size_variables(BRMS, data)
