@@ -39,6 +39,14 @@ STAGES = ("validity", "structure", "timing", "all")
 # Differences that make an equivalent variant invalid. write_array, printed
 # output and error wording may change with a rewrite.
 INVALID_KINDS = ("lp", "grad", "one_side_threw", "crash", "timeout")
+# An equivalent variant whose lp and gradient differ from the base's by less
+# than this (relative) is near_equivalent: it goes on to the performance
+# stages, since the last digits do not change the performance question.
+NEAR_TOL = 1e-7
+# An equivalent variant whose preparation takes this much longer than the
+# base's, by both measures, is a prep_cliff.
+PREP_CLIFF_RATIO = 3.0
+PREP_CLIFF_S = 0.1
 PROPTO = re.compile(r"~|_lupdf\b|_lupmf\b")
 
 
@@ -123,10 +131,37 @@ def validity(tools, rec, stan, data, base_stan, base_data):
         diffs, _ = differential.compare_runs(base_out, var_out, propto)
         problem = first_problem(diffs)
         if problem:
-            return problem
+            kinds = {k for k, d in diffs if k in INVALID_KINDS
+                     and not d.get("write_array")}
+            worst = largest_difference(base_out, var_out, propto)
+            if kinds <= {"lp", "grad"} and worst is not None and worst < NEAR_TOL:
+                rec["near_equivalent"] = {"largest_relative_difference": worst,
+                                          "first": problem}
+            else:
+                return problem
         if propto and differential.compare_runs(base_out, var_out)[0]:
             rec["lp_constant_shift"] = True
     return None
+
+
+def largest_difference(a, b, propto):
+    """The largest relative difference of lp and gradient entries over the
+    check points, or None when the values are not comparable. Under propto
+    the lp may move by a constant, so only the gradient counts."""
+    worst = 0.0
+    for k in differential.POINTS:
+        sa = a[1]["points"][k]["status"]
+        sb = b[1]["points"][k]["status"]
+        if not sa or not sb or sa[0] != "OK" or sb[0] != "OK" or \
+                len(sa[1]) != len(sb[1]):
+            return None
+        pairs = list(zip(sa[1], sb[1]))[1 if propto else 0:]
+        for x, y in pairs:
+            x, y = float(x), float(y)
+            scale_ = max(abs(x), abs(y))
+            if scale_ > differential.ABS_TOL:
+                worst = max(worst, abs(x - y) / scale_)
+    return worst
 
 
 # ---------------------------------------------------------------------------
@@ -143,9 +178,23 @@ def structure(tools, rec, stan, data, base_stan, base_data):
     if var.get("failure"):
         return "failure", var["failure"]
     rec["new_declines"] = sorted(set(var["declines"]) - set(base["declines"]))
-    if rec["meta"].get("equivalent") and m.same_program(base, var):
+    rec["differs"] = [part for part, key in (
+        ("log_prob program", "ops_text_sha"),
+        ("write_array program", "wa_text_sha"), ("islands", "islands_sha"))
+        if base.get(key) != var.get(key)]
+    if rec["meta"].get("equivalent") and not rec["differs"]:
         return "same_program", None
+    if prep_cliff(rec):
+        rec["prep_cliff"] = True
     return None, None
+
+
+def prep_cliff(rec):
+    """Does an equivalent variant take much longer to prepare than its base?"""
+    a = (rec.get("base_program") or {}).get("prep_s")
+    b = (rec.get("variant_program") or {}).get("prep_s")
+    return bool(rec["meta"].get("equivalent") and a is not None and b is not None
+                and b >= PREP_CLIFF_RATIO * a and b - a >= PREP_CLIFF_S)
 
 
 def cached_structure(tools, cache, stan, data):
@@ -161,16 +210,25 @@ def cached_structure(tools, cache, stan, data):
 # Stages 3 and 4: timing
 
 
+def expected_work(meta):
+    """The work multiple a non-equivalent variant should cost, from its
+    meta's "work"; None when it gives none. "dose" is only a label."""
+    work = meta.get("work")
+    return None if work is None else float(work)
+
+
 def needs_cmdstan(rec):
     meta, t = rec["meta"], rec["timing"]
     if meta.get("equivalent"):
         return t["ratio"] >= FLAG_RATIO
-    if meta.get("dose"):
-        return t["ratio"] >= FLAG_RATIO * float(meta["dose"])
+    work = expected_work(meta)
+    if work is not None:
+        return t["ratio"] >= FLAG_RATIO * work
     return True
 
 
-def time_variant(tools, rec, paths):
+def timing_cmds(tools, rec, paths):
+    """The bench_grad commands for base and variant, and their points."""
     stan, data, base_stan, base_data = paths
     base_c = m.compile_source(tools, base_stan.read_text())
     var_c = m.compile_source(tools, stan.read_text())
@@ -179,8 +237,12 @@ def time_variant(tools, rec, paths):
         points, source = m.committed_points(tools, rec["seed"], base_stan,
                                             base_data)
     rec["points"] = source
-    a = m.stanli_cmd(tools, base_c, base_data, points)
-    b = m.stanli_cmd(tools, var_c, data, points)
+    return (m.stanli_cmd(tools, base_c, base_data, points),
+            m.stanli_cmd(tools, var_c, data, points), points)
+
+
+def time_variant(tools, rec, paths):
+    a, b, points = timing_cmds(tools, rec, paths)
     rec["timing"] = m.paired_ratio(a, b, SCREEN_ROUNDS, tools.timeout)
     big = max((rec.get(f"{side}_program") or {}).get("executor_bytes") or 0
               for side in ("base", "variant"))
@@ -207,9 +269,38 @@ def normalize(tools, rec, paths, cmds, args):
         rec["copies"] = m.copies_record(a, b, args.copies, tools.timeout)
     if rec["cliff"] >= FLAG_RATIO:
         return "cliff"
-    if rec["confirm"]["ratio"] < FLAG_RATIO * float(rec["meta"].get("dose") or 1):
+    work = expected_work(rec["meta"])
+    if rec["confirm"]["ratio"] < FLAG_RATIO * (1.0 if work is None else work):
         return "fine"
     return "flagged_cmdstan_equal"
+
+
+# Fields that stages 3 and 4 add to a record, kept per variant in
+# OUT/cache/timing so that an interrupted run resumes where it stopped.
+TIMED_FIELDS = ("outcome", "reason", "points", "timing", "timing_s", "copies",
+                "confirm", "cmdstan", "cliff", "stanli_vs_cmdstan",
+                "cmdstan_error", "cmdstan_s")
+
+
+def timing_key(tools, paths, meta):
+    """A hash of everything a variant's timing depends on."""
+    stan, data, base_stan, base_data = paths
+    parts = [m.sha_file(f) for f in (stan, data, base_stan, base_data,
+                                     tools.bench)]
+    parts.append(json.dumps(meta, sort_keys=True))
+    return m.sha_text("\n".join(parts))
+
+
+def load_timed(tools, key):
+    path = tools.cache / "timing" / f"{key[:24]}.json"
+    return json.loads(path.read_text()) if path.exists() else None
+
+
+def save_timed(tools, key, rec, phase):
+    path = tools.cache / "timing" / f"{key[:24]}.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps({"phase": phase, **{
+        k: rec[k] for k in TIMED_FIELDS if k in rec}}))
 
 
 # ---------------------------------------------------------------------------
@@ -221,8 +312,19 @@ def validity_line(rec):
     if rec["outcome"] == "invalid":
         return f"INVALID {key}: {rec['reason']}"
     kind = "equivalent" if rec["meta"].get("equivalent") else "not equivalent"
+    if rec.get("near_equivalent"):
+        kind = (f"near_equivalent, largest relative difference "
+                f"{rec['near_equivalent']['largest_relative_difference']:.1e}")
     shift = ", lp shifted by a constant" if rec.get("lp_constant_shift") else ""
-    return f"valid   {key} ({kind}{shift})"
+    if "variant_program" not in rec:
+        return f"valid   {key} ({kind}{shift})"
+    b, v = rec["base_program"], rec["variant_program"]
+    prep = (f"preparation {b['prep_s'] * 1e3:.0f} -> {v['prep_s'] * 1e3:.0f} ms"
+            if b.get("prep_s") is not None and v.get("prep_s") is not None else "")
+    cliff = ", PREP_CLIFF" if rec.get("prep_cliff") else ""
+    return (f"changed {key} ({kind}{shift}): {', '.join(rec['differs'])} "
+            f"differ; ops {b.get('ops')} -> {v.get('ops')} (before the passes "
+            f"{b.get('lowered_ops')} -> {v.get('lowered_ops')}); {prep}{cliff}")
 
 
 def run_variants(args, tools):
@@ -268,17 +370,30 @@ def run_variants(args, tools):
     if stage >= 2:
         timed = [r for r in records if r["outcome"] == "valid"]
         flagged = []
+        resumed = 0
         for rec in timed:
-            meta["load_1min"].append(m.load_average())
             p = paths[id(rec)]
+            key = rec["timing_key"] = timing_key(tools, p, rec["meta"])
+            cached = load_timed(tools, key)
+            if cached and (cached["phase"] == "done" or stage < 3):
+                rec.update({k: v for k, v in cached.items() if k != "phase"})
+                resumed += 1
+                continue
+            meta["load_1min"].append(m.load_average())
             started = time.monotonic()
             try:
-                cmds = time_variant(tools, rec, p)
-                rec["timing_s"] = time.monotonic() - started
+                if cached:
+                    rec.update({k: v for k, v in cached.items() if k != "phase"})
+                    cmds = timing_cmds(tools, rec, p)
+                else:
+                    cmds = time_variant(tools, rec, p)
+                    rec["timing_s"] = time.monotonic() - started
                 if needs_cmdstan(rec) and stage >= 3:
                     flagged.append((rec, p, cmds))
+                    save_timed(tools, key, rec, "timed")
                 else:
                     rec["outcome"] = "flagged" if needs_cmdstan(rec) else "fine"
+                    save_timed(tools, key, rec, "done")
             except Exception as e:
                 rec["outcome"], rec["reason"] = "error", f"timing: {e!r}"
             print(f"timed   {rec['seed']}/{rec['variant']}: "
@@ -291,11 +406,13 @@ def run_variants(args, tools):
             started = time.monotonic()
             try:
                 rec["outcome"] = normalize(tools, rec, p, cmds, args)
+                rec["cmdstan_s"] = time.monotonic() - started
+                save_timed(tools, rec["timing_key"], rec, "done")
             except Exception as e:
                 rec["outcome"], rec["reason"] = "error", f"cmdstan: {e!r}"
-            rec["cmdstan_s"] = time.monotonic() - started
             print(f"{rec['outcome']:7s} {rec['seed']}/{rec['variant']}: "
                   f"{m.normalized_text(rec.get('cliff'))}", flush=True)
+        meta["resumed"] = resumed
     return records, meta
 
 

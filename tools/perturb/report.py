@@ -6,7 +6,7 @@ import re
 from collections import Counter, defaultdict
 
 from measure import normalized_text, ratio_text
-from run import FLAG_RATIO, LOAD_WARNING
+from run import FLAG_RATIO, LOAD_WARNING, PREP_CLIFF_RATIO, PREP_CLIFF_S
 
 OUTCOMES = ("invalid", "same_program", "fine", "flagged_cmdstan_equal",
             "cliff", "failure", "flagged", "valid", "error")
@@ -43,6 +43,38 @@ def ops_of(rec, side):
     return s.get("ops"), s.get("wa_ops")
 
 
+def ops_text(rec):
+    """Final log_prob ops (the program that runs), then in parentheses the
+    ops before the passes (which explain preparation time)."""
+    b, v = rec.get("base_program") or {}, rec.get("variant_program") or {}
+    if not b and not v:
+        return "-"
+    return (f"{b.get('ops')} -> {v.get('ops')} "
+            f"({b.get('lowered_ops')} -> {v.get('lowered_ops')})")
+
+
+def prep_text(rec):
+    b, v = rec.get("base_program") or {}, rec.get("variant_program") or {}
+    if b.get("prep_s") is None or v.get("prep_s") is None:
+        return "-"
+    return f"{b['prep_s'] * 1e3:.0f} -> {v['prep_s'] * 1e3:.0f} ms"
+
+
+def note_of(r):
+    parts = [r["reason"]] if r.get("reason") else []
+    if r.get("near_equivalent"):
+        parts.append("near_equivalent (relative "
+                     f"{r['near_equivalent']['largest_relative_difference']:.1e})")
+    if r.get("prep_cliff"):
+        parts.append("prep_cliff")
+    if r.get("differs") and r["outcome"] != "same_program":
+        parts.append("differs: " + ", ".join(r["differs"]))
+    parts += r.get("new_declines", [])
+    if lowering_change(r):
+        parts.append(lowering_change(r))
+    return "; ".join(parts)
+
+
 def unexplained(rec):
     (b, _), (v, _) = ops_of(rec, "base"), ops_of(rec, "variant")
     grew = b and v and v > 1.1 * b
@@ -75,15 +107,16 @@ def variant_report(records, meta, known):
         if not rows:
             out += ["None.", ""]
             continue
-        out += ["| variant | class | dose | log_prob ops | write_array ops "
+        out += ["| variant | class | dose | log_prob ops: final (before passes) "
+                "| write_array ops | preparation "
                 "| executor | stanli | CmdStan | cliff | stanli vs CmdStan "
                 "| known |",
-                "|---|---|---|---|---|---|---|---|---|---|---|"]
+                "|---|---|---|---|---|---|---|---|---|---|---|---|"]
         for r in rows:
             (bo, bw), (vo, vw) = ops_of(r, "base"), ops_of(r, "variant")
             out.append(
                 f"| {r['seed']}/{r['variant']} | {r['class']} | {r['dose']} "
-                f"| {arrow(bo, vo)} | {arrow(bw, vw)} "
+                f"| {ops_text(r)} | {arrow(bw, vw)} | {prep_text(r)} "
                 f"| {arrow(mib(r['base_program'].get('executor_bytes')), mib(r['variant_program'].get('executor_bytes')))} "
                 f"| {ratio_text(r['confirm']['ratio'])} "
                 f"| {ratio_text(r['cmdstan']['ratio'])} "
@@ -118,20 +151,28 @@ def variant_report(records, meta, known):
             "and the gradient did not slow by the threshold; "
             "`flagged_cmdstan_equal` means stanli slowed by "
             f"{FLAG_RATIO}x or more but CmdStan slowed about as much.", "",
-            "## Every variant", "",
+            "## Preparation cliffs", "",
+            f"Equivalent variants whose preparation takes {PREP_CLIFF_RATIO:g}x "
+            f"the base's and {PREP_CLIFF_S * 1e3:.0f} ms more.", ""]
+    preps = [r for r in records if r.get("prep_cliff")]
+    out += [f"- {r['seed']}/{r['variant']}: preparation {prep_text(r)}, "
+            f"log_prob ops {ops_text(r)}" for r in preps] or ["None."]
+    out += ["", "## Every variant", "",
+            "log_prob ops are the final count, the program that runs, then in "
+            "parentheses the count before the passes, which explains "
+            "preparation time.", "",
             "| variant | class | dose | outcome | log_prob ops | write_array "
-            "ops | stanli | CmdStan | cliff | note |",
-            "|---|---|---|---|---|---|---|---|---|---|"]
+            "ops | preparation | stanli | CmdStan | cliff | note |",
+            "|---|---|---|---|---|---|---|---|---|---|---|"]
     for r in records:
         (bo, bw), (vo, vw) = ops_of(r, "base"), ops_of(r, "variant")
         stanli = (r.get("confirm") or r.get("timing") or {}).get("ratio")
         cmd = (r.get("cmdstan") or {}).get("ratio")
         cliff = normalized_text(r.get("cliff"))
-        note = (r.get("reason") or "; ".join(
-            r.get("new_declines", []) + ([lowering_change(r)]
-                                         if lowering_change(r) else [])))
+        note = note_of(r)
         out.append(f"| {r['seed']}/{r['variant']} | {r['class']} | {r['dose']} "
-                   f"| {r['outcome']} | {arrow(bo, vo)} | {arrow(bw, vw)} "
+                   f"| {r['outcome']} | {ops_text(r)} | {arrow(bw, vw)} "
+                   f"| {prep_text(r)} "
                    f"| {ratio_text(stanli)} | {ratio_text(cmd)} | {cliff} "
                    f"| {note[:160].replace('|', '/')} |")
     return "\n".join(out) + "\n"
