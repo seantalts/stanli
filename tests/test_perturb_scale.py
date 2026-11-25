@@ -439,5 +439,51 @@ class CliTest(unittest.TestCase):
             self.assertIn("N", out)
 
 
+class ResampleTest(unittest.TestCase):
+    def test_new_rows_are_resampled_and_distinct(self):
+        new, _ = scale.scale(RADON, RADON_DATA, "N", 12, mode="resample")
+        self.assertEqual(new["county"][:5], RADON_DATA["county"])
+        self.assertEqual(new["y"][:5], RADON_DATA["y"])
+        self.assertTrue(set(new["county"]) <= set(RADON_DATA["county"]))
+        rows = list(zip(new["county"], new["x"], new["y"]))
+        self.assertEqual(len(set(rows)), 12)
+        self.assertEqual(new["u"], RADON_DATA["u"])
+
+    def test_resampled_rows_keep_each_source_row_together(self):
+        new, _ = scale.scale(RADON, RADON_DATA, "N", 40, mode="resample")
+        for g, y in zip(new["county"][5:], new["y"][5:]):
+            sources = [i for i, c in enumerate(RADON_DATA["county"]) if c == g]
+            self.assertTrue(any(abs(y - RADON_DATA["y"][i]) < 0.5 for i in sources))
+
+    def test_constant_column_stays_constant(self):
+        new, _ = scale.scale(BRMS, BRMS_DATA, "N", 9, mode="resample")
+        self.assertEqual([r[0] for r in new["X"]], [1] * 9)
+        self.assertEqual(new["Z_1_1"], [1.0] * 9)
+        self.assertEqual(len({r[1] for r in new["X"]}), 9)
+
+    def test_noise_respects_bounds(self):
+        text = "data { int N; vector<lower=0, upper=1>[N] p; }"
+        data = {"N": 3, "p": [0.0, 1.0, 0.5]}
+        new, _ = scale.scale(text, data, "N", 300, mode="resample")
+        self.assertTrue(all(0 <= v <= 1 for v in new["p"]))
+
+    def test_groups_copies_get_noise_and_offsets(self):
+        new, _ = scale.scale(RADON, RADON_DATA, "J", 6, mode="resample")
+        self.assertEqual(new["county"], [1, 2, 2, 3, 1, 4, 5, 5, 6, 4])
+        self.assertEqual(new["y"][:5], RADON_DATA["y"])
+        self.assertTrue(all(a != b for a, b in zip(new["y"][5:], RADON_DATA["y"])))
+
+    def test_seeded(self):
+        a, _ = scale.scale(RADON, RADON_DATA, "N", 20, mode="resample", seed=3)
+        b, _ = scale.scale(RADON, RADON_DATA, "N", 20, mode="resample", seed=3)
+        c, _ = scale.scale(RADON, RADON_DATA, "N", 20, mode="resample", seed=4)
+        self.assertEqual(a, b)
+        self.assertNotEqual(a, c)
+
+    def test_shrinking_truncates(self):
+        new, _ = scale.scale(RADON, RADON_DATA, "N", 2, mode="resample")
+        self.assertEqual(new["y"], [1.5, 2.5])
+
+
 if __name__ == "__main__":
     unittest.main()
