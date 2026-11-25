@@ -273,6 +273,7 @@ class Analysis:
     def __init__(self, stan_text, data):
         self.decls = {d.name: d for d in parse_data_block(stan_text)}
         self.data = data
+        self.text = strip_comments(stan_text)
         self.elsewhere = parse_dims_elsewhere(stan_text)
         elsewhere = set().union(*map(_idents, self.elsewhere))
         self.scalars = [n for n, d in self.decls.items()
@@ -385,14 +386,48 @@ class Analysis:
                           f"nothing to tile")
         for d in self.decls.values():
             if (d.basetype == "int" and d.array_dims and not d.unsupported
-                    and d.name not in self.index and d.name in self.data
-                    and value > 0 and sum(_flat(self.data[d.name])) == value):
-                raise Refused(f"ragged group sizes {d.name} sum to {var}")
+                    and d.name not in self.index and d.name in self.data):
+                why = self.ragged(d, var, value)
+                if why:
+                    raise Refused(why)
         for other in self.scalars:
-            if (other not in self.candidates and value > 1
-                    and self.value(other) == value):
-                raise Refused(f"undeclared relation: {other} has the same "
-                              f"value as {var} ({value})")
+            if other != var and self.checked_together(var, other):
+                raise Refused(f"checked relation: a condition in the program "
+                              f"compares {var} with {other}")
+
+    def sliced(self, name):
+        """Is the int array `name` used in segment() or in a slice a:b?"""
+        for stmt in re.split(r"[;{}]", self.text):
+            if "segment" in stmt and re.search(rf"\bsegment\s*\(", stmt) \
+                    and name in _idents(stmt):
+                return True
+        return any(":" in inner and name in _idents(inner)
+                   for inner in re.findall(r"\[([^\[\]]*)\]", self.text))
+
+    def ragged(self, d, var, value):
+        """Why the int array d looks like ragged group sizes for var, or
+        None. Values of only 0 and 1 are flags, not sizes, unless the array
+        is used to cut slices."""
+        values = list(_flat(self.data[d.name]))
+        flags = all(v in (0, 1) for v in values)
+        sums = value > 0 and sum(values) == value
+        if sums and (not flags or self.sliced(d.name)):
+            return f"ragged group sizes {d.name} sum to {var}"
+        if self.sliced(d.name) and any(
+                c.axes and c.axes[0] == var for c in self.decls.values()):
+            return (f"ragged group sizes: {d.name} cuts slices, and {var} "
+                    f"sizes the rows it may cut")
+        return None
+
+    def checked_together(self, a, b):
+        """Does an if-condition compare a and b? Such a check (usually with
+        a reject) ties their values; equal values alone do not."""
+        for cond in re.findall(r"\bif\s*\(((?:[^()]|\([^()]*\))*)\)",
+                               self.text):
+            names = _idents(cond)
+            if a in names and b in names and re.search(r"==|!=|<|>", cond):
+                return True
+        return False
 
     def _check_axes(self, var, members):
         for d in self.decls.values():
