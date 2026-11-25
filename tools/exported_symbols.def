@@ -19,6 +19,7 @@ EXPORTS
   stanli_has_embedded_stanc
   stanli_stan_to_mir_with_opts
   stanli_compile_stan
+  stanli_compile_stan_for_model
   stanli_compilation_mir
   stanli_compilation_error
   stanli_compilation_n_messages
@@ -36,6 +37,18 @@ EXPORTS
   stanli_function_call_values
   stanli_build_id
   stanli_bridgestan_data
+  stanli_data_declarations_new
+  stanli_parameter_declarations_new
+  stanli_data_declarations_n
+  stanli_data_declaration_name
+  stanli_data_declaration_type
+  stanli_data_declarations_free
+  stanli_type_kind_of
+  stanli_type_n_dims
+  stanli_type_dim
+  stanli_type_n_array_dims
+  stanli_type_n_parts
+  stanli_type_part
   stanli_exact_lp
   stanli_model_free
   stanli_n_unconstrained
