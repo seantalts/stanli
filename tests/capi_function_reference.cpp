@@ -16,7 +16,7 @@ int main(int argc, char** argv) {
   try {
     if (argc < 3)
       throw std::runtime_error(
-          "usage: capi_function_reference MODEL.tmir.sexp X [X ...]");
+          "usage: capi_function_reference MODEL.mir X [X ...]");
     std::ifstream input(argv[1], std::ios::binary);
     if (!input) throw std::runtime_error("could not open function MIR");
     const std::string mir((std::istreambuf_iterator<char>(input)),

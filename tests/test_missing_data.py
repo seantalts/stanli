@@ -26,11 +26,11 @@ def prepare(data, model=MODEL):
         directory = Path(directory)
         stan = directory / "model.stan"
         stan.write_text(model)
-        mir = subprocess.run([STANC, "--O1", "--debug-optimized-mir", str(stan)],
+        mir = subprocess.run([STANLI_CHECK, "--emit-mir", str(stan)],
                              check=True, capture_output=True, text=True).stdout
-        (directory / "model.sexp").write_text(mir)
+        (directory / "model.mir").write_text(mir)
         (directory / "data.json").write_text(json.dumps(data))
-        return subprocess.run([BENCH_GRAD, str(directory / "model.sexp"),
+        return subprocess.run([BENCH_GRAD, str(directory / "model.mir"),
                                str(directory / "data.json"), "--prep"],
                               capture_output=True, text=True)
 
@@ -76,5 +76,5 @@ class MissingData(unittest.TestCase):
 
 
 if __name__ == "__main__":
-    BENCH_GRAD, STANC = sys.argv.pop(1), sys.argv.pop(1)
+    BENCH_GRAD, STANLI_CHECK = sys.argv.pop(1), sys.argv.pop(1)
     unittest.main()

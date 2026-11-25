@@ -1,6 +1,6 @@
 let usage =
   "usage: stanli-vectorize-probe --vectorize-loops off|on [--fast-math] \
-   --output OUT [--legacy-output OUT] MODEL.stan"
+   --output OUT MODEL.stan"
 
 let fail_usage message =
   prerr_endline message;
@@ -14,33 +14,29 @@ let enabled_value option = function
 
 let fast_math = ref false
 
-let rec parse_args index vectorize output legacy_output model =
-  if index = Array.length Sys.argv then (vectorize, output, legacy_output, model)
+let rec parse_args index vectorize output model =
+  if index = Array.length Sys.argv then (vectorize, output, model)
   else
     match Sys.argv.(index) with
     | "--vectorize-loops" when index + 1 < Array.length Sys.argv ->
         let enabled = enabled_value "vectorize-loops" Sys.argv.(index + 1) in
-        parse_args (index + 2) (Some enabled) output legacy_output model
+        parse_args (index + 2) (Some enabled) output model
     | "--fast-math" ->
         fast_math := true;
-        parse_args (index + 1) vectorize output legacy_output model
+        parse_args (index + 1) vectorize output model
     | "--output" when index + 1 < Array.length Sys.argv ->
-        parse_args (index + 2) vectorize (Some Sys.argv.(index + 1)) legacy_output
-          model
-    | "--legacy-output" when index + 1 < Array.length Sys.argv ->
-        parse_args (index + 2) vectorize output (Some Sys.argv.(index + 1)) model
-    | ("--vectorize-loops" | "--output" | "--legacy-output") as option ->
+        parse_args (index + 2) vectorize (Some Sys.argv.(index + 1)) model
+    | ("--vectorize-loops" | "--output") as option ->
         fail_usage ("missing value for " ^ option)
     | argument when String.starts_with ~prefix:"-" argument ->
         fail_usage ("unknown option: " ^ argument)
     | path -> (
         match model with
-        | None -> parse_args (index + 1) vectorize output legacy_output (Some path)
+        | None -> parse_args (index + 1) vectorize output (Some path)
         | Some _ -> fail_usage "more than one model path was provided")
 
 let () =
-  let vectorize, output, legacy_output, model =
-    parse_args 1 None None None None in
+  let vectorize, output, model = parse_args 1 None None None in
   let vectorize =
     match vectorize with
     | Some enabled -> enabled
@@ -61,8 +57,8 @@ let () =
   let compilation =
     Stanli_pipeline.compile_mir_with_passes
       ~passes:
-        { (Stanli_pipeline.selected_default_passes ~fast_math:!fast_math ()) with
-          vectorize_loops= vectorize }
+        { Stanli_pipeline.vectorize_loops= vectorize
+        ; partial_evaluation= !fast_math }
       ~model_name:"embedded_model" code
       ~include_source:
         (Frontend.Include_files.FileSystemPaths [Filename.dirname model]) in
@@ -70,10 +66,6 @@ let () =
     (fun warning ->
       Fmt.epr "%a@." (Frontend.Warnings.pp ?printed_filename:None ~code) warning)
     compilation.warnings;
-  List.iter
-    (fun diagnostic ->
-      prerr_endline (Stanli_pipeline.diagnostic_message diagnostic))
-    compilation.diagnostics;
   match compilation.result with
   | Error (Stanli_pipeline.Internal_error message)
    |Error (Stanli_pipeline.Unsupported message) ->
@@ -92,13 +84,7 @@ let () =
       | Ok encoded -> (
           try
             Out_channel.with_open_bin output (fun channel ->
-                output_string channel encoded);
-            Option.iter
-              (fun path ->
-                Out_channel.with_open_bin path (fun channel ->
-                    mir |> Middle.Program.Typed.sexp_of_t
-                    |> Sexplib0.Sexp.to_string_hum |> output_string channel))
-              legacy_output
+                output_string channel encoded)
           with Sys_error message ->
             prerr_endline message;
             exit 1))

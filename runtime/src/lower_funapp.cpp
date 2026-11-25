@@ -114,10 +114,12 @@ unsigned Lowering::fun_effects(const std::string& name) {
 
   // Recursion is not itself an observable effect.  Walk the complete
   // reachable call graph for this query, treating an edge back into the
-  // active component as already being examined.  Do not memoize an
-  // intermediate node: in an effectful recursive component its answer can
-  // depend on statements that the outer frame has not visited yet.
-  std::set<std::string> visiting;
+  // active component as already being examined.  Memoize a node only when
+  // its walk reached no function above it on the active path: inside an
+  // effectful recursive component, a node's answer can depend on statements
+  // that an outer frame has not visited yet.
+  std::map<std::string, size_t> visiting;  // active path, name -> depth
+  size_t highest_reached = SIZE_MAX;
   std::function<unsigned(const std::string&)> visit_fun;
   std::function<unsigned(const mir::Expr&)> visit_expr;
   std::function<unsigned(const mir::Stmt&)> visit_stmt;
@@ -125,12 +127,21 @@ unsigned Lowering::fun_effects(const std::string& name) {
   visit_fun = [&](const std::string& called) -> unsigned {
     auto known = effectful_cache.find(called);
     if (known != effectful_cache.end()) return known->second;
-    if (!visiting.insert(called).second) return 0;
+    const size_t depth = visiting.size();
+    const auto [active, fresh] = visiting.emplace(called, depth);
+    if (!fresh) {
+      highest_reached = std::min(highest_reached, active->second);
+      return 0;
+    }
+    const size_t outer_reached = highest_reached;
+    highest_reached = SIZE_MAX;
     unsigned found = 0;
     auto f = fun_defs.find(called);
     if (f != fun_defs.end())
       for (const auto& s : f->second->body) found |= visit_stmt(s);
     visiting.erase(called);
+    if (highest_reached >= depth) effectful_cache[called] = found;
+    highest_reached = std::min(outer_reached, highest_reached);
     return found;
   };
 
@@ -174,9 +185,7 @@ unsigned Lowering::fun_effects(const std::string& name) {
     return found;
   };
 
-  const unsigned effects = visit_fun(name);
-  effectful_cache[name] = effects;
-  return effects;
+  return visit_fun(name);
 }
 // Integer argument of a density/pmf: values must be known at compile
 // time (int data, loop variables, or compile-time expressions).
@@ -192,6 +201,11 @@ std::vector<int> Lowering::int_arg_values(LoweredArgument& actual) {
     if (int_env.count(oc.name)) return {static_cast<int>(int_env[oc.name])};
   }
   if (oc.kind == mir::Expr::LitInt) return {static_cast<int>(oc.lit_i)};
+  // The graph runs the effects of the argument on every evaluation, and its
+  // value may still be known now.
+  if (expr_effectful(oc))
+    if (const DataMap::Entry* en = actual.observation(); en && ints(*en))
+      return en->i;
   if (oc.kind == mir::Expr::Indexed ||
       (oc.kind == mir::Expr::FunApp && oc.unsized.depth > 0)) {
     // May be a slice (y[i] on a 2-D array yields a whole row), so
@@ -517,11 +531,12 @@ bool non_tail_return(const mir::Stmt& s, bool tail) {
   }
 }
 
-// Each return assigns the result. With `leave`, it also breaks out of the
+// Each return assigns the results. With `leave`, it also breaks out of the
 // single pass. A return inside a loop also sets `exited`, and each loop that
 // holds one is followed by `if (exited) break;` so the break reaches the
 // single pass.
-mir::Stmt rewrite_returns(const mir::Stmt& s, const std::string& result,
+mir::Stmt rewrite_returns(const mir::Stmt& s,
+                          const std::vector<std::string>& results,
                           const std::string& exited, bool leave) {
   mir::Expr flag;
   flag.kind = mir::Expr::Var;
@@ -532,7 +547,7 @@ mir::Stmt rewrite_returns(const mir::Stmt& s, const std::string& result,
   if (s.kind != mir::Stmt::Return) {
     mir::Stmt out = s;
     for (auto& child : out.body)
-      child = rewrite_returns(child, result, exited, leave);
+      child = rewrite_returns(child, results, exited, leave);
     if (exited.empty() || !contains_return(s) ||
         (s.kind != mir::Stmt::For && s.kind != mir::Stmt::While))
       return out;
@@ -560,29 +575,53 @@ mir::Stmt rewrite_returns(const mir::Stmt& s, const std::string& result,
     set.rhs = std::move(one);
     block.body.push_back(std::move(set));
   }
-  if (s.has_init) {
-    mir::Stmt assign;
-    assign.kind = mir::Stmt::Assignment;
-    assign.lhs = result;
-    assign.rhs = s.rhs;
-    block.body.push_back(std::move(assign));
-  }
+  const auto assign = [&](const std::string& lhs, const mir::Expr& rhs) {
+    mir::Stmt assignment;
+    assignment.kind = mir::Stmt::Assignment;
+    assignment.lhs = lhs;
+    assignment.rhs = rhs;
+    block.body.push_back(std::move(assignment));
+  };
+  if (s.has_init) assign(results.at(0), s.rhs);
+  for (size_t k = 0; k < s.fn_args.size(); ++k)
+    assign(results.at(k), s.fn_args[k]);
   if (leave) block.body.push_back(std::move(exit));
   return block;
 }
 
 // stanc's inliner form: one pass of a loop, each return an assignment and a
-// break, then one return of the result. When every return is in tail
+// break, then one return of the results. When every return is in tail
 // position, nothing follows it, so the assignments need no loop.
 std::vector<mir::Stmt> single_exit_body(const mir::FunDef& f,
                                         const mir::Expr& call) {
-  // A shape error inside the body names this variable, so it reads as the
-  // function's result; Stan names cannot hold spaces.
-  const std::string result = "the result of " + f.name;
-  mir::Stmt decl;
-  decl.kind = mir::Stmt::Decl;
-  decl.decl_id = result;
-  decl.decl_type = mir::detail::unsized_declaration(call.unsized, "");
+  // A shape error inside the body names these variables, so they read as
+  // the function's results; Stan names cannot hold spaces.
+  std::vector<std::string> results;
+  std::vector<mir::Stmt> decls;
+  mir::Stmt ret;
+  ret.kind = mir::Stmt::Return;
+  const bool one_result = f.results.size() == 1;
+  for (size_t k = 0; k < f.results.size(); ++k) {
+    results.push_back(one_result ? "the result of " + f.name
+                                 : "part " + std::to_string(k + 1) +
+                                       " of the result of " + f.name);
+    mir::Stmt decl;
+    decl.kind = mir::Stmt::Decl;
+    decl.decl_id = results.back();
+    decl.decl_type = mir::detail::unsized_declaration(
+        one_result ? call.unsized : f.results[k], "");
+    decls.push_back(std::move(decl));
+    mir::Expr value;
+    value.kind = mir::Expr::Var;
+    value.name = results.back();
+    value.unsized = decls.back().decl_type.unsized;
+    if (one_result) {
+      ret.has_init = true;
+      ret.rhs = std::move(value);
+    } else {
+      ret.fn_args.push_back(std::move(value));
+    }
+  }
   mir::Expr one;
   one.kind = mir::Expr::LitInt;
   one.lit_i = 1;
@@ -600,20 +639,11 @@ std::vector<mir::Stmt> single_exit_body(const mir::FunDef& f,
   mir::Stmt body;
   body.kind = mir::Stmt::Block;
   for (const auto& st : f.body)
-    body.body.push_back(rewrite_returns(st, result, exited, !tail_only));
+    body.body.push_back(rewrite_returns(st, results, exited, !tail_only));
   pass.body.push_back(std::move(body));
-  mir::Expr value;
-  value.kind = mir::Expr::Var;
-  value.name = result;
-  value.unsized = call.unsized;
-  mir::Stmt ret;
-  ret.kind = mir::Stmt::Return;
-  ret.has_init = true;
-  ret.rhs = std::move(value);
   // A void function has no result to declare or return.
   const bool has_result = !f.results.empty();
-  std::vector<mir::Stmt> out;
-  if (has_result) out.push_back(std::move(decl));
+  std::vector<mir::Stmt> out = std::move(decls);
   if (looped) {
     mir::Stmt flag;
     flag.kind = mir::Stmt::Decl;
@@ -632,7 +662,47 @@ std::vector<mir::Stmt> single_exit_body(const mir::FunDef& f,
   return out;
 }
 
+// Mark e as stanc would if the formals in `data` had the `data` qualifier: a
+// Var of such a formal is data, and so is an expression whose operands are
+// all data. Returns whether e is data.
+bool mark_data(mir::Expr& e, const std::set<std::string>& data) {
+  bool operands = !e.args.empty();
+  for (mir::Expr& a : e.args) operands = mark_data(a, data) && operands;
+  if (!e.data_only && e.kind == mir::Expr::Var)
+    e.data_only = data.count(e.name) != 0;
+  else if (!e.data_only && operands && e.kind != mir::Expr::Unsupported)
+    e.data_only = true;
+  return e.data_only || e.kind == mir::Expr::IndexAll;
+}
+
+void mark_data(mir::Stmt& s, const std::set<std::string>& data) {
+  for (mir::Expr* e : {&s.init, &s.rhs, &s.target, &s.lower, &s.upper, &s.cond})
+    mark_data(*e, data);
+  for (auto* list : {&s.read_dims, &s.lhs_idx, &s.fn_args, &s.decl_type.dims})
+    for (mir::Expr& e : *list) mark_data(e, data);
+  for (mir::Stmt& child : s.body) mark_data(child, data);
+}
+
 }  // namespace
+
+std::shared_ptr<mir::FunDef> Lowering::call_site_def(
+    const mir::FunDef& f, const std::vector<mir::Expr>& args) const {
+  std::vector<bool> mask(f.arg_names.size());
+  std::set<std::string> data;
+  for (size_t i = 0; i < mask.size() && i < args.size(); ++i)
+    if (args[i].data_only && f.arg_views[i].leaf != mir::UnsizedLeaf::Int &&
+        !(i < f.arg_data_only.size() && f.arg_data_only[i])) {
+      mask[i] = true;
+      data.insert(f.arg_names[i]);
+    }
+  if (data.empty()) return nullptr;
+  auto& def = call_site_defs[{&f, std::move(mask)}];
+  if (!def) {
+    def = std::make_shared<mir::FunDef>(f);
+    for (mir::Stmt& s : def->body) mark_data(s, data);
+  }
+  return def;
+}
 
 // Inline a user-defined function at its call site: arguments are lowered
 // in the caller's scope, bound under the parameter names in a shadowed
@@ -644,7 +714,10 @@ Lowering::Val Lowering::lower_call_udf(const mir::Expr& e,
                                        std::vector<Val>* results) {
   auto it = fun_defs.find(mir::function_key(e));
   if (it == fun_defs.end()) fail("unknown function " + e.name, e.raw);
-  const mir::FunDef& f = *it->second;
+  const auto specialized = call_site_def(*it->second, e.args);
+  if (specialized && pooled_call_site_defs.insert(specialized.get()).second)
+    g.udata_pool.push_back(specialized);
+  const mir::FunDef& f = specialized ? *specialized : *it->second;
   if ((f.results.size() > 1) != (results != nullptr))
     fail(e.name + (results ? " does not return several values"
                            : " returns several values; only a MultiAssign "
@@ -670,6 +743,12 @@ Lowering::Val Lowering::lower_call_udf(const mir::Expr& e,
     if (!binds[i].is_int) {
       binds[i].v = actual.value();
       if (const DataMap::Entry* en = actual.observation()) binds[i].data = *en;
+      // The formal keeps the caller's proof of the integer's range, which
+      // can size the callee's runtime-sized locals.
+      if (region_current && mir::is_unsized(a, mir::UnsizedLeaf::Int) &&
+          !int_ranges.count(binds[i].v.slot))
+        if (const auto range = region_range(a))
+          set_int_range(binds[i].v, range->lo, range->hi);
     }
     if (!in_write_array && binds[i].formal_data_only && !binds[i].is_int &&
         (binds[i].v.autodiff || !binds[i].v.si.param_free))
@@ -747,9 +826,8 @@ Lowering::Val Lowering::lower_call_udf(const mir::Expr& e,
     }
   }
   const std::vector<mir::Stmt>* body = &f.body;
-  if (f.results.size() <= 1 &&
-      (non_tail_return(f.body, true) ||
-       std::any_of(f.body.begin(), f.body.end(), return_in_branch))) {
+  if (non_tail_return(f.body, true) ||
+      std::any_of(f.body.begin(), f.body.end(), return_in_branch)) {
     auto rewritten =
         std::make_shared<std::vector<mir::Stmt>>(single_exit_body(f, e));
     g.udata_pool.push_back(rewritten);
@@ -1828,9 +1906,14 @@ std::optional<Lowering::Val> Lowering::lower_eltwise_fn(
     Val c = actuals.at(2).value();
     const int64_t la = g.slots[a.slot].len, lb = g.slots[b.slot].len,
                   lc = g.slots[c.slot].len;
-    const int64_t n = std::max(la, std::max(lb, lc));
+    // A length-1 operand takes the length of the others, as in a binary
+    // operator, including a length of 0.
+    int64_t n = 1;
     for (int64_t l : {la, lb, lc})
-      if (l != n && l != 1) fail("fma: incompatible lengths", e.raw);
+      if (l != 1) {
+        if (n != 1 && l != n) fail("fma: incompatible lengths", e.raw);
+        n = l;
+      }
     // The shape of whichever operand carries one, like the binaries.
     SlotInfo si = shape_of(a, b);
     if (is_scalar(a) && is_scalar(b)) si = shape_of(a, c);

@@ -44,7 +44,7 @@ jobs:
             msystem: CLANG64
             setup_args: ''
             ocaml_packages: mingw-w64-x86_64-gcc
-            ctest_args: "-R '^(test_capi|test_e2e|test_executor|test_compiler_deployment|test_check_external_stanc|lit_densities_scalar_outcome_empty_parameter)$'"
+            ctest_args: "-R '^(test_capi|test_e2e|test_executor|test_compiler_deployment|test_check_external_compiler|lit_densities_scalar_outcome_empty_parameter)$'"
           - os: windows-11-arm
             msystem: CLANGARM64
             setup_args: --no-embed

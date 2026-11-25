@@ -1,4 +1,4 @@
-// Decoder for the MIR formats accepted at the stanli compiler boundary.
+// Decoder for the portable MIR that stanli's compiler writes.
 #ifndef STANLI_MIR_DECODE_HPP
 #define STANLI_MIR_DECODE_HPP
 
@@ -8,9 +8,9 @@
 
 namespace stanli {
 
-// Decode either a versioned stanli portable-MIR envelope or the legacy stanc3
-// S-expression dump. Format selection is based only on the first non-space
-// byte; malformed portable MIR is never retried as legacy MIR.
+// Decode a versioned stanli portable-MIR envelope (STANLI5:...). Any other
+// text, including stock stanc's --debug-optimized-mir s-expressions, is
+// rejected with an error that names the compilers that write portable MIR.
 mir::Program decode_program(std::string_view text);
 
 }  // namespace stanli

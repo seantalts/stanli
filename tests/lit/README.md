@@ -69,7 +69,7 @@ embedded compiler runs the same pipeline through the `stanli-compile`
 executable beside `stanli_check` or on `PATH`; a build with neither fails
 these tests rather than skipping them, and no generated MIR is checked into
 this directory. To test another compiler explicitly, run `stanli_check` by
-hand with `--stanli-compile PATH` or `--stanc PATH`.
+hand with `--stanli-compile PATH`.
 
 After configuring the ordinary native build, run the complete source-lit
 suite with the local build target:
@@ -103,7 +103,7 @@ The corresponding JSON manifests under `tests/function_coverage/` record each
 tested, excluded, and missing stanc signature, including functions for which
 only some overloads are excluded. CTest checks that fixtures and manifests
 remain current. These generated models are source-only lit inputs: ordinary
-builds do not also materialize their legacy MIR under `tests/fixtures/`.
+builds do not also materialize their MIR under `tests/fixtures/`.
 
 For a single case, invoke the runner directly; `--discover` prints the current
 result without enforcing the checked-in expectation:

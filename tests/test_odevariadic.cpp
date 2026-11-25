@@ -479,7 +479,7 @@ int main() {
   using namespace stanli;
 
   DataMap data = DataMap::from_json_file("tests/fixtures/odevariadic.json");
-  const std::string mir_text = slurp("tests/fixtures/odevariadic.tmir.sexp");
+  const std::string mir_text = slurp("tests/fixtures/odevariadic.mir");
   CompiledModel cm = compile_ode_fixture(mir_text, data, false);
   CompiledModel oracle_cm = compile_ode_fixture(mir_text, data, true);
   const OdeSpec* rk45_spec = fixture_spec(cm.graph, OdeSpec::RK45);

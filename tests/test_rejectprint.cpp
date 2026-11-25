@@ -28,7 +28,7 @@
 
 int main() {
   using namespace stanli;
-  const std::string mir = slurp("tests/fixtures/rejectprint.tmir.sexp");
+  const std::string mir = slurp("tests/fixtures/rejectprint.mir");
 
   const auto data_for = [](int n, double lim) {
     return DataMap::from_json("{\"N\": " + std::to_string(n) +
@@ -93,7 +93,7 @@ int main() {
 
   // ---- fatal_error throws std::runtime_error, never a rejection ---------
   {
-    const std::string fatal = slurp("tests/fixtures/fatal_error.tmir.sexp");
+    const std::string fatal = slurp("tests/fixtures/fatal_error.mir");
     const auto n = [](int value) {
       return DataMap::from_json("{\"N\": " + std::to_string(value) + "}");
     };
@@ -207,7 +207,7 @@ int main() {
   //
   {
     const std::string effect_mir =
-        slurp("tests/fixtures/necessity_effects.tmir.sexp");
+        slurp("tests/fixtures/necessity_effects.mir");
     DataMap d;
     d.set_int("mode", 1);
     CompiledModel cm = compile_model(effect_mir, d);
@@ -243,7 +243,7 @@ int main() {
   // numeric live-out and contributes nothing to target.
   {
     const std::string print_only_mir =
-        slurp("tests/fixtures/necessity_print_only.tmir.sexp");
+        slurp("tests/fixtures/necessity_print_only.mir");
     DataMap d;
     CompiledModel cm = compile_model(print_only_mir, d);
     Executor ex(std::move(cm.graph));
@@ -269,7 +269,7 @@ int main() {
     DataMap d;
     d.set_int("mode", 2);
     CompiledModel cm =
-        compile_model(slurp("tests/fixtures/necessity_effects.tmir.sexp"), d);
+        compile_model(slurp("tests/fixtures/necessity_effects.mir"), d);
     Executor ex(std::move(cm.graph));
     cm.bind(ex);
     std::vector<double> g((size_t)ex.n_params());
@@ -299,8 +299,8 @@ int main() {
       lines.emplace_back(text, len);
     });
     DataMap d;
-    CompiledModel cm = compile_model(
-        slurp("tests/fixtures/known_real_udf_effect.tmir.sexp"), d);
+    CompiledModel cm =
+        compile_model(slurp("tests/fixtures/known_real_udf_effect.mir"), d);
     Executor ex(std::move(cm.graph));
     cm.bind(ex);
     std::vector<double> g((size_t)ex.n_params());

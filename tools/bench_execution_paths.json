@@ -2,163 +2,163 @@
   {
     "model": "ode_nested_for",
     "source": "tests/fixtures/ode_nested_for.stan",
-    "mir": "tests/fixtures/ode_nested_for.tmir.sexp",
+    "mir": "tests/fixtures/ode_nested_for.mir",
     "data": "tests/fixtures/ode_nested_for.json"
   },
   {
     "model": "ode_runtime_index",
     "source": "tests/fixtures/ode_runtime_index.stan",
-    "mir": "tests/fixtures/ode_runtime_index.tmir.sexp",
+    "mir": "tests/fixtures/ode_runtime_index.mir",
     "data": "tests/fixtures/ode_runtime_index.json"
   },
   {
     "model": "ode_constant_loop",
     "source": "tests/fixtures/ode_constant_loop.stan",
-    "mir": "tests/fixtures/ode_constant_loop.tmir.sexp",
+    "mir": "tests/fixtures/ode_constant_loop.mir",
     "data": "tests/fixtures/ode_constant_loop.json"
   },
   {
     "model": "ode_branch_returns",
     "source": "tests/fixtures/ode_branch_returns.stan",
-    "mir": "tests/fixtures/ode_branch_returns.tmir.sexp",
+    "mir": "tests/fixtures/ode_branch_returns.mir",
     "data": "tests/fixtures/ode_branch_returns.json"
   },
   {
     "model": "ar1",
     "source": "tests/fixtures/ar1.stan",
-    "mir": "tests/fixtures/ar1.tmir.sexp",
+    "mir": "tests/fixtures/ar1.mir",
     "data": "tests/fixtures/ar1.json"
   },
   {
     "model": "gq_scalar_rng_complete",
     "source": "tests/fixtures/gq_scalar_rng_complete.stan",
-    "mir": "tests/fixtures/gq_scalar_rng_complete.tmir.sexp",
+    "mir": "tests/fixtures/gq_scalar_rng_complete.mir",
     "data": "tests/fixtures/gq_scalar_rng_complete.json"
   },
   {
     "model": "gq_vector_rng_complete",
     "source": "tests/fixtures/gq_vector_rng_complete.stan",
-    "mir": "tests/fixtures/gq_vector_rng_complete.tmir.sexp",
+    "mir": "tests/fixtures/gq_vector_rng_complete.mir",
     "data": "tests/fixtures/gq_vector_rng_complete.json"
   },
   {
     "model": "gq_callback_solver_controls",
     "source": "tests/fixtures/gq_callback_solver_controls.stan",
-    "mir": "tests/fixtures/gq_callback_solver_controls.tmir.sexp",
+    "mir": "tests/fixtures/gq_callback_solver_controls.mir",
     "data": "tests/fixtures/gq_callback_solver_controls.json"
   },
   {
     "model": "gq_container_rng_binomial",
     "source": "tests/fixtures/gq_container_rng_binomial.stan",
-    "mir": "tests/fixtures/gq_container_rng_binomial.tmir.sexp",
+    "mir": "tests/fixtures/gq_container_rng_binomial.mir",
     "data": "tests/fixtures/gq_container_rng_binomial.json"
   },
   {
     "model": "gq_container_rng_complete",
     "source": "tests/fixtures/gq_container_rng_complete.stan",
-    "mir": "tests/fixtures/gq_container_rng_complete.tmir.sexp",
+    "mir": "tests/fixtures/gq_container_rng_complete.mir",
     "data": "tests/fixtures/gq_container_rng_complete.json"
   },
   {
     "model": "gq_integer_expressions",
     "source": "tests/fixtures/gq_integer_expressions.stan",
-    "mir": "tests/fixtures/gq_integer_expressions.tmir.sexp",
+    "mir": "tests/fixtures/gq_integer_expressions.mir",
     "data": "tests/fixtures/gq_integer_expressions.json"
   },
   {
     "model": "gq_uninitialized_int",
     "source": "tests/fixtures/gq_uninitialized_int.stan",
-    "mir": "tests/fixtures/gq_uninitialized_int.tmir.sexp",
+    "mir": "tests/fixtures/gq_uninitialized_int.mir",
     "data": "tests/fixtures/gq_uninitialized_int.json"
   },
   {
     "model": "structured_local_shape",
     "source": "tests/fixtures/structured_local_shape.stan",
-    "mir": "tests/fixtures/structured_local_shape.tmir.sexp",
+    "mir": "tests/fixtures/structured_local_shape.mir",
     "data": "tests/fixtures/structured_local_shape.json"
   },
   {
     "model": "gq_bounded_block",
     "source": "tests/fixtures/gq_bounded_block.stan",
-    "mir": "tests/fixtures/gq_bounded_block.tmir.sexp",
+    "mir": "tests/fixtures/gq_bounded_block.mir",
     "data": "tests/fixtures/gq_bounded_block.json"
   },
   {
     "model": "gq_bounded_vector",
     "source": "tests/fixtures/gq_bounded_vector.stan",
-    "mir": "tests/fixtures/gq_bounded_vector.tmir.sexp",
+    "mir": "tests/fixtures/gq_bounded_vector.mir",
     "data": "tests/fixtures/gq_bounded_vector.json"
   },
   {
     "model": "gq_bounded_row_vector",
     "source": "tests/fixtures/gq_bounded_row_vector.stan",
-    "mir": "tests/fixtures/gq_bounded_row_vector.tmir.sexp",
+    "mir": "tests/fixtures/gq_bounded_row_vector.mir",
     "data": "tests/fixtures/gq_bounded_row_vector.json"
   },
   {
     "model": "gq_bounded_vector_refusals",
     "source": "tests/fixtures/gq_bounded_vector_refusals.stan",
-    "mir": "tests/fixtures/gq_bounded_vector_refusals.tmir.sexp",
+    "mir": "tests/fixtures/gq_bounded_vector_refusals.mir",
     "data": "tests/fixtures/gq_bounded_vector_refusals.json"
   },
   {
     "model": "gq_bounded_integer",
     "source": "tests/fixtures/gq_bounded_integer.stan",
-    "mir": "tests/fixtures/gq_bounded_integer.tmir.sexp",
+    "mir": "tests/fixtures/gq_bounded_integer.mir",
     "data": "tests/fixtures/gq_bounded_integer.json"
   },
   {
     "model": "gq_bounded_integer_refusals",
     "source": "tests/fixtures/gq_bounded_integer_refusals.stan",
-    "mir": "tests/fixtures/gq_bounded_integer_refusals.tmir.sexp",
+    "mir": "tests/fixtures/gq_bounded_integer_refusals.mir",
     "data": "tests/fixtures/gq_bounded_integer_refusals.json"
   },
   {
     "model": "gq_integer_fill_paths",
     "source": "tests/fixtures/gq_integer_fill_paths.stan",
-    "mir": "tests/fixtures/gq_integer_fill_paths.tmir.sexp",
+    "mir": "tests/fixtures/gq_integer_fill_paths.mir",
     "data": "tests/fixtures/gq_integer_fill_paths.json"
   },
   {
     "model": "gq_integer_fill_paths_refusals",
     "source": "tests/fixtures/gq_integer_fill_paths_refusals.stan",
-    "mir": "tests/fixtures/gq_integer_fill_paths_refusals.tmir.sexp",
+    "mir": "tests/fixtures/gq_integer_fill_paths_refusals.mir",
     "data": "tests/fixtures/gq_integer_fill_paths_refusals.json"
   },
   {
     "model": "gq_bounded_nested",
     "source": "tests/fixtures/gq_bounded_nested.stan",
-    "mir": "tests/fixtures/gq_bounded_nested.tmir.sexp",
+    "mir": "tests/fixtures/gq_bounded_nested.mir",
     "data": "tests/fixtures/gq_bounded_nested.json"
   },
   {
     "model": "gq_bounded_nested3",
     "source": "tests/fixtures/gq_bounded_nested3.stan",
-    "mir": "tests/fixtures/gq_bounded_nested3.tmir.sexp",
+    "mir": "tests/fixtures/gq_bounded_nested3.mir",
     "data": "tests/fixtures/gq_bounded_nested3.json"
   },
   {
     "model": "gq_bounded_nested_refusals",
     "source": "tests/fixtures/gq_bounded_nested_refusals.stan",
-    "mir": "tests/fixtures/gq_bounded_nested_refusals.tmir.sexp",
+    "mir": "tests/fixtures/gq_bounded_nested_refusals.mir",
     "data": "tests/fixtures/gq_bounded_nested_refusals.json"
   },
   {
     "model": "gq_bounded_nested_budget",
     "source": "tests/fixtures/gq_bounded_nested.stan",
-    "mir": "tests/fixtures/gq_bounded_nested.tmir.sexp",
+    "mir": "tests/fixtures/gq_bounded_nested.mir",
     "data": "tests/fixtures/gq_bounded_nested_budget.json"
   },
   {
     "model": "gq_bounded_nested3_budget",
     "source": "tests/fixtures/gq_bounded_nested3.stan",
-    "mir": "tests/fixtures/gq_bounded_nested3.tmir.sexp",
+    "mir": "tests/fixtures/gq_bounded_nested3.mir",
     "data": "tests/fixtures/gq_bounded_nested_budget.json"
   },
   {
     "model": "hypergeometric_1f0",
     "source": "tests/fixtures/hypergeometric_1f0.stan",
-    "mir": "tests/fixtures/hypergeometric_1f0.tmir.sexp",
+    "mir": "tests/fixtures/hypergeometric_1f0.mir",
     "data": "tests/fixtures/hypergeometric_1f0.json"
   }
 ]

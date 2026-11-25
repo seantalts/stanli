@@ -9,9 +9,9 @@ namespace stanli {
 namespace mir {
 namespace detail {
 
-// Apply the name resolution and binding checks shared by both wire formats.
-// This records the overload each user-function call site selects.
-void finalize_program(Program& program, bool strict_variable_metadata = false);
+// Apply the name resolution and binding checks to a decoded program. This
+// records the overload each user-function call site selects.
+void finalize_program(Program& program);
 
 // The SizedType of a declaration stanc3 left unsized. A scalar has a fixed
 // width and keeps the sized spelling; a container carries its view, and its
@@ -26,9 +26,7 @@ std::string unmangled(std::string name);
 UnsizedView declaration_view(const SizedType& type);
 
 // Compact portable MIR is a closed-world format, so reject inconsistent
-// kind-specific shapes and redundant type metadata before finalization. The
-// legacy reader deliberately remains permissive because its unsupported-form
-// fallbacks accept some unusual debug-MIR shapes.
+// kind-specific shapes and redundant type metadata before finalization.
 void validate_portable_program(const Program& program);
 
 Program read_portable_program(std::string_view bytes);

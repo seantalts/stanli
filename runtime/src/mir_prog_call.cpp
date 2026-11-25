@@ -1527,9 +1527,10 @@ Range ProgramCompiler::fun(const mir::Expr& e) {
     if ((e.name == "Times__" || e.name == "multiply") && !a_scalar &&
         !b_scalar) {
       // The shared product resolver classifies the matvec/GEMM/outer/
-      // inner forms and validates the inner dimension; the register
-      // emission below stays the explicit MUL/ADD chain the adjoint
-      // machinery prices.
+      // inner forms and validates the inner dimension. Each form calls the
+      // kernel that the graph lowering emits for it (lower_funapp.cpp), so
+      // both paths, and Stan, round the products and sums the same way.
+      // Eigen fuses each multiply-add on arm64; a MUL/ADD chain does not.
       BuiltinProductMap map;
       try {
         map = builtin_product_map(builtin_argument_shape(e.args[0], a),
@@ -1549,31 +1550,16 @@ Range ProgramCompiler::fun(const mir::Expr& e) {
 
       const int64_t width = rows * cols;
       if (width > kMaxRegs) bail("matrix product needs too many registers");
-      const int r = alloc((int)width);
-      const auto left = [&](int64_t i, int64_t k) {
-        if (a.kind == ViewKind::Matrix) return a.reg + (int)(k * a.rows + i);
-        return a.reg + (int)(a.kind == ViewKind::Vector ? i : k);
-      };
-      const auto right = [&](int64_t k, int64_t j) {
-        if (b.kind == ViewKind::Matrix) return b.reg + (int)(j * b.rows + k);
-        return b.reg + (int)(b.kind == ViewKind::Vector ? k : j);
-      };
-      for (int64_t j = 0; j < cols; ++j)
-        for (int64_t i = 0; i < rows; ++i) {
-          const int dst = r + (int)(j * rows + i);
-          if (inner == 0) {
-            const double zero = 0.0;
-            emit_const(dst, &zero, 1);
-            continue;
-          }
-          emit(Program::MUL, dst, left(i, 0), right(0, j));
-          for (int64_t k = 1; k < inner; ++k) {
-            const int term = alloc(1);
-            emit(Program::MUL, term, left(i, k), right(k, j));
-            emit(Program::ADD, dst, dst, term);
-          }
-        }
-      Range out{r, (int)width};
+      Range out{0, (int)width};
+      if (map.kind == BuiltinProductMap::Kind::Inner)
+        out = kernel_call(OP_DOT, {a, b}, out, 0, 0x3, {}, {}, e.name);
+      else if (map.kind == BuiltinProductMap::Kind::MatVec &&
+               e.args[0].data_only && b.kind == ViewKind::Vector)
+        out = kernel_call(OP_MATVEC, {a, b}, out, 0, 0x2,
+                          {(int)rows, (int)inner}, {}, e.name);
+      else
+        out = kernel_call(OP_GEMM, {a, b}, out, 0, 0x3,
+                          {(int)rows, (int)inner, (int)cols}, {}, e.name);
       out.kind = result_kind;
       if (result_kind == ViewKind::Matrix) {
         out.rows = rows;

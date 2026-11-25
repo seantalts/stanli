@@ -126,9 +126,9 @@ void check(const stanli::Op& op) {
 }  // namespace
 int main() {
   using namespace stanli;
-  auto model = compile_model(
-      slurp("tests/fixtures/gq_callback_runtime_values.tmir.sexp"),
-      DataMap::from_json("{}"));
+  auto model =
+      compile_model(slurp("tests/fixtures/gq_callback_runtime_values.mir"),
+                    DataMap::from_json("{}"));
   expect_true("runtime callback output graph compiles",
               model.write_array.has_value());
   if (!model.write_array) return 1;

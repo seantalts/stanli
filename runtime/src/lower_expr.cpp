@@ -236,6 +236,13 @@ long Lowering::eval_int(const mir::Expr& e) {
           if ((en = observation(bound->second)))
             all_single =
                 en->is_int ? en->i.size() == en->r.size() : en->i.empty();
+      // A computed base, such as the result of a user function call.
+      std::optional<DataMap::Entry> computed;
+      if (e.args[0].kind != mir::Expr::Var &&
+          (computed = try_eval_pure(e.args[0]))) {
+        en = &*computed;
+        all_single = en->is_int || en->i.empty();
+      }
       const size_t stored = !en ? 0 : en->is_int ? en->i.size() : en->r.size();
       for (size_t k = 1; all_single && k < e.args.size(); ++k)
         all_single = e.args[k].kind == mir::Expr::IndexSingle;
@@ -300,9 +307,6 @@ long Lowering::eval_int(const mir::Expr& e) {
       if (e.args.size() != 2) fail("malformed logical size expression", e.raw);
       return eval_int(e.args[0]) != 0 && eval_int(e.args[1]) != 0;
     }
-    case mir::Expr::Promotion:
-      if (e.args.size() != 1) fail("malformed promoted size expression", e.raw);
-      return eval_int(e.args[0]);
     case mir::Expr::FunApp:
       if (const FunctionSpec* function = function_spec(e);
           function != nullptr && function->builtin() != nullptr &&
@@ -428,6 +432,23 @@ long Lowering::eval_int(const mir::Expr& e) {
           return td.as_int(e);
         } catch (const CompileError&) {
         }
+      }
+      // A user function of integers: its arguments may be known only here
+      // (a shape of a parameter, an int formal), so pass them as literals.
+      if (e.fn_lib == mir::Expr::Lib::UserDefined &&
+          std::all_of(e.args.begin(), e.args.end(), [](const mir::Expr& a) {
+            return mir::is_unsized(a, mir::UnsizedLeaf::Int);
+          })) {
+        mir::Expr call = e;
+        for (mir::Expr& a : call.args) {
+          const long value = eval_int(a);
+          a.kind = mir::Expr::LitInt;
+          a.lit_i = value;
+          a.args.clear();
+          a.data_only = true;
+        }
+        call.data_only = true;
+        return td.as_int(call);
       }
       fail("unsupported int size function " + e.name, e.raw);
     default:
@@ -1142,12 +1163,30 @@ Lowering::Val Lowering::lower_expr_impl(const mir::Expr& e) {
                          {checked_immediate(a.off, "indexed offset"),
                           checked_immediate(a.stride, "indexed stride")}),
               ExpressionLayout::scalar());
-        if (a.len == 1)
-          return with_layout(
+        if (a.len == 1) {
+          const Val v = with_layout(
               emit_value(OP_INDEX, {base}, 1,
                          indexed_view(base.si, n_idx, 1, e.unsized),
                          {checked_immediate(a.off, "indexed offset")}),
               ExpressionLayout::scalar());
+          // An element of a known integer array is known. The observation
+          // keeps the first index fastest.
+          const DataMap::Entry* be = observation(base);
+          if (be && be->is_int && be->i.size() == be->r.size() &&
+              n_idx == D.size() && !mat) {
+            size_t from = 0, stride = 1;
+            for (size_t d = 0; d < n_idx; ++d) {
+              from += (size_t)ix[d] * stride;
+              stride *= (size_t)D[d];
+            }
+            DataMap::Entry en;
+            en.is_int = true;
+            en.i = {be->i.at(from)};
+            en.r = {(double)en.i[0]};
+            observe(v, std::move(en));
+          }
+          return v;
+        }
         // One whole matrix out of the array keeps its shape, so a later
         // index on it can take the column-major paths above.
         SlotInfo si = indexed_view(base.si, n_idx, a.len, e.unsized);
@@ -1367,9 +1406,10 @@ Lowering::Val Lowering::lower_expr_impl(const mir::Expr& e) {
     }
     case mir::Expr::EOr:
     case mir::Expr::EAnd: {
+      // Like a ternary, the right operand runs only when the left one does
+      // not decide the value, so the region evaluates it.
       if (auto v = fold_const(e)) return *v;
-      if (runtime_only(e)) return lower_runtime_ternary(e);
-      fail("boolean operator on parameters unsupported", e.raw);
+      return lower_runtime_ternary(e);
     }
     default: {
       if (auto v = fold_const(e)) return *v;
@@ -1590,8 +1630,6 @@ Lowering::StaticProbe<Lowering::StaticView> Lowering::try_static_view(
     }
     return {};
   }
-  if (e.kind == mir::Expr::Promotion && e.args.size() == 1)
-    return try_static_view(e.args[0]);
   if (e.kind == mir::Expr::FunApp) {
     if (e.name == "FnMakeRowVec" && !e.args.empty() &&
         std::all_of(e.args.begin(), e.args.end(), [](const mir::Expr& a) {

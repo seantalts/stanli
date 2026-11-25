@@ -11,8 +11,10 @@
 //   * the whole pipeline on tests/fixtures/wanames.stan, whose expected
 //     header was taken verbatim from a CmdStan run of the same model.
 #include "env_helpers.hpp"
+#include "portable_mir_writer.hpp"
 #include "stdout_capture.hpp"
 
+#include <stanli/mir_decode.hpp>
 #include <stanli/compile.hpp>
 #include <stanli/execution_report.hpp>
 #include <stanli/graph.hpp>
@@ -20,7 +22,6 @@
 #include <stanli/mir.hpp>
 #include <stanli/mir_interp.hpp>
 #include <stanli/optable.hpp>
-#include <stanli/sexp.hpp>
 #include <stanli/structured_loop.hpp>
 #include <stanli/wa_interp.hpp>
 
@@ -129,6 +130,25 @@ bool compiled_completely(const stanli::CompiledModel& cm,
   std::printf("FAIL %s did not compile completely: %s\n", what.c_str(),
               cm.write_array ? cm.write_array->truncated.value_or("").c_str()
                              : "no write_array");
+  return false;
+}
+
+// The decoder must refuse the mutated MIR with `reason` in its message. Many
+// malformed shapes that lowering guards against never get past the portable
+// decoder's checks.
+bool expect_rejected(const std::string& text, const stanli::DataMap& data,
+                     const std::string& reason, const std::string& what) {
+  try {
+    (void)stanli::compile_model(text, data);
+  } catch (const std::exception& e) {
+    if (std::string(e.what()).find(reason) != std::string::npos) return true;
+    ++failures;
+    std::printf("FAIL %s: rejected for another reason: %s\n", what.c_str(),
+                e.what());
+    return false;
+  }
+  ++failures;
+  std::printf("FAIL %s: the mutation compiled\n", what.c_str());
   return false;
 }
 
@@ -274,8 +294,7 @@ void test_naming_rules() {
 void test_wanames_pipeline() {
   using namespace stanli;
   DataMap data;  // the model takes no data
-  CompiledModel cm =
-      compile_model(slurp("tests/fixtures/wanames.tmir.sexp"), data);
+  CompiledModel cm = compile_model(slurp("tests/fixtures/wanames.mir"), data);
   if (!cm.write_array || cm.write_array->columns.empty()) {
     ++failures;
     std::printf("FAIL wanames: no write_array\n");
@@ -331,8 +350,8 @@ void test_wanames_pipeline() {
 // must share is the logical column schema and the observable row.
 void test_wanames_interpreter_schema() {
   using namespace stanli;
-  auto prog = std::make_shared<mir::Program>(mir::read_program(
-      sexp::parse(slurp("tests/fixtures/wanames.tmir.sexp"))));
+  auto prog = std::make_shared<mir::Program>(
+      stanli::decode_program(slurp("tests/fixtures/wanames.mir")));
 
   std::map<std::string, DataMap::Entry> base = emit_env();
   WaInterp wi(prog, std::move(base));
@@ -370,8 +389,8 @@ void test_wanames_interpreter_schema() {
 // t = get_lp(lp__, lp_accum__). The interpreter used to refuse the statement.
 void test_interpreter_target_increment() {
   using namespace stanli;
-  auto prog = std::make_shared<mir::Program>(mir::read_program(
-      sexp::parse(slurp("tests/fixtures/wa_interp_target.tmir.sexp"))));
+  auto prog = std::make_shared<mir::Program>(
+      stanli::decode_program(slurp("tests/fixtures/wa_interp_target.mir")));
   WaInterp wi(prog, emit_env());
   std::map<std::string, DataMap::Entry> params;
   params["p"].r = {0.25};
@@ -397,7 +416,7 @@ void test_gq_bare_fill_is_nan() {
   using namespace stanli;
   DataMap data;
   CompiledModel cm =
-      compile_model(slurp("tests/fixtures/gqbarefill.tmir.sexp"), data);
+      compile_model(slurp("tests/fixtures/gqbarefill.mir"), data);
   if (!cm.write_array || cm.write_array->columns.empty()) {
     ++failures;
     std::printf("FAIL gqbarefill: no write_array\n");
@@ -435,8 +454,7 @@ void test_gq_bare_fill_is_nan() {
 void test_gq_name_shadowing() {
   using namespace stanli;
   DataMap data;
-  CompiledModel cm =
-      compile_model(slurp("tests/fixtures/gqshadow.tmir.sexp"), data);
+  CompiledModel cm = compile_model(slurp("tests/fixtures/gqshadow.mir"), data);
   if (!cm.write_array || cm.write_array->columns.empty()) {
     ++failures;
     std::printf("FAIL gqshadow: no write_array\n");
@@ -470,8 +488,8 @@ void test_gq_name_shadowing() {
   expect_row("compiled", row);
 
   // A stale three-wide `x` in the base environment must not widen the row.
-  auto prog = std::make_shared<mir::Program>(mir::read_program(
-      sexp::parse(slurp("tests/fixtures/gqshadow.tmir.sexp"))));
+  auto prog = std::make_shared<mir::Program>(
+      stanli::decode_program(slurp("tests/fixtures/gqshadow.mir")));
   std::map<std::string, DataMap::Entry> base = emit_env();
   base["x"].r = {1.0, 1.0, 1.0};
   base["x"].dims = {3};
@@ -489,7 +507,7 @@ void test_gq_name_shadowing() {
 // reads that accumulator. Here t = 0.5 + 0.375 + 1 and u = 0.875 + 0.5 + 1.
 void test_write_array_target_lp() {
   using namespace stanli;
-  const std::string text = slurp("tests/fixtures/wa_target_lp.tmir.sexp");
+  const std::string text = slurp("tests/fixtures/wa_target_lp.mir");
   const std::vector<double> want{0.25, 1.875, 2.375};
   auto expect_row = [&](const char* what, const std::vector<double>& got) {
     if (got == want) return;
@@ -510,8 +528,7 @@ void test_write_array_target_lp() {
     expect_row("compiled", read_row(cm.write_array->columns, wex));
   }
 
-  auto prog =
-      std::make_shared<mir::Program>(mir::read_program(sexp::parse(text)));
+  auto prog = std::make_shared<mir::Program>(stanli::decode_program(text));
   WaInterp interpreted(prog, emit_env());
   std::map<std::string, DataMap::Entry> params;
   params["x"].r = {0.25};
@@ -525,31 +542,26 @@ void test_write_array_target_lp() {
 }
 
 // The `~` statement adds a target term to the write_array graph before the
-// `||` on a parameter refuses, and the rollback must remove that term with
-// the slots it named. A stale term made CSE write past its slot tables,
-// which ASan reports and which crashed fuzz seeds 530 and 4962.
+// `||` on a parameter. That `||` used to refuse, and the rollback had to
+// remove the term with the slots it named: a stale term made CSE write past
+// its slot tables, which crashed fuzz seeds 530 and 4962. The `||` now
+// lowers, so the graph gives the row.
 void test_write_array_tp_lp_refused() {
   using namespace stanli;
-  const std::string text = slurp("tests/fixtures/wa_tp_lp_refused.tmir.sexp");
+  const std::string text = slurp("tests/fixtures/wa_tp_lp_refused.mir");
   CompiledModel cm = compile_model(text, DataMap());
-  if (!cm.write_array || !cm.write_array->interp) {
-    ++failures;
-    std::printf("FAIL wa_tp_lp_refused: no interpreter for write_array\n");
-    return;
-  }
-  const std::string truncated = cm.write_array->truncated.value_or("");
-  if (truncated.find("transformed parameters") == std::string::npos) {
-    ++failures;
-    std::printf("FAIL wa_tp_lp_refused: truncated message is [%s]\n",
-                truncated.c_str());
-  }
-  std::map<std::string, DataMap::Entry> params;
-  params["p"].r = {0.25};
-  WaRng rng(1);
-  const std::vector<double> got = cm.write_array->interp->eval(params, rng);
-  if (got != std::vector<double>{0.25, 1, 1}) {
-    ++failures;
-    std::printf("FAIL wa_tp_lp_refused: row has %zu values\n", got.size());
+  if (!compiled_completely(cm, "wa_tp_lp_refused")) return;
+  Executor wex(std::move(cm.write_array->graph));
+  cm.write_array->bind(wex);
+  for (const double p : {0.25, 1.0, 3.0}) {
+    wex.params_data()[0] = p;
+    wex.run_forward_only();
+    const double outside = p < 0.5 || p > 2;
+    if (read_row(cm.write_array->columns, wex) !=
+        std::vector<double>{p, outside, outside}) {
+      ++failures;
+      std::printf("FAIL wa_tp_lp_refused: row at p = %g\n", p);
+    }
   }
 }
 
@@ -559,11 +571,10 @@ void test_interpreted_gq() {
   using namespace stanli;
   DataMap data;
   data.set_int("N", 5);
-  const std::string text = slurp("tests/fixtures/gqrng.tmir.sexp");
+  const std::string text = slurp("tests/fixtures/gqrng.mir");
   CompiledModel cm = compile_model(text, data);
   if (!compiled_completely(cm, "gqrng")) return;
-  auto program =
-      std::make_shared<mir::Program>(mir::read_program(sexp::parse(text)));
+  auto program = std::make_shared<mir::Program>(stanli::decode_program(text));
   std::map<std::string, DataMap::Entry> base = emit_env(data, {"N"});
   WaInterp wi(program, std::move(base));
   std::map<std::string, DataMap::Entry> params;
@@ -622,7 +633,7 @@ void test_compiled_extra_rng() {
   using namespace stanli;
   DataMap data;
   data.set_int("N", 10);
-  const std::string text = slurp("tests/fixtures/gqrng_extra.tmir.sexp");
+  const std::string text = slurp("tests/fixtures/gqrng_extra.mir");
   CompiledModel cm = compile_model(text, data);
   if (!compiled_completely(cm, "gqrng_extra")) return;
   expect_eq("gqrng_extra columns", joined(cm.write_array->columns),
@@ -636,8 +647,7 @@ void test_compiled_extra_rng() {
     return read_row(cm.write_array->columns, wex);
   };
 
-  auto program =
-      std::make_shared<mir::Program>(mir::read_program(sexp::parse(text)));
+  auto program = std::make_shared<mir::Program>(stanli::decode_program(text));
   std::map<std::string, DataMap::Entry> base = emit_env(data, {"N"});
   WaInterp wi(program, std::move(base));
   std::map<std::string, DataMap::Entry> params;
@@ -692,7 +702,7 @@ void test_compiled_region_rng() {
   using namespace stanli;
   DataMap data;
   data.set_int("K", 3);
-  const std::string text = slurp("tests/fixtures/gqrngregion.tmir.sexp");
+  const std::string text = slurp("tests/fixtures/gqrngregion.mir");
   CompiledModel cm = compile_model(text, data);
   if (!compiled_completely(cm, "gqrngregion")) return;
   expect_eq("gqrngregion columns", joined(cm.write_array->columns),
@@ -706,8 +716,7 @@ void test_compiled_region_rng() {
   wex.run_forward_only(EvalState{&graph_rng});
   std::vector<double> row = read_row(cm.write_array->columns, wex);
 
-  auto program =
-      std::make_shared<mir::Program>(mir::read_program(sexp::parse(text)));
+  auto program = std::make_shared<mir::Program>(stanli::decode_program(text));
   std::map<std::string, DataMap::Entry> base = emit_env(data, {"K"});
   WaInterp wi(program, std::move(base));
   std::map<std::string, DataMap::Entry> params;
@@ -762,7 +771,7 @@ void test_compiled_region_rng() {
 void test_region_rng_is_not_folded() {
   using namespace stanli;
   DataMap data = DataMap::from_json_file("tests/fixtures/gqrngfold.json");
-  const std::string text = slurp("tests/fixtures/gqrngfold.tmir.sexp");
+  const std::string text = slurp("tests/fixtures/gqrngfold.mir");
   CompiledModel cm = compile_model(text, data);
   if (!compiled_completely(cm, "gqrngfold")) return;
   Executor wex(std::move(cm.write_array->graph));
@@ -801,15 +810,14 @@ void test_region_rng_is_not_folded() {
 void test_interpreted_gq_densities() {
   using namespace stanli;
   DataMap data = DataMap::from_json_file("tests/fixtures/gqdensity.json");
-  const std::string text = slurp("tests/fixtures/gqdensity.tmir.sexp");
+  const std::string text = slurp("tests/fixtures/gqdensity.mir");
   CompiledModel cm = compile_model(text, data);
   if (!cm.write_array || !cm.write_array->interp) {
     ++failures;
     std::printf("FAIL gqdensity: expected an attached interpreter\n");
     return;
   }
-  auto program =
-      std::make_shared<mir::Program>(mir::read_program(sexp::parse(text)));
+  auto program = std::make_shared<mir::Program>(stanli::decode_program(text));
   std::map<std::string, DataMap::Entry> base =
       emit_env(data, {"K", "counts", "y", "Sigma"});
   WaInterp wi(program, std::move(base));
@@ -847,9 +855,8 @@ void test_interpreted_gq_densities() {
 // array[N] vector[D] coordinates.
 void test_interpreted_gq_gp_covariances() {
   using namespace stanli;
-  const std::string text = slurp("tests/fixtures/gpmatern.tmir.sexp");
-  auto program =
-      std::make_shared<mir::Program>(mir::read_program(sexp::parse(text)));
+  const std::string text = slurp("tests/fixtures/gpmatern.mir");
+  auto program = std::make_shared<mir::Program>(stanli::decode_program(text));
   std::map<std::string, DataMap::Entry> base = emit_env();
   WaInterp wi(program, std::move(base));
 
@@ -901,7 +908,7 @@ void test_compiled_multiply_lower_tri() {
   using namespace stanli;
   DataMap data;
   data.set_int("M", 3);
-  const std::string text = slurp("tests/fixtures/mlt.tmir.sexp");
+  const std::string text = slurp("tests/fixtures/mlt.mir");
   CompiledModel cm = compile_model(text, data);
   if (!compiled_completely(cm, "mlt")) return;
   // Column-major A with a non-zero upper triangle that must be ignored.
@@ -914,8 +921,7 @@ void test_compiled_multiply_lower_tri() {
   wex.run_forward_only(EvalState{&graph_rng});
   std::vector<double> row = read_row(cm.write_array->columns, wex);
 
-  auto program =
-      std::make_shared<mir::Program>(mir::read_program(sexp::parse(text)));
+  auto program = std::make_shared<mir::Program>(stanli::decode_program(text));
   std::map<std::string, DataMap::Entry> base = emit_env(data, {"M"});
   WaInterp wi(program, std::move(base));
   std::map<std::string, DataMap::Entry> params;
@@ -955,8 +961,7 @@ void test_compiled_multiply_lower_tri() {
 void test_array_of_matrix_columns() {
   using namespace stanli;
   DataMap data = DataMap::from_json_file("tests/fixtures/amatwa.json");
-  CompiledModel cm =
-      compile_model(slurp("tests/fixtures/amatwa.tmir.sexp"), data);
+  CompiledModel cm = compile_model(slurp("tests/fixtures/amatwa.mir"), data);
   if (!cm.write_array || cm.write_array->columns.empty()) {
     ++failures;
     std::printf("FAIL amatwa: no write_array\n");
@@ -1009,7 +1014,7 @@ void test_array_of_matrix_columns() {
   // exact same named row, including the rank-three parameter that the old
   // boundary rejected outright.
   auto prog = std::make_shared<mir::Program>(
-      mir::read_program(sexp::parse(slurp("tests/fixtures/amatwa.tmir.sexp"))));
+      stanli::decode_program(slurp("tests/fixtures/amatwa.mir")));
   std::map<std::string, DataMap::Entry> base = emit_env(data, {"d"});
   WaInterp interpreted(prog, std::move(base));
   WaRng rng(1234);
@@ -1043,7 +1048,7 @@ void test_caller_owned_rng() {
   DataMap data;
   data.set_int("N", 5);
   auto program = std::make_shared<mir::Program>(
-      mir::read_program(sexp::parse(slurp("tests/fixtures/gqrng.tmir.sexp"))));
+      stanli::decode_program(slurp("tests/fixtures/gqrng.mir")));
   std::map<std::string, DataMap::Entry> base = emit_env(data, {"N"});
   WaInterp wi(program, std::move(base));
   std::map<std::string, DataMap::Entry> params;
@@ -1081,7 +1086,7 @@ void test_caller_owned_rng() {
 
 void test_transformed_parameter_checks() {
   using namespace stanli;
-  const std::string mir = slurp("tests/fixtures/data_and_tp_checks.tmir.sexp");
+  const std::string mir = slurp("tests/fixtures/data_and_tp_checks.mir");
   DataMap data = bound_check_data();
   CompiledModel cm = compile_model(mir, data);
   if (!cm.write_array || cm.write_array->interp) {
@@ -1104,8 +1109,7 @@ void test_transformed_parameter_checks() {
     std::printf("FAIL compiled write_array did not enforce z lower bound\n");
   }
 
-  auto prog =
-      std::make_shared<mir::Program>(mir::read_program(sexp::parse(mir)));
+  auto prog = std::make_shared<mir::Program>(stanli::decode_program(mir));
   WaInterp interpreted(prog, bound_check_env(data));
   std::map<std::string, DataMap::Entry> params;
   params["x"].r = {-1.0};
@@ -1190,7 +1194,7 @@ void expect_retained_write_array_loop(const std::string& stem,
                                       const stanli::DataMap& data) {
   SKIP_WITHOUT_DEBUG_SWITCHES();
   using namespace stanli;
-  const std::string text = slurp("tests/fixtures/" + stem + ".tmir.sexp");
+  const std::string text = slurp("tests/fixtures/" + stem + ".mir");
 
   CompiledModel cm = compile_model(text, data);
   if (find_retained_loop(cm.graph) == nullptr) {
@@ -1274,7 +1278,7 @@ void test_write_array_forward_only() {
   data.set_int_array("y", {0, 3, 1, 7, 2, 4});
   data.set_real_array("x", {0.1, -0.4, 0.8, 0.3, -1.2, 0.5});
   CompiledModel cm =
-      compile_model(slurp("tests/fixtures/wa_scratch.tmir.sexp"), data);
+      compile_model(slurp("tests/fixtures/wa_scratch.mir"), data);
   if (!compiled_completely(cm, "forward-only write_array")) return;
   Executor wex(cm.write_array->graph);
   cm.write_array->bind(wex);
@@ -1340,8 +1344,8 @@ void test_write_array_reused_values() {
   std::vector<double> x(64);
   for (int i = 0; i < 64; ++i) x[(size_t)i] = 0.25 * (i % 5) - 0.5;
   data.set_real_array("x", x);
-  CompiledModel cm = compile_model(
-      slurp("tests/fixtures/structured_wa_carried.tmir.sexp"), data);
+  CompiledModel cm =
+      compile_model(slurp("tests/fixtures/structured_wa_carried.mir"), data);
   if (!compiled_completely(cm, "reused write_array values")) return;
   Graph separate = cm.write_array->graph;
   separate.forward_only = false;
@@ -1370,8 +1374,7 @@ void test_write_array_reused_values() {
 void test_write_array_carried_loop() {
   SKIP_WITHOUT_DEBUG_SWITCHES();
   using namespace stanli;
-  const std::string text =
-      slurp("tests/fixtures/structured_wa_carried.tmir.sexp");
+  const std::string text = slurp("tests/fixtures/structured_wa_carried.mir");
   for (const int t : {8, 20000}) {
     DataMap data;
     const int n = 64;
@@ -1455,7 +1458,7 @@ void test_write_array_vector_rng() {
   const int k = 4;
   DataMap data;
   data.set_int("K", k);
-  const std::string text = slurp("tests/fixtures/gqrng_vector.tmir.sexp");
+  const std::string text = slurp("tests/fixtures/gqrng_vector.mir");
 
   CompiledModel cm = compile_model(text, data);
   compiled_completely(cm, "gqrng_vector");
@@ -1528,7 +1531,7 @@ void expect_rng_loop_parity(const std::string& label, int pad,
   }
   data.set_real_array("x", x);
   data.set_int_array("len", len);
-  const std::string text = slurp("tests/fixtures/wa_rng_loops.tmir.sexp");
+  const std::string text = slurp("tests/fixtures/wa_rng_loops.mir");
   if (structured)
     test_setenv("STANLI_STRUCTURED_LOOPS", structured);
   else
@@ -1581,7 +1584,7 @@ void expect_replayed_write_array_loops(const std::string& stem,
   SKIP_WITHOUT_DEBUG_SWITCHES();
   using namespace stanli;
   const int n = 64;
-  const std::string text = slurp("tests/fixtures/" + stem + ".tmir.sexp");
+  const std::string text = slurp("tests/fixtures/" + stem + ".mir");
   for (const int t : {8, 20000}) {
     const std::string label = stem + " T=" + std::to_string(t);
     DataMap data;
@@ -1676,8 +1679,7 @@ void test_write_array_compare_size() {
   data.set_int("N", 40);
   data.set_int("R", 3);
   data.set_int_array("sizes", {2, 1, 3});
-  const std::string text =
-      slurp("tests/fixtures/structured_compare_size.tmir.sexp");
+  const std::string text = slurp("tests/fixtures/structured_compare_size.mir");
   test_setenv("STANLI_STRUCTURED_LOOPS", "1");
   CompiledModel retained = compile_model(text, data);
   test_setenv("STANLI_STRUCTURED_LOOPS", "0");
@@ -1720,7 +1722,7 @@ void expect_bounded_output(const std::string& fixture,
                            bool early_refusal = false) {
   SKIP_WITHOUT_DEBUG_SWITCHES();
   using namespace stanli;
-  const std::string text = slurp("tests/fixtures/" + fixture + ".tmir.sexp");
+  const std::string text = slurp("tests/fixtures/" + fixture + ".mir");
   ExecutionTrace normal_trace, disabled_trace;
   const auto prepare = [&](ExecutionTrace& trace) {
     ExecutionTraceScope tracing(trace);
@@ -1981,8 +1983,7 @@ void test_write_array_bounded_blocks() {
 void test_write_array_selected_loop_refused() {
   SKIP_WITHOUT_DEBUG_SWITCHES();
   using namespace stanli;
-  const std::string text =
-      slurp("tests/fixtures/gq_selected_loop_refused.tmir.sexp");
+  const std::string text = slurp("tests/fixtures/gq_selected_loop_refused.mir");
   const auto compile_at = [&](int n) {
     DataMap data;
     data.set_int("N", n);
@@ -2040,7 +2041,7 @@ void test_write_array_selected_loop_refused() {
 void test_write_array_selected_loop_overflow() {
   using namespace stanli;
   const std::string text =
-      slurp("tests/fixtures/gq_selected_loop_overflow.tmir.sexp");
+      slurp("tests/fixtures/gq_selected_loop_overflow.mir");
   for (const int n : {32, 1}) {
     const std::string what = "gq_selected_loop_overflow N=" + std::to_string(n);
     DataMap data;
@@ -2093,7 +2094,7 @@ void test_constant_folded_gq_column() {
   using namespace stanli;
   DataMap data;
   data.set_real_array("rectangular", {1.0, 2.0, 3.0, 4.0, 5.0, 6.0}, {3, 2});
-  const std::string text = slurp("tests/fixtures/gqconst.tmir.sexp");
+  const std::string text = slurp("tests/fixtures/gqconst.mir");
   test_setenv("STANLI_WA_FORCE_INTERP", "1");
   CompiledModel cm = compile_model(text, data);
   test_unsetenv("STANLI_WA_FORCE_INTERP");
@@ -2128,7 +2129,7 @@ void test_constant_folded_gq_column() {
 void test_mean_grouping() {
   using namespace stanli;
   DataMap data = DataMap::from_json_file("tests/fixtures/mean_grouping.json");
-  const std::string text = slurp("tests/fixtures/mean_grouping.tmir.sexp");
+  const std::string text = slurp("tests/fixtures/mean_grouping.mir");
   test_setenv("STANLI_WA_FORCE_INTERP", "1");
   CompiledModel cm = compile_model(text, data);
   test_unsetenv("STANLI_WA_FORCE_INTERP");
@@ -2172,8 +2173,7 @@ void test_constant_folded_gq_after_empty_output() {
   using namespace stanli;
   DataMap data;
   data.set_int("N", 0);
-  const std::string text =
-      slurp("tests/fixtures/gqconst_after_empty.tmir.sexp");
+  const std::string text = slurp("tests/fixtures/gqconst_after_empty.mir");
   test_setenv("STANLI_WA_FORCE_INTERP", "1");
   CompiledModel cm = compile_model(text, data);
   test_unsetenv("STANLI_WA_FORCE_INTERP");
@@ -2250,77 +2250,57 @@ static std::vector<double> direct_multi_normal_rng(
 
 void test_categorical_rng_lowering_guards() {
   using namespace stanli;
-  const std::string base = slurp("tests/fixtures/gq_categorical_rng.tmir.sexp");
-  const size_t call = base.find("(FunApp (StanLib categorical_rng");
-  const std::string vector_arg =
-      "((pattern (Var p)) (meta ((type_ UVector) (loc <opaque>) (adlevel "
-      "DataOnly))))";
-  const size_t argument = base.find(vector_arg, call);
-  if (call == std::string::npos || argument == std::string::npos) {
-    ++failures;
-    std::printf("FAIL categorical lowering guard fixture has no call\n");
-    return;
-  }
+  using portable_writer::calls;
+  const mir::Program base =
+      decode_program(slurp("tests/fixtures/gq_categorical_rng.mir"));
+  // The fixture with its categorical_rng call changed by `change`.
+  const auto mutated = [&](const std::function<void(mir::Expr&)>& change) {
+    mir::Program program = base;
+    mir::Expr* call = portable_writer::find_expr(
+        program,
+        [](const mir::Expr& e) { return calls(e, "categorical_rng"); });
+    if (call == nullptr || call->args.size() != 1)
+      throw std::logic_error("categorical lowering guard fixture has no call");
+    change(*call);
+    return portable_writer::write_v2(program);
+  };
 
   DataMap guard_data;
   guard_data.set_int("K", 4);
-  const auto expect_interp = [&](const std::string& mir,
-                                 const std::string& reason, const char* what) {
-    expect_interpreted(mir, guard_data, reason, what);
+  const std::pair<mir::UnsizedView, const char*> bad_arguments[] = {
+      {{0, mir::UnsizedLeaf::Real}, "scalar"},
+      {{0, mir::UnsizedLeaf::RowVector}, "row-vector"},
+      {{1, mir::UnsizedLeaf::Real}, "array"},
+      {{1, mir::UnsizedLeaf::Vector}, "array-vector"},
   };
-
-  struct BadArgument {
-    const char* type;
-    const char* label;
-  };
-  const BadArgument bad_arguments[] = {
-      {"UReal", "scalar"},
-      {"URowVector", "row-vector"},
-      {"(UArray UReal)", "array"},
-      {"(UArray UVector)", "array-vector"},
-  };
-  for (const BadArgument& bad : bad_arguments) {
-    std::string mutated = base;
-    const std::string replacement =
-        std::string("((pattern (Var p)) (meta ((type_ ") + bad.type +
-        ") (loc <opaque>) (adlevel DataOnly))))";
-    mutated.replace(argument, vector_arg.size(), replacement);
+  for (const auto& entry : bad_arguments) {
     const std::string label =
-        std::string("categorical ") + bad.label + " input stays interpreted";
-    expect_interp(mutated, "probability-vector argument", label.c_str());
+        std::string("categorical ") + entry.second + " input is rejected";
+    expect_rejected(
+        mutated([&](mir::Expr& call) { call.args[0].unsized = entry.first; }),
+        guard_data, "variable type disagrees with its binding for p", label);
   }
 
-  std::string no_args = base;
-  no_args.erase(argument, vector_arg.size());
-  expect_interp(no_args, "expected one scalar int result",
-                "zero-argument categorical stays interpreted");
+  expect_rejected(mutated([](mir::Expr& call) { call.args.clear(); }),
+                  guard_data, "expected 1 argument(s), got 0",
+                  "zero-argument categorical is rejected");
+  expect_rejected(
+      mutated([](mir::Expr& call) { call.args.push_back(call.args[0]); }),
+      guard_data, "expected 1 argument(s), got 2",
+      "two-argument categorical is rejected");
+  expect_rejected(mutated([](mir::Expr& call) {
+                    call.unsized = {0, mir::UnsizedLeaf::Real};
+                  }),
+                  guard_data, "assignment type disagrees with its binding",
+                  "categorical real result is rejected");
+  expect_rejected(mutated([](mir::Expr& call) {
+                    call.unsized = {1, mir::UnsizedLeaf::Int};
+                  }),
+                  guard_data, "assignment type disagrees with its binding",
+                  "categorical container result is rejected");
 
-  std::string two_args = base;
-  two_args.insert(argument + vector_arg.size(), " " + vector_arg);
-  expect_interp(two_args, "expected one scalar int result",
-                "two-argument categorical stays interpreted");
-
-  std::string wrong_result = base;
-  const std::string result_type = "(meta ((type_ UInt)";
-  const size_t result = wrong_result.find(result_type, call);
-  if (result == std::string::npos) {
-    ++failures;
-    std::printf("FAIL categorical lowering guard cannot find result type\n");
-  } else {
-    wrong_result.replace(result, result_type.size(), "(meta ((type_ UReal)");
-    expect_interp(wrong_result, "expected one scalar int result",
-                  "categorical real result stays interpreted");
-
-    std::string container_result = base;
-    container_result.replace(result, result_type.size(),
-                             "(meta ((type_ (UArray UInt))");
-    expect_interp(container_result, "expected one scalar int result",
-                  "categorical container result stays interpreted");
-  }
-
-  std::string logit = base;
-  logit.replace(call + std::string("(FunApp (StanLib ").size(),
-                std::string("categorical_rng").size(), "categorical_logit_rng");
+  const std::string logit =
+      mutated([](mir::Expr& call) { call.name = "categorical_logit_rng"; });
   DataMap logit_data;
   logit_data.set_int("K", 4);
   CompiledModel logit_cm = compile_model(logit, logit_data);
@@ -2378,7 +2358,7 @@ static std::vector<double> categorical_direct_row(
 
 void test_compiled_categorical_rng() {
   using namespace stanli;
-  const std::string text = slurp("tests/fixtures/gq_categorical_rng.tmir.sexp");
+  const std::string text = slurp("tests/fixtures/gq_categorical_rng.mir");
   const DataMap data = categorical_data(4);
   CompiledModel cm = compile_model(text, data);
   if (!compiled_completely(cm, "categorical rng")) return;
@@ -2419,8 +2399,7 @@ void test_compiled_categorical_rng() {
     return read_row(cm.write_array->columns, graph);
   };
 
-  auto program =
-      std::make_shared<mir::Program>(mir::read_program(sexp::parse(text)));
+  auto program = std::make_shared<mir::Program>(stanli::decode_program(text));
   WaInterp interpreted(program, categorical_base(data));
   std::map<std::string, DataMap::Entry> params;
   const std::vector<double> valid{0.125, 0.25, 0.375, 0.25};
@@ -2504,15 +2483,14 @@ void test_compiled_categorical_rng() {
 
 void test_categorical_rng_empty_vector() {
   using namespace stanli;
-  const std::string text = slurp("tests/fixtures/gq_categorical_rng.tmir.sexp");
+  const std::string text = slurp("tests/fixtures/gq_categorical_rng.mir");
   const DataMap data = categorical_data(0);
   CompiledModel cm = compile_model(text, data);
   if (!compiled_completely(cm, "empty categorical vector")) return;
 
   Executor graph(std::move(cm.write_array->graph));
   cm.write_array->bind(graph);
-  auto program =
-      std::make_shared<mir::Program>(mir::read_program(sexp::parse(text)));
+  auto program = std::make_shared<mir::Program>(stanli::decode_program(text));
   WaInterp interpreted(program, categorical_base(data));
   std::map<std::string, DataMap::Entry> params;
   params["p"] = categorical_parameter({});
@@ -2540,8 +2518,7 @@ void test_categorical_rng_empty_vector() {
 
 void test_categorical_rng_dynamic_index() {
   using namespace stanli;
-  const std::string text =
-      slurp("tests/fixtures/gq_categorical_dynamic.tmir.sexp");
+  const std::string text = slurp("tests/fixtures/gq_categorical_dynamic.mir");
   const DataMap data = categorical_data(3);
   CompiledModel cm = compile_model(text, data);
   if (!compiled_completely(cm, "categorical dynamic index lowering")) return;
@@ -2625,134 +2602,108 @@ static std::vector<double> multi_normal_direct_row(
 
 void test_multi_normal_rng_lowering_guards() {
   using namespace stanli;
-  const std::string base =
-      slurp("tests/fixtures/gq_multi_normal_rng.tmir.sexp");
-  const size_t call = base.find("(FunApp (StanLib multi_normal_rng");
-  const std::string mean_arg =
-      "((pattern (Var mu)) (meta ((type_ UVector) (loc <opaque>) (adlevel "
-      "DataOnly))))";
-  const std::string covariance_arg =
-      "((pattern (Var inline_cov_matrix_2d_return1__))\n"
-      "           (meta ((type_ UMatrix) (loc <opaque>) (adlevel "
-      "DataOnly))))";
-  const size_t mean = base.find(mean_arg, call);
-  const size_t covariance = base.find(covariance_arg, call);
-  if (call == std::string::npos || mean == std::string::npos ||
-      covariance == std::string::npos) {
-    ++failures;
-    std::printf("FAIL multi-normal lowering guard fixture has no call\n");
-    return;
-  }
+  using portable_writer::calls;
+  const mir::Program base =
+      decode_program(slurp("tests/fixtures/gq_multi_normal_rng.mir"));
+  // The fixture with its multi_normal_rng call, and the declarations of the
+  // covariance and of the draw, changed by `change`.
+  const auto mutated =
+      [&](const std::function<void(mir::Program&, mir::Expr&)>& change) {
+        mir::Program program = base;
+        mir::Expr* call = portable_writer::find_expr(
+            program,
+            [](const mir::Expr& e) { return calls(e, "multi_normal_rng"); });
+        if (call == nullptr || call->args.size() != 2)
+          throw std::logic_error(
+              "multi-normal lowering guard fixture has no call");
+        change(program, *call);
+        return portable_writer::write_v2(program);
+      };
+  const auto declaration = [](mir::Program& program, const std::string& name) {
+    mir::Stmt* decl =
+        portable_writer::find_stmt(program, [&](const mir::Stmt& s) {
+          return s.kind == mir::Stmt::Decl && s.decl_id == name;
+        });
+    if (decl == nullptr) throw std::logic_error("no declaration of " + name);
+    return decl;
+  };
+  const auto set_extents = [](mir::Stmt* decl, int64_t extent) {
+    for (mir::Expr& dim : decl->decl_type.dims) dim.lit_i = extent;
+  };
 
   const auto expect_interp = [](const std::string& mir,
                                 const std::string& reason, const char* label) {
     expect_interpreted(mir, DataMap{}, reason, label);
   };
-
-  const auto replace_once = [](std::string text, size_t at, size_t count,
-                               const std::string& replacement) {
-    text.replace(at, count, replacement);
-    return text;
+  const auto expect_reject = [](const std::string& mir,
+                                const std::string& reason,
+                                const std::string& label) {
+    expect_rejected(mir, DataMap{}, reason, label);
   };
-  for (const auto& bad : std::vector<std::pair<std::string, const char*>>{
-           {"UReal", "scalar"},
-           {"URowVector", "row-vector"},
-           {"(UArray UVector)", "array-vector"}}) {
-    const std::string replacement = "((pattern (Var mu)) (meta ((type_ " +
-                                    bad.first +
-                                    ") (loc <opaque>) (adlevel DataOnly))))";
-    expect_interp(
-        replace_once(base, mean, mean_arg.size(), replacement),
-        "expected one vector location",
-        (std::string("multi-normal ") + bad.second + " mean stays interpreted")
-            .c_str());
-  }
-  for (const auto& bad : std::vector<std::pair<std::string, const char*>>{
-           {"UVector", "vector"}, {"(UArray UMatrix)", "array-matrix"}}) {
-    std::string replacement = covariance_arg;
-    const size_t type = replacement.find("UMatrix");
-    replacement.replace(type, std::string("UMatrix").size(), bad.first);
-    expect_interp(
-        replace_once(base, covariance, covariance_arg.size(), replacement),
-        "expected one covariance matrix",
-        (std::string("multi-normal ") + bad.second +
-         " covariance stays interpreted")
-            .c_str());
-  }
 
-  std::string one_arg = base;
-  one_arg.erase(covariance, covariance_arg.size());
-  expect_interp(one_arg, "expected one vector result",
-                "one-argument multi-normal stays interpreted");
-  std::string zero_args = base;
-  zero_args.erase(covariance, covariance_arg.size());
-  zero_args.erase(mean, mean_arg.size());
-  expect_interp(zero_args, "expected one vector result",
-                "zero-argument multi-normal stays interpreted");
-  std::string three_args = base;
-  three_args.insert(covariance + covariance_arg.size(), " " + mean_arg);
-  expect_interp(three_args, "expected one vector result",
-                "three-argument multi-normal stays interpreted");
+  for (const auto& entry :
+       std::vector<std::pair<mir::UnsizedView, const char*>>{
+           {{0, mir::UnsizedLeaf::Real}, "scalar"},
+           {{0, mir::UnsizedLeaf::RowVector}, "row-vector"},
+           {{1, mir::UnsizedLeaf::Vector}, "array-vector"}})
+    expect_reject(
+        mutated([&](mir::Program&, mir::Expr& call) {
+          call.args[0].unsized = entry.first;
+        }),
+        "variable type disagrees with its binding for mu",
+        std::string("multi-normal ") + entry.second + " mean is rejected");
+  for (const auto& entry :
+       std::vector<std::pair<mir::UnsizedView, const char*>>{
+           {{0, mir::UnsizedLeaf::Vector}, "vector"},
+           {{1, mir::UnsizedLeaf::Matrix}, "array-matrix"}})
+    expect_reject(mutated([&](mir::Program&, mir::Expr& call) {
+                    call.args[1].unsized = entry.first;
+                  }),
+                  "variable type disagrees with its binding",
+                  std::string("multi-normal ") + entry.second +
+                      " covariance is rejected");
 
-  const size_t mean_type = base.find("(type_ UVector)", call);
-  const size_t result_type = base.find("(type_ UVector)", mean_type + 1);
-  if (result_type == std::string::npos) {
-    ++failures;
-    std::printf("FAIL multi-normal lowering guard cannot find result type\n");
-  } else {
-    std::string row_result = base;
-    row_result.replace(result_type, std::string("(type_ UVector)").size(),
-                       "(type_ URowVector)");
-    expect_interp(row_result, "expected one vector result",
-                  "multi-normal row-vector result stays interpreted");
-    std::string array_result = base;
-    array_result.replace(result_type, std::string("(type_ UVector)").size(),
-                         "(type_ (UArray UVector))");
-    expect_interp(array_result, "expected one vector result",
-                  "multi-normal array result stays interpreted");
-  }
+  expect_reject(
+      mutated([](mir::Program&, mir::Expr& call) { call.args.pop_back(); }),
+      "expected 2 argument(s), got 1", "one-argument multi-normal is rejected");
+  expect_reject(
+      mutated([](mir::Program&, mir::Expr& call) { call.args.clear(); }),
+      "expected 2 argument(s), got 0",
+      "zero-argument multi-normal is rejected");
+  expect_reject(mutated([](mir::Program&, mir::Expr& call) {
+                  call.args.push_back(call.args[0]);
+                }),
+                "expected 2 argument(s), got 3",
+                "three-argument multi-normal is rejected");
+  for (const auto& entry :
+       std::vector<std::pair<mir::UnsizedView, const char*>>{
+           {{0, mir::UnsizedLeaf::RowVector}, "row-vector"},
+           {{1, mir::UnsizedLeaf::Vector}, "array"}})
+    expect_reject(
+        mutated([&](mir::Program&, mir::Expr& call) {
+          call.unsized = entry.first;
+        }),
+        "assignment type disagrees with its binding",
+        std::string("multi-normal ") + entry.second + " result is rejected");
 
-  std::string unknown_covariance = base;
-  const size_t covariance_var =
-      unknown_covariance.find("(Var inline_cov_matrix_2d_return1__)", call);
-  unknown_covariance.replace(
-      covariance_var,
-      std::string("(Var inline_cov_matrix_2d_return1__)").size(), "(Var mu)");
-  expect_interp(unknown_covariance, "covariance has no known matrix shape",
-                "multi-normal unknown covariance shape stays interpreted");
+  expect_reject(
+      mutated([](mir::Program&, mir::Expr& call) { call.args[1].name = "mu"; }),
+      "variable type disagrees with its binding for mu",
+      "multi-normal vector covariance variable is rejected");
 
-  std::string mismatched_covariance = base;
-  const size_t matrix_decl = mismatched_covariance.find(
-      "(decl_id inline_cov_matrix_2d_covariance2__)");
-  size_t first_extent =
-      mismatched_covariance.find("((pattern (Lit Int 2))", matrix_decl);
-  size_t second_extent =
-      mismatched_covariance.find("((pattern (Lit Int 2))", first_extent + 1);
-  if (matrix_decl == std::string::npos || first_extent == std::string::npos ||
-      second_extent == std::string::npos) {
-    ++failures;
-    std::printf("FAIL multi-normal cannot locate covariance extents\n");
-  } else {
-    first_extent = mismatched_covariance.find("Int 2", first_extent) + 4;
-    second_extent = mismatched_covariance.find("Int 2", second_extent) + 4;
-    mismatched_covariance[first_extent] = '3';
-    mismatched_covariance[second_extent] = '3';
-    expect_interp(mismatched_covariance,
-                  "covariance shape must match the location",
-                  "multi-normal known dimension mismatch stays interpreted");
-  }
+  const auto mismatched_covariance = [&](mir::Program& program, mir::Expr&) {
+    set_extents(declaration(program, "inline_cov_matrix_2d_covariance2__"), 3);
+  };
+  expect_interp(mutated(mismatched_covariance),
+                "covariance shape must match the location",
+                "multi-normal known dimension mismatch stays interpreted");
 
-  std::string mismatched_result = base;
-  const size_t draw_decl = mismatched_result.find("(decl_id draw)");
-  size_t draw_extent =
-      mismatched_result.find("((pattern (Lit Int 2))", draw_decl);
-  if (draw_decl == std::string::npos || draw_extent == std::string::npos) {
-    ++failures;
-    std::printf("FAIL multi-normal cannot locate result extent\n");
-  } else {
-    draw_extent = mismatched_result.find("Int 2", draw_extent) + 4;
-    mismatched_result[draw_extent] = '3';
-    CompiledModel cm = compile_model(mismatched_result, DataMap{});
+  {
+    CompiledModel cm =
+        compile_model(mutated([&](mir::Program& program, mir::Expr&) {
+                        set_extents(declaration(program, "draw"), 3);
+                      }),
+                      DataMap{});
     std::string thrown;
     if (cm.write_array && !cm.write_array->interp) {
       Executor wex(std::move(cm.write_array->graph));
@@ -2773,25 +2724,23 @@ void test_multi_normal_rng_lowering_guards() {
     }
   }
 
-  std::string cholesky = base;
-  cholesky.replace(call + std::string("(FunApp (StanLib ").size(),
-                   std::string("multi_normal_rng").size(),
-                   "multi_normal_cholesky_rng");
-  auto cholesky_cm = compile_model(cholesky, DataMap{});
+  auto cholesky_cm = compile_model(mutated([](mir::Program&, mir::Expr& call) {
+                                     call.name = "multi_normal_cholesky_rng";
+                                   }),
+                                   DataMap{});
   compiled_completely(cholesky_cm, "multi-normal Cholesky");
   // A new family must not weaken the shared geometry proof.
-  mismatched_covariance.replace(call + std::string("(FunApp (StanLib ").size(),
-                                std::string("multi_normal_rng").size(),
-                                "multi_normal_cholesky_rng");
-  expect_interp(mismatched_covariance,
+  expect_interp(mutated([&](mir::Program& program, mir::Expr& call) {
+                  mismatched_covariance(program, call);
+                  call.name = "multi_normal_cholesky_rng";
+                }),
                 "covariance shape must match the location",
                 "Cholesky mismatched geometry stays interpreted");
 }
 
 void test_compiled_multi_normal_rng() {
   using namespace stanli;
-  const std::string text =
-      slurp("tests/fixtures/gq_multi_normal_rng.tmir.sexp");
+  const std::string text = slurp("tests/fixtures/gq_multi_normal_rng.mir");
   CompiledModel cm = compile_model(text, DataMap{});
   if (!compiled_completely(cm, "multi-normal RNG")) return;
   int multi_ops = 0, uniform_ops = 0, other_rng_ops = 0;
@@ -2842,8 +2791,7 @@ void test_compiled_multi_normal_rng() {
   params["mu"] = vector_entry(mu);
   params["sigma"] = vector_entry(sigma);
   params["rho"] = real_entry(rho);
-  auto program =
-      std::make_shared<mir::Program>(mir::read_program(sexp::parse(text)));
+  auto program = std::make_shared<mir::Program>(stanli::decode_program(text));
   WaInterp interpreted(program, multi_normal_base());
 
   WaRng graph_rng(42), interp_rng(42), direct_rng(42);
@@ -2923,69 +2871,55 @@ void test_compiled_multi_normal_rng() {
 
 void test_binomial_rng_lowering_guards() {
   using namespace stanli;
-  const std::string base = slurp("tests/fixtures/gq_scalar_rng.tmir.sexp");
-  const size_t call = base.find("(FunApp (StanLib binomial_rng");
-  if (call == std::string::npos) {
-    ++failures;
-    std::printf("FAIL binomial lowering guard fixture has no call\n");
-    return;
-  }
-
+  using portable_writer::calls;
+  const mir::Program base =
+      decode_program(slurp("tests/fixtures/gq_scalar_rng.mir"));
+  // The fixture with its binomial_rng call changed by `change`.
+  const auto mutated = [&](const std::function<void(mir::Expr&)>& change) {
+    mir::Program program = base;
+    mir::Expr* call = portable_writer::find_expr(
+        program, [](const mir::Expr& e) { return calls(e, "binomial_rng"); });
+    if (call == nullptr || call->args.empty() ||
+        call->args[0].kind != mir::Expr::LitInt || call->args[0].lit_i != 5)
+      throw std::logic_error("binomial lowering guard fixture has no call");
+    change(*call);
+    return portable_writer::write_v2(program);
+  };
   const auto expect_interp = [](const std::string& mir,
                                 const std::string& reason, const char* what) {
     expect_interpreted(mir, DataMap{}, reason, what);
   };
 
-  const std::string scalar_trials =
-      "((pattern (Lit Int 5))\n"
-      "               (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly))))";
-  const size_t trials = base.find(scalar_trials, call);
-  if (trials == std::string::npos) {
-    ++failures;
-    std::printf("FAIL binomial lowering guard cannot find trials\n");
-    return;
-  }
-
-  std::string malformed = base;
-  malformed.replace(trials, scalar_trials.size(),
-                    "((pattern (Lit Real 5.0))\n"
-                    "               (meta ((type_ UReal) (loc <opaque>) "
-                    "(adlevel DataOnly))))");
-  expect_interp(malformed, "first argument must be int",
+  expect_interp(mutated([](mir::Expr& call) {
+                  mir::Expr& trials = call.args[0];
+                  trials.kind = mir::Expr::LitReal;
+                  trials.lit = 5.0;
+                  trials.unsized = {0, mir::UnsizedLeaf::Real};
+                }),
+                "first argument must be int",
                 "binomial real trials stay interpreted");
-
-  std::string container_arg = base;
-  container_arg.replace(
-      trials, scalar_trials.size(),
-      "((pattern\n"
-      "                (FunApp (CompilerInternal FnMakeArray)\n"
-      "                 (((pattern (Lit Int 5))\n"
-      "                   (meta ((type_ UInt) (loc <opaque>) (adlevel "
-      "DataOnly)))))))\n"
-      "               (meta ((type_ (UArray UInt)) (loc <opaque>) (adlevel "
-      "DataOnly))))");
-  expect_interp(container_arg, "result shape does not match RNG arguments",
+  expect_interp(mutated([](mir::Expr& call) {
+                  mir::Expr array;
+                  array.kind = mir::Expr::FunApp;
+                  array.fn_lib = mir::Expr::Lib::Internal;
+                  array.name = "FnMakeArray";
+                  array.data_only = true;
+                  array.unsized = {1, mir::UnsizedLeaf::Int};
+                  array.args = {call.args[0]};
+                  call.args[0] = array;
+                }),
+                "result shape does not match RNG arguments",
                 "binomial container argument with scalar result refuses");
-
-  std::string container_result = base;
-  const std::string result_meta =
-      "\n           (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly)))";
-  const size_t result = container_result.find(result_meta, call);
-  if (result == std::string::npos) {
-    ++failures;
-    std::printf("FAIL binomial lowering guard cannot find result type\n");
-    return;
-  }
-  container_result.replace(result, result_meta.size(),
-                           "\n           (meta ((type_ (UArray UInt)) (loc "
-                           "<opaque>) (adlevel DataOnly)))");
-  expect_interp(container_result, "result shape does not match RNG arguments",
+  expect_interp(mutated([](mir::Expr& call) {
+                  call.unsized = {1, mir::UnsizedLeaf::Int};
+                }),
+                "result shape does not match RNG arguments",
                 "binomial scalar arguments with container result refuses");
 }
 
 void test_compiled_scalar_rng() {
   using namespace stanli;
-  const std::string path = "tests/fixtures/gq_scalar_rng.tmir.sexp";
+  const std::string path = "tests/fixtures/gq_scalar_rng.mir";
   const std::string text = slurp(path);
   DataMap data;
   CompiledModel cm = compile_model(text, data);
@@ -3009,8 +2943,7 @@ void test_compiled_scalar_rng() {
     return read_row(cm.write_array->columns, wex);
   };
 
-  auto prog =
-      std::make_shared<mir::Program>(mir::read_program(sexp::parse(text)));
+  auto prog = std::make_shared<mir::Program>(stanli::decode_program(text));
   std::map<std::string, DataMap::Entry> base = emit_env();
   WaInterp interp(prog, std::move(base));
   std::map<std::string, DataMap::Entry> params;
@@ -3133,7 +3066,7 @@ static std::map<std::string, stanli::DataMap::Entry> reduction_base(
 void test_layout_materialization_boundaries() {
   using namespace stanli;
   const std::string text =
-      slurp("tests/fixtures/gq_layout_materialization.tmir.sexp");
+      slurp("tests/fixtures/gq_layout_materialization.mir");
   DataMap data;
   data.set_int_array("idx", {1, 2, 3, 4, 5});
   CompiledModel cm = compile_model(text, data);
@@ -3199,8 +3132,7 @@ void test_layout_materialization_boundaries() {
     std::printf("FAIL materialization value %s\n", expected.first.c_str());
   }
 
-  auto program =
-      std::make_shared<mir::Program>(mir::read_program(sexp::parse(text)));
+  auto program = std::make_shared<mir::Program>(stanli::decode_program(text));
   std::map<std::string, DataMap::Entry> base = emit_env(data, {"idx"});
   WaInterp interp(program, std::move(base));
   std::map<std::string, DataMap::Entry> params;
@@ -3228,8 +3160,7 @@ void test_layout_materialization_boundaries() {
     }
   }
 
-  const std::string udf_text =
-      slurp("tests/fixtures/gq_udf_return_layout.tmir.sexp");
+  const std::string udf_text = slurp("tests/fixtures/gq_udf_return_layout.mir");
   CompiledModel udf = compile_model(udf_text, data);
   int udf_packet_products = 0;
   if (udf.write_array)
@@ -3273,8 +3204,7 @@ void test_layout_materialization_boundaries() {
 
 void test_main_index_layout_metadata() {
   using namespace stanli;
-  const std::string text =
-      slurp("tests/fixtures/gq_main_index_layout.tmir.sexp");
+  const std::string text = slurp("tests/fixtures/gq_main_index_layout.mir");
   DataMap data;
   CompiledModel cm = compile_model(text, data);
   if (!compiled_completely(cm, "main index layout fixture")) return;
@@ -3337,7 +3267,7 @@ void test_main_index_layout_metadata() {
 void test_matrix_transpose_extrema_fallback() {
   using namespace stanli;
   const std::string text =
-      slurp("tests/fixtures/gq_matrix_transpose_extrema.tmir.sexp");
+      slurp("tests/fixtures/gq_matrix_transpose_extrema.mir");
   DataMap data;
   CompiledModel cm = compile_model(text, data);
   if (!cm.write_array || !cm.write_array->interp ||
@@ -3357,8 +3287,7 @@ void test_matrix_transpose_extrema_fallback() {
   std::copy(values.begin(), values.end(), matrix.data());
   const double want = stan::math::min(matrix.transpose());
 
-  auto program =
-      std::make_shared<mir::Program>(mir::read_program(sexp::parse(text)));
+  auto program = std::make_shared<mir::Program>(stanli::decode_program(text));
   std::map<std::string, DataMap::Entry> base = emit_env();
   WaInterp interp(program, std::move(base));
   std::map<std::string, DataMap::Entry> params;
@@ -3386,7 +3315,7 @@ void test_matrix_transpose_extrema_fallback() {
 
 void test_compiled_gq_extrema() {
   using namespace stanli;
-  const std::string text = slurp("tests/fixtures/gq_extrema.tmir.sexp");
+  const std::string text = slurp("tests/fixtures/gq_extrema.mir");
   const double nan = std::numeric_limits<double>::quiet_NaN();
   const std::vector<std::vector<double>> cases = {
       {},
@@ -3435,8 +3364,7 @@ void test_compiled_gq_extrema() {
     graph.run_forward_only();
     std::vector<double> graph_row = read_row(cm.write_array->columns, graph);
 
-    auto program =
-        std::make_shared<mir::Program>(mir::read_program(sexp::parse(text)));
+    auto program = std::make_shared<mir::Program>(stanli::decode_program(text));
     std::map<std::string, DataMap::Entry> base = emit_env(data, {"N", "d"});
     WaInterp interp(program, std::move(base));
     std::map<std::string, DataMap::Entry> params;
@@ -3494,109 +3422,91 @@ static void expect_extrema_interp(const std::string& text, const char* what) {
 
 void test_gq_extrema_lowering_guards() {
   using namespace stanli;
-  const std::string base = slurp("tests/fixtures/gq_extrema.tmir.sexp");
-  const size_t wa = base.find("(generate_quantities");
-  const size_t min_call = base.find("(FunApp (StanLib min", wa);
-  const std::string vector_node =
-      "((pattern (Var x)) (meta ((type_ UVector) (loc <opaque>) (adlevel "
-      "DataOnly))))";
-  const size_t arg_at = base.find(vector_node, min_call);
-  if (wa == std::string::npos || min_call == std::string::npos ||
-      arg_at == std::string::npos) {
-    ++failures;
-    std::printf("FAIL extrema guard fixture has no direct min call\n");
-    return;
-  }
-
-  struct BadType {
-    const char* type;
-    const char* label;
+  using portable_writer::calls;
+  const auto min_call = [](const mir::Expr& e) { return calls(e, "min"); };
+  const mir::Program base =
+      decode_program(slurp("tests/fixtures/gq_extrema.mir"));
+  // The fixture with the first min call of generated quantities changed by
+  // `change`.
+  const auto mutated = [&](const std::function<void(mir::Expr&)>& change) {
+    mir::Program program = base;
+    mir::Expr* call =
+        portable_writer::find_expr(program.generate_quantities, min_call);
+    if (call == nullptr || call->args.size() != 1 ||
+        call->args[0].kind != mir::Expr::Var || call->args[0].name != "x")
+      throw std::logic_error("extrema guard fixture has no direct min call");
+    change(*call);
+    return portable_writer::write_v2(program);
   };
-  for (const BadType& bad :
-       {BadType{"UReal", "scalar"}, BadType{"UMatrix", "matrix"},
-        BadType{"(UArray UReal)", "array"}}) {
-    std::string mutated = base;
-    const std::string from = "type_ UVector";
-    const size_t at = mutated.find(from, arg_at);
-    if (at == std::string::npos) {
-      ++failures;
-      std::printf("FAIL extrema mutation cannot find %s type\n", bad.label);
-      continue;
-    }
-    mutated.replace(at, from.size(), std::string("type_ ") + bad.type);
-    expect_extrema_interp(mutated, (std::string("extrema ") + bad.label +
-                                    " argument stays interpreted")
-                                       .c_str());
-  }
+  const auto literal = [](long value) {
+    mir::Expr e;
+    e.kind = mir::Expr::LitInt;
+    e.lit_i = value;
+    e.data_only = true;
+    e.unsized = {0, mir::UnsizedLeaf::Int};
+    return e;
+  };
 
-  const std::string exp_vector =
-      "((pattern\n"
-      "            (FunApp (StanLib exp FnPlain AoS)\n"
-      "             (" +
-      vector_node +
-      ")))\n"
-      "           (meta ((type_ UVector) (loc <opaque>) (adlevel "
-      "DataOnly))))";
-  std::string expression = base;
-  expression.replace(arg_at, vector_node.size(), exp_vector);
-  expect_compiled(expression, extrema_guard_data(), "min(exp(x))");
+  for (const auto& entry :
+       std::vector<std::pair<mir::UnsizedView, const char*>>{
+           {{0, mir::UnsizedLeaf::Real}, "scalar"},
+           {{0, mir::UnsizedLeaf::Matrix}, "matrix"},
+           {{1, mir::UnsizedLeaf::Real}, "array"}})
+    expect_rejected(
+        mutated([&](mir::Expr& call) { call.args[0].unsized = entry.first; }),
+        extrema_guard_data(), "variable type disagrees with its binding for x",
+        std::string("extrema ") + entry.second + " argument is rejected");
 
-  const std::string indexed =
-      "((pattern\n"
-      "            (Indexed\n"
-      "             " +
-      vector_node +
-      "\n"
-      "             ((Between\n"
-      "               ((pattern (Lit Int 2))\n"
-      "                (meta ((type_ UInt) (loc <opaque>) (adlevel "
-      "DataOnly))))\n"
-      "               ((pattern (Lit Int 5))\n"
-      "                (meta ((type_ UInt) (loc <opaque>) (adlevel "
-      "DataOnly))))))))\n"
-      "           (meta ((type_ UVector) (loc <opaque>) (adlevel "
-      "DataOnly))))";
-  std::string view = base;
-  view.replace(arg_at, vector_node.size(), indexed);
-  expect_compiled(view, extrema_guard_data(), "min(x[2:5])");
+  expect_compiled(mutated([](mir::Expr& call) {
+                    mir::Expr exp;
+                    exp.kind = mir::Expr::FunApp;
+                    exp.name = "exp";
+                    exp.data_only = true;
+                    exp.unsized = call.args[0].unsized;
+                    exp.args = {call.args[0]};
+                    call.args[0] = exp;
+                  }),
+                  extrema_guard_data(), "min(exp(x))");
+  expect_compiled(mutated([&](mir::Expr& call) {
+                    mir::Expr between;
+                    between.kind = mir::Expr::IndexBetween;
+                    between.args = {literal(2), literal(5)};
+                    mir::Expr indexed;
+                    indexed.kind = mir::Expr::Indexed;
+                    indexed.data_only = true;
+                    indexed.unsized = call.args[0].unsized;
+                    indexed.args = {call.args[0], between};
+                    call.args[0] = indexed;
+                  }),
+                  extrema_guard_data(), "min(x[2:5])");
 
-  std::string zero_args = base;
-  zero_args.erase(arg_at, vector_node.size());
-  expect_extrema_interp(zero_args, "zero-argument min stays interpreted");
+  expect_rejected(mutated([](mir::Expr& call) { call.args.clear(); }),
+                  extrema_guard_data(), "expected 1 or 2 argument(s), got 0",
+                  "zero-argument min is rejected");
+  expect_extrema_interp(
+      mutated([](mir::Expr& call) { call.args.push_back(call.args[0]); }),
+      "two-argument dynamic min stays interpreted");
+  expect_rejected(mutated([](mir::Expr& call) {
+                    call.unsized = {0, mir::UnsizedLeaf::Vector};
+                  }),
+                  extrema_guard_data(),
+                  "assignment type disagrees with its binding for x_min",
+                  "container-result min is rejected");
 
-  std::string two_args = base;
-  two_args.insert(arg_at + vector_node.size(), " " + vector_node);
-  expect_extrema_interp(two_args, "two-argument dynamic min stays interpreted");
-
-  std::string container_result = base;
-  const std::string scalar_result =
-      "(meta ((type_ UReal) (loc <opaque>) (adlevel DataOnly)))";
-  const size_t result_at = container_result.find(scalar_result, arg_at);
-  if (result_at == std::string::npos) {
-    ++failures;
-    std::printf("FAIL extrema mutation cannot find result metadata\n");
-  } else {
-    container_result.replace(
-        result_at, scalar_result.size(),
-        "(meta ((type_ UVector) (loc <opaque>) (adlevel DataOnly)))");
-    expect_extrema_interp(container_result,
-                          "container-result min stays interpreted");
-  }
-
-  // O1 normally inlines this UDF call.  Restore the retained call so the
-  // direct formal reaches lowering at udf_depth > 0 and cannot acquire an
-  // owning-vector provenance merely from its Var syntax.
-  std::string udf = slurp("tests/fixtures/gq_extrema_udf.tmir.sexp");
-  const size_t udf_wa = udf.find("(generate_quantities");
-  const std::string stan_min = "(FunApp (StanLib min FnPlain)";
-  const size_t inlined = udf.find(stan_min, udf_wa);
-  if (udf_wa == std::string::npos || inlined == std::string::npos) {
+  // The fixture's compile inlines this UDF call. Restore the retained call
+  // so the direct formal reaches lowering at udf_depth > 0 and cannot acquire
+  // an owning-vector provenance merely from its Var syntax.
+  mir::Program udf = decode_program(slurp("tests/fixtures/gq_extrema_udf.mir"));
+  mir::Expr* inlined =
+      portable_writer::find_expr(udf.generate_quantities, min_call);
+  if (inlined == nullptr) {
     ++failures;
     std::printf("FAIL extrema UDF fixture has no inlined call\n");
   } else {
-    udf.replace(inlined, stan_min.size(),
-                "(FunApp (UserDefined vector_min FnPlain)");
-    expect_compiled(udf, extrema_guard_data(), "dynamic UDF extrema");
+    inlined->fn_lib = mir::Expr::Lib::UserDefined;
+    inlined->name = "vector_min";
+    expect_compiled(portable_writer::write_v2(udf), extrema_guard_data(),
+                    "dynamic UDF extrema");
   }
 
   // The same opcode now serves active log_prob reductions through its stored
@@ -3604,8 +3514,8 @@ void test_gq_extrema_lowering_guards() {
   bool reverse_compiled = false;
   try {
     DataMap no_data;
-    CompiledModel reverse = compile_model(
-        slurp("tests/fixtures/gq_extrema_reverse.tmir.sexp"), no_data);
+    CompiledModel reverse =
+        compile_model(slurp("tests/fixtures/gq_extrema_reverse.mir"), no_data);
     reverse_compiled =
         std::any_of(reverse.graph.ops.begin(), reverse.graph.ops.end(),
                     [](const Op& op) { return op.opcode == OP_EXTREMA_VEC; });
@@ -3621,19 +3531,19 @@ void test_gq_extrema_view_lowering_guards() {
   using namespace stanli;
   DataMap row_data;
   row_data.set_int("N", 5);
-  expect_compiled(slurp("tests/fixtures/gq_extrema_row.tmir.sexp"), row_data,
+  expect_compiled(slurp("tests/fixtures/gq_extrema_row.mir"), row_data,
                   "strided matrix-row extrema");
 
   DataMap gather_data;
   gather_data.set_int("N", 5);
   gather_data.set_int_array("idx", {5, 2, 2, 1, 4});
-  expect_compiled(slurp("tests/fixtures/gq_extrema_gather.tmir.sexp"),
-                  gather_data, "gathered extrema");
+  expect_compiled(slurp("tests/fixtures/gq_extrema_gather.mir"), gather_data,
+                  "gathered extrema");
 }
 
 void test_compiled_gq_reductions() {
   using namespace stanli;
-  const std::string text = slurp("tests/fixtures/gq_reductions.tmir.sexp");
+  const std::string text = slurp("tests/fixtures/gq_reductions.mir");
   const DataMap data = reduction_data();
   CompiledModel cm = compile_model(text, data);
   if (!compiled_completely(cm, "reductions fixture")) return;
@@ -3685,8 +3595,7 @@ void test_compiled_gq_reductions() {
     return read_row(cm.write_array->columns, graph);
   };
 
-  auto program =
-      std::make_shared<mir::Program>(mir::read_program(sexp::parse(text)));
+  auto program = std::make_shared<mir::Program>(stanli::decode_program(text));
   WaInterp interpreted(program, reduction_base(data));
   std::map<std::string, DataMap::Entry> params;
   params["pad"].r = {0.25};
@@ -3790,8 +3699,7 @@ static std::vector<double> eval_reduction_interp(
     const std::string& text, std::vector<std::string>* names) {
   using namespace stanli;
   const DataMap data = reduction_data();
-  auto program =
-      std::make_shared<mir::Program>(mir::read_program(sexp::parse(text)));
+  auto program = std::make_shared<mir::Program>(stanli::decode_program(text));
   WaInterp interp(program, reduction_base(data));
   std::map<std::string, DataMap::Entry> params;
   params["pad"].r = {0.25};
@@ -3805,12 +3713,12 @@ static std::vector<double> eval_reduction_interp(
 
 void test_gq_reduction_lowering_guards() {
   using namespace stanli;
-  const std::string base = slurp("tests/fixtures/gq_reductions.tmir.sexp");
+  const std::string base = slurp("tests/fixtures/gq_reductions.mir");
 
   // Generated optimized MIR for the exact corpus surface:
   // prod(rep_vector(1,T) - Transpose__(Indexed(Var p,i))).  Its matrix-row
   // operand deliberately selects the scalar product variant.
-  const std::string udf_fixture = slurp("tests/fixtures/gq_prod_udf.tmir.sexp");
+  const std::string udf_fixture = slurp("tests/fixtures/gq_prod_udf.mir");
   {
     DataMap no_data;
     CompiledModel surface = compile_model(udf_fixture, no_data);
@@ -3844,8 +3752,8 @@ void test_gq_reduction_lowering_guards() {
       std::vector<double> graph_row =
           read_row(surface.write_array->columns, graph);
 
-      auto program = std::make_shared<mir::Program>(
-          mir::read_program(sexp::parse(udf_fixture)));
+      auto program =
+          std::make_shared<mir::Program>(stanli::decode_program(udf_fixture));
       std::map<std::string, DataMap::Entry> base_env = emit_env();
       WaInterp interp(program, std::move(base_env));
       std::map<std::string, DataMap::Entry> params;
@@ -3876,225 +3784,177 @@ void test_gq_reduction_lowering_guards() {
   // Indexed bare matrix variable belongs to the audited scalar surface.
   // Here the transposed row has 2 elements against rep_vector(1.0, 5), so
   // the graph throws Stan's subtract size error instead of computing.
-  std::string matrix_expression = udf_fixture;
-  const size_t matrix_wa =
-      matrix_expression.find("(Assignment ((LVariable target_surface)");
-  const std::string matrix_var = "(pattern (Var p))";
-  const std::string transposed_matrix =
-      "(pattern\n"
-      "                       (FunApp (StanLib Transpose__ FnPlain AoS)\n"
-      "                        (((pattern (Var p))\n"
-      "                          (meta ((type_ UMatrix) (loc <opaque>) "
-      "(adlevel DataOnly)))))))";
-  if (matrix_wa == std::string::npos ||
-      !replace_reduction_after(matrix_expression, matrix_wa, matrix_var,
-                               transposed_matrix,
-                               "matrix-expression product base")) {
-    ++failures;
-    std::printf("FAIL product fixture has no indexed matrix variable\n");
-  } else {
-    DataMap no_data;
-    CompiledModel cm = compile_model(matrix_expression, no_data);
-    std::string thrown;
-    if (cm.write_array && !cm.write_array->interp) {
-      Executor wex(std::move(cm.write_array->graph));
-      cm.write_array->bind(wex);
-      WaRng rng(1234);
-      try {
-        wex.run_forward_only(EvalState{&rng});
-      } catch (const std::invalid_argument& e) {
-        thrown = e.what();
+  namespace pw = portable_writer;
+  using pw::calls;
+  const auto vector = pw::view(mir::UnsizedLeaf::Vector);
+  const auto row_vector = pw::view(mir::UnsizedLeaf::RowVector);
+  const auto is_var = [](const std::string& name) {
+    return [name](const mir::Expr& e) {
+      return e.kind == mir::Expr::Var && e.name == name;
+    };
+  };
+  const auto assignment_to = [](const std::string& lhs) {
+    return [lhs](const mir::Stmt& s) {
+      return s.kind == mir::Stmt::Assignment && s.lhs == lhs;
+    };
+  };
+  {
+    mir::Program program = decode_program(udf_fixture);
+    mir::Stmt* target = pw::find_stmt(program, assignment_to("target_surface"));
+    mir::Expr* p = target ? pw::find_expr(*target, is_var("p")) : nullptr;
+    if (p == nullptr) {
+      ++failures;
+      std::printf("FAIL product fixture has no indexed matrix variable\n");
+    } else {
+      *p = pw::call("Transpose__", p->unsized, {*p});
+      DataMap no_data;
+      CompiledModel cm = compile_model(pw::write_v2(program), no_data);
+      std::string thrown;
+      if (cm.write_array && !cm.write_array->interp) {
+        Executor wex(std::move(cm.write_array->graph));
+        cm.write_array->bind(wex);
+        WaRng rng(1234);
+        try {
+          wex.run_forward_only(EvalState{&rng});
+        } catch (const std::invalid_argument& e) {
+          thrown = e.what();
+        }
+      }
+      if (thrown != "subtract: m1 (5, 1) and m2 (2, 1) must match in size") {
+        ++failures;
+        std::printf("FAIL matrix-expression product base: got '%s'\n",
+                    thrown.c_str());
       }
     }
-    if (thrown != "subtract: m1 (5, 1) and m2 (2, 1) must match in size") {
+  }
+
+  // The fixture's compile inlines generated-quantities UDF calls.  Restore
+  // the call at its retained function definition to pin the lower_call_udf
+  // guard: a formal vector may be bound to a shifted Eigen Block, so dynamic
+  // prod in a UDF must remain on WaInterp even when the caller's syntax is a
+  // Var.
+  {
+    mir::Program program = decode_program(udf_fixture);
+    mir::Expr* inlined =
+        pw::find_expr(program.generate_quantities,
+                      [](const mir::Expr& e) { return calls(e, "prod"); });
+    if (inlined == nullptr) {
       ++failures;
-      std::printf("FAIL matrix-expression product base: got '%s'\n",
-                  thrown.c_str());
+      std::printf("FAIL generated UDF product fixture has no inlined call\n");
+    } else {
+      inlined->fn_lib = mir::Expr::Lib::UserDefined;
+      inlined->name = "vector_product";
+      expect_compiled(pw::write_v2(program), reduction_data(),
+                      "dynamic UDF product");
     }
   }
 
-  // O1 normally inlines generated-quantities UDF calls.  Restore the call
-  // at its retained function definition to pin the lower_call_udf guard: a
-  // formal vector may be bound to a shifted Eigen Block, so dynamic prod in
-  // a UDF must remain on WaInterp even when the caller's syntax is a Var.
-  std::string dynamic_udf = udf_fixture;
-  const size_t udf_wa = dynamic_udf.find("(generate_quantities");
-  const std::string stan_prod = "(FunApp (StanLib prod FnPlain)";
-  const size_t inlined_prod = dynamic_udf.find(stan_prod, udf_wa);
-  if (udf_wa == std::string::npos || inlined_prod == std::string::npos) {
-    ++failures;
-    std::printf("FAIL generated UDF product fixture has no inlined call\n");
-  } else {
-    dynamic_udf.replace(inlined_prod, stan_prod.size(),
-                        "(FunApp (UserDefined vector_product FnPlain)");
-    expect_compiled(dynamic_udf, reduction_data(), "dynamic UDF product");
+  const mir::Program base_program = decode_program(base);
+  {
+    mir::Program program = base_program;
+    mir::Stmt* pr = pw::find_stmt(program, assignment_to("pr"));
+    mir::Expr* prod =
+        pr ? pw::find_expr(*pr,
+                           [](const mir::Expr& e) { return calls(e, "prod"); })
+           : nullptr;
+    if (prod == nullptr || prod->args.size() != 1 ||
+        prod->args[0].kind != mir::Expr::Var || prod->args[0].name != "x") {
+      ++failures;
+      std::printf("FAIL reductions guard fixture has no dynamic product\n");
+      return;
+    }
   }
-
-  const size_t assignment = base.find("(Assignment ((LVariable pr)");
-  const size_t prod_call = base.find("(FunApp (StanLib prod", assignment);
-  const std::string vector_node =
-      "((pattern (Var x)) (meta ((type_ UVector) (loc <opaque>) (adlevel "
-      "DataOnly))))";
-  const std::string vector_meta =
-      "(meta ((type_ UVector) (loc <opaque>) (adlevel DataOnly)))";
-  if (assignment == std::string::npos || prod_call == std::string::npos ||
-      base.find(vector_node, prod_call) == std::string::npos) {
-    ++failures;
-    std::printf("FAIL reductions guard fixture has no dynamic product\n");
-    return;
-  }
-
-  struct BadInput {
-    const char* type;
-    const char* label;
+  // The fixture with the product of pr = prod(x) changed by `change`.
+  const auto with_product = [&](const std::function<void(mir::Expr&)>& change) {
+    mir::Program program = base_program;
+    mir::Expr* prod =
+        pw::find_expr(*pw::find_stmt(program, assignment_to("pr")),
+                      [](const mir::Expr& e) { return calls(e, "prod"); });
+    change(*prod);
+    return pw::write_v2(program);
   };
-  const BadInput bad_inputs[] = {
-      {"UReal", "scalar"},
-      {"UMatrix", "matrix"},
-      {"(UArray UReal)", "array"},
-      {"(UArray (UArray UReal))", "nested array"},
+  // The same with its argument x replaced by `make(x)`.
+  const auto product_of =
+      [&](const std::function<mir::Expr(const mir::Expr&)>& make) {
+        return with_product(
+            [&](mir::Expr& prod) { prod.args[0] = make(prod.args[0]); });
+      };
+  const auto count_products = [](const CompiledModel& cm, int* packets) {
+    int products = 0;
+    if (cm.write_array)
+      for (const Op& op : cm.write_array->graph.ops) {
+        if (op.opcode != OP_PROD_VEC) continue;
+        ++products;
+        if (packets) *packets += op.variant == 0;
+      }
+    return products;
   };
-  for (const BadInput& bad : bad_inputs) {
-    std::string mutated = base;
-    const std::string replacement = std::string("(meta ((type_ ") + bad.type +
-                                    ") (loc <opaque>) (adlevel DataOnly)))";
-    if (!replace_reduction_after(mutated, prod_call, vector_meta, replacement,
-                                 bad.label))
-      continue;
-    expect_compiled(
-        mutated, reduction_data(),
-        (std::string("product ") + bad.label + " uses lowered layout").c_str());
-  }
 
-  std::string container_result = base;
-  const std::string real_result =
-      "(meta ((type_ UReal) (loc <opaque>) (adlevel DataOnly)))";
-  const std::string vector_result =
-      "(meta ((type_ UVector) (loc <opaque>) (adlevel DataOnly)))";
-  if (replace_reduction_after(container_result, prod_call, real_result,
-                              vector_result, "container product result"))
-    expect_reduction_interp(container_result, "scalar-real result",
-                            "product container result stays interpreted");
+  const std::pair<mir::UnsizedView, const char*> bad_inputs[] = {
+      {pw::view(mir::UnsizedLeaf::Real), "scalar"},
+      {pw::view(mir::UnsizedLeaf::Matrix), "matrix"},
+      {pw::view(mir::UnsizedLeaf::Real, 1), "array"},
+      {pw::view(mir::UnsizedLeaf::Real, 2), "nested array"},
+  };
+  for (const auto& entry : bad_inputs)
+    expect_rejected(
+        with_product(
+            [&](mir::Expr& prod) { prod.args[0].unsized = entry.first; }),
+        reduction_data(), "variable type disagrees with its binding for x",
+        std::string("product ") + entry.second + " input is rejected");
 
-  std::string two_args = base;
-  const size_t one_arg = two_args.find(vector_node, prod_call);
-  if (one_arg == std::string::npos) {
-    ++failures;
-    std::printf("FAIL reduction mutation cannot find product arity\n");
-  } else {
-    two_args.insert(one_arg + vector_node.size(), " " + vector_node);
-    expect_reduction_interp(two_args, "scalar-real result",
-                            "two-argument product stays interpreted");
-  }
+  expect_rejected(with_product([&](mir::Expr& prod) { prod.unsized = vector; }),
+                  reduction_data(),
+                  "assignment type disagrees with its binding",
+                  "product container result is rejected");
+  expect_rejected(
+      with_product([](mir::Expr& prod) { prod.args.push_back(prod.args[0]); }),
+      reduction_data(), "expected 1 argument(s), got 2",
+      "two-argument product is rejected");
 
-  const std::string empty_vector =
-      "((pattern\n"
-      "            (FunApp (StanLib rep_vector FnPlain AoS)\n"
-      "             (((pattern (Var pad))\n"
-      "               (meta ((type_ UReal) (loc <opaque>) (adlevel "
-      "DataOnly))))\n"
-      "              ((pattern (Lit Int 0))\n"
-      "               (meta ((type_ UInt) (loc <opaque>) (adlevel "
-      "DataOnly)))))))\n"
-      "           (meta ((type_ UVector) (loc <opaque>) (adlevel "
-      "DataOnly))))";
-  std::string empty = base;
-  if (replace_reduction_after(empty, prod_call, vector_node, empty_vector,
-                              "empty product"))
-    expect_compiled(empty, reduction_data(),
-                    "empty dynamic product lowers to Stan's 1");
+  expect_compiled(
+      product_of([&](const mir::Expr&) {
+        return pw::call(
+            "rep_vector", vector,
+            {pw::var("pad", pw::view(mir::UnsizedLeaf::Real)), pw::lit_int(0)});
+      }),
+      reduction_data(), "empty dynamic product lowers to Stan's 1");
 
-  const std::string segment =
-      "((pattern\n"
-      "            (FunApp (StanLib segment FnPlain AoS)\n"
-      "             (((pattern (Var x))\n"
-      "               (meta ((type_ UVector) (loc <opaque>) (adlevel "
-      "DataOnly))))\n"
-      "              ((pattern (Lit Int 2))\n"
-      "               (meta ((type_ UInt) (loc <opaque>) (adlevel "
-      "DataOnly))))\n"
-      "              ((pattern (Lit Int 3))\n"
-      "               (meta ((type_ UInt) (loc <opaque>) (adlevel "
-      "DataOnly)))))))\n"
-      "           (meta ((type_ UVector) (loc <opaque>) (adlevel "
-      "DataOnly))))";
-  std::string direct_view = base;
-  if (replace_reduction_after(direct_view, prod_call, vector_node, segment,
-                              "segment product"))
-    expect_compiled(direct_view, reduction_data(), "segment product");
-
-  const std::string transposed_segment =
-      "((pattern\n"
-      "            (FunApp (StanLib Transpose__ FnPlain AoS)\n"
-      "             (" +
-      segment +
-      ")))\n"
-      "           (meta ((type_ URowVector) (loc <opaque>) (adlevel "
-      "DataOnly))))";
-  std::string wrapped_view = base;
-  if (replace_reduction_after(wrapped_view, prod_call, vector_node,
-                              transposed_segment, "transposed segment product"))
-    expect_compiled(wrapped_view, reduction_data(),
-                    "transposed segment product");
+  const auto segment = [&](const mir::Expr& x) {
+    return pw::call("segment", vector, {x, pw::lit_int(2), pw::lit_int(3)});
+  };
+  expect_compiled(product_of(segment), reduction_data(), "segment product");
+  expect_compiled(product_of([&](const mir::Expr& x) {
+                    return pw::call("Transpose__", row_vector, {segment(x)});
+                  }),
+                  reduction_data(), "transposed segment product");
 
   // A transpose of a bare vector is an address-zero row-vector view in
   // CmdStan and remains in scope for the native path.
-  const std::string transposed_bare =
-      "((pattern\n"
-      "            (FunApp (StanLib Transpose__ FnPlain AoS)\n"
-      "             (" +
-      vector_node +
-      ")))\n"
-      "           (meta ((type_ URowVector) (loc <opaque>) (adlevel "
-      "DataOnly))))";
-  std::string row_vector = base;
-  if (replace_reduction_after(row_vector, prod_call, vector_node,
-                              transposed_bare, "row-vector product")) {
-    CompiledModel cm = compile_model(row_vector, reduction_data());
-    int products = 0;
-    if (cm.write_array)
-      for (const Op& op : cm.write_array->graph.ops)
-        products += op.opcode == OP_PROD_VEC;
-    if (!cm.write_array || cm.write_array->interp || products != 1) {
+  const auto transposed = [&](const mir::Expr& x) {
+    return pw::call("Transpose__", row_vector, {x});
+  };
+  {
+    CompiledModel cm = compile_model(product_of(transposed), reduction_data());
+    if (!cm.write_array || cm.write_array->interp ||
+        count_products(cm, nullptr) != 1) {
       ++failures;
       std::printf("FAIL bare row-vector product did not compile\n");
     }
   }
 
-  const std::string exp_vector =
-      "((pattern\n"
-      "            (FunApp (StanLib exp FnPlain AoS)\n"
-      "             (" +
-      vector_node +
-      ")))\n"
-      "           (meta ((type_ UVector) (loc <opaque>) (adlevel "
-      "DataOnly))))";
-  std::string exp_product = base;
-  if (replace_reduction_after(exp_product, prod_call, vector_node, exp_vector,
-                              "exp product"))
-    expect_compiled(exp_product, reduction_data(), "prod(exp(x))");
+  const auto exp_of = [&](const mir::Expr& x) {
+    return pw::call("exp", vector, {x});
+  };
+  expect_compiled(product_of(exp_of), reduction_data(), "prod(exp(x))");
 
-  const std::string scalar_one =
-      "((pattern (Lit Real 1.0))\n"
-      "              (meta ((type_ UReal) (loc <opaque>) (adlevel "
-      "DataOnly))))";
-  const std::string safe_minus =
-      "((pattern\n"
-      "            (FunApp (StanLib Minus__ FnPlain AoS)\n"
-      "             (" +
-      scalar_one + " " + vector_node +
-      ")))\n"
-      "           (meta ((type_ UVector) (loc <opaque>) (adlevel "
-      "DataOnly))))";
-  std::string minus_product = base;
-  if (replace_reduction_after(minus_product, prod_call, vector_node, safe_minus,
-                              "audited subtraction product")) {
-    CompiledModel cm = compile_model(minus_product, reduction_data());
-    int products = 0;
-    if (cm.write_array)
-      for (const Op& op : cm.write_array->graph.ops)
-        products += op.opcode == OP_PROD_VEC;
-    if (!cm.write_array || cm.write_array->interp || products != 1) {
+  const auto one_minus = [&](const mir::Expr& e) {
+    return pw::call("Minus__", e.unsized, {pw::lit_real(1.0), e});
+  };
+  {
+    CompiledModel cm = compile_model(product_of(one_minus), reduction_data());
+    if (!cm.write_array || cm.write_array->interp ||
+        count_products(cm, nullptr) != 1) {
       ++failures;
       std::printf("FAIL audited outer-subtraction product did not compile\n");
     }
@@ -4103,29 +3963,14 @@ void test_gq_reduction_lowering_guards() {
   // The same outer subtraction with a transpose-of-bare-vector operand is
   // also packet-grouped.  This exact form previously passed the lowering
   // whitelist while the shared classifier returned Legacy.
-  const std::string safe_transposed_minus =
-      "((pattern\n"
-      "            (FunApp (StanLib Minus__ FnPlain AoS)\n"
-      "             (" +
-      scalar_one + " " + transposed_bare +
-      ")))\n"
-      "           (meta ((type_ URowVector) (loc <opaque>) (adlevel "
-      "DataOnly))))";
-  std::string transposed_minus_product = base;
-  if (replace_reduction_after(transposed_minus_product, prod_call, vector_node,
-                              safe_transposed_minus,
-                              "transposed subtraction product")) {
-    CompiledModel cm =
-        compile_model(transposed_minus_product, reduction_data());
-    int products = 0, packet_products = 0;
-    if (cm.write_array)
-      for (const Op& op : cm.write_array->graph.ops) {
-        if (op.opcode != OP_PROD_VEC) continue;
-        ++products;
-        packet_products += op.variant == 0;
-      }
-    if (!cm.write_array || cm.write_array->interp || products != 1 ||
-        packet_products != 1) {
+  {
+    CompiledModel cm = compile_model(product_of([&](const mir::Expr& x) {
+                                       return one_minus(transposed(x));
+                                     }),
+                                     reduction_data());
+    int packets = 0;
+    if (!cm.write_array || cm.write_array->interp ||
+        count_products(cm, &packets) != 1 || packets != 1) {
       ++failures;
       std::printf(
           "FAIL transposed outer-subtraction product did not compile as "
@@ -4135,141 +3980,124 @@ void test_gq_reduction_lowering_guards() {
 
   // Eigen's IndexedView for a gather clears PacketAccess. The layout carried
   // by the materialized graph value therefore selects scalar grouping.
-  const std::string gather_vector =
-      "((pattern\n"
-      "            (Indexed\n"
-      "             " +
-      vector_node +
-      "\n"
-      "              ((MultiIndex\n"
-      "               ((pattern (Var counts))\n"
-      "                (meta ((type_ (UArray UInt)) (loc <opaque>) "
-      "(adlevel DataOnly))))))))\n"
-      "           (meta ((type_ UVector) (loc <opaque>) (adlevel "
-      "DataOnly))))";
-  const std::string gather_minus =
-      "((pattern\n"
-      "            (FunApp (StanLib Minus__ FnPlain AoS)\n"
-      "             (" +
-      scalar_one + " " + gather_vector +
-      ")))\n"
-      "           (meta ((type_ UVector) (loc <opaque>) (adlevel "
-      "DataOnly))))";
-  std::string gathered_product = base;
-  if (replace_reduction_after(gathered_product, prod_call, vector_node,
-                              gather_minus, "gather product"))
-    expect_compiled(gathered_product, reduction_data(), "prod(1-x[idx])");
-
+  const auto gathered = [&](const mir::Expr& x) {
+    return pw::indexed(
+        x,
+        {pw::index(mir::Expr::IndexMulti,
+                   {pw::var("counts", pw::view(mir::UnsizedLeaf::Int, 1))})},
+        vector);
+  };
+  expect_compiled(
+      product_of([&](const mir::Expr& x) { return one_minus(gathered(x)); }),
+      reduction_data(), "prod(1-x[idx])");
   // The bare gathered vector uses the same scalar grouping.
-  std::string bare_gathered_product = base;
-  if (replace_reduction_after(bare_gathered_product, prod_call, vector_node,
-                              gather_vector, "bare gather product"))
-    expect_compiled(bare_gathered_product, reduction_data(), "prod(x[idx])");
-
-  const std::string unsafe_minus =
-      "((pattern\n"
-      "            (FunApp (StanLib Minus__ FnPlain AoS)\n"
-      "             (" +
-      scalar_one + " " + exp_vector +
-      ")))\n"
-      "           (meta ((type_ UVector) (loc <opaque>) (adlevel "
-      "DataOnly))))";
-  std::string nested_math = base;
-  if (replace_reduction_after(nested_math, prod_call, vector_node, unsafe_minus,
-                              "nested vector math product"))
-    expect_compiled(nested_math, reduction_data(), "prod(1-exp(x))");
+  expect_compiled(product_of(gathered), reduction_data(), "prod(x[idx])");
+  expect_compiled(
+      product_of([&](const mir::Expr& x) { return one_minus(exp_of(x)); }),
+      reduction_data(), "prod(1-exp(x))");
 
   // A dynamic product in log_prob uses the same opcode with stored partials.
-  std::string reverse = base;
-  const size_t log_prod = reverse.find("(FunApp (StanLib prod");
-  const std::string data_node =
-      "((pattern (Var d))\n"
-      "               (meta ((type_ UVector) (loc <opaque>) (adlevel "
-      "DataOnly))))";
-  const std::string active_node =
-      "((pattern (Var x))\n"
-      "               (meta ((type_ UVector) (loc <opaque>) (adlevel "
-      "AutoDiffable))))";
-  if (replace_reduction_after(reverse, log_prod, data_node, active_node,
-                              "reverse-mode product")) {
+  {
+    mir::Program program = base_program;
+    mir::Expr* log_prod = pw::find_expr(
+        program.log_prob, [](const mir::Expr& e) { return calls(e, "prod"); });
     bool compiled = false;
-    try {
-      CompiledModel model = compile_model(reverse, reduction_data());
-      compiled =
-          std::any_of(model.graph.ops.begin(), model.graph.ops.end(),
-                      [](const Op& op) { return op.opcode == OP_PROD_VEC; });
-    } catch (const CompileError&) {
-    }
-    if (!compiled) {
+    if (log_prod == nullptr || log_prod->args.size() != 1 ||
+        log_prod->args[0].name != "d") {
       ++failures;
-      std::printf("FAIL dynamic log_prob product was not compiled\n");
+      std::printf("FAIL reduction mutation cannot find reverse-mode product\n");
+    } else {
+      log_prod->args[0].name = "x";
+      log_prod->args[0].data_only = false;
+      try {
+        CompiledModel model =
+            compile_model(pw::write_v2(program), reduction_data());
+        compiled =
+            std::any_of(model.graph.ops.begin(), model.graph.ops.end(),
+                        [](const Op& op) { return op.opcode == OP_PROD_VEC; });
+      } catch (const CompileError&) {
+      }
+      if (!compiled) {
+        ++failures;
+        std::printf("FAIL dynamic log_prob product was not compiled\n");
+      }
     }
   }
 
-  const size_t sum_call = base.find("(FunApp (StanLib sum", prod_call);
-  const std::string sum_arg =
-      "((pattern (Var z))\n"
-      "           (meta ((type_ (UArray UInt)) (loc <opaque>) (adlevel "
-      "DataOnly))))";
-  if (sum_call == std::string::npos ||
-      base.find(sum_arg, sum_call) == std::string::npos) {
-    ++failures;
-    std::printf("FAIL reductions guard fixture has no runtime int sum\n");
-    return;
+  // The generated quantities after pr = prod(x), changed by `change`.
+  const auto after_product =
+      [&](const std::function<void(std::vector<mir::Stmt>&, size_t)>& change) {
+        mir::Program program = base_program;
+        const auto [body, at] =
+            pw::find_position(program.generate_quantities, assignment_to("pr"));
+        change(*body, at);
+        return pw::write_v2(program);
+      };
+  // The assignments to z after the product, in order.
+  const auto z_writes = [&](std::vector<mir::Stmt>& body, size_t from) {
+    std::vector<mir::Stmt*> writes;
+    for (size_t i = from; i < body.size(); ++i)
+      pw::for_each_stmt(body[i], [&](mir::Stmt& s) {
+        if (s.kind == mir::Stmt::Assignment && s.lhs == "z")
+          writes.push_back(&s);
+      });
+    return writes;
+  };
+  const auto with_sum = [&](const std::function<void(mir::Expr&)>& change) {
+    return after_product([&](std::vector<mir::Stmt>& body, size_t at) {
+      mir::Stmt* total = nullptr;
+      for (size_t i = at; i < body.size() && total == nullptr; ++i)
+        total = pw::find_stmt(body[i], assignment_to("total"));
+      change(*pw::find_expr(
+          *total, [](const mir::Expr& e) { return calls(e, "sum"); }));
+    });
+  };
+  {
+    mir::Program program = base_program;
+    mir::Stmt* total = pw::find_stmt(program, assignment_to("total"));
+    mir::Expr* sum =
+        total ? pw::find_expr(
+                    *total, [](const mir::Expr& e) { return calls(e, "sum"); })
+              : nullptr;
+    if (sum == nullptr || sum->args.size() != 1 || sum->args[0].name != "z") {
+      ++failures;
+      std::printf("FAIL reductions guard fixture has no runtime int sum\n");
+      return;
+    }
   }
 
-  std::string nested_sum = base;
-  const std::string nested_arg =
-      "((pattern (Var z))\n"
-      "           (meta ((type_ (UArray (UArray UInt))) (loc <opaque>) "
-      "(adlevel DataOnly))))";
-  if (replace_reduction_after(nested_sum, sum_call, sum_arg, nested_arg,
-                              "nested int sum"))
-    expect_reduction_interp(nested_sum, "", "nested int sum fallback");
+  expect_rejected(with_sum([](mir::Expr& sum) {
+                    sum.args[0].unsized = pw::view(mir::UnsizedLeaf::Int, 2);
+                  }),
+                  reduction_data(),
+                  "variable type disagrees with its binding for z",
+                  "nested int sum is rejected");
 
-  std::string unproved = base;
-  const size_t first_runtime_rng =
-      unproved.find("(FunApp (StanLib bernoulli_rng", prod_call);
-  if (first_runtime_rng == std::string::npos) {
-    ++failures;
-    std::printf("FAIL reductions guard fixture has no Bernoulli source\n");
-  } else {
-    unproved.replace(first_runtime_rng,
-                     std::string("(FunApp (StanLib bernoulli_rng").size(),
-                     "(FunApp (StanLib poisson_log_rng");
-    expect_reduction_interp(unproved, "unproved integral slot values",
-                            "unproved runtime int sum fallback");
-  }
+  expect_reduction_interp(
+      after_product([&](std::vector<mir::Stmt>& body, size_t at) {
+        mir::Expr* rng = nullptr;
+        for (size_t i = at; i < body.size() && rng == nullptr; ++i)
+          rng = pw::find_expr(body[i], [](const mir::Expr& e) {
+            return calls(e, "bernoulli_rng");
+          });
+        rng->name = "poisson_log_rng";
+      }),
+      "unproved integral slot values", "unproved runtime int sum fallback");
 
-  std::string overflow = base;
-  const size_t first_z = overflow.find("((LVariable z)", prod_call);
-  const size_t index_one = overflow.find("(Lit Int 1)", first_z);
-  const size_t value_one = overflow.find("(Lit Int 1)", index_one + 1);
-  if (value_one == std::string::npos) {
-    ++failures;
-    std::printf("FAIL reductions guard cannot find overflow literal\n");
-  } else {
-    overflow.replace(value_one, std::string("(Lit Int 1)").size(),
-                     "(Lit Int 2147483647)");
-    expect_reduction_interp(overflow, "overflow int32",
-                            "overflowing runtime int sum fallback");
-  }
+  expect_reduction_interp(
+      after_product([&](std::vector<mir::Stmt>& body, size_t at) {
+        z_writes(body, at).at(0)->rhs.lit_i = 2147483647;
+      }),
+      "overflow int32", "overflowing runtime int sum fallback");
 
   // Default local ints are INT_MIN sentinels, not zero.  Re-target the z[3]
   // write to z[2], leaving one element definitely uninitialized: a range hull
   // over the written values alone must not authorize the sum.
-  std::string partial = base;
-  size_t z_assignment = partial.find("((LVariable z)", prod_call);
-  for (int occurrence = 1; occurrence < 3 && z_assignment != std::string::npos;
-       ++occurrence)
-    z_assignment = partial.find("((LVariable z)", z_assignment + 1);
-  const size_t index_three = partial.find("(Lit Int 3)", z_assignment);
-  if (z_assignment == std::string::npos || index_three == std::string::npos) {
-    ++failures;
-    std::printf("FAIL reductions guard cannot find z[3] write\n");
-  } else {
-    partial.replace(index_three, std::string("(Lit Int 3)").size(),
-                    "(Lit Int 2)");
+  {
+    const std::string partial =
+        after_product([&](std::vector<mir::Stmt>& body, size_t at) {
+          z_writes(body, at).at(2)->lhs_idx.at(0).args.at(0).lit_i = 2;
+        });
     expect_reduction_interp(partial, "not definitely initialized",
                             "partially initialized runtime int sum fallback");
     std::vector<std::string> names;
@@ -4294,24 +4122,13 @@ void test_gq_reduction_lowering_guards() {
     }
   }
 
-  const std::string empty_slice =
-      "((pattern\n"
-      "            (Indexed\n"
-      "             ((pattern (Var z))\n"
-      "              (meta ((type_ (UArray UInt)) (loc <opaque>) (adlevel "
-      "DataOnly))))\n"
-      "             ((Between\n"
-      "               ((pattern (Lit Int 1))\n"
-      "                (meta ((type_ UInt) (loc <opaque>) (adlevel "
-      "DataOnly))))\n"
-      "               ((pattern (Lit Int 0))\n"
-      "                (meta ((type_ UInt) (loc <opaque>) (adlevel "
-      "DataOnly))))))))\n"
-      "           (meta ((type_ (UArray UInt)) (loc <opaque>) (adlevel "
-      "DataOnly))))";
-  std::string empty_sum = base;
-  if (replace_reduction_after(empty_sum, sum_call, sum_arg, empty_slice,
-                              "empty int sum")) {
+  {
+    const std::string empty_sum = with_sum([&](mir::Expr& sum) {
+      sum.args[0] = pw::indexed(sum.args[0],
+                                {pw::index(mir::Expr::IndexBetween,
+                                           {pw::lit_int(1), pw::lit_int(0)})},
+                                sum.args[0].unsized);
+    });
     // The empty slice folds to a compile-time zero and the model stays on
     // the graph path; row parity with the interpreter is the guard.
     CompiledModel em;
@@ -4334,8 +4151,8 @@ void test_gq_reduction_lowering_guards() {
       WaRng erng(2026), irng(2026);
       eex.run_forward_only(EvalState{&erng});
       std::vector<double> got = read_row(em.write_array->columns, eex);
-      auto eprogram = std::make_shared<mir::Program>(
-          mir::read_program(sexp::parse(empty_sum)));
+      auto eprogram =
+          std::make_shared<mir::Program>(stanli::decode_program(empty_sum));
       WaInterp einterp(eprogram, reduction_base(reduction_data()));
       std::map<std::string, DataMap::Entry> eparams;
       eparams["pad"].r = {0.25};
@@ -4353,194 +4170,129 @@ void test_gq_reduction_lowering_guards() {
   // reversed ranges are harmless empty updates.  Mutate its later 4:5 write
   // to pin both sides of the bounds check and a width mismatch; every case
   // must fail closed to WaInterp, which then reports the same invalid write.
-  // z[4:5] is now spelled Upfrom(4); restore the explicit Between(4, 5).
-  std::string range_base = base;
+  // z[4:5] is spelled Upfrom(4); write it as Between(lo, hi).
+  const auto tail_write = [&](long lo, long hi, const std::string& lhs) {
+    return after_product([&](std::vector<mir::Stmt>& body, size_t at) {
+      mir::Stmt* write = nullptr;
+      for (mir::Stmt* s : z_writes(body, at))
+        if (!s->lhs_idx.empty() && s->lhs_idx[0].kind == mir::Expr::IndexUpfrom)
+          write = s;
+      write->lhs_idx[0] = pw::index(mir::Expr::IndexBetween,
+                                    {pw::lit_int(lo), pw::lit_int(hi)});
+      write->lhs = lhs;
+    });
+  };
   {
-    const std::string upfrom =
-        "((Upfrom\n"
-        "         ((pattern (Lit Int 4)) (meta ((type_ UInt) (loc <opaque>) "
-        "(adlevel DataOnly))))))";
-    const std::string between =
-        "((Between\n"
-        "         ((pattern (Lit Int 4)) (meta ((type_ UInt) (loc <opaque>) "
-        "(adlevel DataOnly))))\n"
-        "         ((pattern (Lit Int 5)) (meta ((type_ UInt) (loc <opaque>) "
-        "(adlevel DataOnly))))))";
-    const size_t at = range_base.find(upfrom);
-    if (at == std::string::npos) {
+    mir::Program program = base_program;
+    const bool found = pw::find_stmt(program, [](const mir::Stmt& s) {
+      return s.kind == mir::Stmt::Assignment && s.lhs == "z" &&
+             !s.lhs_idx.empty() &&
+             s.lhs_idx[0].kind == mir::Expr::IndexUpfrom &&
+             s.lhs_idx[0].args.size() == 1 && s.lhs_idx[0].args[0].lit_i == 4;
+    });
+    if (!found) {
       ++failures;
       std::printf("FAIL reductions guard cannot find the z Upfrom write\n");
-    } else {
-      range_base.replace(at, upfrom.size(), between);
+      return;
     }
   }
-  const size_t tail_range = range_base.rfind("((Between");
-  const size_t tail_lo = range_base.find("(Lit Int 4)", tail_range);
-  const size_t tail_hi = range_base.find("(Lit Int 5)", tail_lo);
-  if (tail_range == std::string::npos || tail_lo == std::string::npos ||
-      tail_hi == std::string::npos) {
-    ++failures;
-    std::printf("FAIL reductions guard cannot find the 4:5 range write\n");
-  } else {
-    const auto expect_invalid_range = [&](long lo, long hi, const char* reason,
-                                          const char* what) {
-      std::string mutated = range_base;
-      mutated.replace(tail_hi, std::string("(Lit Int 5)").size(),
-                      "(Lit Int " + std::to_string(hi) + ")");
-      mutated.replace(tail_lo, std::string("(Lit Int 4)").size(),
-                      "(Lit Int " + std::to_string(lo) + ")");
-      expect_reduction_interp(mutated, reason, what);
-      try {
-        std::vector<std::string> names;
-        (void)eval_reduction_interp(mutated, &names);
-        ++failures;
-        std::printf("FAIL %s: interpreter accepted invalid range\n", what);
-      } catch (const std::exception&) {
-      }
-    };
-    expect_invalid_range(0, 1,
-                         "array[multi, ...] assign: accessing element out of "
-                         "range. index 0 out of range",
-                         "low OOB range assignment");
-    expect_invalid_range(5, 6,
-                         "array[multi, ...] assign: accessing element out of "
-                         "range. index 6 out of range",
-                         "high OOB range assignment");
-    expect_invalid_range(4, 4, "width mismatch",
-                         "range assignment RHS width mismatch");
-
-    // A single range index on a 2-D value selects rows; 4:5 is outside the
-    // base's two rows, so the write falls closed to WaInterp.
-    std::string matrix_rows = range_base;
-    const size_t lhs_z = matrix_rows.rfind("(LVariable z)", tail_range);
-    if (lhs_z == std::string::npos) {
+  const auto expect_invalid_range = [&](long lo, long hi, const char* reason,
+                                        const char* what) {
+    const std::string mutated = tail_write(lo, hi, "z");
+    expect_reduction_interp(mutated, reason, what);
+    try {
+      std::vector<std::string> names;
+      (void)eval_reduction_interp(mutated, &names);
       ++failures;
-      std::printf("FAIL reductions guard cannot find range target\n");
-    } else {
-      matrix_rows.replace(lhs_z, std::string("(LVariable z)").size(),
-                          "(LVariable partial_matrix)");
-      expect_reduction_interp(
-          matrix_rows,
-          "array[multi, ...] assign: accessing element out of range. index 4 "
-          "out of range",
-          "out-of-bounds row-range assignment falls back");
+      std::printf("FAIL %s: interpreter accepted invalid range\n", what);
+    } catch (const std::exception&) {
     }
-  }
+  };
+  expect_invalid_range(0, 1,
+                       "array[multi, ...] assign: accessing element out of "
+                       "range. index 0 out of range",
+                       "low OOB range assignment");
+  expect_invalid_range(5, 6,
+                       "array[multi, ...] assign: accessing element out of "
+                       "range. index 6 out of range",
+                       "high OOB range assignment");
+  expect_invalid_range(4, 4, "width mismatch",
+                       "range assignment RHS width mismatch");
+
+  // A single range index on a 2-D value selects rows; 4:5 is outside the
+  // base's two rows, so the write falls closed to WaInterp.
+  expect_reduction_interp(
+      tail_write(4, 5, "partial_matrix"),
+      "array[multi, ...] assign: accessing element out of range. index 4 "
+      "out of range",
+      "out-of-bounds row-range assignment falls back");
+}
+
+// gq_reductions with `statement` inserted after int total = sum(z).
+static std::string after_total(const stanli::mir::Stmt& statement) {
+  using namespace stanli;
+  mir::Program program =
+      decode_program(slurp("tests/fixtures/gq_reductions.mir"));
+  const auto [body, at] = portable_writer::find_position(
+      program.generate_quantities, [](const mir::Stmt& s) {
+        return s.kind == mir::Stmt::Assignment && s.lhs == "total";
+      });
+  if (body == nullptr)
+    throw std::logic_error("reductions fixture has no total assignment");
+  body->insert(body->begin() + static_cast<std::ptrdiff_t>(at) + 1, statement);
+  return portable_writer::write_v2(program);
 }
 
 void test_runtime_int_sum_is_not_compile_time() {
-  const std::string base = slurp("tests/fixtures/gq_reductions.tmir.sexp");
-  const size_t sum_call = base.find(
-      "(FunApp (StanLib sum", base.find("(Assignment ((LVariable total)"));
-  const size_t insertion = base.find("((pattern\n     (NRFunApp", sum_call);
-  if (sum_call == std::string::npos || insertion == std::string::npos) {
-    ++failures;
-    std::printf("FAIL reductions fixture has no post-sum insertion point\n");
-    return;
-  }
-
-  const std::string runtime_index =
-      "((pattern\n"
-      "     (Assignment ((LVariable pr) ()) UReal\n"
-      "      ((pattern\n"
-      "        (Indexed\n"
-      "         ((pattern (Var x))\n"
-      "          (meta ((type_ UVector) (loc <opaque>) (adlevel "
-      "DataOnly))))\n"
-      "         ((Single\n"
-      "           ((pattern (Var total))\n"
-      "            (meta ((type_ UInt) (loc <opaque>) (adlevel "
-      "DataOnly))))))))\n"
-      "       (meta ((type_ UReal) (loc <opaque>) (adlevel DataOnly))))))\n"
-      "    (meta <opaque>))\n   ";
-  std::string index = base;
-  index.insert(insertion, runtime_index);
+  using namespace stanli;
+  namespace pw = portable_writer;
+  const mir::Expr total = pw::var("total", pw::view(mir::UnsizedLeaf::Int));
   {
-    const stanli::CompiledModel cm =
-        stanli::compile_model(index, reduction_data());
+    const CompiledModel cm = compile_model(
+        after_total(pw::assign(
+            "pr", {},
+            pw::indexed(pw::var("x", pw::view(mir::UnsizedLeaf::Vector)),
+                        {pw::index(mir::Expr::IndexSingle, {total})},
+                        pw::view(mir::UnsizedLeaf::Real)))),
+        reduction_data());
     int dynamic_slices = 0;
     if (cm.write_array)
-      for (const stanli::Op& op : cm.write_array->graph.ops)
-        dynamic_slices += op.opcode == stanli::OP_DYNAMIC_SLICE;
+      for (const Op& op : cm.write_array->graph.ops)
+        dynamic_slices += op.opcode == OP_DYNAMIC_SLICE;
     if (!cm.write_array || cm.write_array->interp || dynamic_slices != 1) {
       ++failures;
       std::printf("FAIL runtime sum did not provide a dynamic index\n");
     }
   }
 
-  const std::string runtime_shape =
-      "((pattern\n"
-      "     (Decl (decl_adtype DataOnly) (decl_id shaped)\n"
-      "      (decl_type\n"
-      "       (Sized\n"
-      "        (SVector AoS\n"
-      "         ((pattern (Var total))\n"
-      "          (meta ((type_ UInt) (loc <opaque>) (adlevel "
-      "DataOnly)))))))\n"
-      "      (initialize Default)))\n"
-      "    (meta <opaque>))\n   ";
-  std::string shape = base;
-  shape.insert(insertion, runtime_shape);
-  expect_reduction_interp(shape, "unknown int total",
-                          "runtime sum cannot provide a shape", true);
+  expect_reduction_interp(
+      after_total(pw::declare("shaped", "SVector", {total})),
+      "unknown int total", "runtime sum cannot provide a shape", true);
 
-  const std::string runtime_loop =
-      "((pattern\n"
-      "     (For (loopvar i)\n"
-      "      (lower\n"
-      "       ((pattern (Lit Int 1))\n"
-      "        (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly)))))\n"
-      "      (upper\n"
-      "       ((pattern (Var total))\n"
-      "        (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly)))))\n"
-      "      (body\n"
-      "       ((pattern (Block (((pattern Skip) (meta <opaque>)))))\n"
-      "        (meta <opaque>)))))\n"
-      "    (meta <opaque>))\n   ";
-  std::string loop = base;
-  loop.insert(insertion, runtime_loop);
-  expect_reduction_island(loop, "unused runtime loop runs as an island");
+  mir::Stmt loop;
+  loop.kind = mir::Stmt::For;
+  loop.loopvar = "i";
+  loop.lower = pw::lit_int(1);
+  loop.upper = total;
+  loop.body = {pw::block({pw::skip()})};
+  expect_reduction_island(after_total(loop),
+                          "unused runtime loop runs as an island");
 
-  const std::string runtime_condition =
-      "((pattern\n"
-      "     (IfElse\n"
-      "      ((pattern (Var total))\n"
-      "       (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly))))\n"
-      "      ((pattern (Block (((pattern Skip) (meta <opaque>)))))\n"
-      "       (meta <opaque>))\n"
-      "      ()))\n"
-      "    (meta <opaque>))\n   ";
-  std::string condition = base;
-  condition.insert(insertion, runtime_condition);
-  expect_reduction_island(condition, "runtime sum decides a runtime branch");
+  mir::Stmt condition;
+  condition.kind = mir::Stmt::IfElse;
+  condition.cond = total;
+  condition.body = {pw::block({pw::skip()})};
+  expect_reduction_island(after_total(condition),
+                          "runtime sum decides a runtime branch");
 }
 
 void test_runtime_int_sum_redeclaration_shadowing() {
   using namespace stanli;
-  const std::string base = slurp("tests/fixtures/gq_reductions.tmir.sexp");
-  const size_t sum = base.find("(FunApp (StanLib sum",
-                               base.find("(Assignment ((LVariable total)"));
-  const size_t insertion = base.find("((pattern\n     (NRFunApp", sum);
-  if (sum == std::string::npos || insertion == std::string::npos) {
-    ++failures;
-    std::printf(
-        "FAIL reductions fixture has no post-sum redeclaration "
-        "point\n");
-    return;
-  }
-
-  const std::string literal_decl =
-      "((pattern\n"
-      "     (Decl (decl_adtype DataOnly) (decl_id total)\n"
-      "      (decl_type (Sized SInt))\n"
-      "      (initialize\n"
-      "       (Assign\n"
-      "        ((pattern (Lit Int 2))\n"
-      "         (meta ((type_ UInt) (loc <opaque>) (adlevel "
-      "DataOnly))))))))\n"
-      "    (meta <opaque>))\n   ";
-  std::string literal = base;
-  literal.insert(insertion, literal_decl);
+  namespace pw = portable_writer;
+  mir::Stmt literal_decl = pw::declare("total", "SInt");
+  literal_decl.has_init = true;
+  literal_decl.init = pw::lit_int(2);
+  const std::string literal = after_total(literal_decl);
   CompiledModel cm = compile_model(literal, reduction_data());
   if (!cm.write_array || cm.write_array->interp) {
     ++failures;
@@ -4576,13 +4328,7 @@ void test_runtime_int_sum_redeclaration_shadowing() {
     }
   }
 
-  const std::string uninitialized_decl =
-      "((pattern\n"
-      "     (Decl (decl_adtype DataOnly) (decl_id total)\n"
-      "      (decl_type (Sized SInt)) (initialize Uninit)))\n"
-      "    (meta <opaque>))\n   ";
-  std::string uninitialized = base;
-  uninitialized.insert(insertion, uninitialized_decl);
+  const std::string uninitialized = after_total(pw::declare("total", "SInt"));
   expect_compiled(uninitialized, reduction_data(),
                   "same-id uninitialized int sentinel");
   std::vector<std::string> names;
@@ -4626,7 +4372,7 @@ void test_choose_index_gq() {
   using namespace stanli;
   DataMap data;
   data.set_int("M", 4);
-  const std::string text = slurp("tests/fixtures/choosesize.tmir.sexp");
+  const std::string text = slurp("tests/fixtures/choosesize.mir");
   test_setenv("STANLI_WA_FORCE_INTERP", "1");
   CompiledModel cm = compile_model(text, data);
   test_unsetenv("STANLI_WA_FORCE_INTERP");
@@ -4668,7 +4414,7 @@ void test_interpreted_lkj() {
   SKIP_WITHOUT_DEBUG_SWITCHES();
   using namespace stanli;
   DataMap data = DataMap::from_json_file("tests/fixtures/gqlkj.json");
-  const std::string text = slurp("tests/fixtures/gqlkj.tmir.sexp");
+  const std::string text = slurp("tests/fixtures/gqlkj.mir");
   test_setenv("STANLI_WA_FORCE_INTERP", "1");
   CompiledModel cm = compile_model(text, data);
   test_unsetenv("STANLI_WA_FORCE_INTERP");
@@ -4720,7 +4466,7 @@ void test_interpreted_lkj() {
 void test_runtime_control_write_array() {
   using namespace stanli;
 
-  const std::string text = slurp("tests/fixtures/gq_runtime_control.tmir.sexp");
+  const std::string text = slurp("tests/fixtures/gq_runtime_control.mir");
   CompiledModel cm = compile_model(text, DataMap{});
   if (!compiled_completely(cm, "runtime-control write_array")) return;
   int dynamic_slices = 0, control_regions = 0, concatenations = 0;
@@ -4759,8 +4505,7 @@ void test_runtime_control_write_array() {
   params.run_forward_only();
 
   std::map<std::string, DataMap::Entry> base = emit_env();
-  auto program =
-      std::make_shared<mir::Program>(mir::read_program(sexp::parse(text)));
+  auto program = std::make_shared<mir::Program>(stanli::decode_program(text));
   WaInterp interpreted(program, std::move(base));
   const auto env = cm.constrained_env(params);
   const auto graph_row = [&](WaRng& rng) {
@@ -4790,8 +4535,8 @@ void test_integer_rng_control() {
     DataMap data;
     data.set_int("N", n);
     test_setenv("STANLI_WA_FORCE_INTERP", "1");
-    auto cm = compile_model(
-        slurp("tests/fixtures/gq_rng_integer_control.tmir.sexp"), data);
+    auto cm =
+        compile_model(slurp("tests/fixtures/gq_rng_integer_control.mir"), data);
     test_unsetenv("STANLI_WA_FORCE_INTERP");
     if (!cm.write_array || cm.write_array->truncated.has_value()) {
       ++failures;
@@ -4837,8 +4582,8 @@ void test_integer_rng_control() {
   }
 
   DataMap data;
-  auto dynamic = compile_model(
-      slurp("tests/fixtures/gq_rng_dynamic_shape.tmir.sexp"), data);
+  auto dynamic =
+      compile_model(slurp("tests/fixtures/gq_rng_dynamic_shape.mir"), data);
   if (!dynamic.write_array || !dynamic.write_array->interp ||
       !dynamic.write_array->truncated) {
     ++failures;
@@ -4858,8 +4603,8 @@ void test_integer_rng_control() {
   }
 
   test_setenv("STANLI_WA_FORCE_INTERP", "1");
-  auto bad = compile_model(
-      slurp("tests/fixtures/gq_rng_invalid_index.tmir.sexp"), data);
+  auto bad =
+      compile_model(slurp("tests/fixtures/gq_rng_invalid_index.mir"), data);
   test_unsetenv("STANLI_WA_FORCE_INTERP");
   if (!bad.write_array || bad.write_array->truncated.has_value()) {
     ++failures;
@@ -4895,8 +4640,7 @@ void test_integer_rng_control() {
 void test_integer_expressions() {
   SKIP_WITHOUT_DEBUG_SWITCHES();
   using namespace stanli;
-  const std::string source =
-      slurp("tests/fixtures/gq_integer_expressions.tmir.sexp");
+  const std::string source = slurp("tests/fixtures/gq_integer_expressions.mir");
   for (int divisor : {2, -2, 1, -1, std::numeric_limits<int>::max(),
                       std::numeric_limits<int>::min(), 0}) {
     DataMap data;
@@ -4986,25 +4730,42 @@ void test_integer_expressions() {
       std::printf("FAIL direct integer sum lost guard: %s\n", reason);
     }
   };
-  std::string unbounded = source;
-  const auto rng = unbounded.find("bernoulli_logit_rng");
-  if (rng == std::string::npos) {
-    ++failures;
-  } else {
-    unbounded.replace(rng, std::string("bernoulli_logit_rng").size(),
-                      "poisson_log_rng");
-    refused(unbounded, "unproved integral slot values");
-  }
-  std::string overflow = source;
-  const auto sum = overflow.find("(FunApp (StanLib sum");
-  const auto one = overflow.find("(Lit Int 1)", sum);
-  if (one == std::string::npos) {
-    ++failures;
-  } else {
-    overflow.replace(one, std::string("(Lit Int 1)").size(),
-                     "(Lit Int 2147483647)");
-    refused(overflow, "overflow int32");
-  }
+  // The fixture with the first expression that `match` accepts changed by
+  // `change`.
+  const auto mutated = [&](const std::function<bool(const mir::Expr&)>& match,
+                           const std::function<void(mir::Expr&)>& change) {
+    mir::Program program = decode_program(source);
+    mir::Expr* found = portable_writer::find_expr(program, match);
+    if (found == nullptr) {
+      ++failures;
+      std::printf("FAIL integer expressions fixture lacks a mutation site\n");
+      return std::string();
+    }
+    change(*found);
+    return portable_writer::write_v2(program);
+  };
+  refused(mutated(
+              [](const mir::Expr& e) {
+                return portable_writer::calls(e, "bernoulli_logit_rng");
+              },
+              [](mir::Expr& e) { e.name = "poisson_log_rng"; }),
+          "unproved integral slot values");
+  refused(
+      mutated(
+          [](const mir::Expr& e) { return portable_writer::calls(e, "sum"); },
+          [](mir::Expr& sum) {
+            std::function<bool(mir::Expr&)> raise = [&](mir::Expr& e) {
+              if (e.kind == mir::Expr::LitInt && e.lit_i == 1) {
+                e.lit_i = 2147483647;
+                return true;
+              }
+              for (mir::Expr& arg : e.args)
+                if (raise(arg)) return true;
+              return false;
+            };
+            raise(sum);
+          }),
+      "overflow int32");
 }
 
 int main() {

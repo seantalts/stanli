@@ -6,11 +6,16 @@ as in transformed data, apart from lowering it once for log_prob and once
 for write_array. The model repeats an expensive call, so evaluating it a
 second time in each graph shows up as twice the preparation time.
 
-  test_prep_data_calls.py STANC BENCH_GRAD DIR
+  test_prep_data_calls.py STANLI_CHECK BENCH_GRAD DIR
+
+The models get the MIR fixtures' O1 passes (tools/gen_fixtures.py).
 """
 import subprocess
 import sys
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
+from gen_fixtures import O1_PASSES  # noqa: E402
 
 CALLS = 100
 REPEATS = 5
@@ -42,7 +47,7 @@ def prep_seconds(bench, mir, data):
     return best
 
 
-def main(stanc, bench, directory):
+def main(check, bench, directory):
     directory = Path(directory)
     directory.mkdir(parents=True, exist_ok=True)
     data = directory / "data.json"
@@ -51,9 +56,10 @@ def main(stanc, bench, directory):
     for index, (block, source) in enumerate(MODELS.items()):
         stan = directory / f"model{index}.stan"
         stan.write_text(source)
-        mir = directory / f"model{index}.sexp"
-        mir.write_text(subprocess.run([stanc, "--O1", "--debug-optimized-mir", str(stan)],
-                                      check=True, capture_output=True, text=True).stdout)
+        mir = directory / f"model{index}.mir"
+        mir.write_text(subprocess.run(
+            [check, "--emit-mir", str(stan), "--passes", O1_PASSES],
+            check=True, capture_output=True, text=True).stdout)
         seconds[block] = prep_seconds(bench, mir, data)
         print(f"{block}: {seconds[block]:.4f}s")
     ratio = seconds["transformed parameters"] / seconds["transformed data"]

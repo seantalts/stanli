@@ -17,7 +17,7 @@ let () =
     ; ("--fast-math", Arg.Set fast_math, "enable partial evaluation")
     ; ( "--passes"
       , Arg.String set_passes
-      , "none, o1 (no structural fallback), or a comma-separated list of \
+      , "none, o1 (the shipping passes), or a comma-separated list of \
          optimization_settings field names to run instead of the shipping \
          passes" )
     ; ( "--include-path"
@@ -28,7 +28,7 @@ let () =
       , "file name to print in diagnostics instead of 'string'" )
     ; ( "--messages-json"
       , Arg.String (fun path -> messages_json := Some path)
-      , "also write the warnings and the O1 fallback notice to PATH as JSON" )
+      , "also write the warnings to PATH as JSON" )
     ]
     (fun path ->
       match !model with
@@ -50,11 +50,6 @@ let () =
     (fun warning ->
       Fmt.epr "%a@." (Frontend.Warnings.pp ?printed_filename:!filename ~code) warning)
     compilation.warnings;
-  List.iter
-    (fun diagnostic ->
-      prerr_endline (Stanli_pipeline.diagnostic_message diagnostic))
-    compilation.diagnostics;
-  let o1_fallback = Stanli_pipeline.o1_fallback compilation in
   Option.iter
     (fun path ->
       let warning w =
@@ -64,10 +59,7 @@ let () =
                 (Frontend.Warnings.pp ?printed_filename:!filename ~code)
                 w)) in
       let json =
-        `Assoc
-          [ ("warnings", `List (List.map warning compilation.warnings))
-          ; ( "o1_fallback"
-            , match o1_fallback with Some m -> `String m | None -> `Null ) ]
+        `Assoc [("warnings", `List (List.map warning compilation.warnings))]
       in
       Out_channel.with_open_bin path (fun out ->
           Yojson.Basic.to_channel out json;

@@ -2,7 +2,7 @@
 //
 // tests/cross_path.hpp holds the comparison machinery and the account of
 // what this axis catches and what it cannot; this file is the corpus that
-// drives it. Every `tests/fixtures/*.tmir.sexp` joins automatically, with
+// drives it. Every `tests/fixtures/*.mir` joins automatically, with
 // `<name>.json` as its data when that file exists and generated unit data
 // otherwise, so a new feature's own fixture becomes a cross-check input the
 // day it lands and the harness lags new features by zero fixtures.
@@ -51,9 +51,9 @@ std::string slurp(const std::string& path) {
 // Data for a fixture that checks in none: every integer 1, every real 0.5,
 // every size a literal or an integer set earlier. Empty when an input has
 // another type or size, and then the fixture runs with no data as before.
-std::string unit_data(const std::string& sexp) {
+std::string unit_data(const std::string& mir_text) {
   using namespace stanli;
-  const mir::Program p = decode_program(sexp);
+  const mir::Program p = decode_program(mir_text);
   std::map<std::string, long> ints;
   nlohmann::json j = nlohmann::json::object();
   for (const auto& [name, t] : p.input_vars) {
@@ -89,7 +89,7 @@ void ledger_rule_tests() {
   namespace fs = std::filesystem;
   const std::string dir = "tests/fixtures";
   const std::string name = "ar1";
-  const std::string sexp = slurp(dir + "/" + name + ".tmir.sexp");
+  const std::string mir_text = slurp(dir + "/" + name + ".mir");
   DataMap data = DataMap::from_json(slurp(dir + "/" + name + ".json"));
   const fs::path file = fs::temp_directory_path() / "stanli_ledger_rules.json";
   const auto load = [&](const std::string& body) {
@@ -111,7 +111,7 @@ void ledger_rule_tests() {
 
   const cross::Ledger here = load("[" + entry("") + "]");
   expect(here.error.empty(), "ledger without a platform loads");
-  cross::Result r = cross::run_matrix(sexp, data, opt, here);
+  cross::Result r = cross::run_matrix(mir_text, data, opt, here);
   expect(!r.ok && r.report.find("stale ledger entry lp default/no_cse") !=
                       std::string::npos,
          "an entry that excuses nothing fails its model's run");
@@ -122,7 +122,7 @@ void ledger_rule_tests() {
          "an entry for another platform does not apply here");
   expect(elsewhere.find(name, "lp", "default/no_cse") == nullptr,
          "an entry for another platform is not found");
-  r = cross::run_matrix(sexp, data, opt, elsewhere);
+  r = cross::run_matrix(mir_text, data, opt, elsewhere);
   expect(r.ok, "an entry for another platform is not stale here");
 
   const cross::Ledger own_os = load("[" + entry(os) + "]");
@@ -164,7 +164,7 @@ int main() {
   std::vector<std::string> names;
   for (const auto& e : fs::directory_iterator(dir)) {
     const std::string p = e.path().filename().string();
-    const std::string suffix = ".tmir.sexp";
+    const std::string suffix = ".mir";
     if (p.size() > suffix.size() &&
         p.compare(p.size() - suffix.size(), suffix.size(), suffix) == 0)
       names.push_back(p.substr(0, p.size() - suffix.size()));
@@ -184,11 +184,11 @@ int main() {
   int unit_data_fixtures = 0, unit_data_driven = 0;
 
   for (const std::string& name : names) {
-    const std::string sexp = slurp(dir + "/" + name + ".tmir.sexp");
+    const std::string mir_text = slurp(dir + "/" + name + ".mir");
     DataMap data;
     const std::string json = dir + "/" + name + ".json";
     const bool checked_in = fs::exists(json);
-    const std::string generated = checked_in ? "" : unit_data(sexp);
+    const std::string generated = checked_in ? "" : unit_data(mir_text);
     try {
       if (checked_in)
         data = DataMap::from_json(slurp(json));
@@ -203,8 +203,8 @@ int main() {
     opt.model = name;
     opt.repro_model = dir + "/" + name + ".stan";
     opt.repro_data = checked_in ? json : std::string("DATA.json");
-    opt.repro_mir = dir + "/" + name + ".tmir.sexp";
-    const cross::Result r = cross::run_matrix(sexp, data, opt, led);
+    opt.repro_mir = dir + "/" + name + ".mir";
+    const cross::Result r = cross::run_matrix(mir_text, data, opt, led);
     if (!r.report.empty()) std::fputs(r.report.c_str(), stdout);
     if (!r.ok && !generated.empty())
       std::printf("  DATA.json for %s: %s\n", name.c_str(), generated.c_str());

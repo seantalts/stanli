@@ -13,7 +13,7 @@ def run_checked(command, **kwargs):
 
 def main(tool, host):
     fixtures = Path("tests/fixtures")
-    fixture = fixtures / "execution_rng.tmir.sexp"
+    fixture = fixtures / "execution_rng.mir"
     # Use an existing empty JSON fixture; avoid temporary output beside sources.
     import tempfile
     with tempfile.TemporaryDirectory() as directory:
@@ -42,7 +42,7 @@ def main(tool, host):
         ("execution_rng_reject", "unavailable_or_empty", "failed"),
         ("execution_legacy_ode", "bound_graph", "not_required"),
     ]:
-        command = [host, str(fixtures / (name + ".tmir.sexp"))]
+        command = [host, str(fixtures / (name + ".mir"))]
         # A failed probe still reports the selection, then refuses the model.
         run = run_checked if probe != "failed" else (
             lambda c, **kw: subprocess.run(c, text=True, capture_output=True, **kw))

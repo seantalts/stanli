@@ -145,22 +145,6 @@
     "since": "2026-11-12"
   },
   {
-    "model": "region_map_sinks",
-    "quantity": "grad[*]",
-    "pair": "default/no_native_adj",
-    "bound_ulp": 3,
-    "cause": "STANLI_NO_NATIVE_ADJ refuses the region map; see default/no_region_map on this fixture, which gives the same bits.",
-    "since": "2026-11-12"
-  },
-  {
-    "model": "region_map_sinks",
-    "quantity": "grad[*]",
-    "pair": "default/no_region_map",
-    "bound_ulp": 3,
-    "cause": "the region map accumulates the per-iteration gradient contributions in iteration order; with STANLI_REGION_MAP=0 the per-iteration regions accumulate through the graph's own reverse sweep. default/no_native_adj gives the same bits, because it refuses the map too.",
-    "since": "2026-11-12"
-  },
-  {
     "model": "wapar_heavy",
     "quantity": "grad[*]",
     "pair": "default/passes_off",
@@ -223,6 +207,22 @@
     "bound_ulp": 1,
     "cause": "STANLI_NO_NATIVE_ADJ refuses the region map, so it gives the same bits as default/no_region_map. See default/no_region_map.",
     "since": "2026-11-12"
+  },
+  {
+    "model": "cm_betadiscrete",
+    "quantity": "lp",
+    "pair": "default/no_partition",
+    "bound_ulp": 4,
+    "cause": "partition_lanes gathers the log(pzero) terms of the 19 rows with y == 0, which the runtime now inlines from the kept call to cogmod_betadiscrete_lpmf, into one LOGV and SUM_VEC (2,398 ops with the pass, 2,436 without), so lp adds those terms in a different grouping. Before the stanc3 inliner was turned off, the inlined body gave the pass no such group, and both paths had 2,436 ops. The gap is 1 to 4 ULP over the 13 cross-path points. Against an 80-digit mpmath reference at points 0 to 2, default's lp is off by 7.7e-16, 4.0e-16 and 4.0e-16 relative, and no_partition by 3.9e-16, 4.0e-16 and 6.1e-16, the same as CmdStan.",
+    "since": "2026-11-21"
+  },
+  {
+    "model": "cm_betadiscrete",
+    "quantity": "lp",
+    "pair": "default/passes_off",
+    "bound_ulp": 4,
+    "cause": "see lp default/no_partition on this model.",
+    "since": "2026-11-21"
   },
   {
     "model": "cm_rdm",
@@ -323,6 +323,54 @@
     "bound_ulp": 2,
     "cause": "every y == 0 row adds the same log(hu), and CSE now merges those 13 terms into one term times 13 (#587). Without CSE they are added one at a time, so the lp and the hu gradient round differently. The gap is 2 ULP at point 0 on x86-64 Linux, where default's lp is 1 ULP from macOS arm64's and no_cse's is the same on both, and up to 2 ULP over 40 swept points on macOS. Against an 80-digit mpmath reference at point 0, default is 0.5 ULP off on Linux and 1.5 on macOS, no_cse 2.5 on both.",
     "since": "2026-11-18"
+  },
+  {
+    "model": "udf_data_actual_branch_o0",
+    "quantity": "lp",
+    "pair": "default/passes_off",
+    "bound_ulp": 4,
+    "cause": "the 40 per-row target terms, 26 of them normal_lpdf, are summed in a different grouping with and without STANLI_NO_REROLL and STANLI_NO_PARTITION, so the total differs in the last bits. The same body written in the model block (udf_data_actual_branch_inline_o0, run with this data) differs from passes_off in the same way, so this is the rerolled graph's own regrouping, not the call. Measured at the three cross-path points: lp up to 4 ULP, grad up to 2 ULP.",
+    "since": "2026-11-21"
+  },
+  {
+    "model": "udf_data_actual_branch_o0",
+    "quantity": "grad[*]",
+    "pair": "default/passes_off",
+    "bound_ulp": 2,
+    "cause": "see lp on this fixture and pair.",
+    "since": "2026-11-21"
+  },
+  {
+    "model": "udf_call_while_o0",
+    "quantity": "lp",
+    "pair": "default/passes_off",
+    "bound_ulp": 2,
+    "cause": "the per-row target terms of the 40-row loop, each a sum over a while loop, are summed in a different grouping with and without STANLI_NO_REROLL and STANLI_NO_PARTITION, and CSE changes the grouping again, so the totals differ in the last bits. The same body written in the model block (udf_call_while_inline_o0, run with this data) differs from passes_off and no_cse in the same way, so this is the unrolled graph's own regrouping, not the call. Measured at the three cross-path points: lp up to 2 ULP, grad up to 4 ULP.",
+    "since": "2026-11-21"
+  },
+  {
+    "model": "udf_call_while_o0",
+    "quantity": "grad[*]",
+    "pair": "default/passes_off",
+    "bound_ulp": 4,
+    "cause": "see lp default/passes_off on this fixture.",
+    "since": "2026-11-21"
+  },
+  {
+    "model": "udf_call_while_o0",
+    "quantity": "lp",
+    "pair": "default/no_cse",
+    "bound_ulp": 2,
+    "cause": "see lp default/passes_off on this fixture.",
+    "since": "2026-11-21"
+  },
+  {
+    "model": "udf_call_while_o0",
+    "quantity": "grad[*]",
+    "pair": "default/no_cse",
+    "bound_ulp": 4,
+    "cause": "see lp default/passes_off on this fixture.",
+    "since": "2026-11-21"
   },
   {
     "model": "viewalias",

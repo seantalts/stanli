@@ -227,8 +227,8 @@ class CompileAndBucketTest(unittest.TestCase):
     def test_bisect_steps_always_collapse_lists(self):
         steps = d.bisect_steps()
         self.assertEqual(steps[0], ("list_collapsing", "list_collapsing"))
-        self.assertEqual(steps[1], ("function_inlining",
-                                    "function_inlining,list_collapsing"))
+        self.assertEqual(steps[1], ("constant_propagation",
+                                    "constant_propagation,list_collapsing"))
         for added, spec in steps:
             self.assertIn("list_collapsing", spec.split(","))
             self.assertIn(added, spec.split(","))
@@ -265,9 +265,9 @@ class CompileAndBucketTest(unittest.TestCase):
         self.assertIsNone(d.detail([("lp", {"none": "1", "o1": "2"})]))
 
     def test_production_passes_follow_the_suite(self):
-        self.assertEqual(d.PRODUCTION_PASSES[0], "function_inlining")
-        self.assertEqual(d.PRODUCTION_PASSES[-1], "block_fixing")
-        self.assertEqual(len(set(d.PRODUCTION_PASSES)), 9)
+        self.assertEqual(d.PRODUCTION_PASSES[0], "constant_propagation")
+        self.assertEqual(d.PRODUCTION_PASSES[-1], "list_collapsing")
+        self.assertEqual(len(set(d.PRODUCTION_PASSES)), 5)
 
 
 if __name__ == "__main__":

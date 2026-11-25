@@ -51,7 +51,7 @@ std::string slurp(const std::string& path) {
 }
 
 stanli_model* load(const std::string& stem) {
-  const std::string mir = slurp("tests/fixtures/" + stem + ".tmir.sexp");
+  const std::string mir = slurp("tests/fixtures/" + stem + ".mir");
   const std::string data = slurp("tests/fixtures/" + stem + ".json");
   char err[4096]{};
   stanli_model* m = stanli_model_new_with_opts(mir.c_str(), data.c_str(),
@@ -1127,7 +1127,7 @@ void test_hessian(stanli_model* gauss) {
       stanli_hessian(gauss, q, &lp, nullptr, nullptr, err, sizeof err) != 0 &&
           err[0] != '\0');
 
-  const std::string mir = slurp("tests/fixtures/trunc_param.tmir.sexp");
+  const std::string mir = slurp("tests/fixtures/trunc_param.mir");
   stanli_model* tp =
       stanli_model_new_with_opts(mir.c_str(), "{}", nullptr, err, sizeof err);
   expect("trunc_param loads", tp != nullptr);

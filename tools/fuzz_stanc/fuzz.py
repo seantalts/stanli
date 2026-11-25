@@ -5,12 +5,10 @@ Each seed's program from gen.py is compiled with --passes none and o1 and
 compared in stanli by differential.py. A difference is bisected to the
 first pass that causes it. Three performance checks add their own buckets:
 
-  slow_compile   the compile that users get (no --passes, so with the O1
-                 budget and its fallback) takes more than 1 s and more than
-                 10 times the none compile (timed again serially before
-                 reporting)
-  mir_growth     the o1 MIR is more than 8 times the size of the MIR after
-                 function_inlining alone
+  slow_compile   the compile that users get (no --passes) takes more than 1 s
+                 and more than 10 times the none compile (timed again
+                 serially before reporting)
+  mir_growth     the o1 MIR is more than 8 times the size of the none MIR
   slow_gradient  a warm gradient at o1 takes more than 1.5 times, and at
                  least 100 ns more than, the unoptimized one, timed serially
                  with bench_grad. Only programs whose STANLI_PROFILE=1 report
@@ -101,8 +99,8 @@ def perf_kinds(r):
     if slow_compile(r.get("serial_seconds") or {
             k: r[k].get("seconds") for k in ("none", "shipped")}):
         out.append("slow_compile")
-    if r.get("inlined_size") and r["o1"].get("size") and \
-            r["o1"]["size"] > GROWTH_RATIO * r["inlined_size"]:
+    if r["none"].get("size") and r["o1"].get("size") and \
+            r["o1"]["size"] > GROWTH_RATIO * r["none"]["size"]:
         out.append("mir_growth")
     g = r.get("gradient_ns")
     if g and g["none"] and g["o1"] and \
@@ -189,7 +187,7 @@ def keep_failure(ctx, bucket, seed, work, record):
     (dest / "diffs.json").write_text(json.dumps(
         {k: record.get(k) for k in ("seed", "buckets", "guilty", "diffs",
                                     "bisect", "none", "o1", "shipped",
-                                    "inlined_size", "work", "gradient_ns")}, indent=1)
+                                    "work", "gradient_ns")}, indent=1)
         + "\n")
 
 
@@ -235,8 +233,6 @@ def examine(record, source, data_file, work, ctx):
     shipped = d.compile_model(ctx, source, None, work / "shipped.mir")
     record["shipped"] = {k: shipped[k] for k in ("outcome", "seconds",
                                                  "size")}
-    inl = d.compile_model(ctx, source, "function_inlining", work / "inl.mir")
-    record["inlined_size"] = inl["size"]
     tilde = "s_tilde" in record["features"]
     diffs, reason = d.differences(none, o1, tilde)
     if tilde and not reason and \

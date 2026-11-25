@@ -37,12 +37,12 @@ REL_TOL = 1e-10
 ABS_TOL = 1e-12
 TIMEOUT = 60.0
 
-# The production passes (Optimize.level_optimizations O1 plus stanli's
-# vectorize_loops), in the order optimization_suite first applies each.
+# The production passes (production_settings in
+# compiler/ocaml/stanli_pipeline.ml), in the order optimization_suite first
+# applies each.
 PRODUCTION_PASSES = (
-    "function_inlining", "constant_propagation", "copy_propagation",
-    "dead_code_elimination", "vectorize_loops", "list_collapsing",
-    "optimize_soa", "allow_uninitialized_decls", "block_fixing")
+    "constant_propagation", "copy_propagation", "dead_code_elimination",
+    "vectorize_loops", "list_collapsing")
 
 # When a model differs in several ways it is bucketed by the first of these.
 KINDS = ("compile_fail_o1", "compile_fail_o0", "crash", "timeout",
@@ -295,7 +295,7 @@ def run_process(argv, timeout, cwd=None):
 def compile_model(ctx, source, passes, mir_path, repeat=1):
     """The compile's outcome, MIR size and hash, and its fastest wall time
     over `repeat` runs. `passes` None compiles as users do, with the shipping
-    passes and their fallback to unoptimized MIR."""
+    passes."""
     override = [] if passes is None else ["--passes", passes]
     argv = [ctx["compiler"], "--model-only", *override,
             "--filename", source.name, source]

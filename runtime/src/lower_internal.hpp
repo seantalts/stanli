@@ -102,6 +102,7 @@ struct PrepTrace {
     int64_t b = 0;
     int64_t c = 0;
     int64_t d = 0;
+    int64_t e = 0;
     int64_t term_steps = 0;
     int64_t lane_steps = 0;
     int64_t packed_rows = 0;
@@ -129,6 +130,12 @@ struct PrepTrace {
   // share their parent's trace, so their work is counted too.
   int64_t lowered_statements = 0;
   int64_t copied_data_bytes = 0;
+  // Adjoints generated for region-map bodies.
+  int64_t region_map_adjoints = 0;
+  // User function bodies that the write_array control scan entered, and
+  // the statements that it visited.
+  int64_t call_scans = 0;
+  int64_t scan_statements = 0;
   void work(const char* graph) {
     if (!enabled_) return;
     Row& r = next();
@@ -137,6 +144,9 @@ struct PrepTrace {
     r.extra = Extra::Work;
     r.a = lowered_statements;
     r.b = copied_data_bytes;
+    r.c = region_map_adjoints;
+    r.d = call_scans;
+    r.e = scan_statements;
   }
 
   Time start() const { return enabled_ ? Clock::now() : Time{}; }
@@ -264,6 +274,9 @@ struct PrepTrace {
         case Extra::Work:
           field("statements", r.a);
           field("copied_data_bytes", r.b);
+          field("region_map_adjoints", r.c);
+          field("call_scans", r.d);
+          field("scan_statements", r.e);
           break;
         case Extra::None:
           break;
@@ -953,6 +966,16 @@ struct Lowering {
   std::vector<int> jac_slots;
   std::vector<int> extra_roots;
   std::map<std::string, const mir::FunDef*> fun_defs;
+  // A user function as one call sees it: a formal whose argument is data is
+  // data in the body, as if it had the `data` qualifier, so the call lowers
+  // as its inlined body would. Null when no formal changes. One copy per
+  // function and set of data formals; lowering keeps each copy in the graph.
+  std::shared_ptr<mir::FunDef> call_site_def(
+      const mir::FunDef& f, const std::vector<mir::Expr>& args) const;
+  mutable std::map<std::pair<const mir::FunDef*, std::vector<bool>>,
+                   std::shared_ptr<mir::FunDef>>
+      call_site_defs;
+  std::set<const mir::FunDef*> pooled_call_site_defs;
   // The program's tuple input and output variables, or null.
   const mir::detail::TupleInterface* tuples = nullptr;
   // The tuple leaf a variable is, or null.
@@ -1625,37 +1648,14 @@ struct Lowering {
   // out to the supplied count is the shape the reader would produce.
   void validate_data_dims(const std::string& name, const mir::SizedType& t);
 
-  static void data_reads(const mir::Expr& e, std::set<std::string>& names) {
-    if (e.kind == mir::Expr::FunApp && e.fn_lib == mir::Expr::Lib::Internal &&
-        e.name == "FnReadData" && !e.args.empty() &&
-        e.args[0].kind == mir::Expr::LitStr)
-      names.insert(e.args[0].lit_s);
-    for (const auto& a : e.args) data_reads(a, names);
-  }
+  // The statement FnReadData(x, context__, "x"), with which stanc's
+  // prepare_data reads the input x.
   static bool direct_input_load(const mir::Stmt& s,
                                 const std::set<std::string>& inputs) {
-    if (mir::internal_name(s) == "FnReadData")
-      return s.fn_args.size() == 3 && s.fn_args[0].kind == mir::Expr::Var &&
-             inputs.count(s.fn_args[0].name);
-    if (s.kind != mir::Stmt::Assignment || !s.lhs_idx.empty() ||
-        !inputs.count(s.lhs))
-      return false;
-    std::set<std::string> reads;
-    data_reads(s.rhs, reads);
-    return reads.size() == 1 && *reads.begin() == s.lhs;
+    return mir::internal_name(s) == "FnReadData" && s.fn_args.size() == 3 &&
+           s.fn_args[0].kind == mir::Expr::Var &&
+           inputs.count(s.fn_args[0].name);
   }
-  struct RebuildShape {
-    bool supported = true;
-    int loaders = 0;
-    std::string loader_lhs;
-    std::set<std::string> reads;
-    std::set<std::string> decls;
-    std::set<std::string> writes;
-  };
-  static void scan_rebuild(const mir::Stmt& s, RebuildShape& shape);
-
-  static bool canonical_input_rebuild(const mir::Stmt& s,
-                                      const std::set<std::string>& inputs);
 
   void bind_data(const mir::Program& p);
   void report_missing_data(const mir::Program& p);
@@ -1721,7 +1721,7 @@ struct Lowering {
   // Does `s` increment the target, explicitly or through a call?
   static bool has_target_pe(const mir::Stmt& s);
 
-  bool scan_block(const mir::Stmt& s,
+  bool scan_block(const std::vector<mir::Stmt>& body,
                   const std::function<bool(const mir::Stmt&)>& stop);
   static bool while_sizes_from_loop_state(const mir::Stmt& s);
   std::optional<Flow> unroll_while(const mir::Stmt& s);
@@ -1742,6 +1742,15 @@ struct Lowering {
   // and undoes the unroll around it.
   int while_unroll_depth = 0;
   bool needs_runtime_control(const mir::Stmt& s);
+  bool call_needs_runtime_control(const mir::Expr& e);
+  std::set<const mir::FunDef*> scanned_calls;
+  bool call_scan_partial = false;
+  // Statements of called functions that the scan of one write_array block
+  // visits. The corpus needs at most 2,185; ctsem_ctsm_post4_100 needs over
+  // a million, in a search loop nested in a function that a loop calls.
+  static constexpr int64_t kControlScanSteps = int64_t{1} << 14;
+  int64_t control_scan_steps = 0;
+  std::unordered_map<std::string, bool> call_scan_answers;
 
   // A Break/Continue selected by a runtime condition cannot be lowered as a
   // standalone conditional island: its jump target belongs to the enclosing
@@ -1962,12 +1971,17 @@ struct Lowering {
                                  IslandRegion& region,
                                  const std::set<std::string>& names,
                                  const mir::Stmt* s);
-  void finalize_island_program(IslandProg& prog, bool native,
-                               bool keep_every_clear = false,
-                               bool propagate_copies = false);
+  // A caller that refuses a program longer than max_code passes it, and
+  // `adjoints` counts the adjoints that gen_adjoint was asked for.
+  void finalize_island_program(
+      IslandProg& prog, bool native, bool keep_every_clear = false,
+      bool propagate_copies = false,
+      size_t max_code = std::numeric_limits<size_t>::max(),
+      int64_t* adjoints = nullptr);
   void finalize_island_program_once(IslandProg& prog, bool native,
                                     bool keep_every_clear,
-                                    bool propagate_copies);
+                                    bool propagate_copies, size_t max_code,
+                                    int64_t* adjoints);
   std::vector<int> pack_island_inputs(IslandProg& prog,
                                       std::vector<int> inputs);
   bool lower_region_map(const mir::Stmt& s, long lo, long hi);

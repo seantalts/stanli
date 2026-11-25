@@ -137,7 +137,7 @@ using Ref = std::function<var(const std::vector<var>&, const Series&,
                               std::vector<int>*)>;
 
 std::string fixture_mir(const std::string& stem) {
-  return slurp("tests/fixtures/" + stem + ".tmir.sexp");
+  return slurp("tests/fixtures/" + stem + ".mir");
 }
 
 CompiledModel compile_with(const std::string& stem, int n,
@@ -871,9 +871,9 @@ void test_call_partials_differ_per_iteration(bool recompute) {
   for (int i = 0; i < n; ++i) json << (i ? "," : "") << offsets[(size_t)i];
   json << "],\"z_data\":0.25}";
   if (recompute) test_setenv("STANLI_REGION_MAP_SAVE_LIMIT", "0", 1);
-  CompiledModel cm = stanli::compile_model(
-      slurp("tests/fixtures/hypergeometric_1f0.tmir.sexp"),
-      DataMap::from_json(json.str()));
+  CompiledModel cm =
+      stanli::compile_model(slurp("tests/fixtures/hypergeometric_1f0.mir"),
+                            DataMap::from_json(json.str()));
   if (recompute) test_unsetenv("STANLI_REGION_MAP_SAVE_LIMIT");
   expect_mapped("hypergeometric loop", cm);
   const auto& p = map_payload(cm);
@@ -1685,6 +1685,100 @@ void test_lane_cancellation_bitwise() {
   check(distinct.size() > 2, "cancellation lp varies across points");
 }
 
+// A call that stanc kept lowers to the program of its body written in the
+// loop, with the arguments bound to locals: the same instructions, and the
+// same lp and gradient bit for bit. The two programs number their registers
+// differently, so the lane region has to start on a 64-byte boundary in
+// both. cm_exwald's kept calls ran 1.2x slower at two benchmark points when
+// the region started 8 bytes off a 16-byte boundary.
+void test_kept_call_matches_inlined_body() {
+  const int n = 200;
+  CompiledModel call = compile_with("region_map_kept_call_o0", n);
+  CompiledModel body = compile_with("region_map_kept_call_inline_o0", n);
+  expect_mapped("kept call", call);
+  expect_mapped("body in the loop", body);
+  const auto& pc = map_payload(call);
+  const auto& pb = map_payload(body);
+  check(pc.lanes.active && pb.lanes.active, "kept call twins batch lanes");
+  const auto codes = [](const stanli::RegionMapProg& p) {
+    std::vector<int> out;
+    for (const auto& I : p.code) out.push_back((int)I.code);
+    out.push_back(-1);
+    for (const auto& I : p.adj.code) out.push_back((int)I.code);
+    return out;
+  };
+  check(codes(pc) == codes(pb),
+        "kept call and body in the loop compile to the same instructions");
+  Executor ec(call.graph), eb(body.graph);
+  call.bind(ec);
+  body.bind(eb);
+  for (const Params& p : spread_points(2)) {
+    const Eval a = evaluate(ec, p), b = evaluate(eb, p);
+    check(same_bits(a.lp, b.lp), "kept call lp bitwise");
+    for (size_t i = 0; i < a.grad.size(); ++i)
+      check(same_bits(a.grad[i], b.grad[i]), "kept call gradient bitwise");
+  }
+  for (const auto* p : {&pc, &pb}) {
+    const int64_t registers = (int64_t)p->n_regs + p->adj.n_regs;
+    std::vector<double> scratch(
+        (size_t)(registers + stanli::region_map_lane_cells(*p) + 8));
+    // Eight consecutive bases cover every offset from a 64-byte boundary.
+    for (int k = 0; k < 8; ++k) {
+      double* const base = scratch.data() + k;
+      const double* region = stanli::region_map_lane_region(*p, base);
+      check(reinterpret_cast<uintptr_t>(region) % 64 == 0,
+            "lane region starts on a 64-byte boundary from offset " +
+                std::to_string(k));
+      check(region >= base + registers && region < base + registers + 8,
+            "lane region follows the registers");
+    }
+  }
+}
+
+// M[n] reads one row of a matrix that every lane shares. Its adjoint goes to
+// the two cells of that row. It used to go through accumulation rows for all
+// 2N cells of M in every tile, so the lane storage and the work per lane
+// grew with N.
+void test_shared_row_read_lanes() {
+  const Ref ref = [](const std::vector<var>& p, const Series& s,
+                     std::vector<int>* taken) {
+    var lp = 0;
+    for (size_t i = 0; i < s.y.size(); ++i) {
+      const var r1 = p[0] * s.x[i], r2 = p[1] + s.x[i];
+      const bool low = r1 < r2;
+      if (taken) taken->push_back(low);
+      lp += low ? -stan::math::square(s.y[i] - r1)
+                : -0.5 * stan::math::square(s.y[i] - r2) + p[1];
+    }
+    return lp;
+  };
+  int sites[2] = {0, 0};
+  int slot = 0;
+  for (int n : {64, 512}) {
+    const std::string what = "matrix row N=" + std::to_string(n);
+    CompiledModel cm = compile_with("region_map_matrix_row", n);
+    expect_mapped(what, cm);
+    check(map_calls(cm, stanli::OP_INDEX_DYNAMIC),
+          what + ": the row is a runtime index call");
+    const auto& p = map_payload(cm);
+    check(p.lanes.active, what + ": lane plan active");
+    sites[slot++] = p.lanes.max_sites;
+    check(p.lanes.max_sites < n, what + ": adjoint sites " +
+                                     std::to_string(p.lanes.max_sites) +
+                                     " below the matrix size");
+    const Series s = make_series(n);
+    Executor ex(cm.graph);
+    cm.bind(ex);
+    std::vector<std::vector<int>> taken(2);
+    const std::vector<Params> points = {{0.3, -0.5}, {1.5, 0.7}};
+    for (size_t k = 0; k < points.size(); ++k)
+      expect_eval(what + " point " + std::to_string(k), evaluate(ex, points[k]),
+                  reference(ref, s, points[k], &taken[k]));
+    check(flips(taken[0], taken[1]) > 0, what + ": points flip branches");
+  }
+  check(sites[0] == sites[1], "matrix row adjoint sites do not grow with N");
+}
+
 void test_lane_exceptions() {
   for (int n : {37, 64, 200}) {
     const std::string what = "region_map_oob N=" + std::to_string(n);
@@ -1918,7 +2012,13 @@ void test_data_early_return_unrolls() {
   }
 }
 
-#ifdef STANLI_TEST_STANC
+#ifdef STANLI_TEST_STANLI_CHECK
+// These compile with the MIR fixtures' O1 passes, which inline functions.
+std::string mir_of_file(const std::string& path) {
+  return stanli::tooling::run_emit_mir(STANLI_TEST_STANLI_CHECK, path,
+                                       STANLI_TEST_O1_PASSES);
+}
+
 struct CogmodExpectation {
   const char* stem;
   bool mapped;
@@ -1952,8 +2052,7 @@ void test_lane_cogmod() {
   };
   for (const CogmodExpectation& m : models) {
     const std::string stem = m.stem;
-    const std::string mir = stanli::tooling::run_stanc_process(
-        STANLI_TEST_STANC, "tests/cogmod/" + stem + ".stan");
+    const std::string mir = mir_of_file("tests/cogmod/" + stem + ".stan");
     const DataMap data =
         DataMap::from_json_file("tests/cogmod/" + stem + ".json");
     CompiledModel lanes = stanli::compile_model(mir, data);
@@ -1976,8 +2075,7 @@ std::string mir_of_source(const std::string& name, const std::string& source) {
                            "/" + name + "_" +
                            std::to_string(std::random_device{}()) + ".stan";
   std::ofstream(path) << source;
-  const std::string mir =
-      stanli::tooling::run_stanc_process(STANLI_TEST_STANC, path);
+  const std::string mir = mir_of_file(path);
   std::remove(path.c_str());
   return mir;
 }
@@ -2004,6 +2102,36 @@ void test_extent_bound_is_data_control() {
         "loops bounded and branched by extents are not mapped");
   check(histogram(cm) == histogram(off),
         "extent-controlled loops keep the unmapped graph");
+}
+
+// stanc3 types a real local or a transformed parameter as autodiff even when
+// it only ever holds data. A branch on one is decided when the graph is
+// built, so the map would only add work: about 14x per gradient on a loop
+// like the first one here.
+void test_data_valued_locals_are_data_control() {
+  const std::string mir =
+      mir_of_source("region_map_data_locals",
+                    "data { int N; vector[N] y; vector[N] x; }\n"
+                    "parameters { real a; real<lower=0> s; }\n"
+                    "transformed parameters { real c = 2; }\n"
+                    "model {\n"
+                    "  for (n in 1:N) {\n"
+                    "    real t = x[n];\n"
+                    "    if (t > 0) target += normal_lpdf(y[n] | a * t, s);\n"
+                    "    else target += cauchy_lpdf(y[n] | a, s);\n"
+                    "  }\n"
+                    "  for (n in 1:N)\n"
+                    "    if (c * x[n] < 1) target += -square(y[n] - a);\n"
+                    "}\n");
+  const DataMap data = make_data(64);
+  CompiledModel cm = stanli::compile_model(mir, data);
+  test_setenv("STANLI_REGION_MAP", "0", 1);
+  CompiledModel off = stanli::compile_model(mir, data);
+  test_unsetenv("STANLI_REGION_MAP");
+  check(count_opcode(cm, OP_REGION_MAP) == 0,
+        "loops branched on data-valued locals are not mapped");
+  check(histogram(cm) == histogram(off),
+        "loops branched on data-valued locals keep the unmapped graph");
 }
 
 // Input points for each unary in STANLI_PROGRAM_UNARY_LIST. The last point
@@ -2419,6 +2547,8 @@ int main() {
   test_map_selection_follows_data_through_udfs();
   test_lane_flag_clear_segments();
   test_lane_cancellation_bitwise();
+  test_kept_call_matches_inlined_body();
+  test_shared_row_read_lanes();
   test_lane_exceptions();
   test_lane_duplicate_live_in();
   test_lane_copied_executors_interleaved();
@@ -2427,10 +2557,11 @@ int main() {
   test_lane_profile_counters();
   test_hoisted_shared_scalar_mixture();
   test_data_early_return_unrolls();
-#ifdef STANLI_TEST_STANC
+#ifdef STANLI_TEST_STANLI_CHECK
   test_lane_cogmod();
   test_every_unary_in_lanes();
   test_extent_bound_is_data_control();
+  test_data_valued_locals_are_data_control();
 #endif
   test_mode_policy();
   test_recompute_visits_taken_blocks();

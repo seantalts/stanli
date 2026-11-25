@@ -1,7 +1,6 @@
 #include <stanli/compile.hpp>
 #include <stanli/large_stack.hpp>
 #include <stanli/mir_decode.hpp>
-#include <stanli/sexp.hpp>
 
 #include "mir_reader_internal.hpp"
 
@@ -106,14 +105,11 @@ mir::Program decode_text(std::string_view text) {
   size_t first = 0;
   while (first < text.size() && is_space(text[first])) ++first;
   if (first == text.size()) throw mir::MirError("mir: empty input");
-
-  if (text[first] == '(')
-    return rename_shadowed(
-        mir::read_program(sexp::parse(text, 8 * size_t{nesting_limit()})));
-
   throw mir::MirError(
-      "mir: unrecognized input format (expected compact portable MIR or "
-      "legacy S-expression)");
+      "mir: not portable MIR. stanli reads only the STANLI5 portable MIR "
+      "that its own compiler writes: stanli-compile, stan_to_mir() in "
+      "Python, or the embedded compiler. Stock stanc's s-expression MIR "
+      "(--debug-optimized-mir) is no longer read");
 }
 
 }  // namespace

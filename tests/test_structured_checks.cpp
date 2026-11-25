@@ -5,10 +5,11 @@
 // an array, whose JSON/interpreter storage interleaves leaves even though the
 // lowered graph keeps each leaf contiguous.
 #include "env_helpers.hpp"
+#include "portable_mir_writer.hpp"
 
+#include <stanli/mir_decode.hpp>
 #include <stanli/compile.hpp>
 #include <stanli/mir_interp.hpp>
-#include <stanli/sexp.hpp>
 #include <stanli/wa_interp.hpp>
 
 #include <stan/math.hpp>
@@ -471,7 +472,7 @@ std::string replace_once(std::string text, const std::string& from,
 }
 
 void test_data_arrays() {
-  const std::string mir = slurp("tests/fixtures/structured_checks.tmir.sexp");
+  const std::string mir = slurp("tests/fixtures/structured_checks.mir");
   const std::string good = slurp("tests/fixtures/structured_checks.json");
 
   // These two leaves are interleaved in DataMap storage. A contiguous slice
@@ -530,51 +531,46 @@ void test_data_arrays() {
   check(empty_fast == empty_oracle,
         "preloaded empty structured arrays match interpreter oracle");
 
-  std::string malformed = mir;
-  const size_t gq = malformed.find("(decl_id gq_sum_to_zero)");
-  const std::string structured_tag = "(trans SumToZero)";
-  const size_t check_at = malformed.find(structured_tag, gq);
-  if (gq == std::string::npos || check_at == std::string::npos) {
-    check(false, "malformed generated-quantity fixture mutation");
-  } else {
-    malformed.replace(check_at, structured_tag.size(), "(trans Correlation)");
-    check(outcome([&] {
-            (void)stanli::compile_model(malformed, DataMap::from_json(good));
-          }) == Outcome::Other,
-          "malformed generated-quantity check fails model construction");
-
-    std::string unsupported = mir;
-    const size_t unsupported_at = unsupported.find(structured_tag, gq);
-    unsupported.replace(unsupported_at, structured_tag.size(),
-                        "(trans UnknownCheck)");
-    check(outcome([&] {
-            (void)stanli::compile_model(unsupported, DataMap::from_json(good));
-          }) == Outcome::Other,
-          "unknown generated-quantity check fails model construction");
-
-    std::string missing = mir;
-    const size_t missing_at = missing.find(structured_tag, gq);
-    missing.erase(missing_at, structured_tag.size());
-    check(outcome([&] {
-            (void)stanli::compile_model(missing, DataMap::from_json(good));
-          }) == Outcome::Other,
-          "missing generated-quantity check tag fails model construction");
-
-    std::string wrong_depth = mir;
-    const size_t depth_check = wrong_depth.find(structured_tag, gq);
-    const size_t depth_at = wrong_depth.find("(type_ UVector)", depth_check);
-    if (depth_at == std::string::npos) {
-      check(false, "generated-quantity check depth mutation");
-    } else {
-      wrong_depth.replace(depth_at, std::string("(type_ UVector)").size(),
-                          "(type_ (UArray UVector))");
-      check(outcome([&] {
-              (void)stanli::compile_model(wrong_depth,
-                                          DataMap::from_json(good));
-            }) == Outcome::Other,
-            "wrong-depth generated-quantity check fails construction");
-    }
-  }
+  // Decode the fixture, change the generated-quantity check of
+  // gq_sum_to_zero, and encode it again.
+  const auto with_gq_check = [&](const auto& change) {
+    stanli::mir::Program program = stanli::decode_program(mir);
+    bool found = false;
+    const std::function<void(std::vector<Stmt>&)> visit =
+        [&](std::vector<Stmt>& body) {
+          for (Stmt& s : body) {
+            if (s.kind == Stmt::NRFunApp &&
+                stanli::mir::internal_name(s) == "FnCheck" &&
+                s.check_var_name == "gq_sum_to_zero" && s.check_transform &&
+                s.check_transform->kind == Transform::SumToZero) {
+              change(s);
+              found = true;
+            }
+            visit(s.body);
+          }
+        };
+    visit(program.generate_quantities);
+    if (!found) throw std::logic_error("no gq_sum_to_zero check to change");
+    return stanli::portable_writer::write_v2(program);
+  };
+  const auto rejected = [&](const std::string& changed) {
+    return outcome([&] {
+             (void)stanli::compile_model(changed, DataMap::from_json(good));
+           }) == Outcome::Other;
+  };
+  check(!rejected(with_gq_check([](Stmt&) {})),
+        "the re-encoded generated-quantity check is accepted");
+  check(rejected(with_gq_check(
+            [](Stmt& s) { s.check_transform->kind = Transform::Correlation; })),
+        "malformed generated-quantity check fails model construction");
+  check(rejected(with_gq_check(
+            [](Stmt& s) { s.check_transform->kind = Transform::Unsupported; })),
+        "unknown generated-quantity check fails model construction");
+  check(rejected(with_gq_check([](Stmt& s) { s.check_transform.reset(); })),
+        "missing generated-quantity check tag fails model construction");
+  check(rejected(
+            with_gq_check([](Stmt& s) { ++s.fn_args.front().unsized.depth; })),
+        "wrong-depth generated-quantity check fails construction");
 }
 
 std::map<std::string, DataMap::Entry> wa_env(const DataMap& data) {
@@ -596,7 +592,7 @@ std::map<std::string, DataMap::Entry> wa_env(const DataMap& data) {
 }
 
 void test_runtime_phases() {
-  const std::string mir = slurp("tests/fixtures/structured_checks.tmir.sexp");
+  const std::string mir = slurp("tests/fixtures/structured_checks.mir");
   const DataMap data =
       DataMap::from_json_file("tests/fixtures/structured_checks.json");
 
@@ -627,8 +623,8 @@ void test_runtime_phases() {
           "generated-quantity structured check rejects compiled write_array");
   }
 
-  auto prog = std::make_shared<stanli::mir::Program>(
-      stanli::mir::read_program(stanli::sexp::parse(mir)));
+  auto prog =
+      std::make_shared<stanli::mir::Program>(stanli::decode_program(mir));
   WaInterp interpreted(prog, wa_env(data));
   std::map<std::string, DataMap::Entry> params;
   params["tp_shift"].r = {0.0};

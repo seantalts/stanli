@@ -40,8 +40,7 @@ static bool bounded_while_guard(const mir::Expr& e) {
         "Less__",      "Leq__",     "Greater__", "Geq__",
         "Equals__",    "NEquals__", "min",       "max"};
     if (!scalar.count(e.name)) return false;
-  } else if (e.kind != E::Promotion && e.kind != E::EAnd && e.kind != E::EOr &&
-             e.kind != E::TernaryIf) {
+  } else if (e.kind != E::EAnd && e.kind != E::EOr && e.kind != E::TernaryIf) {
     return false;
   }
   for (const auto& a : e.args)
@@ -144,7 +143,7 @@ std::optional<Lowering::Flow> Lowering::unroll_while(const mir::Stmt& s) {
 // size locals, to bound a loop and to guard an early return.  Looking
 // through the whole block without this lexical state rejects an otherwise
 // static UDF.
-bool Lowering::scan_block(const mir::Stmt& s,
+bool Lowering::scan_block(const std::vector<mir::Stmt>& body,
                           const std::function<bool(const mir::Stmt&)>& stop) {
   const IntEnvScope saved{*this};
   std::set<std::string> local_ints;
@@ -225,7 +224,7 @@ bool Lowering::scan_block(const mir::Stmt& s,
         return false;
       };
   bool found = false;
-  for (const auto& child : s.body) {
+  for (const auto& child : body) {
     if (stop(child)) {
       found = true;
       break;
@@ -284,6 +283,14 @@ bool Lowering::scan_block(const mir::Stmt& s,
   return found;
 }
 bool Lowering::needs_runtime_control(const mir::Stmt& s) {
+  // A scan that has not decided within kControlScanSteps statements of
+  // called functions answers as it does for anything else that it cannot
+  // work out.
+  ++prep.scan_statements;
+  if (!scanned_calls.empty() && ++control_scan_steps > kControlScanSteps) {
+    call_scan_partial = true;
+    return true;
+  }
   // Never execute an RNG while the lexical scan tries to discover integer
   // constants. Its result belongs in a runtime register even when MIR marks
   // it DataOnly. The program compiler will still refuse dynamic extents.
@@ -298,8 +305,15 @@ bool Lowering::needs_runtime_control(const mir::Stmt& s) {
   // its enclosing block would absorb UDF-local declarations and returns,
   // which are not live-outs of that outer region.
   if (s.kind == mir::Stmt::While) return false;
+  if (const auto call = mir::user_defined_statement_call(s))
+    if (call_needs_runtime_control(*call)) return true;
+  bool called = false;
+  mir::for_each_expr(s, [&](const mir::Expr& e) {
+    called = called || call_needs_runtime_control(e);
+  });
+  if (called) return true;
   if (s.kind == mir::Stmt::Block || s.kind == mir::Stmt::SList)
-    return scan_block(s, [&](const mir::Stmt& child) {
+    return scan_block(s.body, [&](const mir::Stmt& child) {
       return needs_runtime_control(child);
     });
   if (s.kind == mir::Stmt::IfElse) {
@@ -329,10 +343,21 @@ bool Lowering::needs_runtime_control(const mir::Stmt& s) {
     const bool had_old = old != int_env.end();
     const long old_value = had_old ? old->second : 0;
     bool found = false;
+    // The scan answers yes to whatever it cannot work out, so a body that
+    // needs no runtime control with the loop variable unknown needs none on
+    // any trip, and the trips need not be scanned one by one.
+    if (hi > lo) {
+      scan_erase_int(s.loopvar);
+      found = std::any_of(s.body.begin(), s.body.end(), [&](const auto& k) {
+        return needs_runtime_control(k);
+      });
+    }
+    const bool per_trip = hi == lo || found;
+    found = false;
     // Scan under the same compile-time loop bindings ordinary lowering
     // will use. This keeps static conditions such as `if (t < N)` out of
     // a region without overlooking an arm that exists only at a later t.
-    for (int64_t v = lo; v <= hi && !found; ++v) {
+    for (int64_t v = lo; per_trip && v <= hi && !found; ++v) {
       scan_set_int(s.loopvar, static_cast<long>(v));
       for (const auto& k : s.body)
         if (needs_runtime_control(k)) {
@@ -349,6 +374,119 @@ bool Lowering::needs_runtime_control(const mir::Stmt& s) {
   for (const auto& k : s.body)
     if (needs_runtime_control(k)) return true;
   return false;
+}
+// A user call is scanned as its inlined body would be. The formals take what
+// the scan can work out of the arguments, and the caller's names are out of
+// reach, as in lower_call_udf. So the answer depends only on the function,
+// what the formals hold and the few flags that eval_int and the interpreter
+// read, and a call with the same ones reuses it. A function already being
+// scanned is not entered again (stanc3 does not inline a recursive call
+// either). An answer that met such a call, or that the step limit cut short,
+// is not reused.
+bool Lowering::call_needs_runtime_control(const mir::Expr& e) {
+  for (const auto& a : e.args)
+    if (call_needs_runtime_control(a)) return true;
+  if (e.kind != mir::Expr::FunApp || e.fn_lib != mir::Expr::Lib::UserDefined)
+    return false;
+  const auto found = fun_defs.find(mir::function_key(e));
+  if (found == fun_defs.end()) return false;
+  if (scanned_calls.count(found->second)) {
+    call_scan_partial = true;
+    return false;
+  }
+  const auto specialized = call_site_def(*found->second, e.args);
+  const mir::FunDef& f = specialized ? *specialized : *found->second;
+  struct Formal {
+    std::optional<long> i;
+    std::optional<DataMap::Entry> data;
+    std::optional<DeclView> view;
+  };
+  std::vector<Formal> formals(std::min(e.args.size(), f.arg_names.size()));
+  std::string key;
+  const auto append = [&](const void* bytes, size_t n) {
+    key.append(static_cast<const char*>(bytes), n);
+  };
+  const auto append_vector = [&](const auto& v) {
+    const size_t n = v.size();
+    append(&n, sizeof n);
+    if (n) append(v.data(), n * sizeof v[0]);
+  };
+  const mir::FunDef* const def = &f;
+  append(&def, sizeof def);
+  const bool flags[2] = {region_current != nullptr, data_extent_scope};
+  append(&while_unroll_depth, sizeof while_unroll_depth);
+  append(flags, sizeof flags);
+  for (size_t k = 0; k < formals.size(); ++k) {
+    const mir::Expr& a = e.args[k];
+    if (mir::is_unsized(a, mir::UnsizedLeaf::Int)) {
+      try {
+        formals[k].i = eval_int(a);
+      } catch (const CompileError&) {
+      }
+    } else {
+      formals[k].data = try_eval_pure(a);
+      const auto view = try_static_view(a);
+      if (view.state == StaticProbeState::Known)
+        formals[k].view = DeclView{view.value.len, false, view.value.si};
+    }
+    const char tags[3] = {formals[k].i ? 'i' : '-', formals[k].data ? 'd' : '-',
+                          formals[k].view ? 'v' : '-'};
+    append(tags, sizeof tags);
+    if (formals[k].i) append(&*formals[k].i, sizeof(long));
+    if (const auto& d = formals[k].data) {
+      append(&d->is_int, sizeof d->is_int);
+      append_vector(d->dims);
+      append_vector(d->r);
+      append_vector(d->i);
+    }
+    if (const auto& v = formals[k].view) {
+      const int64_t shape[5] = {v->len, v->si.rows, v->si.cols,
+                                v->si.param_free,
+                                static_cast<int64_t>(v->si.kind)};
+      append(shape, sizeof shape);
+      append(&v->si.shape, sizeof v->si.shape);
+    }
+  }
+  if (const auto known = call_scan_answers.find(key);
+      known != call_scan_answers.end())
+    return known->second;
+  IntEnvLog* const log_saved = int_env_log;
+  auto scope_saved = std::move(scope);
+  auto ie_saved = std::move(int_env);
+  auto decls_saved = std::move(decls);
+  auto il_saved = std::move(int_locals);
+  auto env_saved = std::move(td.env());
+  const bool partial_saved = call_scan_partial;
+  int_env_log = nullptr;
+  scope.clear();
+  int_env.clear();
+  decls.clear();
+  int_locals.clear();
+  td.env().clear();
+  call_scan_partial = false;
+  scanned_calls.insert(found->second);
+  ++prep.call_scans;
+  const ScopeExit restore{[&] {
+    scope = std::move(scope_saved);
+    int_env = std::move(ie_saved);
+    decls = std::move(decls_saved);
+    int_locals = std::move(il_saved);
+    td.env() = std::move(env_saved);
+    int_env_log = log_saved;
+    scanned_calls.erase(found->second);
+    call_scan_partial = call_scan_partial || partial_saved;
+  }};
+  for (size_t k = 0; k < formals.size(); ++k) {
+    const std::string& name = f.arg_names[k];
+    if (formals[k].i) int_env[name] = *formals[k].i;
+    if (formals[k].data) td.env()[name] = *formals[k].data;
+    if (formals[k].view) decls[name] = *formals[k].view;
+  }
+  const bool answer = scan_block(f.body, [&](const mir::Stmt& child) {
+    return needs_runtime_control(child);
+  });
+  if (!call_scan_partial) call_scan_answers.emplace(std::move(key), answer);
+  return answer;
 }
 // Whether `s` holds a break or continue of the loop around it.
 static bool has_loop_control(const mir::Stmt& s) {
@@ -402,7 +540,7 @@ bool Lowering::runtime_loop_control(const mir::Stmt& s, bool runtime_path) {
   }
   if (s.kind == mir::Stmt::Block || s.kind == mir::Stmt::SList) {
     try {
-      return scan_block(s, [&](const mir::Stmt& child) {
+      return scan_block(s.body, [&](const mir::Stmt& child) {
         if (runtime_loop_control(child, runtime_path)) return true;
         forget_runtime_ints(child);
         return false;
@@ -591,20 +729,45 @@ void Lowering::configure_island_compiler(ProgramCompiler& c,
     }
   }
 }
+// A pass whose program is already longer than max_code skips gen_adjoint,
+// which keeps every forward instruction and so could only make it longer.
+// Without copy propagation a program can come out shorter, and whether that
+// pass runs depends on the first pass's adjoint, so both adjoints are skipped
+// only when both programs are too long; otherwise the passes run as before.
 void Lowering::finalize_island_program(IslandProg& prog, bool native,
                                        bool keep_every_clear,
-                                       bool propagate_copies) {
+                                       bool propagate_copies, size_t max_code,
+                                       int64_t* adjoints) {
   if (propagate_copies && native) {
     const IslandProg before = prog;
-    finalize_island_program_once(prog, native, keep_every_clear, true);
+    finalize_island_program_once(prog, native, keep_every_clear, true, max_code,
+                                 adjoints);
     if (prog.native_adj) return;
+    if (prog.code.size() > max_code) {
+      IslandProg plain = before;
+      finalize_island_program_once(plain, native, keep_every_clear, false,
+                                   max_code, adjoints);
+      if (plain.code.size() > max_code) {
+        static_cast<IslandProg&>(prog) = std::move(plain);
+        return;
+      }
+      static_cast<IslandProg&>(prog) = before;
+      finalize_island_program_once(prog, native, keep_every_clear, true,
+                                   std::numeric_limits<size_t>::max(),
+                                   adjoints);
+      if (!prog.native_adj) static_cast<IslandProg&>(prog) = std::move(plain);
+      return;
+    }
     static_cast<IslandProg&>(prog) = before;
   }
-  finalize_island_program_once(prog, native, keep_every_clear, false);
+  finalize_island_program_once(prog, native, keep_every_clear, false, max_code,
+                               adjoints);
 }
 void Lowering::finalize_island_program_once(IslandProg& prog, bool native,
                                             bool keep_every_clear,
-                                            bool propagate_copies) {
+                                            bool propagate_copies,
+                                            size_t max_code,
+                                            int64_t* adjoints) {
   // Forward-only branches can record the executed path for generated
   // adjoints. Unsupported derivatives and loops retain the replay.
   // The register compactor's liveness analysis is straight-line (with
@@ -651,6 +814,11 @@ void Lowering::finalize_island_program_once(IslandProg& prog, bool native,
     sink_program_fills(prog);
     elide_program_dead_constants(prog);
   }
+  if (prog.code.size() > max_code) {
+    prog.native_adj = false;
+    return;
+  }
+  if (native && adjoints) ++*adjoints;
   // Generated quantities have no backward consumer.
   prog.native_adj = native && gen_adjoint(prog, keep_every_clear) &&
                     !debug_env("STANLI_NO_NATIVE_ADJ");
@@ -2120,18 +2288,20 @@ Lowering::Flow Lowering::lower_stmt_impl(const mir::Stmt& s) {
       if (bounded_output_candidate(s, &output_references) &&
           try_lower_region(s, std::nullopt, &output_references))
         return Flow::Next;
-      if (!write_array_known_static && in_write_array &&
-          needs_runtime_control(s)) {
-        std::set<std::string> mentioned;
-        mir::collect_names(s, &mentioned);
-        auto snapshot = wa_snapshot(mentioned);
-        try {
-          lower_runtime_ifelse(s);
-          return Flow::Next;
-        } catch (const CompileError&) {
-        } catch (const std::logic_error&) {
+      if (!write_array_known_static && in_write_array) {
+        control_scan_steps = 0;
+        if (needs_runtime_control(s)) {
+          std::set<std::string> mentioned;
+          mir::collect_names(s, &mentioned);
+          auto snapshot = wa_snapshot(mentioned);
+          try {
+            lower_runtime_ifelse(s);
+            return Flow::Next;
+          } catch (const CompileError&) {
+          } catch (const std::logic_error&) {
+          }
+          wa_restore(snapshot);
         }
-        wa_restore(snapshot);
       }
       const bool outer_known_static = write_array_known_static;
       write_array_known_static = true;

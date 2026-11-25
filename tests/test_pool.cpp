@@ -53,7 +53,7 @@ double point(int64_t i, int k) {
 int main() {
   using namespace stanli;
   DataMap data = DataMap::from_json_file("tests/fixtures/eight_schools.json");
-  CompiledModel cm = compile_model(slurp("tests/fixtures/es.tmir.sexp"), data);
+  CompiledModel cm = compile_model(slurp("tests/fixtures/es.mir"), data);
   Executor proto(std::move(cm.graph));
   cm.bind(proto);
   const int64_t n = proto.n_params();

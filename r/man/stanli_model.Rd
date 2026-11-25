@@ -29,8 +29,10 @@ arrays of them. Zero-length extents are kept. A length-1 R vector
 with no `dim` goes out as a scalar, as in rstan, so give a `vector[1]`
 or `array[1]` as `array(x, 1)`.}
 
-\item{mir}{Transformed MIR text, for a build without the embedded
-compiler. Rarely needed.}
+\item{mir}{Portable MIR text from stanli's compiler, for example the
+output of \code{stanli-compile} or Python's \code{stan_to_mir()}, for a build
+without the embedded compiler. Rarely needed. Stock stanc's MIR is
+refused.}
 
 \item{seed}{The model-construction seed: RNG calls in transformed data
 draw from it once, here, the way CmdStan's generated constructor does.
@@ -71,9 +73,7 @@ An object of class `stanli_model` whose `columns` name every
   reason, when part of the model has no compiled path and runs through
   the much slower MIR interpreter; with `allow_interpreter = FALSE` (or the
   environment variable `STANLI_NO_INTERPRETER` set) that is an error
-  instead. Either message is what to include in a bug report. When the
-  compiler skips O1 for a very large model, the warning has class
-  `stanli_o1_fallback`.
+  instead. Either message is what to include in a bug report.
 }
 \description{
 Compile a Stan model

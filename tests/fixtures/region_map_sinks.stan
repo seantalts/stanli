@@ -17,7 +17,7 @@ model {
     real w = 0.5;
     if (t > 0.3) w = 0.25;
     real r = t - k * a;
-    if (flag > 0.5)
+    if (flag > 0.5 && r < b)
       target += -w * square(r) - b * b;
     else
       target += -0.5 * square(r) + b;

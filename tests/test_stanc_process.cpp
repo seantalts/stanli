@@ -55,20 +55,20 @@ void expect(const std::string& got, const std::string& want, const char* what) {
 
 int main(int argc, char** argv) {
   // A copied instance of this test is the fake compiler used by the parent:
-  // stock stanc's argument shape, or stanli-compile's.
+  // stanli_check --emit-mir's argument shape, or stanli-compile's.
   // A model whose name contains "bad" fails the way stanc3 does: the
   // message on stderr, a blank line after it, and exit status 1.
   const auto fail = [](const std::string& model) {
     std::cerr << "Semantic error in '" << model << "'\n\n";
     return 1;
   };
-  if (argc == 4) {
-    if (std::string(argv[1]) != "--O1" ||
-        std::string(argv[2]) != "--debug-optimized-mir")
+  if (argc == 5) {
+    if (std::string(argv[1]) != "--emit-mir" ||
+        std::string(argv[3]) != "--passes")
       return 2;
-    if (std::string(argv[3]).find("bad") != std::string::npos)
-      return fail(argv[3]);
-    std::cout << "MIR from " << argv[3] << '\n';
+    if (std::string(argv[2]).find("bad") != std::string::npos)
+      return fail(argv[2]);
+    std::cout << "MIR from " << argv[2] << " with " << argv[4] << '\n';
     return 0;
   }
   if (argc == 7 && std::string(argv[1]) == "--model-only" &&
@@ -80,10 +80,8 @@ int main(int argc, char** argv) {
     std::cout << "PORTABLE from " << argv[6] << '\n';
     // stderr is for people; the messages file is what the caller reads.
     std::cerr << "text on stderr\n";
-    const bool o1 = std::string(argv[6]).find("budget") != std::string::npos;
     std::ofstream(fs::u8path(argv[5]))
-        << "{\"warnings\":[\"fake compiler warning\"],\"o1_fallback\":"
-        << (o1 ? "\"stanli compiler: skipped O1\"" : "null") << "}\n";
+        << "{\"warnings\":[\"fake compiler warning\"]}\n";
     return 0;
   }
   if (argc != 1) return 2;
@@ -107,9 +105,10 @@ int main(int argc, char** argv) {
     std::ofstream(model)
         << "parameters { real y; } model { y ~ normal(0, 1); }\n";
 
-    expect(
-        stanli::tooling::run_stanc_process(compiler.string(), model.string()),
-        "MIR from " + model.string() + "\n", "stanc argument shape");
+    expect(stanli::tooling::run_emit_mir(compiler.string(), model.string(),
+                                         "none"),
+           "MIR from " + model.string() + " with none\n",
+           "stanli_check --emit-mir argument shape");
 
     const fs::path beside = install_fake(self, root / kPortableName);
     const stanli::StancResult portable =
@@ -119,23 +118,15 @@ int main(int argc, char** argv) {
            "stanli-compile argument shape");
     expect(portable.warnings.size() == 1 ? portable.warnings[0] : "(not one)",
            "fake compiler warning", "warnings from the messages file");
-    expect(portable.o1_fallback.value_or("(none)"), "(none)",
-           "no O1 fallback notice");
-
-    const fs::path budget = root / "budget model.stan";
-    std::ofstream(budget) << "model {}\n";
-    expect(
-        stanli::tooling::run_portable_compiler(beside.string(), budget.string())
-            .o1_fallback.value_or("(none)"),
-        "stanli compiler: skipped O1", "O1 fallback from the messages file");
 
     const fs::path bad = root / "bad model.stan";
     std::ofstream(bad) << "model { y ~ normal(0, 1); }\n";
     expect(error_from([&] {
-             stanli::tooling::run_stanc_process(compiler.string(),
-                                                bad.string());
+             stanli::tooling::run_emit_mir(compiler.string(), bad.string(),
+                                           "none");
            }),
-           "Semantic error in '" + bad.string() + "'", "stanc error message");
+           "Semantic error in '" + bad.string() + "'",
+           "stanli_check --emit-mir error message");
     expect(error_from([&] {
              stanli::tooling::run_portable_compiler(beside.string(),
                                                     bad.string());

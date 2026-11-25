@@ -112,8 +112,8 @@ and <!--gen:testing_values-->1,504,488<!--/gen--> values. CmdStan rejects <!--ge
 of the points.
 
 In <!--gen:testing_models_within-->333<!--/gen--> models, every value is within 10 ULP of
-CmdStan. The other <!--gen:testing_models_over-->81<!--/gen--> models have <!--gen:testing_entries-->175<!--/gen-->
-ledger entries. stanli is at least as close to the true value as CmdStan in <!--gen:testing_entries_stanli-->127<!--/gen-->
+CmdStan. The other <!--gen:testing_models_over-->81<!--/gen--> models have <!--gen:testing_entries-->177<!--/gen-->
+ledger entries. stanli is at least as close to the true value as CmdStan in <!--gen:testing_entries_stanli-->129<!--/gen-->
 of those entries. CmdStan is closer in <!--gen:testing_entries_cmdstan-->9<!--/gen-->. We
 cannot tell for the other <!--gen:testing_entries_unknown-->39<!--/gen-->.
 
@@ -590,7 +590,7 @@ table and those files disagree.
 | `rstanarm_polr` | rstanarm | 9 | 113 |  |  |  |  |  |  | 10 | CmdStan rejects point 2, and stanli must too |
 | `multinma_ndmm_mspline` | multinma | 62 | 956 |  |  |  |  |  |  | 10 |  |
 | `multinma_smoking_re` | multinma | 59 | 375 |  |  |  |  |  |  | 10 |  |
-| `epinow2_estimate_infections` | epinow2 | 24 | 352 | 1.4e6 | 1.4e6 | 1.6e6 | 1.6e6 | 5.4e5 | 5.4e5 | gradient 34,157, outputs 24 |  |
+| `epinow2_estimate_infections` | epinow2 | 24 | 352 | 1.4e6 | 1.4e6 | 1.6e6 | 1.6e6 | 5.4e5 | 5.4e5 | gradient 34,141, outputs 24 |  |
 | `epinow2_estimate_secondary` | epinow2 | 4 | 72 | 105 | 94.8 | 38.3 | 39.1 | 18.0 | 18.0 | lp 68, gradient 18 |  |
 | `mlumr_survival_mspline_relaxed` | mlumr | 32 | 1052 | 1.03 | 0.53 | 0.24 | 0.18 | 3.34 | 3.58 | outputs 128 |  |
 | `mlumr_survival_relaxed` | mlumr | 12 | 925 | 1.52 | 2.23 | 0.69 | 0.69 | 1.71 | 1.70 | outputs 16 |  |
@@ -638,12 +638,13 @@ CmdStan in the same way.
 | `sized_functions` | 5 models that call library functions at real sizes | `test_sized_functions_reference` |
 | `container_flow` | 66 models that write each container shape in each block and read it back | `test_container_flow_reference` |
 | `fixtures` | 63 models from `tests/fixtures` | `*_reference` |
-| `cmdstan_replay` | 14 models for rewrites that only stock stanc's `--O1` output reaches | `test_cmdstan_replay` |
+| `cmdstan_replay` | 14 models for rewrites that only inlined `--O1` output reaches | `test_cmdstan_replay` |
 | `oncobayes2` | the 3 OncoBayes2 models | `test_oncobayes2_reference` |
 
 CTest runs `container_flow`, `cmdstan_replay` and `oncobayes2` a second time
-with stock stanc as the compiler. Those are the `_stanc` CTests and the
-`--stanc` rows below.
+with the O1 passes of the MIR fixtures. Those passes inline functions, as
+stock stanc's O1 does. Those are the `_fixture_passes` CTests and the
+`--fixture-passes` rows below.
 
 These are all the values in the local corpora that have a ledger entry:
 
@@ -651,11 +652,11 @@ These are all the values in the local corpora that have a ledger entry:
 | corpus | model | value | limit |
 | --- | --- | --- | --- |
 | `container_flow` | `container_flow_rt_fn_amm` | `lp` | 17 (stanli closer) |
-| `container_flow --stanc` | `container_flow_rt_fn_amm` | `lp` | 17 (stanli closer) |
+| `container_flow --fixture-passes` | `container_flow_rt_fn_amm` | `lp` | 17 (stanli closer) |
 | `fixtures` | `nested_callback_contexts` | `grad[2]` | 16 (undecided) |
 | `fixtures` | `nested_callback_contexts_fallback` | `grad[2]` | 16 (undecided) |
 | `oncobayes2` | `oncobayes2_blrm_exnex_combo3` | `wa beta_EX_prob.2.2` | 14 (undecided) |
-| `oncobayes2 --stanc` | `oncobayes2_blrm_exnex_combo3` | `wa beta_EX_prob.2.2` | 14 (undecided) |
+| `oncobayes2 --fixture-passes` | `oncobayes2_blrm_exnex_combo3` | `wa beta_EX_prob.2.2` | 14 (undecided) |
 | `signatures` | `builtin_signatures_20` | `lp` | 20 (stanli closer) |
 | `signatures` | `builtin_signatures_24` | `lp` | 38 (stanli closer) |
 <!--/gen-->
@@ -709,7 +710,6 @@ tests. To run the post-merge jobs on a branch, use
 | [compiler producer parity](#stan-language-coverage) | compact MIR bytes from the native, JavaScript and Windows compilers | each other, byte for byte | PR | numerical behavior |
 | stanc3 fuzzer ([`tools/fuzz_stanc`](tools/fuzz_stanc/README.md)) | random Stan programs compiled with and without stanc3's O1 passes: log density, gradient, `write_array`, printed output and errors at 3 points | each other | nightly, Linux x86-64 | programs that the generator cannot write |
 | Rethinking regeneration | the 62 Rethinking fixtures, regenerated from the book's code with pinned `rethinking` | the checked-in files, byte for byte | nightly, and pushes to `main` that touch them | |
-| MIR wire cost | compact MIR decode time and size on Eight Schools | legacy MIR. Each must be at most half | post-merge | other models |
 
 #### Samplers and algorithms
 
@@ -734,7 +734,6 @@ tests. To run the post-merge jobs on a branch, use
 | Windows dev setup | [`tools/dev_setup.sh`](tools/dev_setup.sh) on Windows, then CTest | the full suite on ARM64 (through `stanli-compile`), and six tests on x64 with the embedded compiler | pushes to `main`, on demand | the rest of the suite with the embedded compiler on x64 |
 | AddressSanitizer | the CTest suite, compiling through `stanli-compile` | no diagnostics | post-merge except release tags | a stale `vari` that points into reused arena memory |
 | ThreadSanitizer | `test_capi`, `test_pool`, `test_multichain`, `test_wa_parallel`, `test_wa_parallel_abi` and `test_wa_parallel_switches` | no diagnostics | post-merge except release tags | the other tests |
-| typed producer | portable MIR from the typed producer for three models | the legacy MIR of the same source | PR and post-merge, Linux x86-64 | other models |
 | bundled compiler | `r/inst/js/stanc.js`, and the compiler loaded in a browser worker, in webR and through V8 in R | a fresh build, byte for byte, and expected compile results | PR | |
 | Windows compiler | the Windows build of the compiler | expected results in `tests/test_windows_compiler.R`, and no integer folded past int32 | PR | |
 | R ABI | the ABI constants in the runtime and in the R bridge | each other | PR and pushes that touch the R paths | |
@@ -754,7 +753,7 @@ bayesplot, bridgesampling, loo, posterior, stanfit and the registration of
 the backend. It fails on any skip, failure, error or warning. The macOS and
 Windows R jobs run only that script.
 
-Three checks measure time and compare no numbers. They are the MIR wire cost,
+Two checks measure time and compare no numbers. They are
 `test_prep_scaling` and `test_prep_deep_expression_time`. Release tags also
 check the version strings, the runtime tarballs and the PyPI description.
 
@@ -838,7 +837,7 @@ match. [`tests/cross_path_ledger.json`](tests/cross_path_ledger.json) lists
 the exceptions, each with a cause and a bound in ULP. A full run fails if an
 entry excuses nothing.
 
-The ledger has <!--gen:testing_cross_entries-->58<!--/gen--> entries. Most allow 1 to 10 ULP
+The ledger has <!--gen:testing_cross_entries-->64<!--/gen--> entries. Most allow 1 to 10 ULP
 for sums that the region map and the lane passes add in a different order.
 Two `cm_rdm` entries allow 2,526 ULP on Windows for a rounding difference
 there.

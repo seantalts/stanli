@@ -129,7 +129,7 @@ int main() {
   }
 
   {
-    const std::string mir = slurp("tests/fixtures/rejectprint.tmir.sexp");
+    const std::string mir = slurp("tests/fixtures/rejectprint.mir");
     DataMap d = DataMap::from_json("{\"N\": 200, \"lim\": 2.5}");
     CompiledModel cm = compile_model(mir, d);
     Executor ex(std::move(cm.graph));

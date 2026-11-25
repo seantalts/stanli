@@ -26,7 +26,6 @@ configure_file("${SOURCE_DIR}/tests/fixtures/ar1.json"
 # missing/broken Stanli compiler must still fail rather than select this one.
 file(MAKE_DIRECTORY "${WORK_DIR}/deps/stanc3")
 configure_file("${STANC}" "${WORK_DIR}/deps/stanc3/stanc${EXE_SUFFIX}" COPYONLY)
-set(ENV{STANC} "")
 set(ENV{PATH} "${WORK_DIR}/empty-path")
 
 function(expect_tool tool expected_code)
@@ -49,10 +48,8 @@ endfunction()
 
 foreach(tool stanli_check stanli_run)
   expect_tool(${tool} 0)
-  expect_tool(${tool} 0 --stanc "${STANC}")
-  expect_tool(${tool} 1 --stanc "${WORK_DIR}/missing-stanc")
+  expect_tool(${tool} 2 --stanc "${STANC}")
   expect_tool(${tool} 1 --stanli-compile "${WORK_DIR}/missing-compiler")
-  expect_tool(${tool} 2 --stanc "${STANC}" --stanli-compile "${portable}")
   if(NOT EMBEDDED)
     expect_tool(${tool} 0 --stanli-compile "${portable}")
   endif()

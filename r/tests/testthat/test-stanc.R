@@ -8,12 +8,11 @@ portable_payload <- function(mir) {
 }
 
 # What a fake stanli-compile writes for --messages-json.
-write_messages <- function(args, warnings = character(), o1_fallback = NULL) {
+write_messages <- function(args, warnings = character()) {
   path <- args[[which(args == "--messages-json") + 1L]]
   path <- sub("^[\"'](.*)[\"']$", "\\1", path)
-  writeLines(jsonlite::toJSON(list(warnings = I(warnings),
-                                   o1_fallback = o1_fallback),
-                              auto_unbox = TRUE, null = "null"),
+  writeLines(jsonlite::toJSON(list(warnings = I(warnings)),
+                              auto_unbox = TRUE),
              path, useBytes = TRUE)
 }
 
@@ -121,8 +120,7 @@ test_that("the V8 helper calls stanli_compile and reports its messages", {
     globalThis.__stanli_calls.arguments = arguments.length;
     globalThis.__stanli_calls.name = name;
     globalThis.__stanli_calls.source = source;
-    return {result: 'STANLI5:ZmFrZQ==', warnings: ['warning with θ'],
-            o1_fallback: null};
+    return {result: 'STANLI5:ZmFrZQ==', warnings: ['warning with θ']};
   };")
   state$ctx <- ctx
 
@@ -160,22 +158,6 @@ test_that("the V8 helper calls stanli_compile and reports its messages", {
     ctx$eval("JSON.stringify(globalThis.__stanli_calls)"))
   expect_identical(calls$portable, 2L)
 
-  ctx$eval("globalThis.stanli_compile = function() {
-    return {result: 'STANLI5:ZmFrZQ==', warnings: ['a warning'],
-            o1_fallback: 'stanli compiler: skipped O1'};
-  };")
-  o1 <- NULL
-  other <- character()
-  withCallingHandlers(
-    stanli:::mir_from_js("model {}"),
-    warning = function(w) {
-      if (inherits(w, "stanli_o1_fallback")) o1 <<- conditionMessage(w)
-      else other <<- c(other, conditionMessage(w))
-      invokeRestart("muffleWarning")
-    })
-  expect_identical(o1, "stanli compiler: skipped O1")
-  expect_identical(other, "a warning")
-
   ctx$eval("globalThis.stanli_compile = {};")
   expect_error(stanli:::mir_from_js("model {}"),
                "stanli_compile: export is not a function", fixed = TRUE)
@@ -188,7 +170,6 @@ test_that("the V8 helper calls stanli_compile and reports its messages", {
 
 test_that("the native compiler reports messages from its JSON file", {
   seen <- NULL
-  o1 <- NULL
   run_stanc <- function(compiler, args, stdout, stderr) {
     seen <<- list(compiler = compiler, args = args,
                   stdout = stdout, stderr = stderr,
@@ -202,7 +183,7 @@ test_that("the native compiler reports messages from its JSON file", {
               eos = NULL, useBytes = TRUE)
     close(con)
     writeLines("text for people on stderr", stderr, useBytes = TRUE)
-    write_messages(args, "a successful frontend warning θ", o1)
+    write_messages(args, "a successful frontend warning θ")
     0L
   }
 
@@ -217,19 +198,10 @@ test_that("the native compiler reports messages from its JSON file", {
   expect_identical(seen$args[[1]], "--messages-json")
   expect_false(dir.exists(seen$work))
 
-  o1 <- "stanli compiler: skipped O1"
-  got_o1 <- NULL
-  other <- character()
-  withCallingHandlers(
+  expect_warning(
     stanli:::mir_from_binary("fake-stanli-compile", "model { // θ\r\n}\r\n",
                              run_stanc = run_stanc, file = "dir/m.stan"),
-    warning = function(w) {
-      if (inherits(w, "stanli_o1_fallback")) got_o1 <<- conditionMessage(w)
-      else other <<- c(other, conditionMessage(w))
-      invokeRestart("muffleWarning")
-    })
-  expect_identical(got_o1, "stanli compiler: skipped O1")
-  expect_identical(other, enc2utf8("a successful frontend warning θ"))
+    "a successful frontend warning θ", fixed = TRUE)
   expect_identical(seen$args[1:2], c("--filename", shQuote("dir/m.stan")))
 })
 
@@ -392,8 +364,7 @@ test_that("the webR helper calls stanli_compile and reports its messages", {
     globalThis.__stanli_calls.arguments = arguments.length;
     globalThis.__stanli_calls.name = name;
     globalThis.__stanli_calls.source = source;
-    var r = {result: 'STANLI5:ZmFrZQ==', warnings: ['warning with ☃'],
-             o1_fallback: null};
+    var r = {result: 'STANLI5:ZmFrZQ==', warnings: ['warning with ☃']};
     globalThis.__stanli_calls.warnings = r.warnings.length;
     return r;
   };")
@@ -454,22 +425,6 @@ test_that("the webR helper calls stanli_compile and reports its messages", {
   calls <- jsonlite::fromJSON(
     ctx$eval("JSON.stringify(globalThis.__stanli_calls)"))
   expect_identical(calls$portable, 3L)
-
-  ctx$eval("globalThis.stanli_compile = function() {
-    return {result: 'STANLI5:ZmFrZQ==', warnings: ['a warning'],
-            o1_fallback: 'stanli compiler: skipped O1'};
-  };")
-  o1 <- NULL
-  other <- character()
-  withCallingHandlers(
-    stanli:::mir_from_webr(eval_js, "model {}"),
-    warning = function(w) {
-      if (inherits(w, "stanli_o1_fallback")) o1 <<- conditionMessage(w)
-      else other <<- c(other, conditionMessage(w))
-      invokeRestart("muffleWarning")
-    })
-  expect_identical(o1, "stanli compiler: skipped O1")
-  expect_identical(other, "a warning")
 
   ctx$eval("globalThis.stanli_compile = {};")
   expect_error(stanli:::mir_from_webr(eval_js, "model {}"),

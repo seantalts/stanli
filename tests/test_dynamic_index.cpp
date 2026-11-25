@@ -68,8 +68,99 @@ static void fixed_scalar_index_tests() {
   }
 }
 
+// A matrix row, a matrix column and a row of an array of vectors read a
+// strided run of cells. The run's own path and the general path agree on
+// values, adjoints and errors, also for descriptors the run does not accept.
+static void strided_run_index_tests() {
+  using Axis = DynamicIndexSpec::Axis;
+  const Kernel& kernel = *find_kernel(OP_INDEX_DYNAMIC);
+  struct Shape {
+    const char* name;
+    bool matrix_leaf;
+    Axis first, second;
+    int64_t selected;
+    int expect[2];  // the first two cells selected by index 2
+  };
+  const Shape shapes[] = {
+      {"matrix row",
+       true,
+       {Axis::Single, 3, 1, 1, 0},
+       {Axis::All, 2, 3, 2, 0},
+       2,
+       {1, 4}},
+      {"matrix column",
+       true,
+       {Axis::All, 3, 1, 3, 0},
+       {Axis::Single, 2, 3, 1, 0},
+       3,
+       {3, 4}},
+      {"array row",
+       false,
+       {Axis::Single, 3, 2, 1, 0},
+       {Axis::All, 2, 1, 2, 0},
+       2,
+       {2, 3}},
+  };
+  for (const Shape& shape : shapes) {
+    for (int mutation = 0; mutation < 5; ++mutation) {
+      for (double at : {-1.0, 0.0, 1.0, 2.0, 3.0, 3.5,
+                        std::numeric_limits<double>::infinity(),
+                        std::numeric_limits<double>::quiet_NaN()}) {
+        DynamicIndexSpec spec;
+        spec.matrix_leaf = shape.matrix_leaf;
+        spec.axes = {shape.first, shape.second};
+        spec.selected_size = shape.selected;
+        Axis& single = spec.axes[spec.axes[0].kind == Axis::Single ? 0 : 1];
+        if (mutation == 1) spec.axes[spec.matrix_leaf ? 0 : 1].stride = 2;
+        if (mutation == 2) single.input_offset = 1;
+        if (mutation == 3) single.extent = 2;
+        if (mutation == 4) spec.selected_size += 1;
+        double base[] = {0.2, -0.4, 1.7, 3.1, -5.3, 0.9};
+        double seed[] = {-2.75, 1.5, 0.125, 4.0};
+        double outputs[2][4] = {};
+        double adjoints[2][6] = {};
+        std::string errors[2];
+        for (int path = 0; path < 2; ++path) {
+          spec.input_count = path ? 3 : 2;
+          KernelCtx c{};
+          c.n_in = spec.input_count;
+          c.in[0] = {base, 6};
+          c.in[1] = {&at, 1};
+          c.in[2] = {&at, 1};
+          c.in_adj[0] = {adjoints[path], 6};
+          c.out = {outputs[path], shape.selected};
+          c.out_adj_vec = {seed, shape.selected};
+          c.udata = &spec;
+          try {
+            kernel.forward(c);
+            kernel.backward(c);
+          } catch (const std::out_of_range& error) {
+            errors[path] = std::string("range:") + error.what();
+          } catch (const std::logic_error& error) {
+            errors[path] = std::string("logic:") + error.what();
+          }
+        }
+        const std::string what = std::string(shape.name) + " mutation " +
+                                 std::to_string(mutation) + " at " +
+                                 std::to_string(at);
+        check(errors[0] == errors[1], what + ": same validation errors");
+        check(std::memcmp(outputs[0], outputs[1], sizeof(outputs[0])) == 0,
+              what + ": same values");
+        check(std::memcmp(adjoints[0], adjoints[1], sizeof(adjoints[0])) == 0,
+              what + ": same adjoints");
+        if (mutation == 0 && at == 2.0)
+          check(errors[0].empty() && outputs[0][0] == base[shape.expect[0]] &&
+                    outputs[0][1] == base[shape.expect[1]] &&
+                    adjoints[0][shape.expect[1]] == seed[1],
+                what + ": selects the expected cells");
+      }
+    }
+  }
+}
+
 static void direct_index_kernel_tests() {
   fixed_scalar_index_tests();
+  strided_run_index_tests();
   const Kernel* dynamic_index = find_kernel(OP_INDEX_DYNAMIC);
   check(dynamic_index && dynamic_index->forward && dynamic_index->backward,
         "dynamic index kernel registered");

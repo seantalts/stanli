@@ -762,8 +762,8 @@ SEXP stanli_r_reduce_sum_fallbacks(SEXP m) {
   return out;
 }
 
-/* list(kind = character, text = character): kind is "warning" or
- * "o1_fallback" (stanli_compiler_message_kind). */
+/* list(kind = character, text = character): kind is "warning" for
+ * STANLI_COMPILER_WARNING (stanli_compiler_message_kind), else "other". */
 static SEXP compiler_messages(int64_t n, int (*kind)(const void*, int64_t),
                               const char* (*text)(const void*, int64_t),
                               const void* from) {
@@ -771,7 +771,7 @@ static SEXP compiler_messages(int64_t n, int (*kind)(const void*, int64_t),
   SEXP texts = PROTECT(allocVector(STRSXP, (R_xlen_t)n));
   for (int64_t i = 0; i < n; ++i) {
     SET_STRING_ELT(kinds, (R_xlen_t)i,
-                   mkChar(kind(from, i) == 1 ? "o1_fallback" : "warning"));
+                   mkChar(kind(from, i) == 0 ? "warning" : "other"));
     SET_STRING_ELT(texts, (R_xlen_t)i, mkCharCE(text(from, i), CE_UTF8));
   }
   const char* names[] = {"kind", "text", ""};

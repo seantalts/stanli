@@ -29,7 +29,7 @@ harnesses/conformance/signatures.txt
 harnesses/conformance/repro/
 harnesses/conformance/generated/
 tests/fixtures/*.hpp
-tests/fixtures/*.tmir.sexp
+tests/fixtures/*.mir
 tests/fixtures/builtin_signatures_*.stan
 tests/fixtures/density_signatures_*.stan
 tests/regressions/*.hpp

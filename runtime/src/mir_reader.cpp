@@ -1,6 +1,5 @@
 #include <stanli/callable_transform.hpp>
 #include <stanli/function_registry.hpp>
-#include <stanli/large_stack.hpp>
 #include <stanli/mir.hpp>
 
 #include "mir_reader_internal.hpp"
@@ -15,8 +14,6 @@
 namespace stanli {
 namespace mir {
 namespace {
-
-using sexp::Node;
 
 [[noreturn]] void malformed(const std::string& what) {
   throw mir::MirError("mir: malformed " + what);
@@ -182,532 +179,6 @@ void validate_funapp_arity(const Expr& e) {
               std::to_string(e.args.size()) + " argument(s)");
 }
 
-std::string dump(const Node& n, size_t budget = 240) {
-  std::string out;
-  if (n.is_atom()) {
-    out = n.atom;
-  } else {
-    out = "(";
-    for (size_t i = 0; i < n.size() && out.size() < budget; ++i) {
-      if (i) out += ' ';
-      out += dump(n[i], budget - out.size());
-    }
-    out += ")";
-  }
-  if (out.size() > budget) out = out.substr(0, budget) + "...";
-  return out;
-}
-
-// Find `(key ...)` inside a list of key-value lists; null if absent.
-const Node* field(const Node& n, const char* key) {
-  for (size_t i = 0; i < n.size(); ++i)
-    if (n[i].head_is(key)) return &n[i];
-  return nullptr;
-}
-
-UnsizedLeaf unsized_leaf(const std::string& atom) {
-  if (atom == "UInt") return UnsizedLeaf::Int;
-  if (atom == "UReal") return UnsizedLeaf::Real;
-  if (atom == "UComplex") return UnsizedLeaf::Complex;
-  if (atom == "UVector") return UnsizedLeaf::Vector;
-  if (atom == "URowVector") return UnsizedLeaf::RowVector;
-  if (atom == "UMatrix") return UnsizedLeaf::Matrix;
-  return UnsizedLeaf::Unknown;
-}
-
-// stanc3's Fun_kind suffix: `FnPlain`, `(FnDist Density Unnormalized)`, ...
-// Older stanc3 spelled densities `(FnLpdf true)`, as some hand-written test
-// MIR still does.
-FnSuffix read_suffix(const Node& n, bool* propto) {
-  *propto = false;
-  const std::string& head = n.is_atom() ? n.atom : n[0].atom;
-  if (!n.is_atom() && n.size() == 3 && head == "FnDist") {
-    *propto = n[2].atom == "Unnormalized";
-    if (n[1].atom == "Density") return FnSuffix::Lpdf;
-    if (n[1].atom == "Mass") return FnSuffix::Lpmf;
-    throw mir::MirError("mir: unknown density support " + n[1].atom);
-  }
-  if (!n.is_atom() && n.size() == 2 && (head == "FnLpdf" || head == "FnLpmf")) {
-    *propto = n[1].atom == "true";
-    return head == "FnLpdf" ? FnSuffix::Lpdf : FnSuffix::Lpmf;
-  }
-  if (head == "FnRng") return FnSuffix::Rng;
-  if (head == "FnTarget") return FnSuffix::Target;
-  if (head == "FnJacobian") return FnSuffix::Jacobian;
-  if (head == "FnPlain") return FnSuffix::Plain;
-  throw mir::MirError("mir: unknown function suffix " + head);
-}
-
-UnsizedView read_unsized(const Node& n);
-
-// Only stanli's compiler splits tuples into their leaves; stock stanc3 MIR
-// keeps them whole.
-[[noreturn]] void tuples_unsupported() {
-  throw mir::MirError(
-      "mir: tuples need stanli's compiler; the stock stanc S-expression "
-      "reader does not support them");
-}
-
-// (UFun ((arg types...) return-type suffix mem-pattern)): a variable that
-// names a function.
-std::optional<FunctionType> read_function_type(const Node& type) {
-  if (type.is_atom() || !type.head_is("UFun")) return std::nullopt;
-  if (type.size() != 2 || type[1].is_atom() || type[1].size() < 3 ||
-      type[1][0].is_atom())
-    throw mir::MirError("mir: malformed function type");
-  FunctionType out;
-  for (const Node& arg : type[1][0].kids) {
-    if (arg.is_atom() || arg.size() != 2)
-      throw mir::MirError("mir: malformed function type");
-    out.args.push_back(read_unsized(arg[1]));
-  }
-  out.suffix = read_suffix(type[1][2], &out.propto);
-  return out;
-}
-
-UnsizedView read_unsized(const Node& n) {
-  UnsizedView out;
-  const Node* leaf = &n;
-  while (!leaf->is_atom() && leaf->head_is("UArray") && leaf->size() == 2) {
-    if (out.depth == std::numeric_limits<uint8_t>::max())
-      throw mir::MirError("mir: unsized array nesting is too deep");
-    ++out.depth;
-    leaf = &(*leaf)[1];
-  }
-  if (leaf->is_atom())
-    out.leaf = unsized_leaf(leaf->atom);
-  else if (leaf->head_is("UTuple"))
-    tuples_unsupported();
-  return out;
-}
-
-struct NestingMeter {
-  unsigned depth = 0;
-  unsigned peak = 0;
-};
-thread_local NestingMeter nesting_meter;
-
-class NestingScope {
- public:
-  NestingScope() {
-    if (nesting_meter.depth >= nesting_limit())
-      throw NestingTooDeep("mir: nested too deeply (more than " +
-                           std::to_string(nesting_limit()) + " levels)");
-    nesting_meter.peak = std::max(nesting_meter.peak, ++nesting_meter.depth);
-  }
-  ~NestingScope() { --nesting_meter.depth; }
-  NestingScope(const NestingScope&) = delete;
-  NestingScope& operator=(const NestingScope&) = delete;
-};
-
-Expr read_expr(const Node& n);
-
-Expr read_index(const Node& ix_n) {
-  Expr ix;
-  if (ix_n.is_atom() && ix_n.atom == "All") {
-    ix.kind = Expr::IndexAll;
-  } else if (!ix_n.is_atom() && ix_n.head_is("Single")) {
-    ix.kind = Expr::IndexSingle;
-    ix.args.push_back(read_expr(ix_n[1]));
-  } else if (!ix_n.is_atom() && ix_n.head_is("Between")) {
-    ix.kind = Expr::IndexBetween;
-    ix.args.push_back(read_expr(ix_n[1]));
-    ix.args.push_back(read_expr(ix_n[2]));
-  } else if (!ix_n.is_atom() && ix_n.head_is("Upfrom")) {
-    ix.kind = Expr::IndexUpfrom;
-    ix.args.push_back(read_expr(ix_n[1]));
-  } else if (!ix_n.is_atom() && ix_n.head_is("MultiIndex")) {
-    ix.kind = Expr::IndexMulti;
-    ix.args.push_back(read_expr(ix_n[1]));
-  } else {
-    ix.kind = Expr::Unsupported;
-    ix.raw = dump(ix_n);
-  }
-  return ix;
-}
-
-// n is the `(pattern X)` payload X for an expression.
-Expr read_expr_pattern(const Node& p) {
-  Expr e;
-  if (p.head_is("Var")) {
-    e.kind = Expr::Var;
-    e.name = p[1].atom;
-  } else if (p.head_is("Lit")) {
-    const std::string& k = p[1].atom;
-    const std::string& v = p[2].atom;
-    if (k == "Int") {
-      e.kind = Expr::LitInt;
-      e.lit_i = std::stol(v);
-      e.lit = static_cast<double>(e.lit_i);
-    } else if (k == "Real") {
-      e.kind = Expr::LitReal;
-      e.lit = std::stod(v);
-    } else {  // Str
-      e.kind = Expr::LitStr;
-      e.lit_s = v;
-    }
-  } else if (p.head_is("FunApp")) {
-    e.kind = Expr::FunApp;
-    const Node& kind = p[1];
-    // (StanLib normal_lpdf (FnDist Density Unnormalized)) and
-    // (UserDefined f_lpdf (FnDist Density Unnormalized)) spell the propto
-    // flag the same way, and it means the same thing on both: `_lupdf` was
-    // written. On a user function it is the value of CmdStan's propto__
-    // template argument, which the body inherits. Older stanc3 spelled it
-    // (FnLpdf true), as some hand-written test MIR still does.
-    auto read_propto = [&](const Node& kind) {
-      e.fn_suffix = read_suffix(kind[2], &e.fn_propto);
-    };
-    if (kind.head_is("StanLib")) {
-      e.fn_lib = Expr::Lib::StanLib;
-      e.name = kind[1].atom;
-      read_propto(kind);
-    } else if (kind.head_is("Operator")) {
-      // (Operator Plus) is the StanLib function Plus__.
-      e.fn_lib = Expr::Lib::StanLib;
-      e.name = kind[1].atom + "__";
-    } else if (kind.head_is("CompilerInternal")) {
-      e.fn_lib = Expr::Lib::Internal;
-      const Node& internal = kind[1];
-      e.name = internal.is_atom() ? internal.atom : internal[0].atom;
-      if (!internal.is_atom()) e.raw = dump(internal);
-    } else if (kind.head_is("UserDefined")) {
-      e.fn_lib = Expr::Lib::UserDefined;
-      e.name = kind[1].atom;
-      read_propto(kind);
-    } else {
-      e.kind = Expr::Unsupported;
-      e.raw = dump(p);
-      return e;
-    }
-    for (size_t i = 2; i < p.size(); ++i) {
-      // args are a single list node
-      const Node& args = p[i];
-      for (size_t a = 0; a < args.size(); ++a)
-        e.args.push_back(read_expr(args[a]));
-    }
-  } else if (p.head_is("Promotion")) {
-    e = read_expr(p[1]);  // transparent: keep inner, adopt promoted type later
-    e.promoted = true;
-    return e;
-  } else if (p.head_is("TernaryIf")) {
-    e.kind = Expr::TernaryIf;
-    for (size_t i = 1; i < p.size(); ++i) e.args.push_back(read_expr(p[i]));
-  } else if (p.head_is("EOr") || p.head_is("EAnd")) {
-    e.kind = p.head_is("EOr") ? Expr::EOr : Expr::EAnd;
-    for (size_t i = 1; i < p.size(); ++i) e.args.push_back(read_expr(p[i]));
-  } else if (p.head_is("Indexed")) {
-    e.kind = Expr::Indexed;
-    e.args.push_back(read_expr(p[1]));
-    for (size_t i = 2; i < p.size(); ++i) {
-      const Node& idxs = p[i];
-      for (size_t a = 0; a < idxs.size(); ++a)
-        e.args.push_back(read_index(idxs[a]));
-    }
-  } else {
-    e.kind = Expr::Unsupported;
-    e.raw = dump(p);
-  }
-  return e;
-}
-
-// n is `((pattern X) (meta ((type_ T) (loc _) (adlevel A))))`.
-Expr read_expr(const Node& n) {
-  NestingScope nesting;
-  const Node* pat = field(n, "pattern");
-  if (!pat) {
-    Expr e;
-    e.kind = Expr::Unsupported;
-    e.raw = dump(n);
-    return e;
-  }
-  Expr e = read_expr_pattern((*pat)[1]);
-  if (const Node* meta = field(n, "meta")) {
-    const Node& m = (*meta)[1];
-    if (!m.is_atom()) {
-      if (const Node* t = field(m, "type_")) {
-        const Node& type = (*t)[1];
-        e.unsized = read_unsized(type);
-        if (e.kind == Expr::Var) {
-          e.fn_type = read_function_type(type);
-          // A density passed as `foo_lupdf` names the definition foo_lpdf
-          // and asks for its unnormalized form, as stanc3's C++ generation
-          // reads it; the portable producer does the same.
-          if (e.fn_type && e.fn_type->propto) {
-            e.fn_propto = true;
-            for (const char* unnormalized : {"_lupdf", "_lupmf"})
-              if (e.name.size() > 6 &&
-                  e.name.compare(e.name.size() - 6, 6, unnormalized) == 0)
-                e.name.replace(e.name.size() - 6, 6,
-                               unnormalized[4] == 'd' ? "_lpdf" : "_lpmf");
-          }
-        }
-        if (e.unsized.leaf == UnsizedLeaf::Unknown) e.raw = dump(type);
-      }
-      if (const Node* a = field(m, "adlevel"))
-        e.data_only = (*a)[1].is_atom() && (*a)[1].atom == "DataOnly";
-    }
-  }
-  return e;
-}
-
-SizedType read_sized(const Node& n) {
-  SizedType st;
-  if (n.is_atom()) {
-    st.base = n.atom;  // SInt / SReal / SComplex
-    return st;
-  }
-  st.base = n[0].atom;
-  if (st.base == "SVector" || st.base == "SRowVector") {
-    st.dims.push_back(read_expr(n[2]));  // n[1] is AoS/SoA mem pattern
-  } else if (st.base == "SMatrix") {
-    st.dims.push_back(read_expr(n[2]));
-    st.dims.push_back(read_expr(n[3]));
-  } else if (st.base == "SArray") {
-    SizedType inner = read_sized(n[1]);
-    st.dims.push_back(read_expr(n[2]));
-    for (auto& d : inner.dims) st.dims.push_back(std::move(d));
-    // Innermost element base kept for the lowering (nested SArray chains
-    // propagate it up, so array[T, N] int reports SInt).
-    st.elem_base = inner.base == "SArray" ? inner.elem_base : inner.base;
-  } else if (st.base == "STuple") {
-    tuples_unsupported();
-  } else {
-    st.raw = dump(n);
-  }
-  return st;
-}
-
-Transform read_transform(const Node& n) {
-  Transform t;
-  if (n.is_atom()) {
-    if (n.atom == "Identity")
-      t.kind = Transform::Identity;
-    else if (n.atom == "Simplex")
-      t.kind = Transform::Simplex;
-    else if (n.atom == "Ordered")
-      t.kind = Transform::Ordered;
-    else if (n.atom == "PositiveOrdered")
-      t.kind = Transform::PositiveOrdered;
-    else if (n.atom == "CholeskyCorr")
-      t.kind = Transform::CholeskyCorr;
-    else if (n.atom == "UnitVector")
-      t.kind = Transform::UnitVector;
-    else if (n.atom == "SumToZero")
-      t.kind = Transform::SumToZero;
-    else if (n.atom == "Correlation")
-      t.kind = Transform::Correlation;
-    else if (n.atom == "Covariance")
-      t.kind = Transform::Covariance;
-    else if (n.atom == "CholeskyCov")
-      t.kind = Transform::CholeskyCov;
-    else if (n.atom == "StochasticColumn")
-      t.kind = Transform::StochasticColumn;
-    else if (n.atom == "StochasticRow")
-      t.kind = Transform::StochasticRow;
-    else
-      t.kind = Transform::Unsupported;
-    t.raw = n.atom;
-    return t;
-  }
-  const std::string& k = n[0].atom;
-  if (k == "Lower")
-    t.kind = Transform::Lower;
-  else if (k == "Upper")
-    t.kind = Transform::Upper;
-  else if (k == "LowerUpper")
-    t.kind = Transform::LowerUpper;
-  else if (k == "Offset")
-    t.kind = Transform::Offset;
-  else if (k == "Multiplier")
-    t.kind = Transform::Multiplier;
-  else if (k == "OffsetMultiplier")
-    t.kind = Transform::OffsetMultiplier;
-  else {
-    t.kind = Transform::Unsupported;
-    t.raw = dump(n);
-  }
-  for (size_t i = 1; i < n.size(); ++i) t.args.push_back(read_expr(n[i]));
-  return t;
-}
-
-Stmt read_stmt(const Node& n);
-
-void read_stmt_list(const Node& list, std::vector<Stmt>& out) {
-  for (size_t i = 0; i < list.size(); ++i) out.push_back(read_stmt(list[i]));
-}
-
-Stmt read_stmt(const Node& n) {
-  NestingScope nesting;
-  Stmt s;
-  const Node* pat = field(n, "pattern");
-  if (!pat) {
-    s.raw = dump(n);
-    return s;
-  }
-  const Node& p = (*pat)[1];
-  if (p.is_atom()) {
-    if (p.atom == "Skip")
-      s.kind = Stmt::Skip;
-    else if (p.atom == "Break")
-      s.kind = Stmt::Break;
-    else if (p.atom == "Continue")
-      s.kind = Stmt::Continue;
-    else
-      s.raw = p.atom;
-    return s;
-  }
-  const std::string& head = p[0].atom;
-  if (head == "Decl") {
-    s.kind = Stmt::Decl;
-    if (const Node* id = field(p, "decl_id")) s.decl_id = (*id)[1].atom;
-    if (const Node* ad = field(p, "decl_adtype"))
-      s.decl_data_only = (*ad)[1].is_atom() && (*ad)[1].atom == "DataOnly";
-    if (const Node* dt = field(p, "decl_type")) {
-      const Node& t = (*dt)[1];  // (Sized ST) or (Unsized T)
-      if (t.head_is("Sized"))
-        s.decl_type = read_sized(t[1]);
-      else if (t.head_is("Unsized") && t.size() == 2) {
-        const UnsizedView view = read_unsized(t[1]);
-        s.decl_type = detail::unsized_declaration(
-            view, view.leaf == UnsizedLeaf::Unknown ? dump(t[1]) : "");
-      } else
-        s.decl_type.raw = dump(t);
-    }
-    if (const Node* init = field(p, "initialize")) {
-      const Node& iv = (*init)[1];
-      if (iv.head_is("Assign")) {
-        s.has_init = true;
-        s.init = read_expr(iv[1]);
-        // FnReadParam: pull transform + dims straight from the sexp.
-        const Node& expr_pat = (*field(iv[1], "pattern"))[1];
-        if (expr_pat.head_is("FunApp") &&
-            expr_pat[1].head_is("CompilerInternal") &&
-            !expr_pat[1][1].is_atom() &&
-            expr_pat[1][1].head_is("FnReadParam")) {
-          const Node& rp = expr_pat[1][1];
-          if (const Node* c = field(rp, "constrain"))
-            s.read_transform = read_transform((*c)[1]);
-          if (const Node* d = field(rp, "dims")) {
-            const Node& dims = (*d)[1];
-            for (size_t i = 0; i < dims.size(); ++i)
-              s.read_dims.push_back(read_expr(dims[i]));
-          }
-        }
-      }
-    }
-  } else if (head == "Assignment") {
-    s.kind = Stmt::Assignment;
-    const Node& lhs = p[1];  // ((LVariable name) (idxs))
-    if (lhs[0].head_is("LVariable")) {
-      s.lhs = lhs[0][1].atom;
-    } else {
-      s.kind = Stmt::Unsupported;
-      s.raw = dump(p);
-      return s;
-    }
-    if (lhs.size() > 1) {
-      for (size_t i = 0; i < lhs[1].size(); ++i)
-        s.lhs_idx.push_back(read_index(lhs[1][i]));
-    }
-    s.rhs = read_expr(p[p.size() - 1]);
-  } else if (head == "TargetPE" || head == "JacobianPE") {
-    s.kind = Stmt::TargetPE;
-    s.jacobian = head == "JacobianPE";
-    s.target = read_expr(p[1]);
-  } else if (head == "Block") {
-    s.kind = Stmt::Block;
-    read_stmt_list(p[1], s.body);
-  } else if (head == "SList") {
-    s.kind = Stmt::SList;
-    read_stmt_list(p[1], s.body);
-  } else if (head == "Profile") {
-    // (Profile name (stmts)): the name is only for stanc's own profiling
-    // output, which stanli does not produce, so unwrap to a plain block.
-    s.kind = Stmt::Block;
-    read_stmt_list(p[2], s.body);
-  } else if (head == "For") {
-    s.kind = Stmt::For;
-    if (const Node* lv = field(p, "loopvar")) s.loopvar = (*lv)[1].atom;
-    if (const Node* lo = field(p, "lower")) s.lower = read_expr((*lo)[1]);
-    if (const Node* up = field(p, "upper")) s.upper = read_expr((*up)[1]);
-    if (const Node* b = field(p, "body")) s.body.push_back(read_stmt((*b)[1]));
-  } else if (head == "IfElse") {
-    s.kind = Stmt::IfElse;
-    s.cond = read_expr(p[1]);
-    s.body.push_back(read_stmt(p[2]));
-    if (p.size() > 3 && !p[3].is_atom() && p[3].size() > 0)
-      s.body.push_back(read_stmt(p[3][0]));
-  } else if (head == "While") {
-    s.kind = Stmt::While;
-    s.cond = read_expr(p[1]);
-    s.body.push_back(read_stmt(p[2]));
-  } else if (head == "Return") {
-    // (Return ()) or (Return (expr)); the value, if any, lands in rhs.
-    s.kind = Stmt::Return;
-    s.has_init = !p[1].is_atom() && p[1].size() > 0;
-    if (s.has_init) s.rhs = read_expr(p[1][0]);
-  } else if (head == "NRFunApp") {
-    s.kind = Stmt::NRFunApp;
-    const Node& kind = p[1];
-    if (kind.head_is("CompilerInternal")) {
-      s.fn_lib = Expr::Lib::Internal;
-      const Node& internal = kind[1];
-      s.fn_name = internal.is_atom() ? internal.atom : internal[0].atom;
-      if (!internal.is_atom()) {
-        // FnCheck's payload distinguishes lower from upper and names the
-        // value. Its ordinary operands contain the value and bound but not
-        // that relation.
-        if (s.fn_name == "FnCheck") {
-          if (const Node* t = field(internal, "trans"))
-            s.check_transform = read_transform((*t)[1]);
-          if (const Node* name = field(internal, "var_name"))
-            s.check_var_name = (*name)[1].atom;
-        }
-        // transform_inits' FnWriteParam names the transform to INVERT, so
-        // that an already-constrained value becomes a free one. The payload
-        // is an OCaml option one level deeper than FnReadParam's `constrain`:
-        // `(unconstrain_opt (Simplex))` and `(unconstrain_opt ((Lower e)))`
-        // both wrap the transform in a one-element list, and
-        // `(unconstrain_opt ())` is None -- the shape every write_array
-        // FnWriteParam has, its value being constrained already.
-        if (s.fn_name == "FnWriteParam") {
-          if (const Node* t = field(internal, "unconstrain_opt")) {
-            const Node& option = (*t)[1];
-            if (!option.is_atom() && option.size() == 1)
-              s.write_transform = read_transform(option[0]);
-          }
-        }
-        // FnWriteParam names its column in the payload, not in the (empty)
-        // argument list; FnCheck likewise carries its checked value here.
-        if (const Node* v = field(internal, "var"))
-          s.fn_args.push_back(read_expr((*v)[1]));
-      }
-    } else if (kind.head_is("StanLib")) {
-      s.fn_name = kind[1].atom;
-      bool propto = false;
-      if (kind.size() > 2) s.fn_suffix = read_suffix(kind[2], &propto);
-    } else if (kind.head_is("UserDefined") && kind.size() == 3) {
-      s.fn_lib = Expr::Lib::UserDefined;
-      s.fn_name = kind[1].atom;
-      bool propto = false;
-      s.fn_suffix = read_suffix(kind[2], &propto);
-    } else if (kind.head_is("Operator")) {
-      s.fn_name = kind[1].atom + "__";
-    } else {
-      s.kind = Stmt::Unsupported;
-      s.raw = dump(p);
-      return s;
-    }
-    for (size_t i = 2; i < p.size(); ++i)
-      for (size_t a = 0; a < p[i].size(); ++a)
-        s.fn_args.push_back(read_expr(p[i][a]));
-  } else {
-    s.raw = dump(p);
-  }
-  return s;
-}
-
 void validate_expression_shape(const Expr& e);
 
 void validate_index_shape(const Expr& index) {
@@ -724,9 +195,8 @@ void validate_expression_shape(const Expr& e) {
     case Expr::Unsupported:
       if (!e.args.empty()) malformed("leaf expression argument list");
       break;
-    case Expr::Promotion:
-      if (e.args.size() != 1) malformed("Promotion expression arity");
-      break;
+    case Expr::Promotion:  // the decoder rejects its tag
+      malformed("Promotion expression");
     case Expr::Indexed:
       // args[0] is the base. stanc can retain a no-op Indexed wrapper with no
       // descriptors after transformations, so only the base is mandatory.
@@ -985,14 +455,12 @@ UnsizedView declared_view(const SizedType& type) {
 }
 
 void validate_bindings(const std::vector<Stmt>& body, Bindings& bindings,
-                       BindingScope* scope, const Functions& functions,
-                       bool strict_variable_metadata);
+                       BindingScope* scope, const Functions& functions);
 
 void validate_expression(const Expr& e, const Bindings& bindings,
                          const Functions& functions,
-                         bool strict_variable_metadata,
                          bool several_results = false) {
-  if (strict_variable_metadata && e.kind == Expr::Var && !e.promoted) {
+  if (e.kind == Expr::Var && !e.promoted) {
     const auto binding = bindings.find(e.name);
     if (binding != bindings.end() &&
         binding->second.view.leaf != UnsizedLeaf::Unknown &&
@@ -1060,8 +528,7 @@ void validate_expression(const Expr& e, const Bindings& bindings,
             "mir: data-only function argument depends on a parameter");
     }
   }
-  for (const Expr& arg : e.args)
-    validate_expression(arg, bindings, functions, strict_variable_metadata);
+  for (const Expr& arg : e.args) validate_expression(arg, bindings, functions);
 }
 
 // The number of values a supported library function returning a tuple
@@ -1079,8 +546,7 @@ std::optional<size_t> library_results(const std::string& name) {
 }
 
 void validate_multi_assign(const Stmt& s, const Bindings& bindings,
-                           const Functions& functions,
-                           bool strict_variable_metadata) {
+                           const Functions& functions) {
   const Expr& call = s.rhs;
   std::vector<UnsizedView> results;
   if (call.fn_lib == Expr::Lib::UserDefined) {
@@ -1118,21 +584,17 @@ void validate_multi_assign(const Stmt& s, const Bindings& bindings,
       throw mir::MirError("mir: MultiAssign target type disagrees for " +
                           target.name);
   }
-  validate_expression(call, bindings, functions, strict_variable_metadata,
-                      true);
+  validate_expression(call, bindings, functions, true);
 }
 
 void validate_bindings(const Stmt& s, Bindings& bindings, BindingScope* scope,
-                       const Functions& functions,
-                       bool strict_variable_metadata) {
+                       const Functions& functions) {
   if (s.kind == Stmt::MultiAssign)
-    return validate_multi_assign(s, bindings, functions,
-                                 strict_variable_metadata);
-  for_each_expr(s, [&](const Expr& e) {
-    validate_expression(e, bindings, functions, strict_variable_metadata);
-  });
+    return validate_multi_assign(s, bindings, functions);
+  for_each_expr(
+      s, [&](const Expr& e) { validate_expression(e, bindings, functions); });
   if (const auto call = user_defined_statement_call(s))
-    validate_expression(*call, bindings, functions, strict_variable_metadata);
+    validate_expression(*call, bindings, functions);
   if (internal_name(s) == "FnCheck") {
     if (!s.check_transform)
       throw mir::MirError("mir: FnCheck has no transform");
@@ -1169,8 +631,7 @@ void validate_bindings(const Stmt& s, Bindings& bindings, BindingScope* scope,
             "mir: FnCheck value type disagrees with its declaration");
     }
   }
-  if (strict_variable_metadata && s.kind == Stmt::Assignment &&
-      s.lhs_idx.empty()) {
+  if (s.kind == Stmt::Assignment && s.lhs_idx.empty()) {
     const auto binding = bindings.find(s.lhs);
     if (binding != bindings.end() &&
         binding->second.view.leaf != UnsizedLeaf::Unknown &&
@@ -1182,8 +643,7 @@ void validate_bindings(const Stmt& s, Bindings& bindings, BindingScope* scope,
   }
   if (s.kind == Stmt::Decl) {
     const UnsizedView view = declared_view(s.decl_type);
-    if (strict_variable_metadata &&
-        s.decl_type.unsized.leaf != UnsizedLeaf::Unknown && s.has_init &&
+    if (s.decl_type.unsized.leaf != UnsizedLeaf::Unknown && s.has_init &&
         s.init.unsized.leaf != UnsizedLeaf::Unknown &&
         (view.depth != s.init.unsized.depth ||
          view.leaf != s.init.unsized.leaf))
@@ -1197,28 +657,23 @@ void validate_bindings(const Stmt& s, Bindings& bindings, BindingScope* scope,
       bindings[s.decl_id] = declared;
   }
   if (s.kind == Stmt::SList) {
-    validate_bindings(s.body, bindings, scope, functions,
-                      strict_variable_metadata);
+    validate_bindings(s.body, bindings, scope, functions);
   } else if (s.kind == Stmt::IfElse) {
     for (const auto& child : s.body) {
       BindingScope branch(bindings);
-      validate_bindings(child, bindings, &branch, functions,
-                        strict_variable_metadata);
+      validate_bindings(child, bindings, &branch, functions);
     }
   } else if (!s.body.empty()) {
     BindingScope nested(bindings);
     if (s.kind == Stmt::For)
       nested.bind(s.loopvar, Binding{UnsizedView{0, UnsizedLeaf::Int}, true});
-    validate_bindings(s.body, bindings, &nested, functions,
-                      strict_variable_metadata);
+    validate_bindings(s.body, bindings, &nested, functions);
   }
 }
 
 void validate_bindings(const std::vector<Stmt>& body, Bindings& bindings,
-                       BindingScope* scope, const Functions& functions,
-                       bool strict_variable_metadata) {
-  for (const auto& s : body)
-    validate_bindings(s, bindings, scope, functions, strict_variable_metadata);
+                       BindingScope* scope, const Functions& functions) {
+  for (const auto& s : body) validate_bindings(s, bindings, scope, functions);
 }
 
 // stanc3 keeps every overload of a user function under one fdname, and calls
@@ -1453,7 +908,7 @@ void validate_returns(const Stmt& s, const FunDef& f) {
 
 }  // namespace
 
-void detail::finalize_program(Program& prog, bool strict_variable_metadata) {
+void detail::finalize_program(Program& prog) {
   strip_eval(prog);
   unmangle(prog);
   resolve_overloads(prog);
@@ -1471,172 +926,22 @@ void detail::finalize_program(Program& prog, bool strict_variable_metadata) {
   for (const auto& [name, type] : prog.input_vars)
     inputs[name] = Binding{declared_view(type), true};
   Bindings prepare_bindings = inputs;
-  validate_bindings(prog.prepare_data, prepare_bindings, nullptr, functions,
-                    strict_variable_metadata);
+  validate_bindings(prog.prepare_data, prepare_bindings, nullptr, functions);
   Bindings log_prob_bindings = prepare_bindings;
-  validate_bindings(prog.log_prob, log_prob_bindings, nullptr, functions,
-                    strict_variable_metadata);
+  validate_bindings(prog.log_prob, log_prob_bindings, nullptr, functions);
   Bindings gq_bindings = prepare_bindings;
-  validate_bindings(prog.generate_quantities, gq_bindings, nullptr, functions,
-                    strict_variable_metadata);
+  validate_bindings(prog.generate_quantities, gq_bindings, nullptr, functions);
   // transform_inits sees data and transformed data and declares each
   // parameter locally, exactly like generate_quantities does.
   Bindings init_bindings = prepare_bindings;
-  validate_bindings(prog.transform_inits, init_bindings, nullptr, functions,
-                    strict_variable_metadata);
+  validate_bindings(prog.transform_inits, init_bindings, nullptr, functions);
   for (const auto& f : prog.fun_defs) {
     for (const Stmt& s : f.body) validate_returns(s, f);
     Bindings args;
     for (size_t i = 0; i < f.arg_names.size(); ++i)
       args[f.arg_names[i]] = Binding{f.arg_views[i], f.arg_data_only[i]};
-    validate_bindings(f.body, args, nullptr, functions,
-                      strict_variable_metadata);
+    validate_bindings(f.body, args, nullptr, functions);
   }
-}
-
-// stanc3 separates write_array's three sections with top-level early-return
-// guards on its emit flags:
-//   if (!(emit_transformed_parameters__ || emit_generated_quantities__))
-//     return;                                 <- transformed parameters start
-//   if (!emit_generated_quantities__) return; <- generated quantities start
-// stanli always emits every section, so drop the guards and keep where they
-// were, as the portable producer does.
-void read_write_array(const Node& list, Program& prog) {
-  const auto mentions = [](const auto& self, const Expr& e,
-                           const char* name) -> bool {
-    if (e.kind == Expr::Var && e.name == name) return true;
-    for (const Expr& arg : e.args)
-      if (self(self, arg, name)) return true;
-    return false;
-  };
-  std::optional<size_t> tp_begin, gq_begin;
-  for (size_t i = 0; i < list.size(); ++i) {
-    Stmt s = read_stmt(list[i]);
-    const size_t here = prog.generate_quantities.size();
-    if (s.kind == Stmt::IfElse && s.cond.kind == Expr::FunApp &&
-        s.cond.args.size() == 1 && s.cond.args[0].kind == Expr::Var &&
-        s.cond.args[0].name == "emit_generated_quantities__") {
-      if (!gq_begin) {
-        gq_begin = here;
-        continue;
-      }
-    } else if (s.kind == Stmt::IfElse &&
-               mentions(mentions, s.cond, "emit_transformed_parameters__")) {
-      if (!tp_begin) {
-        tp_begin = here;
-        continue;
-      }
-    }
-    prog.generate_quantities.push_back(std::move(s));
-  }
-  prog.generated_quantities_begin =
-      gq_begin.value_or(prog.generate_quantities.size());
-  prog.transformed_parameters_begin =
-      tp_begin.value_or(prog.generated_quantities_begin);
-}
-
-Program read_program(const sexp::Node& root) {
-  Program prog;
-  nesting_meter = {};
-  const Node* iv = field(root, "input_vars");
-  if (!iv) throw mir::MirError("mir: no input_vars section");
-  const Node& vars = (*iv)[1];
-  for (size_t i = 0; i < vars.size(); ++i) {
-    const Node& v = vars[i];  // (name <loc> sizedtype)
-    prog.input_vars.emplace_back(v[0].atom, read_sized(v[2]));
-  }
-  if (const Node* pd = field(root, "prepare_data"))
-    read_stmt_list((*pd)[1], prog.prepare_data);
-  if (const Node* fb = field(root, "functions_block")) {
-    const Node& defs = (*fb)[1];
-    for (size_t i = 0; i < defs.size(); ++i) {
-      const Node& fd = defs[i];
-      FunDef f;
-      if (const Node* nm = field(fd, "fdname")) f.name = (*nm)[1].atom;
-      if (const Node* fa = field(fd, "fdargs")) {
-        const Node& args = (*fa)[1];
-        for (size_t a = 0; a < args.size(); ++a) {
-          // (AutoDiffable name type) or (DataOnly name type)
-          f.arg_names.push_back(args[a][1].atom);
-          f.arg_views.push_back(read_unsized(args[a][2]));
-          f.arg_data_only.push_back(args[a][0].is_atom() &&
-                                    args[a][0].atom == "DataOnly");
-        }
-      }
-      if (const Node* fb2 = field(fd, "fdbody"))
-        read_stmt_list((*fb2)[1], f.body);
-      // (fdrt (ReturnType T)) or (fdrt Void). Hand-written MIR may leave it
-      // out; a function returning a value then says so by its returns.
-      const Node* rt = field(fd, "fdrt");
-      if (rt && rt->size() == 2 && !(*rt)[1].is_atom() &&
-          (*rt)[1].head_is("ReturnType") && (*rt)[1].size() == 2) {
-        f.results.push_back(read_unsized((*rt)[1][1]));
-      } else if (!rt) {
-        const auto returns_value = [](const auto& self, const Stmt& s) -> bool {
-          if (s.kind == Stmt::Return && s.has_init) return true;
-          for (const Stmt& child : s.body)
-            if (self(self, child)) return true;
-          return false;
-        };
-        for (const Stmt& s : f.body)
-          if (returns_value(returns_value, s)) {
-            f.results.push_back(UnsizedView{});
-            break;
-          }
-      }
-      prog.fun_defs.push_back(std::move(f));
-    }
-  }
-  const Node* lp = field(root, "log_prob");
-  if (!lp) throw mir::MirError("mir: no log_prob section");
-  read_stmt_list((*lp)[1], prog.log_prob);
-  if (const Node* gq = field(root, "generate_quantities"))
-    read_write_array((*gq)[1], prog);
-  // stanc3's inverse parameter transforms. Absent from a hand-written or
-  // pre-backend-transform MIR, in which case constrained-scale inits stay
-  // unavailable for this model rather than becoming an error here.
-  if (const Node* ti = field(root, "transform_inits")) {
-    prog.has_transform_inits = true;
-    read_stmt_list((*ti)[1], prog.transform_inits);
-  }
-  if (const Node* ov = field(root, "output_vars")) {
-    // ((name <opaque> ((out_unconstrained_st ST) (out_constrained_st ST)
-    // (out_block B) (out_trans T))) ...)
-    const Node& vars = (*ov)[1];
-    for (size_t i = 0; i < vars.size(); ++i) {
-      const Node& v = vars[i];
-      const Node* type =
-          v.size() == 3 ? field(v[2], "out_constrained_st") : nullptr;
-      const Node* block = v.size() == 3 ? field(v[2], "out_block") : nullptr;
-      if (!type || !block || !(*block)[1].is_atom())
-        throw mir::MirError("mir: malformed output variable");
-      OutputVar out;
-      out.name = v[0].atom;
-      out.type = read_sized((*type)[1]);
-      if (const Node* notes = field(v[2], "out_annotations")) {
-        const Node& list = (*notes)[1];
-        for (size_t k = 0; k < list.size(); ++k) {
-          const Node* name = field(list[k], "name");
-          if (!name || !(*name)[1].is_atom())
-            throw mir::MirError("mir: malformed output annotation");
-          out.annotations.push_back((*name)[1].atom);
-        }
-      }
-      const std::string& b = (*block)[1].atom;
-      if (b == "Parameters")
-        out.block = OutputVar::Block::Parameters;
-      else if (b == "TransformedParameters")
-        out.block = OutputVar::Block::TransformedParameters;
-      else if (b == "GeneratedQuantities")
-        out.block = OutputVar::Block::GeneratedQuantities;
-      else
-        throw mir::MirError("mir: unknown output block " + b);
-      prog.output_vars.push_back(std::move(out));
-    }
-  }
-  prog.nesting = nesting_meter.peak;
-  detail::finalize_program(prog);
-  return prog;
 }
 
 }  // namespace mir

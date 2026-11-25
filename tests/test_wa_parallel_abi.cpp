@@ -142,7 +142,7 @@ int main() {
         "wapar_lp_error", "wapar_both_error"}) {
     Model m;
     m.name = name;
-    m.mir = slurp(std::string("tests/fixtures/") + name + ".tmir.sexp");
+    m.mir = slurp(std::string("tests/fixtures/") + name + ".mir");
     m.data = slurp(std::string("tests/fixtures/") + name + ".json");
     if (m.data.empty()) m.data = "{}";
     expect(!m.mir.empty(), std::string("fixture present: ") + name);

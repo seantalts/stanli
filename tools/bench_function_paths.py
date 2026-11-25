@@ -33,7 +33,7 @@ lib.stanli_function_new_from_mir.restype = ptr
 lib.stanli_function_free.argtypes = [ptr]
 lib.stanli_function_call_values.argtypes = [ptr,c.POINTER(Argument),c.c_size_t,
                                           Writer,ptr,c.c_char_p,c.c_size_t]
-mir = Path('tests/fixtures/standalone_compiled.tmir.sexp').read_bytes()
+mir = Path('tests/fixtures/standalone_compiled.mir').read_bytes()
 err = c.create_string_buffer(8192)
 keep = []
 def argument(name, values, dimensions=(), integer=False):

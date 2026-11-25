@@ -8,6 +8,7 @@
 #include <stanli/wa_interp.hpp>
 
 #include "../runtime/src/mir_tuples.hpp"
+#include "portable_mir_writer.hpp"
 #include "../runtime/ext/nlohmann_json.hpp"
 
 #include <algorithm>
@@ -31,6 +32,7 @@ namespace {
 
 using json = nlohmann::json;
 using namespace stanli;
+using namespace stanli::portable_writer;
 
 int failures = 0;
 
@@ -46,357 +48,6 @@ std::string slurp(const std::string& path) {
   std::ostringstream contents;
   contents << input.rdbuf();
   return contents.str();
-}
-
-void append_u8(std::string& bytes, uint8_t value) {
-  bytes.push_back(static_cast<char>(value));
-}
-
-void append_u32(std::string& bytes, uint32_t value) {
-  for (unsigned shift = 0; shift < 32; shift += 8)
-    append_u8(bytes, static_cast<uint8_t>(value >> shift));
-}
-
-void append_u64(std::string& bytes, uint64_t value) {
-  for (unsigned shift = 0; shift < 64; shift += 8)
-    append_u8(bytes, static_cast<uint8_t>(value >> shift));
-}
-
-void append_string(std::string& bytes, std::string_view value) {
-  append_u32(bytes, static_cast<uint32_t>(value.size()));
-  bytes.append(value);
-}
-
-std::string encode_base64(std::string_view bytes) {
-  constexpr std::string_view alphabet =
-      "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-  std::string result;
-  result.reserve(((bytes.size() + 2) / 3) * 4);
-  for (size_t offset = 0; offset < bytes.size(); offset += 3) {
-    const uint32_t a = static_cast<unsigned char>(bytes[offset]);
-    const bool have_b = offset + 1 < bytes.size();
-    const bool have_c = offset + 2 < bytes.size();
-    const uint32_t b =
-        have_b ? static_cast<unsigned char>(bytes[offset + 1]) : 0;
-    const uint32_t c =
-        have_c ? static_cast<unsigned char>(bytes[offset + 2]) : 0;
-    result.push_back(alphabet[a >> 2]);
-    result.push_back(alphabet[((a & 0x03) << 4) | (b >> 4)]);
-    result.push_back(have_b ? alphabet[((b & 0x0f) << 2) | (c >> 6)] : '=');
-    result.push_back(have_c ? alphabet[c & 0x3f] : '=');
-  }
-  return result;
-}
-
-std::string v2_wire(std::string_view payload) {
-  return "STANLI5:" + encode_base64(payload);
-}
-
-void append_bool(std::string& bytes, bool value) {
-  append_u8(bytes, value ? 1 : 0);
-}
-
-template <typename T, typename Write>
-void append_list(std::string& bytes, const std::vector<T>& values,
-                 Write write) {
-  append_u32(bytes, static_cast<uint32_t>(values.size()));
-  for (const T& value : values) write(bytes, value);
-}
-
-void append_view(std::string& bytes, const mir::UnsizedView& value) {
-  append_u8(bytes, value.depth);
-  append_u8(bytes, static_cast<uint8_t>(value.leaf));
-}
-
-void append_bools(std::string& bytes, const std::vector<bool>& values) {
-  append_u32(bytes, static_cast<uint32_t>(values.size()));
-  for (bool value : values) append_bool(bytes, value);
-}
-
-void append_expr(std::string& bytes, const mir::Expr& value);
-void append_stmt(std::string& bytes, const mir::Stmt& value);
-
-void append_expr_list(std::string& bytes,
-                      const std::vector<mir::Expr>& values) {
-  append_list(bytes, values, [](std::string& out, const mir::Expr& expression) {
-    append_expr(out, expression);
-  });
-}
-
-void append_expr(std::string& bytes, const mir::Expr& value) {
-  append_u8(bytes, static_cast<uint8_t>(value.kind));
-  switch (value.kind) {
-    case mir::Expr::Var:
-      append_string(bytes, value.name);
-      append_bool(bytes, value.fn_type.has_value());
-      if (value.fn_type) {
-        append_list(bytes, value.fn_type->args,
-                    [](std::string& out, const mir::UnsizedView& view) {
-                      append_view(out, view);
-                    });
-        append_u8(bytes, static_cast<uint8_t>(value.fn_type->suffix));
-        append_bool(bytes, value.fn_type->propto);
-      }
-      break;
-    case mir::Expr::LitInt:
-      append_u32(bytes,
-                 static_cast<uint32_t>(static_cast<int32_t>(value.lit_i)));
-      break;
-    case mir::Expr::LitReal: {
-      uint64_t bits = 0;
-      std::memcpy(&bits, &value.lit, sizeof(bits));
-      append_u64(bytes, bits);
-      break;
-    }
-    case mir::Expr::LitStr:
-      append_string(bytes, value.lit_s);
-      break;
-    case mir::Expr::FunApp:
-      append_u8(bytes, static_cast<uint8_t>(value.fn_lib));
-      append_string(bytes, value.name);
-      append_u8(bytes, static_cast<uint8_t>(value.fn_suffix));
-      append_bool(bytes, value.fn_propto);
-      append_expr_list(bytes, value.args);
-      break;
-    case mir::Expr::Promotion:
-    case mir::Expr::Indexed:
-    case mir::Expr::TernaryIf:
-    case mir::Expr::EOr:
-    case mir::Expr::EAnd:
-    case mir::Expr::IndexAll:
-    case mir::Expr::IndexSingle:
-    case mir::Expr::IndexUpfrom:
-    case mir::Expr::IndexBetween:
-    case mir::Expr::IndexMulti:
-      append_expr_list(bytes, value.args);
-      break;
-    case mir::Expr::Unsupported:
-      break;
-  }
-  append_view(bytes, value.unsized);
-  append_bool(bytes, value.data_only);
-  append_bool(bytes, value.promoted);
-  append_string(bytes, value.raw);
-}
-
-void append_transform(std::string& bytes, const mir::Transform& value) {
-  append_u8(bytes, static_cast<uint8_t>(value.kind));
-  append_expr_list(bytes, value.args);
-  append_string(bytes, value.raw);
-}
-
-void append_optional_transform(std::string& bytes,
-                               const std::optional<mir::Transform>& value) {
-  append_bool(bytes, value.has_value());
-  if (value) append_transform(bytes, *value);
-}
-
-void append_sized(std::string& bytes, const mir::SizedType& value) {
-  append_string(bytes, value.base);
-  append_expr_list(bytes, value.dims);
-  append_string(bytes, value.elem_base);
-  append_string(bytes, value.raw);
-}
-
-// The type of an input or output variable, with a tuple's components.
-void append_interface_type(std::string& bytes,
-                           const mir::detail::TupleType& value) {
-  append_sized(bytes, value.type);
-  if (mir::detail::is_tuple(value.type))
-    append_list(bytes, value.components, append_interface_type);
-}
-
-void append_print_item(std::string& bytes, const mir::PrintItem& item) {
-  append_u8(bytes, item.kind == mir::PrintItem::Kind::Tuple ? 1 : 0);
-  if (item.kind == mir::PrintItem::Kind::Tuple) {
-    append_u8(bytes, item.depth);
-    append_list(bytes, item.components, append_print_item);
-  }
-}
-
-void append_stmt_list(std::string& bytes,
-                      const std::vector<mir::Stmt>& values) {
-  append_list(bytes, values, [](std::string& out, const mir::Stmt& statement) {
-    append_stmt(out, statement);
-  });
-}
-
-void append_stmt(std::string& bytes, const mir::Stmt& value) {
-  append_u8(bytes, value.kind == mir::Stmt::MultiAssign ? 15
-                   : value.jacobian ? 14
-                                    : static_cast<uint8_t>(value.kind));
-  switch (value.kind) {
-    case mir::Stmt::Decl:
-      append_string(bytes, value.decl_id);
-      if (!value.decl_type.base.empty() ||
-          value.decl_type.unsized.leaf == mir::UnsizedLeaf::Unknown) {
-        append_u8(bytes, 0);
-        append_sized(bytes, value.decl_type);
-      } else {
-        append_u8(bytes, 1);
-        append_view(bytes, value.decl_type.unsized);
-        append_string(bytes, value.decl_type.raw);
-      }
-      append_bool(bytes, value.decl_data_only);
-      append_bool(bytes, value.has_init);
-      if (value.has_init) append_expr(bytes, value.init);
-      append_optional_transform(bytes, value.read_transform);
-      append_expr_list(bytes, value.read_dims);
-      append_string(bytes, value.raw);
-      break;
-    case mir::Stmt::Assignment:
-      append_string(bytes, value.lhs);
-      append_expr_list(bytes, value.lhs_idx);
-      append_expr(bytes, value.rhs);
-      append_string(bytes, value.raw);
-      break;
-    case mir::Stmt::TargetPE:
-      append_expr(bytes, value.target);
-      append_string(bytes, value.raw);
-      break;
-    case mir::Stmt::Block:
-    case mir::Stmt::SList:
-      append_stmt_list(bytes, value.body);
-      append_string(bytes, value.raw);
-      break;
-    case mir::Stmt::For:
-      append_string(bytes, value.loopvar);
-      append_expr(bytes, value.lower);
-      append_expr(bytes, value.upper);
-      append_stmt_list(bytes, value.body);
-      append_string(bytes, value.raw);
-      break;
-    case mir::Stmt::IfElse:
-    case mir::Stmt::While:
-      append_expr(bytes, value.cond);
-      append_stmt_list(bytes, value.body);
-      append_string(bytes, value.raw);
-      break;
-    case mir::Stmt::NRFunApp:
-      append_u8(bytes, static_cast<uint8_t>(value.fn_lib));
-      append_string(bytes, value.fn_name);
-      append_u8(bytes, static_cast<uint8_t>(value.fn_suffix));
-      if (mir::internal_name(value) == "FnCheck" ||
-          mir::internal_name(value) == "FnWriteParam") {
-        const bool check = mir::internal_name(value) == "FnCheck";
-        const std::vector<mir::Expr> args =
-            value.fn_args.empty()
-                ? std::vector<mir::Expr>{}
-                : std::vector<mir::Expr>(value.fn_args.begin() + 1,
-                                         value.fn_args.end());
-        append_expr_list(bytes, args);
-        append_u8(bytes, check ? 1 : 2);
-        if (check) {
-          append_transform(bytes,
-                           value.check_transform.value_or(mir::Transform{}));
-          append_string(bytes, value.check_var_name);
-        } else {
-          append_optional_transform(bytes, value.write_transform);
-        }
-        append_expr(
-            bytes, value.fn_args.empty() ? mir::Expr{} : value.fn_args.front());
-      } else {
-        append_expr_list(bytes, value.fn_args);
-        append_u8(bytes, value.print_layout.empty() ? 0 : 3);
-        if (!value.print_layout.empty())
-          append_list(bytes, value.print_layout, append_print_item);
-      }
-      append_string(bytes, value.raw);
-      break;
-    case mir::Stmt::Return:
-      append_expr_list(bytes, value.has_init ? std::vector<mir::Expr>{value.rhs}
-                                             : value.fn_args);
-      append_string(bytes, value.raw);
-      break;
-    case mir::Stmt::MultiAssign:
-      append_list(bytes, value.fn_args,
-                  [](std::string& out, const mir::Expr& target) {
-                    append_string(out, target.name);
-                  });
-      append_expr(bytes, value.rhs);
-      append_string(bytes, value.raw);
-      break;
-    case mir::Stmt::Break:
-    case mir::Stmt::Continue:
-      break;
-    case mir::Stmt::Skip:
-    case mir::Stmt::Unsupported:
-      append_string(bytes, value.raw);
-      break;
-  }
-}
-
-void append_strings(std::string& bytes,
-                    const std::vector<std::string>& values) {
-  append_list(bytes, values, [](std::string& out, const std::string& value) {
-    append_string(out, value);
-  });
-}
-
-void append_fun(std::string& bytes, const mir::FunDef& value) {
-  append_string(bytes, value.name);
-  append_strings(bytes, value.arg_names);
-  append_list(bytes, value.arg_views, append_view);
-  append_bools(bytes, value.arg_data_only);
-  append_list(bytes, value.results, append_view);
-  append_stmt_list(bytes, value.body);
-}
-
-// What a program's tuple input and output variables add on the wire: their
-// full types, by name, and the leaf variables the compiler made for them.
-struct WireTuples {
-  std::map<std::string, mir::detail::TupleType> types;
-  std::vector<mir::detail::WireTupleLeaf> leaves;
-};
-
-std::string write_v2(const mir::Program& value, const WireTuples& tuples = {}) {
-  const auto append_type = [&](std::string& out, const std::string& name,
-                               const mir::SizedType& type) {
-    const auto found = tuples.types.find(name);
-    if (found != tuples.types.end())
-      append_interface_type(out, found->second);
-    else
-      append_sized(out, type);
-  };
-  std::string payload;
-  append_u32(payload, static_cast<uint32_t>(value.input_vars.size()));
-  for (const auto& input : value.input_vars) {
-    append_string(payload, input.first);
-    append_type(payload, input.first, input.second);
-  }
-  append_stmt_list(payload, value.prepare_data);
-  append_stmt_list(payload, value.log_prob);
-  append_stmt_list(payload, value.generate_quantities);
-  append_u32(payload,
-             static_cast<uint32_t>(value.transformed_parameters_begin));
-  append_u32(payload, static_cast<uint32_t>(value.generated_quantities_begin));
-  append_list(payload, value.fun_defs,
-              [](std::string& out, const mir::FunDef& definition) {
-                append_fun(out, definition);
-              });
-  append_list(payload, value.output_vars,
-              [&](std::string& out, const mir::OutputVar& var) {
-                append_string(out, var.name);
-                append_u8(out, static_cast<uint8_t>(var.block));
-                append_type(out, var.name, var.type);
-                append_list(out, var.annotations,
-                            [](std::string& list, const std::string& name) {
-                              append_string(list, name);
-                            });
-              });
-  append_stmt_list(payload, value.transform_inits);
-  append_list(payload, tuples.leaves,
-              [](std::string& out, const mir::detail::WireTupleLeaf& leaf) {
-                append_string(out, leaf.variable);
-                append_string(out, leaf.base);
-                append_list(
-                    out, leaf.path,
-                    [](std::string& slots, const mir::detail::TupleSlot& slot) {
-                      append_u32(slots, static_cast<uint32_t>(slot.before));
-                      append_u32(slots, static_cast<uint32_t>(slot.component));
-                    });
-              });
-  return v2_wire(payload);
 }
 
 std::string empty_v2_payload() {
@@ -430,16 +81,22 @@ std::string real_target_v2_payload(uint64_t bits, uint8_t data_only = 1,
   return payload;
 }
 
+// Write each whole assignment `lhs = value` whose value has `view` as the
+// full-span assignment `lhs[:] = value`; return how many there were.
 size_t replace_assignment_with_all(std::string& text, const std::string& lhs,
-                                   const std::string& type) {
-  const std::string from = "(Assignment ((LVariable " + lhs + ") ()) " + type;
-  const std::string to = "(Assignment ((LVariable " + lhs + ") (All)) " + type;
+                                   mir::UnsizedView view) {
+  mir::Program program = decode_program(text);
   size_t count = 0;
-  for (size_t at = 0; (at = text.find(from, at)) != std::string::npos;) {
-    text.replace(at, from.size(), to);
-    at += to.size();
-    ++count;
-  }
+  for_each_stmt(program, [&](mir::Stmt& statement) {
+    if (statement.kind == mir::Stmt::Assignment && statement.lhs == lhs &&
+        statement.lhs_idx.empty() &&
+        statement.rhs.unsized.depth == view.depth &&
+        statement.rhs.unsized.leaf == view.leaf) {
+      statement.lhs_idx = {index(mir::Expr::IndexAll, {})};
+      ++count;
+    }
+  });
+  text = write_v2(program);
   return count;
 }
 
@@ -873,176 +530,68 @@ mir::Program read_fixture(const std::string& path) {
   return decode_program(text);
 }
 
-void clear_raw(mir::Expr& value) {
-  value.raw.clear();
-  for (mir::Expr& arg : value.args) clear_raw(arg);
-}
-
-void clear_raw(mir::Transform& value) {
-  value.raw.clear();
-  for (mir::Expr& arg : value.args) clear_raw(arg);
-}
-
-void clear_raw(mir::SizedType& value) {
-  value.raw.clear();
-  for (mir::Expr& dim : value.dims) clear_raw(dim);
-}
-
-void clear_raw(mir::Stmt& value) {
-  value.raw.clear();
-  clear_raw(value.decl_type);
-  for (mir::Expr* expression : {&value.init, &value.rhs, &value.target,
-                                &value.lower, &value.upper, &value.cond})
-    clear_raw(*expression);
-  for (std::vector<mir::Expr>* expressions :
-       {&value.read_dims, &value.lhs_idx, &value.fn_args})
-    for (mir::Expr& expression : *expressions) clear_raw(expression);
-  if (value.read_transform) clear_raw(*value.read_transform);
-  if (value.check_transform) clear_raw(*value.check_transform);
-  for (mir::Stmt& child : value.body) clear_raw(child);
-}
-
-void clear_raw(mir::Program& value) {
-  for (auto& input : value.input_vars) clear_raw(input.second);
-  for (std::vector<mir::Stmt>* body :
-       {&value.prepare_data, &value.log_prob, &value.generate_quantities,
-        &value.transform_inits})
-    for (mir::Stmt& statement : *body) clear_raw(statement);
-  for (mir::FunDef& function : value.fun_defs)
-    for (mir::Stmt& statement : function.body) clear_raw(statement);
-}
-
-bool report_first_difference(const json& actual, const json& expected,
-                             const std::string& path) {
-  if (actual.type() != expected.type()) {
-    std::printf("DIFF %s type actual=%s expected=%s\n", path.c_str(),
-                actual.type_name(), expected.type_name());
-    return true;
-  }
-  if (actual.is_object()) {
-    if (actual.size() != expected.size()) {
-      std::printf("DIFF %s object size actual=%zu expected=%zu\n", path.c_str(),
-                  actual.size(), expected.size());
-      return true;
-    }
-    for (auto it = expected.begin(); it != expected.end(); ++it) {
-      if (!actual.contains(it.key())) {
-        std::printf("DIFF %s missing key %s\n", path.c_str(), it.key().c_str());
-        return true;
-      }
-      if (report_first_difference(actual.at(it.key()), it.value(),
-                                  path + "." + it.key()))
-        return true;
-    }
-    return false;
-  }
-  if (actual.is_array()) {
-    if (actual.size() != expected.size()) {
-      std::printf("DIFF %s array size actual=%zu expected=%zu\n", path.c_str(),
-                  actual.size(), expected.size());
-      if (actual.size() <= 8 && expected.size() <= 8)
-        std::printf("  actual=%s\n  expected=%s\n", actual.dump().c_str(),
-                    expected.dump().c_str());
-      return true;
-    }
-    for (size_t i = 0; i < actual.size(); ++i)
-      if (report_first_difference(actual[i], expected[i],
-                                  path + "[" + std::to_string(i) + "]"))
-        return true;
-    return false;
-  }
-  if (actual != expected) {
-    std::printf("DIFF %s actual=%s expected=%s\n", path.c_str(),
-                actual.dump().c_str(), expected.dump().c_str());
-    return true;
-  }
-  return false;
-}
-
-void check_program_equivalence(const std::string& legacy_path,
-                               const std::string& portable_path) {
-  mir::Program legacy = read_fixture(legacy_path);
-  mir::Program portable = read_fixture(portable_path);
-  // Portable MIR keeps complete opaque diagnostic payloads; the legacy reader
-  // truncates some of them. They do not participate in execution, so compare
-  // every structural/semantic field after removing only those payloads.
-  clear_raw(legacy);
-  clear_raw(portable);
-  const json portable_object = write_program_object(portable);
-  const json legacy_object = write_program_object(legacy);
-  const bool equal = portable_object == legacy_object;
-  if (!equal)
-    report_first_difference(portable_object, legacy_object, "$program");
-  check(equal, portable_path + " decoded fields match " + legacy_path);
-}
-
+// A decoded fixture survives a round trip through the test writer.
 void check_round_trip(const std::string& path) {
-  const mir::Program legacy = read_fixture(path);
-  const mir::Program portable = decode_program(write_v2(legacy));
-  check(write_program_object(portable) == write_program_object(legacy),
-        path + " portable fields match legacy fields");
+  const mir::Program decoded = read_fixture(path);
+  const mir::Program again = decode_program(write_v2(decoded));
+  check(write_program_object(again) == write_program_object(decoded),
+        path + " survives a round trip through the writer");
 }
 
-void check_lowering_equivalence(const char* legacy_fixture,
-                                const char* portable_fixture) {
-  const std::string legacy_text =
-      slurp(legacy_fixture ? legacy_fixture : "tests/fixtures/es.tmir.sexp");
-  const mir::Program legacy_program = decode_program(legacy_text);
-  const std::string portable_text =
-      portable_fixture ? slurp(portable_fixture) : write_v2(legacy_program);
-  check(!portable_text.empty(), "portable lowering fixture exists");
-  if (legacy_fixture && portable_fixture)
-    check_program_equivalence(legacy_fixture, portable_fixture);
+// The eight schools fixture lowers to the same graph after a round trip
+// through the test writer.
+void check_round_trip_lowering() {
+  const std::string text = slurp("tests/fixtures/es.mir");
+  const std::string again = write_v2(decode_program(text));
 
   DataMap data;
   data.set_int("J", 8);
   data.set_real_array("y", {28, 8, -3, 7, -1, 1, 18, 12}, {8});
   data.set_real_array("sigma", {15, 10, 16, 11, 9, 11, 10, 18}, {8});
 
-  CompiledModel legacy = compile_model(legacy_text, data);
-  CompiledModel portable = compile_model(portable_text, data);
-  check(legacy.graph.ops.size() == portable.graph.ops.size(),
-        "portable lowering op count");
-  check(legacy.graph.slots.size() == portable.graph.slots.size(),
-        "portable lowering slot count");
-  check(legacy.fills == portable.fills, "portable lowering fills");
-  check(legacy.param_names == portable.param_names,
-        "portable lowering parameter names");
-  check(legacy.n_unconstrained == portable.n_unconstrained,
-        "portable lowering parameter count");
+  CompiledModel fixture = compile_model(text, data);
+  CompiledModel written = compile_model(again, data);
+  check(fixture.graph.ops.size() == written.graph.ops.size(),
+        "round-trip lowering op count");
+  check(fixture.graph.slots.size() == written.graph.slots.size(),
+        "round-trip lowering slot count");
+  check(fixture.fills == written.fills, "round-trip lowering fills");
+  check(fixture.param_names == written.param_names,
+        "round-trip lowering parameter names");
+  check(fixture.n_unconstrained == written.n_unconstrained,
+        "round-trip lowering parameter count");
 
-  Executor legacy_executor(std::move(legacy.graph));
-  Executor portable_executor(std::move(portable.graph));
-  legacy.bind(legacy_executor);
-  portable.bind(portable_executor);
-  check(legacy_executor.n_params() == portable_executor.n_params(),
-        "portable executor parameter count");
-  const int64_t count = legacy_executor.n_params();
+  Executor fixture_executor(std::move(fixture.graph));
+  Executor written_executor(std::move(written.graph));
+  fixture.bind(fixture_executor);
+  written.bind(written_executor);
+  check(fixture_executor.n_params() == written_executor.n_params(),
+        "round-trip executor parameter count");
+  const int64_t count = fixture_executor.n_params();
   for (int64_t i = 0; i < count; ++i) {
     const double value = 0.03 * static_cast<double>(i) - 0.1;
-    legacy_executor.params_data()[i] = value;
-    portable_executor.params_data()[i] = value;
+    fixture_executor.params_data()[i] = value;
+    written_executor.params_data()[i] = value;
   }
-  std::vector<double> legacy_gradient(static_cast<size_t>(count));
-  std::vector<double> portable_gradient(static_cast<size_t>(count));
-  const double legacy_lp = legacy_executor.gradient(legacy_gradient.data());
-  const double portable_lp =
-      portable_executor.gradient(portable_gradient.data());
-  check(legacy_lp == portable_lp, "portable lowering lp bitwise");
-  check(legacy_gradient == portable_gradient,
-        "portable lowering gradient bitwise");
+  std::vector<double> fixture_gradient(static_cast<size_t>(count));
+  std::vector<double> written_gradient(static_cast<size_t>(count));
+  const double fixture_lp = fixture_executor.gradient(fixture_gradient.data());
+  const double written_lp = written_executor.gradient(written_gradient.data());
+  check(fixture_lp == written_lp, "round-trip lowering lp bitwise");
+  check(fixture_gradient == written_gradient,
+        "round-trip lowering gradient bitwise");
 }
 
 void check_full_span_assignment_lowering() {
-  const auto decoded_pair = [](const std::string& legacy_text,
+  const auto decoded_pair = [](const std::string& fixture_text,
                                const std::string& what) {
-    const mir::Program legacy_program = decode_program(legacy_text);
-    const std::string portable_text = write_v2(legacy_program);
-    const mir::Program portable_program = decode_program(portable_text);
-    check(write_program_object(portable_program) ==
-              write_program_object(legacy_program),
-          what + " portable decode matches legacy decode");
-    return std::make_pair(portable_text, legacy_program);
+    const mir::Program fixture_program = decode_program(fixture_text);
+    const std::string written_text = write_v2(fixture_program);
+    const mir::Program written_program = decode_program(written_text);
+    check(write_program_object(written_program) ==
+              write_program_object(fixture_program),
+          what + " survives a round trip through the writer");
+    return std::make_pair(written_text, fixture_program);
   };
   const auto run_log = [](CompiledModel& model,
                           const std::vector<double>& params,
@@ -1063,27 +612,29 @@ void check_full_span_assignment_lowering() {
   // view check in graph lowering, including the leaf orientation carried by
   // the portable format.
   {
-    std::string legacy =
-        slurp("tests/fixtures/view_array_container_extract.tmir.sexp");
-    check(replace_assignment_with_all(legacy, "vs", "(UArray UVector)") == 2,
-          "legacy array-vector assignments rewritten for fixture");
-    check(replace_assignment_with_all(legacy, "rs", "(UArray URowVector)") == 2,
-          "legacy array-row assignments rewritten for fixture");
+    std::string fixture =
+        slurp("tests/fixtures/view_array_container_extract.mir");
+    check(replace_assignment_with_all(fixture, "vs",
+                                      view(mir::UnsizedLeaf::Vector, 1)) == 1,
+          "vs assignment rewritten for fixture");
+    check(replace_assignment_with_all(
+              fixture, "rs", view(mir::UnsizedLeaf::RowVector, 1)) == 1,
+          "rs assignment rewritten for fixture");
     const auto decoded =
-        decoded_pair(legacy, "full-span array-container fixture");
+        decoded_pair(fixture, "full-span array-container fixture");
     check(count_full_span_assignments(decoded.second.log_prob, "vs") == 1 &&
               count_full_span_assignments(decoded.second.log_prob, "rs") == 1,
-          "legacy decoder preserves array-container IndexAll LHS");
-    CompiledModel legacy_model = compile_model(legacy, DataMap{});
-    CompiledModel portable_model = compile_model(decoded.first, DataMap{});
-    const auto legacy_result =
-        run_log(legacy_model, {0.25}, "legacy array-container full-span");
-    const auto portable_result =
-        run_log(portable_model, {0.25}, "portable array-container full-span");
-    check(legacy_result == portable_result,
-          "array-container full-span log_prob format parity");
-    check(legacy_result.first == 1630.25 &&
-              legacy_result.second == std::vector<double>({1.0}),
+          "decoder preserves array-container IndexAll LHS");
+    CompiledModel fixture_model = compile_model(fixture, DataMap{});
+    CompiledModel written_model = compile_model(decoded.first, DataMap{});
+    const auto fixture_result =
+        run_log(fixture_model, {0.25}, "array-container full-span");
+    const auto written_result =
+        run_log(written_model, {0.25}, "portable array-container full-span");
+    check(fixture_result == written_result,
+          "array-container full-span log_prob round-trip parity");
+    check(fixture_result.first == 1630.25 &&
+              fixture_result.second == std::vector<double>({1.0}),
           "array-container full-span log_prob value");
   }
 
@@ -1091,41 +642,42 @@ void check_full_span_assignment_lowering() {
   // complete assignment of array[2] vector[0] therefore succeeds only when
   // the logical views, rather than flat widths alone, agree.
   {
-    std::string legacy =
-        slurp("tests/fixtures/viewa_explicit_zero_vectors.tmir.sexp");
-    check(
-        replace_assignment_with_all(legacy, "values", "(UArray UVector)") == 2,
-        "legacy zero-vector-array assignments rewritten for fixture");
+    std::string fixture =
+        slurp("tests/fixtures/viewa_explicit_zero_vectors.mir");
+    check(replace_assignment_with_all(fixture, "values",
+                                      view(mir::UnsizedLeaf::Vector, 1)) == 1,
+          "values assignment rewritten for fixture");
     const auto decoded =
-        decoded_pair(legacy, "full-span zero-vector-array fixture");
-    CompiledModel legacy_model = compile_model(legacy, DataMap{});
-    CompiledModel portable_model = compile_model(decoded.first, DataMap{});
-    const auto legacy_result =
-        run_log(legacy_model, {0.25}, "legacy zero-vector-array full-span");
-    const auto portable_result =
-        run_log(portable_model, {0.25}, "portable zero-vector-array full-span");
-    check(legacy_result == portable_result && legacy_result.first == 200.25 &&
-              legacy_result.second == std::vector<double>({1.0}),
-          "zero-vector-array full-span value and format parity");
+        decoded_pair(fixture, "full-span zero-vector-array fixture");
+    CompiledModel fixture_model = compile_model(fixture, DataMap{});
+    CompiledModel written_model = compile_model(decoded.first, DataMap{});
+    const auto fixture_result =
+        run_log(fixture_model, {0.25}, "zero-vector-array full-span");
+    const auto written_result =
+        run_log(written_model, {0.25}, "portable zero-vector-array full-span");
+    check(fixture_result == written_result && fixture_result.first == 200.25 &&
+              fixture_result.second == std::vector<double>({1.0}),
+          "zero-vector-array full-span value and round-trip parity");
   }
 
   // The row-vector form uses the same storage width as a vector but a
   // distinct logical view, so it is a focused orientation check.
   {
-    std::string legacy = slurp("tests/fixtures/rep_row_vector.tmir.sexp");
-    check(replace_assignment_with_all(legacy, "x", "URowVector") == 2,
-          "legacy row-vector assignments rewritten for fixture");
-    const auto decoded = decoded_pair(legacy, "full-span row-vector fixture");
+    std::string fixture = slurp("tests/fixtures/rep_row_vector.mir");
+    check(replace_assignment_with_all(fixture, "x",
+                                      view(mir::UnsizedLeaf::RowVector)) == 1,
+          "x assignment rewritten for fixture");
+    const auto decoded = decoded_pair(fixture, "full-span row-vector fixture");
     check(count_full_span_assignments(decoded.second.log_prob, "x") == 1,
-          "legacy decoder preserves row-vector IndexAll LHS");
-    CompiledModel legacy_model = compile_model(legacy, DataMap{});
-    CompiledModel portable_model = compile_model(decoded.first, DataMap{});
-    const auto legacy_result =
-        run_log(legacy_model, {0.25}, "legacy row-vector full-span");
-    const auto portable_result =
-        run_log(portable_model, {0.25}, "portable row-vector full-span");
-    check(legacy_result == portable_result,
-          "row-vector full-span log_prob format parity");
+          "decoder preserves row-vector IndexAll LHS");
+    CompiledModel fixture_model = compile_model(fixture, DataMap{});
+    CompiledModel written_model = compile_model(decoded.first, DataMap{});
+    const auto fixture_result =
+        run_log(fixture_model, {0.25}, "row-vector full-span");
+    const auto written_result =
+        run_log(written_model, {0.25}, "portable row-vector full-span");
+    check(fixture_result == written_result,
+          "row-vector full-span log_prob round-trip parity");
 
     mir::Program mismatch = decoded.second;
     std::function<bool(std::vector<mir::Stmt>&)> shorten =
@@ -1173,26 +725,28 @@ void check_full_span_assignment_lowering() {
   // A transformed-data scalar array reaches MirInterp during concrete data
   // specialization, then the graph consumes the assigned values.
   {
-    std::string legacy = slurp("tests/fixtures/rangeclamp.tmir.sexp");
-    check(replace_assignment_with_all(legacy, "xs", "(UArray UReal)") == 1,
-          "legacy scalar-array assignment rewritten for fixture");
-    const auto decoded = decoded_pair(legacy, "full-span scalar-array fixture");
+    std::string fixture = slurp("tests/fixtures/rangeclamp.mir");
+    check(replace_assignment_with_all(fixture, "xs",
+                                      view(mir::UnsizedLeaf::Real, 1)) == 1,
+          "xs assignment rewritten for fixture");
+    const auto decoded =
+        decoded_pair(fixture, "full-span scalar-array fixture");
     check(count_full_span_assignments(decoded.second.prepare_data, "xs") == 1,
-          "legacy decoder preserves scalar-array IndexAll LHS");
+          "decoder preserves scalar-array IndexAll LHS");
     DataMap data;
     data.set_int("K", 3);
     data.set_int("lo", 1);
     data.set_int("hi", 4);
     data.set_real_array("Y", {0, 0, 0, 0}, {4});
     data.set_real_array("Zm", std::vector<double>(8, 0.0), {4, 2});
-    CompiledModel legacy_model = compile_model(legacy, data);
-    CompiledModel portable_model = compile_model(decoded.first, data);
-    const auto legacy_result =
-        run_log(legacy_model, {0.125}, "legacy scalar-array full-span");
-    const auto portable_result =
-        run_log(portable_model, {0.125}, "portable scalar-array full-span");
-    check(legacy_result == portable_result,
-          "scalar-array full-span specialization format parity");
+    CompiledModel fixture_model = compile_model(fixture, data);
+    CompiledModel written_model = compile_model(decoded.first, data);
+    const auto fixture_result =
+        run_log(fixture_model, {0.125}, "scalar-array full-span");
+    const auto written_result =
+        run_log(written_model, {0.125}, "portable scalar-array full-span");
+    check(fixture_result == written_result,
+          "scalar-array full-span specialization round-trip parity");
   }
 
   // An integer array initialized through a complete assignment is consumed
@@ -1200,68 +754,68 @@ void check_full_span_assignment_lowering() {
   // the assignment retained both initialized-prefix and observed-value
   // specialization instead of leaving a typeless real slot behind.
   {
-    std::string legacy = slurp("tests/fixtures/binint.tmir.sexp");
-    check(replace_assignment_with_all(legacy, "expo",
-                                      "(UArray (UArray UInt))") == 1,
-          "legacy int-array assignment rewritten for fixture");
-    const auto decoded = decoded_pair(legacy, "full-span int-array fixture");
+    std::string fixture = slurp("tests/fixtures/binint.mir");
+    check(replace_assignment_with_all(fixture, "expo",
+                                      view(mir::UnsizedLeaf::Int, 2)) == 1,
+          "expo assignment rewritten for fixture");
+    const auto decoded = decoded_pair(fixture, "full-span int-array fixture");
     const DataMap data = DataMap::from_json_file("tests/fixtures/binint.json");
-    const CompiledModel legacy_model = compile_model(legacy, data);
-    const CompiledModel portable_model = compile_model(decoded.first, data);
-    check(legacy_model.n_unconstrained == portable_model.n_unconstrained &&
-              legacy_model.fills == portable_model.fills &&
-              legacy_model.graph.ops.size() == portable_model.graph.ops.size(),
-          "int-array full-span specialization format parity");
+    const CompiledModel fixture_model = compile_model(fixture, data);
+    const CompiledModel written_model = compile_model(decoded.first, data);
+    check(fixture_model.n_unconstrained == written_model.n_unconstrained &&
+              fixture_model.fills == written_model.fills &&
+              fixture_model.graph.ops.size() == written_model.graph.ops.size(),
+          "int-array full-span specialization round-trip parity");
   }
 
   // Generated quantities execute a vector full-span assignment whose RHS
   // uses a draw-dependent array index. Run both formats with identical RNG
   // streams and compare every emitted column and the stream position.
   {
-    std::string legacy = slurp("tests/fixtures/gq_runtime_control.tmir.sexp");
-    check(replace_assignment_with_all(legacy, "chosen", "UVector") == 1,
-          "legacy generated vector assignment rewritten for fixture");
+    std::string fixture = slurp("tests/fixtures/gq_runtime_control.mir");
+    check(replace_assignment_with_all(fixture, "chosen",
+                                      view(mir::UnsizedLeaf::Vector)) == 1,
+          "chosen assignment rewritten for fixture");
     const auto decoded =
-        decoded_pair(legacy, "full-span generated-vector fixture");
+        decoded_pair(fixture, "full-span generated-vector fixture");
     check(count_full_span_assignments(decoded.second.generate_quantities,
                                       "chosen") == 1,
-          "legacy decoder preserves generated-vector IndexAll LHS");
-    CompiledModel legacy_model = compile_model(legacy, DataMap{});
-    CompiledModel portable_model = compile_model(decoded.first, DataMap{});
+          "decoder preserves generated-vector IndexAll LHS");
+    CompiledModel fixture_model = compile_model(fixture, DataMap{});
+    CompiledModel written_model = compile_model(decoded.first, DataMap{});
     const std::vector<double> params = {
         0.2,           -0.3,          0.1,  -0.2, 1.0,  2.0,  3.0,  4.0,
         std::log(1.1), std::log(1.7), 0.25, -0.5, 0.75, -1.0, 1.25, -1.5};
-    const auto legacy_log =
-        run_log(legacy_model, params, "legacy generated-vector full-span");
-    const auto portable_log =
-        run_log(portable_model, params, "portable generated-vector full-span");
-    check(legacy_log == portable_log,
-          "generated-vector full-span log_prob format parity");
+    const auto fixture_log =
+        run_log(fixture_model, params, "generated-vector full-span");
+    const auto written_log =
+        run_log(written_model, params, "portable generated-vector full-span");
+    check(fixture_log == written_log,
+          "generated-vector full-span log_prob round-trip parity");
 
-    check(legacy_model.write_array && portable_model.write_array,
+    check(fixture_model.write_array && written_model.write_array,
           "full-span generated-vector write_array exists");
-    if (legacy_model.write_array && portable_model.write_array) {
-      check(!legacy_model.write_array->interp &&
-                !legacy_model.write_array->truncated &&
-                !portable_model.write_array->interp &&
-                !portable_model.write_array->truncated,
+    if (fixture_model.write_array && written_model.write_array) {
+      check(!fixture_model.write_array->interp &&
+                !fixture_model.write_array->truncated &&
+                !written_model.write_array->interp &&
+                !written_model.write_array->truncated,
             "full-span generated-vector write_array lowers completely");
-      check(CompiledModel::csv_names(legacy_model.write_array->columns) ==
-                CompiledModel::csv_names(portable_model.write_array->columns),
+      check(CompiledModel::csv_names(fixture_model.write_array->columns) ==
+                CompiledModel::csv_names(written_model.write_array->columns),
             "full-span generated-vector output columns");
-      Executor legacy_write(std::move(legacy_model.write_array->graph));
-      Executor portable_write(std::move(portable_model.write_array->graph));
-      legacy_model.write_array->bind(legacy_write);
-      portable_model.write_array->bind(portable_write);
-      check(
-          legacy_write.n_params() == static_cast<int64_t>(params.size()) &&
-              portable_write.n_params() == static_cast<int64_t>(params.size()),
-          "full-span generated-vector write_array parameter width");
-      std::copy(params.begin(), params.end(), legacy_write.params_data());
-      std::copy(params.begin(), params.end(), portable_write.params_data());
-      WaRng legacy_rng(81), portable_rng(81);
-      legacy_write.run_forward_only(EvalState{&legacy_rng});
-      portable_write.run_forward_only(EvalState{&portable_rng});
+      Executor fixture_write(std::move(fixture_model.write_array->graph));
+      Executor written_write(std::move(written_model.write_array->graph));
+      fixture_model.write_array->bind(fixture_write);
+      written_model.write_array->bind(written_write);
+      check(fixture_write.n_params() == static_cast<int64_t>(params.size()) &&
+                written_write.n_params() == static_cast<int64_t>(params.size()),
+            "full-span generated-vector write_array parameter width");
+      std::copy(params.begin(), params.end(), fixture_write.params_data());
+      std::copy(params.begin(), params.end(), written_write.params_data());
+      WaRng fixture_rng(81), written_rng(81);
+      fixture_write.run_forward_only(EvalState{&fixture_rng});
+      written_write.run_forward_only(EvalState{&written_rng});
       const auto collect = [](const CompiledModel::WriteArray& write_array,
                               Executor& executor) {
         std::vector<double> row;
@@ -1272,25 +826,24 @@ void check_full_span_assignment_lowering() {
         }
         return row;
       };
-      const std::vector<double> legacy_row =
-          collect(*legacy_model.write_array, legacy_write);
-      const std::vector<double> portable_row =
-          collect(*portable_model.write_array, portable_write);
+      const std::vector<double> fixture_row =
+          collect(*fixture_model.write_array, fixture_write);
+      const std::vector<double> written_row =
+          collect(*written_model.write_array, written_write);
       const bool same_row =
-          legacy_row.size() == portable_row.size() &&
-          std::memcmp(legacy_row.data(), portable_row.data(),
-                      legacy_row.size() * sizeof(double)) == 0;
+          fixture_row.size() == written_row.size() &&
+          std::memcmp(fixture_row.data(), written_row.data(),
+                      fixture_row.size() * sizeof(double)) == 0;
       check(same_row,
-            "full-span generated-vector write_array value format parity");
-      check(legacy_rng.gen()() == portable_rng.gen()(),
+            "full-span generated-vector write_array value round-trip parity");
+      check(fixture_rng.gen()() == written_rng.gen()(),
             "full-span generated-vector RNG stream parity");
     }
   }
 }
 
 void check_overload_finalization() {
-  const mir::Program resolved =
-      read_fixture("tests/fixtures/overload.tmir.sexp");
+  const mir::Program resolved = read_fixture("tests/fixtures/overload.mir");
   mir::Program unresolved = resolved;
   strip_overload_suffixes(unresolved);
   bool has_overloads = false;
@@ -1301,7 +854,7 @@ void check_overload_finalization() {
   check(has_overloads, "overload fixture contains pre-resolution collisions");
   const mir::Program decoded = decode_program(write_v2(unresolved));
   check(write_program_object(decoded) == write_program_object(resolved),
-        "portable decoder applies legacy overload finalization once");
+        "portable decoder applies overload finalization once");
 }
 
 namespace build {
@@ -1985,30 +1538,21 @@ void check_exact_float_bits() {
 }
 
 void check_output_annotations() {
-  std::string text = slurp("tests/fixtures/es.tmir.sexp");
-  const std::string plain = "(out_annotations ())";
-  const size_t at = text.find(plain);
-  check(at != std::string::npos, "fixture has an unannotated output variable");
-  if (at == std::string::npos) return;
-  text.replace(at, plain.size(),
-               "(out_annotations (((name latent) (args ()) (loc <opaque>))"
-               " ((name foo) (args (a b)) (loc <opaque>))))");
+  mir::Program annotated = decode_program(slurp("tests/fixtures/es.mir"));
+  check(!annotated.output_vars.empty() &&
+            annotated.output_vars[0].annotations.empty(),
+        "fixture has an unannotated output variable");
+  if (annotated.output_vars.empty()) return;
   const std::vector<std::string> want = {"latent", "foo"};
+  annotated.output_vars[0].annotations = want;
+  const std::string text = write_v2(annotated);
 
-  const mir::Program legacy = decode_program(text);
-  const mir::Program portable = decode_program(write_v2(legacy));
-  check(!legacy.output_vars.empty(), "annotated fixture has output variables");
-  if (legacy.output_vars.empty()) return;
-  check(legacy.output_vars[0].annotations == want,
-        "sexp reader keeps output annotation names");
+  const mir::Program portable = decode_program(text);
   check(portable.output_vars[0].annotations == want,
         "portable reader keeps output annotation names");
-  for (size_t i = 1; i < legacy.output_vars.size(); ++i)
-    check(legacy.output_vars[i].annotations.empty() &&
-              portable.output_vars[i].annotations.empty(),
+  for (size_t i = 1; i < portable.output_vars.size(); ++i)
+    check(portable.output_vars[i].annotations.empty(),
           "unannotated output variables stay empty");
-  check(write_program_object(portable) == write_program_object(legacy),
-        "annotated portable fields match sexp fields");
 
   DataMap data;
   data.set_int("J", 8);
@@ -2016,7 +1560,7 @@ void check_output_annotations() {
   data.set_real_array("sigma", {15, 10, 16, 11, 9, 11, 10, 18}, {8});
   const CompiledModel model = compile_model(text, data);
   check(model.annotations.size() == 1 &&
-            model.annotations[0].first == legacy.output_vars[0].name &&
+            model.annotations[0].first == portable.output_vars[0].name &&
             model.annotations[0].second == want,
         "compiled model carries output annotations");
 }
@@ -2072,7 +1616,7 @@ void check_structural_rejections() {
                "a call in index position");
 
   for (const auto& test : std::vector<std::pair<mir::Expr::Kind, const char*>>{
-           {mir::Expr::Promotion, "Promotion expression arity"},
+           {mir::Expr::Promotion, "expression tag 5 (Promotion)"},
            {mir::Expr::TernaryIf, "TernaryIf expression arity"},
            {mir::Expr::EOr, "EOr expression arity"},
            {mir::Expr::EAnd, "EAnd expression arity"}}) {
@@ -2246,11 +1790,15 @@ void check_v2_rejections() {
                "retired portable v3 envelope");
   expect_error("STANLI2:AAAAAA==", "is from a different stanli compiler",
                "retired portable v2 envelope");
-  expect_error("{\"stanli_ir\":1}", "unrecognized input format",
+  expect_error("{\"stanli_ir\":1}", "not portable MIR",
                "retired portable v1 envelope");
-  expect_error(" STANLI5:", "unrecognized input format",
-               "v2 leading whitespace");
-  expect_error("[]", "unrecognized input format", "unknown input format");
+  expect_error(" STANLI5:", "not portable MIR", "v2 leading whitespace");
+  expect_error("[]", "not portable MIR", "unknown input format");
+  // Stock stanc's s-expression MIR, which an earlier reader accepted.
+  expect_error("((functions_block ()) (input_vars ()) (log_prob ()))",
+               "Stock stanc's s-expression MIR (--debug-optimized-mir) is no "
+               "longer read",
+               "stock stanc s-expression");
   expect_error(" \n\t", "empty input", "empty input");
   const std::string empty_wire = v2_wire(empty_v2_payload());
   const mir::Program empty = decode_program(empty_wire);
@@ -2258,8 +1806,7 @@ void check_v2_rejections() {
             empty.log_prob.empty() && empty.generate_quantities.empty() &&
             empty.fun_defs.empty() && empty.output_vars.empty(),
         "v2 empty program");
-  check(empty.has_transform_inits && empty.transform_inits.empty(),
-        "v3 empty transform_inits section");
+  check(empty.transform_inits.empty(), "v3 empty transform_inits section");
   check(empty_wire.find('\0') == std::string::npos,
         "v2 envelope is safe for C-string transports");
 
@@ -2300,8 +1847,7 @@ void check_v2_rejections() {
   inits.generate_quantities.push_back(constrained_write);
   const mir::Program decoded_inits = decode_program(write_v2(inits));
   check(
-      decoded_inits.has_transform_inits &&
-          decoded_inits.transform_inits.size() == 1 &&
+      decoded_inits.transform_inits.size() == 1 &&
           decoded_inits.transform_inits[0].write_transform.has_value() &&
           decoded_inits.transform_inits[0].write_transform->kind ==
               mir::Transform::Lower &&
@@ -2501,37 +2047,18 @@ void check_v2_rejections() {
 
 }  // namespace
 
-int main(int argc, char** argv) {
-  const bool program_only =
-      argc == 4 && std::string(argv[1]) == "--program-only";
-  if (argc != 1 && argc != 3 && !program_only) {
-    std::fprintf(stderr,
-                 "usage: %s [legacy-es-mir portable-es-mir]\n"
-                 "       %s --program-only legacy-mir portable-mir\n",
-                 argv[0], argv[0]);
-    return 2;
-  }
-  if (program_only) {
-    check_program_equivalence(argv[2], argv[3]);
-    if (failures) {
-      std::printf("%d failure(s)\n", failures);
-      return 1;
-    }
-    std::puts("ok");
-    return 0;
-  }
-  check_round_trip("tests/fixtures/es.tmir.sexp");
-  check_round_trip("tests/fixtures/tdvocab.tmir.sexp");
-  check_round_trip("tests/fixtures/wanames.tmir.sexp");
-  check_round_trip("tests/fixtures/odefns.tmir.sexp");
-  check_round_trip("tests/fixtures/view_udf_local_data_branch.tmir.sexp");
-  check_round_trip("tests/fixtures/paramcond_break.tmir.sexp");
-  check_round_trip("tests/fixtures/shape_named_guard.tmir.sexp");
-  check_round_trip("tests/fixtures/shape_indexed_guard.tmir.sexp");
-  check_round_trip("tests/fixtures/shape_guard_lazy.tmir.sexp");
-  check_round_trip("tests/fixtures/shape_partial_guard.tmir.sexp");
-  check_lowering_equivalence(argc == 3 ? argv[1] : nullptr,
-                             argc == 3 ? argv[2] : nullptr);
+int main() {
+  check_round_trip("tests/fixtures/es.mir");
+  check_round_trip("tests/fixtures/tdvocab.mir");
+  check_round_trip("tests/fixtures/wanames.mir");
+  check_round_trip("tests/fixtures/odefns.mir");
+  check_round_trip("tests/fixtures/view_udf_local_data_branch.mir");
+  check_round_trip("tests/fixtures/paramcond_break.mir");
+  check_round_trip("tests/fixtures/shape_named_guard.mir");
+  check_round_trip("tests/fixtures/shape_indexed_guard.mir");
+  check_round_trip("tests/fixtures/shape_guard_lazy.mir");
+  check_round_trip("tests/fixtures/shape_partial_guard.mir");
+  check_round_trip_lowering();
   check_full_span_assignment_lowering();
   check_overload_finalization();
   check_multi_results();

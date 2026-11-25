@@ -107,11 +107,6 @@ class Reader {
     if (position_ != bytes_.size()) fail("trailing bytes");
   }
 
-  // True once every required section has been read. The transform_inits
-  // section is appended after them, so its absence is what distinguishes a
-  // document written before it existed from a truncated one.
-  bool at_end() const { return position_ == bytes_.size(); }
-
   uint8_t u8() {
     count_value();
     require(1);
@@ -408,6 +403,11 @@ Expr read_expr(Reader& reader) {
       break;
     }
     case Expr::Promotion:
+      // The producer writes a promoted expression as itself with `promoted`
+      // set (SCHEMA.md), so no compiler writes this tag.
+      reader.fail(
+          "expression tag 5 (Promotion) is not written by any "
+          "compiler");
     case Expr::Indexed:
     case Expr::TernaryIf:
     case Expr::EOr:
@@ -712,7 +712,6 @@ Program read_program(Reader& reader) {
   result.fun_defs = reader.list<FunDef>([&] { return read_fun(reader); });
   result.output_vars = reader.list<OutputVar>(
       [&] { return read_output_var(reader, interface); });
-  result.has_transform_inits = true;
   result.transform_inits = read_stmts(reader);
   std::vector<WireTupleLeaf> leaves =
       reader.list<WireTupleLeaf>([&] { return read_tuple_leaf(reader); });
@@ -730,7 +729,7 @@ Program read_portable_program(std::string_view bytes) {
   Program result = read_program(reader);
   reader.finish();
   validate_portable_program(result);
-  finalize_program(result, true);
+  finalize_program(result);
   return result;
 }
 

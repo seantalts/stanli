@@ -174,8 +174,8 @@ void parameterless_model() {
   using namespace stanli;
   DataMap data;
   data.set_real_array("M", {1, 2, 3, 4, 5, 6}, {2, 3});
-  CompiledModel cm = compile_model(
-      slurp("tests/fixtures/view_gq_data_matrix.tmir.sexp"), data);
+  CompiledModel cm =
+      compile_model(slurp("tests/fixtures/view_gq_data_matrix.mir"), data);
   check(cm.transform_inits.has_value(),
         "an explicitly empty init section remains available");
   if (!cm.transform_inits || !cm.transform_inits->interp) {
@@ -190,7 +190,7 @@ void parameterless_model() {
 
 int main() {
   using namespace stanli;
-  const std::string text = slurp("tests/fixtures/initrt.tmir.sexp");
+  const std::string text = slurp("tests/fixtures/initrt.mir");
   if (text.empty()) {
     std::printf("FAIL fixture missing (run from repo root)\n");
     return 1;

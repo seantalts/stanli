@@ -4,6 +4,7 @@
 #include <stanli/adjoint_rules.hpp>
 #include <stanli/program_density.hpp>
 #include <stanli/region_map.hpp>
+#include <stanli/structured_loop.hpp>
 
 #include <algorithm>
 #include <limits>
@@ -1021,6 +1022,11 @@ class Analysis {
         w.tile = tile_call_kind(call.opcode);
         ++plan_.tile_calls;
       }
+      w.index_sites =
+          call.opcode == OP_INDEX_DYNAMIC && call.udata_owner &&
+          call.backward != nullptr && call.scratch_len == 0 &&
+          (call.input_adjoint_mask & ((1u << call.n_in) - 1)) == 1u &&
+          w.adj_out_cell >= 0 && shared_adjoint_cell(call.bwd_adj_in[0]);
     }
   }
 
@@ -1151,6 +1157,11 @@ class Analysis {
         }
       } else if (A.code == Program::CALL) {
         const Program::Call& call = p_.calls[(size_t)A.a];
+        if (plan_.calls[(size_t)A.a].index_sites) {
+          plan_.max_sites += call.out_len;
+          plan_.max_dynamic += call.out_len;
+          continue;
+        }
         for (int k = 0; k < call.n_in; ++k)
           if ((call.input_adjoint_mask & (1u << k)) &&
               shared_cell(call.bwd_adj_in[k]))
@@ -1694,17 +1705,22 @@ class AdjointTile {
     double* index;
   };
 
-  Dynamic acc_dynamic() {
-    if (n_sites_ >= plan_.max_sites || n_dynamic_ >= plan_.max_dynamic)
+  // `count` sites in consecutive rows: site i's values start at
+  // value + i * kTile and its cell indices at index + i * kTile.
+  Dynamic acc_dynamic(int count = 1) {
+    if (n_sites_ + count > plan_.max_sites ||
+        n_dynamic_ + count > plan_.max_dynamic)
       throw std::logic_error("lane adjoint site capacity exceeded");
     Dynamic d{rows_ + (size_t)n_sites_ * kTile,
               idx_rows_ + (size_t)n_dynamic_ * kTile};
-    std::fill_n(d.value, fwd_.lanes(), 0.0);
-    std::fill_n(d.index, fwd_.lanes(), -1.0);
-    meta_[2 * n_sites_] = -1.0;
-    meta_[2 * n_sites_ + 1] = n_dynamic_;
-    ++n_sites_;
-    ++n_dynamic_;
+    for (int i = 0; i < count; ++i) {
+      std::fill_n(d.value + (size_t)i * kTile, fwd_.lanes(), 0.0);
+      std::fill_n(d.index + (size_t)i * kTile, fwd_.lanes(), -1.0);
+      meta_[2 * n_sites_] = -1.0;
+      meta_[2 * n_sites_ + 1] = n_dynamic_;
+      ++n_sites_;
+      ++n_dynamic_;
+    }
     return d;
   }
 
@@ -1853,6 +1869,44 @@ void tile_call_backward(const RegionMapLanePlan::CallWindow& w,
     for (int i = 0; i < n; ++i) dst[lanes.idx[i]] = adj[k][i];
   }
   for (int i = 0; i < n; ++i) out_adj_cell[lanes.idx[i]] = 0.0;
+}
+
+// The adjoint of an index read from shared cells, without running its
+// kernel: each lane's selected positions go into the index rows of one
+// dynamic site per output element, and its output adjoint into the values.
+// Replay then adds them as the kernel's backward would have.
+void index_read_backward(const RegionMapLanePlan::CallWindow& w,
+                         const Program::Call& call, AdjointTile& t, Mask m,
+                         double* window, KernelCtx& ctx) {
+  const TileState& f = t.forward();
+  const double* const fbase = f.base();
+  double* const cbase = t.cells();
+  const auto site = t.acc_dynamic(call.out_len);
+  ctx.n_in = call.n_in;
+  ctx.in[0] = Desc{nullptr, call.in_len[0]};
+  for (int k = 1; k < call.n_in; ++k) {
+    if (w.val_in_reg[k] < 0)
+      std::copy_n(f.shared_regs() + call.bwd_value_in[k], call.in_len[k],
+                  window + w.val_in_off[k]);
+    ctx.in[k] = Desc{window + w.val_in_off[k], call.in_len[k]};
+  }
+  ctx.out = Desc{nullptr, call.out_len};
+  const auto& spec =
+      *static_cast<const DynamicIndexSpec*>(call.udata_owner.get());
+  t.each(m, [&](int l) {
+    for (int k = 1; k < call.n_in; ++k)
+      if (w.val_in_reg[k] >= 0)
+        for (int j = 0; j < call.in_len[k]; ++j)
+          window[w.val_in_off[k] + j] = fbase[w.val_in_reg[k] + j * kTile + l];
+    const int64_t n = index_read_positions(spec, ctx, site.index + l, kTile);
+    for (int64_t j = 0; j < n; ++j)
+      site.index[j * kTile + l] += call.bwd_adj_in[0];
+    for (int j = 0; j < call.out_len; ++j) {
+      double& u = cbase[w.adj_out_cell + j * kTile + l];
+      if (j < n) site.value[j * kTile + l] = u;
+      u = 0.0;
+    }
+  });
 }
 
 void lane_adjoint_instruction(const RegionMapProg& p, AdjointTile& t, int pc,
@@ -2110,6 +2164,10 @@ void lane_adjoint_instruction(const RegionMapProg& p, AdjointTile& t, int pc,
       const Program::Call& call = p.calls[(size_t)I.a];
       const auto& w = p.lanes.calls[(size_t)I.a];
       const TileState& f = t.forward();
+      if (w.index_sites) {
+        index_read_backward(w, call, t, m, window, ctx);
+        return;
+      }
       double* rows[6] = {nullptr, nullptr, nullptr, nullptr, nullptr, nullptr};
       for (int k = 0; k < call.n_in; ++k)
         if ((call.input_adjoint_mask & (1u << k)) &&
@@ -2330,12 +2388,24 @@ uint64_t region_map_lane_runs() {
   return lane_runs.load(std::memory_order_relaxed);
 }
 
+// Doubles per 64 bytes. The lane region starts on that boundary, so that
+// its rows load the same way whatever the register count before it.
+constexpr int64_t kLaneRegionAlignment = 8;
+
 int64_t region_map_lane_cells(const RegionMapProg& p) {
   if (!p.lanes.active) return 0;
   const auto& l = p.lanes;
   return l.storage + l.max_window +
          (int64_t)l.max_sites * (2 + kRegionMapTile) +
-         (int64_t)l.max_dynamic * kRegionMapTile + l.mask_cells;
+         (int64_t)l.max_dynamic * kRegionMapTile + l.mask_cells +
+         (kLaneRegionAlignment - 1);
+}
+
+double* region_map_lane_region(const RegionMapProg& p, double* scratch) {
+  constexpr uintptr_t bytes = kLaneRegionAlignment * sizeof(double);
+  const auto at =
+      reinterpret_cast<uintptr_t>(scratch + p.n_regs + p.adj.n_regs);
+  return reinterpret_cast<double*>((at + bytes - 1) & ~(bytes - 1));
 }
 
 static double* segment_masks(const RegionMapLanePlan& plan, double* region,

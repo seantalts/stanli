@@ -44,6 +44,8 @@ class PrivateSeed(unittest.TestCase):
                 mock.patch.object(verify_refs, "load_corpus_refs",
                                   lambda corpus: (self.refs, {})), \
                 mock.patch.object(verify_refs, "pin_drift", lambda *a: ""), \
+                mock.patch.object(verify_refs, "load_ulp_ledger",
+                                  lambda: {"platforms": {}}), \
                 mock.patch.object(verify_refs, "check_model", check_model):
             self.assertEqual(verify_refs.replay_corpus(
                 "signatures", [], self.tmp / "stanli_check", None, 1, 10), 0)

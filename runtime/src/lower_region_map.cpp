@@ -2,6 +2,7 @@
 #include <stanli/region_map.hpp>
 
 #include <cstdlib>
+#include <functional>
 #include <map>
 #include <set>
 #include <string>
@@ -25,18 +26,61 @@ bool body_escapes(const mir::Stmt& s, bool in_inner_loop) {
   return false;
 }
 
+void collect_body_names(const mir::Stmt& s, std::set<std::string>* names) {
+  if (s.kind == mir::Stmt::Decl) names->insert(s.decl_id);
+  if (s.kind == mir::Stmt::For) names->insert(s.loopvar);
+  for (const auto& child : s.body) collect_body_names(child, names);
+}
+
+void collect_reads(const mir::Expr& e, std::set<std::string>* names) {
+  if (e.kind == mir::Expr::Var) names->insert(e.name);
+  for (const auto& a : e.args) collect_reads(a, names);
+}
+
+void collect_reads(const mir::Stmt& s, std::set<std::string>* names) {
+  mir::for_each_expr(s, [&](const mir::Expr& e) { collect_reads(e, names); });
+  for (const auto& child : s.body) collect_reads(child, names);
+}
+
+// Whether a loop's control flow depends on a parameter. A name declared
+// outside the loop depends on one when its lowered value does (`outer`). A
+// name declared in the loop or in a called function depends on one when a
+// value assigned to it does. The MIR's AD level is not used: stanc3 marks
+// `real t = x[n];` autodiffable although t only ever holds data.
 class ParameterControl {
  public:
   using Defs = std::map<std::string, const mir::FunDef*>;
   using Env = std::set<std::string>;
 
-  explicit ParameterControl(const Defs& defs) : defs_(defs) {}
+  ParameterControl(const Defs& defs,
+                   std::function<bool(const std::string&)> outer)
+      : defs_(defs), outer_(std::move(outer)) {}
 
-  bool operator()(const mir::Stmt& root) { return statement(root, nullptr, 0); }
+  bool operator()(const mir::Stmt& loop) {
+    Env body, names;
+    collect_body_names(loop, &body);
+    collect_reads(loop, &names);
+    Env env;
+    for (const auto& name : names)
+      if (!body.count(name) && outer_(name)) env.insert(name);
+    flow(loop.body, &env);
+    for (const auto& child : loop.body)
+      if (statement(child, &env, 0)) return true;
+    return false;
+  }
 
  private:
   const Defs& defs_;
+  std::function<bool(const std::string&)> outer_;
   std::set<std::string> visited_;
+
+  void flow(const std::vector<mir::Stmt>& body, Env* env) const {
+    for (bool changed = true; changed;) {
+      const size_t before = env->size();
+      for (const auto& s : body) propagate(s, env);
+      changed = env->size() != before;
+    }
+  }
 
   // An extent (rows, size, ...) of a parameter is fixed by the data, so a
   // loop bound or branch that reads only extents is data control.
@@ -50,15 +94,14 @@ class ParameterControl {
     if (shape_query(e)) return false;
     switch (e.kind) {
       case mir::Expr::Var:
-        return env ? env->count(e.name) != 0 : !e.data_only;
+        return env->count(e.name) != 0;
       case mir::Expr::LitInt:
       case mir::Expr::LitReal:
       case mir::Expr::LitStr:
         return false;
       case mir::Expr::Unsupported:
-        return env || !e.data_only;
+        return true;
       default:
-        if (e.args.empty()) return env ? false : !e.data_only;
         for (const auto& a : e.args)
           if (dependent(a, env)) return true;
         return false;
@@ -81,11 +124,7 @@ class ParameterControl {
     Env env;
     for (size_t k = 0; k < def.arg_names.size(); ++k)
       if (k >= bits.size() || bits[k] == '1') env.insert(def.arg_names[k]);
-    for (bool changed = true; changed;) {
-      const size_t before = env.size();
-      for (const auto& body : def.body) propagate(body, &env);
-      changed = env.size() != before;
-    }
+    flow(def.body, &env);
     for (const auto& body : def.body)
       if (statement(body, &env, depth + 1)) return true;
     return false;
@@ -301,7 +340,12 @@ bool Lowering::lower_region_map(const mir::Stmt& s, long lo, long hi) {
   };
   if (structured_outer_depth != 1) return false;
   if (hi - lo + 1 < 2) return refuse("fewer than two iterations");
-  if (!ParameterControl(fun_defs)(s))
+  const auto outer_dependent = [&](const std::string& name) {
+    const auto value = scope.find(name);
+    if (value != scope.end()) return !value->second.si.param_free;
+    return !int_env.count(name) && !td.find(name);
+  };
+  if (!ParameterControl(fun_defs, outer_dependent)(s))
     return refuse("no parameter-dependent control");
   if (target_scale != 1.0) return refuse("enclosing target scaling");
   if (contains_multi_assign(s))
@@ -385,7 +429,9 @@ bool Lowering::lower_region_map(const mir::Stmt& s, long lo, long hi) {
 
   const auto build = [&](bool recompute, bool keep_every_clear) -> std::string {
     *prog = pristine;
-    finalize_island_program(*prog, true, keep_every_clear, true);
+    finalize_island_program(*prog, true, keep_every_clear, true,
+                            kMaxRegionMapCode, &prep.region_map_adjoints);
+    if (prog->code.size() > kMaxRegionMapCode) return "body program too large";
     if (!prog->native_adj) {
       std::string why = "no generated adjoint";
       if (diagnostics) {
@@ -401,7 +447,6 @@ bool Lowering::lower_region_map(const mir::Stmt& s, long lo, long hi) {
       }
       return why;
     }
-    if (prog->code.size() > kMaxRegionMapCode) return "body program too large";
     for (const auto& li : prog->ins)
       if (!li.immutable) return "program writes a live-in register";
 

@@ -44,11 +44,6 @@ model { y ~ normal(a + b * x, sigma); }`;
 const warningCode =
     "parameters { real x; } model { if (0 < x < 1) target += 0; }";
 
-// Past the compiler's structural budget, so O1 is skipped.
-const budgetCode = "parameters { real x; }\nmodel {\nreal s = 0;\n" +
-    Array.from({length: 9}, (_, d) => `for (i${d} in 1:1) {\n`).join("") +
-    "s += 1;\n".repeat(2100) + "}\n".repeat(9) + "x ~ normal(s, 1);\n}\n";
-
 async function reply(request) {
   const before = messages.length;
   await globalThis.onmessage({data: request});
@@ -66,10 +61,9 @@ async function reply(request) {
   if (JSON.stringify(imports) !==
       JSON.stringify(["stanli.js", "stanli-compiler.js"]))
     throw new Error("unexpected import order: " + JSON.stringify(imports));
-  if (plain.o1Fallback !== null || !Array.isArray(plain.warnings) ||
-      plain.warnings.length !== 0)
+  if (!Array.isArray(plain.warnings) || plain.warnings.length !== 0)
     throw new Error("a small clean model reported compiler messages: " +
-                    JSON.stringify([plain.warnings, plain.o1Fallback]));
+                    JSON.stringify(plain.warnings));
 
   const slow = await reply({cmd: "compile", code: fastCode});
   const fast = await reply({cmd: "compile", code: fastCode, fastMath: true});
@@ -80,17 +74,8 @@ async function reply(request) {
 
   const warned = await reply({cmd: "compile", code: warningCode});
   if (warned.warnings.length !== 1 ||
-      !warned.warnings[0].includes("chained comparison") ||
-      warned.o1Fallback !== null)
+      !warned.warnings[0].includes("chained comparison"))
     throw new Error("unexpected warnings: " + JSON.stringify(warned.warnings));
-
-  const budget = await reply({cmd: "compile", code: budgetCode});
-  if (typeof budget.o1Fallback !== "string" ||
-      !budget.o1Fallback.includes("skipped O1"))
-    throw new Error("the O1 fallback was not reported: " +
-                    JSON.stringify(budget.o1Fallback));
-  if (budget.warnings.some((w) => w.includes("skipped O1")))
-    throw new Error("the O1 fallback notice is also in the warnings");
 
   console.log("test_worker_compiler OK");
 })().catch((error) => {

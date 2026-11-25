@@ -29,7 +29,7 @@ def record(**kw):
          "none": {"seconds": 0.01, "size": 1000},
          "o1": {"seconds": 0.02, "size": 1500},
          "shipped": {"seconds": 0.02, "size": 1500},
-         "inlined_size": 1200, "work": None, "buckets": []}
+         "work": None, "buckets": []}
     r.update(kw)
     return r
 
@@ -65,7 +65,7 @@ class PerfTest(unittest.TestCase):
         r = record(o1={"seconds": 5.0, "size": 1},
                    none={"seconds": 0.1, "size": 1000})
         self.assertEqual(fuzz.perf_kinds(r), [],
-                         "o1 without the budget fallback is not what ships")
+                         "slow_compile read the o1 time")
 
     def test_serial_times_override_parallel_ones(self):
         r = record(shipped={"seconds": 1.5, "size": 1},
@@ -74,14 +74,10 @@ class PerfTest(unittest.TestCase):
         self.assertEqual(fuzz.perf_kinds(r), [])
 
     def test_mir_growth(self):
-        r = record(o1={"seconds": 0.01, "size": 9000}, inlined_size=1000)
+        r = record(o1={"seconds": 0.01, "size": 9000})
         self.assertEqual(fuzz.perf_kinds(r), ["mir_growth"])
-        r["inlined_size"] = 1200
+        r["none"]["size"] = 1200
         self.assertEqual(fuzz.perf_kinds(r), [])
-
-    def test_inline_growth_is_not_a_bucket(self):
-        self.assertEqual(fuzz.perf_kinds(record(inlined_size=10**9)), [])
-        self.assertNotIn("inline_growth", fuzz.PERF_KINDS)
 
     def test_more_work_screen(self):
         def work(none, o1):

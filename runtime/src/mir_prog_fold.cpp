@@ -168,8 +168,6 @@ std::optional<double> ProgramCompiler::constant_real(const mir::Expr& e) {
         return static_cast<double>(integer->second[0]);
       return std::nullopt;
     }
-    case mir::Expr::Promotion:
-      return e.args.size() == 1 ? constant_real(e.args[0]) : std::nullopt;
     case mir::Expr::TernaryIf: {
       long condition;
       if (e.args.size() != 3 || !try_cint(e.args[0], &condition))
@@ -305,9 +303,6 @@ long ProgramCompiler::cint(const mir::Expr& e) {
       }
       bail("integer array " + e.args[0].name);
     }
-    case mir::Expr::Promotion:
-      if (e.args.size() != 1) bail("integer promotion form");
-      return cint(e.args[0]);
     case mir::Expr::TernaryIf:
       if (e.args.size() != 3) bail("integer conditional form");
       return cint(e.args[cint(e.args[0]) != 0 ? 1 : 2]);
@@ -425,8 +420,6 @@ bool ProgramCompiler::try_cint(const mir::Expr& e, long* out) {
     *out = it->second[0];
     return true;
   }
-  if (e.kind == mir::Expr::Promotion)
-    return e.args.size() == 1 && try_cint(e.args[0], out);
   if (e.kind == mir::Expr::TernaryIf) {
     long condition;
     return e.args.size() == 3 && try_cint(e.args[0], &condition) &&
