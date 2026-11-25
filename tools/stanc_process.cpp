@@ -361,8 +361,6 @@ class MessagesFile {
     const nlohmann::json messages = nlohmann::json::parse(text.str());
     for (const auto& warning : messages.at("warnings"))
       result.warnings.push_back(warning.get<std::string>());
-    const auto& o1 = messages.at("o1_fallback");
-    if (!o1.is_null()) result.o1_fallback = o1.get<std::string>();
   }
 
  private:
@@ -383,21 +381,25 @@ bool is_executable_file(const std::string& path) {
 
 }  // namespace
 
-std::string run_stanc_process(const std::string& stanc,
-                              const std::string& model) {
+std::string run_emit_mir(const std::string& stanli_check,
+                         const std::string& model, const std::string& passes) {
   std::string warnings;
-  std::string mir =
-      run_compiler(stanc, {"--O1", "--debug-optimized-mir", model}, warnings);
+  std::string mir = run_compiler(
+      stanli_check, {"--emit-mir", model, "--passes", passes}, warnings);
   if (!warnings.empty()) std::fprintf(stderr, "%s\n", warnings.c_str());
   return mir;
 }
 
 stanli::StancResult run_portable_compiler(const std::string& compiler,
                                           const std::string& model,
-                                          bool fast_math) {
+                                          bool fast_math,
+                                          const std::string& passes,
+                                          bool model_only) {
   const MessagesFile messages;
-  std::vector<std::string> args = {"--model-only"};
+  std::vector<std::string> args;
+  if (model_only) args.push_back("--model-only");
   if (fast_math) args.push_back("--fast-math");
+  if (!passes.empty()) args.insert(args.end(), {"--passes", passes});
   args.insert(args.end(), {"--filename", model, "--messages-json",
                            messages.string(), model});
   std::string human_text;

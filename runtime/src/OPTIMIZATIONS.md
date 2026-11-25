@@ -22,16 +22,14 @@ headers such as `mir_prog.hpp`, which are in `runtime/include/stanli/`.
 
 ## Data input preload (`lower.cpp`, disable: `STANLI_NO_DATA_PRELOAD=1`)
 
-stanc's transformed MIR contains a small program that reconstructs each input
-from a flat `FnReadData` buffer. That is useful to generated C++, but redundant
-here: `DataMap` has already parsed the JSON into the same typed, column-major
-layout. Replaying the program is especially expensive for matrices because it
-performs one interpreted assignment per element.
+stanc's transformed MIR declares each input and reads it with one
+`FnReadData` statement. That is useful to generated C++, but redundant here:
+`DataMap` has already parsed the JSON into the same typed, column-major
+layout. Older stanc releases copied each container element by element from a
+flat buffer, which was especially expensive for matrices.
 
-Lowering therefore binds declared inputs directly and recognizes the statement
-and name envelope used by stanc's pinned hydration code: a direct
-scalar/vector load, or the generated flat-buffer container-copy loop. Anything
-with another statement kind, effect, data source, or written name still goes
+Lowering therefore binds declared inputs directly and skips those
+declarations and `FnReadData` statements. Every other statement still goes
 through the transformed-data interpreter. User-written transformed-data
 statements always run; `STANLI_NO_DATA_PRELOAD=1` remains the exact interpreter
 oracle for auditing future stanc output changes.
@@ -1167,8 +1165,13 @@ Lowering maps a loop when all of these hold (`lower_region_map.cpp`):
   300 dynamic-index calls per lane and a tile of about 616 KB, against 300
   islands of about 19 instructions.
 - The body branches on a parameter: an `if`, a ternary, an `&&` or `||`, or a
-  `while` whose condition depends on one, followed into user functions with each
-  argument's dependence taken from the call site.
+  `while` whose condition depends on one. A name from outside the loop depends
+  on a parameter when its lowered value does. A name declared in the loop or in
+  a called user function depends on one when a value assigned to it does, with
+  each argument's dependence taken from the call site. The MIR's AD level is
+  not used, because stanc3 marks `real t = x[n];` as autodiff although `t`
+  only holds data. Lowering decides a branch on data when it builds the graph,
+  and mapping such a loop made it about 14x slower.
 - Iterations are independent. Everything the body assigns is declared inside it,
   with one exception: a real declared outside may collect the terms, if the
   body only adds to it and never reads it. Nothing escapes with `break`,
@@ -1200,7 +1203,10 @@ op adds the iteration terms in order and then adds that total to the rest of
 the target, which regroups the sum within the ULP policy. In the lane form,
 iterations that add into one shared adjoint cell (a scalar parameter that every
 iteration reads) log their additions, and the tile replays them in scalar
-order, so the lane gradient equals the scalar one bit for bit. The design, the
+order, so the lane gradient equals the scalar one bit for bit. An index read
+such as `M[n]` from a shared matrix logs one addition per selected cell. It
+used to log one per cell of `M`, which made a 572-row loop over a 572 x 3
+matrix about 40x slower than the unmapped loop. The design, the
 lane plan and the measurements are in
 [`notes/execution/2026-10-03-region-map-design.md`](../../notes/execution/2026-10-03-region-map-design.md),
 [`2026-10-02-region-map-lanes.md`](../../notes/execution/2026-10-02-region-map-lanes.md)
@@ -1256,6 +1262,14 @@ cost, and a cost-neutral correction for calls to graph kernels. This is the
 same layout the native island backward allocates and clears, rather than a
 fixed weight per forward register.
 
+The adjoint generator keeps every forward instruction and only adds
+registers. So the forward part of the estimate is a lower bound on the
+whole, and a run whose graph cost is below that bound stays on the graph
+without generating its adjoint. The decision is the same as with the full
+estimate: no corpus model's prepared program changes. It takes the island
+pass on `examplemodels_ms` from 263 to 131 ms. `STANLI_DEBUG_ISLAND` prices
+every run in full, so its estimate lines keep their values.
+
 The constants behind that estimate (5 for `kOpCost`, 2 for `kValueRegWeight`,
 and a bare 3 for each live-out element in `island.cpp`) are calibrated on corpus
 timing, not on instruction dispatch. A micro-benchmark of one graph op
@@ -1288,6 +1302,26 @@ the estimate charges it accordingly. Elementwise vector ops compile at any
 width, with length-1 operands broadcast, and a run that holds them is priced
 both whole and split at them. A call must have a single-number result, so any
 other op with a vector result still ends a run.
+
+CSE (above) can let copies of an op share its value. The carver used to
+leave the op that computes the shared value on the graph. A recursion that
+reads the same element several times, as `iohmm_reg`'s forward step reads
+`logA[t][i]` once for each j, has such an op every few ops. No run reached 32
+ops, the recursion stayed as graph ops, and CSE made `iohmm_reg` about 2x
+slower. Now a run takes shared ops too, and the island computes each copy
+again, which is what the graph without CSE does. A run stops before a shared
+op that has a copy after the run. That op stays on the graph, and the later
+copies keep sharing its value. Such a cut can still put a shared op in an
+island and leave some of its copies on the graph. The first of those copies
+then computes the value for the others. A shared op that the island could
+only run as a call to its graph kernel stays on the graph. The call costs what
+the graph op costs, while on the graph each copy skips its forward. Taking 29
+shared `lgamma` calls into one island made `epinow2_estimate_infections`
+1.06x slower. For the same reason the estimate charges a copy on the graph
+half an op, since it runs only its backward. A run that is mostly copies can
+then stay on the graph: 44,354 of the 68,252 ops in `ch14_m14_11`'s one run
+are copies, and its graph with CSE is faster than the island on an idle
+machine.
 
 A region with more distinct inputs than an op's six descriptors packs the
 leading ones with an `OP_CONCAT2` chain, as necessity lowering does, and
@@ -1755,9 +1789,7 @@ switch acts when the variable is set to any value, including an empty value or
 `0`, and the developer switches work only in a build configured with
 `-DSTANLI_DEBUG_SWITCHES=ON` (see the top of this file). Three variables are
 read with `getenv` directly and work in every build: `STANLI_NO_INTERPRETER`,
-`STANLI_NO_FUSED_DENSITY` and `STANLI_ISA`. A fourth that works in every build,
-`STANLI_NO_O1_FALLBACK`, is read by the OCaml compiler
-(`compiler/ocaml/stanli_pipeline.ml`). The runtime does not read it.
+`STANLI_NO_FUSED_DENSITY` and `STANLI_ISA`.
 
 Graph passes:
 

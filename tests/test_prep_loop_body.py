@@ -15,6 +15,9 @@ import sys
 import tempfile
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
+from gen_fixtures import O1_PASSES  # noqa: E402
+
 N = 8000
 REPEATS = 5
 MAX_RATIO = 4.0
@@ -83,22 +86,23 @@ PAIRS = {
 }
 
 
-def prep_seconds(bench, stanc, directory, source):
+def prep_seconds(bench, check, directory, source):
     stan = directory / "model.stan"
     stan.write_text(source)
-    mir = subprocess.run([stanc, "--O1", "--debug-optimized-mir", str(stan)],
-                         check=True, capture_output=True, text=True).stdout
-    (directory / "model.sexp").write_text(mir)
+    mir = subprocess.run(
+        [check, "--emit-mir", str(stan), "--passes", O1_PASSES],
+        check=True, capture_output=True, text=True).stdout
+    (directory / "model.mir").write_text(mir)
     best = float("inf")
     for _ in range(REPEATS):
-        out = subprocess.run([bench, str(directory / "model.sexp"),
+        out = subprocess.run([bench, str(directory / "model.mir"),
                               str(directory / "data.json"), "--prep"],
                              check=True, capture_output=True, text=True).stdout
         best = min(best, float(out.split()[0]))
     return best
 
 
-def main(bench, stanc):
+def main(bench, check):
     failures = []
     with tempfile.TemporaryDirectory() as scratch:
         directory = Path(scratch)
@@ -108,8 +112,8 @@ def main(bench, stanc):
             "k": [1 + i % 2 for i in range(N)],
         }))
         for name, (plain, variant) in PAIRS.items():
-            base = prep_seconds(bench, stanc, directory, plain)
-            other = prep_seconds(bench, stanc, directory, variant)
+            base = prep_seconds(bench, check, directory, plain)
+            other = prep_seconds(bench, check, directory, variant)
             ratio = other / base
             print(f"{name}: plain {base:.4f}s, variant {other:.4f}s, ratio {ratio:.1f}")
             if ratio > MAX_RATIO:

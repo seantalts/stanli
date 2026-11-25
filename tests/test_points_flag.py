@@ -15,7 +15,7 @@ FIX = ROOT / "tests" / "fixtures"
 def run(model, *flags):
     proc = subprocess.run(
         [check, str(FIX / (model + ".stan")), str(FIX / (model + ".json")),
-         "--mir", str(FIX / (model + ".tmir.sexp")), "--wa-values", *flags],
+         "--mir", str(FIX / (model + ".mir")), "--wa-values", *flags],
         capture_output=True, text=True, timeout=120)
     assert proc.returncode == 0, (model, proc.stdout, proc.stderr)
     return proc.stdout

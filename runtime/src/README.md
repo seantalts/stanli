@@ -6,8 +6,8 @@ each other or with the tools live in
 [`runtime/include/stanli/`](../include/stanli/); op implementations
 live in [`runtime/kernels/`](../kernels/).
 
-The compiler is [`mir_reader.cpp`](mir_reader.cpp) (stanc3's
-s-expressions in) and [`lower.cpp`](lower.cpp) (op graph out),
+The compiler is [`mir_decode.cpp`](mir_decode.cpp) (portable MIR in) and
+[`lower.cpp`](lower.cpp) (op graph out),
 followed by the optimization passes in pipeline order:
 [`inplace.cpp`](inplace.cpp), [`constfold.cpp`](constfold.cpp),
 [`reroll.cpp`](reroll.cpp), and [`island.cpp`](island.cpp) with its

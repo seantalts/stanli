@@ -7,9 +7,7 @@ Needs numpy and scipy. Run against an installed wheel or a local build:
 """
 import contextlib
 import pathlib
-import subprocess
 import sys
-import tempfile
 import warnings
 from unittest import mock
 
@@ -63,19 +61,6 @@ def compiler_paths():
     return paths
 
 
-def sexp_mir(code):
-    stanc = HERE.parent / "deps" / "stanc3" / "stanc"
-    if not stanc.is_file():
-        return None
-    with tempfile.TemporaryDirectory() as tmp:
-        source = pathlib.Path(tmp) / "m.stan"
-        source.write_text(code, encoding="utf-8")
-        done = subprocess.run(
-            [str(stanc), "--O1", "--debug-optimized-mir", str(source)],
-            capture_output=True, text=True, check=False)
-    return done.stdout if done.returncode == 0 else None
-
-
 def refused(match, *args, **kwargs):
     try:
         stanli.laplace_whiten(*args, **kwargs)
@@ -99,18 +84,12 @@ def test_annotations_reach_the_model_on_every_compile_path():
             assert plain.parameter_annotations() == {}
 
 
-def test_sexp_and_portable_paths_agree():
-    sexp = sexp_mir(TWO_LATENT)
-    if sexp is None:
-        print("  no stanc binary under deps/stanc3; sexp path skipped")
-        return
+def test_mir_argument_keeps_annotations():
     portable = quiet(stanli.stan_to_mir, TWO_LATENT)
     assert portable.startswith("STANLI5:")
-    from_sexp = quiet(stanli.Model, mir=sexp, data=SMALL)
     from_portable = quiet(stanli.Model, mir=portable, data=SMALL)
-    assert (from_sexp.parameter_annotations()
-            == from_portable.parameter_annotations()
-            == {"a": ["latent"], "mu": ["latent", "foo"]})
+    assert from_portable.parameter_annotations() == {
+        "a": ["latent"], "mu": ["latent", "foo"]}
 
 
 def test_transformed_parameter_annotation_is_not_latent():

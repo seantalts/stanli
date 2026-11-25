@@ -119,7 +119,7 @@ step "fetching pinned deps (Stan Math and Stan)"
 ./deps/fetch.sh
 
 # --- source-pinned stanc3 --------------------------------------------------
-# Fixture generation and the signature model generators run this executable,
+# The signature model generators run this executable, which is
 # built from stanli's stanc3 fork. build_stanc caches by source revision.
 step "stanc3 executable from source at $STANC3_SRC_SHA"
 # The embed build needs the source checkout too. Force the centralized builder

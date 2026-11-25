@@ -48,9 +48,7 @@ can make constant. The summary counts them.
 Performance checks use the bucket prefix `o1`: `slow_compile`,
 `mir_growth` and `slow_gradient`. The thresholds are in the docstring of
 `fuzz.py`. `slow_compile` times the compile that users get, without
-`--passes`, so a program that the O1 budget sends back to unoptimized MIR
-counts only the time it takes to decide that. After the parallel run, fuzz.py times the
-candidates for `slow_compile` and `slow_gradient` again one at a time.
+`--passes`. After the parallel run, fuzz.py times the candidates for `slow_compile` and `slow_gradient` again one at a time.
 `--retime-seconds S` stops that after S seconds, and the summary counts the
 candidates left untimed.
 

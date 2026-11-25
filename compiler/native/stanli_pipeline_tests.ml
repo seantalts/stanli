@@ -12,14 +12,6 @@ let compile ?(passes = Stanli_pipeline.default_pass_selection)
 let passes vectorize_loops =
   {Stanli_pipeline.default_pass_selection with vectorize_loops}
 
-let budget max_statement_depth_cost =
-  { Stanli_pipeline.default_pass_selection with
-    max_o1_statement_depth_cost= Some max_statement_depth_cost }
-
-let no_budget =
-  { Stanli_pipeline.default_pass_selection with
-    max_o1_statement_depth_cost= None }
-
 let compile_portable code =
   match
     Stanli_pipeline.compile_portable ~model_name:"pass_selection_test" code
@@ -27,18 +19,15 @@ let compile_portable code =
   | {result= Ok encoded; _} -> encoded
   | {result= Error _; _} -> failwith "Stan source did not compile"
 
-let compile_upstream_stable_o1 code =
+(* Upstream's optimizer run in one piece, without stanli's pipeline. *)
+let compile_upstream ~settings code =
   let flags =
     { Driver.Flags.default with
       optimization_level= Analysis_and_optimization.Optimize.O0 } in
   match
     Driver.Entry.stan2mir "pass_selection_test" (`Code code) flags (fun _ -> ())
   with
-  | Ok mir ->
-      let module O = Analysis_and_optimization.Optimize in
-      O.optimization_suite
-        ~settings:{ (O.level_optimizations O.O1) with
-          preserve_stability=true; partial_evaluation=false } mir
+  | Ok mir -> Analysis_and_optimization.Optimize.optimization_suite ~settings mir
   | Error _ -> failwith "Stan source did not compile"
 
 let compile_upstream_o0 code =
@@ -56,6 +45,14 @@ let encode mir = Portable_mir.encode mir
 let compile_result ~passes code =
   Stanli_pipeline.compile_mir_with_passes ~passes
     ~model_name:"pass_selection_test" code
+
+let compile_o0 code =
+  match
+    Stanli_pipeline.compile_mir ~passes:Stanli_pipeline.No_passes
+      ~model_name:"pass_selection_test" code
+  with
+  | {result= Ok mir; _} -> mir
+  | {result= Error _; _} -> failwith "Stan source did not compile at O0"
 
 let rec count_for_stmt (stmt : Stmt.Located.t) =
   let current = match stmt.pattern with Stmt.Pattern.For _ -> 1 | _ -> 0 in
@@ -145,62 +142,6 @@ let fast_math_test () =
     "an explicit fast_math=false differs from the default";
   require (not (String.equal (portable ()) (portable ~fast_math:true ())))
     "fast_math=true left the portable encoding unchanged"
-
-let repeated_scalar_argument_test () =
-  let mir = compile {|
-    functions {
-      real piecewise(real x, real weight) {
-        if (x < 1) return x * (weight - 1);
-        return x * weight;
-      }
-    }
-    parameters { real theta; real weight; }
-    model { target += piecewise(exp(theta), weight); }
-  |} in
-  let rec expr n (e : Expr.Typed.t) =
-    let n = match e.pattern with
-      | FunApp (Fun_kind.StanLib ("exp", _), _) -> n + 1
-      | _ -> n in
-    Expr.Pattern.fold expr n e.pattern in
-  let rec stmt n (s : Stmt.Located.t) =
-    Stmt.Pattern.fold expr stmt n s.pattern in
-  require (List.fold_left stmt 0 mir.Program.log_prob = 1)
-    "inlining duplicated a repeated scalar function argument"
-
-let inlining_effect_order_test () =
-  let inline source =
-    compile_upstream_o0 source
-    |> Analysis_and_optimization.Optimize.function_inlining in
-  let rec expr events (e : Expr.Typed.t) =
-    let events = match e.pattern with
-      | FunApp (Fun_kind.StanLib ("normal_rng", _), _) ->
-          events @ ["normal_rng"]
-      | _ -> events in
-    Expr.Pattern.fold expr events e.pattern in
-  let rec stmt events (s : Stmt.Located.t) =
-    let events = match s.pattern with
-      | NRFunApp (Fun_kind.CompilerInternal FnPrint, _) -> events @ ["print"]
-      | _ -> events in
-    Stmt.Pattern.fold expr stmt events s.pattern in
-  let events mir = List.fold_left stmt [] mir.Program.generate_quantities in
-  let ordered = inline {|
-    functions {
-      real twice(real x, real y) { return x * x + y * y; }
-      real announce(real x) { print(x); return x; }
-    }
-    generated quantities {
-      real a = twice(normal_rng(0, 1), announce(2));
-      real b = twice(announce(3), normal_rng(4, 1));
-    }
-  |} in
-  require (events ordered = ["print"; "normal_rng"; "normal_rng"; "print"])
-    "inlining reordered argument effects";
-  let void = inline {|
-    functions { void twice(real x) { print(x, x); } }
-    generated quantities { twice(normal_rng(0, 1)); }
-  |} in
-  require (events void = ["normal_rng"; "print"])
-    "inlining duplicated a repeated argument of a void function"
 
 let matching_loop =
   {|
@@ -354,8 +295,6 @@ let check_tuple_boundaries (mir : Program.Typed.t) =
     ; mir.generate_quantities; mir.transform_inits; mir.unconstrain_array ]
 
 let tuple_tests () =
-  (* Overloading keeps these functions from being inlined, so each call
-     returns its tuple through a temporary. *)
   let effect_once = {|
     functions {
       real pair_sum(tuple(real, real) t) { return t.1 + t.2; }
@@ -363,7 +302,6 @@ let tuple_tests () =
         print("draw_pair_rng ", mu);
         return (normal_rng(mu, 1), 1.0);
       }
-      tuple(real, real) draw_pair_rng(vector mu) { return (normal_rng(mu[1], 1), 2.0); }
     }
     transformed data { real td = pair_sum(draw_pair_rng(0.5)); }
     parameters { real mu; }
@@ -378,12 +316,6 @@ let tuple_tests () =
     match Stanli_pipeline.compile_mir ~fast_math:true ~model_name:"tuples" effect_once with
     | {result= Ok mir; _} -> mir
     | {result= Error _; _} -> failwith "Stan source did not compile" in
-  let fallback =
-    match (compile_result ~passes:(budget 0) effect_once).result with
-    | Ok mir -> mir
-    | Error (Stanli_pipeline.Internal_error m | Unsupported m) ->
-        failwith ("budgeted tuple model: " ^ m)
-    | Error (Frontend_error e) -> failwith (Fmt.str "budgeted tuple model: %a" (fun ppf e -> Frontend.Errors.pp ppf e) e) in
   List.iter
     (fun (label, mir) ->
       check_tuple_boundaries mir;
@@ -391,11 +323,10 @@ let tuple_tests () =
         (label ^ ": a tuple call in transformed data did not run exactly once");
       require (List.length (calls_of "draw_pair_rng" mir.generate_quantities) = 3)
         (label ^ ": a generated-quantities tuple call was duplicated or lost"))
-    [("O1", compile effect_once); ("fast math", fast); ("O0 fallback", fallback)];
+    [("O1", compile effect_once); ("fast math", fast); ("O0", compile_o0 effect_once)];
   let guarded = {|
     functions {
       tuple(real, int) advance(real x) { return (x - 1, x > 0); }
-      tuple(real, int) advance(vector x) { return (x[1] - 1, x[1] > 0); }
     }
     parameters { real mu; }
     model { mu ~ normal(0, 1); }
@@ -420,17 +351,12 @@ let tuple_tests () =
       require (List.for_all Fun.id calls)
         (label ^ ": a tuple call in a while condition, a right operand or a \
                   ternary branch runs unconditionally"))
-    [ ("O1", compile guarded)
-    ; ( "O0 fallback"
-      , match (compile_result ~passes:(budget 0) guarded).result with
-        | Ok mir -> mir
-        | Error _ -> failwith "budgeted tuple model did not compile" ) ];
+    [("O1", compile guarded); ("O0", compile_o0 guarded)];
   (* Splitting runs before pruning, so dropping an unused function must not
      renumber the temporaries of the code that remains. *)
   let stability = {|
     functions {
       tuple(real, real) pair(real x) { return (x, x + 1); }
-      tuple(real, real) pair(vector x) { return (x[1], x[1] + 1); }
       tuple(real, real) unused(real x) { return pair(x); }
     }
     data { tuple(real, array[2] int) d; }
@@ -454,6 +380,31 @@ let tuple_tests () =
   require (String.equal (encode pruned) (encode projected))
     "pruning renamed a tuple temporary or changed a split procedure"
 
+(* Partial evaluation fuses a real a * b + c into fma. An integer one stays
+   integer arithmetic, because fma returns a real. *)
+let fast_math_integer_test () =
+  let code = {|
+    data { int d; int i; int j; array[10] real x; }
+    parameters { real a; }
+    model { target += a * x[d * (i - 1) + j]; target += a * a + x[1]; }
+  |} in
+  let mir =
+    match Stanli_pipeline.compile_mir ~fast_math:true ~model_name:"fast_math_int" code with
+    | {result= Ok mir; _} -> mir
+    | {result= Error _; _} -> failwith "Stan source did not compile" in
+  let rec int_fma (e : Expr.Typed.t) =
+    (match e.pattern with
+     | Expr.Pattern.FunApp (Fun_kind.StanLib ("fma", _), _) ->
+         e.meta.type_ = UnsizedType.UInt
+     | _ -> false)
+    || Expr.Pattern.fold (fun found e -> found || int_fma e) false e.pattern in
+  let rec stmt (s : Stmt.Located.t) =
+    Stmt.Pattern.fold (fun found e -> found || int_fma e)
+      (fun found s -> found || stmt s) false s.pattern in
+  require (has_call "fma" mir) "fast_math=true did not fuse a real multiply-add";
+  require (not (List.exists stmt mir.Program.log_prob))
+    "fast_math=true turned an integer index into a real fma"
+
 let () =
   let builtin_sets = Lazy.force Stan_math_signatures.lazy_signatures_alist in
   let materialized () =
@@ -466,8 +417,7 @@ let () =
     "simple compilation forced unrelated built-in overloads";
   arithmetic_preservation_test ();
   fast_math_test ();
-  repeated_scalar_argument_test ();
-  inlining_effect_order_test ();
+  fast_math_integer_test ();
   tuple_tests ();
   List.iter (fun code ->
       match (Stanli_pipeline.compile_mir_with_passes
@@ -545,10 +495,15 @@ let () =
     (fun (name, code) ->
       let pass_off_bytes =
         encode (compile ~passes:(passes false) ~prune_unused_sections:false code) in
-      let upstream_o1_bytes = encode (compile_upstream_stable_o1 code) in
+      let upstream_bytes =
+        encode
+          (compile_upstream
+             ~settings:(Stanli_pipeline.production_settings (passes false))
+             code) in
       require
-        (String.equal pass_off_bytes upstream_o1_bytes)
-        ("pass-off output differs from upstream stable O1 for " ^ name);
+        (String.equal pass_off_bytes upstream_bytes)
+        ("pass-off output differs from upstream's optimizer with the same \
+          settings for " ^ name);
       let pass_on_bytes =
         encode (compile ~passes:(passes true) code) in
       require
@@ -560,53 +515,6 @@ let () =
         (String.equal production_bytes pass_on_bytes)
         ("production output differs from O1 plus vectorize_loops for " ^ name))
     o1_equivalence_models;
-
-  (* The structural guard is decided after isolated inlining but before any
-     dataflow optimization.  A deliberately tiny budget makes this ordinary
-     model exercise the fallback without putting a pathological compiler case
-     in the unit suite. *)
-  let fallback = compile_result ~passes:(budget 0) matching_loop in
-  let fallback_mir =
-    match fallback.result with
-    | Ok mir -> mir
-    | Error _ -> failwith "budgeted fallback model did not compile" in
-  require
-    (String.equal (encode fallback_mir)
-       (encode (compile_upstream_o0 matching_loop)))
-    "budgeted fallback did not return untouched transformed O0 MIR";
-  require
-    (match fallback.diagnostics with
-    | [Stanli_pipeline.O1_budget_exceeded {cost; budget= 0; _}] -> cost > 0
-    | _ -> false)
-    "budgeted fallback did not report its structural cost and budget";
-
-  let guarded_o1 =
-    compile_result ~passes:(budget Stdlib.max_int) matching_loop in
-  let unguarded_o1 = compile_result ~passes:no_budget matching_loop in
-  let require_o1 result label =
-    match result.Stanli_pipeline.result with
-    | Ok mir ->
-        require
-          (String.equal (encode mir)
-             (encode (compile ~passes:(passes true) matching_loop)))
-          (label ^ " changed ordinary O1 output");
-        require
-          (List.is_empty result.diagnostics)
-          (label ^ " emitted a fallback diagnostic")
-    | Error _ -> failwith (label ^ " did not compile") in
-  require_o1 guarded_o1 "feature-on under-budget path";
-  require_o1 unguarded_o1 "feature-off path";
-
-  let malformed =
-    compile_result ~passes:(budget 0) "parameters { real x } model { }" in
-  require
-    (match malformed.result with
-    | Error (Stanli_pipeline.Frontend_error _) -> true
-    | _ -> false)
-    "the O1 fallback accepted malformed Stan source";
-  require
-    (List.is_empty malformed.diagnostics)
-    "malformed Stan source was mislabeled as an O1 fallback";
 
   let off = compile ~passes:(passes false) matching_loop in
   let on = compile ~passes:(passes true) matching_loop in
@@ -633,9 +541,10 @@ let () =
   require
     (not (log_prob_has_vector_density side_effect_off))
     "pass-off vectorized the density beside a side effect";
+  (* bump_lp stays a call, and an _lp call can read target. *)
   require
-    (log_prob_has_vector_density side_effect_on)
-    "pass-on left the density beside a side effect in the loop"
+    (not (log_prob_has_vector_density side_effect_on))
+    "pass-on moved a density whose argument calls an _lp function"
 
 (* A reader for the portable MIR payload written from SCHEMA.md, independent
    of the encoder, so the tests check the documented layout. It rejects any
@@ -1118,18 +1027,21 @@ let tuple_phase_a_tests () =
   |}) in
   require (not (Wire.has_unsupported promoted))
     "a promotion around a tuple call left an unsupported node";
-  List.iter (fun passes ->
-  match (compile_result ~passes {|
+  List.iter (fun compile_at ->
+  match (compile_at {|
     functions {
       tuple(int, real) g(real x) { return (2, x); }
     }
     parameters { real x; }
     model { tuple(real, real) u = g(x); target += u.1 * u.2; }
     generated quantities { tuple(real, real) q = g(x); }
-  |}).result with
+  |}).Stanli_pipeline.result with
   | Ok mir -> require (not (Wire.has_unsupported (Wire.read (encode mir))))
       ("a promotion around a tuple call left an unsupported node: " ^ Sexplib0.Sexp.to_string_hum (Program.Typed.sexp_of_t mir))
-  | Error _ -> failwith "promotion model did not compile") [budget 0; no_budget];
+  | Error _ -> failwith "promotion model did not compile")
+    [ (fun code -> Stanli_pipeline.compile_mir ~passes:No_passes
+                     ~model_name:"pass_selection_test" code)
+    ; compile_result ~passes:Stanli_pipeline.default_pass_selection ];
   (* A statement Phase A cannot rewrite: a check of a whole tuple. Over a
      split tuple it names the variable; over a tuple expression it is left
      for the runtime to refuse. *)
@@ -1217,8 +1129,7 @@ let pass_override_tests () =
       Stanli_pipeline.compile_mir ~passes ~model_name:"pass_selection_test"
         code
     with
-    | {result= Ok mir; diagnostics= []; _} -> mir
-    | {result= Ok _; _} -> failwith "pass override emitted a diagnostic"
+    | {result= Ok mir; _} -> mir
     | {result= Error _; _} -> failwith "pass override did not compile" in
   let portable ?passes () =
     match
@@ -1235,9 +1146,8 @@ let pass_override_tests () =
     (String.equal (portable ~passes:(parse_passes "o1") ()) (portable ()))
     "--passes o1 differs from the production output";
   let production_list =
-    "function_inlining,constant_propagation,copy_propagation,\
-     dead_code_elimination,vectorize_loops,list_collapsing,optimize_soa,\
-     allow_uninitialized_decls,block_fixing" in
+    "constant_propagation,copy_propagation,dead_code_elimination,\
+     vectorize_loops,list_collapsing" in
   require
     (String.equal
        (portable ~passes:(parse_passes production_list) ())
@@ -1267,63 +1177,7 @@ let pass_override_tests () =
         ("the unknown-pass error does not name the pass and the valid names: "
        ^ message)
 
-(* Each f_k calls f_(k-1) twice, so inlining f_depth copies f0 2^depth times. *)
-let call_chain depth =
-  let fn k =
-    Printf.sprintf "real f%d(real x) { return f%d(x) + f%d(x + 1); }" k (k - 1)
-      (k - 1) in
-  Printf.sprintf
-    "functions { real f0(real x) { return x; } %s } parameters { real y; } \
-     model { target += f%d(y); }"
-    (String.concat " " (List.init depth (fun k -> fn (k + 1))))
-    depth
-
-(* Long function bodies that the inliner leaves as calls: overloads, the
-   recursive call inside a recursive function, and calls in parameter bounds.
-   Counting any of them as inlined would put this program over the budget. *)
-let uninlined_calls =
-  let body = String.concat " " (List.init 60 (fun _ -> "t = t + 1;")) in
-  let repeat n f = String.concat " " (List.init n f) in
-  Printf.sprintf
-    "functions { real overloaded(real x) { real t = 0; %s return x; } \
-     real overloaded(int x) { real t = 0; %s return x; } \
-     real recursive(real x) { real t = 0; %s \
-     if (x > 10) return x; return recursive(x + 1); } \
-     real bound() { real t = 0; %s return 0; } } \
-     parameters { real y; %s } model { %s target += recursive(y); }"
-    body body body body
-    (repeat 400 (Printf.sprintf "real<lower=bound()> p%d;"))
-    (repeat 200 (fun _ -> "target += overloaded(y) + overloaded(1);"))
-
-let inlining_estimate_test () =
-  let deep = call_chain 14 in
-  let production = Stanli_pipeline.default_pass_selection in
-  let compiled = compile_result ~passes:production deep in
-  require
-    (match compiled.result with
-    | Ok mir -> String.equal (encode mir) (encode (compile_upstream_o0 deep))
-    | Error _ -> false)
-    "a deep call chain did not fall back to transformed O0 MIR";
-  require
-    (match compiled.diagnostics with
-    | [Stanli_pipeline.O1_budget_exceeded {checked= Before_inlining; _}] ->
-        true
-    | _ -> false)
-    "a deep call chain was inlined before the budget check";
-  let shallow = compile_result ~passes:production uninlined_calls in
-  require
-    (List.is_empty shallow.diagnostics)
-    "the estimate counted calls that the inliner leaves alone";
-  require
-    (match shallow.result with
-    | Ok mir ->
-        String.equal (encode mir)
-          (encode (compile ~passes:no_budget uninlined_calls))
-    | Error _ -> false)
-    "a program under the budget did not get O1"
-
 let () =
-  inlining_estimate_test ();
   pass_override_tests ();
   tuple_wire_tests ();
   tuple_print_test ();

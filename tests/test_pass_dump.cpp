@@ -38,7 +38,7 @@ static std::vector<std::string> listing(const std::filesystem::path& dir) {
   return names;
 }
 
-static const char* kExpected[] = {"00-mir.sexp",
+static const char* kExpected[] = {"00-mir.txt",
                                   "01-log_prob-bind_data.txt",
                                   "02-log_prob-lower.txt",
                                   "03-log_prob-inplace.txt",
@@ -96,7 +96,7 @@ int main(int argc, char** argv) {
   // store_forward and constfold dumps differ in the graph itself.
   const DataMap data =
       DataMap::from_json_file("tests/fixtures/arr2d_rowrange.json");
-  const std::string mir = slurp("tests/fixtures/arr2d_rowrange.tmir.sexp");
+  const std::string mir = slurp("tests/fixtures/arr2d_rowrange.mir");
 
   const std::filesystem::path root =
       std::filesystem::temp_directory_path() / "stanli_pass_dump_test";
@@ -119,7 +119,7 @@ int main(int argc, char** argv) {
   for (const std::string& n : got)
     expect("non-empty " + n, !slurp(on_dir / n).empty());
 
-  expect("00-mir.sexp is the input mir", slurp(on_dir / "00-mir.sexp") == mir);
+  expect("00-mir.txt is the input mir", slurp(on_dir / "00-mir.txt") == mir);
 
   const std::string before = slurp(on_dir / "04-log_prob-store_forward.txt");
   const std::string after = slurp(on_dir / "05-log_prob-constfold.txt");
@@ -148,11 +148,10 @@ int main(int argc, char** argv) {
   expect("qualified stage name matches one graph",
          listing_with("log_prob:reroll", "qualified") ==
              std::vector<std::string>{"06-log_prob-reroll.txt"});
-  expect(
-      "mir is selectable",
-      listing_with("mir,constfold", "mir") ==
-          std::vector<std::string>{"00-mir.sexp", "05-log_prob-constfold.txt",
-                                   "17-write_array-constfold.txt"});
+  expect("mir is selectable",
+         listing_with("mir,constfold", "mir") ==
+             std::vector<std::string>{"00-mir.txt", "05-log_prob-constfold.txt",
+                                      "17-write_array-constfold.txt"});
   expect("all selects every stage", listing_with("all", "all") == want);
 
   std::string captured;

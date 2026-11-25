@@ -116,8 +116,7 @@ int main() {
                                 .GetString()) == "unclassified",
         "retained CALL replacement is not misclassified");
 
-  const std::string source =
-      slurp("tests/fixtures/execution_legacy_ode.tmir.sexp");
+  const std::string source = slurp("tests/fixtures/execution_legacy_ode.mir");
   const auto data = DataMap::from_json("{}");
   ExecutionTrace trace;
   CompiledModel model;
@@ -136,7 +135,7 @@ int main() {
   check(!trace.events.empty(), "preparation interpreter observations captured");
   {
     auto rng_model =
-        compile_model(slurp("tests/fixtures/execution_rng.tmir.sexp"), data);
+        compile_model(slurp("tests/fixtures/execution_rng.mir"), data);
     check(rng_model.write_array && rng_model.write_array->interp,
           "dynamic-storage RNG fixture retains interpreter");
     check(rng_model.transform_inits && rng_model.transform_inits->interp,
@@ -176,8 +175,8 @@ int main() {
     if (mode == 1) test_setenv("STANLI_STRUCTURED_LOOPS", "0", 1);
     if (mode == 2) test_setenv("STANLI_BOUNDED_SPECIALIZATION", "0", 1);
     if (mode == 2 || mode == 4) test_setenv("STANLI_REGION_MAP", "0", 1);
-    auto cm = compile_model(
-        slurp("tests/fixtures/hypergeometric_1f0.tmir.sexp"), inputs);
+    auto cm =
+        compile_model(slurp("tests/fixtures/hypergeometric_1f0.mir"), inputs);
     if (mode == 1) test_unsetenv("STANLI_STRUCTURED_LOOPS");
     if (mode == 2) test_unsetenv("STANLI_BOUNDED_SPECIALIZATION");
     if (mode == 2 || mode == 4) test_unsetenv("STANLI_REGION_MAP");

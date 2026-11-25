@@ -246,8 +246,7 @@ def sweep_one(spec, cs, tmp, keep, density=True):
     data = d / "data.json"
     data.write_text(json.dumps({"y_data": 1.0}))
 
-    ours = run([str(REPO / BUILD / "stanli_check"), str(stan), str(data),
-                "--stanc", str(REPO / "deps/stanc3/stanc")])
+    ours = run([str(REPO / BUILD / "stanli_check"), str(stan), str(data)])
     if "COMPILE_FAIL" in ours.stdout or "COMPILE_FAIL" in ours.stderr:
         why = (ours.stdout + ours.stderr).strip().splitlines()[-1]
         return name, "unsupported", why[:60], None, None
@@ -260,19 +259,18 @@ def sweep_one(spec, cs, tmp, keep, density=True):
         return name, status, note, None, None
 
     worst, n_cmp, err = compare_points(exe, REPO / BUILD / "stanli_check",
-                                       stan, data, ulp_distance,
-                                       REPO / "deps/stanc3/stanc", run=run)
+                                       stan, data, ulp_distance, run=run)
     if err:
         return name, err[0], err[1], None, None
     if n_cmp == 0:
         return name, "no_valid_point", "", None, None
 
     ns = None
-    sexp = d / "m.sexp"
-    mir = run([str(REPO / "deps/stanc3/stanc"), "--O1", "--debug-optimized-mir", str(stan)])
+    mir_path = d / "m.mir"
+    mir = run([str(REPO / BUILD / "stanli_check"), "--emit-mir", str(stan)])
     if mir.returncode == 0:
-        sexp.write_text(mir.stdout)
-        bench = run([str(REPO / BUILD / "bench_grad"), str(sexp), str(data), "20000"])
+        mir_path.write_text(mir.stdout)
+        bench = run([str(REPO / BUILD / "bench_grad"), str(mir_path), str(data), "20000"])
         if bench.returncode == 0 and bench.stdout.split():
             ns = float(bench.stdout.split()[0])
     if not keep:

@@ -19,8 +19,7 @@
 # package's eval_js() evaluates in the worker's global scope, and the
 # same bundled stanc.js defines stanli_compile() there once per session.
 #
-# Every path reports the compiler's warnings as one R warning and the O1
-# fallback notice as a warning of class "stanli_o1_fallback".
+# Every path reports the compiler's warnings as one R warning.
 
 stanc_js_ctx <- new.env(parent = emptyenv())
 
@@ -86,20 +85,11 @@ warn_compiler <- function(text) {
   invisible(NULL)
 }
 
-warn_o1_fallback <- function(text) {
-  for (t in text)
-    warning(structure(class = c("stanli_o1_fallback", "warning", "condition"),
-                      list(message = t, call = NULL)))
-  invisible(NULL)
-}
-
 # Compiler messages from the runtime: list(kind, text). Warnings go out as
-# one warning; the O1 fallback notice is its own warning with class
-# "stanli_o1_fallback".
+# one warning.
 warn_compiler_messages <- function(messages) {
   if (is.null(messages)) return(invisible(NULL))
   warn_compiler(messages$text[messages$kind == "warning"])
-  warn_o1_fallback(messages$text[messages$kind == "o1_fallback"])
   invisible(NULL)
 }
 
@@ -167,9 +157,7 @@ mir_from_js <- function(code, name = "stanli_model", include_paths = character()
          if (typeof r.result === 'undefined')
            return JSON.stringify({e: 'compiler returned no MIR', c: name});
          return JSON.stringify({r: String(r.result), c: name,
-                                w: (r.warnings || []).map(String),
-                                o1: r.o1_fallback == null ? null
-                                                          : String(r.o1_fallback)});
+                                w: (r.warnings || []).map(String)});
        } catch (e) {
          return JSON.stringify({e: String(e), c: name});
        }
@@ -178,7 +166,6 @@ mir_from_js <- function(code, name = "stanli_model", include_paths = character()
   if (!is.null(parsed$e))
     stop(parsed$c, ": ", paste(parsed$e, collapse = "\n"), call. = FALSE)
   warn_compiler(parsed$w)
-  warn_o1_fallback(parsed$o1)
   parsed$r
 }
 
@@ -281,7 +268,6 @@ mir_from_binary <- function(compiler, code, run_stanc = system2,
   messages <- jsonlite::fromJSON(read_compiler_output(messages_file),
                                  simplifyVector = TRUE)
   warn_compiler(as.character(messages$warnings))
-  warn_o1_fallback(messages$o1_fallback)
   out
 }
 
@@ -336,9 +322,9 @@ mir_from_webr <- function(eval_js, code, name = "stanli_model",
   # whether compilation failed; the error and each warning are then read as
   # separate values, since eval_js converts only scalars.
   failed <- eval_js(sprintf("(() => {
-    const done = (error, warnings, o1) => {
+    const done = (error, warnings) => {
       globalThis.__stanli_webr = {failed: error !== null, error: error,
-                                  warnings: warnings, o1_fallback: o1};
+                                  warnings: warnings};
       return error !== null;
     };
     const src = Module.FS.readFile(%s, {encoding: 'utf8'});
@@ -357,24 +343,23 @@ mir_from_webr <- function(eval_js, code, name = "stanli_model",
     const found = exported(name);
     if (!found.present)
       return done(fast ? 'JavaScript compiler: fast_math needs a stanc.js with the stanli_compile_fast export'
-                       : 'JavaScript compiler: no stanli_compile() export', [], null);
+                       : 'JavaScript compiler: no stanli_compile() export', []);
     const compile = found.value;
     if (typeof compile !== 'function')
-      return done(name + ': export is not a function', [], null);
+      return done(name + ': export is not a function', []);
     const file = %s;
     try {
       const r = file === null ? compile(%s, src, includes)
                               : compile(%s, src, includes, file);
       if (!r || typeof r !== 'object')
-        return done(name + ': compiler returned no result object', [], null);
-      if (r.errors) return done(name + ': ' + String(r.errors), [], null);
+        return done(name + ': compiler returned no result object', []);
+      if (r.errors) return done(name + ': ' + String(r.errors), []);
       if (typeof r.result === 'undefined')
-        return done(name + ': compiler returned no MIR', [], null);
+        return done(name + ': compiler returned no MIR', []);
       Module.FS.writeFile(%s, String(r.result));
-      return done(null, (r.warnings || []).map(String),
-                  r.o1_fallback == null ? null : String(r.o1_fallback));
+      return done(null, (r.warnings || []).map(String));
     } catch (e) {
-      return done(name + ': ' + String(e), [], null);
+      return done(name + ': ' + String(e), []);
     }
   })()", src_js, paste(include_js, collapse = "\n"),
     if (isTRUE(fast_math)) "true" else "false",
@@ -386,8 +371,6 @@ mir_from_webr <- function(eval_js, code, name = "stanli_model",
   warn_compiler(vapply(seq_len(n) - 1L, function(i)
     eval_js(sprintf("globalThis.__stanli_webr.warnings[%d]", i)),
     character(1)))
-  if (isTRUE(as.logical(eval_js("globalThis.__stanli_webr.o1_fallback !== null"))))
-    warn_o1_fallback(eval_js("globalThis.__stanli_webr.o1_fallback"))
   read_compiler_output(mirf)
 }
 

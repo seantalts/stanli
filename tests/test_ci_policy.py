@@ -92,7 +92,6 @@ class CiPolicyTest(unittest.TestCase):
             "no-stdio", "wasm", "wasm-webr", "r-platform-tests")]
         items.append(workflow("r.yml")["jobs"]["check"])
         items += [self.step("build", name) for name in (
-            "Measure portable MIR size and preparation cost",
             "Install reference BridgeStan",
             "Restore BridgeStan sources and shared build objects",
             "Restore compiled BridgeStan conformance models",
@@ -103,7 +102,7 @@ class CiPolicyTest(unittest.TestCase):
         items += [step for job in ("build", "r-tests")
                   for step in self.jobs[job]["steps"]
                   if step.get("with", {}).get("name") in (
-                      "portable-mir-measurements", "r-first-posterior-linux")]
+                      "r-first-posterior-linux",)]
         for item in items:
             for event in ("pull_request", "push", "schedule", "workflow_dispatch"):
                 with self.subTest(item=item.get("name", item.get("uses")), event=event):
@@ -154,8 +153,7 @@ class CiPolicyTest(unittest.TestCase):
             self.assertFalse(enabled(self.jobs[job], "pull_request", heavy="false"))
         for job, names in {
             "build": ("Tests", "Corpus verification against CmdStan references",
-                      "Wheel", "Install the wheel and run the Python tests",
-                      "Typed producer matches exact-source legacy MIR"),
+                      "Wheel", "Install the wheel and run the Python tests"),
             "r-tests": ("Build and check",
                         "Bundled portable compiler through V8 and the current runtime",
                         "R ecosystem acceptance (no skips)"),
@@ -572,47 +570,6 @@ class DevRuntimeReleaseTest(unittest.TestCase):
         self.assertEqual(deleted, ["dev-%012x" % i for i in range(3)])
         self.assertEqual(log.count("--cleanup-tag --yes"), 3)
         self.assertIn("--exclude-drafts", log)
-
-
-class DecodeSpeedGateTest(unittest.TestCase):
-    gate = ROOT / "tools/check_mir_decode_speed.sh"
-
-    def run_gate(self, legacy, portable):
-        line = ("bytes=1 repetitions=101 min_ns={min} q1_ns={q1} "
-                "median_ns={median} p95_ns=9 max_ns=9 checksum=1")
-        with tempfile.TemporaryDirectory() as tmp:
-            bench = Path(tmp) / "bench"
-            bench.write_text(
-                "#!/usr/bin/env bash\n"
-                '[ "$1" = --paired ] || exit 64\n'
-                "cat <<'EOF'\n%s\n%s\nEOF\n"
-                % (line.format(**legacy), line.format(**portable)))
-            bench.chmod(0o755)
-            return subprocess.run(
-                ["bash", str(self.gate), str(bench), "legacy.mir", "portable.mir"],
-                capture_output=True, text=True)
-
-    def test_passes_on_the_flaked_run_whose_median_was_noisy(self):
-        # Run 40324681901: 1.80x by median, 3.06x by minimum.
-        result = self.run_gate(
-            dict(min=3060, q1=3200, median=1800), dict(min=1000, q1=1400, median=1000))
-        self.assertEqual(result.returncode, 0, result.stderr)
-
-    def test_fails_when_the_lower_quartile_is_under_2x(self):
-        result = self.run_gate(
-            dict(min=2000, q1=2100, median=3000), dict(min=1000, q1=1100, median=1000))
-        self.assertEqual(result.returncode, 1)
-        self.assertIn("not at least 2x faster", result.stderr)
-
-    def test_boundary_of_exactly_2x_passes(self):
-        result = self.run_gate(
-            dict(min=2000, q1=2000, median=2000), dict(min=1000, q1=1000, median=1000))
-        self.assertEqual(result.returncode, 0, result.stderr)
-
-    def test_rejects_unparseable_benchmark_output(self):
-        result = self.run_gate(
-            dict(min=1, q1="x", median=1), dict(min=1, q1=1, median=1))
-        self.assertNotEqual(result.returncode, 0)
 
 
 class MainStatusTest(unittest.TestCase):

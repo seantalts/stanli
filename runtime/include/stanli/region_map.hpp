@@ -73,6 +73,9 @@ struct RegionMapLanePlan {
     int32_t adj_in_cell[6] = {-1, -1, -1, -1, -1, -1};
     int32_t adj_out_cell = -1;
     TileCallKind tile = TileCallKind::None;
+    // An index read from shared cells: its adjoint takes one dynamic site
+    // per selected element instead of a row for every input cell.
+    bool index_sites = false;
   };
   struct Operands {
     int32_t dst = -1, a = -1, b = -1, c = -1;
@@ -136,6 +139,9 @@ uint64_t region_map_tile_call_runs();
 std::string region_map_call_summary(const RegionMapProg& p);
 
 int64_t region_map_lane_cells(const RegionMapProg& p);
+// The lane plan's storage in a region map's scratch: after the registers,
+// on a 64-byte boundary.
+double* region_map_lane_region(const RegionMapProg& p, double* scratch);
 std::vector<char> region_map_clean_exempt_cells(const RegionMapProg& p);
 
 void region_map_lanes_forward(const RegionMapProg& p, KernelCtx& ctx,

@@ -98,8 +98,7 @@ void test_conjugate() {
   double ss = 0;
   for (double v : y) ss += (v - ybar) * (v - ybar);
 
-  CompiledModel cm =
-      compile_model(slurp("tests/fixtures/conj.tmir.sexp"), data);
+  CompiledModel cm = compile_model(slurp("tests/fixtures/conj.mir"), data);
   if (!cm.write_array) {
     std::printf("FAIL conj: no write_array graph was compiled\n");
     ++failures;
@@ -212,7 +211,7 @@ void test_trajectory_depth() {
 
   DataMap data = DataMap::from_json_file("tests/fixtures/ar1.json");
   const int K = data.at("K").i[0];
-  CompiledModel cm = compile_model(slurp("tests/fixtures/ar1.tmir.sexp"), data);
+  CompiledModel cm = compile_model(slurp("tests/fixtures/ar1.mir"), data);
   Executor ex(std::move(cm.graph));
   cm.bind(ex);
 

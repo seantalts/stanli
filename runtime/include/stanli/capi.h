@@ -104,12 +104,13 @@ typedef struct {
 } stanli_model_opts;
 void stanli_model_opts_init(stanli_model_opts* o);
 
-/* Compile either stanli portable MIR or legacy MIR S-expression text (from
- * `stanc --O1 --debug-optimized-mir`) against JSON data (CmdStan conventions).
- * The unoptimized --debug-transformed-mir S-expression is also accepted.
- * Returns null on failure with a message in err. A null opts means the
- * defaults. Construction cannot be interrupted: it takes no poll callback,
- * and a large model can take seconds or more to prepare. */
+/* Compile stanli portable MIR (the STANLI5 text that stanli-compile, the
+ * embedded compiler, stanli_compile_stan and the JavaScript compiler write)
+ * against JSON data (CmdStan conventions). Any other text, including stock
+ * stanc's --debug-optimized-mir S-expressions, fails with a message that
+ * names those compilers. Returns null on failure with a message in err. A null
+ * opts means the defaults. Construction cannot be interrupted: it takes no poll
+ * callback, and a large model can take seconds or more to prepare. */
 stanli_model* stanli_model_new_with_opts(const char* mir_text,
                                          const char* data_json,
                                          const stanli_model_opts* opts,
@@ -149,14 +150,12 @@ char* stanli_stan_to_mir_with_opts(const char* stan_code,
                                    size_t include_path_count, int fast_math,
                                    char* err, size_t err_len);
 
-/* What the compiler says besides the MIR: a warning from stanc3, or the
- * notice that O1 was skipped because the model exceeds stanli's structural
- * budget (the model then runs from O0 MIR; STANLI_NO_O1_FALLBACK=1 forces
- * O1). */
+/* What the compiler says besides the MIR: a warning from stanc3. Value 1
+ * was a notice that O1 had been skipped; no release after 0.30.1 reports
+ * it. */
 typedef enum {
   STANLI_COMPILER_MESSAGE_NONE = -1, /* the index was out of range */
-  STANLI_COMPILER_WARNING = 0,
-  STANLI_COMPILER_O1_FALLBACK = 1
+  STANLI_COMPILER_WARNING = 0
 } stanli_compiler_message_kind;
 
 /* One compilation of Stan source, with the source file named in compiler

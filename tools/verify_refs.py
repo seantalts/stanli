@@ -27,8 +27,11 @@ Usage: tools/verify_refs.py PDB_DIR [--check BIN] [--max-rel X]
 Exit nonzero if any referenced model fails to run at any point, changes
 shape, or exceeds the gate.
 
-       tools/verify_refs.py --corpus NAME [--model M ...] [--stanc STANC]
+       tools/verify_refs.py --corpus NAME [--model M ...] [--fixture-passes]
 replays one of the local corpora in CORPORA, as CTest does.
+--fixture-passes compiles with the O1 passes of the MIR fixtures
+(tools/gen_fixtures.py O1_PASSES), which add function inlining and
+partial evaluation to the shipping passes.
 """
 from __future__ import annotations
 
@@ -46,7 +49,6 @@ import re
 import struct
 import subprocess
 import sys
-import shutil
 import tempfile
 from fractions import Fraction
 
@@ -54,6 +56,7 @@ from corpus_inventory import (CorpusCase, corpus_cases, local_cases, materialize
                               source_digest)
 import toolchain
 import check_status
+import gen_fixtures
 
 REPO = pathlib.Path(__file__).resolve().parent.parent
 N_SAMPLER_COLS = 7
@@ -1902,8 +1905,8 @@ CORPORA = {
                          reference=signature_exact_lp),
     "fixtures": Corpus(FIXTURES / "references.json.gz", None, mir=True,
                        ulp=10),
-    # Lowering rewrites that only stock stanc's --O1 MIR reaches, so these
-    # also run with --stanc. isclose(rel 1e-9, abs 1e-12): the scaled
+    # Lowering rewrites that only inlined O1 MIR reaches, so these also run
+    # with --fixture-passes. isclose(rel 1e-9, abs 1e-12): the scaled
     # error with values below 1e-3 held to an absolute 1e-12.
     "cmdstan_replay": Corpus(FIXTURES / "cmdstan_replay" / "references.json.gz",
                              replay_models, scale_floor=1e-3, strict=False,
@@ -1940,7 +1943,7 @@ def pin_drift(recorded, required=("cmdstan", "stan", "math")):
     return ""
 
 
-def replay_corpus(name, selected, check_bin, stanc, jobs, timeout,
+def replay_corpus(name, selected, check_bin, passes, jobs, timeout,
                   target_platform=None, update_ledger=False, first_reasons=None):
     """Replay a local corpus against its archive. Exit status.
 
@@ -1949,7 +1952,7 @@ def replay_corpus(name, selected, check_bin, stanc, jobs, timeout,
     corpus = CORPORA[name]
     refs, _ = load_corpus_refs(corpus)
     target_platform = target_platform or native_platform()
-    ledger_key = name + (" --stanc" if stanc else "")
+    ledger_key = name + (" --fixture-passes" if passes else "")
     ledger = load_ulp_ledger()
     section = ulp_section(ledger, target_platform, ledger_key)
     measured = collections.defaultdict(dict)
@@ -1969,7 +1972,7 @@ def replay_corpus(name, selected, check_bin, stanc, jobs, timeout,
         if unknown:
             print(f"not in the {name} corpus: " + " ".join(unknown))
             return 2
-        if stanc and corpus.mir:
+        if passes and corpus.mir:
             print(f"the {name} corpus replays its build-generated MIR")
             return 2
         if section is not None and set(section) - set(models):
@@ -2005,13 +2008,9 @@ def replay_corpus(name, selected, check_bin, stanc, jobs, timeout,
                         "stanli_signature_models target", [])
             args = ()
             if corpus.mir:
-                args = ("--mir", str(source.with_suffix(".tmir.sexp")))
-            elif stanc:
-                # Stock stanc writes the model's C++ beside its source.
-                copy = work / "stanc" / model / source.name
-                copy.parent.mkdir(parents=True)
-                shutil.copyfile(source, copy)
-                source, args = copy, ("--stanc", str(stanc))
+                args = ("--mir", str(source.with_suffix(".mir")))
+            elif passes:
+                args = ("--passes", passes)
             columns = {}
             if corpus.case_labels:
                 labels = tuple(SIGNATURE_CASE.findall(source.read_text()))
@@ -2028,7 +2027,7 @@ def replay_corpus(name, selected, check_bin, stanc, jobs, timeout,
                                             else section.get(model, {})),
                                measured=measured[model])
 
-        leg = " through stock stanc" if stanc else ""
+        leg = " with the fixture passes" if passes else ""
         with concurrent.futures.ThreadPoolExecutor(jobs) as pool:
             for model, status, rel, ulp, n, detail, notes in pool.map(
                     one, selected or sorted(models)):
@@ -2091,8 +2090,9 @@ def main():
                     help="replay a local corpus instead of the posteriordb one")
     ap.add_argument("--model", action="append", default=[],
                     help="with --corpus, replay only this model")
-    ap.add_argument("--stanc", type=pathlib.Path,
-                    help="with --corpus, compile with this stock stanc")
+    ap.add_argument("--fixture-passes", action="store_true",
+                    help="with --corpus, compile with the MIR fixtures' O1 "
+                         "passes, which inline functions")
     ap.add_argument("--check", type=pathlib.Path,
                     default=default_check_bin())
     ap.add_argument("--max-rel", type=float, default=None,
@@ -2151,7 +2151,8 @@ def main():
         if args.pdb or args.models:
             ap.error("--corpus takes models with --model")
         return replay_corpus(args.corpus, args.model, args.check.resolve(),
-                             args.stanc and args.stanc.resolve(), args.jobs,
+                             gen_fixtures.O1_PASSES if args.fixture_passes
+                             else None, args.jobs,
                              args.timeout, args.target_platform,
                              args.update_ulp_ledger, first_reasons)
     if args.pdb is None:

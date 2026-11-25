@@ -193,26 +193,6 @@ if (compilerPath) {
         "ok"
       }
 
-      loops <- paste0("for (i", 1:9, " in 1:1) {", collapse = "\n")
-      budget_source <- paste("parameters { real x; }", "model {",
-                             "real s = 0;", loops, strrep("s += 1;\n", 2100),
-                             strrep("}\n", 9), "x ~ normal(s, 1);", "}",
-                             sep = "\n")
-      o1 <- NULL
-      budget_mir <- withCallingHandlers(
-        mir_from_webr(eval_js, budget_source, "webr_budget"),
-        stanli_o1_fallback = function(w) {
-          o1 <<- c(o1, conditionMessage(w))
-          invokeRestart("muffleWarning")
-        })
-      o1_ok <- if (!startsWith(budget_mir, "STANLI5:")) {
-        "FAIL budget source produced no portable MIR"
-      } else if (length(o1) != 1L || !grepl("skipped O1", o1, fixed = TRUE)) {
-        "FAIL O1 fallback was not a stanli_o1_fallback condition"
-      } else {
-        "ok"
-      }
-
       bad_source <- read_compiler_output("/tmp/portable-bad.stan")
       bad_message <- tryCatch({
         mir_from_webr(eval_js, bad_source, "webr_bad")
@@ -221,12 +201,12 @@ if (compilerPath) {
       final_calls <- eval_js('JSON.stringify(globalThis.__stanli_helper_calls)')
       bad <- if (!grepl("stanli_compile", bad_message, fixed = TRUE)) {
         "FAIL portable error was not reported"
-      } else if (!grepl('"portable":3', final_calls, fixed = TRUE)) {
+      } else if (!grepl('"portable":2', final_calls, fixed = TRUE)) {
         "FAIL portable error was retried"
       } else {
         "ok"
       }
-      c(good, portable_includes, instrumented, warning_ok, o1_ok, bad)
+      c(good, portable_includes, instrumented, warning_ok, bad)
     }, finally = restore_process())
     statuses
   `);

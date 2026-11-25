@@ -110,6 +110,13 @@ struct StructuredLoop {
   void prepare();
 };
 
+// The cells of in[0] that an OP_INDEX_DYNAMIC read with context `c` selects,
+// written to positions[i * stride] in output order. The read's backward adds
+// out_adj[i] to in[0] at those cells and touches no other cell. Returns the
+// number selected, at most spec.selected_size.
+int64_t index_read_positions(const DynamicIndexSpec& spec, const KernelCtx& c,
+                             double* positions, int64_t stride);
+
 void structured_loop_forward(KernelCtx& ctx);
 void structured_loop_backward(KernelCtx& ctx);
 void register_structured_loop_kernel();

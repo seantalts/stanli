@@ -5,9 +5,7 @@
 //   node tests/test_wasm.cjs [stanli.js] [stanli-compiler.js]
 "use strict";
 const fs = require("fs");
-const os = require("os");
 const path = require("path");
-const {spawnSync} = require("child_process");
 
 const modPath = path.resolve(
     process.argv[2] || path.join(__dirname, "..", "build-wasm", "stanli.js"));
@@ -19,27 +17,12 @@ function fail(msg) {
   process.exit(1);
 }
 
-function nativeMir(fixtures) {
-  const executable = process.platform === "win32" ? "stanc.exe" : "stanc";
-  const stanc = path.resolve(
-      process.env.STANC || path.join(__dirname, "..", "deps", "stanc3",
-                                    executable));
-  if (!fs.existsSync(stanc))
-    throw new Error("missing pinned compiler: " + stanc);
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), "stanli-wasm-stanc-"));
-  try {
-    const source = path.join(root, "es.stan");
-    fs.copyFileSync(path.join(fixtures, "es.stan"), source);
-    const compiled = spawnSync(
-        stanc, ["--O1", "--debug-optimized-mir", source],
-        {encoding: "utf8"});
-    if (compiled.error) throw compiled.error;
-    if (compiled.status !== 0)
-      throw new Error("stanc failed: " + (compiled.stderr || compiled.status));
-    return compiled.stdout;
-  } finally {
-    fs.rmSync(root, {recursive: true, force: true});
-  }
+// The build generates tests/fixtures/es.mir with stanli's own compiler.
+function fixtureMir(fixtures) {
+  const file = path.join(fixtures, "es.mir");
+  if (!fs.existsSync(file))
+    throw new Error("missing generated MIR " + file + "; build the native tree");
+  return fs.readFileSync(file, "utf8");
 }
 
 createStanli().then((M) => {
@@ -66,7 +49,7 @@ createStanli().then((M) => {
     mir = String(compiled.result);
   } else {
     try {
-      mir = nativeMir(fixtures);
+      mir = fixtureMir(fixtures);
     } catch (error) {
       fail(String(error));
     }

@@ -28,7 +28,7 @@ def main(check, dump_ops):
         for suffix in ("", "_fallback"):
             stem = ROOT / "tests/fixtures" / (family + suffix)
             report = json.loads(subprocess.check_output(
-                [dump_ops, str(stem.with_suffix(".tmir.sexp")),
+                [dump_ops, str(stem.with_suffix(".mir")),
                  str(stem.with_suffix(".json")), "--execution-json"], text=True))
             selected = list(callbacks(report["log_prob"]))
             assert Counter(node["operation"] for node in selected) == {
@@ -54,7 +54,7 @@ def main(check, dump_ops):
                  "ode_constant_loop", "ode_retained_loop", "ode_nested_for"):
         stem = ROOT / "tests/fixtures" / name
         report = json.loads(subprocess.check_output(
-            [dump_ops, str(stem.with_suffix(".tmir.sexp")),
+            [dump_ops, str(stem.with_suffix(".mir")),
              str(stem.with_suffix(".json")), "--execution-json"], text=True))
         for phase in ("log_prob", "write_array"):
             assert report[phase].get("value_engine") != "mir_interpreter", report
@@ -69,7 +69,7 @@ def main(check, dump_ops):
                  "gq_callback_integer_contexts_fallback"):
         stem = ROOT / "tests/fixtures" / name
         report = json.loads(subprocess.check_output(
-            [dump_ops, str(stem.with_suffix(".tmir.sexp")),
+            [dump_ops, str(stem.with_suffix(".mir")),
              str(stem.with_suffix(".json")), "--execution-json"], text=True))
         wa = report["write_array"]
         assert wa.get("value_engine") != "mir_interpreter", wa
@@ -84,7 +84,7 @@ def main(check, dump_ops):
 
     stem = ROOT / "tests/fixtures/gq_callback_shared_function"
     report = json.loads(subprocess.check_output(
-        [dump_ops, str(stem.with_suffix(".tmir.sexp")),
+        [dump_ops, str(stem.with_suffix(".mir")),
          str(stem.with_suffix(".json")), "--execution-json"], text=True))
     selected = list(callbacks(report["write_array"]))
     assert Counter(n["operation"] for n in selected) == {"OP_ODE": 1, "OP_ALGEBRA_SOLVER": 1}
@@ -94,7 +94,7 @@ def main(check, dump_ops):
 
     stem = ROOT / "tests/fixtures/matrix_callback_value_fallback"
     report = json.loads(subprocess.check_output(
-        [dump_ops, str(stem.with_suffix(".tmir.sexp")),
+        [dump_ops, str(stem.with_suffix(".mir")),
          str(stem.with_suffix(".json")), "--execution-json"], text=True))
     assert report["write_array"]["value_engine"] == "mir_interpreter", report
     assert "compile time" in report["write_array"]["refusal"], report
@@ -102,7 +102,7 @@ def main(check, dump_ops):
     for name in ("ode_matrix_callback", "ode_matrix_callback_flat"):
         stem = ROOT / "tests/fixtures" / name
         report = json.loads(subprocess.check_output(
-            [dump_ops, str(stem.with_suffix(".tmir.sexp")),
+            [dump_ops, str(stem.with_suffix(".mir")),
              str(stem.with_suffix(".json")), "--execution-json"], text=True))
         selected = list(callbacks(report["log_prob"]))
         assert selected and all(n["callback"]["value_engine"] == "register_program" for n in selected)
@@ -116,7 +116,7 @@ def main(check, dump_ops):
                     env["STANLI_NO_ODE_DIRECT_RK"] = "1"
                 run = subprocess.run([check, str(stem.with_suffix(".stan")),
                     str(stem.with_suffix(".json")), "--mir",
-                    str(stem.with_suffix(".tmir.sexp")), "--wa-values", "--point", str(point)],
+                    str(stem.with_suffix(".mir")), "--wa-values", "--point", str(point)],
                     env=env, capture_output=True, text=True, check=True)
                 values = parse_status(run.stdout)
                 assert values[0] == "OK", run.stdout

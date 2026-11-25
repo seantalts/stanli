@@ -120,7 +120,7 @@ void run_scalar_forward(const RegionMapProg& p, KernelCtx& ctx) {
 }
 
 double* lane_region(const RegionMapProg& p, KernelCtx& ctx) {
-  return ctx.scratch + p.n_regs + p.adj.n_regs;
+  return region_map_lane_region(p, ctx.scratch);
 }
 
 void run_lane_forward(const RegionMapProg& p, KernelCtx& ctx) {

@@ -145,7 +145,7 @@ int main() {
     expect_eq("active solve value-only", sex.forward_value_only(), double_ref);
   }
 
-  CompiledModel cm = compile_model(slurp("tests/fixtures/solve.tmir.sexp"), d);
+  CompiledModel cm = compile_model(slurp("tests/fixtures/solve.mir"), d);
   check(cm.n_unconstrained == 21, "solve 21 unconstrained");
 
   // The discriminator, read back off the graph. Eight divisions in the
@@ -229,8 +229,7 @@ int main() {
   // Every deterministic column must remain bitwise equal, and reseeding the
   // caller-owned stream must reproduce the stochastic column.
   {
-    CompiledModel im =
-        compile_model(slurp("tests/fixtures/solverng.tmir.sexp"), d);
+    CompiledModel im = compile_model(slurp("tests/fixtures/solverng.mir"), d);
     check(im.write_array && !im.write_array->truncated,
           "solverng write_array compiles");
     check(im.write_array && im.write_array->interp == nullptr,

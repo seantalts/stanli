@@ -89,8 +89,8 @@ stanli::DataMap data_of(const Csr& m) {
 }
 
 stanli::CompiledModel compile_csr(const Csr& m) {
-  return stanli::compile_model(
-      slurp("tests/fixtures/csr_times_vector.tmir.sexp"), data_of(m));
+  return stanli::compile_model(slurp("tests/fixtures/csr_times_vector.mir"),
+                               data_of(m));
 }
 
 struct Eval {

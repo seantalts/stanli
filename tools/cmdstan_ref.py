@@ -94,7 +94,7 @@ def build_reference(cs, workdir, stan, driver, stanc, name="ref", opt="-O1",
     return exe, None
 
 
-def compare_points(ref_exe, check_bin, stan, data, metric, stanc, n=3,
+def compare_points(ref_exe, check_bin, stan, data, metric, n=3,
                    run=_plain):
     """Compare reference and stanli at n deterministic points.
 
@@ -112,8 +112,8 @@ def compare_points(ref_exe, check_bin, stan, data, metric, stanc, n=3,
     worst, n_cmp = 0, 0
     for point in range(n):
         ref = run([str(ref_exe), str(data), str(point)])
-        got = run([str(check_bin), str(stan), str(data), "--stanc",
-                   str(stanc), "--point", str(point)])
+        got = run([str(check_bin), str(stan), str(data), "--point",
+                   str(point)])
         rf = parse_status(ref.stdout)
         gf = parse_status(got.stdout)
         if rf[:1] == ["OK"] and all(x != x for x in

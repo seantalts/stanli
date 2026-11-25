@@ -14,7 +14,7 @@ evolved; verify completion in source rather than executing old task lists.
 | Preparation | [Preparation tuning](../archive/plans/2026-09-10-prep-time-tuning.md), [teaching investigation digest](../archive/plans/2026-09-15-teaching-performance.md): cold work, speculation cost and completed-graph profiling. |
 | General runtime costs | [Registry storage and ADD_N binding](../../../notes/performance/2026-10-15-general-runtime-fixes.md): baseline-ISA extraction, rejected constant sharing, and validation evidence. |
 | Identity slices | [Full-range slice regression](../../../notes/performance/2026-09-22-identity-slice.md): why unconditional aliases could regroup adjoints, and the narrower ownership proof. |
-| Diagnostic compiler policy | [Main CI corrections](../../../notes/performance/2026-10-03-ci-diagnostics.md): preserve the shipped O1 budget in vectorization comparisons; forced-O1 ctsem lowering remains unresolved. |
+| Diagnostic compiler policy | [Main CI corrections](../../../notes/performance/2026-10-03-ci-diagnostics.md): why vectorization comparisons once preserved the O1 budget. The budget and its O0 fallback are gone since the stanc3 pin 93e206e6: stanli runs O1 without function inlining, so forced-O1 ctsem's loop stays structured, and the runtime inlines every call when it lowers the model. |
 
 A logical view is not just a flat element count. Shape, storage order, activity,
 control/effect dependence and ownership must survive a rewrite. Speculative

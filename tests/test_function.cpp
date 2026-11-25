@@ -115,17 +115,17 @@ int main() {
     const std::string source = slurp("tests/fixtures/standalone_compiled.stan");
     // The MIR constructor works in every runtime build, including developer
     // builds which deliberately omit the embedded source compiler.
-    Function cached = Function::from_mir(
-        slurp("tests/fixtures/early_return.tmir.sexp"), "choose");
+    Function cached =
+        Function::from_mir(slurp("tests/fixtures/early_return.mir"), "choose");
     DataMap cached_args;
     cached_args.set_real("x", 4.0);
     cached_args.set_int("first", 1);
     check(cached(cached_args).r == std::vector<double>({8.0}),
           "cached MIR function call");
-    typed_boundary(slurp("tests/fixtures/early_return.tmir.sexp"));
+    typed_boundary(slurp("tests/fixtures/early_return.mir"));
 
     Function hypergeometric = Function::from_mir(
-        slurp("tests/fixtures/hypergeometric_1f0.tmir.sexp"), "coverage");
+        slurp("tests/fixtures/hypergeometric_1f0.mir"), "coverage");
     DataMap hypergeometric_args;
     hypergeometric_args.set_real("a", 1.0);
     for (double z : {0.5, 0.0, -0.5}) {

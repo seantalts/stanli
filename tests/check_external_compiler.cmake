@@ -15,9 +15,8 @@ function(expect_result label expected_code expected_line)
   endif()
 endfunction()
 
-expect_result("--stanc ${STANC}" 0 "OK " --stanc "${STANC}")
-expect_result("--stanc with a missing executable" 1 "COMPILE_FAIL "
-              --stanc "${work}/no-such-stanc")
+# Stock stanc's s-expression MIR is no longer read, so its flag is an error.
+expect_result("--stanc" 2 "" --stanc "${work}/stanc")
 expect_result("--stanli-compile with a missing executable" 1 "COMPILE_FAIL "
               --stanli-compile "${work}/no-such-stanli-compile")
 
@@ -28,11 +27,11 @@ if(NOT WIN32)
   file(WRITE "${fake}" "#!/bin/sh
 while [ $# -gt 1 ]; do
   if [ \"$1\" = --messages-json ]; then
-    printf '{\"warnings\":[],\"o1_fallback\":null}\\n' > \"$2\"
+    printf '{\"warnings\":[]}\\n' > \"$2\"
   fi
   shift
 done
-exec cat \"${SOURCE_DIR}/tests/fixtures/ar1.tmir.sexp\"
+exec cat \"${SOURCE_DIR}/tests/fixtures/ar1.mir\"
 ")
   execute_process(COMMAND chmod +x "${fake}")
   expect_result("--stanli-compile ${fake}" 0 "OK " --stanli-compile "${fake}")

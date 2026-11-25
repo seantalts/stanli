@@ -540,7 +540,7 @@ def main(argv=None):
         print("", file=f)
         for x in final.get("diffs", []):
             print(json.dumps(x), file=f)
-        for k in ("none", "o1", "inlined_size", "work", "gradient_ns"):
+        for k in ("none", "o1", "work", "gradient_ns"):
             if final.get(k) is not None:
                 print(f"{k}: {json.dumps(final[k])}", file=f)
     sys.stdout.write(small.source())

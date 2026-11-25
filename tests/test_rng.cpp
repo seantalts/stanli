@@ -76,7 +76,7 @@ std::vector<double> run_graph_only(Executor& graph, const CompiledModel& cm,
   return row_of(graph, cm);
 }
 std::shared_ptr<mir::Program> program_of(const std::string& text) {
-  return std::make_shared<mir::Program>(mir::read_program(sexp::parse(text)));
+  return std::make_shared<mir::Program>(stanli::decode_program(text));
 }
 
 double scalar_upstream(int family, double a, double b, WaRng& stream) {
@@ -111,8 +111,7 @@ double scalar_upstream(int family, double a, double b, WaRng& stream) {
 // The container form uses the same vectorized Stan Math call.
 void scalar_container_guard() {
   auto container = compile_model(
-      slurp("tests/fixtures/gq_scalar_rng_container_guard.tmir.sexp"),
-      DataMap{});
+      slurp("tests/fixtures/gq_scalar_rng_container_guard.mir"), DataMap{});
   require(container.write_array && !container.write_array->interp,
           "container RNG fell back");
   Executor container_graph(std::move(container.write_array->graph));
@@ -131,7 +130,7 @@ void scalar_container_guard() {
 }
 
 void scalar_family(int family, int region) {
-  const auto text = slurp("tests/fixtures/gq_scalar_rng_gap.tmir.sexp");
+  const auto text = slurp("tests/fixtures/gq_scalar_rng_gap.mir");
   const auto data =
       DataMap::from_json("{\"family\":" + std::to_string(family) +
                          ",\"region\":" + std::to_string(region) + "}");
@@ -240,7 +239,7 @@ Eigen::VectorXd vector_upstream(int family, const Eigen::VectorXd& p,
 }
 
 void vector_family(int family, int region, int n) {
-  const auto text = slurp("tests/fixtures/gq_vector_rng_gap.tmir.sexp");
+  const auto text = slurp("tests/fixtures/gq_vector_rng_gap.mir");
   const auto data = DataMap::from_json("{\"family\":" + std::to_string(family) +
                                        ",\"region\":" + std::to_string(region) +
                                        ",\"N\":" + std::to_string(n) + "}");
@@ -357,9 +356,8 @@ void vector_family(int family, int region, int n) {
 }
 
 void udf_effect(bool early_exits) {
-  const auto text =
-      slurp(early_exits ? "tests/fixtures/gq_function_exits.tmir.sexp"
-                        : "tests/fixtures/gq_rng_udf_effect.tmir.sexp");
+  const auto text = slurp(early_exits ? "tests/fixtures/gq_function_exits.mir"
+                                      : "tests/fixtures/gq_rng_udf_effect.mir");
   auto cm = compile_model(text, DataMap{});
   require(cm.write_array && !cm.write_array->interp,
           "UDF effect fixture did not compile");
@@ -398,7 +396,7 @@ void udf_effect(bool early_exits) {
 void container_family(int family, int mode, int region, std::vector<double> a,
                       std::vector<double> b, std::vector<int> counts,
                       bool admitted = true) {
-  const auto text = slurp("tests/fixtures/gq_container_rng_edges.tmir.sexp");
+  const auto text = slurp("tests/fixtures/gq_container_rng_edges.mir");
   DataMap data;
   data.set_int("N", a.size());
   data.set_int("M", b.size());

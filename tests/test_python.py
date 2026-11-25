@@ -1688,8 +1688,7 @@ def test_packaged_subprocess_includes():
                     raise AssertionError("subprocess accepted a missing include")
 
 
-def _fake_compiler_run(calls, warnings=(), o1_fallback=None,
-                       stderr="text for people"):
+def _fake_compiler_run(calls, warnings=(), stderr="text for people"):
     """A subprocess.run stand-in for stanli-compile that writes its
     --messages-json file."""
     import json
@@ -1698,7 +1697,7 @@ def _fake_compiler_run(calls, warnings=(), o1_fallback=None,
         calls.append((argv, kwargs))
         path = argv[argv.index("--messages-json") + 1]
         pathlib.Path(path).write_text(json.dumps(
-            {"warnings": list(warnings), "o1_fallback": o1_fallback}),
+            {"warnings": list(warnings)}),
             encoding="utf-8")
         return subprocess.CompletedProcess(argv, 0, "STANLI5:ZmFrZQ==",
                                            stderr)
@@ -1707,7 +1706,7 @@ def _fake_compiler_run(calls, warnings=(), o1_fallback=None,
 
 def test_subprocess_compiler_contract():
     # The packaged stanli-compile is the only subprocess compiler. Its
-    # warnings and O1 notice come from the --messages-json file, and a
+    # warnings come from the --messages-json file, and a
     # non-zero exit is an error carrying its stderr.
     suffix = ".exe" if sys.platform == "win32" else ""
     with tempfile.TemporaryDirectory() as tmpdir:
@@ -1719,8 +1718,7 @@ def test_subprocess_compiler_contract():
         source.write_text("model {}", encoding="utf-8")
         calls = []
 
-        run = _fake_compiler_run(calls, ["a successful frontend warning"],
-                                 "stanli compiler: skipped O1")
+        run = _fake_compiler_run(calls, ["a successful frontend warning"])
         with mock.patch.object(stanli, "_BIN", compiler_dir), \
                 mock.patch.object(stanli.subprocess, "run", run):
             with warnings.catch_warnings(record=True) as caught:
@@ -1728,8 +1726,7 @@ def test_subprocess_compiler_contract():
                 got = stanli._stanc_mir(source)
         assert got == "STANLI5:ZmFrZQ=="
         assert [(w.category, str(w.message)) for w in caught] == [
-            (RuntimeWarning, "a successful frontend warning"),
-            (stanli.O1FallbackWarning, "stanli compiler: skipped O1")]
+            (RuntimeWarning, "a successful frontend warning")]
         argv = calls[0][0]
         assert argv[0] == str(portable) and argv[-1] == str(source)
         assert argv[1] == "--messages-json" and len(argv) == 4
@@ -2530,32 +2527,14 @@ def test_allow_interpreter_false_refuses_fallback_models():
     stanli.Model(stan_code=clean, allow_interpreter=False)
 
 
-def _o1_budget_source():
-    body = "s += 1;\n" * 2100
-    loops = "".join(f"for (i{d} in 1:1) {{\n" for d in range(9))
-    return ("parameters { real x; }\nmodel {\nreal s = 0;\n" + loops + body
-            + "}\n" * 9 + "x ~ normal(s, 1);\n}\n")
-
-
-def test_o1_fallback_is_its_own_warning_category():
-    assert issubclass(stanli.O1FallbackWarning, RuntimeWarning)
-    assert "O1FallbackWarning" in stanli.__all__
-    source = _o1_budget_source()
-    paths = _compiler_paths()
-    assert paths, "no compile path to test"
-    for path in paths:
-        for build in (lambda: stanli.Model(stan_code=source),
-                      lambda: stanli.stan_to_mir(source)):
-            with path(), warnings.catch_warnings(record=True) as caught:
-                warnings.simplefilter("always")
-                build()
-            o1 = [w for w in caught
-                  if issubclass(w.category, stanli.O1FallbackWarning)]
-            assert len(o1) == 1 and "skipped O1" in str(o1[0].message), \
-                [str(w.message) for w in caught]
-            others = [w for w in caught if w not in o1]
-            assert not any("skipped O1" in str(w.message) for w in others), \
-                [str(w.message) for w in others]
+def test_mir_that_is_not_portable_is_refused():
+    try:
+        stanli.Model(mir="((functions_block ()) (input_vars ()) (log_prob ()))",
+                     data={})
+    except Exception as e:  # noqa: BLE001 - the runtime's message is the test
+        assert "not portable MIR" in str(e) and "stan_to_mir" in str(e), e
+    else:
+        raise AssertionError("stock stanc MIR was accepted")
 
 
 def test_struct_mirrors_are_checked_against_the_runtime():

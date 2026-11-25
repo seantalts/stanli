@@ -28,7 +28,7 @@ __all__ = ["Model", "Function", "Fit", "Summary", "OptimizeResult",
            "laplace_whiten", "LaplaceWhitenReport",
            "exact_lp", "thread_safe", "stan_to_mir", "build_id",
            "bridgestan_model", "bridgestan_data", "runtime_path",
-           "SAMPLER_COLUMNS", "O1FallbackWarning", "ExperimentalWarning",
+           "SAMPLER_COLUMNS", "ExperimentalWarning",
            "__version__"]
 # The one place the version lives. setup.py and the release workflow both
 # read it from here.
@@ -42,7 +42,6 @@ _ABI_VERSION = 6
 
 # stanli_compiler_message_kind in capi.h.
 _COMPILER_WARNING = 0
-_COMPILER_O1_FALLBACK = 1
 # The column sets of stanli_n_variables.
 _CONSTRAINED_COLUMNS = 0
 _OUTPUT_COLUMNS = 2
@@ -53,14 +52,6 @@ _EVAL_FAILURE = {
     3: "log density evaluation failed inside stanli at this point (this is "
        "a bug in stanli; please report it)",
 }
-
-
-class O1FallbackWarning(RuntimeWarning):
-    """The compiler skipped O1 for this model and it runs from O0 MIR.
-
-    Issued when the model's structure exceeds stanli's O1 budget. The model
-    is correct but may be slower; ``STANLI_NO_O1_FALLBACK=1`` forces O1.
-    """
 
 
 class ExperimentalWarning(UserWarning):
@@ -742,19 +733,15 @@ def _warn_caller(text, category=RuntimeWarning):
 
 
 def _warn_compiler_messages(kinds_and_texts):
-    for kind, text in kinds_and_texts:
-        _warn_caller(text, O1FallbackWarning if kind == _COMPILER_O1_FALLBACK
-                      else RuntimeWarning)
+    for _kind, text in kinds_and_texts:
+        _warn_caller(text)
 
 
 def _read_compiler_messages(path):
     """stanli-compile's --messages-json file as (kind, text) pairs."""
     import json
     messages = json.loads(pathlib.Path(path).read_text(encoding="utf-8"))
-    out = [(_COMPILER_WARNING, text) for text in messages["warnings"]]
-    if messages["o1_fallback"] is not None:
-        out.append((_COMPILER_O1_FALLBACK, messages["o1_fallback"]))
-    return out
+    return [(_COMPILER_WARNING, text) for text in messages["warnings"]]
 
 
 def _stanc_mir(model_path: pathlib.Path, include_paths=(), fast_math=False,
@@ -1617,6 +1604,10 @@ def _threads_per_chain(value):
 
 class Model:
     """A compiled (model, data) pair.
+
+    ``mir`` is portable MIR from ``stan_to_mir`` or stanli-compile, in place
+    of ``stan_file`` or ``stan_code``. Other text, such as stock stanc's
+    ``--debug-optimized-mir`` output, is refused.
 
     ``seed`` is the model-construction seed: RNG calls in transformed data
     draw from it once, here, the way CmdStan's generated constructor does,

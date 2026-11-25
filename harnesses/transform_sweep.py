@@ -132,7 +132,7 @@ def sweep_one(case, cs, tmp, build):
     data.write_text(json.dumps({"m": 0.3, "s": 1.7}))
 
     check = REPO / build / "stanli_check"
-    ours = run([check, stan, data, "--stanc", REPO / "deps/stanc3/stanc"])
+    ours = run([check, stan, data])
     if "COMPILE_FAIL" in ours.stdout + ours.stderr:
         why = (ours.stdout + ours.stderr).strip().splitlines()[-1]
         return name, "unsupported", why[:70]
@@ -146,7 +146,7 @@ def sweep_one(case, cs, tmp, build):
     # shape_mismatch here is the unconstrained-size check: a wrong
     # free-parameter count for corr_matrix vs cov_matrix lands exactly there.
     worst, n_cmp, err = compare_points(exe, check, stan, data, ulp_distance,
-                                       REPO / "deps/stanc3/stanc", run=run)
+                                       run=run)
     if err:
         return (name,) + err
     if n_cmp == 0:

@@ -21,7 +21,7 @@ static std::string slurp(const char* p) {
 
 int main(int argc, char** argv) {
   if (argc < 3) {
-    std::fprintf(stderr, "usage: dump_islands mir.sexp data.json\n");
+    std::fprintf(stderr, "usage: dump_islands model.mir data.json\n");
     return 2;
   }
   DataMap data = DataMap::from_json(slurp(argv[2]));

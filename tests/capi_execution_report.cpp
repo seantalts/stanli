@@ -15,7 +15,7 @@ int main(int argc, char** argv) {
         argc == 3 && std::string(argv[2]) == "--execution-report";
     if (argc != 2 && !report)
       throw std::runtime_error(
-          "usage: capi_execution_report MODEL.tmir.sexp [--execution-report]");
+          "usage: capi_execution_report MODEL.mir [--execution-report]");
     std::ifstream input(argv[1], std::ios::binary);
     if (!input) throw std::runtime_error("could not open model MIR");
     const std::string mir((std::istreambuf_iterator<char>(input)),

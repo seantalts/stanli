@@ -2,20 +2,22 @@
 // by generated Stan and Reference BridgeStan. This test keeps raw sampler
 // order, constrained serialization order, and unconstrained naming separate
 // across Graph, compiled/direct-interpreted write_array, and BridgeStan.
+#include "portable_mir_writer.hpp"
 #include "structured_array_oracles.hpp"
 
 #include "../runtime/ext/bridgestan.h"
 
+#include <stanli/mir_decode.hpp>
 #include <stanli/bridgestan_internal.hpp>
 #include <stanli/compile.hpp>
 #include <stanli/mir.hpp>
-#include <stanli/sexp.hpp>
 #include <stanli/wa_interp.hpp>
 
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
 #include <fstream>
+#include <functional>
 #include <map>
 #include <memory>
 #include <sstream>
@@ -43,21 +45,6 @@ std::string join(const std::vector<std::string>& xs) {
     out += x;
   }
   return out;
-}
-
-bool replace_sexp(std::string& text, size_t start,
-                  const std::string& replacement) {
-  if (start == std::string::npos || text[start] != '(') return false;
-  int depth = 0;
-  for (size_t i = start; i < text.size(); ++i) {
-    if (text[i] == '(') {
-      ++depth;
-    } else if (text[i] == ')' && --depth == 0) {
-      text.replace(start, i - start + 1, replacement);
-      return true;
-    }
-  }
-  return false;
 }
 
 void fail(const std::string& what) {
@@ -158,8 +145,7 @@ void test_graph_and_write_array(int B, const std::string& mir) {
                 materialize(wex, cm.write_array->columns),
                 oracle::write_values(B));
 
-  auto prog =
-      std::make_shared<mir::Program>(mir::read_program(sexp::parse(mir)));
+  auto prog = std::make_shared<mir::Program>(stanli::decode_program(mir));
   std::map<std::string, DataMap::Entry> base;
   DataMap::Entry b;
   b.is_int = true;
@@ -257,14 +243,24 @@ void test_bridgestan(int B, const std::string& mir) {
 }
 
 void test_stale_read_dimensions(const std::string& mir) {
-  std::string stale = mir;
-  size_t at = stale.find("FnReadParam (constrain Simplex)");
-  if (at != std::string::npos) at = stale.find("(Lit Int 3)", at);
-  if (at == std::string::npos) {
+  // Give the simplex parameter's read one more element than its declaration.
+  stanli::mir::Program program = stanli::decode_program(mir);
+  bool changed = false;
+  stanli::portable_writer::for_each_stmt(program, [&](stanli::mir::Stmt& s) {
+    if (!changed && s.kind == stanli::mir::Stmt::Decl && s.read_transform &&
+        s.read_transform->kind == stanli::mir::Transform::Simplex &&
+        !s.read_dims.empty() &&
+        s.read_dims.back().kind == stanli::mir::Expr::LitInt &&
+        s.read_dims.back().lit_i == 3) {
+      s.read_dims.back().lit_i = 4;
+      changed = true;
+    }
+  });
+  if (!changed) {
     fail("could not construct stale structured MIR fixture");
     return;
   }
-  stale.replace(at, std::string("(Lit Int 3)").size(), "(Lit Int 4)");
+  const std::string stale = stanli::portable_writer::write_v2(program);
   stanli::DataMap data;
   data.set_int("B", 1);
   try {
@@ -278,19 +274,39 @@ void test_stale_read_dimensions(const std::string& mir) {
 }
 
 void test_malformed_vector_transform() {
-  std::string malformed = slurp("tests/fixtures/newtrans.tmir.sexp");
-  const size_t id = malformed.find("(decl_id u)");
-  size_t type = malformed.find("(SVector AoS", id);
-  if (!replace_sexp(malformed, type, "SReal")) {
+  // In the log density, declare the unit-vector parameter u as a scalar and
+  // read it as one.
+  namespace mir = stanli::mir;
+  mir::Program program =
+      stanli::decode_program(slurp("tests/fixtures/newtrans.mir"));
+  bool changed = false;
+  const std::function<void(mir::Expr&)> retype = [&](mir::Expr& e) {
+    if (e.kind == mir::Expr::Var && e.name == "u")
+      e.unsized = {0, mir::UnsizedLeaf::Real};
+    for (mir::Expr& arg : e.args) retype(arg);
+  };
+  const std::function<void(std::vector<mir::Stmt>&)> visit =
+      [&](std::vector<mir::Stmt>& body) {
+        for (mir::Stmt& s : body) {
+          if (s.kind == mir::Stmt::Decl && s.decl_id == "u" &&
+              s.read_transform &&
+              s.read_transform->kind == mir::Transform::UnitVector) {
+            s.decl_type.base = "SReal";
+            s.decl_type.unsized = {0, mir::UnsizedLeaf::Real};
+            s.decl_type.dims.clear();
+            s.read_dims.clear();
+            changed = true;
+          }
+          mir::for_each_expr(s, retype);
+          visit(s.body);
+        }
+      };
+  visit(program.log_prob);
+  if (!changed) {
     fail("could not replace malformed vector declaration");
     return;
   }
-  const size_t read = malformed.find("FnReadParam (constrain UnitVector)", id);
-  size_t dims = malformed.find("(dims", read);
-  if (!replace_sexp(malformed, dims, "(dims ())")) {
-    fail("could not replace malformed vector read dimensions");
-    return;
-  }
+  const std::string malformed = stanli::portable_writer::write_v2(program);
   stanli::DataMap data;
   data.set_real("m", 0.0);
   data.set_real("s", 1.0);
@@ -308,7 +324,7 @@ void test_malformed_vector_transform() {
 }  // namespace
 
 int main() {
-  const std::string mir = slurp("tests/fixtures/structured_arrays.tmir.sexp");
+  const std::string mir = slurp("tests/fixtures/structured_arrays.mir");
   for (int B = 0; B <= 2; ++B) {
     try {
       test_graph_and_write_array(B, mir);

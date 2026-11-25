@@ -29,7 +29,7 @@ with tempfile.TemporaryDirectory() as directory:
         else:
             os.environ.pop("STANLI_WA_FORCE_INTERP", None)
         for fixture in ("gq_scalar_rng", "gq_rng_stream", "gq_rng_stream_reject"):
-            mir = ROOT / "tests/fixtures" / (fixture + ".tmir.sexp")
+            mir = ROOT / "tests/fixtures" / (fixture + ".mir")
             serial = None
             for threads in (1, 2):
                 reference = subprocess.run([capi, str(mir), str(threads)],

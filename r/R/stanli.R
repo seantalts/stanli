@@ -254,8 +254,10 @@ read_utf8_file <- function(path) {
 #'   for `vector[N]`, `list(1, 2, 3)` for `array[3] vector[1]`, and
 #'   `array(x, 1)` for a `real`. A transposed matrix or a flat vector for a
 #'   matrix is an error, as in CmdStan.
-#' @param mir Transformed MIR text, for a build without the embedded
-#'   compiler. Rarely needed.
+#' @param mir Portable MIR text from stanli's compiler, for example the
+#'   output of `stanli-compile` or Python's `stan_to_mir()`, for a build
+#'   without the embedded compiler. Rarely needed. Stock stanc's MIR is
+#'   refused.
 #' @param threads_per_chain Positive thread count for eligible native `reduce_sum`
 #'   calls. Defaults to 1. The model is compiled for this count, and
 #'   [sample_model()], optimization, the approximate methods and direct
@@ -289,9 +291,7 @@ read_utf8_file <- function(path) {
 #'   reason, when part of the model has no compiled path and runs through
 #'   the much slower MIR interpreter; with `allow_interpreter = FALSE` (or the
 #'   environment variable `STANLI_NO_INTERPRETER` set) that is an error
-#'   instead. Either message is what to include in a bug report. When the
-#'   compiler skips O1 for a very large model, the warning has class
-#'   `stanli_o1_fallback`.
+#'   instead. Either message is what to include in a bug report.
 #' @export
 stanli_model <- function(file = NULL, code = NULL, data = NULL, mir = NULL,
                          seed = 1, threads_per_chain = 1, include_paths = NULL,
@@ -316,7 +316,7 @@ stanli_model <- function(file = NULL, code = NULL, data = NULL, mir = NULL,
       paths <- stan_include_paths(include_paths, source_file)
     # Compile once, to MIR, so that the data can be written from its
     # declarations; the model is then built from that MIR. A runtime
-    # without the embedded compiler uses the stanc binary beside it or the
+    # without the embedded compiler uses stanli-compile beside it or the
     # bundled JavaScript compiler.
     mir <- with_commit_note(if (.Call("stanli_r_has_embedded_stanc"))
       embedded_mir(code, paths, fast_math, source_file, model_only = TRUE) else

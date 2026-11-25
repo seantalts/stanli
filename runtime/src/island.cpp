@@ -184,12 +184,13 @@ bool callable(const Graph& g, const Op& op) {
 // returns false) and the run is left alone. Strict is the vocabulary
 // before elementwise ops had range forms: scalar arithmetic, and vector
 // unaries only for log and exp.
+//
+// An op whose primal CSE shares (cse.cpp) compiles like any other: the island
+// computes each copy again, as the graph without CSE would. A run stops
+// before such an op with a copy past the run (before_shared_past), and
+// reshare_primals mends a group that a cut leaves partly on the graph.
 bool in_vocab(const Graph& g, const Op& op, bool strict = false) {
-  // A cached copy can be expanded back into its original computation inside
-  // the cheaper instruction stream. Keep the survivor graph-visible: copies
-  // outside this region still share its forward value and scratch.
-  if (op.out2 >= 0 || op.dyn_lengths || op.primal_source == op.out)
-    return false;
+  if (op.out2 >= 0 || op.dyn_lengths) return false;
   switch (op.opcode) {
     case OP_ADD:
     case OP_SUB:
@@ -231,8 +232,22 @@ bool in_vocab(const Graph& g, const Op& op, bool strict = false) {
       // every argument as T, which only matches the <false> instantiation.
       if (program_density_id_by_opcode(op.opcode) >= 0)
         return !density_mode(op).propto && scalar_ins(g, op);
+      // A call costs what the graph op costs, and a shared op costs less on
+      // the graph, where each copy skips its forward.
+      if (op.primal_source >= 0) return false;
       return callable(g, op);
   }
+}
+
+// A cut run can put the first op of a group that shares a primal in an
+// island and leave later copies on the graph. The first copy still on the
+// graph then computes the value and the others share it.
+void reshare_primals(Graph& g) {
+  std::unordered_map<int, int> first_on_graph;
+  for (Op& op : g.ops)
+    if (op.primal_source >= 0)
+      op.primal_source =
+          first_on_graph.emplace(op.primal_source, op.out).first->second;
 }
 
 struct Compiler {
@@ -604,6 +619,8 @@ struct Carver {
   std::unordered_set<int> root_set;
   std::unordered_set<int> pinned;
   std::unordered_map<int, size_t> last_use;
+  // Last op index of a copy sharing each shared op's primal, by its slot.
+  std::unordered_map<int, size_t> last_copy;
   std::unordered_map<int, const std::vector<double>*> const_slots;
   std::vector<char> slot_active;
   std::vector<Op> result;
@@ -650,6 +667,12 @@ struct Carver {
     for (const auto& f : fills)
       if (!written.count(f.first)) const_slots[f.first] = &f.second;
 
+    for (size_t u = 0; u < g.ops.size(); ++u) {
+      const Op& op = g.ops[u];
+      if (op.primal_source >= 0 && op.primal_source != op.out)
+        last_copy[op.primal_source] = u;
+    }
+
     // Which slots carry a parameter. The adjoint generator turns this into
     // per-argument masks on the densities it differentiates; slots added
     // below are active until something says otherwise.
@@ -675,9 +698,23 @@ struct Carver {
     return j;
   }
 
+  // The first op in [i, j) whose primal CSE shares (cse.cpp) with a copy
+  // past j, or j. The run stops there, so that op stays on the graph and its
+  // later copies keep sharing its value.
+  size_t before_shared_past(size_t i, size_t j) const {
+    for (size_t u = i; u < j; ++u) {
+      const Op& op = g.ops[u];
+      if (op.primal_source != op.out) continue;
+      const auto it = last_copy.find(op.out);
+      if (it != last_copy.end() && it->second >= j) return u;
+    }
+    return j;
+  }
+
   // The graph's side of the estimate: what its ops move (an in-place
   // element update moves one element, not a vector) plus what each op
-  // costs to run.
+  // costs to run. A copy of a shared primal (cse.cpp) runs only the backward
+  // of the two sweeps, so it costs half.
   int64_t op_graph_cost(size_t u) const {
     const Op& op = g.ops[u];
     int64_t traffic;
@@ -689,7 +726,9 @@ struct Carver {
       traffic = g.slots[op.in[0]].len;
     else
       traffic = g.slots[op.out].len;
-    return traffic + graph_op_cost(op.opcode);
+    const int64_t cost = traffic + graph_op_cost(op.opcode);
+    return op.primal_source >= 0 && op.primal_source != op.out ? cost / 2
+                                                               : cost;
   }
 
   int64_t graph_cost(size_t i, size_t j) const {
@@ -755,6 +794,26 @@ struct Carver {
     return inputs;
   }
 
+  // An instruction whose rule runs once per element (RANGE and the other
+  // ranged opcodes) counts its width; everything else counts 1.
+  template <class Code>
+  static int64_t instr_cost(const Code& code) {
+    int64_t instrs = 0;
+    for (const auto& I : code) instrs += touches_width(I.code) ? I.len : 1;
+    return instrs;
+  }
+
+  // The island's price without its adjoint: the value file, the forward
+  // instructions, each call's overhead and the packing of the live-ins.
+  int64_t forward_cost(const Compiler& cc, const IslandProg& prog,
+                       const std::vector<int>& live_in_slots) const {
+    return kValueRegWeight *
+               ((int64_t)prog.n_regs - cc.n_call_scratch - cc.n_const_regs) +
+           instr_cost(prog.code) +
+           (kOpCost - 1) * 2 * (int64_t)prog.calls.size() +
+           packing_cost(live_in_slots);
+  }
+
   // Compile and price [i, j) without touching the graph. label tags the
   // debug line so a liveness-piece compile does not read as the whole
   // span's own join-vs-leave estimate to a caller counting those lines.
@@ -813,6 +872,19 @@ struct Carver {
           may_forward_adjacent_copy_destination(cc.prog))
         c.destination_source = std::make_unique<IslandProg>(cc.prog);
       compact_island_gated(cc.prog, false);
+      // gen_adjoint keeps every forward instruction and only adds registers,
+      // so the forward part of the price is a lower bound on the whole. A
+      // run whose graph cost is below it stays on the graph without an
+      // adjoint. The debug estimate lines keep the full price.
+      if (!debug_env("STANLI_ISLAND_ALWAYS") &&
+          !debug_env("STANLI_DEBUG_ISLAND") &&
+          forward_cost(cc, cc.prog, cc.live_in_slots) > graph_cost(i, j)) {
+        c.compiled = true;
+        c.graph_cost = graph_cost(i, j);
+        c.prog = std::move(cc.prog);
+        c.live_in_slots = std::move(cc.live_in_slots);
+        return c;
+      }
       c.priced_gen = gen_adjoint(cc.prog);
       cc.prog.native_adj = c.priced_gen && !debug_env("STANLI_NO_NATIVE_ADJ");
       // A failed generated adjoint would make this optimization replay each
@@ -854,23 +926,14 @@ struct Carver {
     // pays the same kOpCost the graph side is charged -- without which a
     // region of nothing but CALLs reads as a win and measures a loss
     // (dugongs_model, 0.63x, the first sweep after the vocabulary widened).
-    const int64_t n_calls = (int64_t)c.prog.calls.size();
+    //
     // A rare program the generator refuses keeps the replay. Preserve its
     // old one-cell-per-value charge rather than treating an absent compact
     // adjoint program as a zero-sized file.
     const int64_t adj_regs = c.prog.adj.empty() ? (int64_t)c.prog.n_regs
                                                 : (int64_t)c.prog.adj.n_regs;
-    // An instruction whose rule runs once per element (RANGE and the other
-    // ranged opcodes) counts its width; everything else counts 1.
-    int64_t instrs = 0;
-    for (const auto& I : c.prog.code)
-      instrs += touches_width(I.code) ? I.len : 1;
-    for (const auto& I : c.prog.adj.code)
-      instrs += touches_width(I.code) ? I.len : 1;
-    c.island_cost = kValueRegWeight * ((int64_t)c.prog.n_regs -
-                                       cc.n_call_scratch - cc.n_const_regs) +
-                    adj_regs + instrs + (kOpCost - 1) * 2 * n_calls +
-                    packing_cost(c.live_in_slots);
+    c.island_cost = forward_cost(cc, c.prog, c.live_in_slots) + adj_regs +
+                    instr_cost(c.prog.adj.code);
     for (const auto& li : c.prog.ins) c.boundary += 2 * li.len;
     for (int o : c.live_outs) c.boundary += kOpCost + 3 * g.slots[o].len;
     if (debug_env("STANLI_ISLAND_ALWAYS")) {
@@ -1322,10 +1385,15 @@ struct Carver {
     const bool liveness_off = debug_env("STANLI_NO_ISLAND_LIVENESS") != nullptr;
     size_t i = 0;
     size_t liveness_until = 0;
+    // Where the run of compilable ops holding i ends. A run cut short by
+    // before_shared_past resumes inside it without growing it again.
+    size_t vocab_end = 0;
     while (i < g.ops.size()) {
       const bool via_liveness = i < liveness_until;
+      if (!via_liveness && i >= vocab_end)
+        vocab_end = grow(i, g.ops.size(), false);
       const size_t j = via_liveness ? grow_liveness(i, liveness_until)
-                                    : grow(i, g.ops.size(), false);
+                                    : before_shared_past(i, vocab_end);
       if ((int64_t)(j - i) < kMinIslandOps) {
         const size_t stop = j > i ? j : i + 1;
         while (i < stop) result.push_back(g.ops[i++]);
@@ -1417,6 +1485,7 @@ struct Carver {
       }
     }
     g.ops = std::move(result);
+    reshare_primals(g);
     return carved;
   }
 };

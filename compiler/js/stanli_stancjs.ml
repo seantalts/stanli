@@ -20,23 +20,16 @@ let compile_portable ~model_only ~fast_math name code includes filename :
           ~include_source:driver_flags.include_source in
       let warnings = include_reader_warnings @ compilation.warnings in
       let printed_filename = driver_flags.filename_in_msg in
-      let returned =
-        match compilation.result with
-        | Ok encoded ->
-            wrap_result ?printed_filename ~code ~color_output ~warnings
-              (Ok encoded)
-        | Error (Stanli_pipeline.Frontend_error error) ->
-            wrap_result ?printed_filename ~code ~color_output ~warnings
-              (Error error)
-        | Error (Stanli_pipeline.Internal_error message)
-         |Error (Stanli_pipeline.Unsupported message) ->
-            wrap_error ?printed_filename ~code ~color_output ~warnings message
-      in
-      Js.Unsafe.set returned (Js.string "o1_fallback")
-        ( match Stanli_pipeline.o1_fallback compilation with
-        | Some message -> Js.Unsafe.inject (Js.string message)
-        | None -> Js.Unsafe.inject Js.null );
-      returned
+      match compilation.result with
+      | Ok encoded ->
+          wrap_result ?printed_filename ~code ~color_output ~warnings
+            (Ok encoded)
+      | Error (Stanli_pipeline.Frontend_error error) ->
+          wrap_result ?printed_filename ~code ~color_output ~warnings
+            (Error error)
+      | Error (Stanli_pipeline.Internal_error message)
+       |Error (Stanli_pipeline.Unsupported message) ->
+          wrap_error ?printed_filename ~code ~color_output ~warnings message
 
 let dump_stan_math_signatures () =
   Js.string @@ Fmt.str "%a" Stan_math_signatures.pretty_print_all_math_sigs ()

@@ -105,7 +105,7 @@ int main() {
   expect_true("force interpreted write_array environment",
               test_setenv("STANLI_WA_FORCE_INTERP", "1", 1) == 0);
   CompiledModel cm =
-      compile_model(slurp("tests/fixtures/algebra.tmir.sexp"),
+      compile_model(slurp("tests/fixtures/algebra.mir"),
                     DataMap::from_json_file("tests/fixtures/algebra.json"));
   expect_true("clear interpreted write_array environment",
               test_unsetenv("STANLI_WA_FORCE_INTERP") == 0);

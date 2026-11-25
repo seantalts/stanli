@@ -458,7 +458,7 @@ bool compare_rng(bool interpreted, int mode, int scenario) {
   const char* fixture = reject   ? "gq_rng_stream_reject"
                         : vector ? "gq_rng_stream"
                                  : "gq_scalar_rng";
-  std::ifstream f(std::string("tests/fixtures/") + fixture + ".tmir.sexp");
+  std::ifstream f(std::string("tests/fixtures/") + fixture + ".mir");
   std::ostringstream source;
   source << f.rdbuf();
   if (interpreted)

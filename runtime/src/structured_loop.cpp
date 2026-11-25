@@ -858,12 +858,52 @@ int64_t whole_row_start(const DynamicIndexSpec& p, const KernelCtx& c) {
   return (static_cast<int64_t>(raw) - 1) * width;
 }
 
+// A matrix row or column, m[i] or m[:, j], or a row x[t] of an array of
+// vectors: one runtime Single axis and one All axis, so the cells are
+// start + k * step. As in fixed_scalar_index, prove the descriptor here and
+// check the one selector, or return -1 and leave it to validate_index.
+int64_t strided_run_start(const DynamicIndexSpec& p, const KernelCtx& c,
+                          int64_t* step) {
+  if (p.axes.size() != 2 || c.n_in != 2 ||
+      (p.input_count != 0 && p.input_count != 2) || p.rhs_input != -1)
+    return -1;
+  const auto& inner = p.axes[p.matrix_leaf ? 0 : 1];
+  const auto& outer = p.axes[p.matrix_leaf ? 1 : 0];
+  if (inner.stride != 1 || outer.stride != inner.extent) return -1;
+  const bool single_inner = inner.kind == DynamicIndexSpec::Axis::Single;
+  const auto& s = single_inner ? inner : outer;
+  const auto& a = single_inner ? outer : inner;
+  if (s.kind != DynamicIndexSpec::Axis::Single ||
+      a.kind != DynamicIndexSpec::Axis::All || s.count != 1 ||
+      a.count != a.extent || s.extent < 0 || a.extent < 0 ||
+      s.extent > exact_limit ||
+      (a.extent != 0 && s.extent > exact_limit / a.extent) ||
+      s.count_input_offset >= 0 || s.extent_input_offset >= 0 ||
+      a.count_input_offset >= 0 || a.extent_input_offset >= 0 ||
+      s.selector_input != 1 || s.input_offset < 0 ||
+      s.input_offset >= c.in[1].len || p.selected_size != a.extent ||
+      c.out.len != a.extent || c.in[0].len != s.extent * a.extent)
+    return -1;
+  const double raw = c.in[1].data[s.input_offset];
+  if (!std::isfinite(raw) || std::trunc(raw) != raw || raw < 1 ||
+      raw > static_cast<double>(s.extent))
+    index_out_of_range();
+  *step = a.stride;
+  return (static_cast<int64_t>(raw) - 1) * s.stride;
+}
+
 template <class F>
 void index_positions(const DynamicIndexSpec& p, const KernelCtx& c, bool update,
                      F&& f) {
   const int64_t fixed = fixed_scalar_index(p, c, update);
   if (fixed >= 0) {
     f(0, fixed);
+    return;
+  }
+  int64_t step = 0;
+  const int64_t start = update ? -1 : strided_run_start(p, c, &step);
+  if (start >= 0) {
+    for (int64_t i = 0; i < p.selected_size; ++i) f(i, start + i * step);
     return;
   }
   selected_positions(p, validate_index(p, c, update), f);
@@ -970,6 +1010,13 @@ void index_forward(KernelCtx& c) {
     (void)scalar_index_forward(c);
     return;
   }
+  int64_t step = 0;
+  const int64_t start = strided_run_start(p, c, &step);
+  if (start >= 0) {
+    for (int64_t i = 0; i < p.selected_size; ++i)
+      c.out.data[i] = c.in[0].data[start + i * step];
+    return;
+  }
   const IndexRuntime runtime = validate_index(p, c, false);
   std::fill(c.out.data, c.out.data + c.out.len, 0.0);
   selected_positions(p, runtime, [&](int64_t i, int64_t at) {
@@ -989,6 +1036,13 @@ void index_backward(KernelCtx& c) {
     double* adj = c.in_adj[0].data + row;
     for (int64_t i = 0; i < p.selected_size; ++i)
       adj[i] += c.out_adj_vec.data[i];
+    return;
+  }
+  int64_t step = 0;
+  const int64_t start = strided_run_start(p, c, &step);
+  if (start >= 0) {
+    for (int64_t i = 0; i < p.selected_size; ++i)
+      c.in_adj[0].data[start + i * step] += c.out_adj_vec.data[i];
     return;
   }
   const IndexRuntime runtime = validate_index(p, c, false);
@@ -3426,6 +3480,16 @@ LoopState& require_state(KernelCtx& ctx) {
   return *state;
 }
 }  // namespace
+
+int64_t index_read_positions(const DynamicIndexSpec& spec, const KernelCtx& c,
+                             double* positions, int64_t stride) {
+  int64_t n = 0;
+  index_positions(spec, c, false, [&](int64_t i, int64_t at) {
+    positions[i * stride] = static_cast<double>(at);
+    n = i + 1;
+  });
+  return n;
+}
 
 void StructuredLoop::prepare() {
   initial_size = 0;
