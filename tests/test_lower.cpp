@@ -2102,8 +2102,7 @@ static void test_write_array_shadowed_size() {
   }
 }
 
-// `for (a in av)` over an array of vectors loops size(av) times. The
-// interpreter once used num_elements and indexed past the array's end.
+// `for (a in av)` over an array of vectors loops size(av) times.
 static void test_write_array_foreach_array() {
   using namespace stanli;
   const std::string mir = slurp("tests/fixtures/foreach_array_length.mir");
