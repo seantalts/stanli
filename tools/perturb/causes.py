@@ -7,9 +7,10 @@ Reads SCALING_OUT/scaling.json and DATAVALUES_OUT/datavalues.json, files
 that run.py writes with --stage scaling and --stage datavalues. Each
 finding is given the causes that explain it: a decline reason that is new
 at the larger size or with the changed data, or a switch in how a loop is
-lowered (LOOP, REGION_MAP, ISLAND). A finding with no such cause counts
-under "no new decline". The table ranks the causes by how many models show
-them, so it says which proof condition fails most often as sizes and data
+lowered (LOOP, REGION_MAP, ISLAND). A shape change that only removes a
+decline or a lowering counts under "a decline or lowering went away", and
+a finding with no change in declines at all under "no new decline". The
+table ranks the causes by how many models show them, so it says which proof condition fails most often as sizes and data
 values move.
 """
 from __future__ import annotations
@@ -28,6 +29,7 @@ from corpus_inventory import corpus_cases  # noqa: E402
 STRUCTURAL = ("ops_grow", "prep_superlinear", "program_changes_shape",
               "data_value_changes_program", "failure")
 NONE = "no new decline or lowering switch"
+WENT_AWAY = "a decline or lowering went away"
 # Below this size a lane group is too small to fuse at all, so a change of
 # shape there says little about a proof condition.
 MIN_SHAPE_SIZE = 8
@@ -42,8 +44,10 @@ def scaling_causes(x, f):
     """The causes of one scaling finding."""
     kind = f["kind"]
     if kind == "program_changes_shape":
-        return [c[1:].replace("decline ", "") for c in f["detail"].split("; ")
-                if c.startswith("+")] or [NONE]
+        parts = [c for c in f["detail"].split("; ") if c]
+        added = [c[1:].replace("decline ", "") for c in parts
+                 if c.startswith("+")]
+        return added or [WENT_AWAY if parts else NONE]
     if kind == "failure":
         return ["failure: " + re.sub(r"\d+", "N", f["detail"])[:90]]
     p = last_ok(x["ladders"][f["var"]]["points"])

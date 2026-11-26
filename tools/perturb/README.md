@@ -223,7 +223,9 @@ variant stages.
 decline reason that is new at the larger size or with the changed data,
 or a new region opcode) and ranks the causes by the number of models that
 show them, with the collections and two examples each. Shape changes
-below size 8 are left out. It also counts the size variables that
+below size 8 are left out. A shape change that only removes a decline or a
+lowering is filed under "a decline or lowering went away", so that "no new
+decline or lowering switch" holds only findings with no change in declines. It also counts the size variables that
 scale.py refused, by reason.
 
 ## Known cliffs

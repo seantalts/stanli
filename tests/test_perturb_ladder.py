@@ -4,6 +4,7 @@ import sys
 import unittest
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1] / "tools" / "perturb"))
+import causes  # noqa: E402
 import ladder  # noqa: E402
 import measure  # noqa: E402
 import report  # noqa: E402
@@ -313,6 +314,26 @@ class NewDeclines(unittest.TestCase):
     def test_a_variant_with_more_of_a_known_decline_is_not_unexplained(self):
         rec = {"new_declines": [self.A], "decline_more": {self.A: 5}}
         self.assertFalse(report.unexplained(rec))
+
+
+class Causes(unittest.TestCase):
+    def finding(self, detail):
+        return {"kind": "program_changes_shape", "detail": detail}
+
+    def test_removals_only_are_not_filed_under_no_new_decline(self):
+        got = causes.scaling_causes({}, self.finding("-decline reroll/log_prob: x"))
+        self.assertEqual(got, [causes.WENT_AWAY])
+        self.assertNotEqual(causes.WENT_AWAY, causes.NONE)
+        got = causes.scaling_causes({}, self.finding("-lowering REGION_MAP"))
+        self.assertEqual(got, [causes.WENT_AWAY])
+
+    def test_additions_are_the_causes_even_with_removals(self):
+        got = causes.scaling_causes(
+            {}, self.finding("-lowering LOOP; +decline reroll/log_prob: x"))
+        self.assertEqual(got, ["reroll/log_prob: x"])
+
+    def test_no_change_in_declines_is_no_new_decline(self):
+        self.assertEqual(causes.scaling_causes({}, self.finding("")), [causes.NONE])
 
 
 if __name__ == "__main__":
