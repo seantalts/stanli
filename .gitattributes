@@ -20,3 +20,5 @@ output/rethinking-report/*.csv -text whitespace=cr-at-eol
 harnesses/diagnostics/fixtures/covariance_*.stan -text whitespace=-blank-at-eol,-blank-at-eof
 notes/performance/data/2026-11-23-forward-loop-storage/*.tsv -text whitespace=-blank-at-eol,cr-at-eol
 notes/triage/data/*.log -text whitespace=-blank-at-eol
+# Fuzz inputs are bytes: a line-ending conversion would change them.
+tests/fuzz/corpus/** -text

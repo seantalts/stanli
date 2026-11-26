@@ -1,6 +1,5 @@
 #include <stanli/json_writer.hpp>
-#include <rapidjson/stringbuffer.h>
-#include <rapidjson/writer.h>
+#include "../runtime/src/rapidjson.hpp"
 
 #include <cstdint>
 #include <cstdio>

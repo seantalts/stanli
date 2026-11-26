@@ -743,7 +743,8 @@ void Execution::plan_schedule(FrameTemplate& t) const {
       for (uint32_t r : arrays)
         checks.emplace(
             std::make_pair(-1 - t.refs[r].base,
-                           t.refs[r].offset * 65536 + t.array_at.at(r).second),
+                           int64_t{t.refs[r].offset} * 65536 +
+                               t.array_at.at(r).second),
             r);
     }
     repeated[i] = same;

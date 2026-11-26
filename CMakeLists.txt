@@ -54,11 +54,12 @@ endif()
 #
 # `address,undefined` works too, and is clean: all 51 tests pass with zero
 # runtime errors on Apple clang 17, arm64, with -fno-sanitize-recover
-# below in force. CI runs `address` alone only because that result has not
-# been reproduced on the Linux toolchain, whose UBSan differs -- the two
-# bugs above are both ASan's kind, so the job leads with what it can show
-# working, and adding `,undefined` here is the whole change if someone
-# confirms it there.
+# below in force. CI runs `address,signed-integer-overflow` rather than the
+# whole `undefined` group because the group has not been tried on the
+# Linux toolchain, whose UBSan differs. The one check covers size arithmetic
+# on untrusted input: an `n * k` that wraps lets short arrays pass a length
+# check, which is how the low-rank whitening entry points read out of bounds
+# (#693).
 set(STANLI_SANITIZE "" CACHE STRING
     "Sanitizers to build the tests with, e.g. `address` (empty: none)")
 if(STANLI_SANITIZE)
@@ -69,10 +70,28 @@ if(STANLI_SANITIZE)
   # UndefinedBehaviorSanitizer prints and CARRIES ON by default, so a
   # suite that trips it still exits 0 and CI still goes green. Trap it
   # instead: a check nobody's exit code depends on is the failure this
-  # whole job exists to close.
-  if(STANLI_SANITIZE MATCHES "undefined")
-    add_compile_options(-fno-sanitize-recover=undefined)
+  # whole job exists to close. `all` covers a single check named on its
+  # own, such as signed-integer-overflow, as well as the `undefined`
+  # group; ASan and TSan do not recover either way.
+  add_compile_options(-fno-sanitize-recover=all)
+endif()
+
+# libFuzzer executables for the parsers that read untrusted bytes (the
+# fuzz_* targets below). Every build replays their seed corpora as tests;
+# this option builds the fuzzers themselves and gives the whole runtime
+# libFuzzer's coverage instrumentation. libFuzzer ships with LLVM's Clang
+# only: Apple's Clang and GCC have no runtime for it.
+option(STANLI_FUZZ "Build the libFuzzer targets (LLVM Clang only)" OFF)
+if(STANLI_FUZZ)
+  if(NOT CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
+    message(FATAL_ERROR "STANLI_FUZZ needs LLVM's Clang, not "
+            "${CMAKE_CXX_COMPILER_ID}")
   endif()
+  if(NOT STANLI_SANITIZE MATCHES "address")
+    message(FATAL_ERROR "STANLI_FUZZ needs AddressSanitizer: configure with "
+            "-DSTANLI_SANITIZE=address,signed-integer-overflow")
+  endif()
+  add_compile_options(-fsanitize=fuzzer-no-link)
 endif()
 
 if(MINGW)
@@ -1499,6 +1518,28 @@ if(STANLI_FAST_TEST_TUS)
 endif()
 add_test(NAME test_laplace_capi COMMAND test_laplace_capi
          WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
+
+# Fuzz targets for input that arrives from callers as bytes or sizes: the
+# whitening member of the BridgeStan manifest, the low-rank whitening and
+# sparse-factor arguments, and data JSON. Each one replays its seed corpus
+# under CTest in every build, so the harnesses cannot rot, and a crash input
+# added to tests/fuzz/corpus/ becomes a regression test. STANLI_FUZZ links
+# the same harnesses against libFuzzer.
+foreach(_fuzz manifest lowrank data)
+  add_executable(fuzz_${_fuzz}_replay tests/fuzz/fuzz_${_fuzz}.cpp
+    tests/fuzz/replay_main.cpp $<TARGET_OBJECTS:stanli_tbb_stub>)
+  target_link_libraries(fuzz_${_fuzz}_replay PRIVATE
+                        ${STANLI_TEST_RUNTIME_TARGET})
+  add_test(NAME fuzz_${_fuzz}_corpus
+           COMMAND fuzz_${_fuzz}_replay tests/fuzz/corpus/${_fuzz}
+           WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
+  if(STANLI_FUZZ)
+    add_executable(fuzz_${_fuzz} tests/fuzz/fuzz_${_fuzz}.cpp
+      $<TARGET_OBJECTS:stanli_tbb_stub>)
+    target_link_libraries(fuzz_${_fuzz} PRIVATE stanli)
+    target_link_options(fuzz_${_fuzz} PRIVATE -fsanitize=fuzzer)
+  endif()
+endforeach()
 
 # write_array lowered beside log_prob, through the same boundary.
 add_executable(test_wa_parallel_abi tests/test_wa_parallel_abi.cpp)

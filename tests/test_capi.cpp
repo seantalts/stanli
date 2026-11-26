@@ -418,6 +418,53 @@ void expect_compiled_scalar_rng() {
   stanli_model_free(model);
 }
 
+// n * k wraps to a few elements in int64_t arithmetic; buffers of that
+// wrapped size must not pass for an n by k low-rank factor.
+void expect_whiten_width_overflow_refused() {
+  const std::string mir = slurp("tests/fixtures/es.mir");
+  const std::string data = slurp("tests/fixtures/eight_schools.json");
+  char err[8192]{};
+  stanli_model* model = stanli_model_new_with_opts(mir.c_str(), data.c_str(),
+                                                   nullptr, err, sizeof err);
+  if (model == nullptr) {
+    ++failures;
+    std::printf("FAIL C API whiten construction: %s\n", err);
+    return;
+  }
+  const int64_t n = stanli_n_unconstrained(model);
+  const int64_t k = (int64_t)(UINT64_MAX / (uint64_t)n + 1);
+  std::vector<double> ones((size_t)n, 1.0);
+  std::vector<int64_t> perm((size_t)n), col_ptr((size_t)n + 1);
+  for (int64_t i = 0; i <= n; ++i) {
+    if (i < n) perm[(size_t)i] = i;
+    col_ptr[(size_t)i] = i;
+  }
+  err[0] = '\0';
+  stanli_model* w = stanli_model_whiten_lowrank(
+      model, ones.data(), n, perm.data(), col_ptr.data(), perm.data(),
+      ones.data(), n, k, ones.data(), ones.data(), ones.data(), err,
+      sizeof err);
+  expect_true(std::string("an overflowing whiten width is refused: ") + err,
+              w == nullptr && std::strstr(err, "too large") != nullptr);
+  stanli_model_free(w);
+  stanli_model_free(model);
+
+  // With n = 1, n * k fits and only k * k overflows.
+  const int64_t one_col[] = {0, 1}, one_row[] = {0};
+  const double one_value[] = {2.0}, u[] = {0.5};
+  stanli_sparse_factor* f = stanli_sparse_factor_new(
+      1, one_col, one_row, one_value, nullptr, err, sizeof err);
+  expect_true(std::string("a 1 by 1 sparse factor: ") + err, f != nullptr);
+  if (f == nullptr) return;
+  double c = 0, b = 0, wk = 0;
+  err[0] = '\0';
+  const int rc = stanli_sparse_factor_lowrank(f, int64_t{1} << 32, u, &c, &b,
+                                              &wk, err, sizeof err);
+  expect_true(std::string("an overflowing sparse width is refused: ") + err,
+              rc != 0 && std::strstr(err, "too large") != nullptr);
+  stanli_sparse_factor_free(f);
+}
+
 // Pathfinder across the ABI: draws, the per-draw log densities, the
 // summary block, and the per-iterate callback that lets a caller animate
 // the climb. The statistics are test_pathfinder's job; what this pins is
@@ -2831,6 +2878,37 @@ void test_build_id_names_the_abi() {
               id.rfind(want, 0) == 0);
 }
 
+// Inf with an exponent fails an assertion inside rapidjson. Each reader of
+// caller JSON must refuse it with a parse error, in every build.
+void test_inf_exponent_rejected() {
+  const std::string mir = slurp("tests/fixtures/conj.mir");
+  for (const char* bad :
+       {"{\"y\": Infe1}", "{\"y\": -Infe0}", "{\"a\": -Infe0.0]}"}) {
+    char err[8192]{};
+    stanli_model* model =
+        stanli_model_new_with_opts(mir.c_str(), bad, nullptr, err, sizeof err);
+    expect_true(std::string("model data ") + bad + " refused: " + err,
+                model == nullptr &&
+                    std::strstr(err, "Error in JSON parsing") != nullptr);
+    stanli_model_free(model);
+    err[0] = '\0';
+    char* payload =
+        stanli_bridgestan_data(bad, mir.c_str(), "conj", err, sizeof err);
+    expect_true(std::string("bridgestan payload ") + bad + " refused: " + err,
+                payload == nullptr &&
+                    std::strstr(err, "Error in JSON parsing") != nullptr);
+    stanli_string_free(payload);
+    char* bs_err = nullptr;
+    bs_model* bs = bs_model_construct(bad, 1, &bs_err);
+    expect_true(std::string("bs_model_construct ") + bad +
+                    " refused: " + (bs_err ? bs_err : "(no message)"),
+                bs == nullptr && bs_err != nullptr &&
+                    std::strstr(bs_err, "Error in JSON parsing") != nullptr);
+    bs_model_destruct(bs);
+    bs_free_error_msg(bs_err);
+  }
+}
+
 void test_bridgestan_data() {
   const std::string mir = slurp("tests/fixtures/conj.mir");
   const std::string conj = slurp("tests/fixtures/conj.json");
@@ -4446,7 +4524,8 @@ generated quantities {
     std::vector<double> want, got;
     const int want_status = call(want);
     int got_status = -1;
-    on_new_thread([&] { got_status = call(got); });
+    // C++17 lambdas cannot capture a structured binding by name.
+    on_new_thread([&, &call = call] { got_status = call(got); });
     expect_true(std::string(name) + " on a new thread matches the main thread",
                 want_status == 0 && got_status == 0 && same_bits(want, got));
   }
@@ -4507,7 +4586,8 @@ generated quantities {
     std::vector<double> want, got;
     const int want_status = call(want);
     int got_status = -1;
-    on_new_thread([&] { got_status = call(got); });
+    // C++17 lambdas cannot capture a structured binding by name.
+    on_new_thread([&, &call = call] { got_status = call(got); });
     expect_true(std::string(name) + " on a new thread matches the main thread",
                 want_status == 0 && got_status == 0 && same_bits(want, got));
   }
@@ -4598,6 +4678,7 @@ int main() {
   test_build_id_names_the_abi();
   test_variables_and_layouts();
   test_sample_setup_error();
+  test_inf_exponent_rejected();
   test_bridgestan_data();
   test_named_source_and_warnings();
   test_tuple_names();
@@ -4626,6 +4707,7 @@ int main() {
   expect_callback_print_each_evaluation();
   expect_parameterless_unconstrain();
   expect_parameterless_sampling();
+  expect_whiten_width_overflow_refused();
 
   expect_names("tests/fixtures/wanames.mir", "{}",
                {

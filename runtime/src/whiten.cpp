@@ -2,6 +2,8 @@
 
 #include <stanli/optable.hpp>
 
+#include "checked_size.hpp"
+
 #include <algorithm>
 #include <cmath>
 #include <stdexcept>
@@ -172,10 +174,12 @@ std::shared_ptr<const WhitenSpec> make_whiten_spec(
     if (k < 0) throw std::invalid_argument("the low-rank width is negative");
     if (k > 0 && (!b || !w))
       throw std::invalid_argument("whiten got a null low-rank array");
+    const int64_t nk = checked_size(
+        n, k, "the low-rank width k is too large for n parameters");
     spec->k = k;
     spec->c.assign(c, c + n);
-    spec->cb.assign(b, b + (k > 0 ? n * k : 0));
-    spec->cw.assign(w, w + (k > 0 ? n * k : 0));
+    spec->cb.assign(b, b + nk);
+    spec->cw.assign(w, w + nk);
     for (double v : spec->c)
       if (!(v != 0.0) || !std::isfinite(v))
         throw std::invalid_argument("c has a zero or non-finite entry");
