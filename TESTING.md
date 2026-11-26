@@ -709,6 +709,7 @@ tests. To run the post-merge jobs on a branch, use
 | [cross-path matrix](#comparing-stanlis-execution-paths) | every fixture at 3 points and the 22 cogmod models at 13, under 19 execution configurations | each other, in every bit, with a ledger | PR on Linux x86-64, in the build with developer switches. Post-merge under AddressSanitizer and on Windows ARM64 | transformed data, which has one engine, and an error that every path shares |
 | [posteriordb cross-path](#comparing-stanlis-execution-paths) | the posteriordb models under the same configurations plus one pass-off set | each other, within 1e-11 | by hand after pass changes | an error present in both cells |
 | [compiler producer parity](#stan-language-coverage) | compact MIR bytes from the native, JavaScript and Windows (`stanli-compile.exe`) compilers | each other, byte for byte | PR | numerical behavior |
+| [interpreter oracle](#the-interpreter-oracle) | every fixture, lit case and regression model at 5 points: log density, gradient at 2 of them, `write_array`, printed output and errors | the MIR interpreter on `--passes none` MIR, with a ledger | PR (CTest) | solver models below the solver's tolerance, gradients of models with more than 200 parameters, and a bug that the interpreter shares |
 | Rethinking regeneration | the 62 Rethinking fixtures, regenerated from the book's code with pinned `rethinking` | the checked-in files, byte for byte | nightly, and pushes to `main` that touch them | |
 
 #### Samplers and algorithms
@@ -855,6 +856,50 @@ in a build that has them.
 After you change a pass, run `stanli_check --cross --cross-corpus
 --cross-rel-tol 1e-11` over posteriordb by hand.
 [`runtime/src/OPTIMIZATIONS.md`](runtime/src/OPTIMIZATIONS.md) has the steps.
+
+### The interpreter oracle
+
+`stanli_check --interp` runs a whole model through the MIR interpreter on
+doubles. It takes the gradient by finite differences and prints an error
+estimate for each component on a `GRAD_ERR` line. The interpreter reads
+the MIR directly and does not use the graph passes or kernels of the
+compiled path.
+
+[`tools/check_interp.py`](tools/check_interp.py) runs each model in
+`tests/fixtures`, `tests/lit` and `tests/regressions` both ways. The
+compiled path reads the shipping MIR and the interpreter reads the
+`--passes none` MIR, so a wrong stanc3 pass also shows. It compares the log
+density, the `write_array` row, printed output and error messages at five
+points, and the gradient at points 3 and 4. Values agree within 1e-10
+relative. A gradient component agrees within 10 times its error estimate
+plus 1e-6 relative.
+
+[`tests/interp_ledger.json`](tests/interp_ledger.json) lists every model
+that does not agree, with its state and a cause. Most entries are models
+that the compiled path refuses while it prepares them, and ODE models that
+differ by the solver's tolerance. A model whose state differs from its
+entry fails the test. This is true in both directions, so
+an entry for a model that now agrees must be removed. After an intended
+change, run `python3 tools/check_interp.py --update-ledger` and replace each
+`UNTRIAGED` cause with the reason.
+
+The CTest entry is `test_interp_oracle`. It takes about 15 seconds with 4
+jobs. To run another corpus by hand, pass `--out DIR` and `--corpus` with
+`posteriordb`, `brms`, `stanc3_good`, `dir:PATH` or one of the others that
+`--help` lists.
+
+The oracle has limits:
+
+- For models with a solver (ODE, DAE, algebra, `integrate_1d`), the solver
+  on doubles and the solver on vars differ by about the solver's tolerance.
+  Such a model gets no gradient comparison, and its lp difference is
+  ledgered.
+- A model with more than 200 free parameters gets no gradient comparison.
+- A finite difference cannot see a gradient error much smaller than about
+  1e-5 relative. A model where Stan Math's derivative differs from the
+  finite difference of its value is ledgered as `gradient_only`.
+- The interpreter is slow on large models: ctsem takes about 90 seconds, so
+  such models only run by hand.
 
 ### Fast mode
 
