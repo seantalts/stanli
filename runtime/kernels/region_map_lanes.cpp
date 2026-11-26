@@ -16,6 +16,7 @@
 #include <cstring>
 #include <map>
 #include <mutex>
+#include <optional>
 #include <memory>
 #include <stdexcept>
 #include <set>
@@ -1376,6 +1377,21 @@ class Analysis {
 using Mask = uint64_t;
 constexpr int kTile = kRegionMapTile;
 
+// A buffer of n values on the stack, or on the heap when n is large, so that
+// an evaluation of an ordinary body allocates nothing.
+template <typename T, size_t kStack = 256>
+class SmallBuffer {
+ public:
+  explicit SmallBuffer(size_t n) {
+    if (n > kStack) heap_.resize(n);
+  }
+  T* data() { return heap_.empty() ? local_ : heap_.data(); }
+
+ private:
+  T local_[kStack];
+  std::vector<T> heap_;
+};
+
 class TileState {
  public:
   TileState(const RegionMapProg& p, double* reg, double* fwd, int lanes)
@@ -1690,12 +1706,12 @@ void lane_instruction(const RegionMapProg& p, const TileState& t, int pc,
       break;
     case Program::LSE_RANGE: {
       double* const d = t.slot(I.dst);
-      std::vector<double> terms((size_t)I.len);
+      SmallBuffer<double> buffer((size_t)I.len);
+      double* const terms = buffer.data();
       t.each(m, [&](int l) {
-        for (int32_t k = 0; k < I.len; ++k)
-          terms[(size_t)k] = t.value(I.a + k, l);
+        for (int32_t k = 0; k < I.len; ++k) terms[k] = t.value(I.a + k, l);
         d[l] = stan::math::log_sum_exp(
-            Eigen::Map<const Eigen::VectorXd>(terms.data(), I.len));
+            Eigen::Map<const Eigen::VectorXd>(terms, I.len));
       });
       break;
     }
@@ -1845,10 +1861,9 @@ void tally_block(const RegionMapProg& p, const RegionMapLanePlan::Block& block,
 
 void lane_tile_forward(const RegionMapProg& p, const TileState& t,
                        double* window, KernelCtx& call_ctx, EvalState* state,
-                       std::vector<Mask>& entry, double* seg_masks,
-                       RegionMapTally* tally) {
+                       Mask* entry, double* seg_masks, RegionMapTally* tally) {
   const auto& blocks = p.lanes.blocks;
-  entry.assign(blocks.size() + 1, 0);
+  std::fill_n(entry, blocks.size() + 1, Mask{0});
   entry[0] = t.full();
   for (size_t b = 0; b < blocks.size(); ++b) {
     const Mask m = entry[b];
@@ -2725,20 +2740,20 @@ void region_map_lanes_forward(const RegionMapProg& p, KernelCtx& ctx,
   double* window = region + plan.storage;
   double* reg = ctx.scratch;
   KernelCtx call_ctx;
-  std::vector<Mask> entry;
-  entry.reserve(plan.blocks.size() + 1);
+  SmallBuffer<Mask> entry(plan.blocks.size() + 1);
   double total = 0.0;
   CompensatedSum compensated;
   const int target = p.out_regs[0];
-  RegionMapTally tally;
-  RegionMapTally* counting = plan.profile ? &tally : nullptr;
+  std::optional<RegionMapTally> tally;
+  if (plan.profile) tally.emplace();
+  RegionMapTally* counting = tally ? &*tally : nullptr;
   for (int tile = 0; tile < plan.tiles; ++tile) {
     const int64_t first = (int64_t)tile * kTile;
     const int lanes = (int)std::min<int64_t>(kTile, p.count - first);
     double* base = tile_base(plan, tiles, tile);
     TileState t = seeded_tile(p, reg, base, first, lanes);
     t.set_proven(proven);
-    lane_tile_forward(p, t, window, call_ctx, ctx.eval_state, entry,
+    lane_tile_forward(p, t, window, call_ctx, ctx.eval_state, entry.data(),
                       segment_masks(plan, region, tile), counting);
     const double* out = t.slot(target);
     for (int l = 0; l < lanes; ++l) total += out[l];
@@ -2746,9 +2761,9 @@ void region_map_lanes_forward(const RegionMapProg& p, KernelCtx& ctx,
       for (int l = 0; l < lanes; ++l) compensated.add(out[l]);
   }
   if (counting) {
-    tally.evaluations = 1;
-    tally.tiles = (uint64_t)plan.tiles;
-    merge_tally(*plan.profile, tally);
+    counting->evaluations = 1;
+    counting->tiles = (uint64_t)plan.tiles;
+    merge_tally(*plan.profile, *counting);
   }
   ctx.out.data[0] =
       p.compensated && p.count > kPlainSumMax ? compensated.result() : total;
@@ -2766,11 +2781,11 @@ void region_map_lanes_backward(const RegionMapProg& p, KernelCtx& ctx,
   double* window = region + plan.storage;
   double* log = window + plan.max_window;
   KernelCtx call_ctx;
-  std::vector<Mask> entry;
-  entry.reserve(plan.blocks.size() + 1);
+  SmallBuffer<Mask> entry(plan.blocks.size() + 1);
   const bool verify = p.check_clean;
-  RegionMapTally tally;
-  RegionMapTally* counting = plan.profile ? &tally : nullptr;
+  std::optional<RegionMapTally> tally;
+  if (plan.profile) tally.emplace();
+  RegionMapTally* counting = tally ? &*tally : nullptr;
   struct DirtyOnThrow {
     double* tile;
     int cells;
@@ -2795,7 +2810,7 @@ void region_map_lanes_backward(const RegionMapProg& p, KernelCtx& ctx,
     // The forward of this evaluation checked every selector.
     fwd.set_proven(true);
     if (plan.tile_recompute)
-      lane_tile_forward(p, fwd, window, call_ctx, ctx.eval_state, entry,
+      lane_tile_forward(p, fwd, window, call_ctx, ctx.eval_state, entry.data(),
                         segment_masks(plan, region, tile), counting);
     AdjointTile t(p, fwd, adj_tile, adj, log);
     const auto seed_cell = t.cell(target);
@@ -2847,7 +2862,7 @@ void region_map_lanes_backward(const RegionMapProg& p, KernelCtx& ctx,
     }
   }
   dirty.swept = true;
-  if (counting) merge_tally(*plan.profile, tally);
+  if (counting) merge_tally(*plan.profile, *counting);
 }
 
 void plan_region_map_lanes(RegionMapProg& p, bool enabled,

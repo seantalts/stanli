@@ -28,6 +28,8 @@
 #include <set>
 #include <sstream>
 #include <string>
+#include <atomic>
+#include <new>
 #include <thread>
 #include <utility>
 #include <vector>
@@ -98,6 +100,17 @@ static bool same_graph_structure(const stanli::CompiledModel& a,
   }
   return true;
 }
+
+// Counts heap allocations, so that a test can check that a warmed
+// evaluation allocates nothing.
+static std::atomic<uint64_t> heap_allocations{0};
+void* operator new(size_t n) {
+  heap_allocations.fetch_add(1, std::memory_order_relaxed);
+  if (void* p = std::malloc(n ? n : 1)) return p;
+  throw std::bad_alloc();
+}
+void operator delete(void* p) noexcept { std::free(p); }
+void operator delete(void* p, size_t) noexcept { std::free(p); }
 
 namespace region_map_test {
 
@@ -2316,6 +2329,27 @@ void test_lane_counters_per_thread() {
             " tile calls)");
 }
 
+// A warmed lane-form gradient allocates nothing: the per-evaluation state
+// (block masks, profile tallies) lives on the stack or in the scratch.
+void test_lane_evaluation_allocates_nothing() {
+  for (const char* stem : {"region_map_branch", "region_map_logic",
+                           "region_map_density", "region_map_lse"}) {
+    CompiledModel cm = compile_with(stem, 200);
+    check(map_payload(cm).lanes.active, std::string(stem) + ": lanes run");
+    Executor ex(cm.graph);
+    cm.bind(ex);
+    const Params point = spread_point(2, (size_t)ex.n_params());
+    std::vector<double> grad(point.size());
+    for (size_t i = 0; i < point.size(); ++i) ex.params_data()[i] = point[i];
+    ex.gradient(grad.data());
+    const uint64_t before = heap_allocations.load();
+    for (int k = 0; k < 3; ++k) ex.gradient(grad.data());
+    const uint64_t used = heap_allocations.load() - before;
+    check(used == 0, std::string(stem) + ": a warmed gradient allocates " +
+                         std::to_string(used) + " times in 3 gradients");
+  }
+}
+
 void test_out_register_is_not_hoisted() {
   const std::string minimal =
       "parameters { real p; }\n"
@@ -3718,6 +3752,7 @@ int main() {
   test_lane_index_adjoint_sites();
   test_lane_affine_index_reads();
   test_lane_counters_per_thread();
+  test_lane_evaluation_allocates_nothing();
 #endif
   test_mode_policy();
   test_recompute_visits_taken_blocks();
