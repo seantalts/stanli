@@ -2985,8 +2985,10 @@ uint16_t accelerated_opcode(const Op& op, const Slot* slots) {
         return OP_GEMM_BLAS;
       break;
     case OP_MATVEC:
-      if (op.n_idata >= 2 && op.idata[0] >= t.gemv_min_rows &&
-          op.idata[1] >= t.gemv_min_cols)
+      if (op.n_idata >= 2 &&
+          ((op.idata[0] >= t.gemv_min_rows && op.idata[1] >= t.gemv_min_cols) ||
+           (op.idata[0] >= t.gemv_tall_min_rows &&
+            op.idata[1] >= t.gemv_tall_min_cols)))
         return OP_MATVEC_BLAS;
       break;
     case OP_CHOLESKY:

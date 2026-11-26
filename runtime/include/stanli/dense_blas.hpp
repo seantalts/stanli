@@ -49,9 +49,11 @@ namespace blas {
 // The smallest sizes at which each accelerated kernel is used. See
 // runtime/src/dense_blas.cpp for the measurements behind them.
 struct Thresholds {
-  int64_t gemm_min_dim;   // smallest of rows, inner and columns
-  int64_t gemv_min_rows;  // matrix-vector product: rows and columns
-  int64_t gemv_min_cols;
+  int64_t gemm_min_dim;  // smallest of rows, inner and columns
+  // A matrix-vector product with at least these rows and columns, or at
+  // least the tall pair.
+  int64_t gemv_min_rows, gemv_min_cols;
+  int64_t gemv_tall_min_rows, gemv_tall_min_cols;
   int64_t cholesky_min_n;     // factor and adjoint
   int64_t tri_inverse_min_n;  // multi_normal_cholesky's inverse of L
 };

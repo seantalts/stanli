@@ -217,9 +217,10 @@ void thresholds_select_opcodes() {
 #ifdef STANLI_ACCELERATE
   const blas::Thresholds& t = blas::thresholds();
   const int g = (int)t.gemm_min_dim, c = (int)t.cholesky_min_n,
-            m = (int)t.tri_inverse_min_n;
+            m = (int)t.tri_inverse_min_n, vr = (int)t.gemv_min_rows,
+            vc = (int)t.gemv_min_cols;
 #else
-  const int g = 64, c = 128, m = 64;
+  const int g = 24, c = 32, m = 32, vr = 256, vc = 64;
 #endif
   const bool on = std::string(blas_provider()) != "none";
   const auto expect_op = [&](const std::string& what, uint16_t got,
@@ -236,6 +237,13 @@ void thresholds_select_opcodes() {
             opcode_after_pass(OP_GEMM, {g, g, g},
                               {int64_t(g) * g, int64_t(g) * g}, int64_t(g) * g),
             OP_GEMM_BLAS, OP_GEMM);
+  expect_op("matvec below threshold",
+            opcode_after_pass(OP_MATVEC, {vr, vc - 1},
+                              {int64_t(vr) * (vc - 1), vc - 1}, vr),
+            OP_MATVEC, OP_MATVEC);
+  expect_op("matvec at threshold",
+            opcode_after_pass(OP_MATVEC, {vr, vc}, {int64_t(vr) * vc, vc}, vr),
+            OP_MATVEC_BLAS, OP_MATVEC);
   expect_op("cholesky below threshold",
             opcode_after_pass(OP_CHOLESKY, {c - 1}, {int64_t(c - 1) * (c - 1)},
                               int64_t(c - 1) * (c - 1)),
@@ -275,7 +283,7 @@ void accelerated_kernels_agree() {
     check_close("gemm adjoint of A", fast.adj0, plain.adj0, 1e-14);
     check_close("gemm adjoint of B", fast.adj1, plain.adj1, 1e-14);
   }
-  if (t.gemv_min_rows < (int64_t(1) << 20)) {
+  {
     const Mat x = seed(t.gemv_min_rows, t.gemv_min_cols, 0.4);
     const Vec b = seed(t.gemv_min_cols, 1, 1.1);
     const Run plain = run_matvec(OP_MATVEC, x, b);

@@ -58,15 +58,20 @@ void count() { g_calls.fetch_add(1, std::memory_order_relaxed); }
 
 }  // namespace
 
-// Provisional, from single-operation timings of Eigen against Accelerate.
-// The matrix-vector product stays on Eigen at every size for now.
+// The smallest sizes at which the accelerated kernel was faster than the
+// plain one, forward plus backward on one thread, at every measured size and
+// shape above them, with a step of margin where the sweep showed a dip
+// (tools/bench_dense_blas;
+// notes/performance/2026-11-26-accelerate-thresholds.md).
 const Thresholds& thresholds() {
   static const Thresholds t{
-      /*gemm_min_dim=*/64,
-      /*gemv_min_rows=*/1 << 30,
-      /*gemv_min_cols=*/1 << 30,
-      /*cholesky_min_n=*/128,
-      /*tri_inverse_min_n=*/64,
+      /*gemm_min_dim=*/24,
+      /*gemv_min_rows=*/256,
+      /*gemv_min_cols=*/64,
+      /*gemv_tall_min_rows=*/10000,
+      /*gemv_tall_min_cols=*/10,
+      /*cholesky_min_n=*/32,
+      /*tri_inverse_min_n=*/32,
   };
   return t;
 }
