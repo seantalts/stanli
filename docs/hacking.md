@@ -217,7 +217,10 @@ ones through every stage, op list and register programs included.
 The tools you will reach for most:
 
 - [`stanli_check`](../tools/stanli_check.cpp): one deterministic
-  gradient evaluation, printed.
+  gradient evaluation, printed. With `--interp` it runs the whole model
+  through the MIR interpreter instead, with a finite-difference gradient;
+  [`tools/check_interp.py`](../tools/check_interp.py) compares the two
+  ([the interpreter oracle](../TESTING.md#the-interpreter-oracle)).
 - [`stanli_run`](../tools/stanli_run.cpp): a full sampling run,
   CmdStan-style CSV out.
 - [`bench_grad`](../tools/bench_grad.cpp): gradient/forward timing. Pass

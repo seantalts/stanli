@@ -120,6 +120,14 @@ class MirInterp {
   // Where `target +=` adds in write_array, which accumulates from 0 like
   // CmdStan's. Without one the statement is refused.
   void set_target_sink(T* sum) { target_sink_ = sum; }
+  // Where `jacobian +=` and the callable `_jacobian` transforms add, in
+  // user functions too, for a caller that evaluates the log density with
+  // the Jacobian. Without one they add nothing, as in CmdStan's
+  // write_array.
+  void set_jacobian_sink(T* sum) { jacobian_sink_ = sum; }
+  // Where every target and Jacobian term adds its absolute value, so that a
+  // caller can tell how much rounding error the sum can carry.
+  void set_magnitude_sink(double* sum) { magnitude_sink_ = sum; }
 
   // The caller's propto__ for this scope. Lowering sets it on entering a
   // user function body that it inlines.
@@ -129,6 +137,10 @@ class MirInterp {
   // CmdStan may use vars, and the terms propto drops depend on which. So a
   // density that drops terms refuses rather than guess.
   void refuse_propto_densities() { refuse_propto_ = true; }
+  // Decide which terms propto drops from the types CmdStan's log density
+  // gives each argument, as the var instantiation does, while computing on
+  // doubles.
+  void set_model_types(bool on) { model_types_ = on; }
 
   // A host may bind a typed value directly and skip stanc's generated input
   // declaration/rebuild statements. Keep the declaration-owned geometry
@@ -492,6 +504,13 @@ class MirInterp {
             fail("full-span assignment needs a container", st.raw);
           if (assign_shape_.count(st.lhs))
             check_assign_size(st.lhs, en->dims, v);
+          // stan::model::assign checks sizes only against a destination
+          // with elements; an empty one takes the right-hand side's size.
+          if (en->r.empty() && en->i.empty() && !v.r.empty()) {
+            if (v.dims.empty()) v.dims = {static_cast<int64_t>(v.r.size())};
+            en->dims = v.dims;
+            en->r.resize(v.r.size());
+          }
           if (v.r.size() != en->r.size())
             fail("full-span assignment size mismatch", st.raw);
           if (v.dims != en->dims)
@@ -541,6 +560,9 @@ class MirInterp {
             int64_t rest = 1;
             for (size_t d = prefix_len; d < en->dims.size(); ++d)
               rest *= en->dims[d];
+            check_prefix_assign_size(st.lhs, prefix_len,
+                                     st.lhs_idx.size() > prefix_len, en->dims,
+                                     v);
             if (static_cast<int64_t>(v.r.size()) != rest)
               fail("indexed assignment size mismatch", st.raw);
             for (int64_t k = 0; k < rest; ++k) {
@@ -640,6 +662,14 @@ class MirInterp {
               fail(std::string("multi-index assignment: ") + error.what(),
                    st.raw);
             }
+            if (st.lhs_idx.size() == 1 && (int64_t)v.r.size() != map.count &&
+                st.lhs_idx[0].kind != mir::Expr::IndexSingle &&
+                st.lhs_idx[0].kind != mir::Expr::IndexAll)
+              throw std::invalid_argument(selected_assign_size_message(
+                  st.lhs, st.lhs_idx[0].kind == mir::Expr::IndexBetween,
+                  st.lhs_idx[0].kind == mir::Expr::IndexUpfrom,
+                  assigns_to_array(st.lhs), map.count,
+                  static_cast<int64_t>(v.r.size())));
             if ((int64_t)v.r.size() != map.count ||
                 (!map.dimensions.empty() && v.dims != map.dimensions))
               fail("multi-index assignment size mismatch", st.raw);
@@ -778,20 +808,23 @@ class MirInterp {
       case mir::Stmt::TargetPE:
         if (!target_sink_)
           fail("target += is not available in " + where_, st.raw);
-        // write_array runs without the Jacobian.
-        if (st.jacobian) return;
+        if (st.jacobian && !jacobian_sink_) return;
         {
+          T* const sink = st.jacobian ? jacobian_sink_ : target_sink_;
           const Value terms = eval(st.target);
+          if (magnitude_sink_)
+            for (const T& term : terms.r)
+              *magnitude_sink_ += std::abs(val(term));
           if constexpr (std::is_same_v<T, double>) {
             // A long container adds its compensated sum, as OP_SUM_VEC does
             // on the graph and in the register program.
             const auto n = static_cast<int64_t>(terms.r.size());
             if (n > kPlainSumMax) {
-              *target_sink_ += compensated_sum(terms.r.data(), n);
+              *sink += compensated_sum(terms.r.data(), n);
               return;
             }
           }
-          for (const T& term : terms.r) *target_sink_ += term;
+          for (const T& term : terms.r) *sink += term;
         }
         return;
       default:
@@ -902,8 +935,7 @@ class MirInterp {
         argument.shape = function_argument_shape(e.args[k], values[k]);
         argument.scalar = e.args[k].unsized.depth == 0;
         argument.data_only = e.args[k].data_only;
-        if constexpr (!std::is_same_v<T, double>)
-          argument.active = autodiff(e.args[k]);
+        argument.active = autodiff(e.args[k]);
         if (spec.evaluation == DensityEvaluationPolicy::AllInteger ||
             k < static_cast<size_t>(spec.integer_args)) {
           argument.integers = ints(k);
@@ -982,8 +1014,7 @@ class MirInterp {
     for (int k = 0; k < nargs; ++k) {
       if ((int64_t)values[k].r.size() != lanes)
         fail(e.name + ": arguments differ in length", e.raw);
-      if constexpr (!std::is_same_v<T, double>)
-        if (autodiff(e.args[k])) active |= 1 << k;
+      if (autodiff(e.args[k])) active |= 1 << k;
       packed.insert(packed.end(), values[k].r.begin(), values[k].r.end());
     }
     const T precision = form.has_precision ? values[(size_t)nargs].r.at(0)
@@ -1169,8 +1200,9 @@ class MirInterp {
         spec.opcode == OP_POW
             ? mir::pow_zero_base_law(e.args[0], e.args[1], !e.args[1].data_only)
             : 0;
-    if (!std::is_same_v<T, double> && spec.opcode == OP_VARIANCE &&
-        e.args[0].unsized.depth == 1 && !e.args[0].data_only)
+    if ((!std::is_same_v<T, double> || model_types_) &&
+        spec.opcode == OP_VARIANCE && e.args[0].unsized.depth == 1 &&
+        !e.args[0].data_only)
       variant = kVarianceOfVarArray;
     Value o;
     std::vector<int> idata;
@@ -1423,6 +1455,8 @@ class MirInterp {
   std::string where_;
   bool native_extrema_ = false;
   T* target_sink_ = nullptr;
+  T* jacobian_sink_ = nullptr;
+  double* magnitude_sink_ = nullptr;
   MirHooks hooks_;
   std::map<std::string, Value> env_;
   Value returned_;
@@ -1461,8 +1495,9 @@ class MirInterp {
     return shape;
   }
 
-  static bool interpreter_autodiff(const mir::Expr& call) {
-    return !std::is_same_v<T, double> && mir::any_argument_active(call);
+  bool interpreter_autodiff(const mir::Expr& call) const {
+    return (!std::is_same_v<T, double> || model_types_) &&
+           mir::any_argument_active(call);
   }
 
   bool assigns_to_array(const std::string& name) const {
@@ -1559,9 +1594,33 @@ class MirInterp {
     if (!message.empty()) throw std::invalid_argument(message);
   }
 
+  // An assignment to the element that the first prefix_len indices of an
+  // array pick: x[i] = y, or x[i, :, :] = y with a `:` for every remaining
+  // dimension (omni).
+  void check_prefix_assign_size(const std::string& name, size_t prefix_len,
+                                bool omni, const std::vector<int64_t>& dst,
+                                const Value& v) {
+    const auto it = assign_shape_.find(name);
+    if (it == assign_shape_.end() || prefix_len > it->second.array_levels)
+      return;
+    const AssignShape& shape = it->second;
+    const size_t levels = shape.array_levels - prefix_len;
+    const std::vector<int64_t> rest(dst.begin() + prefix_len, dst.end());
+    std::vector<int64_t> src = v.dims;
+    if (src.empty() || (levels == 0 && (shape.leaf == AssignLeaf::Vector ||
+                                        shape.leaf == AssignLeaf::RowVector)))
+      src = {static_cast<int64_t>(std::max(v.r.size(), v.i.size()))};
+    const std::string message =
+        !omni ? assign_size_mismatch(name, shape.leaf, levels, rest, src)
+        : levels == 0 ? omni_assign_size_mismatch(name, shape.leaf, rest, src)
+                      : "";
+    if (!message.empty()) throw std::invalid_argument(message);
+  }
+
   int udf_depth_ = 0;
   bool propto_ctx_ = true;
   bool refuse_propto_ = false;
+  bool model_types_ = false;
   bool propto(const mir::Expr& e) const {
     const bool on = e.fn_propto && propto_ctx_;
     if (on && refuse_propto_)
@@ -1581,16 +1640,13 @@ class MirInterp {
   };
   std::optional<CallTypes> call_types_;
   bool autodiff(const mir::Expr& e) const {
-    if constexpr (std::is_same_v<T, double>) {
-      return false;
-    } else {
-      const bool locals = !call_types_ || call_types_->locals;
-      return mir::instantiated_autodiff(e, locals, [&](const mir::Expr& v) {
-        if (!call_types_) return true;
-        const auto formal = call_types_->formals.find(v.name);
-        return formal != call_types_->formals.end() ? formal->second : locals;
-      });
-    }
+    if (std::is_same_v<T, double> && !model_types_) return false;
+    const bool locals = !call_types_ || call_types_->locals;
+    return mir::instantiated_autodiff(e, locals, [&](const mir::Expr& v) {
+      if (!call_types_) return true;
+      const auto formal = call_types_->formals.find(v.name);
+      return formal != call_types_->formals.end() ? formal->second : locals;
+    });
   }
   void bind_argument_types(const mir::FunDef& f,
                            const std::vector<bool>* autodiff) {
@@ -2030,6 +2086,23 @@ class MirInterp {
     return result;
   }
 
+  // unit_vector_constrain as Stan Math's var overload computes it, which
+  // unlike the double one does not check the norm, for a double evaluation
+  // that stands in for CmdStan's var one (set_model_types).
+  static void unchecked_unit_vector(const Program::Transform& tr, T* reg) {
+    using Vec = Eigen::Matrix<T, Eigen::Dynamic, 1>;
+    T lp = 0.0;
+    for (int b = 0; b < tr.batch; ++b) {
+      Eigen::Map<const Vec> y(reg + tr.in[0] + b * tr.inner_raw, tr.inner_raw);
+      stan::math::check_nonzero_size("unit_vector", "y", y);
+      const T SN = stan::math::dot_self(y);
+      lp -= 0.5 * SN;
+      for (int i = 0; i < tr.out_rows; ++i)
+        reg[tr.out + b * tr.out_rows + i] = y(i) / stan::math::sqrt(SN);
+    }
+    reg[tr.jac] = lp;
+  }
+
   // An empty scope for one user-function body: function bodies see their
   // arguments and nothing else.
   MirInterp function_scope(bool propto) {
@@ -2037,9 +2110,12 @@ class MirInterp {
     MirInterp sub(funs_, where_, hooks_);
     sub.native_extrema_ = native_extrema_;
     sub.target_sink_ = target_sink_;
+    sub.jacobian_sink_ = jacobian_sink_;
+    sub.magnitude_sink_ = magnitude_sink_;
     sub.udf_depth_ = udf_depth_ + 1;
     sub.propto_ctx_ = propto;
     sub.refuse_propto_ = refuse_propto_;
+    sub.model_types_ = model_types_;
     return sub;
   }
 
@@ -2767,9 +2843,9 @@ class MirInterp {
       return o;
     }
     // Callable transforms share their name/arity dispatch and their typed
-    // execution with graph lowering and runtime-control Programs. The
-    // interpreter is used for write_array with jacobian__ false, so it keeps
-    // the constrained value and deliberately discards the auxiliary lp.
+    // execution with graph lowering and runtime-control Programs. A
+    // `_jacobian` call adds its log Jacobian to the Jacobian sink, when
+    // there is one.
     CallableTransformSpec transform;
     if (callable_transform(e.name, &transform) &&
         transform.arity == e.args.size() && transform.structured &&
@@ -2915,7 +2991,15 @@ class MirInterp {
       reg.resize(reg.size() + (size_t)tr.out_len);
       tr.jac = (int32_t)reg.size();
       reg.emplace_back(T(0));
-      run_program_transform(tr, reg.data());
+      if (std::is_same_v<T, double> && model_types_ &&
+          transform.kind == CallableTransformKind::UnitVector &&
+          autodiff(e.args[0]))
+        unchecked_unit_vector(tr, reg.data());
+      else
+        run_program_transform(tr, reg.data());
+      if (transform.direction == TransformDirection::Jacobian &&
+          jacobian_sink_ != nullptr)
+        *jacobian_sink_ += reg[(size_t)tr.jac];
       o.r.assign(reg.begin() + tr.out, reg.begin() + tr.out + tr.out_len);
       if (transform.structured && outer_rank > 0)
         o.r = serialized_container_order(o.r, o.dims, outer_rank);
@@ -3035,8 +3119,11 @@ class MirInterp {
       Value a = eval(e.args[0]);
       if constexpr (std::is_same_v<T, double>) {
         stan::math::check_nonzero_size("mean", "m", a.r);
-        const auto grouping = eigen_sum_grouping(e.args[0]).value_or(
-            std::pair<SumGrouping, int64_t>{SumGrouping::Packet, 0});
+        const auto grouping =
+            autodiff(e.args[0])
+                ? std::pair<SumGrouping, int64_t>{SumGrouping::InOrder, 0}
+                : eigen_sum_grouping(e.args[0]).value_or(
+                      std::pair<SumGrouping, int64_t>{SumGrouping::Packet, 0});
         r.r = {sum_grouped(a.r.data(), (int64_t)a.r.size(), grouping.first,
                            grouping.second) /
                static_cast<double>(a.r.size())};
@@ -3418,14 +3505,13 @@ class MirInterp {
     }
     // Registered shape queries answer through the shared resolver, with
     // vector orientation from the MIR type -- the same source the graph
-    // reads, so the two paths cannot drift. FnLength stays outside the
-    // registry: the compiler internal stanc3 emits for the observation
-    // count in a vectorized `T[,]` normalizer spells stan::math::size,
-    // which counts every element, so it answers as num_elements does
-    // rather than as size does.
+    // reads, so the two paths cannot drift. FnLength is the compiler's
+    // spelling of stan::math::size: the outer length of an array, and the
+    // element count of a vector or matrix.
     if (const BuiltinSpec* query =
             e.args.size() == 1
-                ? shaped_builtin_spec(e.name, 1, BuiltinShapePolicy::ShapeQuery)
+                ? shaped_builtin_spec(e.name == "FnLength" ? "size" : e.name, 1,
+                                      BuiltinShapePolicy::ShapeQuery)
                 : nullptr) {
       Value a = eval(e.args[0]);
       if (a.is_int && a.r.size() != a.i.size()) {
@@ -3435,6 +3521,8 @@ class MirInterp {
         a.r.reserve(a.i.size());
         for (int value : a.i) a.r.push_back(T((double)value));
       }
+      if (a.dims.empty() && e.args[0].unsized.depth != 0)
+        a.dims = {static_cast<int64_t>(a.r.size())};
       std::vector<int64_t> answer;
       try {
         answer =
@@ -3449,14 +3537,6 @@ class MirInterp {
         r.i.push_back((int)v);
         r.r.push_back(T((double)v));
       }
-      return r;
-    }
-    if (e.name == "FnLength" && e.args.size() == 1) {
-      Value a = eval(e.args[0]);
-      const long v = (long)std::max(a.r.size(), a.i.size());
-      r.is_int = true;
-      r.i = {(int)v};
-      r.r = {T((double)v)};
       return r;
     }
     // Scalar unaries from the shared list, so transformed data and
@@ -3576,13 +3656,13 @@ class MirInterp {
         fail(e.name + ": y and G must be matrices", e.raw);
       std::vector<T> packed;
       uint8_t packed_active = 0;
+      const bool typed = !std::is_same_v<T, double> || model_types_;
       for (size_t k = 1; k < 7; ++k) {
         packed.insert(packed.end(), a[k].r.begin(), a[k].r.end());
-        if constexpr (!std::is_same_v<T, double>)
-          if (!e.args[k].data_only) packed_active = 1;
+        if (typed && !e.args[k].data_only) packed_active = 1;
       }
       const bool propto = this->propto(e);
-      const bool y_active = !std::is_same_v<T, double> && !e.args[0].data_only;
+      const bool y_active = typed && !e.args[0].data_only;
       const uint8_t activity =
           (uint8_t)((y_active ? 1u : 0u) | (packed_active << 1));
       const uint8_t variant =

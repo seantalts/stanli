@@ -856,6 +856,42 @@ int main(int argc, char** argv) {
           "integer literal assignment retains declared real vector type");
   }
 
+  // `jacobian +=` and a callable `_jacobian` transform add to the Jacobian
+  // sink when the caller gives one. Without one both are dropped, as
+  // write_array drops them.
+  {
+    std::map<std::string, const mir::FunDef*> functions;
+    mir::Stmt increment;
+    increment.kind = mir::Stmt::TargetPE;
+    increment.jacobian = true;
+    increment.target = mir_checks::real(1.5);
+    mir::Expr call;
+    call.kind = mir::Expr::FunApp;
+    call.name = "lower_bound_jacobian";
+    call.fn_lib = mir::Expr::Lib::StanLib;
+    call.fn_suffix = mir::FnSuffix::Jacobian;
+    call.unsized.leaf = mir::UnsizedLeaf::Real;
+    call.args = {mir_checks::real(0.5), mir_checks::real(0.0)};
+    mir::Stmt add;
+    add.kind = mir::Stmt::TargetPE;
+    add.target = call;
+    double target = 0.0, jacobian = 0.0;
+    MirInterp<double> with(functions, "jacobian sink test");
+    with.set_target_sink(&target);
+    with.set_jacobian_sink(&jacobian);
+    with.run({increment, add});
+    check(std::abs(target - std::exp(0.5)) < 1e-15,
+          "a _jacobian transform's value reaches the target");
+    check(std::abs(jacobian - 2.0) < 1e-15,
+          "jacobian += and a _jacobian transform add to the Jacobian sink");
+    double plain = 0.0;
+    MirInterp<double> without(functions, "jacobian sink test");
+    without.set_target_sink(&plain);
+    without.run({increment, add});
+    check(std::abs(plain - std::exp(0.5)) < 1e-15,
+          "without a Jacobian sink only the target accumulates");
+  }
+
   // A parent environment is read in place. An indexed write copies the
   // written entry into the interpreter's own environment and leaves the
   // parent as it was.

@@ -728,10 +728,11 @@ inline bool inherits_propto(const Expr& call) {
 // Whether CmdStan instantiates `e` as a var, which decides the terms propto
 // drops. The adlevel is right for a variable at the top level, but not for a
 // variable inside a user function body, where CmdStan's types come from the
-// call's actual arguments. Nor is it right for an indexed formal that stanc's
-// O1 inliner substituted: `s[i]` keeps the formal's adlevel when `s` becomes
-// data. So read variables through `var_autodiff` and derive the rest from
-// them. `promoted_autodiff` is the type a promotion to a var produces.
+// call's actual arguments. Nor is it right for an indexed formal that stanc3's
+// inliner substituted in the inlined MIR of the fixtures that
+// tools/gen_fixtures.py writes: `s[i]` keeps the formal's adlevel when `s`
+// becomes data. So read variables through `var_autodiff` and derive the rest
+// from them. `promoted_autodiff` is the type a promotion to a var produces.
 template <class VarAutodiff>
 bool instantiated_autodiff(const Expr& e, bool promoted_autodiff,
                            const VarAutodiff& var_autodiff) {

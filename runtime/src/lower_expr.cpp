@@ -412,11 +412,12 @@ long Lowering::eval_int(const mir::Expr& e) {
           }
         }
       }
-      // Shape query on a COMPUTED value: --O1 inlining substitutes call
-      // arguments into the callee's size expressions, so `rows(beta)`
-      // arrives as `rows(segment(beta, pos[i], m[i]))`. Lower the
-      // argument and answer from its slot metadata; any op this emits
-      // is one the body was about to emit anyway.
+      // Shape query on a computed value, such as
+      // `rows(segment(beta, pos[i], m[i]))`. The fixtures that
+      // tools/gen_fixtures.py compiles with function inlining write these
+      // where the callee had `rows(beta)`. Lower the argument and answer
+      // from its slot metadata; any op this emits is one the body was
+      // about to emit anyway.
       if (scalar_shape_query(e) && e.args.size() == 1 &&
           e.args[0].kind != mir::Expr::Var) {
         CallArguments actuals(*this, e);

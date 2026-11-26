@@ -5,6 +5,7 @@ import unittest
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1] / "tools" / "perturb"))
 import causes  # noqa: E402
+import check_compare  # noqa: E402
 import ladder  # noqa: E402
 import measure  # noqa: E402
 import report  # noqa: E402
@@ -153,9 +154,44 @@ class CapSizes(unittest.TestCase):
 
 
 def outcome(values):
-    """A differential.run_outcome payload with OK rows at the check points."""
+    """A check_compare.run_outcome payload with OK rows at the check points."""
     return ("points", {"points": {k: {"status": ("OK", [str(v) for v in values[k]])}
                                   for k in range(3)}, "prints": {}})
+
+
+def run_with_rows(lp, grad, row, prints=()):
+    """A run_outcome payload with the same lp, gradient and write_array row
+    at every check point."""
+    point = {"status": ("OK", [str(lp), *map(str, grad)]),
+             "wa": ("ok", ["x"], [str(row)])}
+    return ("points", {"points": {k: dict(point) for k in range(3)},
+                       "prints": {"pre": [], **{k: list(prints) for k in range(3)}}})
+
+
+class InterpCheck(unittest.TestCase):
+    def test_gradient_and_printed_lines_are_not_compared(self):
+        compiled = run_with_rows(-10.0, [1.5], 0.25)
+        interp = run_with_rows(-10.0, ["nan"], 0.25, ["GRAD_ERR inf"])
+        self.assertIsNone(check_compare.lp_and_rows_differ(compiled, interp))
+
+    def test_lp_and_rows_are_compared(self):
+        compiled = run_with_rows(-10.0, [1.5], 0.25)
+        self.assertIn("lp", check_compare.lp_and_rows_differ(
+            compiled, run_with_rows(-10.5, ["nan"], 0.25)))
+        self.assertIn("write_array", check_compare.lp_and_rows_differ(
+            compiled, run_with_rows(-10.0, ["nan"], 0.5)))
+
+    def test_a_difference_is_its_own_label(self):
+        rec = {"seed": "s", "variant": "v", "outcome": "valid",
+               "meta": {"equivalent": True}, "interp_differs": "lp: 1 vs 2"}
+        self.assertIn("INTERP_DIFFERS lp: 1 vs 2", run.validity_line(rec))
+        self.assertIn("interp_differs (lp: 1 vs 2)", report.note_of(rec))
+
+    def test_an_interpreter_failure_is_not_agreement(self):
+        rec = {"seed": "s", "variant": "v", "outcome": "valid",
+               "meta": {"equivalent": True}, "interp_unchecked": "timeout"}
+        self.assertIn("INTERP_UNCHECKED timeout", run.validity_line(rec))
+        self.assertIn("interp_unchecked (timeout)", report.note_of(rec))
 
 
 class Variants(unittest.TestCase):
@@ -212,8 +248,9 @@ class Text(unittest.TestCase):
         diffs = [("one_side_threw", {"point": 0, "write_array": True}),
                  ("output", {"point": 0})]
         self.assertIsNone(run.first_problem(diffs))
-        self.assertIn("grad differs",
-                      run.first_problem([("grad", {"point": 1, "none": "1", "o1": "2"})]))
+        problem = run.first_problem([("grad", {"point": 1, "a": "1", "b": "2"})])
+        self.assertIn("grad differs", problem)
+        self.assertIn('"base": "1", "variant": "2"', problem)
 
 
 def lanes(op, reason, graph="log_prob", pass_="reroll", period=1):

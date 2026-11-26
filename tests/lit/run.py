@@ -139,6 +139,9 @@ def main() -> int:
     parser.add_argument("case", type=pathlib.Path)
     parser.add_argument("stanli_check", type=pathlib.Path)
     parser.add_argument("--discover", action="store_true")
+    parser.add_argument("--interp", action="store_true",
+                        help="run the whole model through the MIR "
+                        "interpreter (stanli_check --interp)")
     args = parser.parse_args()
 
     try:
@@ -178,7 +181,9 @@ def main() -> int:
         source.write_text(source_text, encoding="utf-8")
         data_path.write_text(json.dumps(data), encoding="utf-8")
         command = [str(args.stanli_check), str(source), str(data_path)]
-        if dump_stage:
+        if args.interp:
+            command.append("--interp")
+        if dump_stage and not args.interp:
             command.append(f"--dump-passes={dump_stage}")
         if want_names is not None:
             command.append("--wa-values")
@@ -196,6 +201,8 @@ def main() -> int:
             return 1
 
     result = result_line(completed)
+    if args.interp:
+        dump_stage, check_directives = None, []
     region = slice_region(completed.stdout, dump_stage) if dump_stage else None
 
     if args.discover:
