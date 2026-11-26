@@ -263,8 +263,7 @@ inline std::unique_ptr<Model> prepare(const std::string& mir_text,
                                       const DataMap& data, unsigned seed) {
   auto m = std::make_unique<Model>();
   auto prog = std::make_shared<mir::Program>(decode_program(mir_text));
-  if (prog->tuples)
-    throw Refused("oracle: tuple inputs or outputs are not supported");
+
   m->prog = prog;
   for (const auto& f : prog->fun_defs) m->funs[mir::function_key(f)] = &f;
   WaRng td_rng(seed);
