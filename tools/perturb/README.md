@@ -61,10 +61,16 @@ python3 tools/perturb/causes.py SCALING_OUT DATAVALUES_OUT           # findings 
    takes about a second for 30 variants once the binaries are warm, so
    authors can use it as their check.
 2. **Structure.** For base and variant: op counts of the log-density and
-   write_array programs, islands, the reroll and partition decline reasons
-   (`STANLI_LANE_REPORT=1`), the region opcodes in the program (LOOP,
+   write_array programs, islands, the decline reasons of reroll and
+   partition (`STANLI_LANE_REPORT=1`), of the region map
+   (`STANLI_REGION_MAP_DIAGNOSTICS=1`) and of the structured-loop lowering
+   (`STANLI_STRUCTURED_LOOP_DIAGNOSTICS=1`), the region opcodes in the program (LOOP,
    REGION_MAP, ISLAND), the op count before the passes, preparation time
-   and peak RSS (`bench_grad --prep`). The executor size is the estimate of
+   and peak RSS (`bench_grad --prep`). A reason is written
+   `pass/graph: reason`, such as `region_map/log_prob: assigns NAME declared
+   outside the body`. The region map and structured-loop reasons come from
+   the `refused` lines on stderr, with identifiers replaced by NAME and numbers
+   by N so that `causes.py` can group them. The executor size is the estimate of
    `Executor::program_bytes`: 448 bytes per log-density op and 424 per
    write_array op, plus 16 bytes per slot element for values and adjoints.
    No tool prints this, so the constants are in `measure.py`. An equivalent
