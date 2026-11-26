@@ -43,6 +43,20 @@ int main() {
     check(rejected, "malformed JSON data rejected");
   }
 
+  // Inf followed by an exponent fails an assertion inside rapidjson. CmdStan
+  // aborts on it; release builds without the assertion read 0 instead.
+  for (const char* bad :
+       {"{\"y\": Infe1}", "{\"y\": -Infe0}", "{\"a\": -Infe0.0]}"}) {
+    std::string message;
+    try {
+      DataMap::from_json(bad);
+    } catch (const std::exception& e) {
+      message = e.what();
+    }
+    check(message.find("Error in JSON parsing") != std::string::npos,
+          std::string(bad) + " rejected as a parse error: " + message);
+  }
+
   // Mixed int/real detection + matrices as nested arrays (row-major).
   DataMap m = DataMap::from_json(R"({
     "n": 3, "x": 2.5, "v": [1, 2, 3],

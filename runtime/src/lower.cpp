@@ -1005,6 +1005,7 @@ void Lowering::run_passes(const std::vector<int>& roots, const PassPlan& plan) {
     trace("constfold", constfold_time, update_roots,
           PrepTrace::Extra::ConstFold, constfolded.ops_removed,
           constfolded.slots_folded);
+    scalarize_uniform_constants(g, out.fills);
   }
   const auto reroll_time = prep.start();
   const RerollStats rerolled =

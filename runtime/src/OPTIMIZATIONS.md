@@ -242,6 +242,28 @@ cannot be folded, and nothing computed from it can be either.
 Unlike the other `STANLI_NO_*` developer switches, which act when they are set
 to any value, `STANLI_NO_CONSTFOLD` acts only when its value starts with `1`.
 
+### Vector statements from the compiler (`lower_expr.cpp`, `constfold.cpp`)
+
+stanc3's `vectorize_loops` pass turns `for (n in 1:N) mu[n] += b * x[n];`
+into `mu[1:N] = mu[1:N] + b * x[1:N];`. Since the fork commit 10833830 it
+also takes a loop whose statements write and then read the same element
+`mu[n]`, when every mention of `mu` in the body is that element and the
+whole body vectorizes. Such a loop no longer unrolls, so its size never
+meets the unroll ceiling.
+
+Two small rules keep the program of such a statement the same as the one
+that the unrolled loop gave after re-rolling:
+
+- A range over a whole vector (`mu[1:N]`) and a gather of every element in
+  order (`r[J]` with `J = 1, 2, ..., N`) return the vector and emit no
+  `SLICE` or `GATHER`. The value keeps the layout of a range, so a
+  reduction over it sums in the order that Stan Math uses.
+- After constant folding, an elementwise `ADD`, `SUB`, `MUL` or `DIV` that
+  reads a data vector whose elements are all equal reads one scalar
+  instead (`scalarize_uniform_constants`). brms multiplies a group effect
+  by a design column `Z` that is often all ones. This runs with constant
+  folding and has the same switch.
+
 ## Loop re-rolling (`reroll.cpp`, disable: `STANLI_NO_REROLL=1`)
 
 The main pass. An unrolled loop shows up as the same short op pattern

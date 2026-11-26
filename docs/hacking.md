@@ -877,7 +877,8 @@ build compiles Stan source through `stanli-compile`, which
 
 ```
 asan_jobs=$(STANLI_JOB_MEMORY_GIB=12 tools/build_jobs.sh)
-cmake -B build-asan -DCMAKE_BUILD_TYPE=RelWithDebInfo -DSTANLI_SANITIZE=address \
+cmake -B build-asan -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+  -DSTANLI_SANITIZE=address,signed-integer-overflow \
   -DSTANLI_DEBUG_SWITCHES=ON \
   -DSTANLI_PORTABLE_COMPILER="$PWD/deps/stanc3/stanli-compile"
 cmake --build build-asan --parallel "$asan_jobs" && \
@@ -888,6 +889,26 @@ cmake --build build-asan --parallel "$asan_jobs" && \
 `var`: stan-math's arena recovers a nested tape by rewinding a bump
 pointer, so reading a `vari` from a tape that was already recovered
 lands inside a live allocation and reports nothing.
+
+If the change reads sizes, indices or bytes that a caller supplies, run the
+fuzzers in [`tests/fuzz`](../tests/fuzz/) too. They need LLVM's Clang,
+because Apple's Clang and GCC ship no libFuzzer. On Linux that is `clang`;
+on macOS, use Homebrew's `llvm` (`llvm=$(brew --prefix llvm)/bin/`):
+
+```
+cmake -B build-fuzz -DCMAKE_BUILD_TYPE=None -DCMAKE_CXX_FLAGS="-O1 -g1" \
+  -DCMAKE_C_COMPILER="${llvm}clang" -DCMAKE_CXX_COMPILER="${llvm}clang++" \
+  -DSTANLI_SANITIZE=address,signed-integer-overflow -DSTANLI_FUZZ=ON
+cmake --build build-fuzz --target fuzz_manifest fuzz_lowrank fuzz_data
+mkdir -p /tmp/fuzz-manifest
+build-fuzz/fuzz_manifest -max_total_time=300 \
+  -dict=tests/fuzz/manifest.dict /tmp/fuzz-manifest tests/fuzz/corpus/manifest
+```
+
+Name a scratch directory first, as here, so that new inputs go there and not
+into the checked-in seeds. A crash writes a `crash-*` file. Once the bug is
+fixed, add that file to the target's directory in `tests/fuzz/corpus/`, and
+CTest replays it from then on.
 
 If the change touches `runtime/kernels/density_fused.cpp`, build with the
 Stan Math kernels kept, which is the default of a plain `cmake -B build`

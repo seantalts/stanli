@@ -44,6 +44,14 @@ ConstFoldStats const_fold(
     Graph& g, std::vector<std::pair<int, std::vector<double>>>& fills,
     const std::vector<int>& roots, const std::vector<KnownOutput>& known = {});
 
+// An elementwise ADD, SUB, MUL or DIV that reads a data vector whose
+// elements are all equal reads one scalar with that value instead, and the
+// kernel broadcasts it. A loop that the compiler turned into vector
+// statements multiplies by such a vector where the unrolled loop multiplied
+// each row by the same constant. Returns the number of operands replaced.
+int scalarize_uniform_constants(
+    Graph& g, std::vector<std::pair<int, std::vector<double>>>& fills);
+
 }  // namespace stanli
 
 #endif

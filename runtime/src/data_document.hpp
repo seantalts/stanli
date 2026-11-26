@@ -5,7 +5,7 @@
 
 #include <stanli/data.hpp>
 
-#include <rapidjson/document.h>
+#include "rapidjson.hpp"
 
 #include <string>
 
