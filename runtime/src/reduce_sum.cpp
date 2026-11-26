@@ -76,7 +76,8 @@ struct ReduceExecutionContext::Impl {
   void worker() {
     // No Stan vars survive a job; each thread owns its nested-tape stack.
     std::unique_ptr<stan::math::ChainableStack> tape;
-    const SingleThreadedBlas blas_on_this_thread;
+    const ChainBlasThreads blas_on_this_thread(
+        ChainBlasThreads::kUnknownParallelism);
     try {
       tape = std::make_unique<stan::math::ChainableStack>();
     } catch (...) {

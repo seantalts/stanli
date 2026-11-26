@@ -19,19 +19,39 @@ struct Slot;
 // "accelerate" in a STANLI_ACCELERATE build, "none" otherwise.
 const char* blas_provider();
 
-// Keeps the BLAS calls made on this thread on this thread while it lives,
-// then restores the thread's previous setting. Accelerate otherwise spreads
-// a large product or factorization over threads of its own, which
-// oversubscribes the cores when chains already run one per core, and gives
-// results that differ in the last digits from the single-threaded ones for
-// some large factorizations. Needs macOS 15 (BLASSetThreading, a per-thread
-// setting); elsewhere, and in builds without Accelerate, it does nothing.
-class SingleThreadedBlas {
+// Math threads only when cores are free. Accelerate spreads a large product
+// or factorization over threads of its own; with chains already running one
+// per core that oversubscribes the machine. Chains that run in parallel limit
+// their BLAS calls to one thread each when
+//   parallel_chains * 2 > performance cores,
+// and otherwise leave Accelerate to choose. The limit needs BLASSetThreading
+// (macOS 15, a per-thread setting); without it, and in builds without
+// Accelerate, nothing is limited.
+struct BlasThreadPlan {
+  bool cores_full = false;  // the chains would fill the performance cores
+  bool limited = false;     // and the limit can be applied
+};
+BlasThreadPlan plan_blas_threads(int parallel_chains, int performance_cores,
+                                 bool thread_control_available);
+// hw.perflevel0.physicalcpu on Apple, else std::thread's
+// hardware_concurrency; the developer switch STANLI_PERFORMANCE_CORES
+// replaces it for tests.
+int performance_cores();
+// Whether this system has BLASSetThreading (macOS 15 or later).
+bool blas_thread_control_available();
+
+// Applies plan_blas_threads for the calling thread while it lives: limits its
+// BLAS calls to one thread when the chains fill the cores, then restores the
+// thread's previous setting.
+class ChainBlasThreads {
  public:
-  SingleThreadedBlas();
-  ~SingleThreadedBlas();
-  SingleThreadedBlas(const SingleThreadedBlas&) = delete;
-  SingleThreadedBlas& operator=(const SingleThreadedBlas&) = delete;
+  // For threads that cannot tell how many others run beside them, such as a
+  // reduce_sum team inside a chain: limit whenever the limit is available.
+  static constexpr int kUnknownParallelism = 1 << 20;
+  explicit ChainBlasThreads(int parallel_chains);
+  ~ChainBlasThreads();
+  ChainBlasThreads(const ChainBlasThreads&) = delete;
+  ChainBlasThreads& operator=(const ChainBlasThreads&) = delete;
 
  private:
   unsigned saved_ = 0;
@@ -40,7 +60,8 @@ class SingleThreadedBlas {
 
 // Gives each op of the graph whose sizes are at or above its operation's
 // threshold the accelerated opcode. Does nothing in a build without
-// STANLI_ACCELERATE. Returns the number of ops it changed.
+// STANLI_ACCELERATE, or when the developer switch STANLI_NO_ACCELERATE is
+// set. Returns the number of ops it changed.
 int accelerate_dense_ops(Graph& g);
 
 #ifdef STANLI_ACCELERATE

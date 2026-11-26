@@ -105,7 +105,7 @@ int main(int argc, char** argv) {
 #else
   using namespace stanli;
   const double min_ms = argc > 1 ? std::atof(argv[1]) : 20.0;
-  const SingleThreadedBlas one_thread;
+  const ChainBlasThreads one_thread(ChainBlasThreads::kUnknownParallelism);
   char shape[64];
 
   // gemm: square, and the rectangular shapes of corpus models.
