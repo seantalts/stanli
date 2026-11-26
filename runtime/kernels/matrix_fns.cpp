@@ -2731,7 +2731,7 @@ STANLI_TAIL_INT_CDF_LIST(STANLI_TAIL_INT_CDF_KERNEL)
 // opcodes only when its static sizes reach the threshold in
 // blas::thresholds(), and never inside a retained loop (dyn_lengths), so
 // the plain kernels above still run every smaller op. The results agree with
-// the plain kernels to rounding, not bitwise.
+// the plain kernels to rounding; they are not bitwise equal.
 
 // out = A * B; idata = {rows_a, cols_a, cols_b}.
 void gemm_blas_fwd(KernelCtx& ctx) {

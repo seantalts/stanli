@@ -70,8 +70,8 @@ among eigendecompositions) was 1.012x slower, four runs each of
 `EIGENVECTORS_SYM`, `LKJ_CORR_CHOL_LPDF`, `MULT_LOWER_TRI_SELF_TRANSPOSE`
 and `CONSTRAIN_CHOL_CORR` ran about 25% slower; their forward passes did
 not. The gemm threshold is therefore 32. One untested explanation: results
-that Accelerate's matrix unit writes reach the core through L2, not L1, so
-the next op to read them waits longer. A size threshold cannot rule out this
+that Accelerate's matrix unit writes go to L2 and skip L1, so the next op
+to read them waits longer. A size threshold cannot rule out this
 cost in a model where a small accelerated op sits among much larger plain
 ones.
 
