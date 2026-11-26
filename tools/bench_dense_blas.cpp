@@ -20,6 +20,7 @@
 #include <functional>
 #include <vector>
 
+#ifdef STANLI_ACCELERATE
 namespace {
 
 using Mat = Eigen::MatrixXd;
@@ -49,10 +50,10 @@ double ns_per_call(const std::function<void()>& f, double min_ms) {
   for (int round = 0; round < 7; ++round) {
     const auto t0 = Clock::now();
     for (long r = 0; r < reps; ++r) f();
-    best = std::min(best, std::chrono::duration<double, std::nano>(
-                              Clock::now() - t0)
-                                  .count() /
-                              double(reps));
+    best = std::min(
+        best,
+        std::chrono::duration<double, std::nano>(Clock::now() - t0).count() /
+            double(reps));
   }
   return best;
 }
@@ -94,6 +95,7 @@ void compare(const char* name, const char* shape, Case& c, uint16_t plain,
 }
 
 }  // namespace
+#endif
 
 int main(int argc, char** argv) {
 #ifndef STANLI_ACCELERATE
@@ -111,10 +113,15 @@ int main(int argc, char** argv) {
   std::vector<std::array<int, 3>> gemm_shapes;
   for (int n : {8, 16, 24, 32, 48, 64, 96, 128, 192, 256, 512})
     gemm_shapes.push_back({n, n, n});
-  for (std::array<int, 3> s :
-       {std::array<int, 3>{512, 128, 128}, {512, 128, 512}, {1000, 10, 10},
-        {1000, 100, 10}, {100, 100, 100}, {64, 64, 4}, {256, 256, 8},
-        {4096, 64, 64}, {32, 32, 512}})
+  for (std::array<int, 3> s : {std::array<int, 3>{512, 128, 128},
+                               {512, 128, 512},
+                               {1000, 10, 10},
+                               {1000, 100, 10},
+                               {100, 100, 100},
+                               {64, 64, 4},
+                               {256, 256, 8},
+                               {4096, 64, 64},
+                               {32, 32, 512}})
     gemm_shapes.push_back(s);
   for (const auto& s : gemm_shapes) {
     Case c;
@@ -135,10 +142,19 @@ int main(int argc, char** argv) {
   }
 
   // matrix-vector product with data X: rows x cols.
-  for (std::array<int, 2> s :
-       {std::array<int, 2>{64, 64}, {128, 128}, {256, 256}, {512, 512},
-        {1024, 1024}, {2048, 2048}, {100, 5}, {1000, 10}, {1000, 100},
-        {5000, 24}, {10000, 20}, {10000, 100}, {100000, 10}}) {
+  for (std::array<int, 2> s : {std::array<int, 2>{64, 64},
+                               {128, 128},
+                               {256, 256},
+                               {512, 512},
+                               {1024, 1024},
+                               {2048, 2048},
+                               {100, 5},
+                               {1000, 10},
+                               {1000, 100},
+                               {5000, 24},
+                               {10000, 20},
+                               {10000, 100},
+                               {100000, 10}}) {
     Case c;
     c.idata = {s[0], s[1]};
     c.ctx.n_in = 2;

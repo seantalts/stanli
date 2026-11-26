@@ -2736,8 +2736,8 @@ STANLI_TAIL_INT_CDF_LIST(STANLI_TAIL_INT_CDF_KERNEL)
 // out = A * B; idata = {rows_a, cols_a, cols_b}.
 void gemm_blas_fwd(KernelCtx& ctx) {
   const int64_t ra = ctx.idata[0], ca = ctx.idata[1], cb = ctx.idata[2];
-  blas::gemm(false, false, ra, cb, ca, 1.0, ctx.in[0].data, ra,
-             ctx.in[1].data, ca, 0.0, ctx.out.data, ra);
+  blas::gemm(false, false, ra, cb, ca, 1.0, ctx.in[0].data, ra, ctx.in[1].data,
+             ca, 0.0, ctx.out.data, ra);
 }
 void gemm_blas_bwd(KernelCtx& ctx) {
   const int64_t ra = ctx.idata[0], ca = ctx.idata[1], cb = ctx.idata[2];
@@ -2753,14 +2753,14 @@ void gemm_blas_bwd(KernelCtx& ctx) {
 // out = X * beta with data X; idata = {rows, cols}.
 void matvec_blas_fwd(KernelCtx& ctx) {
   const int64_t rows = ctx.idata[0], cols = ctx.idata[1];
-  blas::gemv(false, rows, cols, 1.0, ctx.in[0].data, rows, ctx.in[1].data,
-             0.0, ctx.out.data);
+  blas::gemv(false, rows, cols, 1.0, ctx.in[0].data, rows, ctx.in[1].data, 0.0,
+             ctx.out.data);
 }
 void matvec_blas_bwd(KernelCtx& ctx) {
   if (!ctx.in_adj[1].data) return;
   const int64_t rows = ctx.idata[0], cols = ctx.idata[1];
-  blas::gemv(true, rows, cols, 1.0, ctx.in[0].data, rows,
-             ctx.out_adj_vec.data, 1.0, ctx.in_adj[1].data);
+  blas::gemv(true, rows, cols, 1.0, ctx.in[0].data, rows, ctx.out_adj_vec.data,
+             1.0, ctx.in_adj[1].data);
 }
 
 // cholesky_decompose with LAPACK's dpotrf and the checks and messages of
@@ -2861,7 +2861,8 @@ double mnc_blas_fwd_value(KernelCtx& ctx) {
   if (!values_only(ctx)) {
     VecD scaled_diff = half;
     blas::trmv_lower(true, n, inv_L.data(), n, scaled_diff.data());
-    MapM(ctx.scratch, n, n) = scaled_diff * half.transpose() - inv_L.transpose();
+    MapM(ctx.scratch, n, n) =
+        scaled_diff * half.transpose() - inv_L.transpose();
   }
   logp -= 0.5 * stan::math::sum(stan::math::dot_self(half));
   return logp;

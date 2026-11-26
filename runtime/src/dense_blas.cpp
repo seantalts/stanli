@@ -27,9 +27,8 @@ void dtrsm_(const char* side, const char* uplo, const char* transa,
 void dtrmm_(const char* side, const char* uplo, const char* transa,
             const char* diag, const int* m, const int* n, const double* alpha,
             const double* a, const int* lda, double* b, const int* ldb);
-void dtrmv_(const char* uplo, const char* trans, const char* diag,
-            const int* n, const double* a, const int* lda, double* x,
-            const int* incx);
+void dtrmv_(const char* uplo, const char* trans, const char* diag, const int* n,
+            const double* a, const int* lda, double* x, const int* incx);
 void dsymm_(const char* side, const char* uplo, const int* m, const int* n,
             const double* alpha, const double* a, const int* lda,
             const double* b, const int* ldb, const double* beta, double* c,
@@ -147,8 +146,7 @@ void symm_lower_left(int64_t m, int64_t n, double alpha, const double* s,
                      double* c, int64_t ldc) {
   if (m == 0 || n == 0) return;
   const char side = 'L', lo = 'L';
-  const int im = dim(m), in = dim(n), is = ld(lds), ib = ld(ldb),
-            ic = ld(ldc);
+  const int im = dim(m), in = dim(n), is = ld(lds), ib = ld(ldb), ic = ld(ldc);
   count();
   dsymm_(&side, &lo, &im, &in, &alpha, s, &is, b, &ib, &beta, c, &ic);
 }
