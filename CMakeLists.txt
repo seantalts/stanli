@@ -1556,6 +1556,19 @@ endif()
 add_test(NAME test_capi COMMAND test_capi
          WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
 
+# Parallel chains with dense linear algebra, through the shipped library.
+# getrusage and the thread count are POSIX-only.
+if(NOT WIN32)
+  add_executable(test_blas_chains tests/test_blas_chains.cpp)
+  target_link_libraries(test_blas_chains PRIVATE stanli_shared Threads::Threads)
+  foreach(_model gp product)
+    add_test(NAME test_blas_chains_${_model} COMMAND test_blas_chains ${_model}
+             WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
+    set_tests_properties(test_blas_chains_${_model} PROPERTIES
+                         SKIP_RETURN_CODE 77)
+  endforeach()
+endif()
+
 # The Laplace whitening builder, through the same boundary.
 add_executable(test_laplace_capi tests/test_laplace_capi.cpp)
 target_link_libraries(test_laplace_capi PRIVATE stanli_shared)
