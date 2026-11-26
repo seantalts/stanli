@@ -2102,6 +2102,26 @@ static void test_write_array_shadowed_size() {
   }
 }
 
+// `for (a in av)` over an array of vectors loops size(av) times. The
+// interpreter once used num_elements and indexed past the array's end.
+static void test_write_array_foreach_array() {
+  using namespace stanli;
+  const std::string mir = slurp("tests/fixtures/foreach_array_length.mir");
+  const DataMap data = DataMap::from_json(R"({"av":[[1,2,3],[4,5,6]]})");
+  const std::vector<double> q{0.25};
+  const std::vector<double> want{0.25, 21.0};
+  for (bool interp : {false, true}) {
+    if (interp && !debug_switches_available()) continue;
+    const std::string what = std::string("foreach array write_array ") +
+                             (interp ? "interpreted" : "compiled");
+    try {
+      check(write_array_row(mir, data, q, interp) == want, what);
+    } catch (const std::exception& e) {
+      check(false, what + " threw: " + e.what());
+    }
+  }
+}
+
 // stanc's inliner declares a vector-returning function's result zero-length
 // and assigns it in each arm. The structured loop sizes it from those
 // assignments instead of refusing the loop.
@@ -2480,6 +2500,7 @@ int main() {
   using namespace stanli;
 
   test_write_array_shadowed_size();
+  test_write_array_foreach_array();
 
   // Section A1's five reductions must lower in the autodiff model graph, not
   // merely in the generated-quantities graph. A zero product and tied maximum
