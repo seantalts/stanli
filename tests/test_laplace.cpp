@@ -636,6 +636,28 @@ void test_lowrank_implies_the_corrected_precision() {
   expect_true("a correction that leaves it indefinite is refused", refused);
 }
 
+// Each width makes a size product overflow int64_t: n * k for the first,
+// only k * k for the second. Both must be refused before anything is
+// allocated or read from u.
+void test_lowrank_width_overflow_is_refused() {
+  const auto refused = [](int n, int64_t k, const char* label) {
+    const Csc c = lower_csc(banded(n, 2, {}));
+    const auto f = stanli::sparse_ldlt(n, c.col_ptr.data(), c.row_idx.data(),
+                                       c.values.data(), nullptr);
+    const std::vector<double> u((size_t)n, 0.5);
+    try {
+      stanli::sparse_lowrank(f, k, u.data());
+    } catch (const std::invalid_argument& e) {
+      expect_true(std::string(label) + " names the width: " + e.what(),
+                  std::string(e.what()).find("too large") != std::string::npos);
+      return;
+    }
+    expect_true(std::string(label) + " is refused", false);
+  };
+  refused(4, int64_t{1} << 62, "a width whose n * k overflows");
+  refused(1, int64_t{1} << 32, "a width whose k * k overflows");
+}
+
 // ---- the whole builder -------------------------------------------------
 
 template <typename F>
@@ -950,6 +972,7 @@ int main() {
   test_ldlt_reproduces_the_matrix();
   test_ldlt_refusals();
   test_lowrank_implies_the_corrected_precision();
+  test_lowrank_width_overflow_is_refused();
   test_gaussian_marginal_mode_and_precision();
   test_hierarchical_marginal_mode_is_a_maximum();
   test_probe_and_dense_patterns_give_the_same_whitening();
