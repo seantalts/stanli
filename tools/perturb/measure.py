@@ -7,6 +7,7 @@ depend on the data.
 """
 from __future__ import annotations
 
+import collections
 import hashlib
 import json
 import math
@@ -244,13 +245,62 @@ def parse_prep_trace(text):
     return rows
 
 
+DECLINE_ENV = {"STANLI_LANE_REPORT": "1",
+               "STANLI_REGION_MAP_DIAGNOSTICS": "1",
+               "STANLI_STRUCTURED_LOOP_DIAGNOSTICS": "1"}
+
+REGION_MAP_REFUSAL = re.compile(r"^stanli_region_map refused \((.*?)\): (.*)$")
+STRUCTURED_REFUSAL = re.compile(r"^stanli_structured refused: (.*)$")
+# The identifier in a refusal depends on the model, so it becomes NAME.
+NAMED = (re.compile(r"(assigns |add to |a read of )[A-Za-z_][\w.]*"
+                    r"(?= declared outside|, which|$)"),
+         re.compile(r"(\b(?:shape|paths|binding|local|extent): )"
+                    r"[A-Za-z_][\w.]*$"))
+
+
+def normalize_reason(text):
+    """A refusal reason that groups across models: identifiers are NAME and
+    numbers are N."""
+    for pattern in NAMED:
+        text = pattern.sub(r"\1NAME", text)
+    return re.sub(r"\d+", "N", text)
+
+
 def lane_declines(stderr):
+    """The distinct decline reasons of one lowering, each prefixed with the
+    pass and the graph, as in "reroll/log_prob: reason"."""
+    return sorted(decline_counts(stderr))
+
+
+def decline_counts(stderr):
+    """How many times each decline reason is reported. The lane passes
+    report one record per op position that stays unfused. The region map and
+    the structured-loop lowering report one line per refused loop; a loop
+    that several lowering tries refuse the same way counts once."""
     records = [json.loads(line[len("LANES "):]) for line in stderr.splitlines()
                if line.startswith("LANES {")]
-    # bounded_log_prob and budget_log_prob are tries of the same graph.
-    return sorted({f"{r['pass']}/{re.sub(r'^.*log_prob$', 'log_prob', r['graph'])}: "
-                   f"{r['reason']}"
-                   for r in first_per_position(records)})
+    # bounded_log_prob and budget_log_prob are tries of the same graph, so
+    # a reason counts as often as its try reports it most.
+    tries = collections.defaultdict(collections.Counter)
+    for r in first_per_position(records):
+        tries[r["graph"]][f"{r['pass']}/"
+                          f"{re.sub(r'^.*log_prob$', 'log_prob', r['graph'])}: "
+                          f"{r['reason']}"] += 1
+    counts = collections.Counter()
+    for found in tries.values():
+        for reason, n in found.items():
+            counts[reason] = max(counts[reason], n)
+    loops = set()
+    for line in stderr.splitlines():
+        match = REGION_MAP_REFUSAL.match(line)
+        if match:
+            loops.add(("region_map", match[1], normalize_reason(match[2])))
+        match = STRUCTURED_REFUSAL.match(line)
+        if match:
+            loops.add(("structured_loop", "", normalize_reason(match[1])))
+    for name, _, reason in loops:
+        counts[f"{name}/log_prob: {reason}"] += 1
+    return dict(sorted(counts.items()))
 
 
 def lowering(ops_text):
@@ -267,7 +317,7 @@ def structure(tools, comp, data, prep_reps=3):
     result = {}
     code, out, err, _ = run([tools.dump_ops, mir, data, ALL_OPS],
                             tools.timeout,
-                            env=clean_env({"STANLI_LANE_REPORT": "1"}))
+                            env=clean_env(DECLINE_ENV))
     if code != 0:
         return {"failure": "dump_ops: " + failure_text(code, err)}
     result["ops_text_sha"] = sha_text(out)

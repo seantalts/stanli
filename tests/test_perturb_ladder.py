@@ -1,9 +1,11 @@
+import json
 import pathlib
 import sys
 import unittest
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1] / "tools" / "perturb"))
 import ladder  # noqa: E402
+import measure  # noqa: E402
 import run  # noqa: E402
 
 
@@ -210,6 +212,66 @@ class Text(unittest.TestCase):
         self.assertIsNone(run.first_problem(diffs))
         self.assertIn("grad differs",
                       run.first_problem([("grad", {"point": 1, "none": "1", "o1": "2"})]))
+
+
+def lanes(op, reason, graph="log_prob", pass_="reroll", period=1):
+    return ("LANES " + json.dumps({"pass": pass_, "graph": graph, "op": op,
+                                   "reason": reason, "period": period}))
+
+
+STDERR = "\n".join([
+    lanes(3, "group is too small"),
+    lanes(9, "group is too small"),
+    lanes(9, "group is too small", graph="bounded_log_prob"),
+    lanes(4, "mixed ops", pass_="partition"),
+    "stanli_region_map refused (n): assigns mu declared outside the body",
+    "stanli_region_map refused (n): assigns mu declared outside the body",
+    "stanli_region_map refused (i): assigns tmp declared outside the body",
+    "stanli_region_map refused (k): no generated adjoint program_code=17 instructions=210",
+    "stanli_region_map selected (j): iterations=200 prologue=11",
+    "stanli_structured refused: a read of eta, which a branch on parameters may have left empty",
+    "stanli_structured native candidate (n): something",
+    "stanli_structured unrolled loop=n trips=200 graph=lp ops=40 delta=3",
+    "slots=40 ops=16 result=39",
+])
+
+
+class Declines(unittest.TestCase):
+    def test_every_pass_is_parsed_with_its_name(self):
+        self.assertEqual(measure.lane_declines(STDERR), [
+            "partition/log_prob: mixed ops",
+            "region_map/log_prob: assigns NAME declared outside the body",
+            "region_map/log_prob: no generated adjoint program_code=N instructions=N",
+            "reroll/log_prob: group is too small",
+            "structured_loop/log_prob: a read of NAME, which a branch on parameters "
+            "may have left empty",
+        ])
+
+    def test_counts_are_one_per_lane_op_and_one_per_refused_loop(self):
+        counts = measure.decline_counts(STDERR)
+        self.assertEqual(counts["reroll/log_prob: group is too small"], 2)
+        self.assertEqual(
+            counts["region_map/log_prob: assigns NAME declared outside the body"], 2)
+        self.assertEqual(counts["partition/log_prob: mixed ops"], 1)
+
+    def test_the_same_loop_refused_by_two_lowering_tries_counts_once(self):
+        text = "\n".join(["stanli_region_map refused (n): body has effects"] * 2)
+        self.assertEqual(measure.decline_counts(text),
+                         {"region_map/log_prob: body has effects": 1})
+
+    def test_normalize_keeps_readable_text(self):
+        self.assertEqual(measure.normalize_reason("body does more than add to lp"),
+                         "body does more than add to NAME")
+        self.assertEqual(measure.normalize_reason("fewer than two iterations"),
+                         "fewer than two iterations")
+        self.assertEqual(
+            measure.normalize_reason("structured assignment changes runtime shape: mu"),
+            "structured assignment changes runtime shape: NAME")
+
+    def test_diagnostic_switches_are_set_for_the_structure_run(self):
+        for name in ("STANLI_LANE_REPORT", "STANLI_REGION_MAP_DIAGNOSTICS",
+                     "STANLI_STRUCTURED_LOOP_DIAGNOSTICS"):
+            self.assertEqual(measure.DECLINE_ENV[name], "1")
 
 
 if __name__ == "__main__":
