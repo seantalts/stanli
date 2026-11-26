@@ -255,6 +255,7 @@ paths and hashes in raw records unchanged.
 | [2026-11-20 · Why reroll and partition decline lanes](../../notes/performance/2026-11-20-lane-declines.md) | Dated results, proof limits and linked evidence. |
 | [2026-11-23 · Forward-only structured-loop storage](../../notes/performance/2026-11-23-forward-loop-storage.md) | Bounded output-only loop evaluation, semantic proof and validation evidence. |
 | [2026-11-25 · Performance cliffs found by perturbing corpus models](../../notes/performance/2026-11-25-perturbation-cliffs.md) | Dated results: the gates behind each cliff, ranked by reach, with linked evidence. |
+| [2026-11-26 · Thresholds for the Accelerate dense kernels](../../notes/performance/2026-11-26-accelerate-thresholds.md) | Crossover sweep of the plain and Accelerate dense kernels on one thread, and the size rules chosen from it. |
 
 ## Parallel reductions
 
