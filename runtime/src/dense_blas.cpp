@@ -82,7 +82,7 @@ const Thresholds& thresholds() {
       /*tri_inverse_min_n=*/64,
       /*mn_cov_min_n=*/32,
       /*glm_min_rows=*/4096,
-      /*glm_min_cols=*/24,
+      /*glm_min_cols=*/16,
   };
   return t;
 }

@@ -926,10 +926,11 @@ prints a notice, then is ignored, in an OFF build.
 On macOS, `STANLI_ACCELERATE` (on by default on Apple silicon, off by
 default on Intel Macs, unavailable on other systems) links Apple's
 Accelerate framework. A pass at the end of lowering gives a
-matrix product, a matrix-vector product with data, a Cholesky factor or a
-`multi_normal_cholesky` with data `y` and `mu` an accelerated opcode when the
-op is at least as large as that operation's threshold; the kernel then calls
-BLAS or LAPACK. Every smaller op runs the same code as a build with
+matrix product, a matrix-vector product with data, a Cholesky factor, a
+`multi_normal_cholesky` with data `y` and `mu`, a `multi_normal` of one
+vector with an active covariance, or a `normal_id_glm` with data `y` and `X`
+and an active `beta` an accelerated opcode when the op is at least as large
+as that operation's threshold; the kernel then calls BLAS or LAPACK. Every smaller op runs the same code as a build with
 `-DSTANLI_ACCELERATE=OFF`, and so do Linux, Windows and the browser builds.
 The thresholds and the sweep behind them are in
 [`notes/performance/2026-11-26-accelerate-thresholds.md`](../notes/performance/2026-11-26-accelerate-thresholds.md).

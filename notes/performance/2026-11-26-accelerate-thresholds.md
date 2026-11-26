@@ -15,6 +15,8 @@ without the option.
 | `MATVEC` (data X, rows x columns) | rows >= 256 and columns >= 64, or rows >= 10000 and columns >= 10 |
 | `CHOLESKY` | n >= 64 |
 | `MULTI_NORMAL_CHOL_LPDF` (the propto, factor-only path) | n >= 64 |
+| `MULTI_NORMAL_LPDF` (one vector, active covariance) | n >= 32 |
+| `NORMAL_ID_GLM_LPDF` (data `y` and `X`, active `beta`) | rows >= 4096 and columns >= 16 |
 
 Ops inside retained loops (`dyn_lengths`) are never accelerated.
 
@@ -182,3 +184,22 @@ ones.
 | multi_normal_cholesky | 512 | 3969536 | 827035 | 4.01x to 4.88x |
 | cholesky | 1024 | 27921417 | 7640802 | 3.43x to 3.91x |
 | multi_normal_cholesky | 1024 | 30282125 | 4017417 | 6.53x to 7.61x |
+
+## multi_normal and normal_id_glm (2026-11-26, later)
+
+`bench_dense_blas`, two runs, load average 5.8 to 10.7 (the plain and the
+accelerated kernel of each size run back to back):
+
+- **multi_normal** (data y, active mu and covariance): 0.81x to 0.99x at
+  n = 4 to 12, 1.17x at 16, 1.35x to 1.47x at 24 to 32, 1.30x to 1.65x at
+  36 to 64, 2.27x to 2.79x at 96 to 128, 6.3x to 9.0x from 256. The rule is
+  n >= 32. Only `ch14_m14_9`, `_10` and `_11` (n = 151) reach it; inside
+  those models, six interleaved `bench_grad --timed` pairs each at load
+  average 5.0, the gradient is 2.13x, 2.30x and 1.46x faster.
+- **normal_id_glm** (data y and X, active alpha, beta and sigma), load
+  average 3.6 to 3.9: slower at 919 x 2 (0.68x), 1000 x 10 (0.83x) and
+  1000 x 24 (0.82x to 0.87x); 0.99x to 1.03x at 236 x 4, 2000 x 24 and
+  10000 x 5; 1.15x at 5000 x 10; 1.31x to 1.39x at 4096 x 16; 2.6x to 3.6x
+  at 4096 x 24 and above; 2.1x at 10000 x 10. The rule is rows >= 4096 and
+  columns >= 16. In the corpus only `diamonds` (5000 x 24) reaches it, and
+  its gradient is 2.53x faster in-model (six pairs, load average 5.0 to 5.2).
