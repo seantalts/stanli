@@ -130,7 +130,7 @@ int potri_lower(int64_t n, double* a, int64_t lda) {
   const int in = dim(n), ia = ld(lda);
   int info = 0;
   count();
-  const BlasCallThreads call_threads;
+  const BlasCallThreads call_threads(BlasCallThreads::kOneThread);
   dpotri_(&lo, &in, a, &ia, &info);
   return info;
 }

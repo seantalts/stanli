@@ -78,11 +78,12 @@ ParallelChainsScope::ParallelChainsScope(int chains)
 }
 ParallelChainsScope::~ParallelChainsScope() { t_parallel_chains = previous_; }
 
-BlasCallThreads::BlasCallThreads() {
+BlasCallThreads::BlasCallThreads(Policy policy) {
+  (void)policy;
 #ifdef STANLI_VECLIB_THREADING
   if (__builtin_available(macOS 15.0, *)) {
     const BLAS_THREADING want =
-        t_parallel_blas &&
+        policy == kByModel && t_parallel_blas &&
                 blas_may_thread(true, t_parallel_chains, performance_cores())
             ? BLAS_THREADING_MULTI_THREADED
             : BLAS_THREADING_SINGLE_THREADED;
