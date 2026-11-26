@@ -17,7 +17,14 @@ import time
 import measure as m
 import scale
 
+# The default ladder is coarse: bisection then finds the size of each jump in
+# the op count, and the cap points find the lowering caps. The full ladder
+# also puts a point on each side of 8, 32 and 64.
+COARSE = (0, 1, 8, 100, 10**4)
 LADDER = (0, 1, 2, 3, 7, 8, 9, 31, 32, 33, 63, 64, 65, 100, 1000, 10**4, 10**5)
+# A cap point is measured when it lies within this factor of the largest
+# ladder size; the limits on time and memory still apply to it.
+CAP_REACH = 32
 # The caps that lowering applies (runtime/src/lower.cpp): the program
 # budgets on the log-density program's bytes, and the unroll ceiling on the
 # ops one loop lowers to before the passes.
@@ -212,7 +219,7 @@ def run_ladder(tools, comp, text, data, var, sizes, work, args, deadline=None):
     stop, lad["stop"] = lad["stop"], ""
     lad["cap_points"] = []
     for size, why in cap_sizes(lad["points"]):
-        if size < max(sizes) * 4:
+        if size < max(sizes) * CAP_REACH:
             lad["cap_points"].append({"size": size, "cap": why})
             at(size)
     # Locate each jump in the op count to one size, by bisection. The sizes
@@ -237,10 +244,10 @@ def run_ladder(tools, comp, text, data, var, sizes, work, args, deadline=None):
     return lad
 
 
-def ladder_sizes(sv, wanted):
+def ladder_sizes(sv, wanted, full=False):
     lower = sv.lower if sv.lower is not None else 1
     upper = getattr(sv, "upper", None)
-    sizes = wanted or LADDER
+    sizes = wanted or (LADDER if full else COARSE)
     return [s for s in sorted(set(int(x) for x in sizes))
             if s >= max(lower, 0) and (upper is None or s <= upper)]
 
@@ -275,7 +282,9 @@ def structural(tools, source, args):
     share = max(30.0, args.model_seconds / max(1, len(todo)))
     for var, sv in todo:
         lad = run_ladder(tools, comp, text, data, var,
-                         ladder_sizes(sv, (wanted or {}).get(var)), work, args,
+                         ladder_sizes(sv, (wanted or {}).get(var),
+                                      getattr(args, "ladder", "") == "full"),
+                         work, args,
                          deadline=time.monotonic() + share)
         lad.update(kind=sv.kind, value=sv.value, inferred=sv.inferred)
         x["ladders"][var] = lad

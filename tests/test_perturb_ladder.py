@@ -144,6 +144,8 @@ class CapSizes(unittest.TestCase):
         SV.lower = 0
         self.assertIn(0, ladder.ladder_sizes(SV, None))
         self.assertEqual(ladder.ladder_sizes(SV, [5, 3, 3]), [3, 5])
+        self.assertEqual(ladder.ladder_sizes(SV, None), [0, 1, 8, 100, 10**4])
+        self.assertIn(33, ladder.ladder_sizes(SV, None, full=True))
 
 
 def outcome(values):

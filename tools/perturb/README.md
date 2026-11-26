@@ -138,9 +138,12 @@ python3 tools/perturb/scale.py MODEL.stan DATA.json --set N=1000 [--mode tile] -
 ```
 
 `--stage scaling` sweeps every seed's base over every size variable that
-scale.py accepts, and every variant whose meta names `sizes`. The ladder is
-0 (when the lower bound allows it), 1, 2, 3, 7, 8, 9, 31, 32, 33, 63, 64,
-65, 100, 1000, 10^4 and 10^5. After it, the ladder adds the sizes 3% below
+scale.py accepts, and every variant whose meta names `sizes`. The default
+ladder is coarse: 0 (when the lower bound allows it), 1, 8, 100 and 10^4.
+Bisection (below) then finds the size at which the op count jumps, so the
+coarse ladder locates a jump with far fewer points than the full one. `--ladder full` measures 0, 1, 2, 3, 7, 8, 9, 31, 32, 33, 63,
+64, 65, 100, 1000, 10^4 and 10^5, which also shows changes at 8, 32 and 64
+that do not move the op count. After it, the ladder adds the sizes 3% below
 and above where the program would cross the 8 MiB program budget, the
 32 MiB loop budget (`runtime/src/lower.cpp`) and the 2^20-op unroll
 ceiling, estimated from the growth of the last two points under each cap.

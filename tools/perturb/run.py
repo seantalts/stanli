@@ -446,6 +446,9 @@ def main(argv=None):
     ap.add_argument("--no-timing", action="store_true",
                     help="scaling: structural ladder only; scaled data "
                     "files are deleted after they are measured")
+    ap.add_argument("--ladder", choices=("coarse", "full"), default="coarse",
+                    help="scaling: 0, 1, 8, 100, 10^4 with bisection, or "
+                         "the full 17-size ladder")
     ap.add_argument("--growth", choices=("resample", "tile"),
                     default="resample",
                     help="scaling: how a ladder grows an axis")
