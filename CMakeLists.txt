@@ -1452,6 +1452,7 @@ if(NOT EMSCRIPTEN AND NOT WIN32)
                    -DEXPECTED=${STANLI_EXPECTED_BLAS}
                    -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/check_blas_link.cmake)
 endif()
+stanli_add_test(test_dense_blas OPTIMIZED)
 
 set(STANLI_TESTS
   test_execution_report test_json_writer test_rng
