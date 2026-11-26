@@ -283,7 +283,7 @@ def compare(c, i):
     lp_w, g_w, wa_w = [], [], []
     shape = []
     msgs = []
-    both_threw = one_threw = unchecked = 0
+    both_threw = one_threw = unchecked = components = 0
     for k, cp in c["points"].items():
         ip = i["points"].get(k, {"status": "none"})
         if cp["status"] == "ok" and ip["status"] == "ok":
@@ -295,6 +295,7 @@ def compare(c, i):
                 w, u = grad_check(cp["grad"], ip["grad"], ip.get("grad_err"))
                 g_w.append(w)
                 unchecked += u
+                components += len(cp["grad"])
             cw, iw = cp.get("wa"), ip.get("wa")
             # No write_array line and an empty row both mean no columns.
             if cw is None and iw and iw.get("names") == []:
@@ -359,6 +360,7 @@ def compare(c, i):
          "lp_worst": max(lp_w) if lp_w else None,
          "grad_worst": max(g_w) if g_w else None,
          "grad_unchecked": unchecked,
+         "grad_components": components,
          "wa_worst": max(wa_w) if wa_w else None,
          "points_both_threw": both_threw, "points_one_threw": one_threw,
          "notes": shape[:4]}
@@ -497,6 +499,14 @@ def table(records):
             lines.append(f"  {r['state']} {r['model']}: lp={v.get('lp_worst')} "
                          f"grad={v.get('grad_worst')} wa={v.get('wa_worst')} "
                          f"{v.get('notes', [])[:2]}")
+        partly = [r["model"] for r in rs
+                  if r.get("cmp", {}).get("grad_unchecked")]
+        none = [r["model"] for r in rs if r.get("cmp", {}).get("grad_components")
+                and r["cmp"]["grad_unchecked"] == r["cmp"]["grad_components"]]
+        if partly:
+            lines.append(f"  grad components unchecked (GRAD_ERR inf): "
+                         f"{len(partly)} models, {len(none)} with none "
+                         f"checked; e.g. {', '.join((none or partly)[:4])}")
         blame = collections.Counter(r["blame"] for r in rs if "blame" in r)
         if blame:
             lines.append("  interp on --passes none MIR disagrees; on shipping "
