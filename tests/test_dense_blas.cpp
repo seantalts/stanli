@@ -52,6 +52,8 @@ uint16_t opcode_after_pass(uint16_t opcode, std::vector<int> idata,
     g.add_op(opcode, {ins[0], ins[1]}, out, idata);
   else
     g.add_op(opcode, {ins[0], ins[1], ins[2]}, out, idata);
+  for (size_t k = 3; k < ins.size(); ++k) g.ops[at].in[k] = ins[k];
+  g.ops[at].n_in = (int)ins.size();
   g.ops[at].variant = variant;
   accelerate_dense_ops(g);
   return g.ops[at].opcode;
@@ -261,6 +263,58 @@ MnRun run_mn(uint16_t opcode, const Vec& y, const Vec& mu, const Mat& sigma,
   return r;
 }
 
+// normal_id_glm(y | X, alpha, beta, sigma) with data y and X: the log
+// density and the partials of alpha, beta and sigma, or the error.
+struct GlmRun {
+  double lp = 0;
+  Vec dalpha, dbeta, dsigma;
+  std::string error;
+  uint64_t calls = 0;
+};
+GlmRun run_glm(uint16_t opcode, const Vec& y, const Mat& x, const Vec& alpha,
+               const Vec& beta, const Vec& sigma, uint8_t variant) {
+  using namespace stanli;
+  const int64_t rows = x.rows(), cols = x.cols();
+  const int dims[] = {(int)rows, (int)cols, 0};
+  GlmRun r;
+  r.dalpha = Vec::Zero(alpha.size());
+  r.dbeta = Vec::Zero(cols);
+  r.dsigma = Vec::Zero(sigma.size());
+  std::vector<double> scratch(
+      (size_t)(rows + rows * cols + alpha.size() + cols + sigma.size()));
+  double out = 0;
+  KernelCtx ctx;
+  ctx.n_in = 5;
+  ctx.idata = dims;
+  ctx.n_idata = 3;
+  ctx.variant = variant;
+  ctx.in[0] = {const_cast<double*>(y.data()), rows};
+  ctx.in[1] = {const_cast<double*>(x.data()), rows * cols};
+  ctx.in[2] = {const_cast<double*>(alpha.data()), alpha.size()};
+  ctx.in[3] = {const_cast<double*>(beta.data()), cols};
+  ctx.in[4] = {const_cast<double*>(sigma.data()), sigma.size()};
+  ctx.in_adj[0] = {nullptr, rows};
+  ctx.in_adj[1] = {nullptr, rows * cols};
+  ctx.in_adj[2] = {(variant & 4) ? r.dalpha.data() : nullptr, alpha.size()};
+  ctx.in_adj[3] = {(variant & 8) ? r.dbeta.data() : nullptr, cols};
+  ctx.in_adj[4] = {(variant & 16) ? r.dsigma.data() : nullptr, sigma.size()};
+  ctx.out = {&out, 1};
+  ctx.out_adj = 1.0;
+  ctx.scratch = scratch.data();
+  const Kernel* k = find_kernel(opcode);
+  if (!registered(k, opcode)) return r;
+  const uint64_t before = blas::call_count();
+  try {
+    k->forward(ctx);
+    k->backward(ctx);
+  } catch (const std::exception& e) {
+    r.error = e.what();
+  }
+  r.calls = blas::call_count() - before;
+  r.lp = out;
+  return r;
+}
+
 void check_close(const std::string& what, const Mat& got, const Mat& want,
                  double tolerance) {
   const double e = scaled_error(got.data(), want.data(), got.size());
@@ -342,6 +396,33 @@ void thresholds_select_opcodes() {
             opcode_after_pass(OP_MULTI_NORMAL_LPDF, {v, 3, 3, 3},
                               {3 * v, 3 * v, int64_t(v) * v}, 1, 0x86),
             OP_MULTI_NORMAL_LPDF, OP_MULTI_NORMAL_LPDF);
+  // normal_id_glm with data y and X and an active beta, on a design that
+  // reaches the threshold; a thin design, an active X and a row-vector
+  // design keep the plain kernel.
+#ifdef STANLI_ACCELERATE
+  const int gr = (int)t.glm_min_rows, gc = (int)t.glm_min_cols;
+#else
+  const int gr = 4096, gc = 24;
+#endif
+  const auto glm = [&](int rows, int cols, uint8_t variant, int flags) {
+    return opcode_after_pass(OP_NORMAL_ID_GLM_LPDF, {rows, cols, flags},
+                             {rows, int64_t(rows) * cols, 1, cols, 1}, 1,
+                             variant);
+  };
+  expect_op("normal_id_glm at threshold", glm(gr, gc, 0x1c, 0),
+            OP_NORMAL_ID_GLM_LPDF_BLAS, OP_NORMAL_ID_GLM_LPDF);
+  expect_op("normal_id_glm, propto, beta only", glm(gr, gc, 0x88, 0),
+            OP_NORMAL_ID_GLM_LPDF_BLAS, OP_NORMAL_ID_GLM_LPDF);
+  expect_op("normal_id_glm with fewer rows", glm(gr - 1, gc, 0x1c, 0),
+            OP_NORMAL_ID_GLM_LPDF, OP_NORMAL_ID_GLM_LPDF);
+  expect_op("normal_id_glm with fewer columns", glm(gr, gc - 1, 0x1c, 0),
+            OP_NORMAL_ID_GLM_LPDF, OP_NORMAL_ID_GLM_LPDF);
+  expect_op("normal_id_glm with data beta", glm(gr, gc, 0x14, 0),
+            OP_NORMAL_ID_GLM_LPDF, OP_NORMAL_ID_GLM_LPDF);
+  expect_op("normal_id_glm with an active X", glm(gr, gc, 0x1e, 0),
+            OP_NORMAL_ID_GLM_LPDF, OP_NORMAL_ID_GLM_LPDF);
+  expect_op("normal_id_glm with an active y", glm(gr, gc, 0x1d, 0),
+            OP_NORMAL_ID_GLM_LPDF, OP_NORMAL_ID_GLM_LPDF);
   // Every other activity keeps Stan Math's nested tape.
   expect_op("multi_normal_cholesky with active y",
             opcode_after_pass(OP_MULTI_NORMAL_CHOL_LPDF, {m, 1, 1, 0},
@@ -490,6 +571,78 @@ void accelerated_kernels_agree() {
               same && same_bits(fast.dsigma.data()[i], plain.dsigma.data()[i]);
         expect_true(what + ": same adjoint bits", same);
       }
+    }
+  }
+  // normal_id_glm: the accelerated kernel against the plain one for each
+  // activity with an active beta, scalar and vector alpha and sigma, and the
+  // plain kernel's errors for a non-positive or non-finite scale and
+  // non-finite data.
+  {
+    const int64_t rows = t.glm_min_rows, cols = t.glm_min_cols;
+    const Mat x = seed(rows, cols, 0.3) * 0.5;
+    const Vec beta = seed(cols, 1, 1.1) * 0.2;
+    const Vec y = (x * beta + seed(rows, 1, 2.0) * 0.3).eval();
+    const Vec a1 = Vec::Constant(1, 0.1), av = seed(rows, 1, 0.4) * 0.1;
+    const Vec s1 = Vec::Constant(1, 0.7),
+              sv = (seed(rows, 1, 0.8).array().abs() + 0.5).matrix();
+    for (uint8_t variant : {uint8_t(0x1c), uint8_t(0x9c), uint8_t(0x88),
+                            uint8_t(0x08), uint8_t(0x18), uint8_t(0x8c)})
+      for (int shape = 0; shape < 4; ++shape) {
+        const Vec& alpha = (shape & 1) ? av : a1;
+        const Vec& sigma = (shape & 2) ? sv : s1;
+        const GlmRun plain =
+            run_glm(OP_NORMAL_ID_GLM_LPDF, y, x, alpha, beta, sigma, variant);
+        const GlmRun fast = run_glm(OP_NORMAL_ID_GLM_LPDF_BLAS, y, x, alpha,
+                                    beta, sigma, variant);
+        const std::string at = " variant=" + std::to_string(int(variant)) +
+                               ((shape & 1) ? " alpha vector" : "") +
+                               ((shape & 2) ? " sigma vector" : "");
+        expect_true("plain normal_id_glm succeeds" + at, plain.error.empty());
+        expect_true("accelerated normal_id_glm succeeds" + at,
+                    fast.error.empty());
+        expect_true("accelerated normal_id_glm calls BLAS" + at,
+                    fast.calls > 0);
+        const double lp_rel =
+            std::abs(fast.lp - plain.lp) / std::max(1.0, std::abs(plain.lp));
+        std::printf("%-44s relative error %.2e\n",
+                    ("normal_id_glm lp" + at).c_str(), lp_rel);
+        expect_true("normal_id_glm lp" + at, lp_rel <= 1e-13);
+        check_close("normal_id_glm adjoint of beta" + at, fast.dbeta,
+                    plain.dbeta, 1e-13);
+        check_close("normal_id_glm adjoint of alpha" + at, fast.dalpha,
+                    plain.dalpha, 1e-13);
+        check_close("normal_id_glm adjoint of sigma" + at, fast.dsigma,
+                    plain.dsigma, 1e-13);
+      }
+    const double nan = std::numeric_limits<double>::quiet_NaN(),
+                 inf = std::numeric_limits<double>::infinity();
+    struct Bad {
+      const char* what;
+      Vec y, sigma;
+      Mat x;
+    };
+    std::vector<Bad> bad;
+    bad.push_back({"zero scale", y, Vec::Constant(1, 0.0), x});
+    bad.push_back({"negative scale", y, Vec::Constant(1, -1.0), x});
+    bad.push_back({"infinite scale", y, Vec::Constant(1, inf), x});
+    Vec ynan = y;
+    ynan(3) = nan;
+    bad.push_back({"nan in y", ynan, s1, x});
+    Mat xinf = x;
+    xinf(5, 2) = inf;
+    bad.push_back({"infinite x", y, s1, xinf});
+    Mat xnan = x;
+    xnan(7, 1) = nan;
+    bad.push_back({"nan in x", y, s1, xnan});
+    for (const Bad& b : bad) {
+      const GlmRun plain =
+          run_glm(OP_NORMAL_ID_GLM_LPDF, b.y, b.x, a1, beta, b.sigma, 0x1c);
+      const GlmRun fast = run_glm(OP_NORMAL_ID_GLM_LPDF_BLAS, b.y, b.x, a1,
+                                  beta, b.sigma, 0x1c);
+      const std::string what = std::string("normal_id_glm, ") + b.what;
+      std::printf("%-44s plain: %s\n", what.c_str(),
+                  plain.error.empty() ? "accepted" : plain.error.c_str());
+      expect_true(what + ": same error", fast.error == plain.error);
     }
   }
   for (int64_t n : {t.tri_inverse_min_n, int64_t(200)}) {
