@@ -6,6 +6,9 @@
 # its caches: the main Clang ccache, the OCaml switch and the incremental
 # stanc3 build. Restoring and never saving keeps this workflow from writing
 # a cache entry that another workflow would then restore.
+#
+# The libfuzzer job runs the runtime's input fuzzers (tests/fuzz). It saves
+# a compiler cache of its own, under a key prefix that nothing else restores.
 name: nightly stanc3 fuzz
 
 on:
@@ -200,6 +203,120 @@ jobs:
         with:
           name: fuzz-run
           path: fuzz-run/
+          retention-days: 30
+
+  # libFuzzer on the parsers that read caller input: the BridgeStan
+  # manifest's whiten member, the low-rank whitening and sparse-factor
+  # arguments, and data JSON. Five minutes per target under ASan and UBSan's
+  # signed-integer-overflow check. A crash fails the job and its input is
+  # in the uploaded artifact; once fixed, it belongs in tests/fuzz/corpus/,
+  # which CTest replays. The runner's own Clang, as in the wheels
+  # workflow's asan job: libFuzzer's runtime ships with LLVM's Clang, and
+  # Ubuntu's package has it.
+  libfuzzer:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: ./.github/actions/pins
+
+      - name: Install Clang
+        run: |
+          tools/with_retry.sh sh -c \
+            'sudo apt-get update && sudo apt-get install -y clang ccache'
+
+      - name: Fingerprint Clang
+        id: toolchain
+        run: |
+          fingerprint=$(clang++ --version | sha256sum | cut -d' ' -f1)
+          echo "id=$fingerprint" >> "$GITHUB_OUTPUT"
+
+      - name: Restore the compiler cache
+        id: cache
+        uses: actions/cache/restore@v4
+        with:
+          path: .ccache
+          key: >-
+            ccache-libfuzzer-v1-${{ steps.toolchain.outputs.id }}-${{ hashFiles('CMakeLists.txt', 'runtime/**', 'tests/fuzz/**', 'tests/tbb_stub.cpp', 'deps/fetch.sh', 'deps/pins.env') }}
+          restore-keys: ccache-libfuzzer-v1-${{ steps.toolchain.outputs.id }}-
+
+      - name: Restore the vendored dependencies
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            deps/math
+            deps/stan
+          key: deps-${{ runner.os }}-sources3-${{ hashFiles('deps/pins.env', 'deps/fetch.sh') }}
+
+      - name: Fetch pinned dependencies
+        run: ./deps/fetch.sh
+
+      # The density kernels peak at about 8 GB each under ASan and
+      # libFuzzer's coverage (measured with Homebrew Clang 23 on arm64), so
+      # two at once need more than the runner's 16 GB. Swap on the ephemeral
+      # disk, as in the wheels workflow's asan job.
+      - name: Swap, so a compiler memory spike degrades instead of killing
+        run: |
+          sudo fallocate -l 8G /mnt/swapfile-fuzz
+          sudo chmod 600 /mnt/swapfile-fuzz
+          sudo mkswap /mnt/swapfile-fuzz
+          sudo swapon /mnt/swapfile-fuzz
+          swapon --show && free -h
+
+      - name: Build the fuzz targets
+        id: build
+        run: |
+          export CCACHE_DIR="$PWD/.ccache" CCACHE_COMPRESS=1 CCACHE_MAXSIZE=400M
+          cmake -B build-fuzz -DCMAKE_BUILD_TYPE=None \
+            -DCMAKE_C_FLAGS="-O1 -g1" -DCMAKE_CXX_FLAGS="-O1 -g1" \
+            -DSTANLI_SANITIZE=address,signed-integer-overflow -DSTANLI_FUZZ=ON \
+            -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++ \
+            -DCMAKE_C_COMPILER_LAUNCHER=ccache \
+            -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
+          cmake --build build-fuzz -j2 \
+            --target fuzz_manifest fuzz_lowrank fuzz_data
+          ccache -s
+
+      - name: Save the compiler cache
+        if: >-
+          always() && steps.build.outcome == 'success' &&
+          steps.cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: .ccache
+          key: ${{ steps.cache.outputs.cache-primary-key }}
+
+      - name: Fuzz
+        env:
+          ASAN_OPTIONS: detect_leaks=0
+          UBSAN_OPTIONS: print_stacktrace=1
+        run: |
+          status=0
+          for t in manifest lowrank data; do
+            mkdir -p "fuzz-out/$t/corpus"
+            dict=
+            [ -f "tests/fuzz/$t.dict" ] && dict="-dict=tests/fuzz/$t.dict"
+            # New inputs go to the first directory, not the checked-in seeds.
+            "build-fuzz/fuzz_$t" -max_total_time=300 -timeout=30 $dict \
+              -artifact_prefix="fuzz-out/$t/" \
+              "fuzz-out/$t/corpus" "tests/fuzz/corpus/$t" \
+              > "fuzz-out/$t/log.txt" 2>&1 || status=1
+            tail -n 40 "fuzz-out/$t/log.txt"
+          done
+          exit $status
+
+      - name: Upload the crash inputs and logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: libfuzzer-run
+          path: |
+            fuzz-out/*/log.txt
+            fuzz-out/*/crash-*
+            fuzz-out/*/timeout-*
+            fuzz-out/*/oom-*
+          if-no-files-found: ignore
           retention-days: 30
 
   # A separate job so that the job running generated programs never holds a

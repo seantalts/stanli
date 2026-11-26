@@ -1,0 +1,19 @@
+# libFuzzer dictionary for fuzz_manifest: the whiten member's field names,
+# and widths near the limits of n * k. A whole "k" member, inserted before
+# another member, replaces the seed's width: the reader takes the first of
+# two equal keys.
+"\"q_hat\""
+"\"perm\""
+"\"col_ptr\""
+"\"row_idx\""
+"\"values\""
+"\"k\":"
+"\"c\""
+"\"b\""
+"\"w\""
+"9223372036854775807"
+"4611686018427387904"
+"3074457345618258603"
+"AAAAAAAA8D8="
+"\"k\": 9223372036854775807, "
+"\"k\": 4611686018427387904, "
