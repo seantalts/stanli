@@ -212,8 +212,7 @@ def changed(base, p):
     parts += [f"-lowering {x}" for x in sorted(bl - pl)]
     if not parts:
         return None
-    new = sorted(set(p.get("declines") or ()) - set(base.get("declines") or ()))
-    return "; ".join(parts), new
+    return "; ".join(parts), sorted(m.decline_growth(base, p))
 
 
 def measure_data(tools, comp, data, path):
@@ -260,7 +259,8 @@ def one_model(tools, source, args):
     work.mkdir(parents=True, exist_ok=True)
     base = ladder.measure_point(tools, comp, data_path, 0)
     x["base"] = {k: base.get(k) for k in ("status", "ops", "lowering",
-                                           "declines", "message")}
+                                           "declines", "decline_counts",
+                                           "message")}
     if base["status"] != "ok":
         x["error"] = f"base data: {base['status']} {base.get('message')}"
         return x
@@ -273,7 +273,8 @@ def one_model(tools, source, args):
         p = measure_data(tools, comp, new, work / "point.json")
         rec = {"kind": kind, "label": label, "dose": dose,
                **{k: p.get(k) for k in ("status", "message", "ops",
-                                        "lowering", "declines", "prep_s",
+                                        "lowering", "declines",
+                                        "decline_counts", "prep_s",
                                         "executor_bytes")}}
         x["perturbations"].append(rec)
         diff = changed(base, p)
@@ -293,6 +294,8 @@ def one_model(tools, source, args):
             x["findings"].append({
                 "kind": "data_value_changes_program", "var": kind,
                 "sizes": label, "detail": what, "new_declines": new_declines,
+                "decline_more": m.decline_rises(
+                    base, m.decline_growth(base, p)),
                 "threshold": rec.get("threshold")})
     x["seconds"] = time.monotonic() - started
     return x
@@ -327,7 +330,7 @@ def report(models, meta):
             "|---|---|---|---|---|---|"]
     for x, f in rows:
         out.append(f"| {x['name']} | {f['var']} | {f['sizes']} | {f['detail']} "
-                   f"| {'; '.join(f['new_declines'])[:200]} "
+                   f"| {'; '.join(m.decline_text(f, d) for d in f['new_declines'])[:200]} "
                    f"| {f.get('threshold') or '-'} |")
     errors = [x for x in models if x.get("error")]
     if errors:

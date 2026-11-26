@@ -177,7 +177,9 @@ def structure(tools, rec, stan, data, base_stan, base_data):
         return "error", f"base: {base['failure']}"
     if var.get("failure"):
         return "failure", var["failure"]
-    rec["new_declines"] = sorted(set(var["declines"]) - set(base["declines"]))
+    growth = m.decline_growth(base, var)
+    rec["new_declines"] = sorted(growth)
+    rec["decline_more"] = m.decline_rises(base, growth)
     rec["differs"] = [part for part, key in (
         ("log_prob program", "ops_text_sha"),
         ("write_array program", "wa_text_sha"), ("islands", "islands_sha"))

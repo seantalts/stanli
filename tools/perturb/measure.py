@@ -303,6 +303,33 @@ def decline_counts(stderr):
     return dict(sorted(counts.items()))
 
 
+def decline_growth(base, var):
+    """The reasons that are new in `var`, or that it reports more often than
+    `base`, as {reason: how many more}. Records from before the counts were
+    kept count each reason once."""
+    def counts(record):
+        have = record.get("decline_counts")
+        return have if have is not None else dict.fromkeys(
+            record.get("declines") or (), 1)
+    before = counts(base)
+    return {reason: n - before.get(reason, 0)
+            for reason, n in counts(var).items()
+            if n > before.get(reason, 0)}
+
+
+def decline_rises(base, growth):
+    """The part of `growth` that the base already reports at least once."""
+    held = set(base.get("declines") or ())
+    return {reason: n for reason, n in growth.items() if reason in held}
+
+
+def decline_text(rec, reason):
+    """A new decline as a report writes it: the reason, with how many more
+    of it there are than in the base when the base already had it."""
+    more = (rec.get("decline_more") or {}).get(reason)
+    return f"{reason} (x{more} more)" if more else reason
+
+
 def lowering(ops_text):
     """How the program runs its loops: counts of the region opcodes and of
     scalar ops. No REGION op and many scalar ops means unrolled."""
@@ -322,7 +349,8 @@ def structure(tools, comp, data, prep_reps=3):
         return {"failure": "dump_ops: " + failure_text(code, err)}
     result["ops_text_sha"] = sha_text(out)
     result["lowering"] = lowering(out)
-    result["declines"] = lane_declines(err)
+    result["decline_counts"] = decline_counts(err)
+    result["declines"] = sorted(result["decline_counts"])
     code, wa, err, _ = run([tools.dump_ops, mir, data, ALL_OPS,
                             "--write-array"], tools.timeout)
     if code == 1 and err.strip() == NO_WRITE_ARRAY:

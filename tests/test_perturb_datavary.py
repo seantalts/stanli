@@ -68,5 +68,18 @@ class Perturbations(unittest.TestCase):
         self.assertIsNone(datavary.changed(base, {"status": "rejected"}))
 
 
+class NewDeclines(unittest.TestCase):
+    A = "reroll/log_prob: group is too small"
+
+    def test_a_decline_the_base_already_has_counts_when_it_rises(self):
+        base = {"ops": 20, "lowering": {}, "declines": [self.A],
+                "decline_counts": {self.A: 2}}
+        p = {"status": "ok", "ops": 90, "lowering": {}, "declines": [self.A],
+             "decline_counts": {self.A: 9}}
+        what, new = datavary.changed(base, p)
+        self.assertEqual(new, [self.A])
+        self.assertIn("ops 20 -> 90", what)
+
+
 if __name__ == "__main__":
     unittest.main()

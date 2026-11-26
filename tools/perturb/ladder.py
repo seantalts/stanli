@@ -118,7 +118,7 @@ def measure_point(tools, comp, data_path, size):
     point.update({k: s.get(k) for k in (
         "ops", "lowered_ops", "wa_ops", "wa_lowered_ops", "program_bytes",
         "executor_bytes", "slot_elems", "prep_s", "peak_rss",
-        "first_gradient_s", "declines", "lowering", "wa_lowering", "islands")})
+        "first_gradient_s", "declines", "decline_counts", "lowering", "wa_lowering", "islands")})
     return point
 
 

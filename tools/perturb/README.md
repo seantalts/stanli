@@ -70,7 +70,13 @@ python3 tools/perturb/causes.py SCALING_OUT DATAVALUES_OUT           # findings 
    `pass/graph: reason`, such as `region_map/log_prob: assigns NAME declared
    outside the body`. The region map and structured-loop reasons come from
    the `refused` lines on stderr, with identifiers replaced by NAME and numbers
-   by N so that `causes.py` can group them. The executor size is the estimate of
+   by N so that `causes.py` can group them. `declines` lists each reason
+   once and `decline_counts` says how many times it is reported (one per
+   unfused op position for reroll and partition, one per refused loop for
+   the others). A reason is a new decline when the base lacks it or the
+   variant reports it more often; the report writes the second case as
+   `reason (x5 more)`, and `new_declines` in `results.json` keeps the plain
+   reason. The executor size is the estimate of
    `Executor::program_bytes`: 448 bytes per log-density op and 424 per
    write_array op, plus 16 bytes per slot element for values and adjoints.
    No tool prints this, so the constants are in `measure.py`. An equivalent
@@ -204,7 +210,8 @@ have it as their first axis:
 
 A perturbation whose log-density program grows 1.5x (and by 20 ops or
 more), or whose loops are lowered another way, than with the base data is
-a `data_value_changes_program` finding. For duplicate rows the count is
+a `data_value_changes_program` finding. New declines are found as in stage 2,
+by reason or by a higher count. For duplicate rows the count is
 bisected to the smallest number of duplicates that changes the program.
 `OUT/datavalues.json` keeps every perturbation and `OUT/datavalues.md`
 lists the findings. Timing and CmdStan confirmation are left to the
