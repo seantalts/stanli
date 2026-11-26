@@ -38,11 +38,10 @@ import time
 
 REPO = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO / "tools"))
-sys.path.insert(0, str(REPO / "tools" / "fuzz_stanc"))
 from corpus_inventory import corpus_cases, materialize_data  # noqa: E402
 import check_stanc3_good as good  # noqa: E402
 import check_status  # noqa: E402
-from differential import printed_lines  # noqa: E402
+from check_compare import ABS_TOL, printed_lines  # noqa: E402
 
 POINTS = "0,1,2,3,4"
 # The gradient is compared at the two pseudorandom points only: the others
@@ -52,21 +51,11 @@ POINTS = "0,1,2,3,4"
 GRAD_POINTS = ("3", "4")
 GRAD_MAX = 200
 TOLS = (1e-10, 1e-8)
-ABS_TOL = 1e-12
 # A gradient component agrees when |compiled - interp| is within
 # GRAD_ERR_FACTOR times the interpreter's error estimate plus
 # GRAD_REL_TOL * max(1, |compiled|).
 GRAD_ERR_FACTOR = 10.0
 GRAD_REL_TOL = 1e-6
-
-
-def close(a, b, rel):
-    a, b = float(a), float(b)
-    if math.isnan(a) or math.isnan(b):
-        return math.isnan(a) and math.isnan(b)
-    if math.isinf(a) or math.isinf(b):
-        return a == b
-    return abs(a - b) <= max(ABS_TOL, rel * max(abs(a), abs(b)))
 
 
 def worst_rel(xs, ys):

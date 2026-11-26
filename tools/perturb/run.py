@@ -29,7 +29,7 @@ import time
 HERE = pathlib.Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 import measure as m  # noqa: E402
-import differential  # noqa: E402  (on the path through measure)
+import check_compare  # noqa: E402  (on the path through measure)
 
 FLAG_RATIO = 1.3
 SCREEN_ROUNDS = 6
@@ -99,8 +99,8 @@ def init_seeds(root, models):
 def first_problem(diffs):
     for kind, d in diffs:
         if kind in INVALID_KINDS and not d.get("write_array"):
-            text = json.dumps(d).replace('"none"', '"base"').replace(
-                '"o1"', '"variant"')
+            text = json.dumps(d).replace('"a":', '"base":').replace(
+                '"b":', '"variant":')
             return f"{kind} differs: {text[:300]}"
     return None
 
@@ -128,7 +128,7 @@ def validity(tools, rec, stan, data, base_stan, base_data):
     if meta.get("equivalent"):
         propto = bool(PROPTO.search(base_stan.read_text())
                       or PROPTO.search(stan.read_text()))
-        diffs, _ = differential.compare_runs(base_out, var_out, propto)
+        diffs, _ = check_compare.compare_runs(base_out, var_out, propto)
         problem = first_problem(diffs)
         if problem:
             kinds = {k for k, d in diffs if k in INVALID_KINDS
@@ -139,7 +139,7 @@ def validity(tools, rec, stan, data, base_stan, base_data):
                                           "first": problem}
             else:
                 return problem
-        if propto and differential.compare_runs(base_out, var_out)[0]:
+        if propto and check_compare.compare_runs(base_out, var_out)[0]:
             rec["lp_constant_shift"] = True
     return None
 
@@ -149,7 +149,7 @@ def largest_difference(a, b, propto):
     check points, or None when the values are not comparable. Under propto
     the lp may move by a constant, so only the gradient counts."""
     worst = 0.0
-    for k in differential.POINTS:
+    for k in check_compare.POINTS:
         sa = a[1]["points"][k]["status"]
         sb = b[1]["points"][k]["status"]
         if not sa or not sb or sa[0] != "OK" or sb[0] != "OK" or \
@@ -159,7 +159,7 @@ def largest_difference(a, b, propto):
         for x, y in pairs:
             x, y = float(x), float(y)
             scale_ = max(abs(x), abs(y))
-            if scale_ > differential.ABS_TOL:
+            if scale_ > check_compare.ABS_TOL:
                 worst = max(worst, abs(x - y) / scale_)
     return worst
 

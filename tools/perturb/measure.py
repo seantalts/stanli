@@ -24,11 +24,10 @@ import time
 
 REPO = pathlib.Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO / "tools"))
-sys.path.insert(0, str(REPO / "tools" / "fuzz_stanc"))
 import benchmark_points  # noqa: E402
+import check_compare  # noqa: E402
 import check_status  # noqa: E402
 import cmdstan_ref  # noqa: E402
-import differential  # noqa: E402
 import toolchain  # noqa: E402
 from bench_select import NO_WRITE_ARRAY, opcode_counts  # noqa: E402
 from lane_declines import first_per_position  # noqa: E402
@@ -192,8 +191,8 @@ def compile_source(tools, text):
         return result
 
 
-def check(tools, comp, data, points=differential.POINTS, status=None):
-    """stanli_check at `points`: differential.run_outcome's (state, payload)
+def check(tools, comp, data, points=check_compare.POINTS, status=None):
+    """stanli_check at `points`: check_compare.run_outcome's (state, payload)
     and the status records."""
     if status is None:
         fd, status = tempfile.mkstemp(suffix=".jsonl",
@@ -207,10 +206,10 @@ def check(tools, comp, data, points=differential.POINTS, status=None):
     records = check_status.read(status)
     status.unlink(missing_ok=True)
     raw = None if code is None else (code, out, err)
-    return differential.run_outcome(raw, records), records
+    return check_compare.run_outcome(raw, records), records
 
 
-def finite_values(outcome, points=differential.POINTS):
+def finite_values(outcome, points=check_compare.POINTS):
     """None when every point gave a finite lp and gradient, else why not."""
     state, payload = outcome
     if state != "points":

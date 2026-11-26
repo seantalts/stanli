@@ -153,7 +153,7 @@ class CapSizes(unittest.TestCase):
 
 
 def outcome(values):
-    """A differential.run_outcome payload with OK rows at the check points."""
+    """A check_compare.run_outcome payload with OK rows at the check points."""
     return ("points", {"points": {k: {"status": ("OK", [str(v) for v in values[k]])}
                                   for k in range(3)}, "prints": {}})
 
@@ -212,8 +212,9 @@ class Text(unittest.TestCase):
         diffs = [("one_side_threw", {"point": 0, "write_array": True}),
                  ("output", {"point": 0})]
         self.assertIsNone(run.first_problem(diffs))
-        self.assertIn("grad differs",
-                      run.first_problem([("grad", {"point": 1, "none": "1", "o1": "2"})]))
+        problem = run.first_problem([("grad", {"point": 1, "a": "1", "b": "2"})])
+        self.assertIn("grad differs", problem)
+        self.assertIn('"base": "1", "variant": "2"', problem)
 
 
 def lanes(op, reason, graph="log_prob", pass_="reroll", period=1):
