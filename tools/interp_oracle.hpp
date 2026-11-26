@@ -268,9 +268,14 @@ inline std::unique_ptr<Model> prepare(const std::string& mir_text,
   m->prog = prog;
   for (const auto& f : prog->fun_defs) m->funs[mir::function_key(f)] = &f;
   WaRng td_rng(seed);
+  // An input with no elements may be left out of the data, as CmdStan
+  // allows; it is synthesized at its declaration.
+  std::map<std::string, Entry> empty_inputs;
   MirHooks h;
-  h.data = [&data](const std::string& n) -> const Entry* {
-    return data.has(n) ? &data.at(n) : nullptr;
+  h.data = [&](const std::string& n) -> const Entry* {
+    if (data.has(n)) return &data.at(n);
+    auto it = empty_inputs.find(n);
+    return it == empty_inputs.end() ? nullptr : &it->second;
   };
   h.fun = [&](MirInterp<double>& in, const mir::Expr& e, Entry* out) {
     if (interpreted_rng_call(in, e, out, td_rng)) return true;
@@ -278,7 +283,24 @@ inline std::unique_ptr<Model> prepare(const std::string& mir_text,
         m->funs, e, [&in](const mir::Expr& a) { return in.eval(a); }, out);
   };
   MirInterp<double> td(m->funs, "prepare_data", h);
-  td.run(prog->prepare_data);
+  std::map<std::string, const mir::SizedType*> inputs;
+  for (const auto& [name, type] : prog->input_vars) inputs[name] = &type;
+  for (const auto& st : prog->prepare_data) {
+    if (st.kind == mir::Stmt::Decl && inputs.count(st.decl_id) &&
+        !data.has(st.decl_id)) {
+      Entry e;
+      int64_t n = 1;
+      for (const auto& d : st.decl_type.dims) {
+        e.dims.push_back(td.as_int(d));
+        n *= e.dims.back();
+      }
+      e.is_int = st.decl_type.base == "SInt" ||
+                 (st.decl_type.base == "SArray" &&
+                  st.decl_type.elem_base == "SInt");
+      if (n == 0 && !e.dims.empty()) empty_inputs[st.decl_id] = e;
+    }
+    if (td.exec(st) != MirInterp<double>::Flow::Next) break;
+  }
   m->td_env = td.env();
   m->shared_env =
       std::make_shared<const std::map<std::string, Entry>>(m->td_env);
