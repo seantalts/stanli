@@ -395,12 +395,22 @@ void read_structured(stan::io::deserializer<S>& d, const mir::Transform& tr,
         break;
       }
       case mir::Transform::SumToZero: {
+        // The transform has no Jacobian, so its double overload serves both
+        // reads. The var overload crashes on a matrix with no free values
+        // (sum_to_zero_matrix[1, 3]).
         if (g.leaf.size() == 2) {
-          MatV v = d.template read_constrain_sum_to_zero<MatV, true>(lp, K, C);
-          place(l, v.data());
+          const Eigen::MatrixXd free =
+              stan::math::value_of(MatV(d.template read<MatV>(
+                  std::max<int64_t>(K - 1, 0), std::max<int64_t>(C - 1, 0))));
+          const Eigen::MatrixXd v = stan::math::sum_to_zero_constrain(free);
+          for (int64_t e = 0; e < g.leaf_len; ++e)
+            out.r[(size_t)flat_pos(g, l, e)] = v.data()[e];
         } else {
-          VecV v = d.template read_constrain_sum_to_zero<VecV, true>(lp, K);
-          place(l, v.data());
+          const Eigen::VectorXd free = stan::math::value_of(
+              VecV(d.template read<VecV>(std::max<int64_t>(K - 1, 0))));
+          const Eigen::VectorXd v = stan::math::sum_to_zero_constrain(free);
+          for (int64_t e = 0; e < g.leaf_len; ++e)
+            out.r[(size_t)flat_pos(g, l, e)] = v.data()[e];
         }
         break;
       }
