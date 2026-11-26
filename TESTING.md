@@ -111,11 +111,11 @@ answers at 3 points for each model. That makes <!--gen:testing_points-->1245<!--
 and <!--gen:testing_values-->1,504,551<!--/gen--> values. CmdStan rejects <!--gen:testing_rejected_points-->6<!--/gen-->
 of the points.
 
-In <!--gen:testing_models_within-->329<!--/gen--> models, every value is within 10 ULP of
-CmdStan. The other <!--gen:testing_models_over-->86<!--/gen--> models have <!--gen:testing_entries-->190<!--/gen-->
-ledger entries. stanli is at least as close to the true value as CmdStan in <!--gen:testing_entries_stanli-->145<!--/gen-->
+In <!--gen:testing_models_within-->328<!--/gen--> models, every value is within 10 ULP of
+CmdStan. The other <!--gen:testing_models_over-->87<!--/gen--> models have <!--gen:testing_entries-->192<!--/gen-->
+ledger entries. stanli is at least as close to the true value as CmdStan in <!--gen:testing_entries_stanli-->146<!--/gen-->
 of those entries. CmdStan is closer in <!--gen:testing_entries_cmdstan-->6<!--/gen-->. We
-cannot tell for the other <!--gen:testing_entries_unknown-->39<!--/gen-->.
+cannot tell for the other <!--gen:testing_entries_unknown-->40<!--/gen-->.
 
 <!--gen:testing_collections-->
 | source | models | models with a value over 10 ULP |
@@ -126,7 +126,7 @@ cannot tell for the other <!--gen:testing_entries_unknown-->39<!--/gen-->.
 | rethinking | 62 | 12 |
 | cogmod | 22 | 12 |
 | ctsem | 3 | 1 |
-| examplemodels | 23 | 5 |
+| examplemodels | 23 | 6 |
 | stanguide | 6 | 1 |
 | oncobayes2 | 3 | 1 |
 | rstanarm | 4 | 0 |
@@ -142,7 +142,7 @@ cannot tell for the other <!--gen:testing_entries_unknown-->39<!--/gen-->.
 | walker | 2 | 0 |
 | bayesdfa | 2 | 0 |
 | regressions | 14 | 0 |
-| all | 415 | 86 |
+| all | 415 | 87 |
 <!--/gen-->
 
 The models come from posteriordb, brms formulas, the code of Statistical
@@ -559,7 +559,7 @@ table and those files disagree.
 | `examplemodels_dlm_fx_equicorr` | examplemodels | 7 | 25 |  |  |  |  |  |  | 10 |  |
 | `examplemodels_dlm_fx_factor` | examplemodels | 7 | 10 |  |  |  |  |  |  | 10 |  |
 | `examplemodels_dlm_nile` | examplemodels | 2 | 2 |  |  |  |  |  |  | 10 |  |
-| `examplemodels_gp_fit_multi_output` | examplemodels | 311 | 326 | 1.8e7 | 1.8e7 |  |  | 0.01 | 0.01 | 10 | ill-conditioned, so the 1e-9 limit is 1.5e-6 for the gradient and 5e-8 for lp |
+| `examplemodels_gp_fit_multi_output` | examplemodels | 311 | 326 | 1.8e7 | 1.8e7 |  |  | 0.01 | 0.01 | lp 5.2e07, outputs 4.2e08 | ill-conditioned, so the 1e-9 limit is 1.5e-6 for the gradient and 5e-8 for lp |
 | `examplemodels_hmm_marginal` | examplemodels | 10 | 0 |  |  |  |  |  |  | 10 |  |
 | `examplemodels_irt_1pl_hier` | examplemodels | 33 | 33 | 0.89 | 0.89 | 0.08 | 0.07 | 0.02 | 0.02 | 10 |  |
 | `examplemodels_irt_multilevel` | examplemodels | 55 | 55 | 6.15 | 6.48 | 0.09 | 0.07 | 0.04 | 0.04 | 10 |  |
