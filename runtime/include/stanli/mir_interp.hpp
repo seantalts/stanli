@@ -120,6 +120,11 @@ class MirInterp {
   // Where `target +=` adds in write_array, which accumulates from 0 like
   // CmdStan's. Without one the statement is refused.
   void set_target_sink(T* sum) { target_sink_ = sum; }
+  // Where `jacobian +=` and the callable `_jacobian` transforms add, in
+  // user functions too, for a caller that evaluates the log density with
+  // the Jacobian. Without one they add nothing, as in CmdStan's
+  // write_array.
+  void set_jacobian_sink(T* sum) { jacobian_sink_ = sum; }
 
   // The caller's propto__ for this scope. Lowering sets it on entering a
   // user function body that it inlines.
@@ -129,6 +134,10 @@ class MirInterp {
   // CmdStan may use vars, and the terms propto drops depend on which. So a
   // density that drops terms refuses rather than guess.
   void refuse_propto_densities() { refuse_propto_ = true; }
+  // Decide which terms propto drops from the types CmdStan's log density
+  // gives each argument, as the var instantiation does, while computing on
+  // doubles.
+  void set_model_types(bool on) { model_types_ = on; }
 
   // A host may bind a typed value directly and skip stanc's generated input
   // declaration/rebuild statements. Keep the declaration-owned geometry
@@ -778,20 +787,20 @@ class MirInterp {
       case mir::Stmt::TargetPE:
         if (!target_sink_)
           fail("target += is not available in " + where_, st.raw);
-        // write_array runs without the Jacobian.
-        if (st.jacobian) return;
+        if (st.jacobian && !jacobian_sink_) return;
         {
+          T* const sink = st.jacobian ? jacobian_sink_ : target_sink_;
           const Value terms = eval(st.target);
           if constexpr (std::is_same_v<T, double>) {
             // A long container adds its compensated sum, as OP_SUM_VEC does
             // on the graph and in the register program.
             const auto n = static_cast<int64_t>(terms.r.size());
             if (n > kPlainSumMax) {
-              *target_sink_ += compensated_sum(terms.r.data(), n);
+              *sink += compensated_sum(terms.r.data(), n);
               return;
             }
           }
-          for (const T& term : terms.r) *target_sink_ += term;
+          for (const T& term : terms.r) *sink += term;
         }
         return;
       default:
@@ -902,8 +911,7 @@ class MirInterp {
         argument.shape = function_argument_shape(e.args[k], values[k]);
         argument.scalar = e.args[k].unsized.depth == 0;
         argument.data_only = e.args[k].data_only;
-        if constexpr (!std::is_same_v<T, double>)
-          argument.active = autodiff(e.args[k]);
+        argument.active = autodiff(e.args[k]);
         if (spec.evaluation == DensityEvaluationPolicy::AllInteger ||
             k < static_cast<size_t>(spec.integer_args)) {
           argument.integers = ints(k);
@@ -982,8 +990,7 @@ class MirInterp {
     for (int k = 0; k < nargs; ++k) {
       if ((int64_t)values[k].r.size() != lanes)
         fail(e.name + ": arguments differ in length", e.raw);
-      if constexpr (!std::is_same_v<T, double>)
-        if (autodiff(e.args[k])) active |= 1 << k;
+      if (autodiff(e.args[k])) active |= 1 << k;
       packed.insert(packed.end(), values[k].r.begin(), values[k].r.end());
     }
     const T precision = form.has_precision ? values[(size_t)nargs].r.at(0)
@@ -1423,6 +1430,7 @@ class MirInterp {
   std::string where_;
   bool native_extrema_ = false;
   T* target_sink_ = nullptr;
+  T* jacobian_sink_ = nullptr;
   MirHooks hooks_;
   std::map<std::string, Value> env_;
   Value returned_;
@@ -1562,6 +1570,7 @@ class MirInterp {
   int udf_depth_ = 0;
   bool propto_ctx_ = true;
   bool refuse_propto_ = false;
+  bool model_types_ = false;
   bool propto(const mir::Expr& e) const {
     const bool on = e.fn_propto && propto_ctx_;
     if (on && refuse_propto_)
@@ -1581,16 +1590,13 @@ class MirInterp {
   };
   std::optional<CallTypes> call_types_;
   bool autodiff(const mir::Expr& e) const {
-    if constexpr (std::is_same_v<T, double>) {
-      return false;
-    } else {
-      const bool locals = !call_types_ || call_types_->locals;
-      return mir::instantiated_autodiff(e, locals, [&](const mir::Expr& v) {
-        if (!call_types_) return true;
-        const auto formal = call_types_->formals.find(v.name);
-        return formal != call_types_->formals.end() ? formal->second : locals;
-      });
-    }
+    if (std::is_same_v<T, double> && !model_types_) return false;
+    const bool locals = !call_types_ || call_types_->locals;
+    return mir::instantiated_autodiff(e, locals, [&](const mir::Expr& v) {
+      if (!call_types_) return true;
+      const auto formal = call_types_->formals.find(v.name);
+      return formal != call_types_->formals.end() ? formal->second : locals;
+    });
   }
   void bind_argument_types(const mir::FunDef& f,
                            const std::vector<bool>* autodiff) {
@@ -2037,9 +2043,11 @@ class MirInterp {
     MirInterp sub(funs_, where_, hooks_);
     sub.native_extrema_ = native_extrema_;
     sub.target_sink_ = target_sink_;
+    sub.jacobian_sink_ = jacobian_sink_;
     sub.udf_depth_ = udf_depth_ + 1;
     sub.propto_ctx_ = propto;
     sub.refuse_propto_ = refuse_propto_;
+    sub.model_types_ = model_types_;
     return sub;
   }
 
@@ -2767,9 +2775,9 @@ class MirInterp {
       return o;
     }
     // Callable transforms share their name/arity dispatch and their typed
-    // execution with graph lowering and runtime-control Programs. The
-    // interpreter is used for write_array with jacobian__ false, so it keeps
-    // the constrained value and deliberately discards the auxiliary lp.
+    // execution with graph lowering and runtime-control Programs. A
+    // `_jacobian` call adds its log Jacobian to the Jacobian sink, when
+    // there is one.
     CallableTransformSpec transform;
     if (callable_transform(e.name, &transform) &&
         transform.arity == e.args.size() && transform.structured &&
@@ -2916,6 +2924,9 @@ class MirInterp {
       tr.jac = (int32_t)reg.size();
       reg.emplace_back(T(0));
       run_program_transform(tr, reg.data());
+      if (transform.direction == TransformDirection::Jacobian &&
+          jacobian_sink_ != nullptr)
+        *jacobian_sink_ += reg[(size_t)tr.jac];
       o.r.assign(reg.begin() + tr.out, reg.begin() + tr.out + tr.out_len);
       if (transform.structured && outer_rank > 0)
         o.r = serialized_container_order(o.r, o.dims, outer_rank);
@@ -3569,13 +3580,13 @@ class MirInterp {
         fail(e.name + ": y and G must be matrices", e.raw);
       std::vector<T> packed;
       uint8_t packed_active = 0;
+      const bool typed = !std::is_same_v<T, double> || model_types_;
       for (size_t k = 1; k < 7; ++k) {
         packed.insert(packed.end(), a[k].r.begin(), a[k].r.end());
-        if constexpr (!std::is_same_v<T, double>)
-          if (!e.args[k].data_only) packed_active = 1;
+        if (typed && !e.args[k].data_only) packed_active = 1;
       }
       const bool propto = this->propto(e);
-      const bool y_active = !std::is_same_v<T, double> && !e.args[0].data_only;
+      const bool y_active = typed && !e.args[0].data_only;
       const uint8_t activity =
           (uint8_t)((y_active ? 1u : 0u) | (packed_active << 1));
       const uint8_t variant =
