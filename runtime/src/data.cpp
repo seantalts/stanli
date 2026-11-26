@@ -4,9 +4,9 @@
 
 #include "data_document.hpp"
 
+#include "rapidjson.hpp"
+
 #include <stan/io/json/json_data_handler.hpp>
-#include <rapidjson/filereadstream.h>
-#include <rapidjson/memorystream.h>
 
 #include <cstdio>
 #include <memory>
@@ -67,7 +67,12 @@ template <typename Stream>
 DataMap read_json_stream(Stream& input) {
   return read_json([&](JsonFilter& filter) {
     rapidjson::Reader reader;
-    if (reader.Parse<kDataParseFlags>(input, filter)) return std::string();
+    try {
+      if (reader.Parse<kDataParseFlags>(input, filter)) return std::string();
+    } catch (const RapidjsonAssertion& e) {
+      return parse_error_message(input.Tell(),
+                                 rapidjson::kParseErrorValueInvalid, "");
+    }
     return parse_error_message(reader.GetErrorOffset(),
                                reader.GetParseErrorCode(),
                                filter.error_message_);
@@ -91,7 +96,17 @@ DataMap DataMap::from_json_file(const std::string& path) {
 
 rapidjson::Document parse_data_document(const std::string& text) {
   rapidjson::Document doc;
-  doc.Parse<kDataParseFlags>(text.data(), text.size());
+  // What Document::Parse(text, length) does, with the stream kept so that an
+  // assertion can report its offset.
+  rapidjson::MemoryStream bytes(text.data(), text.size());
+  rapidjson::EncodedInputStream<rapidjson::UTF8<>, rapidjson::MemoryStream>
+      input(bytes);
+  try {
+    doc.ParseStream<kDataParseFlags, rapidjson::UTF8<>>(input);
+  } catch (const RapidjsonAssertion&) {
+    throw stan::json::json_error(parse_error_message(
+        input.Tell(), rapidjson::kParseErrorValueInvalid, ""));
+  }
   if (doc.HasParseError())
     throw stan::json::json_error(parse_error_message(
         doc.GetErrorOffset(), doc.GetParseError(), std::string()));
