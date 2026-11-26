@@ -23,28 +23,71 @@ const char* blas_provider();
 bool blas_thread_control_available();
 
 // Whether the accelerated kernels run on a system without
-// BLASSetThreading (macOS 11 to 14). There Accelerate chooses its own
+// BLASSetThreading (macOS 11 to 14). There Accelerate would choose its own
 // threads for every call, and a large factorization can give different
-// results from one run to the next on a busy machine. Turning this off keeps
-// every op on the plain kernels there.
-inline constexpr bool kAccelerateWithoutThreadControl = true;
+// results from one run to the next on a busy machine, so the selection pass
+// keeps every op on the plain kernels: no speedup, and the results of a
+// build without the option.
+inline constexpr bool kAccelerateWithoutThreadControl = false;
 inline bool accelerated_kernels_enabled(bool thread_control_available) {
   return thread_control_available || kAccelerateWithoutThreadControl;
 }
 
-// Runs the calling thread's BLAS calls on that thread alone while it lives,
-// then restores the thread's previous setting, so that a host such as numpy
-// on the same thread keeps its own. Every accelerated BLAS and LAPACK call
-// runs inside one: Accelerate would otherwise split a large factorization
-// over threads of its own, and how it splits depends on the load, which
-// changed results from one process to the next (tests/test_blas_determinism).
-// Needs BLASSetThreading; elsewhere it does nothing.
-class OneBlasThread {
+// Accelerate's own threads for one accelerated call: only in a program
+// lowered with parallel_blas, and only while the chains that run in
+// parallel leave cores free, parallel_chains * 2 <= performance_cores.
+// Otherwise the call runs on the calling thread alone, and its result is the
+// same in every run.
+bool blas_may_thread(bool parallel_blas, int parallel_chains,
+                     int performance_cores);
+// hw.perflevel0.physicalcpu on Apple, else std::thread's
+// hardware_concurrency, read once. The developer switch
+// STANLI_PERFORMANCE_CORES replaces it for tests.
+int performance_cores();
+
+// While it lives, the evaluation on this thread belongs to a program
+// lowered with (or without) parallel_blas. Executor sets it around each
+// forward and reverse sweep; nested scopes restore the outer value.
+class ParallelBlasScope {
  public:
-  OneBlasThread();
-  ~OneBlasThread();
-  OneBlasThread(const OneBlasThread&) = delete;
-  OneBlasThread& operator=(const OneBlasThread&) = delete;
+  explicit ParallelBlasScope(bool parallel_blas);
+  ~ParallelBlasScope();
+  ParallelBlasScope(const ParallelBlasScope&) = delete;
+  ParallelBlasScope& operator=(const ParallelBlasScope&) = delete;
+
+ private:
+  bool previous_;
+};
+
+// While it lives, this thread is one of `chains` that run in parallel. A
+// thread outside a chain pool counts as one chain alone.
+class ParallelChainsScope {
+ public:
+  // For threads that cannot tell how many others run beside them, such as a
+  // reduce_sum team inside a chain: never Accelerate's threads.
+  static constexpr int kUnknownParallelism = 1 << 20;
+  explicit ParallelChainsScope(int chains);
+  ~ParallelChainsScope();
+  ParallelChainsScope(const ParallelChainsScope&) = delete;
+  ParallelChainsScope& operator=(const ParallelChainsScope&) = delete;
+
+ private:
+  int previous_;
+};
+
+// Sets the calling thread's BLASSetThreading mode for one accelerated call,
+// by blas_may_thread, then restores the thread's previous setting, so that a
+// host such as numpy on the same thread keeps its own. Every accelerated
+// BLAS and LAPACK call runs inside one. Left to choose its own threads,
+// Accelerate split a large factorization differently under load and changed
+// results from one process to the next (tests/test_blas_determinism).
+// Needs BLASSetThreading; elsewhere it does nothing.
+class BlasCallThreads {
+ public:
+  BlasCallThreads();
+  ~BlasCallThreads();
+  BlasCallThreads(const BlasCallThreads&) = delete;
+  BlasCallThreads& operator=(const BlasCallThreads&) = delete;
 
  private:
   unsigned saved_ = 0;
@@ -57,6 +100,8 @@ class OneBlasThread {
 // or when accelerated_kernels_enabled says no. Returns the number of ops it
 // changed.
 int accelerate_dense_ops(Graph& g);
+// The same with the availability of BLASSetThreading given, for tests.
+int accelerate_dense_ops(Graph& g, bool thread_control_available);
 
 #ifdef STANLI_ACCELERATE
 namespace blas {

@@ -1,5 +1,6 @@
 #include <stanli/nuts.hpp>
 
+#include <stanli/dense_blas.hpp>
 #include <stanli/message_sink.hpp>
 #include <stanli/model_adapter.hpp>
 #include <stanli/wa_interp.hpp>
@@ -585,6 +586,7 @@ std::vector<ChainResult> run_nuts_chains(
       // first nested_rev_autodiff on a worker dereferences null inside
       // start_nested(), which is a segfault, not a wrong number.
       stan::math::ChainableStack ad_tape_for_this_thread;
+      const ParallelChainsScope parallel_chains(threads);
       for (size_t c = next++; c < n_chains; c = next++) {
         ProgressObserver one_progress;
         if (progress)

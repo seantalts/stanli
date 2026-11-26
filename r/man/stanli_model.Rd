@@ -13,7 +13,8 @@ stanli_model(
   threads_per_chain = 1,
   include_paths = NULL,
   fast_math = FALSE,
-  allow_interpreter = TRUE
+  allow_interpreter = TRUE,
+  parallel_blas = FALSE
 )
 }
 \arguments{
@@ -79,6 +80,14 @@ fast mode.}
 \item{allow_interpreter}{`FALSE` makes it an error, naming the parts, when
 part of the model has no compiled path and would run through the much
 slower MIR interpreter. Defaults to `TRUE`.}
+
+\item{parallel_blas}{`TRUE` lets this model's large dense operations, which
+the macOS runtime on Apple silicon runs through Apple's Accelerate on
+macOS 15 or later, use Accelerate's own threads while the chains that run
+in parallel leave cores free. With it on, results can differ in the last
+digits from one run to the next. Defaults to `FALSE`, which runs each
+such operation on one thread with the same result in every run.
+Elsewhere it does nothing.}
 }
 \value{
 An object of class `stanli_model` whose `columns` name every

@@ -181,8 +181,8 @@ int main(int argc, char** argv) {
     return 1;
   }
   const stanli::Graph& g = write_array ? cm.write_array->graph : cm.graph;
-  std::printf("slots=%zu ops=%zu result=%d\n", g.slots.size(), g.ops.size(),
-              g.result_slot);
+  std::printf("slots=%zu ops=%zu result=%d%s\n", g.slots.size(), g.ops.size(),
+              g.result_slot, g.parallel_blas ? " parallel_blas" : "");
   if (max_ops < 0) {
     summarize(g);
     return 0;

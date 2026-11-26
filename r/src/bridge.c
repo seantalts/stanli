@@ -63,7 +63,7 @@ static const char* dl_error(void) {
  * runtime reports its own through stanli_abi_version(), and
  * stanli_bridge_load() refuses to bind when the two disagree -- see
  * there for why a mismatch cannot be allowed to proceed. */
-#define STANLI_R_ABI_VERSION 6
+#define STANLI_R_ABI_VERSION 7
 
 /* stanli_install() can only fetch the runtime of the release this package
  * pins, so reinstalling it never fixes a runtime older than the package.
@@ -250,6 +250,7 @@ typedef struct {
   int allow_interpreter;
   int execution_report;
   int parallel_write_array;
+  int parallel_blas;
 } stanli_model_opts;
 /* Mirrors stanli_field_layout. */
 typedef struct {
@@ -518,6 +519,7 @@ static const field_layout k_layouts[] = {
     LAYOUT(stanli_model_opts, allow_interpreter),
     LAYOUT(stanli_model_opts, execution_report),
     LAYOUT(stanli_model_opts, parallel_write_array),
+    LAYOUT(stanli_model_opts, parallel_blas),
 };
 #undef LAYOUT
 
@@ -746,7 +748,7 @@ static void flush_messages_cb(void* unused) {
 
 SEXP stanli_r_model_new(SEXP code, SEXP data_json, SEXP is_mir, SEXP seed,
                         SEXP threads_per_chain, SEXP fast_math,
-                        SEXP allow_interpreter, SEXP file) {
+                        SEXP allow_interpreter, SEXP file, SEXP parallel_blas) {
   require_loaded();
   char err[8192];
   err[0] = '\0';
@@ -761,7 +763,8 @@ SEXP stanli_r_model_new(SEXP code, SEXP data_json, SEXP is_mir, SEXP seed,
                             asLogical(fast_math) == TRUE,
                             asLogical(allow_interpreter) == TRUE,
                             0,
-                            0};
+                            0,
+                            asLogical(parallel_blas) == TRUE};
   const char* label = file_label(file);
   if (asLogical(is_mir))
     m = p_model_new_with_opts(text, data, &opts, err, sizeof err);

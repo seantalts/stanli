@@ -938,12 +938,20 @@ Every accelerated BLAS or LAPACK call runs on the calling thread alone
 (`BLASSetThreading`, macOS 15 or later), and the thread's previous setting
 is restored afterwards. Left to choose its own threads, Accelerate split a
 large factorization differently under load and gave different results from
-one process to the next (`tests/test_blas_determinism.cpp`). On macOS 11 to
-14, which lack `BLASSetThreading`, the accelerated kernels still run and
-Accelerate chooses its threads; `kAccelerateWithoutThreadControl` in
-`runtime/include/stanli/dense_blas.hpp` turns them off there. In a build
-with developer switches, `STANLI_NO_ACCELERATE` keeps every op on the plain
-kernels.
+one process to the next (`tests/test_blas_determinism.cpp`). The model
+option `parallel_blas` (C API `stanli_model_opts`, Python `Model`, R
+`stanli_model()`) lets a model's accelerated calls use Accelerate's own
+threads while the chains that run in parallel leave cores free: twice the
+number of parallel chains at most the number of performance cores, with a
+single gradient outside a sampler counted as one chain. Its results can
+then differ in the last digits from one run to the next. The lowered
+program carries the option, and the program dump names it. On macOS 11 to
+14, which lack `BLASSetThreading`, the selection pass keeps every op on the
+plain kernels (`kAccelerateWithoutThreadControl` in
+`runtime/include/stanli/dense_blas.hpp`), so those systems get no speedup
+and the results of a build without the option. In a build with developer
+switches, `STANLI_NO_ACCELERATE` keeps every op on the plain kernels and
+`STANLI_PERFORMANCE_CORES` sets the core count that `parallel_blas` uses.
 
 For sampler changes, use
 [`tools/sampler_trace.py`](../tools/sampler_trace.py). For

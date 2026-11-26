@@ -59,7 +59,7 @@ int dim(int64_t v) {
 int ld(int64_t v) { return v < 1 ? 1 : dim(v); }
 void count() { g_calls.fetch_add(1, std::memory_order_relaxed); }
 
-// Every call below runs inside a OneBlasThread (stanli/dense_blas.hpp).
+// Every call below runs inside a BlasCallThreads (stanli/dense_blas.hpp).
 
 }  // namespace
 
@@ -99,7 +99,7 @@ void gemm(bool trans_a, bool trans_b, int64_t m, int64_t n, int64_t k,
   const int im = dim(m), in = dim(n), ik = dim(k), ia = ld(lda), ib = ld(ldb),
             ic = ld(ldc);
   count();
-  const OneBlasThread one_thread;
+  const BlasCallThreads call_threads;
   dgemm_(&ta, &tb, &im, &in, &ik, &alpha, a, &ia, b, &ib, &beta, c, &ic);
 }
 
@@ -109,7 +109,7 @@ void gemv(bool trans, int64_t m, int64_t n, double alpha, const double* a,
   const char t = trans ? 'T' : 'N';
   const int im = dim(m), in = dim(n), ia = ld(lda), one = 1;
   count();
-  const OneBlasThread one_thread;
+  const BlasCallThreads call_threads;
   dgemv_(&t, &im, &in, &alpha, a, &ia, x, &one, &beta, y, &one);
 }
 
@@ -119,7 +119,7 @@ int potrf_lower(int64_t n, double* a, int64_t lda) {
   const int in = dim(n), ia = ld(lda);
   int info = 0;
   count();
-  const OneBlasThread one_thread;
+  const BlasCallThreads call_threads;
   dpotrf_(&lo, &in, a, &ia, &info);
   return info;
 }
@@ -130,7 +130,7 @@ int potri_lower(int64_t n, double* a, int64_t lda) {
   const int in = dim(n), ia = ld(lda);
   int info = 0;
   count();
-  const OneBlasThread one_thread;
+  const BlasCallThreads call_threads;
   dpotri_(&lo, &in, a, &ia, &info);
   return info;
 }
@@ -141,7 +141,7 @@ int trtri_lower(int64_t n, double* a, int64_t lda) {
   const int in = dim(n), ia = ld(lda);
   int info = 0;
   count();
-  const OneBlasThread one_thread;
+  const BlasCallThreads call_threads;
   dtrtri_(&lo, &nonunit, &in, a, &ia, &info);
   return info;
 }
@@ -153,7 +153,7 @@ void trsm_lower(bool left, bool trans, int64_t m, int64_t n, double alpha,
              nonunit = 'N';
   const int im = dim(m), in = dim(n), il = ld(ldl), ib = ld(ldb);
   count();
-  const OneBlasThread one_thread;
+  const BlasCallThreads call_threads;
   dtrsm_(&side, &lo, &t, &nonunit, &im, &in, &alpha, l, &il, b, &ib);
 }
 
@@ -163,7 +163,7 @@ void trmm_lower_left(bool trans, int64_t m, int64_t n, double alpha,
   const char side = 'L', lo = 'L', t = trans ? 'T' : 'N', nonunit = 'N';
   const int im = dim(m), in = dim(n), il = ld(ldl), ib = ld(ldb);
   count();
-  const OneBlasThread one_thread;
+  const BlasCallThreads call_threads;
   dtrmm_(&side, &lo, &t, &nonunit, &im, &in, &alpha, l, &il, b, &ib);
 }
 
@@ -173,7 +173,7 @@ void trmv_lower(bool trans, int64_t n, const double* l, int64_t ldl,
   const char lo = 'L', t = trans ? 'T' : 'N', nonunit = 'N';
   const int in = dim(n), il = ld(ldl), one = 1;
   count();
-  const OneBlasThread one_thread;
+  const BlasCallThreads call_threads;
   dtrmv_(&lo, &t, &nonunit, &in, l, &il, x, &one);
 }
 
@@ -184,7 +184,7 @@ void symm_lower_left(int64_t m, int64_t n, double alpha, const double* s,
   const char side = 'L', lo = 'L';
   const int im = dim(m), in = dim(n), is = ld(lds), ib = ld(ldb), ic = ld(ldc);
   count();
-  const OneBlasThread one_thread;
+  const BlasCallThreads call_threads;
   dsymm_(&side, &lo, &im, &in, &alpha, s, &is, b, &ib, &beta, c, &ic);
 }
 
@@ -192,9 +192,13 @@ void symm_lower_left(int64_t m, int64_t n, double alpha, const double* s,
 #endif
 
 int accelerate_dense_ops(Graph& g) {
+  return accelerate_dense_ops(g, blas_thread_control_available());
+}
+
+int accelerate_dense_ops(Graph& g, bool thread_control_available) {
 #ifdef STANLI_ACCELERATE
   if (debug_env("STANLI_NO_ACCELERATE") != nullptr ||
-      !accelerated_kernels_enabled(blas_thread_control_available()))
+      !accelerated_kernels_enabled(thread_control_available))
     return 0;
   int changed = 0;
   for (Op& op : g.ops) {
@@ -207,6 +211,7 @@ int accelerate_dense_ops(Graph& g) {
   return changed;
 #else
   (void)g;
+  (void)thread_control_available;
   return 0;
 #endif
 }

@@ -1,3 +1,4 @@
+#include <stanli/dense_blas.hpp>
 #include <stanli/debug_switch.hpp>
 #include <stanli/graph.hpp>
 #include <stanli/optable.hpp>
@@ -943,6 +944,7 @@ void Executor::run_forward_only(EvalState state) {
     ~RestoreState() { slot = previous; }
   } restore{eval_state_, eval_state_};
   eval_state_ = state;
+  const ParallelBlasScope parallel_blas(graph_.parallel_blas);
   // The profiled path keeps the opcode-keyed loop (attribution needs the
   // opcode anyway, and the timing calls dwarf dispatch cost), but it must
   // invoke the same bound function pointer as the fast path. The registry is
@@ -1066,6 +1068,7 @@ void Executor::reverse(double* grad_out, double seed) {
     ~RestoreState() { state = previous; }
   } restore{eval_state_, eval_state_};
   eval_state_.reduce = reduce_context_;
+  const ParallelBlasScope parallel_blas(graph_.parallel_blas);
   std::memset(adjoints_.data(), 0, sizeof(double) * adjoints_.size());
   assert(result_adjoint_offset_ >= 0);
   adjoints_[result_adjoint_offset_] = seed;
