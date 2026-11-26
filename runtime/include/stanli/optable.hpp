@@ -785,6 +785,16 @@ inline void div_partials(double u, double b, double out, double* da,
 // their declared integer type and has no reverse pass.
 #define STANLI_SCALAR_BINARY_INTEGER_LIST(X) X(OP_CHOOSE, choose, choose)
 
+// The large-size forms of dense kernels, which call the system BLAS and
+// LAPACK in a STANLI_ACCELERATE build (stanli/dense_blas.hpp). Only
+// accelerate_dense_ops emits them, and only in that build. Last, so that the
+// other opcodes keep their numbers.
+#define STANLI_ACCELERATED_OPCODE_LIST(X) \
+  X(OP_GEMM_BLAS)                         \
+  X(OP_MATVEC_BLAS)                       \
+  X(OP_CHOLESKY_BLAS)                     \
+  X(OP_MULTI_NORMAL_CHOL_LPDF_BLAS)
+
 // Every opcode list, in enum order, named once. The enum and the name
 // table both expand this, so a list added to one cannot be forgotten in
 // the other. PLAIN takes (name), DENSITY takes (code, fn, n) and, for a
@@ -799,7 +809,8 @@ inline void div_partials(double u, double b, double out, double* da,
   STANLI_TWO_INT_CDF_LIST(DENSITY)                \
   STANLI_TAIL_CDF_LIST(DENSITY)                   \
   STANLI_TAIL_INT_CDF_LIST(DENSITY)               \
-  STANLI_SCALAR_UNARY_LIST(UNARY)
+  STANLI_SCALAR_UNARY_LIST(UNARY)                 \
+  STANLI_ACCELERATED_OPCODE_LIST(PLAIN)
 
 enum Opcode : uint16_t {
   OP_NONE_ = 0,

@@ -9,6 +9,7 @@
 #include <stanli/target_sums.hpp>
 #include <stanli/execution_report.hpp>
 #include <stanli/large_stack.hpp>
+#include <stanli/dense_blas.hpp>
 #include <stanli/threading.hpp>
 
 #include <stan/math/rev/core/chainablestack.hpp>
@@ -1062,6 +1063,9 @@ void Lowering::run_passes(const std::vector<int>& roots, const PassPlan& plan) {
     const int islands = carve_islands(g, out.fills, target_terms, roots);
     trace("island", island_time, roots, PrepTrace::Extra::Regions, islands);
   }
+  // After every pass that matches on opcodes: give the large dense ops the
+  // kernels that call Accelerate. A no-op without STANLI_ACCELERATE.
+  accelerate_dense_ops(g);
 }
 CompiledModel::WriteArray Lowering::run_write_array(const mir::Program& p) {
   const auto total_time = prep.start();

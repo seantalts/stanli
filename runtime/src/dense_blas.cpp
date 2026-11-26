@@ -3,6 +3,7 @@
 // Eigen's blas.h, which disagree about some prototypes. Nothing in this file
 // includes Eigen.
 #include <stanli/dense_blas.hpp>
+#include <stanli/graph.hpp>
 
 #ifdef STANLI_ACCELERATE
 #include <atomic>
@@ -58,9 +59,8 @@ void count() { g_calls.fetch_add(1, std::memory_order_relaxed); }
 
 }  // namespace
 
-// Chosen from single-thread crossover sweeps of these kernels against the
-// plain Eigen code on an Apple M3 Ultra; see
-// notes/performance/accelerate-thresholds.md.
+// Provisional, from single-operation timings of Eigen against Accelerate.
+// The matrix-vector product stays on Eigen at every size for now.
 const Thresholds& thresholds() {
   static const Thresholds t{
       /*gemm_min_dim=*/64,
@@ -155,5 +155,22 @@ void symm_lower_left(int64_t m, int64_t n, double alpha, const double* s,
 
 }  // namespace blas
 #endif
+
+int accelerate_dense_ops(Graph& g) {
+#ifdef STANLI_ACCELERATE
+  int changed = 0;
+  for (Op& op : g.ops) {
+    const uint16_t to = blas::accelerated_opcode(op, g.slots.data());
+    if (to != op.opcode) {
+      op.opcode = to;
+      ++changed;
+    }
+  }
+  return changed;
+#else
+  (void)g;
+  return 0;
+#endif
+}
 
 }  // namespace stanli
