@@ -13,8 +13,8 @@ without the option.
 | --- | --- |
 | `GEMM` (rows x inner x columns) | all three are at least 24 |
 | `MATVEC` (data X, rows x columns) | rows >= 256 and columns >= 64, or rows >= 10000 and columns >= 10 |
-| `CHOLESKY` | n >= 32 |
-| `MULTI_NORMAL_CHOL_LPDF` (the propto, factor-only path) | n >= 32 |
+| `CHOLESKY` | n >= 64 |
+| `MULTI_NORMAL_CHOL_LPDF` (the propto, factor-only path) | n >= 64 |
 
 Ops inside retained loops (`dyn_lengths`) are never accelerated.
 
@@ -40,8 +40,31 @@ the ratio dipped near 1.0:
   wins from 32 columns at 256 rows or more (2.3x), and from 10 columns at
   10000 rows (4.7x). 300x40 was only 1.04x, so the rule asks for 64
   columns (256x64: 2.9x).
-- **cholesky:** at most 1.08x up to n = 24, then at least 1.22x from 32.
-- **multi_normal_cholesky:** 1.15x at 24, at least 1.27x from 32.
+- **cholesky:** at most 1.08x up to n = 24, then at least 1.15x from 32.
+- **multi_normal_cholesky:** 1.15x at 24, at least 1.21x from 32.
+
+## Inside a model
+
+The single-op sweep overstates the gain for small factors. In `sw_gp`
+(Cholesky of n = 40) with a threshold of 32, `STANLI_PROFILE=1` over 20000
+gradients showed the accelerated Cholesky 1.1x faster than the plain one,
+but `GP_COV`, `GEMM` and `SET_INDEX`, which did not change, ran about 25%
+slower, and the gradient was 1.05x slower overall (`bench_grad --timed`, six
+alternating runs each). Moving the Cholesky adjoint's work array out of the
+arena did not change this. The cause was not established.
+
+The census Gaussian process (`cholesky_decompose` plus `multi_normal_cholesky`
+with data y), gradient time plain / accelerated with both thresholds at 32,
+six alternating `bench_grad --timed` runs, two sweeps, load average 9 to 11:
+
+| N | 24 (no op accelerated) | 32 | 40 | 48 | 64 | 80 | 96 | 128 | 160 | 256 |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| speedup | 0.973x, 0.987x | 1.006x, 1.014x | 0.987x, 0.982x | 1.014x, 1.009x | 1.086x, 1.098x | 1.158x, 1.161x | 1.222x | 1.442x | 1.492x | 1.791x |
+
+Both thresholds are therefore 64. The census product model (two GEMMs) at
+N x K, one sweep: 16x16 (below the threshold) 0.988x, 24x24 1.30x, 32x32
+1.84x, 48x48 2.21x, 64x64 2.65x, 128x32 2.41x, 512x128 4.03x, so the gemm
+rule stands.
 
 | Kernel | Shape | Plain ns (best) | Accelerated ns (best) | Speedup, lowest to highest run |
 |---|---|---:|---:|---|

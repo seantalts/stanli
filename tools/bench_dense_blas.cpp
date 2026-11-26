@@ -165,8 +165,8 @@ int main(int argc, char** argv) {
     compare("matvec", shape, c, OP_MATVEC, OP_MATVEC_BLAS, min_ms);
   }
 
-  for (int n :
-       {4, 8, 12, 16, 24, 32, 48, 64, 96, 128, 192, 256, 384, 512, 1024}) {
+  for (int n : {4,  8,  12, 16, 24,  32,  36,  40,  44,  48,
+                56, 64, 80, 96, 128, 192, 256, 384, 512, 1024}) {
     const int64_t nn = int64_t(n) * n;
     Mat m = filled(n, n, 0.3);
     Mat a = (m * m.transpose()).eval() / double(n);
