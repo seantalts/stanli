@@ -465,7 +465,8 @@ int main(int argc, char** argv) {
           } else {
             try {
               stanli::WaRng rng(1234);
-              const std::vector<double> row = m->wa->eval(r.constrained, rng);
+              const std::vector<double> row = m->wa->eval(
+                  stanli::oracle::constrained(*m, theta), rng);
               int64_t bad = 0;
               for (double x : row)
                 if (!std::isfinite(x)) ++bad;

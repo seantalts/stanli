@@ -8,6 +8,10 @@ the MIR interpreter. It compares lp, the gradient and the write_array row,
 and writes one JSON file per corpus plus a table.
 
     tools/interp_gap.py --out DIR [--corpus NAME ...] [--jobs N]
+
+NAME is fixtures, lit, stanc3_good, posteriordb, brms, rethinking, cogmod,
+other_local (the remaining tests/ collections), or dir:PATH for every
+PATH/*.stan with its PATH/*.json.
 """
 from __future__ import annotations
 
@@ -22,6 +26,7 @@ import re
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 
 REPO = pathlib.Path(__file__).resolve().parents[1]
@@ -85,7 +90,14 @@ def cases(names, pdb, tmp):
             data = tmp / ("good_" + path.replace("/", "__") + ".json")
             data.write_text(json.dumps(obj))
             out.append(("stanc3_good", path, source, data))
-    collections_wanted = want - {"fixtures", "lit", "stanc3_good"}
+    for name in sorted(n for n in want if n.startswith("dir:")):
+        root = pathlib.Path(name[4:])
+        for stan in sorted(root.glob("*.stan")):
+            data = stan.with_suffix(".json")
+            out.append((root.name, stan.stem, stan,
+                        data if data.exists() else tmp / "empty.json"))
+    collections_wanted = {n for n in want if not n.startswith("dir:")} - {
+        "fixtures", "lit", "stanc3_good"}
     if collections_wanted:
         for name, case in corpus_cases(pdb, "all", include_language=True).items():
             coll = case.collection
@@ -97,20 +109,49 @@ def cases(names, pdb, tmp):
     return out
 
 
+MAX_RSS_KB = 6 * 1024 * 1024
+
+
 def run(argv, timeout):
+    """(code, stdout, stderr, wall); code None on timeout, "rss" when the
+    process passed MAX_RSS_KB and was killed."""
     t = time.perf_counter()
+    p = subprocess.Popen([str(a) for a in argv], stdout=subprocess.PIPE,
+                         stderr=subprocess.PIPE, text=True, errors="replace")
+    killed = []
+
+    def watch():
+        while p.poll() is None:
+            try:
+                rss = int(subprocess.run(["ps", "-o", "rss=", "-p", str(p.pid)],
+                                         capture_output=True, text=True).stdout or 0)
+            except ValueError:
+                rss = 0
+            if rss > MAX_RSS_KB:
+                killed.append(rss)
+                p.kill()
+                return
+            time.sleep(0.5)
+    w = threading.Thread(target=watch, daemon=True)
+    w.start()
     try:
-        r = subprocess.run([str(a) for a in argv], capture_output=True,
-                           text=True, timeout=timeout, errors="replace")
-        return r.returncode, r.stdout, r.stderr, time.perf_counter() - t
+        out, err = p.communicate(timeout=timeout)
     except subprocess.TimeoutExpired:
+        p.kill()
+        p.communicate()
         return None, "", "", time.perf_counter() - t
+    if killed:
+        return "rss", out, err, time.perf_counter() - t
+    return p.returncode, out, err, time.perf_counter() - t
 
 
 def summarize(proc):
     code, out, err, wall = proc
     if code is None:
         return {"state": "timeout", "wall": wall}
+    if code == "rss":
+        return {"state": "memory", "wall": wall,
+                "message": f"killed above {MAX_RSS_KB // 1024 // 1024} GB RSS"}
     parsed = good.parse_output(out)
     pre = parsed["pre"]
     res = {"wall": wall, "code": code}
@@ -169,6 +210,11 @@ def compare(c, i):
             else:
                 g_w.append(worst_rel(cp["grad"], ip["grad"]))
             cw, iw = cp.get("wa"), ip.get("wa")
+            # No write_array line and an empty row both mean no columns.
+            if cw is None and iw and iw.get("names") == []:
+                iw = None
+            if iw is None and cw and cw.get("names") == []:
+                cw = None
             if cw and iw and "names" in cw and "names" in iw:
                 if cw["names"] != iw["names"]:
                     shape.append("wa names differ")
@@ -238,8 +284,8 @@ def one(case, check, tmp, timeout):
 def first_fail(side):
     if side["state"] in ("compile_fail", "crash"):
         return side.get("message", side["state"])
-    if side["state"] == "timeout":
-        return "timeout"
+    if side["state"] in ("timeout", "memory"):
+        return side.get("message", side["state"])
     for p in side.get("points", {}).values():
         if p["status"] == "threw":
             return p["message"]

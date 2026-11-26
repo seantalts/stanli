@@ -118,24 +118,30 @@ inline int64_t flat_pos(const ParamGeom& g, int64_t l, int64_t e) {
   return pos;
 }
 
-inline const var& arg_at(const VarVal& v, int64_t pos) {
+template <typename T>
+const T& arg_at(const typename MirInterp<T>::Value& v, int64_t pos) {
   return v.r.size() == 1 ? v.r[0] : v.r.at((size_t)pos);
 }
 
 // Read one parameter declaration: constrain with the Jacobian into `lp`,
 // bind it in `in`, and record its value for write_array.
-inline void read_param(MirInterp<var>& in, const mir::Stmt& st,
-                       const ParamGeom& g, stan::io::deserializer<var>& d,
-                       var& lp, std::map<std::string, Entry>& record) {
-  using VecV = Eigen::Matrix<var, -1, 1>;
-  using MatV = Eigen::Matrix<var, -1, -1>;
+// T = var for log_prob, T = double for write_array, which CmdStan also
+// constrains on doubles (the double overloads check more, unit_vector's norm
+// for one).
+template <typename T>
+void read_param(MirInterp<T>& in, const mir::Stmt& st, const ParamGeom& g,
+                stan::io::deserializer<T>& d, T& lp,
+                std::map<std::string, Entry>* record) {
+  using VecV = Eigen::Matrix<T, -1, 1>;
+  using MatV = Eigen::Matrix<T, -1, -1>;
+  using Val = typename MirInterp<T>::Value;
   const mir::Transform& tr = *st.read_transform;
-  std::vector<VarVal> args;
+  std::vector<Val> args;
   for (const auto& a : tr.args) args.push_back(in.eval(a));
-  VarVal out;
+  Val out;
   out.dims = g.dims;
   int64_t total = g.n_leaves * g.leaf_len;
-  out.r.assign((size_t)total, var(0.0));
+  out.r.assign((size_t)total, T(0.0));
   const auto place = [&](int64_t l, const auto& leafval) {
     for (int64_t e = 0; e < g.leaf_len; ++e)
       out.r[(size_t)flat_pos(g, l, e)] = leafval(e);
@@ -145,62 +151,62 @@ inline void read_param(MirInterp<var>& in, const mir::Stmt& st,
     const int64_t C = g.leaf.size() > 1 ? g.leaf[1] : 1;
     switch (tr.kind) {
       case mir::Transform::Simplex: {
-        VecV v = d.read_constrain_simplex<VecV, true>(lp, K);
+        VecV v = d.template read_constrain_simplex<VecV, true>(lp, K);
         place(l, [&](int64_t e) { return v(e); });
         break;
       }
       case mir::Transform::Ordered: {
-        VecV v = d.read_constrain_ordered<VecV, true>(lp, K);
+        VecV v = d.template read_constrain_ordered<VecV, true>(lp, K);
         place(l, [&](int64_t e) { return v(e); });
         break;
       }
       case mir::Transform::PositiveOrdered: {
-        VecV v = d.read_constrain_positive_ordered<VecV, true>(lp, K);
+        VecV v = d.template read_constrain_positive_ordered<VecV, true>(lp, K);
         place(l, [&](int64_t e) { return v(e); });
         break;
       }
       case mir::Transform::UnitVector: {
-        VecV v = d.read_constrain_unit_vector<VecV, true>(lp, K);
+        VecV v = d.template read_constrain_unit_vector<VecV, true>(lp, K);
         place(l, [&](int64_t e) { return v(e); });
         break;
       }
       case mir::Transform::SumToZero: {
         if (g.leaf.size() == 2) {
-          MatV v = d.read_constrain_sum_to_zero<MatV, true>(lp, K, C);
+          MatV v = d.template read_constrain_sum_to_zero<MatV, true>(lp, K, C);
           place(l, [&](int64_t e) { return v.data()[e]; });
         } else {
-          VecV v = d.read_constrain_sum_to_zero<VecV, true>(lp, K);
+          VecV v = d.template read_constrain_sum_to_zero<VecV, true>(lp, K);
           place(l, [&](int64_t e) { return v(e); });
         }
         break;
       }
       case mir::Transform::CholeskyCorr: {
-        MatV v = d.read_constrain_cholesky_factor_corr<MatV, true>(lp, K);
+        MatV v = d.template read_constrain_cholesky_factor_corr<MatV, true>(lp, K);
         place(l, [&](int64_t e) { return v.data()[e]; });
         break;
       }
       case mir::Transform::CholeskyCov: {
-        MatV v = d.read_constrain_cholesky_factor_cov<MatV, true>(lp, K, C);
+        MatV v = d.template read_constrain_cholesky_factor_cov<MatV, true>(lp, K, C);
         place(l, [&](int64_t e) { return v.data()[e]; });
         break;
       }
       case mir::Transform::Correlation: {
-        MatV v = d.read_constrain_corr_matrix<MatV, true>(lp, K);
+        MatV v = d.template read_constrain_corr_matrix<MatV, true>(lp, K);
         place(l, [&](int64_t e) { return v.data()[e]; });
         break;
       }
       case mir::Transform::Covariance: {
-        MatV v = d.read_constrain_cov_matrix<MatV, true>(lp, K);
+        MatV v = d.template read_constrain_cov_matrix<MatV, true>(lp, K);
         place(l, [&](int64_t e) { return v.data()[e]; });
         break;
       }
       case mir::Transform::StochasticColumn: {
-        MatV v = d.read_constrain_stochastic_column<MatV, true>(lp, K, C);
+        MatV v = d.template read_constrain_stochastic_column<MatV, true>(lp, K, C);
         place(l, [&](int64_t e) { return v.data()[e]; });
         break;
       }
       case mir::Transform::StochasticRow: {
-        MatV v = d.read_constrain_stochastic_row<MatV, true>(lp, K, C);
+        MatV v = d.template read_constrain_stochastic_row<MatV, true>(lp, K, C);
         place(l, [&](int64_t e) { return v.data()[e]; });
         break;
       }
@@ -208,32 +214,32 @@ inline void read_param(MirInterp<var>& in, const mir::Stmt& st,
         // Elementwise: one scalar at a time, in the deserializer's order.
         for (int64_t e = 0; e < g.leaf_len; ++e) {
           const int64_t pos = flat_pos(g, l, e);
-          var x;
+          T x;
           switch (tr.kind) {
             case mir::Transform::Identity:
-              x = d.read<var>();
+              x = d.template read<T>();
               break;
             case mir::Transform::Lower:
-              x = d.read_constrain_lb<var, true>(arg_at(args.at(0), pos), lp);
+              x = d.template read_constrain_lb<T, true>(arg_at<T>(args.at(0), pos), lp);
               break;
             case mir::Transform::Upper:
-              x = d.read_constrain_ub<var, true>(arg_at(args.at(0), pos), lp);
+              x = d.template read_constrain_ub<T, true>(arg_at<T>(args.at(0), pos), lp);
               break;
             case mir::Transform::LowerUpper:
-              x = d.read_constrain_lub<var, true>(
-                  arg_at(args.at(0), pos), arg_at(args.at(1), pos), lp);
+              x = d.template read_constrain_lub<T, true>(
+                  arg_at<T>(args.at(0), pos), arg_at<T>(args.at(1), pos), lp);
               break;
             case mir::Transform::Offset:
-              x = d.read_constrain_offset_multiplier<var, true>(
-                  arg_at(args.at(0), pos), 1.0, lp);
+              x = d.template read_constrain_offset_multiplier<T, true>(
+                  arg_at<T>(args.at(0), pos), 1.0, lp);
               break;
             case mir::Transform::Multiplier:
-              x = d.read_constrain_offset_multiplier<var, true>(
-                  0.0, arg_at(args.at(0), pos), lp);
+              x = d.template read_constrain_offset_multiplier<T, true>(
+                  0.0, arg_at<T>(args.at(0), pos), lp);
               break;
             case mir::Transform::OffsetMultiplier:
-              x = d.read_constrain_offset_multiplier<var, true>(
-                  arg_at(args.at(0), pos), arg_at(args.at(1), pos), lp);
+              x = d.template read_constrain_offset_multiplier<T, true>(
+                  arg_at<T>(args.at(0), pos), arg_at<T>(args.at(1), pos), lp);
               break;
             default:
               throw Refused("oracle: unhandled transform " + tr.raw);
@@ -243,10 +249,12 @@ inline void read_param(MirInterp<var>& in, const mir::Stmt& st,
       }
     }
   }
-  Entry rec;
-  rec.dims = g.dims;
-  for (const var& x : out.r) rec.r.push_back(x.val());
-  record[st.decl_id] = std::move(rec);
+  if (record) {
+    Entry rec;
+    rec.dims = g.dims;
+    for (const T& x : out.r) rec.r.push_back(stan::math::value_of(x));
+    (*record)[st.decl_id] = std::move(rec);
+  }
   in.set_declared_dims(st.decl_id, g.dims);
   in.env()[st.decl_id] = std::move(out);
 }
@@ -328,6 +336,7 @@ inline PointResult log_density(Model& m, const std::vector<double>& theta) {
     parent.emplace(name, std::move(v));
   }
   MirInterp<var> in(m.funs, "log_prob");
+  in.set_native_extrema(true);
   in.set_parent_env(&parent);
   in.set_target_sink(&target);
   MirInterp<double> sizes(m.funs, "parameter sizes");
@@ -338,7 +347,7 @@ inline PointResult log_density(Model& m, const std::vector<double>& theta) {
           if (st.kind == mir::Stmt::Block || st.kind == mir::Stmt::SList) {
             walk(st.body);
           } else if (st.read_transform) {
-            read_param(in, st, geometry(sizes, st), d, jac, res.constrained);
+            read_param<var>(in, st, geometry(sizes, st), d, jac, nullptr);
           } else if (st.kind == mir::Stmt::TargetPE && st.jacobian) {
             // MirInterp drops `jacobian +=` (write_array semantics); the
             // driver adds the top-level ones itself.
@@ -357,6 +366,30 @@ inline PointResult log_density(Model& m, const std::vector<double>& theta) {
   res.grad.resize(th.size());
   for (size_t i = 0; i < th.size(); ++i) res.grad[i] = th[i].adj();
   return res;
+}
+
+// The constrained parameters on doubles, as CmdStan's write_array reads
+// them. Bounds see data, transformed data and earlier parameters.
+inline std::map<std::string, Entry> constrained(
+    Model& m, const std::vector<double>& theta) {
+  std::map<std::string, Entry> out;
+  std::vector<double> th(theta);
+  std::vector<int> ints;
+  stan::io::deserializer<double> d(th, ints);
+  double lp = 0.0;
+  MirInterp<double> in(m.funs, "write_array parameters");
+  in.set_parent_env(m.shared_env.get());
+  std::function<void(const std::vector<mir::Stmt>&)> walk =
+      [&](const std::vector<mir::Stmt>& body) {
+        for (const auto& st : body) {
+          if (st.kind == mir::Stmt::Block || st.kind == mir::Stmt::SList)
+            walk(st.body);
+          else if (st.read_transform)
+            read_param<double>(in, st, geometry(in, st), d, lp, &out);
+        }
+      };
+  walk(m.prog->log_prob);
+  return out;
 }
 
 }  // namespace stanli::oracle
