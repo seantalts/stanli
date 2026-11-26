@@ -5,7 +5,7 @@ import json
 import re
 from collections import Counter, defaultdict
 
-from measure import normalized_text, ratio_text
+from measure import decline_text, normalized_text, ratio_text
 from run import FLAG_RATIO, LOAD_WARNING, PREP_CLIFF_RATIO, PREP_CLIFF_S
 
 OUTCOMES = ("invalid", "same_program", "fine", "flagged_cmdstan_equal",
@@ -69,7 +69,7 @@ def note_of(r):
         parts.append("prep_cliff")
     if r.get("differs") and r["outcome"] != "same_program":
         parts.append("differs: " + ", ".join(r["differs"]))
-    parts += r.get("new_declines", [])
+    parts += [decline_text(r, d) for d in r.get("new_declines", [])]
     if lowering_change(r):
         parts.append(lowering_change(r))
     return "; ".join(parts)
@@ -127,7 +127,7 @@ def variant_report(records, meta, known):
             out.append(f"- **{r['seed']}/{r['variant']}**: "
                        f"{(r['meta'] or {}).get('description', '')}")
             for d in r.get("new_declines", []):
-                out.append(f"  - new decline: {d}")
+                out.append(f"  - new decline: {decline_text(r, d)}")
             if lowering_change(r):
                 out.append(f"  - lowering: {lowering_change(r)}")
             if r.get("copies"):

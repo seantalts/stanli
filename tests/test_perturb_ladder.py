@@ -6,6 +6,7 @@ import unittest
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1] / "tools" / "perturb"))
 import ladder  # noqa: E402
 import measure  # noqa: E402
+import report  # noqa: E402
 import run  # noqa: E402
 
 
@@ -272,6 +273,46 @@ class Declines(unittest.TestCase):
         for name in ("STANLI_LANE_REPORT", "STANLI_REGION_MAP_DIAGNOSTICS",
                      "STANLI_STRUCTURED_LOOP_DIAGNOSTICS"):
             self.assertEqual(measure.DECLINE_ENV[name], "1")
+
+
+class NewDeclines(unittest.TestCase):
+    A = "reroll/log_prob: group is too small"
+    B = "region_map/log_prob: body has effects"
+
+    def test_a_reason_the_base_lacks_is_new(self):
+        base = {"declines": [self.A], "decline_counts": {self.A: 2}}
+        var = {"declines": [self.A, self.B],
+               "decline_counts": {self.A: 2, self.B: 1}}
+        self.assertEqual(measure.decline_growth(base, var), {self.B: 1})
+
+    def test_a_reason_the_base_has_is_new_when_its_count_rises(self):
+        base = {"declines": [self.A], "decline_counts": {self.A: 2}}
+        var = {"declines": [self.A], "decline_counts": {self.A: 7}}
+        self.assertEqual(measure.decline_growth(base, var), {self.A: 5})
+
+    def test_a_falling_count_is_not_new(self):
+        base = {"declines": [self.A], "decline_counts": {self.A: 7}}
+        var = {"declines": [self.A], "decline_counts": {self.A: 2}}
+        self.assertEqual(measure.decline_growth(base, var), {})
+
+    def test_records_without_counts_compare_their_reason_sets(self):
+        base = {"declines": [self.A]}
+        var = {"declines": [self.A, self.B]}
+        self.assertEqual(measure.decline_growth(base, var), {self.B: 1})
+
+    def test_report_writes_the_rise_and_keeps_the_reason_for_grouping(self):
+        rec = {"new_declines": [self.A, self.B],
+               "decline_more": {self.A: 5}}
+        self.assertEqual(report.decline_text(rec, self.A), self.A + " (x5 more)")
+        self.assertEqual(report.decline_text(rec, self.B), self.B)
+        self.assertEqual(report.decline_text({"new_declines": [self.A]}, self.A),
+                         self.A)
+        self.assertIn(self.A + " (x5 more)", report.note_of(
+            {"outcome": "fine", **rec}))
+
+    def test_a_variant_with_more_of_a_known_decline_is_not_unexplained(self):
+        rec = {"new_declines": [self.A], "decline_more": {self.A: 5}}
+        self.assertFalse(report.unexplained(rec))
 
 
 if __name__ == "__main__":
