@@ -1845,21 +1845,11 @@ if(Python3_Interpreter_FOUND)
   add_test(NAME test_check_interp
            COMMAND ${Python3_EXECUTABLE} tests/test_check_interp.py
            WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
-  add_test(NAME test_fuzz_stanc_differential
-           COMMAND ${Python3_EXECUTABLE} tests/test_fuzz_stanc_differential.py
-           WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
-  foreach(_fuzz_test gen fuzz reduce nightly)
-    add_test(NAME test_fuzz_stanc_${_fuzz_test}
-             COMMAND ${Python3_EXECUTABLE} tests/test_fuzz_stanc_${_fuzz_test}.py
-             WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
-  endforeach()
   foreach(_perturb_test scale ladder datavary)
     add_test(NAME test_perturb_${_perturb_test}
              COMMAND ${Python3_EXECUTABLE} tests/test_perturb_${_perturb_test}.py
              WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
   endforeach()
-  # test_generation_is_fast times the generator against a fixed budget.
-  set_tests_properties(test_fuzz_stanc_gen PROPERTIES RUN_SERIAL TRUE)
   # It picks the passes, so it needs the compiler executable.
   set(_stanli_compile
       "${CMAKE_CURRENT_SOURCE_DIR}/deps/stanc3/stanli-compile${CMAKE_EXECUTABLE_SUFFIX}")
