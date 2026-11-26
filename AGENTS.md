@@ -96,8 +96,9 @@ run both revisions with the shipped configuration, matched hardware/toolchains,
 and retained raw results. A focused benchmark or a passing numerical corpus
 replay does not substitute for this run.
 
-A change to graph passes, lowering, preparation or kernels (`runtime/`) may
-time a selected set of models instead of the full corpus.
+A change to graph passes, lowering, preparation or kernels (`runtime/`), or to
+the stanc3 pin (`STANC3_SRC_SHA` in `deps/pins.env`), may time a selected set
+of models instead of the full corpus.
 [`tools/bench_select.py`](tools/bench_select.py) prepares every corpus model
 with both builds and selects:
 
@@ -116,10 +117,15 @@ Time the selected models with `harnesses/corpus_bench.py --models`, using the
 same protocol, threshold and evidence rules as a full run
 ([selected models](docs/benchmarks.md#selected-models)).
 
-The full corpus stays required for compiler pins, source-to-MIR compilation
-(`compiler/`, `tools/stanc_embed`, `deps/pins.env`), changes to how the
-benchmark harness or timer measures, and build flag or toolchain changes. It is
-also required when the selection tool fails on any model in either build. The
+The tool compiles each model with the compiler that each build's pin names,
+so a new stanc3 pin shows up as a changed program. For a pin change, build the
+embedded compiler for both pins first, and report both pins with the selection.
+
+The full corpus stays required for other changes to source-to-MIR compilation
+(`compiler/`, `tools/stanc_embed`, the other pins in `deps/pins.env`), changes
+to how the benchmark harness or timer measures, and build flag or toolchain
+changes. It is also required when the selection tool fails on any model in
+either build. The
 tool lists such a model as selected and unresolved, and it is never dropped.
 The PR reports the selection evidence: the counts, each changed model with a
 one-line reason, the named opcodes, the controls, and the preparation
