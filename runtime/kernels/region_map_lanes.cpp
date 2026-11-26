@@ -222,6 +222,7 @@ class Analysis {
     assign_register_slots();
     assign_cell_slots();
     decode_operands();
+    find_affine_reads();
     collect_seeds();
     build_windows();
     find_proven_gathers();
@@ -885,6 +886,36 @@ class Analysis {
       }
       if (blocks[b].taken >= 0) meet((size_t)blocks[b].taken, defined);
       if (blocks[b].fall >= 0) meet((size_t)blocks[b].fall, defined);
+    }
+  }
+
+  // A DYN_INDEX whose index is the loop variable, or the loop variable
+  // plus or minus a shared register, steps by one from lane to lane.
+  void find_affine_reads() {
+    std::vector<int> writer((size_t)p_.n_regs, -1);
+    for (size_t pc = 0; pc < p_.code.size(); ++pc)
+      each_instr_write(p_.code[pc], [&](int reg, int len) {
+        for (int k = 0; k < len; ++k) writer[(size_t)(reg + k)] = (int)pc;
+      });
+    const auto steps = [&](int r) {
+      if (r == p_.iter_reg) return true;
+      if (r < 0 || r >= p_.n_regs || writes_[(size_t)r] != 1 ||
+          undefined_read_[(size_t)r] || writer[(size_t)r] < 0)
+        return false;
+      const Program::Instr& W = p_.code[(size_t)writer[(size_t)r]];
+      if (W.code == Program::IADD)
+        return (W.a == p_.iter_reg && shared_reg(W.b)) ||
+               (W.b == p_.iter_reg && shared_reg(W.a));
+      if (W.code == Program::ISUB) return W.a == p_.iter_reg && shared_reg(W.b);
+      return false;
+    };
+    plan_.dyn_step.assign(p_.code.size(), 0);
+    for (size_t pc = 0; pc < p_.code.size(); ++pc) {
+      const Program::Instr& I = p_.code[pc];
+      if (I.code != Program::DYN_INDEX || !steps(I.b) || shared_reg(I.b))
+        continue;
+      plan_.dyn_step[pc] = 1;
+      ++plan_.affine_reads;
     }
   }
 
@@ -1692,6 +1723,27 @@ void lane_instruction(const RegionMapProg& p, const TileState& t, int pc,
       double* d = t.slot(I.dst);
       const int first = I.a + I.c;
       const double len = static_cast<double>(I.len);
+      if (p.lanes.dyn_step[(size_t)pc] && m) {
+        // The index steps by one per lane, so the lanes in the mask read
+        // inside the container when the lowest and the highest do.
+        const double* const idx = t.base() + o.b;
+        const int low = __builtin_ctzll(m), high = 63 - __builtin_clzll(m);
+        const double lo = idx[low], hi = idx[high];
+        if (std::isfinite(lo) && std::trunc(lo) == lo && lo >= 1.0 &&
+            std::isfinite(hi) && std::trunc(hi) == hi && hi <= len &&
+            hi - lo == high - low) {
+          const int32_t at = static_cast<int32_t>(lo) - 1 - low;
+          if (o.a >= 0) {
+            const double* base = t.base() + o.a;
+            t.each(m,
+                   [&](int l) { d[l] = base[(size_t)(at + l) * kTile + l]; });
+          } else {
+            const double* base = t.shared_regs() + first + at;
+            t.each(m, [&](int l) { d[l] = base[l]; });
+          }
+          break;
+        }
+      }
       t.with(o.b, I.b, [&](auto idx) {
         const auto pick = [&](auto read) {
           t.each(m, [&](int l) {

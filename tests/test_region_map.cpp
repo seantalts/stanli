@@ -2144,6 +2144,8 @@ void test_data_valued_locals_are_data_control() {
 // Compiles `source` twice, with and without lanes, and checks that the
 // lane form gives the scalar map's lp and gradient bit for bit. Returns the
 // lane payload's plan through `plan` (a copy, the model goes out of scope).
+int lanes_bitwise_throws = 0;
+
 stanli::RegionMapLanePlan expect_lanes_bitwise(const std::string& what,
                                                const std::string& source,
                                                int n) {
@@ -2165,7 +2167,10 @@ stanli::RegionMapLanePlan expect_lanes_bitwise(const std::string& what,
     const Run want = try_evaluate(es, point);
     check(got.threw == want.threw && got.what == want.what,
           what + ": lanes and scalar throw alike");
-    if (got.threw || want.threw) continue;
+    if (got.threw || want.threw) {
+      ++lanes_bitwise_throws;
+      continue;
+    }
     check(same_bits(got.e.lp, want.e.lp), what + ": lp bitwise");
     for (size_t i = 0; i < want.e.grad.size(); ++i)
       check(same_bits(got.e.grad[i], want.e.grad[i]),
@@ -2235,6 +2240,49 @@ void test_lane_index_adjoint_sites() {
               ": mu[n] shares mu[1]'s cell and keeps its "
               "site (" +
               std::to_string(fixed.max_dynamic) + ")");
+  }
+}
+
+// A read y[n], y[n - 1] or y[n + 1] has an index that steps by one per lane,
+// so the lane form checks the tile's first and last index and copies a run.
+// An index out of range throws as the scalar map does.
+void test_lane_affine_index_reads() {
+  const std::string head =
+      "functions { real guarded_lpdf(real y, real mu, real s) {\n"
+      "  if (s <= 0) return negative_infinity();\n"
+      "  return normal_lpdf(y | mu, s); } }\n"
+      "data { int N; vector[N] x; vector[N] y; }\n"
+      "parameters { real a; real b; real<lower=0> s; }\n"
+      "model { vector[N] mu = a + b * x;\n";
+  for (int n : {37, 64, 65, 200}) {
+    const std::string at = " N=" + std::to_string(n);
+    const auto plain = expect_lanes_bitwise(
+        "region_map_affine_plain" + at,
+        head + "  for (n in 1:N) target += guarded_lpdf(y[n] | mu[n], s); }\n",
+        n);
+    check(plain.affine_reads == 2, "affine plain" + at + ": y[n] and mu[n] (" +
+                                       std::to_string(plain.affine_reads) +
+                                       ")");
+    const auto shifted = expect_lanes_bitwise(
+        "region_map_affine_shifted" + at,
+        head +
+            "  for (n in 2:N) target += guarded_lpdf(y[n - 1] | mu[n] +"
+            " x[n - 1], s); }\n",
+        n);
+    check(shifted.affine_reads == 3,
+          "affine shifted" + at + ": y[n - 1], x[n - 1] and mu[n] (" +
+              std::to_string(shifted.affine_reads) + ")");
+    const int threw = lanes_bitwise_throws;
+    const auto past = expect_lanes_bitwise(
+        "region_map_affine_past" + at,
+        head +
+            "  for (n in 1:N) target += guarded_lpdf(y[n] | mu[n] +"
+            " x[n + 1], s); }\n",
+        n);
+    check(past.affine_reads == 3, "affine past the end" + at + " (" +
+                                      std::to_string(past.affine_reads) + ")");
+    check(lanes_bitwise_throws > threw,
+          "affine past the end" + at + ": x[N + 1] throws");
   }
 }
 
@@ -3638,6 +3686,7 @@ int main() {
   test_data_valued_locals_are_data_control();
   test_out_register_is_not_hoisted();
   test_lane_index_adjoint_sites();
+  test_lane_affine_index_reads();
 #endif
   test_mode_policy();
   test_recompute_visits_taken_blocks();

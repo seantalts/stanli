@@ -101,6 +101,10 @@ struct RegionMapLanePlan {
   int max_dynamic = 0;
   int tile_calls = 0;
   int proven_calls = 0;
+  // DYN_INDEX instructions whose index is the loop variable plus a shared
+  // integer, with dyn_step[pc] = 1 for them.
+  int affine_reads = 0;
+  std::vector<char> dyn_step;
   std::vector<int32_t> reg_slot;
   std::vector<int32_t> seed_regs;
   std::vector<int32_t> cell_slot;
