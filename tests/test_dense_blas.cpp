@@ -10,15 +10,22 @@
 //    to rounding. The Cholesky adjoint is also checked against central
 //    finite differences of the factor, which neither kernel shares.
 //
-// In a build without the option the pass must leave every op alone.
+// In a build without the option the pass must leave every op alone, and a
+// lowered program never contains an accelerated opcode.
+//
+// Argument: the MIR of tests/accelerate/dense_model.stan.
+#include "env_helpers.hpp"
 #include "expect.hpp"
 
+#include <stanli/compile.hpp>
+#include <stanli/data.hpp>
 #include <stanli/dense_blas.hpp>
 #include <stanli/graph.hpp>
 #include <stanli/optable.hpp>
 
 #include <Eigen/Dense>
 
+#include <algorithm>
 #include <cmath>
 #include <cstdio>
 #include <string>
@@ -358,8 +365,116 @@ void accelerated_kernels_agree() {
 
 }  // namespace
 
-int main() {
+namespace {
+
+bool accelerated(uint16_t opcode) {
+  using namespace stanli;
+  return opcode == OP_GEMM_BLAS || opcode == OP_MATVEC_BLAS ||
+         opcode == OP_CHOLESKY_BLAS || opcode == OP_MULTI_NORMAL_CHOL_LPDF_BLAS;
+}
+
+// The accelerated opcodes in the log density and write_array graphs of the
+// dense test model, lowered with N x N factors, an N x N by N x P product
+// and an M x K by K matrix-vector product.
+std::vector<uint16_t> accelerated_ops(const std::string& mir, int n, int p,
+                                      int m, int k) {
+  stanli::DataMap d;
+  d.set_int("N", n);
+  d.set_int("K", k);
+  d.set_int("M", m);
+  d.set_int("P", p);
+  std::vector<double> x((size_t)n), y((size_t)n), big((size_t)(n * n)),
+      z((size_t)(m * k));
+  for (int i = 0; i < n; ++i) x[(size_t)i] = double(i) / n;
+  for (int i = 0; i < n; ++i) y[(size_t)i] = std::sin(double(i));
+  for (size_t i = 0; i < big.size(); ++i) big[i] = std::sin(0.3 * double(i));
+  for (size_t i = 0; i < z.size(); ++i) z[i] = std::cos(0.1 * double(i));
+  d.set_real_array("x", x);
+  d.set_real_array("y", y);
+  d.set_real_array("X", big, {n, n});
+  d.set_real_array("Z", z, {m, k});
+  const stanli::CompiledModel cm = stanli::compile_model(mir, d);
+  std::vector<uint16_t> found;
+  for (const stanli::Op& op : cm.graph.ops)
+    if (accelerated(op.opcode)) found.push_back(op.opcode);
+  if (cm.write_array)
+    for (const stanli::Op& op : cm.write_array->graph.ops)
+      if (accelerated(op.opcode)) found.push_back(op.opcode);
+  return found;
+}
+
+bool contains(const std::vector<uint16_t>& ops, uint16_t opcode) {
+  return std::find(ops.begin(), ops.end(), opcode) != ops.end();
+}
+
+void lowered_programs(const char* mir_path) {
+  using namespace stanli;
+  if (mir_path == nullptr) {
+    expect_true("test_dense_blas needs the dense model's MIR", false);
+    return;
+  }
+  const std::string mir = slurp(mir_path);
+  const bool on = std::string(blas_provider()) != "none";
+  const std::vector<uint16_t> large = accelerated_ops(mir, 64, 32, 256, 64);
+  const std::vector<uint16_t> small = accelerated_ops(mir, 16, 8, 64, 16);
+  std::printf(
+      "dense model: %zu accelerated ops above the thresholds, %zu "
+      "below\n",
+      large.size(), small.size());
+  expect_true("no accelerated op below the thresholds", small.empty());
+  if (!on) {
+    expect_true("a build without STANLI_ACCELERATE lowers no accelerated op",
+                large.empty());
+    return;
+  }
+  for (uint16_t opcode : {OP_GEMM_BLAS, OP_MATVEC_BLAS, OP_CHOLESKY_BLAS,
+                          OP_MULTI_NORMAL_CHOL_LPDF_BLAS})
+    expect_true(std::string("dense model lowers ") + opcode_name(opcode),
+                contains(large, opcode));
+  if (skip_without_debug_switches("STANLI_NO_ACCELERATE")) return;
+  test_setenv("STANLI_NO_ACCELERATE", "1");
+  const std::vector<uint16_t> off = accelerated_ops(mir, 64, 32, 256, 64);
+  test_unsetenv("STANLI_NO_ACCELERATE");
+  expect_true("STANLI_NO_ACCELERATE lowers no accelerated op", off.empty());
+}
+
+// The thread rule: limit a chain's BLAS calls to one thread when parallel
+// chains * 2 exceed the performance cores, and only where BLASSetThreading
+// exists. Without it the plan says the cores are full and applies nothing;
+// the choice of kernels never depends on it (accelerate_dense_ops reads
+// only the op sizes and STANLI_NO_ACCELERATE).
+void thread_plan() {
+  using namespace stanli;
+  struct Case {
+    int chains, cores;
+    bool available, full, limited;
+  };
+  const Case cases[] = {
+      {1, 4, true, false, false},   {2, 4, true, false, false},
+      {3, 4, true, true, true},     {4, 4, true, true, true},
+      {4, 8, true, false, false},   {4, 24, true, false, false},
+      {12, 24, true, false, false}, {13, 24, true, true, true},
+      {4, 4, false, true, false},   {64, 1, false, true, false},
+      {1, 1, true, true, true},
+  };
+  for (const Case& c : cases) {
+    const BlasThreadPlan plan =
+        plan_blas_threads(c.chains, c.cores, c.available);
+    const std::string what = std::to_string(c.chains) + " chains on " +
+                             std::to_string(c.cores) + " cores" +
+                             (c.available ? "" : " without BLASSetThreading");
+    expect_true(what + ": cores full", plan.cores_full == c.full);
+    expect_true(what + ": limited", plan.limited == c.limited);
+  }
+  expect_true("at least one performance core", performance_cores() >= 1);
+}
+
+}  // namespace
+
+int main(int argc, char** argv) {
   thresholds_select_opcodes();
+  thread_plan();
+  lowered_programs(argc > 1 ? argv[1] : nullptr);
 #ifdef STANLI_ACCELERATE
   accelerated_kernels_agree();
 #endif
