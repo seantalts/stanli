@@ -1895,9 +1895,15 @@ void lane_tile_forward(const RegionMapProg& p, const TileState& t,
     } else if (tail.code == Program::JZ) {
       Mask taken = 0;
       t.with(p.lanes.ops[(size_t)last].a, tail.a, [&](auto flag) {
-        t.each(m, [&](int l) {
-          if (flag[l] == 0.0) taken |= Mask{1} << l;
-        });
+        if constexpr (std::is_same_v<decltype(flag), TileState::Shared>) {
+          taken = flag.v == 0.0 ? m : 0;
+        } else {
+          // Every lane of the tile, then the mask: a flag row has a cell
+          // for each lane, and the inactive ones are discarded.
+          for (int l = 0; l < t.lanes(); ++l)
+            taken |= Mask{flag[l] == 0.0} << l;
+          taken &= m;
+        }
       });
       entry[(size_t)block.taken] |= taken;
       entry[(size_t)block.fall] |= m & ~taken;
