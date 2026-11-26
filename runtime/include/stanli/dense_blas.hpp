@@ -12,6 +12,10 @@
 
 namespace stanli {
 
+struct Graph;
+struct Op;
+struct Slot;
+
 // "accelerate" in a STANLI_ACCELERATE build, "none" otherwise.
 const char* blas_provider();
 
@@ -34,6 +38,11 @@ class SingleThreadedBlas {
   bool active_ = false;
 };
 
+// Gives each op of the graph whose sizes are at or above its operation's
+// threshold the accelerated opcode. Does nothing in a build without
+// STANLI_ACCELERATE. Returns the number of ops it changed.
+int accelerate_dense_ops(Graph& g);
+
 #ifdef STANLI_ACCELERATE
 namespace blas {
 
@@ -47,6 +56,10 @@ struct Thresholds {
   int64_t tri_inverse_min_n;  // multi_normal_cholesky's inverse of L
 };
 const Thresholds& thresholds();
+
+// The accelerated opcode for this op at its bound sizes, or its own opcode
+// when it stays on the plain kernel. Defined beside the kernels.
+uint16_t accelerated_opcode(const Op& op, const Slot* slots);
 
 // Number of calls into BLAS or LAPACK since the process started, for tests.
 uint64_t call_count();

@@ -1160,6 +1160,10 @@ target_link_libraries(bench_opcost PRIVATE stanli)
 add_executable(bench_executor_clone EXCLUDE_FROM_ALL
   tools/bench_executor_clone.cpp tests/tbb_stub.cpp)
 target_link_libraries(bench_executor_clone PRIVATE stanli)
+# Crossover sweep behind the thresholds of the accelerated dense kernels.
+add_executable(bench_dense_blas EXCLUDE_FROM_ALL
+  tools/bench_dense_blas.cpp tests/tbb_stub.cpp)
+target_link_libraries(bench_dense_blas PRIVATE stanli)
 add_test(NAME test_bench_opcost_smoke COMMAND bench_opcost --smoke)
 set_tests_properties(test_bench_opcost_smoke PROPERTIES
   PASS_REGULAR_EXPRESSION "sink=")
