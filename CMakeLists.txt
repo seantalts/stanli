@@ -1475,7 +1475,29 @@ if(NOT EMSCRIPTEN AND NOT WIN32)
                    -DEXPECTED=${STANLI_EXPECTED_BLAS}
                    -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/check_blas_link.cmake)
 endif()
-stanli_add_test(test_dense_blas OPTIMIZED)
+# The model whose lowered program test_dense_blas inspects, compiled the way
+# the MIR fixtures are; outside tests/fixtures so that the fixture corpora do
+# not pick it up.
+set(STANLI_ACCELERATE_MODEL_MIR
+    "${CMAKE_CURRENT_BINARY_DIR}/accelerate/dense_model.mir")
+add_custom_command(
+  OUTPUT "${STANLI_ACCELERATE_MODEL_MIR}"
+  COMMAND ${STANLI_FIXTURE_PYTHON}
+          "${CMAKE_CURRENT_SOURCE_DIR}/tools/gen_fixtures.py"
+          --stanli-check $<TARGET_FILE:stanli_check>
+          --source-dir tests/accelerate
+          --output-dir "${CMAKE_CURRENT_BINARY_DIR}/accelerate"
+  DEPENDS ${_stanli_fixture_dependencies}
+          "${CMAKE_CURRENT_SOURCE_DIR}/tests/accelerate/dense_model.stan"
+  WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
+  COMMENT "Generating the accelerate test model's MIR"
+  VERBATIM)
+add_custom_target(stanli_accelerate_model_mir
+                  DEPENDS "${STANLI_ACCELERATE_MODEL_MIR}")
+add_dependencies(stanli_accelerate_model_mir stanli_check)
+stanli_add_test(test_dense_blas OPTIMIZED ARGS "${STANLI_ACCELERATE_MODEL_MIR}")
+add_dependencies(test_dense_blas stanli_accelerate_model_mir)
+list(APPEND STANLI_DEBUG_SWITCH_TESTS test_dense_blas)
 
 set(STANLI_TESTS
   test_execution_report test_json_writer test_rng
@@ -1562,10 +1584,14 @@ if(NOT WIN32)
   add_executable(test_blas_chains tests/test_blas_chains.cpp)
   target_link_libraries(test_blas_chains PRIVATE stanli_shared Threads::Threads)
   foreach(_model gp product)
-    add_test(NAME test_blas_chains_${_model} COMMAND test_blas_chains ${_model}
-             WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
-    set_tests_properties(test_blas_chains_${_model} PROPERTIES
-                         SKIP_RETURN_CODE 77)
+    foreach(_cores filled free)
+      set(_name test_blas_chains_${_model}_${_cores})
+      add_test(NAME ${_name} COMMAND test_blas_chains ${_model} ${_cores}
+               WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
+      set_tests_properties(${_name} PROPERTIES SKIP_RETURN_CODE 77)
+      list(APPEND STANLI_DEBUG_SWITCH_TESTS ${_name})
+      list(APPEND STANLI_DEBUG_SWITCH_ONLY_TESTS ${_name})
+    endforeach()
   endforeach()
 endif()
 
