@@ -22,7 +22,7 @@ Ops inside retained loops (`dyn_lengths`) are never accelerated.
 
 `tools/bench_dense_blas` (target `bench_dense_blas`, excluded from the
 default build) times the plain kernel and its accelerated form, forward plus
-backward, on one thread (`SingleThreadedBlas`), best of 7 rounds of at least
+backward, on one thread (`ChainBlasThreads` with an unknown chain count, which limits BLAS to one thread), best of 7 rounds of at least
 20 ms. Apple M3 Ultra, macOS 26.6.2, revision 8a11fd7d0 plus the sweep
 shapes, 2026-11-26, load average 5 to 10 from other work on the 32-core
 host. Four runs; the first two lack the shapes added in the last two.

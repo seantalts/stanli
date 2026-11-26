@@ -2010,6 +2010,8 @@ Graph passes:
 | `STANLI_LANE_REPORT` | print why re-rolling and partitioning left each group of matching lanes unfused, and how many target terms were listed twice | `lower.cpp`, `pass_util.hpp` |
 | `STANLI_NO_CSE` | turn off common-subexpression elimination | `cse.cpp` |
 | `STANLI_NO_DENSITY_MASK` | bind every density argument in a generated backward as a recorder scalar again, instead of by its activity mask | `adjoint.cpp` |
+| `STANLI_NO_ACCELERATE` | keep every op on the plain kernels in a `STANLI_ACCELERATE` build: no matrix product, matrix-vector product, Cholesky factor or `multi_normal_cholesky` gets an accelerated opcode | `dense_blas.cpp` |
+| `STANLI_PERFORMANCE_CORES=n` | the number of performance cores that the BLAS thread rule uses, in place of `hw.perflevel0.physicalcpu` | `blas_threads.cpp` |
 | `STANLI_NO_FUSED_DENSITY` | use Stan Math's kernels instead of the fused kernels for the seven fused densities; acts when the value is set, nonempty and not `0`; ignored, with a notice, in a build with CMake option `STANLI_STAN_DENSITY_ORACLE=OFF` | `density_fused.cpp` |
 
 Islands and register programs:
