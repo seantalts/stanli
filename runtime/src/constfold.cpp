@@ -36,6 +36,7 @@
 
 #include <algorithm>
 #include <cstdlib>
+#include <cstring>
 #include <unordered_map>
 #include <unordered_set>
 
@@ -342,6 +343,57 @@ ConstFoldStats const_fold(
   st.ops_removed = (int)(g.ops.size() - kept.size());
   g.ops = std::move(kept);
   return st;
+}
+
+int scalarize_uniform_constants(
+    Graph& g, std::vector<std::pair<int, std::vector<double>>>& fills) {
+  std::vector<char> written(g.slots.size(), 0);
+  for (const Op& op : g.ops) {
+    if (op.out >= 0) written[(size_t)op.out] = 1;
+    if (op.out2 >= 0) written[(size_t)op.out2] = 1;
+  }
+  // The last fill of a slot is its value; -1 marks a slot with none.
+  std::vector<int64_t> fill_of(g.slots.size(), -1);
+  for (size_t f = 0; f < fills.size(); ++f)
+    fill_of[(size_t)fills[f].first] = (int64_t)f;
+  const auto uniform = [&](int slot) {
+    if (written[(size_t)slot] || g.slots[(size_t)slot].is_param) return false;
+    const int64_t f = fill_of[(size_t)slot];
+    if (f < 0) return false;
+    const std::vector<double>& v = fills[(size_t)f].second;
+    if (v.size() < 2 || (int64_t)v.size() != g.slots[(size_t)slot].len)
+      return false;
+    for (double x : v)
+      if (std::memcmp(&x, &v[0], sizeof x) != 0) return false;
+    return true;
+  };
+  std::unordered_map<int, int> scalar_of;
+  int replaced = 0;
+  const size_t n_ops = g.ops.size();
+  for (size_t i = 0; i < n_ops; ++i) {
+    const uint16_t opcode = g.ops[i].opcode;
+    if ((opcode != OP_ADD && opcode != OP_SUB && opcode != OP_MUL &&
+         opcode != OP_DIV) ||
+        g.ops[i].n_in != 2)
+      continue;
+    for (int j = 0; j < 2; ++j) {
+      const int slot = g.ops[i].in[j], other = g.ops[i].in[1 - j];
+      // The other operand has to keep giving the result its length.
+      if (g.slots[(size_t)other].len != g.slots[(size_t)slot].len ||
+          !uniform(slot))
+        continue;
+      auto [it, added] = scalar_of.try_emplace(slot, -1);
+      if (added) {
+        const double value = fills[(size_t)fill_of[(size_t)slot]].second[0];
+        it->second = g.add_slot(1, false);
+        fills.emplace_back(it->second, std::vector<double>{value});
+      }
+      g.ops[i].in[j] = it->second;
+      ++replaced;
+      break;
+    }
+  }
+  return replaced;
 }
 
 }  // namespace stanli

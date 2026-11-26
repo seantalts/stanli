@@ -953,6 +953,14 @@ Lowering::Val Lowering::lower_expr_impl(const mir::Expr& e) {
             e.args[1], g.slots[base.slot].len, SelectorSite::Vector, e.raw);
         const int64_t len = range.count;
         const int64_t offset = len ? range.first - 1 : 0;
+        // A range over the whole vector is the vector. It keeps the layout
+        // of a range, which is what Stan Math reduces.
+        if (len == g.slots[base.slot].len) {
+          Val whole = base;
+          whole.si = view_of(e.unsized);
+          whole.si.param_free = base.si.param_free;
+          return with_layout(whole, contiguous_layout(base, offset, "range"));
+        }
         return with_layout(
             emit_value(OP_SLICE, {base}, len, view_of(e.unsized),
                        {checked_immediate(offset, "range offset")}),
@@ -998,6 +1006,16 @@ Lowering::Val Lowering::lower_expr_impl(const mir::Expr& e) {
           idata.push_back(stan_index(x, g.slots[base.slot].len,
                                      "vector[multi] indexing", e.raw) -
                           1);
+        // A gather of every element in order is the vector.
+        bool whole = (int64_t)idata.size() == g.slots[base.slot].len;
+        for (size_t k = 0; whole && k < idata.size(); ++k)
+          whole = idata[k] == (int)k;
+        if (whole) {
+          Val all = base;
+          all.si = view_of(e.unsized);
+          all.si.param_free = base.si.param_free;
+          return with_layout(all, ExpressionLayout::scalar());
+        }
         return with_layout(emit_value(OP_GATHER, {base}, (int64_t)idata.size(),
                                       view_of(e.unsized), idata),
                            ExpressionLayout::scalar());
