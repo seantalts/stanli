@@ -5,7 +5,7 @@
 #include <stanli/optable.hpp>
 #include <stanli/message_sink.hpp>
 #include <stanli/wa_interp.hpp>
-#include <rapidjson/document.h>
+#include "../runtime/src/rapidjson.hpp"
 #include "env_helpers.hpp"
 
 #include <cstdio>

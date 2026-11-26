@@ -822,8 +822,9 @@ exact commands, coverage, the phase comparison and links to the raw results.
 
 ### Selected models
 
-A change to graph passes, lowering, preparation or kernels (`runtime/`) may
-time a selected set of models. Build `bench_grad`, `dump_ops` and
+A change to graph passes, lowering, preparation or kernels (`runtime/`), or to
+the stanc3 pin (`STANC3_SRC_SHA` in `deps/pins.env`), may time a selected set
+of models. Build `bench_grad`, `dump_ops` and
 `dump_islands` with the shipped configuration for both revisions, then run:
 
 ```sh
@@ -908,10 +909,17 @@ PR also reports the selection: the counts, the changed models with their
 reasons, the named opcodes, the controls and the preparation comparison over
 all models.
 
-The full corpus stays required for compiler pins, source-to-MIR compilation
-(`compiler/`, `tools/stanc_embed`, `deps/pins.env`), changes to how the
-benchmark harness or timer measures, build flag or toolchain changes, and any run where the
-selection tool fails on a model in either revision.
+A stanc3 pin change can use the selection because the tool compiles each
+model with the compiler that each revision's pin names. A model whose MIR or
+prepared program is the same under both pins runs the same code, so timing it
+again measures only noise. Build the embedded compiler for both pins before
+the selection (`tools/stanc_embed/build.sh`), and report both pins in the PR.
+
+The full corpus stays required for other changes to source-to-MIR compilation
+(`compiler/`, `tools/stanc_embed`, the other pins in `deps/pins.env`), changes
+to how the benchmark harness or timer measures, build flag or toolchain
+changes, and any run where the selection tool fails on a model in either
+revision.
 
 ### Focused execution-path benchmarks
 

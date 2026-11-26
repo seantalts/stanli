@@ -35,6 +35,8 @@ with tempfile.TemporaryDirectory() as directory:
             [binary, str(repo/'tests/fixtures/reduce_sum_parallel_probe.stan'),
              str(path), '--warmup', '2', '--samples', '2', '--max-depth', '3'],
             capture_output=True, text=True, check=True, timeout=60).stderr
-    assert 'reduce_sum over 16384 elements runs on one thread' in single(n)
+    # The hint needs twice the smallest chunk worth splitting off. The model
+    # is four vector ops per element, which reaches that above 18750.
+    assert 'reduce_sum over 32768 elements runs on one thread' in single(2 * n)
     assert 'runs on one thread' not in single(64)
 print('PASS: within-chain CLI teams, sampling, CSV, and validation')

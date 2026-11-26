@@ -24,8 +24,7 @@
 #include "copy_doubles.hpp"
 #include "lent_stack.hpp"
 #include "data_document.hpp"
-#include <rapidjson/stringbuffer.h>
-#include <rapidjson/writer.h>
+#include "rapidjson.hpp"
 #include "service_model.hpp"
 
 #include <stan/math/rev/functor/finite_diff_hessian_auto.hpp>

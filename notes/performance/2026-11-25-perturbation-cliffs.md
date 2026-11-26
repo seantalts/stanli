@@ -74,9 +74,9 @@ variant. Timings are from the second run.
 
 | gate | corpus today | cliffs | size of the effect | what a fix needs |
 |---|---|---:|---|---|
-| The cost model for repeated lanes (`partition.cpp:1025-1095`, the same formula as `reroll_plan.hpp:194-222`) | 19 bases decline on cost today (13 in partition, 10 in reroll). How many of them sit between the measured break-even and the model's threshold was not measured. 14 more models reach the gate only when their data gets repeated values: the 12 radon models, low_dim_gauss_mix and its collapsed form. | data values, not source | It fuses only above about 46% distinct lanes. Measured break-even is 10% to 20%. In the reproducer with 4,000 rows, 1,900 distinct rows fuse to 11 ops and 1,800 give 3,972 ops and run 4.5x slower. | Raise the price of a scalar op (one formula, shared by both passes), or fuse only the distinct lanes and multiply by integer counts. First measure the share of distinct lanes in the 19 bases: only those between about 15% and 46% would change. |
+| The cost model for repeated lanes (`partition.cpp:1025-1095`, the same formula as `reroll_plan.hpp:194-222`) | 19 bases decline on cost today (13 in partition, 10 in reroll). How many of them sit between the measured break-even and the model's threshold was not measured. 14 more models reach the gate only when their data gets repeated values: the 12 radon models, low_dim_gauss_mix and its collapsed form. | data values, not source | It fuses only above about 46% distinct lanes. Measured break-even is 10% to 20%. In the reproducer with 4,000 rows, 1,900 distinct rows fuse to 11 ops and 1,800 give 3,972 ops and run 4.5x slower. | Measured and left alone: forcing fusion on the 19 bases slows four of them and helps one, so no single price fits (see "Which fixes reach the corpus"). |
 | A container built per row (`reroll.cpp:1008-1024`, `partition.cpp:253-256`, `762-776`, `976-977`) | normal_mixture_k runs at 7,159 ops as written. 39 bases have the reroll decline, 21 the "no lane rule" decline. | 11 | 11 to 21 ops become 2,000 to 15,000. 1.5x to 5.3x. Four variants end up to 2.3x slower than CmdStan. | Treat a row container of width K as one lane value, with row rules for `log_sum_exp`, `log_mix` and concatenation. This is the largest change in this note. |
-| The unroll ceiling counts ops before the passes (`lower.cpp:1345`, `lower_stmt.cpp:2482-2484`) | Any model whose row loop lowers to more than 2^20 ops. In the sweep, 19 models switched to `OP_LOOP` at some size. | size | radon at N=149,700 folds to 21 ops. At N=149,900 it is one `OP_LOOP`: 14.4x slower for 0.13% more rows, and 1.5x slower than CmdStan. | Find the fused form without unrolling everything: lower the body once over whole columns, or prove the lanes on a prefix and extend the strides. Reproduce with `scale.py base.stan base.json --set N=149700` and `N=149900` on radon_variable_intercept_slope_noncentered. |
+| The unroll ceiling counts ops before the passes (`lower.cpp:1345`, `lower_stmt.cpp:2482-2484`) | Any model whose row loop lowers to more than 2^20 ops. In the sweep, 19 models switched to `OP_LOOP` at some size. | size | radon at N=149,700 folds to 21 ops. At N=149,900 it is one `OP_LOOP`: 14.4x slower for 0.13% more rows, and 1.5x slower than CmdStan. | Fixed in the compiler: stanc3 now turns the row loop into vector statements, so the runtime never unrolls it (see "Which fixes reach the corpus"). A loop that the compiler cannot vectorize still reaches the ceiling. Reproduce with `scale.py base.stan base.json --set N=149700` and `N=149900` on radon_variable_intercept_slope_noncentered. |
 | Preparation: a loop bound is evaluated again on every iteration (`mir_interp.hpp:268`, `:333`) | 2pl_latent_reg_irt, gpcm_latent_reg_irt | size | 28 s of preparation at K=1000, growing as K^1.9. | Evaluate the bound once. |
 | Preparation: a constant write keeps a copy of the whole container (`lower_expr.cpp:110`, `:128`) | hbayesdm_prl_rp, hbayesdm_dd_hyperbolic | size | 4.8 GB and 3.3 GB at 63 subjects. Memory grows as the square of the container. | Update in place, or keep one copy per container. |
 | Preparation: reroll counts a run of stores again from every start (`reroll.cpp:1795`) | hbayesdm_prl_rp | size | Scan steps grow 4x per doubling, and nothing is fused. | Remember where a run was refused. |
@@ -168,17 +168,26 @@ whose program changes. A gate that only variants reach changes no corpus
 program, so it cannot pass that bar on its own. Whether to fix those is a
 separate decision. By reach:
 
-1. **Re-price the cost model.** One formula, and the threshold is
-   measurably in the wrong place. Its reach in the corpus is not yet
-   known: 19 bases decline on cost, and only those with a share of
-   distinct lanes between the break-even and 46% would change. The radon
-   models fuse with their own data, so their programs would not change
-   and they cannot count toward the corpus bar.
-2. **Find the fused form above the unroll ceiling without the full
-   unroll.** This is the only cliff here where more data makes stanli
-   slower than CmdStan on an unchanged corpus model. Counting the ceiling
-   after the passes is not a fix, because the ceiling exists to avoid that
-   unroll.
+1. **The cost model for repeated lanes: measured on 2026-11-26, and
+   left alone.** Forcing fusion on the 19 bases that decline on cost
+   slows four of them (ch12_m12_3 11x, ch12_m12_3_alt 2.5x,
+   multi_occupancy 1.4x to 1.7x, dogs_hierarchical 1.3x), speeds up two
+   (dogs 1.28x, multinma_ndmm_mspline 1.07x) and leaves the rest within
+   3%. No single price for a scalar op separates them: the shapes need
+   prices between 18 and 55. A count of distinct lanes per position does
+   not separate them either, because keeping ch12_m12_3 scalar needs a
+   price of at most 8.4 and fusing the radon shape at 20% distinct needs
+   at least 26.5. The repeats that matter sit across reroll groups, which
+   a count per group cannot see. So the declines in the corpus are mostly
+   right, and the gate still costs the 14 models that reach it through
+   repeated data values.
+2. **The fused form above the unroll ceiling: fixed on 2026-11-26 in
+   stanc3.** The fork's `vectorize_loops` now turns a loop whose statements
+   all read and write the same element `mu[n]` into vector statements, so
+   the row loop never reaches the unroll. radon at N=149,900 and at
+   N=10^6 gets the same 21 ops as a full unroll, and preparation at 10^6
+   takes 0.37 s and 334 MB where the full unroll took 5.9 s and 3.2 GB. A
+   loop that the pass does not take still meets the ceiling as before.
 3. **The three preparation causes.** Each is local and has a reproducer.
 4. **The row container.** The largest change, and the one that covers the
    most variants (11) and one corpus model as written.
