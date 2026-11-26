@@ -3418,14 +3418,13 @@ class MirInterp {
     }
     // Registered shape queries answer through the shared resolver, with
     // vector orientation from the MIR type -- the same source the graph
-    // reads, so the two paths cannot drift. FnLength stays outside the
-    // registry: the compiler internal stanc3 emits for the observation
-    // count in a vectorized `T[,]` normalizer spells stan::math::size,
-    // which counts every element, so it answers as num_elements does
-    // rather than as size does.
+    // reads, so the two paths cannot drift. FnLength is the compiler's
+    // spelling of stan::math::size: the outer length of an array, and the
+    // element count of a vector or matrix.
     if (const BuiltinSpec* query =
             e.args.size() == 1
-                ? shaped_builtin_spec(e.name, 1, BuiltinShapePolicy::ShapeQuery)
+                ? shaped_builtin_spec(e.name == "FnLength" ? "size" : e.name,
+                                      1, BuiltinShapePolicy::ShapeQuery)
                 : nullptr) {
       Value a = eval(e.args[0]);
       if (a.is_int && a.r.size() != a.i.size()) {
@@ -3435,6 +3434,8 @@ class MirInterp {
         a.r.reserve(a.i.size());
         for (int value : a.i) a.r.push_back(T((double)value));
       }
+      if (a.dims.empty() && e.args[0].unsized.depth != 0)
+        a.dims = {static_cast<int64_t>(a.r.size())};
       std::vector<int64_t> answer;
       try {
         answer =
@@ -3449,14 +3450,6 @@ class MirInterp {
         r.i.push_back((int)v);
         r.r.push_back(T((double)v));
       }
-      return r;
-    }
-    if (e.name == "FnLength" && e.args.size() == 1) {
-      Value a = eval(e.args[0]);
-      const long v = (long)std::max(a.r.size(), a.i.size());
-      r.is_int = true;
-      r.i = {(int)v};
-      r.r = {T((double)v)};
       return r;
     }
     // Scalar unaries from the shared list, so transformed data and
