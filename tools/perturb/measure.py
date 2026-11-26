@@ -315,7 +315,8 @@ def structure(tools, comp, data, prep_reps=3):
         if code != 0:
             return {**result,
                     "failure": "bench_grad --prep: " + failure_text(code, err)}
-        cols = out.split()
+        # A model's own print statements come first on stdout.
+        cols = out.strip().splitlines()[-1].split()
         prep = float(cols[0])
         if best is None or prep < best["prep_s"]:
             best = {"prep_s": prep, "params": int(cols[1]),
