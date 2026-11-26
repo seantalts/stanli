@@ -3,6 +3,8 @@
 #include <Eigen/Sparse>
 #include <Eigen/SparseCholesky>
 
+#include "checked_size.hpp"
+
 #include <cmath>
 #include <limits>
 #include <stdexcept>
@@ -113,11 +115,14 @@ SparseFactor sparse_ldlt(int64_t n, const int64_t* col_ptr,
 LowRank sparse_lowrank(const SparseFactor& f, int64_t k, const double* u) {
   const int64_t n = f.n;
   if (k < 1) throw std::invalid_argument("the low-rank width must be positive");
+  const int64_t nk =
+      checked_size(n, k, "the low-rank width k is too large for n parameters");
+  const int64_t kk = checked_size(k, k, "the low-rank width k is too large");
   LowRank r;
   r.k = k;
   r.c.assign((size_t)n, 0.0);
-  r.b.assign((size_t)(n * k), 0.0);
-  r.w.assign((size_t)(n * k), 0.0);
+  r.b.assign((size_t)nk, 0.0);
+  r.w.assign((size_t)nk, 0.0);
   std::vector<double> x((size_t)n);
   for (int64_t col = 0; col < k; ++col) {
     for (int64_t i = 0; i < n; ++i)
@@ -130,7 +135,7 @@ LowRank sparse_lowrank(const SparseFactor& f, int64_t k, const double* u) {
     }
     for (int64_t i = 0; i < n; ++i) r.w[(size_t)(i * k + col)] = x[(size_t)i];
   }
-  std::vector<double> s((size_t)(k * k), 0.0);
+  std::vector<double> s((size_t)kk, 0.0);
   std::vector<double> v((size_t)k);
   for (int64_t j = 0; j < n; ++j) {
     const double* wj = r.w.data() + j * k;

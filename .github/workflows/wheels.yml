@@ -1914,11 +1914,11 @@ jobs:
             -DSTANLI_PORTABLE_COMPILER="$PWD/deps/stanc3/stanli-compile"
           cmake --build build-tsan -j4 \
             --target test_capi test_pool test_multichain \
-            test_wa_parallel test_wa_parallel_abi
+            test_wa_parallel test_wa_parallel_abi test_bridgestan
       - name: ctest
         run: >-
           ctest --test-dir build-tsan --timeout 600 --output-on-failure
-          -R '^(test_capi|test_pool|test_multichain|test_wa_parallel|test_wa_parallel_switches|test_wa_parallel_abi)$'
+          -R '^(test_capi|test_pool|test_multichain|test_wa_parallel|test_wa_parallel_switches|test_wa_parallel_abi|test_bridgestan)$'
 
   # Build and link the browser runtime after merge, nightly, on demand, and
   # on tags. Pages and release jobs consume the artifact and run end-to-end

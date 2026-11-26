@@ -25,6 +25,7 @@
 #include <stanli/wa_interp.hpp>
 #include <stanli/whiten.hpp>
 
+#include <atomic>
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
@@ -33,6 +34,7 @@
 #include <map>
 #include <sstream>
 #include <string>
+#include <thread>
 #include <vector>
 
 namespace {
@@ -795,6 +797,44 @@ void test_print_callback() {
   bs_model_destruct(m);
 }
 
+std::atomic<int> g_prints_a{0}, g_prints_b{0};
+void count_print_a(const char*, size_t) { ++g_prints_a; }
+void count_print_b(const char*, size_t) { ++g_prints_b; }
+
+// A client may install or clear its callback while another thread is
+// evaluating and printing. This only shows a failure under TSan.
+void test_print_callback_swap_during_evaluation() {
+  const std::string mir = slurp("tests/fixtures/rejectprint.mir");
+  char* err = nullptr;
+  bs_model* m =
+      bs_model_from_mir(mir.c_str(), "{\"N\": 3, \"lim\": 1.0}", 1, &err);
+  if (m == nullptr) {
+    fail(std::string("rejectprint construct: ") + (err ? err : "(none)"));
+    bs_free_error_msg(err);
+    return;
+  }
+  std::vector<double> q((size_t)bs_param_unc_num(m), 0.25);
+  std::atomic<bool> started{false}, done{false};
+  bs_set_print_callback(&count_print_a, &err);
+  std::thread worker([&] {
+    double lp = 0;
+    char* werr = nullptr;
+    started = true;
+    for (int i = 0; i < 300; ++i)
+      if (bs_log_density(m, true, true, q.data(), &lp, &werr) != 0) {
+        bs_free_error_msg(werr);
+        werr = nullptr;
+      }
+    done = true;
+  });
+  while (!started) std::this_thread::yield();
+  const STREAM_CALLBACK cycle[] = {&count_print_a, &count_print_b, nullptr};
+  for (int i = 0; !done; ++i) bs_set_print_callback(cycle[i % 3], &err);
+  worker.join();
+  bs_set_print_callback(nullptr, &err);
+  bs_model_destruct(m);
+}
+
 void test_necessity_effects() {
   const std::string mir = slurp("tests/fixtures/necessity_effects.mir");
   char* err = nullptr;
@@ -1243,6 +1283,35 @@ void test_whitened_manifest() {
                                "\", \"values\": \"" + base64_of(zero) + "\"}}";
   if (stanli::bs_read_manifest(base + singular, &man, &err))
     fail("a whitening with a zero diagonal was accepted");
+
+  // n * k is 2^64 + 2, which wraps to 2 in int64_t arithmetic. Arrays of
+  // the wrapped size must not pass for an n by k factor.
+  const int64_t n3 = 3;
+  const int64_t huge_k = (int64_t)(UINT64_MAX / (uint64_t)n3 + 1);
+  const std::vector<double> ones3 = {1.0, 1.0, 1.0}, two = {0.5, 0.5};
+  const std::vector<int64_t> p3 = {0, 1, 2}, cp3 = {0, 1, 2, 3};
+  try {
+    stanli::make_whiten_spec(ones3.data(), n3, p3.data(), cp3.data(), p3.data(),
+                             ones3.data(), n3, huge_k, ones3.data(), two.data(),
+                             two.data());
+    fail("make_whiten_spec accepted a width whose n * k overflows");
+  } catch (const std::invalid_argument& e) {
+    if (std::string(e.what()).find("too large") == std::string::npos)
+      fail(std::string("the overflowing width was refused for another "
+                       "reason: ") +
+           e.what());
+  }
+  const std::string wide =
+      ", \"whiten\": {\"q_hat\": \"" + base64_of(ones3) + "\", \"perm\": \"" +
+      base64_of(p3) + "\", \"col_ptr\": \"" + base64_of(cp3) +
+      "\", \"row_idx\": \"" + base64_of(p3) + "\", \"values\": \"" +
+      base64_of(ones3) + "\", \"k\": " + std::to_string(huge_k) +
+      ", \"c\": \"" + base64_of(ones3) + "\", \"b\": \"" + base64_of(two) +
+      "\", \"w\": \"" + base64_of(two) + "\"}}";
+  err.clear();
+  if (stanli::bs_read_manifest(base + wide, &man, &err) ||
+      err.find("too large") == std::string::npos)
+    fail("a manifest whose whiten n * k overflows was not refused: " + err);
 }
 
 // Real BridgeStan reads bs_param_unconstrain_json with the data rule, so []
@@ -1423,6 +1492,7 @@ int main() {
   test_unsupported();
   test_initialize();
   test_print_callback();
+  test_print_callback_swap_during_evaluation();
   test_necessity_effects();
   test_parameterless();
   test_manifest();

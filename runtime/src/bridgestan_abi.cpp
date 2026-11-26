@@ -46,6 +46,7 @@
 #include <stanli/whiten.hpp>
 
 #include "build_id.hpp"
+#include "checked_size.hpp"
 #include "copy_doubles.hpp"
 #include "data_document.hpp"
 
@@ -112,11 +113,6 @@ std::string join_csv(const std::vector<std::string>& names) {
   }
   return s;
 }
-
-// The print callback the client installed, read by the message sink.
-// Installing and emitting are serialized inside set_message_sink /
-// emit_message, so a plain pointer is enough.
-STREAM_CALLBACK g_print_callback = nullptr;
 
 }  // namespace
 
@@ -334,9 +330,13 @@ std::shared_ptr<const WhitenSpec> read_whiten(const rapidjson::Value& obj) {
   if ((int64_t)perm.size() != n || (int64_t)col_ptr.size() != n + 1 ||
       row_idx.size() != values.size())
     throw std::runtime_error("whiten arrays disagree on the parameter count");
-  if (k > 0 && ((int64_t)c.size() != n || (int64_t)b.size() != n * k ||
-                (int64_t)w.size() != n * k))
-    throw std::runtime_error("whiten low-rank arrays have the wrong sizes");
+  if (k > 0) {
+    const int64_t nk = checked_size(
+        n, k, "the low-rank width k is too large for n parameters");
+    if ((int64_t)c.size() != n || (int64_t)b.size() != nk ||
+        (int64_t)w.size() != nk)
+      throw std::runtime_error("whiten low-rank arrays have the wrong sizes");
+  }
   return make_whiten_spec(
       q_hat.data(), n, perm.data(), col_ptr.data(), row_idx.data(),
       values.data(), (int64_t)values.size(), k, k > 0 ? c.data() : nullptr,
@@ -882,21 +882,18 @@ void bs_rng_destruct(bs_rng* rng) { delete rng; }
 
 int bs_set_print_callback(STREAM_CALLBACK callback, char** error_msg) {
   try {
-    g_print_callback = callback;
     if (callback == nullptr) {
       stanli::set_message_sink(nullptr);
       return 0;
     }
-    stanli::set_message_sink([](const char* text, std::size_t len) {
-      STREAM_CALLBACK cb = g_print_callback;
-      if (cb == nullptr) return;
+    stanli::set_message_sink([callback](const char* text, std::size_t len) {
       // The sink delivers one line with no terminator; reference
       // BridgeStan hands the client the bytes Stan wrote to the print
       // stream, and Stan's print() ends its line. Put the newline back so
       // a client concatenating chunks reconstructs the same text.
       std::string line(text, len);
       line.push_back('\n');
-      cb(line.data(), line.size());
+      callback(line.data(), line.size());
     });
     return 0;
   } catch (const std::exception& e) {
