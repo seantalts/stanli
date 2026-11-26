@@ -125,6 +125,9 @@ class MirInterp {
   // the Jacobian. Without one they add nothing, as in CmdStan's
   // write_array.
   void set_jacobian_sink(T* sum) { jacobian_sink_ = sum; }
+  // Where every target and Jacobian term adds its absolute value, so that a
+  // caller can tell how much rounding error the sum can carry.
+  void set_magnitude_sink(double* sum) { magnitude_sink_ = sum; }
 
   // The caller's propto__ for this scope. Lowering sets it on entering a
   // user function body that it inlines.
@@ -798,6 +801,9 @@ class MirInterp {
         {
           T* const sink = st.jacobian ? jacobian_sink_ : target_sink_;
           const Value terms = eval(st.target);
+          if (magnitude_sink_)
+            for (const T& term : terms.r)
+              *magnitude_sink_ += std::abs(val(term));
           if constexpr (std::is_same_v<T, double>) {
             // A long container adds its compensated sum, as OP_SUM_VEC does
             // on the graph and in the register program.
@@ -1438,6 +1444,7 @@ class MirInterp {
   bool native_extrema_ = false;
   T* target_sink_ = nullptr;
   T* jacobian_sink_ = nullptr;
+  double* magnitude_sink_ = nullptr;
   MirHooks hooks_;
   std::map<std::string, Value> env_;
   Value returned_;
@@ -2051,6 +2058,7 @@ class MirInterp {
     sub.native_extrema_ = native_extrema_;
     sub.target_sink_ = target_sink_;
     sub.jacobian_sink_ = jacobian_sink_;
+    sub.magnitude_sink_ = magnitude_sink_;
     sub.udf_depth_ = udf_depth_ + 1;
     sub.propto_ctx_ = propto;
     sub.refuse_propto_ = refuse_propto_;

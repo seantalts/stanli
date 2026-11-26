@@ -46,7 +46,22 @@ namespace stanli::oracle {
 
 using Entry = DataMap::Entry;
 using Value = MirInterp<double>::Value;
-using Deserializer = stan::io::deserializer<double>;
+// The log density reads its parameters as CmdStan's does: with Stan Math's
+// var overloads, which check bounds, name elements and treat a unit_vector
+// of norm 0 differently from the double ones. Only the values and the
+// Jacobian leave the read; the model itself runs on doubles. write_array
+// reads on doubles, as CmdStan's does.
+using stan::math::var;
+
+// The scalar S counterpart of a double, vector, row vector or matrix leaf.
+template <typename S, typename Leaf>
+struct ScalarLeaf {
+  using type = S;
+};
+template <typename S, int R, int C>
+struct ScalarLeaf<S, Eigen::Matrix<double, R, C>> {
+  using type = Eigen::Matrix<S, R, C>;
+};
 
 struct Refused : CompileError {
   using CompileError::CompileError;
@@ -250,11 +265,11 @@ auto with_sizes(const std::vector<int64_t>& dims, std::index_sequence<I...>,
 // An elementwise transform (identity, bounds, offset and multiplier) reads
 // the whole declaration at once, as stanc3's generated code does, so Stan
 // Math checks the bounds and names an element as CmdStan does.
-template <typename Leaf, size_t Depth>
-void read_elementwise(Deserializer& d, const mir::Transform& tr,
-                      const std::vector<Value>& args, const ParamGeom& g,
-                      double& lp, Value& out) {
-  using Ret = typename Nested<Leaf, Depth>::type;
+template <typename S, typename Leaf, size_t Depth>
+void read_elementwise(stan::io::deserializer<S>& d, const mir::Transform& tr,
+                      const std::vector<Value>& args, const ParamGeom& g, S& lp,
+                      Value& out) {
+  using Ret = typename Nested<typename ScalarLeaf<S, Leaf>::type, Depth>::type;
   const auto sizes = std::make_index_sequence<Depth + leaf_rank_v<Leaf>>{};
   const auto arg = [&](size_t k) -> const Value& {
     if (k >= args.size())
@@ -321,22 +336,24 @@ void read_elementwise(Deserializer& d, const mir::Transform& tr,
     default:
       throw Refused("oracle: unhandled transform " + tr.raw);
   }
-  Layout<Ret>::into(x, out.r, g.dims, 0, 0, 1);
+  using Values = typename Nested<Leaf, Depth>::type;
+  Layout<Values>::into(Values(stan::math::value_of(x)), out.r, g.dims, 0, 0, 1);
 }
 
-template <typename Leaf>
-void read_elementwise_at_depth(Deserializer& d, const mir::Transform& tr,
+template <typename S, typename Leaf>
+void read_elementwise_at_depth(stan::io::deserializer<S>& d,
+                               const mir::Transform& tr,
                                const std::vector<Value>& args,
-                               const ParamGeom& g, double& lp, Value& out) {
+                               const ParamGeom& g, S& lp, Value& out) {
   switch (g.outer) {
     case 0:
-      return read_elementwise<Leaf, 0>(d, tr, args, g, lp, out);
+      return read_elementwise<S, Leaf, 0>(d, tr, args, g, lp, out);
     case 1:
-      return read_elementwise<Leaf, 1>(d, tr, args, g, lp, out);
+      return read_elementwise<S, Leaf, 1>(d, tr, args, g, lp, out);
     case 2:
-      return read_elementwise<Leaf, 2>(d, tr, args, g, lp, out);
+      return read_elementwise<S, Leaf, 2>(d, tr, args, g, lp, out);
     case 3:
-      return read_elementwise<Leaf, 3>(d, tr, args, g, lp, out);
+      return read_elementwise<S, Leaf, 3>(d, tr, args, g, lp, out);
     default:
       throw Refused("oracle: parameter arrays deeper than 3 are not supported");
   }
@@ -344,13 +361,14 @@ void read_elementwise_at_depth(Deserializer& d, const mir::Transform& tr,
 
 // A structured transform reads one leaf at a time, which is what Stan's
 // std::vector overloads do too.
-inline void read_structured(Deserializer& d, const mir::Transform& tr,
-                            const ParamGeom& g, double& lp, Value& out) {
-  using VecV = Eigen::VectorXd;
-  using MatV = Eigen::MatrixXd;
-  const auto place = [&](int64_t l, const double* leafval) {
+template <typename S>
+void read_structured(stan::io::deserializer<S>& d, const mir::Transform& tr,
+                     const ParamGeom& g, S& lp, Value& out) {
+  using VecV = Eigen::Matrix<S, -1, 1>;
+  using MatV = Eigen::Matrix<S, -1, -1>;
+  const auto place = [&](int64_t l, const S* leafval) {
     for (int64_t e = 0; e < g.leaf_len; ++e)
-      out.r[(size_t)flat_pos(g, l, e)] = leafval[e];
+      out.r[(size_t)flat_pos(g, l, e)] = stan::math::value_of(leafval[e]);
   };
   const int64_t K = g.leaf.empty() ? 1 : g.leaf[0];
   const int64_t C = g.leaf.size() > 1 ? g.leaf[1] : 1;
@@ -427,9 +445,10 @@ inline void read_structured(Deserializer& d, const mir::Transform& tr,
 
 // Read one parameter declaration: constrain it with the Jacobian into `lp`,
 // bind it in `in`, and record its value for write_array.
-inline void read_param(MirInterp<double>& in, const mir::Stmt& st,
-                       Deserializer& d, double& lp,
-                       std::map<std::string, Entry>* record) {
+template <typename S>
+void read_param(MirInterp<double>& in, const mir::Stmt& st,
+                stan::io::deserializer<S>& d, S& lp,
+                std::map<std::string, Entry>* record) {
   const mir::Transform& tr = *st.read_transform;
   const ParamGeom g = geometry(in, st.decl_type, tr);
   Value out;
@@ -444,13 +463,13 @@ inline void read_param(MirInterp<double>& in, const mir::Stmt& st,
                                ? st.decl_type.elem_base
                                : st.decl_type.base;
     if (b == "SVector")
-      read_elementwise_at_depth<Eigen::VectorXd>(d, tr, args, g, lp, out);
+      read_elementwise_at_depth<S, Eigen::VectorXd>(d, tr, args, g, lp, out);
     else if (b == "SRowVector")
-      read_elementwise_at_depth<Eigen::RowVectorXd>(d, tr, args, g, lp, out);
+      read_elementwise_at_depth<S, Eigen::RowVectorXd>(d, tr, args, g, lp, out);
     else if (b == "SMatrix")
-      read_elementwise_at_depth<Eigen::MatrixXd>(d, tr, args, g, lp, out);
+      read_elementwise_at_depth<S, Eigen::MatrixXd>(d, tr, args, g, lp, out);
     else
-      read_elementwise_at_depth<double>(d, tr, args, g, lp, out);
+      read_elementwise_at_depth<S, double>(d, tr, args, g, lp, out);
   }
   if (record) (*record)[st.decl_id] = out;
   in.set_declared_dims(st.decl_id, g.dims);
@@ -487,7 +506,9 @@ class DataBinder {
   // Bind each input with its declared dims where those can be computed
   // from the inputs before it.
   void bind(const std::map<std::string, const mir::FunDef*>& funs) {
-    MirInterp<double> shapes(funs, "data shapes");
+    MirHooks quiet;
+    quiet.stmt = [](const mir::Stmt& st) { return is_print(st); };
+    MirInterp<double> shapes(funs, "data shapes", quiet);
     for (const auto& [name, type] : p_.input_vars) {
       const std::string& key = mir::detail::data_key(p_, name);
       const mir::detail::TupleLeaf* leaf = mir::detail::tuple_leaf(p_, name);
@@ -513,6 +534,14 @@ class DataBinder {
 
   bool is_input(const std::string& name) const { return types_.count(name); }
 
+  // A size is computed again for these checks; its prints happened when
+  // the declaration ran.
+  static bool is_print(const mir::Stmt& st) {
+    return st.kind == mir::Stmt::NRFunApp &&
+           message_action(st.fn_name) == MessageAction::Print;
+  }
+  bool quiet = false;
+
   void check(const std::string& name, MirInterp<double>& in) {
     if (!checked_.insert(name).second) return;
     const std::string& key = mir::detail::data_key(p_, name);
@@ -520,7 +549,14 @@ class DataBinder {
     if (!data_.has(key)) return;
     const mir::SizedType& t = *types_.at(name);
     std::vector<int64_t> declared;
-    for (const auto& d : t.dims) declared.push_back(in.as_int(d));
+    quiet = true;
+    try {
+      for (const auto& d : t.dims) declared.push_back(in.as_int(d));
+    } catch (...) {
+      quiet = false;
+      throw;
+    }
+    quiet = false;
     for (int64_t d : declared)
       if (d < 0)
         throw CompileError("negative extent for data " + key +
@@ -643,11 +679,17 @@ inline std::unique_ptr<Model> prepare(const std::string& mir_text,
   auto prog = std::make_shared<mir::Program>(decode_program(mir_text));
   m->prog = prog;
   for (const auto& f : prog->fun_defs) m->funs[mir::function_key(f)] = &f;
+  for (const auto& [name, type] : prog->input_vars)
+    if (mir::is_complex(type))
+      throw Refused("oracle: complex data are not supported (" + name + ")");
   DataBinder binder(*prog, data);
   binder.bind(m->funs);
   WaRng td_rng(seed);
   MirHooks h;
   h.data = [&](const std::string& n) { return binder.entry(n); };
+  h.stmt = [&](const mir::Stmt& st) {
+    return binder.quiet && DataBinder::is_print(st);
+  };
   h.fun = [&](MirInterp<double>& in, const mir::Expr& e, Entry* out) {
     if (interpreted_rng_call(in, e, out, td_rng)) return true;
     return evaluate_retained_higher_order(
@@ -695,24 +737,28 @@ inline std::unique_ptr<Model> prepare(const std::string& mir_text,
 // log_prob_propto_jacobian, on doubles. propto drops the terms CmdStan's
 // var instantiation drops (set_model_types). `record` receives the
 // constrained parameters.
+// `magnitude`, when given, receives the sum of the absolute values of the
+// terms.
 inline double log_density(const Model& m, const std::vector<double>& theta,
-                          std::map<std::string, Entry>* record) {
-  std::vector<double> th(theta.size());
+                          double* magnitude = nullptr) {
+  stan::math::nested_rev_autodiff nested;
+  std::vector<var> th(theta.size());
   for (size_t k = 0; k < th.size(); ++k)
     th[k] = theta.at((size_t)m.free_order.at(k));
   std::vector<int> ints;
-  Deserializer d(th, ints);
+  stan::io::deserializer<var> d(th, ints);
+  var reads = 0.0;
   double jacobian = 0.0, target = 0.0;
   MirInterp<double>* current = nullptr;
   MirHooks h;
   h.stmt = [&](const mir::Stmt& st) {
     if (st.kind != mir::Stmt::Decl || !st.read_transform) return false;
-    read_param(*current, st, d, jacobian, record);
+    read_param(*current, st, d, reads, nullptr);
     return true;
   };
   h.fun = [&](MirInterp<double>& in, const mir::Expr& e, Entry* out) {
     if (mir::stateful_intrinsic_kind(e)) {
-      out->r = {jacobian + target};
+      out->r = {reads.val() + jacobian + target};
       return true;
     }
     return evaluate_retained_higher_order(
@@ -725,8 +771,36 @@ inline double log_density(const Model& m, const std::vector<double>& theta,
   in.set_parent_env(m.shared_env.get());
   in.set_target_sink(&target);
   in.set_jacobian_sink(&jacobian);
+  in.set_magnitude_sink(magnitude);
   in.run(m.prog->log_prob);
-  return jacobian + target;
+  if (magnitude) *magnitude += std::abs(reads.val());
+  return reads.val() + jacobian + target;
+}
+
+// The constrained parameters on doubles, as CmdStan's write_array reads
+// them. Bounds see data, transformed data and earlier parameters.
+inline std::map<std::string, Entry> constrained(
+    const Model& m, const std::vector<double>& theta) {
+  std::map<std::string, Entry> out;
+  std::vector<double> th(theta.size());
+  for (size_t k = 0; k < th.size(); ++k)
+    th[k] = theta.at((size_t)m.free_order.at(k));
+  std::vector<int> ints;
+  stan::io::deserializer<double> d(th, ints);
+  double lp = 0.0;
+  MirInterp<double> in(m.funs, "write_array parameters");
+  in.set_parent_env(m.shared_env.get());
+  std::function<void(const std::vector<mir::Stmt>&)> walk =
+      [&](const std::vector<mir::Stmt>& body) {
+        for (const auto& st : body) {
+          if (st.kind == mir::Stmt::Block || st.kind == mir::Stmt::SList)
+            walk(st.body);
+          else if (st.read_transform)
+            read_param(in, st, d, lp, &out);
+        }
+      };
+  walk(m.prog->log_prob);
+  return out;
 }
 
 struct PointResult {
@@ -735,18 +809,19 @@ struct PointResult {
   // The estimated absolute error of each gradient component; infinite
   // where an evaluation near the point failed.
   std::vector<double> grad_err;
-  std::map<std::string, Entry> constrained;
 };
 
 // The log density at `theta`, and its gradient by central differences with
 // steps h = cbrt(eps) max(1, |x|) and h/2, combined by Richardson
 // extrapolation. The two estimates' difference bounds the truncation
-// error; the rounding error of the differences is added to it.
+// error; the rounding error of the differences is added to it. A component
+// whose evaluations straddle a kink gets an infinite error.
 inline PointResult evaluate(
     const Model& m, const std::vector<double>& theta, bool gradient = true,
     std::chrono::steady_clock::time_point* lp_done = nullptr) {
   PointResult res;
-  res.lp = log_density(m, theta, &res.constrained);
+  double magnitude = 0.0;
+  res.lp = log_density(m, theta, &magnitude);
   if (lp_done) *lp_done = std::chrono::steady_clock::now();
   const size_t n = theta.size();
   res.grad.assign(n, std::numeric_limits<double>::quiet_NaN());
@@ -762,30 +837,43 @@ inline PointResult evaluate(
     x[i] = xi;
     std::optional<double> v;
     try {
-      const double f = log_density(m, x, nullptr);
+      const double f = log_density(m, x);
       if (std::isfinite(f)) v = f;
     } catch (const std::exception&) {
     }
     x[i] = theta[i];
     return v;
   };
+  const double f0 = res.lp;
+  // The rounding error of the sum grows with its terms, not its value.
+  const double noise = 8 * eps * std::max({1.0, std::abs(f0), magnitude});
   for (size_t i = 0; i < n; ++i) {
     const double h = std::cbrt(eps) * std::max(1.0, std::abs(theta[i]));
-    const auto central = [&](double step) -> std::optional<double> {
+    struct Central {
+      double slope;
+      // The forward slope less the backward one: h f'' where f is smooth.
+      double bend;
+    };
+    const auto central = [&](double step) -> std::optional<Central> {
       const double hi = theta[i] + step, lo = theta[i] - step;
       const std::optional<double> a = at(i, hi);
       if (!a) return std::nullopt;
       const std::optional<double> b = at(i, lo);
       if (!b) return std::nullopt;
-      return (*a - *b) / (hi - lo);
+      return Central{(*a - *b) / (hi - lo),
+                     (*a - f0) / (hi - theta[i]) - (f0 - *b) / (theta[i] - lo)};
     };
-    const std::optional<double> coarse = central(h);
+    const std::optional<Central> coarse = central(h);
     if (!coarse) continue;
-    const std::optional<double> fine = central(h / 2);
+    const std::optional<Central> fine = central(h / 2);
     if (!fine) continue;
-    res.grad[i] = *fine + (*fine - *coarse) / 3;
-    res.grad_err[i] = std::abs(*fine - *coarse) +
-                      4 * eps * std::max(1.0, std::abs(res.lp)) / h;
+    res.grad[i] = fine->slope + (fine->slope - coarse->slope) / 3;
+    // A kink between the steps leaves the bend as large at h / 2 as at h,
+    // and the difference quotients say nothing about the derivative there.
+    if (std::abs(fine->bend) > noise / (h / 2) &&
+        std::abs(fine->bend) > 0.75 * std::abs(coarse->bend))
+      continue;
+    res.grad_err[i] = std::abs(fine->slope - coarse->slope) + noise / (2 * h);
   }
   return res;
 }

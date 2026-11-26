@@ -27,6 +27,7 @@ import concurrent.futures
 import gzip
 import json
 import math
+import os
 import pathlib
 import re
 import subprocess
@@ -125,12 +126,13 @@ def cases(names, pdb, tmp):
 MAX_RSS_KB = 6 * 1024 * 1024
 
 
-def run(argv, timeout):
+def run(argv, timeout, env=None):
     """(code, stdout, stderr, wall); code None on timeout, "rss" when the
     process passed MAX_RSS_KB and was killed."""
     t = time.perf_counter()
     p = subprocess.Popen([str(a) for a in argv], stdout=subprocess.PIPE,
-                         stderr=subprocess.PIPE, text=True, errors="replace")
+                         stderr=subprocess.PIPE, text=True, errors="replace",
+                         env=env)
     killed = []
 
     def watch():
@@ -243,6 +245,9 @@ def message_verdict(cm, im, ce, ie):
 def grad_check(cg, ig, ierr):
     """(worst ratio of |difference| to the tolerance, unchecked count).
 
+    A component is unchecked where the interpreter could not estimate its
+    error (GRAD_ERR inf) and where only the compiled value is not finite:
+    a difference quotient cannot see that a derivative does not exist.
     Without error estimates (an older stanli_check) the tolerance is
     relative, as for lp."""
     worst, unchecked = 0.0, 0
@@ -253,6 +258,9 @@ def grad_check(cg, ig, ierr):
             unchecked += 1
             continue
         if math.isnan(a) and math.isnan(b) or a == b:
+            continue
+        if e is not None and not math.isfinite(a) and math.isfinite(b):
+            unchecked += 1
             continue
         if not (math.isfinite(a) and math.isfinite(b)):
             return math.inf, unchecked
@@ -392,11 +400,21 @@ def one(case, check, tmp, timeout, interp_o0=False):
     mir.write_text(e[1])
     base = [check, stan, data, "--points", POINTS, "--wa-values"]
 
-    def side(tag, mir_path, extra):
+    def side(tag, mir_path, extra, env=None):
         status = tmp / f"{safe}.{tag}.status.jsonl"
         status.unlink(missing_ok=True)
         return summarize(run(base + ["--mir", mir_path, "--status-json", status]
-                             + extra, timeout), status)
+                             + extra, timeout, env), status)
+
+    def interp(tag, mir_path):
+        # The gradient costs four evaluations per parameter; where that
+        # does not finish, compare the rest without it.
+        res = side(tag, mir_path, ["--interp"])
+        if res["state"] == "timeout":
+            res = side(tag, mir_path, ["--interp"],
+                       dict(os.environ, STANLI_INTERP_NO_GRAD="1"))
+            res["no_gradient"] = True
+        return res
     rec["compiled"] = side("compiled", mir, [])
     interp_mir = mir
     if interp_o0:
@@ -405,10 +423,10 @@ def one(case, check, tmp, timeout, interp_o0=False):
             mir0.write_text(e0[1])
             interp_mir = mir0
             rec["interp_mir"] = "none"
-    rec["interp"] = side("interp", interp_mir, ["--interp"])
+    rec["interp"] = interp("interp", interp_mir)
     rec["cmp"] = compare(rec["compiled"], rec["interp"])
     if interp_mir is mir0 and not agrees(rec["cmp"], loose=True):
-        rec["interp_shipping"] = side("interp_shipping", mir, ["--interp"])
+        rec["interp_shipping"] = interp("interp_shipping", mir)
         rec["cmp_shipping"] = compare(rec["compiled"], rec["interp_shipping"])
         rec["blame"] = ("stanc3_pass" if agrees(rec["cmp_shipping"], loose=True)
                         else "runtime")
@@ -427,9 +445,28 @@ def first_fail(side):
     return None
 
 
+# An adaptive solver's result on doubles differs from CmdStan's on vars
+# (which also solves for the sensitivities) by about its tolerance, and a
+# difference quotient of it changes with the solver's steps.
+SOLVERS = re.compile(r"\b(ode_\w+|integrate_ode\w*|integrate_1d|dae\w*|"
+                     r"algebra_solver\w*|solve_newton\w*|solve_powell\w*)"
+                     r"\s*\(")
+
+
+def uses_solver(rec):
+    try:
+        return bool(SOLVERS.search(pathlib.Path(rec["stan"]).read_text()))
+    except OSError:
+        return False
+
+
 def classify(rec):
     c, i, v = rec["compiled"], rec["interp"], rec["cmp"]
     if c["state"] == "compile_fail" and i["state"] == "compile_fail":
+        if v["messages"] != "identical" and c.get("error") in \
+                check_status.UNSUPPORTED and i.get("error") in \
+                check_status.UNSUPPORTED:
+            return "both_unsupported"
         return "both_compile_fail_" + v["messages"]
     if c["state"] != "points":
         return "compiled_refused" if i["state"] == "points" else "both_refused"
@@ -445,7 +482,7 @@ def classify(rec):
         return "one_side_threw"
     if not all(v[q] in ("agree_1e-10", "agree_1e-8", "n/a")
                for q in ("lp", "wa")) or v["grad"] == "disagree":
-        return "disagree"
+        return "solver_disagree" if uses_solver(rec) else "disagree"
     if v["messages"] not in ("identical", "n/a"):
         return "message_" + v["messages"]
     if v["output"] != "same":
@@ -490,7 +527,7 @@ def table(records):
                 cgroups[error_key(first_fail(r["compiled"]))].append(r["model"])
         for key, ms in sorted(cgroups.items(), key=lambda kv: -len(kv[1])):
             lines.append(f"  compiled fails x{len(ms)}: {key}  e.g. {', '.join(ms[:2])}")
-        dis = [r for r in rs if r["state"] == "disagree"
+        dis = [r for r in rs if r["state"] in ("disagree", "solver_disagree")
                or r["state"].startswith(("message_", "output_",
                                          "both_compile_fail_s",
                                          "both_compile_fail_d"))]
@@ -503,6 +540,10 @@ def table(records):
                   if r.get("cmp", {}).get("grad_unchecked")]
         none = [r["model"] for r in rs if r.get("cmp", {}).get("grad_components")
                 and r["cmp"]["grad_unchecked"] == r["cmp"]["grad_components"]]
+        nograd = [r["model"] for r in rs if r.get("interp", {}).get("no_gradient")]
+        if nograd:
+            lines.append(f"  interp gradient timed out, compared without it: "
+                         f"{len(nograd)}: {', '.join(nograd[:6])}")
         if partly:
             lines.append(f"  grad components unchecked (GRAD_ERR inf): "
                          f"{len(partly)} models, {len(none)} with none "
