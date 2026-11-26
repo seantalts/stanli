@@ -7,6 +7,10 @@
 // Accelerate uses threads of its own.
 //
 // Run with --child to print one gradient's hash.
+//
+// With --parallel-blas, the same model at N = 512 with the parallel_blas
+// option on, so that Accelerate may use its own threads, must give the
+// bits of the option off in every one of many gradients in one process.
 #include <stanli/capi.h>
 
 #include <algorithm>
@@ -48,9 +52,8 @@ model {
 }
 )";
 
-std::string data() {
-  const int n = 151;
-  std::string s = "{\"N\":151,\"D\":[";
+std::string data(int n = 151) {
+  std::string s = "{\"N\":" + std::to_string(n) + ",\"D\":[";
   char buf[40];
   for (int i = 0; i < n; ++i) {
     s += i ? ",[" : "[";
@@ -90,6 +93,52 @@ int child() {
   return 0;
 }
 
+stanli_model* model(int n, bool parallel_blas) {
+  stanli_model_opts opts;
+  stanli_model_opts_init(&opts);
+  opts.parallel_blas = parallel_blas ? 1 : 0;
+  char err[4096] = {};
+  stanli_model* m = stanli_model_new_from_stan_with_opts(
+      kModel, data(n).c_str(), &opts, err, sizeof err);
+  if (m == nullptr) std::printf("compile failed: %s\n", err);
+  return m;
+}
+
+std::string gradient(stanli_model* m) {
+  const double q[3] = {0.1, 0.2, 0.3};
+  double lp = 0, g[3] = {};
+  if (stanli_grad(m, q, &lp, g) != 0) return "gradient failed";
+  char buf[160];
+  std::snprintf(buf, sizeof buf, "%.17g %.17g %.17g %.17g", lp, g[0], g[1],
+                g[2]);
+  return buf;
+}
+
+int parallel_blas_repeats() {
+  const int n = 512, repeats = 400;
+  stanli_model* off = model(n, false);
+  stanli_model* on = model(n, true);
+  if (off == nullptr || on == nullptr) return 1;
+  const std::string want = gradient(off);
+  int differ = 0;
+  std::string first_bad;
+  for (int k = 0; k < repeats; ++k) {
+    const std::string got = gradient(on);
+    if (got != want) {
+      if (differ++ == 0) first_bad = got;
+    }
+  }
+  stanli_model_free(off);
+  stanli_model_free(on);
+  std::printf("parallel_blas off: %s\n", want.c_str());
+  std::printf("%d of %d gradients with parallel_blas on differ\n", differ,
+              repeats);
+  if (differ) std::printf("  first: %s\n", first_bad.c_str());
+  const bool ok = differ == 0 && want.find("failed") == std::string::npos;
+  std::printf(ok ? "ok\n" : "FAIL parallel_blas changes the gradient\n");
+  return ok ? 0 : 1;
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -98,6 +147,8 @@ int main(int argc, char** argv) {
     std::printf("SKIP: this build does not embed stanc\n");
     return 77;
   }
+  if (argc > 1 && std::strcmp(argv[1], "--parallel-blas") == 0)
+    return parallel_blas_repeats();
   std::vector<std::string> results;
   for (int round = 0; round < 6; ++round) {
     std::vector<std::string> batch(24);

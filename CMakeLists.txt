@@ -1592,6 +1592,11 @@ if(NOT WIN32)
   add_test(NAME test_blas_determinism COMMAND test_blas_determinism
            WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
   set_tests_properties(test_blas_determinism PROPERTIES SKIP_RETURN_CODE 77)
+  add_test(NAME test_blas_determinism_parallel_blas
+           COMMAND test_blas_determinism --parallel-blas
+           WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
+  set_tests_properties(test_blas_determinism_parallel_blas PROPERTIES
+                       SKIP_RETURN_CODE 77)
   add_executable(test_blas_chains tests/test_blas_chains.cpp)
   target_link_libraries(test_blas_chains PRIVATE stanli_shared Threads::Threads)
   foreach(_model gp product)
