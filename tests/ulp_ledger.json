@@ -559,6 +559,18 @@
       "reason": "measured on Darwin arm64; 80-digit reference at point 1: stanli 2, CmdStan 21 scaled ULP from the true value; stanli is at least as close to it; the merged loop's sums are pairwise or compensated in stanli, while CmdStan adds one call at a time"
      }
     },
+    "examplemodels_gp_fit_multi_output": {
+     "grad": {
+      "bound": 416707283,
+      "closer": "unknown",
+      "reason": "measured on Darwin arm64 with STANLI_ACCELERATE (dpotrf and the blocked BLAS adjoint for the 101 x 101 Cholesky factor of a covariance with condition number 5.6e10); the gradient stays within ILL_CONDITIONED_GATE. 80-digit reference at point 0, directional derivatives along 4 seeded unit vectors: stanli 2.22e-9, CmdStan 2.25e-9; no per-entry reference. A build with -DSTANLI_ACCELERATE=OFF is within 10 ULP; 311 grad values over 10"
+     },
+     "lp": {
+      "bound": 52088412,
+      "closer": "stanli",
+      "reason": "measured on Darwin arm64 with STANLI_ACCELERATE, where cholesky_decompose of the 101 x 101 covariance runs LAPACK's dpotrf and the blocked adjoint in BLAS; the covariance has condition number 5.6e10 (ILL_CONDITIONED). 80-digit reference at point 0 (tools/hp/hp_eval.py): stanli's lp is 2.85e-10 off, CmdStan's 7.25e-9. A build with -DSTANLI_ACCELERATE=OFF is within 10 ULP"
+     }
+    },
     "examplemodels_mr_ss": {
      "grad[1]": {
       "bound": 729,
