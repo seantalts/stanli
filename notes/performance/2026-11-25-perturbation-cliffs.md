@@ -168,17 +168,26 @@ whose program changes. A gate that only variants reach changes no corpus
 program, so it cannot pass that bar on its own. Whether to fix those is a
 separate decision. By reach:
 
-1. **Re-price the cost model.** One formula, and the threshold is
-   measurably in the wrong place. Its reach in the corpus is not yet
-   known: 19 bases decline on cost, and only those with a share of
-   distinct lanes between the break-even and 46% would change. The radon
-   models fuse with their own data, so their programs would not change
-   and they cannot count toward the corpus bar.
-2. **Find the fused form above the unroll ceiling without the full
-   unroll.** This is the only cliff here where more data makes stanli
-   slower than CmdStan on an unchanged corpus model. Counting the ceiling
-   after the passes is not a fix, because the ceiling exists to avoid that
-   unroll.
+1. **The cost model for repeated lanes: measured on 2026-11-26, and
+   left alone.** Forcing fusion on the 19 bases that decline on cost
+   slows four of them (ch12_m12_3 11x, ch12_m12_3_alt 2.5x,
+   multi_occupancy 1.4x to 1.7x, dogs_hierarchical 1.3x), speeds up two
+   (dogs 1.28x, multinma_ndmm_mspline 1.07x) and leaves the rest within
+   3%. No single price for a scalar op separates them: the shapes need
+   prices between 18 and 55. A count of distinct lanes per position does
+   not separate them either, because keeping ch12_m12_3 scalar needs a
+   price of at most 8.4 and fusing the radon shape at 20% distinct needs
+   at least 26.5. The repeats that matter sit across reroll groups, which
+   a count per group cannot see. So the declines in the corpus are mostly
+   right, and the gate still costs the 14 models that reach it through
+   repeated data values.
+2. **The fused form above the unroll ceiling: fixed on 2026-11-26 in
+   stanc3.** The fork's `vectorize_loops` now turns a loop whose statements
+   all read and write the same element `mu[n]` into vector statements, so
+   the row loop never reaches the unroll. radon at N=149,900 and at
+   N=10^6 gets the same 21 ops as a full unroll, and preparation at 10^6
+   takes 0.37 s and 334 MB where the full unroll took 5.9 s and 3.2 GB. A
+   loop that the pass does not take still meets the ceiling as before.
 3. **The three preparation causes.** Each is local and has a reproducer.
 4. **The row container.** The largest change, and the one that covers the
    most variants (11) and one corpus model as written.
