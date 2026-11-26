@@ -4493,7 +4493,8 @@ generated quantities {
     std::vector<double> want, got;
     const int want_status = call(want);
     int got_status = -1;
-    on_new_thread([&] { got_status = call(got); });
+    // C++17 lambdas cannot capture a structured binding by name.
+    on_new_thread([&, &call = call] { got_status = call(got); });
     expect_true(std::string(name) + " on a new thread matches the main thread",
                 want_status == 0 && got_status == 0 && same_bits(want, got));
   }
@@ -4554,7 +4555,8 @@ generated quantities {
     std::vector<double> want, got;
     const int want_status = call(want);
     int got_status = -1;
-    on_new_thread([&] { got_status = call(got); });
+    // C++17 lambdas cannot capture a structured binding by name.
+    on_new_thread([&, &call = call] { got_status = call(got); });
     expect_true(std::string(name) + " on a new thread matches the main thread",
                 want_status == 0 && got_status == 0 && same_bits(want, got));
   }
