@@ -174,7 +174,8 @@ Run run_mnc(uint16_t opcode, const Vec& y, const Vec& mu, const Mat& L,
             double* lp) {
   using namespace stanli;
   const int64_t n = y.size();
-  const int dims[] = {(int)n, 1};
+  // The vector layout: width, one y, one mu, no arrays.
+  const int dims[] = {(int)n, 1, 1, 0};
   Run r;
   r.adj0 = Mat::Constant(n, n, 0.25);
   std::vector<double> scratch((size_t)(n * n));
@@ -182,7 +183,7 @@ Run run_mnc(uint16_t opcode, const Vec& y, const Vec& mu, const Mat& L,
   KernelCtx ctx;
   ctx.n_in = 3;
   ctx.idata = dims;
-  ctx.n_idata = 2;
+  ctx.n_idata = 4;
   ctx.variant = 0x84;
   ctx.in[0] = {const_cast<double*>(y.data()), n};
   ctx.in[1] = {const_cast<double*>(mu.data()), n};
@@ -245,16 +246,16 @@ void thresholds_select_opcodes() {
       OP_CHOLESKY_BLAS, OP_CHOLESKY);
   expect_op(
       "multi_normal_cholesky below threshold",
-      opcode_after_pass(OP_MULTI_NORMAL_CHOL_LPDF, {m - 1, 1},
+      opcode_after_pass(OP_MULTI_NORMAL_CHOL_LPDF, {m - 1, 1, 1, 0},
                         {m - 1, m - 1, int64_t(m - 1) * (m - 1)}, 1, 0x84),
       OP_MULTI_NORMAL_CHOL_LPDF, OP_MULTI_NORMAL_CHOL_LPDF);
   expect_op("multi_normal_cholesky at threshold",
-            opcode_after_pass(OP_MULTI_NORMAL_CHOL_LPDF, {m, 1},
+            opcode_after_pass(OP_MULTI_NORMAL_CHOL_LPDF, {m, 1, 1, 0},
                               {m, m, int64_t(m) * m}, 1, 0x84),
             OP_MULTI_NORMAL_CHOL_LPDF_BLAS, OP_MULTI_NORMAL_CHOL_LPDF);
   // Every other activity keeps Stan Math's nested tape.
   expect_op("multi_normal_cholesky with active y",
-            opcode_after_pass(OP_MULTI_NORMAL_CHOL_LPDF, {m, 1},
+            opcode_after_pass(OP_MULTI_NORMAL_CHOL_LPDF, {m, 1, 1, 0},
                               {m, m, int64_t(m) * m}, 1, 0x85),
             OP_MULTI_NORMAL_CHOL_LPDF, OP_MULTI_NORMAL_CHOL_LPDF);
 }

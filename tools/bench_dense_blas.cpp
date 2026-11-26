@@ -194,10 +194,10 @@ int main(int argc, char** argv) {
     compare("cholesky", shape, c, OP_CHOLESKY, OP_CHOLESKY_BLAS, min_ms);
 
     Case d;
-    d.idata = {n, 1};
+    d.idata = {n, 1, 1, 0};
     d.ctx.n_in = 3;
     d.ctx.idata = d.idata.data();
-    d.ctx.n_idata = 2;
+    d.ctx.n_idata = 4;
     d.ctx.variant = 0x84;
     d.ctx.in[0] = {d.add(n, 0.5), n};
     d.ctx.in[1] = {d.add(n, 0.6), n};
