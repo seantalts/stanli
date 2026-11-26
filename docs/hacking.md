@@ -899,8 +899,9 @@ corpus replay there runs the fused kernels alone; its `build` keeps them.
 `STANLI_NO_FUSED_DENSITY=1` selects Stan Math's kernels in an ON build and
 prints a notice, then is ignored, in an OFF build.
 
-On macOS, `STANLI_ACCELERATE` (on by default there, unavailable elsewhere)
-links Apple's Accelerate framework. A pass at the end of lowering gives a
+On macOS, `STANLI_ACCELERATE` (on by default on Apple silicon, off by
+default on Intel Macs, unavailable on other systems) links Apple's
+Accelerate framework. A pass at the end of lowering gives a
 matrix product, a matrix-vector product with data, a Cholesky factor or a
 `multi_normal_cholesky` with data `y` and `mu` an accelerated opcode when the
 op is at least as large as that operation's threshold; the kernel then calls

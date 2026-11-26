@@ -230,12 +230,16 @@ endif()
 # lowering gives an op a separate opcode when its sizes are above that
 # operation's threshold (runtime/src/dense_blas.cpp); every other op runs the
 # same code as a build without the option. Eigen itself does not call BLAS.
+# On by default only for Apple silicon, where the thresholds were measured.
+# Intel Macs have Accelerate too and may turn it on; nothing there has been
+# timed.
 set(_stanli_accelerate_default OFF)
-if(APPLE AND NOT EMSCRIPTEN)
+if(APPLE AND NOT EMSCRIPTEN AND CMAKE_SYSTEM_PROCESSOR MATCHES "^(arm64|aarch64)$"
+   AND (NOT CMAKE_OSX_ARCHITECTURES OR CMAKE_OSX_ARCHITECTURES STREQUAL "arm64"))
   set(_stanli_accelerate_default ON)
 endif()
 option(STANLI_ACCELERATE
-  "Call Apple's Accelerate from the large dense kernels (macOS)"
+  "Call Apple's Accelerate from the large dense kernels (macOS; default on Apple silicon)"
   ${_stanli_accelerate_default})
 if(STANLI_ACCELERATE AND (NOT APPLE OR EMSCRIPTEN))
   message(FATAL_ERROR "STANLI_ACCELERATE needs a native macOS build")
