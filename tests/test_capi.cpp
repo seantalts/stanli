@@ -2878,6 +2878,37 @@ void test_build_id_names_the_abi() {
               id.rfind(want, 0) == 0);
 }
 
+// Inf with an exponent fails an assertion inside rapidjson. Each reader of
+// caller JSON must refuse it with a parse error, in every build.
+void test_inf_exponent_rejected() {
+  const std::string mir = slurp("tests/fixtures/conj.mir");
+  for (const char* bad :
+       {"{\"y\": Infe1}", "{\"y\": -Infe0}", "{\"a\": -Infe0.0]}"}) {
+    char err[8192]{};
+    stanli_model* model =
+        stanli_model_new_with_opts(mir.c_str(), bad, nullptr, err, sizeof err);
+    expect_true(std::string("model data ") + bad + " refused: " + err,
+                model == nullptr &&
+                    std::strstr(err, "Error in JSON parsing") != nullptr);
+    stanli_model_free(model);
+    err[0] = '\0';
+    char* payload =
+        stanli_bridgestan_data(bad, mir.c_str(), "conj", err, sizeof err);
+    expect_true(std::string("bridgestan payload ") + bad + " refused: " + err,
+                payload == nullptr &&
+                    std::strstr(err, "Error in JSON parsing") != nullptr);
+    stanli_string_free(payload);
+    char* bs_err = nullptr;
+    bs_model* bs = bs_model_construct(bad, 1, &bs_err);
+    expect_true(std::string("bs_model_construct ") + bad +
+                    " refused: " + (bs_err ? bs_err : "(no message)"),
+                bs == nullptr && bs_err != nullptr &&
+                    std::strstr(bs_err, "Error in JSON parsing") != nullptr);
+    bs_model_destruct(bs);
+    bs_free_error_msg(bs_err);
+  }
+}
+
 void test_bridgestan_data() {
   const std::string mir = slurp("tests/fixtures/conj.mir");
   const std::string conj = slurp("tests/fixtures/conj.json");
@@ -4647,6 +4678,7 @@ int main() {
   test_build_id_names_the_abi();
   test_variables_and_layouts();
   test_sample_setup_error();
+  test_inf_exponent_rejected();
   test_bridgestan_data();
   test_named_source_and_warnings();
   test_tuple_names();
