@@ -794,7 +794,8 @@ inline void div_partials(double u, double b, double out, double* da,
   X(OP_MATVEC_BLAS)                       \
   X(OP_CHOLESKY_BLAS)                     \
   X(OP_MULTI_NORMAL_CHOL_LPDF_BLAS)       \
-  X(OP_MULTI_NORMAL_LPDF_BLAS)
+  X(OP_MULTI_NORMAL_LPDF_BLAS)            \
+  X(OP_NORMAL_ID_GLM_LPDF_BLAS)
 
 // Every opcode list, in enum order, named once. The enum and the name
 // table both expand this, so a list added to one cannot be forgotten in

@@ -81,6 +81,8 @@ const Thresholds& thresholds() {
       /*cholesky_min_n=*/64,
       /*tri_inverse_min_n=*/64,
       /*mn_cov_min_n=*/32,
+      /*glm_min_rows=*/4096,
+      /*glm_min_cols=*/24,
   };
   return t;
 }

@@ -78,6 +78,8 @@ struct Thresholds {
   int64_t cholesky_min_n;     // factor and adjoint
   int64_t tri_inverse_min_n;  // multi_normal_cholesky's inverse of L
   int64_t mn_cov_min_n;       // multi_normal's covariance
+  // normal_id_glm's design matrix: at least these rows and columns.
+  int64_t glm_min_rows, glm_min_cols;
 };
 const Thresholds& thresholds();
 

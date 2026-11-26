@@ -165,6 +165,43 @@ int main(int argc, char** argv) {
     compare("matvec", shape, c, OP_MATVEC, OP_MATVEC_BLAS, min_ms);
   }
 
+  // normal_id_glm with data y and X, active alpha, beta and sigma (0x1c).
+  static const int kGlmShapes[][2] = {
+      {100, 4},   {236, 4},   {919, 2},    {1000, 10},  {1000, 24},
+      {1000, 32}, {2000, 24}, {4096, 16},  {4096, 24},  {5000, 10},
+      {5000, 24}, {10000, 5}, {10000, 10}, {10000, 24}, {20000, 24}};
+  for (const auto& sh : kGlmShapes) {
+    const int rows = sh[0], cols = sh[1];
+    Case c;
+    c.idata = {rows, cols, 0};
+    c.ctx.n_in = 5;
+    c.ctx.idata = c.idata.data();
+    c.ctx.n_idata = 3;
+    c.ctx.variant = 0x1c;
+    const int64_t lx = int64_t(rows) * cols;
+    c.ctx.in[0] = {c.add(rows, 0.1), rows};
+    c.ctx.in[1] = {c.add(lx, 0.2), lx};
+    double* alpha = c.add(1, 0.0);
+    alpha[0] = 0.1;
+    c.ctx.in[2] = {alpha, 1};
+    c.ctx.in[3] = {c.add(cols, 0.4), cols};
+    double* sigma = c.add(1, 0.0);
+    sigma[0] = 0.8;
+    c.ctx.in[4] = {sigma, 1};
+    c.ctx.in_adj[0] = {nullptr, rows};
+    c.ctx.in_adj[1] = {nullptr, lx};
+    c.ctx.in_adj[2] = {c.add(1, 0.5), 1};
+    c.ctx.in_adj[3] = {c.add(cols, 0.6), cols};
+    c.ctx.in_adj[4] = {c.add(1, 0.7), 1};
+    double out = 0;
+    c.ctx.out = {&out, 1};
+    c.ctx.out_adj = 1.0;
+    c.ctx.scratch = c.add(rows + lx + 2 + cols, 0.0);
+    std::snprintf(shape, sizeof shape, "%dx%d", rows, cols);
+    compare("normal_id_glm", shape, c, OP_NORMAL_ID_GLM_LPDF,
+            OP_NORMAL_ID_GLM_LPDF_BLAS, min_ms);
+  }
+
   for (int n : {4,  8,  12, 16, 24,  32,  36,  40,  44,  48,
                 56, 64, 80, 96, 128, 192, 256, 384, 512, 1024}) {
     const int64_t nn = int64_t(n) * n;
