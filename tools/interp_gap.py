@@ -44,7 +44,13 @@ import check_stanc3_good as good  # noqa: E402
 import check_status  # noqa: E402
 from differential import printed_lines  # noqa: E402
 
-POINTS = "0,1,2"
+POINTS = "0,1,2,3,4"
+# The gradient is compared at the two pseudorandom points only: the others
+# sit on round values (2 is all zeros) where Stan Math's special cases make
+# its derivative differ from the derivative of its value (pow at 0, an LKJ
+# eta of 1). A gradient mismatch counts when it shows at both.
+GRAD_POINTS = ("3", "4")
+GRAD_MAX = 200
 TOLS = (1e-10, 1e-8)
 ABS_TOL = 1e-12
 # A gradient component agrees when |compiled - interp| is within
@@ -243,14 +249,16 @@ def message_verdict(cm, im, ce, ie):
 
 
 def grad_check(cg, ig, ierr):
-    """(worst ratio of |difference| to the tolerance, unchecked count).
+    """(worst ratio of |difference| to the tolerance, unchecked count,
+    largest relative gap |difference| / max(1, |compiled|) among the
+    components outside the tolerance).
 
     A component is unchecked where the interpreter could not estimate its
     error (GRAD_ERR inf) and where only the compiled value is not finite:
     a difference quotient cannot see that a derivative does not exist.
     Without error estimates (an older stanli_check) the tolerance is
     relative, as for lp."""
-    worst, unchecked = 0.0, 0
+    worst, unchecked, gap = 0.0, 0, 0.0
     for k, (a, b) in enumerate(zip(cg, ig)):
         a, b = float(a), float(b)
         e = float(ierr[k]) if ierr is not None and k < len(ierr) else None
@@ -263,13 +271,15 @@ def grad_check(cg, ig, ierr):
             unchecked += 1
             continue
         if not (math.isfinite(a) and math.isfinite(b)):
-            return math.inf, unchecked
+            return math.inf, unchecked, math.inf
         if e is None:
             tol = max(ABS_TOL, TOLS[0] * max(abs(a), abs(b)))
         else:
             tol = GRAD_ERR_FACTOR * e + GRAD_REL_TOL * max(1.0, abs(a))
         worst = max(worst, abs(a - b) / tol)
-    return worst, unchecked
+        if abs(a - b) > tol:
+            gap = max(gap, abs(a - b) / max(1.0, abs(a)))
+    return worst, unchecked, gap
 
 
 def compare(c, i):
@@ -289,6 +299,7 @@ def compare(c, i):
     if c["state"] != "points" or i["state"] != "points":
         return v
     lp_w, g_w, wa_w = [], [], []
+    g_bad, g_gap = [], 0.0
     shape = []
     msgs = []
     both_threw = one_threw = unchecked = components = 0
@@ -299,11 +310,15 @@ def compare(c, i):
             if len(cp["grad"]) != len(ip["grad"]):
                 shape.append(f"grad width {len(cp['grad'])} vs {len(ip['grad'])}")
                 g_w.append(math.inf)
-            else:
-                w, u = grad_check(cp["grad"], ip["grad"], ip.get("grad_err"))
+                g_bad.append(k)
+            elif k in GRAD_POINTS and "grad_err" in ip:
+                w, u, gap = grad_check(cp["grad"], ip["grad"], ip["grad_err"])
                 g_w.append(w)
                 unchecked += u
                 components += len(cp["grad"])
+                if w > 1:
+                    g_bad.append(k)
+                    g_gap = max(g_gap, gap)
             cw, iw = cp.get("wa"), ip.get("wa")
             # No write_array line and an empty row both mean no columns.
             if cw is None and iw and iw.get("names") == []:
@@ -361,8 +376,12 @@ def compare(c, i):
         return "disagree"
     order = ("identical", "same_class", "differ")
     v = {"lp": verdict(lp_w), "wa": verdict(wa_w),
-         "grad": "n/a" if not g_w else ("agree" if max(g_w) <= 1 else
-                                        "disagree"),
+         "grad": "n/a" if not g_w else (
+             "agree" if not g_bad else
+             "disagree" if all(k in g_bad for k in GRAD_POINTS) or
+             any(k not in GRAD_POINTS for k in g_bad) else "one_point"),
+         "grad_points_bad": g_bad,
+         "grad_rel": g_gap,
          "messages": max(msgs, key=order.index) if msgs else "n/a",
          "output": output,
          "lp_worst": max(lp_w) if lp_w else None,
@@ -381,12 +400,12 @@ def agrees(v, loose=False):
         "agree_1e-10", "n/a")
     return (not v.get("points_one_threw") and v.get("lp", "n/a") in vals
             and v.get("wa", "n/a") in vals
-            and v.get("grad", "n/a") in ("agree", "n/a")
+            and v.get("grad", "n/a") in ("agree", "n/a", "one_point")
             and v.get("messages", "n/a") in ("identical", "n/a")
             and v.get("output", "same") == "same")
 
 
-def one(case, check, tmp, timeout, interp_o0=False):
+def one(case, check, tmp, timeout, interp_o0=False, grad_max=GRAD_MAX):
     group, name, stan, data = case
     safe = re.sub(r"[^A-Za-z0-9_.-]", "_", f"{group}_{name}")
     mir = tmp / f"{safe}.mir"
@@ -406,10 +425,16 @@ def one(case, check, tmp, timeout, interp_o0=False):
         return summarize(run(base + ["--mir", mir_path, "--status-json", status]
                              + extra, timeout, env), status)
 
+    # The gradient costs four evaluations per parameter: it is computed at
+    # the two gradient points only, not for a model with more than
+    # grad_max free parameters, and not for a solver model.
+    genv = dict(os.environ, STANLI_INTERP_GRAD_POINTS=",".join(GRAD_POINTS),
+                STANLI_INTERP_GRAD_MAX=str(grad_max))
+    if uses_solver(rec):
+        genv["STANLI_INTERP_NO_GRAD"] = "1"
+
     def interp(tag, mir_path):
-        # The gradient costs four evaluations per parameter; where that
-        # does not finish, compare the rest without it.
-        res = side(tag, mir_path, ["--interp"])
+        res = side(tag, mir_path, ["--interp"], genv)
         if res["state"] == "timeout":
             res = side(tag, mir_path, ["--interp"],
                        dict(os.environ, STANLI_INTERP_NO_GRAD="1"))
@@ -481,12 +506,14 @@ def classify(rec):
             return "compiled_threw"
         return "one_side_threw"
     if not all(v[q] in ("agree_1e-10", "agree_1e-8", "n/a")
-               for q in ("lp", "wa")) or v["grad"] == "disagree":
+               for q in ("lp", "wa")):
         return "solver_disagree" if uses_solver(rec) else "disagree"
     if v["messages"] not in ("identical", "n/a"):
         return "message_" + v["messages"]
     if v["output"] != "same":
         return "output_differs"
+    if v["grad"] == "disagree":
+        return "gradient_only"
     if v["lp"] == "n/a":
         return "both_threw_everywhere"
     if all(v[q] in ("agree_1e-10", "n/a") for q in ("lp", "wa")):
@@ -527,14 +554,16 @@ def table(records):
                 cgroups[error_key(first_fail(r["compiled"]))].append(r["model"])
         for key, ms in sorted(cgroups.items(), key=lambda kv: -len(kv[1])):
             lines.append(f"  compiled fails x{len(ms)}: {key}  e.g. {', '.join(ms[:2])}")
-        dis = [r for r in rs if r["state"] in ("disagree", "solver_disagree")
+        dis = [r for r in rs if r["state"] in ("disagree", "solver_disagree",
+                                               "gradient_only")
                or r["state"].startswith(("message_", "output_",
                                          "both_compile_fail_s",
                                          "both_compile_fail_d"))]
         for r in dis[:40]:
             v = r["cmp"]
             lines.append(f"  {r['state']} {r['model']}: lp={v.get('lp_worst')} "
-                         f"grad={v.get('grad_worst')} wa={v.get('wa_worst')} "
+                         f"grad_rel={v.get('grad_rel')} at {v.get('grad_points_bad')} "
+                         f"wa={v.get('wa_worst')} "
                          f"{v.get('notes', [])[:2]}")
         partly = [r["model"] for r in rs
                   if r.get("cmp", {}).get("grad_unchecked")]
@@ -578,6 +607,9 @@ def main():
     ap.add_argument("--jobs", type=int, default=24)
     ap.add_argument("--timeout", type=float, default=120.0)
     ap.add_argument("--filter", default="")
+    ap.add_argument("--grad-max", type=int, default=GRAD_MAX,
+                    help="skip the gradient for models with more free "
+                    "parameters")
     ap.add_argument("--interp-o0", action="store_true",
                     help="give the interpreter the --passes none MIR")
     ap.add_argument("--report", action="store_true",
@@ -606,7 +638,7 @@ def main():
         records = []
         with concurrent.futures.ThreadPoolExecutor(args.jobs) as pool:
             futs = [pool.submit(one, c, args.check, tmp, args.timeout,
-                                args.interp_o0) for c in cs]
+                                args.interp_o0, args.grad_max) for c in cs]
             for n, f in enumerate(concurrent.futures.as_completed(futs), 1):
                 records.append(f.result())
                 if n % 100 == 0:

@@ -413,8 +413,19 @@ int main(int argc, char** argv) {
     const auto body = [&]() -> int {
       std::optional<stan::math::ChainableStack> stack;
       if (stan::math::ChainableStack::instance_ == nullptr) stack.emplace();
+      // The difference quotients cost four evaluations per parameter.
+      // STANLI_INTERP_NO_GRAD=1 skips them, STANLI_INTERP_GRAD_MAX=N skips
+      // them for a model with more than N free parameters, and
+      // STANLI_INTERP_GRAD_POINTS=3,4 computes them at those points only.
       const char* no_grad = std::getenv("STANLI_INTERP_NO_GRAD");
-      const bool gradient = no_grad == nullptr || no_grad[0] == '0';
+      bool gradient = no_grad == nullptr || no_grad[0] == '0';
+      const char* grad_max = std::getenv("STANLI_INTERP_GRAD_MAX");
+      std::vector<int> grad_points;
+      if (const char* list = std::getenv("STANLI_INTERP_GRAD_POINTS");
+          list != nullptr && !parse_points(list, &grad_points)) {
+        std::fprintf(stderr, "stanli_check: bad STANLI_INTERP_GRAD_POINTS\n");
+        return 2;
+      }
       using Clock = std::chrono::steady_clock;
       const auto ms = [](Clock::time_point a, Clock::time_point b) {
         return std::chrono::duration<double, std::milli>(b - a).count();
@@ -440,6 +451,8 @@ int main(int argc, char** argv) {
       }
       std::fprintf(stderr, "INTERP_TIME prepare_ms %.3f\n",
                    ms(t0, Clock::now()));
+      if (grad_max != nullptr && m->n_free > std::atoll(grad_max))
+        gradient = false;
       status.write(
           {{"record", "compile"},
            {"ok", true},
@@ -456,8 +469,12 @@ int main(int argc, char** argv) {
           for (int64_t i = 0; i < m->n_free; ++i)
             theta[(size_t)i] = check_point(i, v);
           Clock::time_point lp_end;
-          stanli::oracle::PointResult r =
-              stanli::oracle::evaluate(*m, theta, gradient, &lp_end);
+          stanli::oracle::PointResult r = stanli::oracle::evaluate(
+              *m, theta,
+              gradient && (grad_points.empty() ||
+                           std::find(grad_points.begin(), grad_points.end(),
+                                     v) != grad_points.end()),
+              &lp_end);
           const auto t2 = Clock::now();
           if (!m->wa) {
             std::fprintf(stderr, "write_array: no section\n");
