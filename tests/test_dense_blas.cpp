@@ -27,6 +27,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <limits>
 #include <cstdio>
 #include <string>
 #include <vector>
@@ -211,6 +212,55 @@ Run run_mnc(uint16_t opcode, const Vec& y, const Vec& mu, const Mat& L,
   return r;
 }
 
+// multi_normal(y | mu, Sigma) for one vector, with the activity in
+// `variant`. Returns the log density and fills the three partials (the
+// backward with out_adj 1), or reports the exception's message.
+struct MnRun {
+  double lp = 0;
+  Vec dy, dmu;
+  Mat dsigma;
+  std::string error;
+  uint64_t calls = 0;
+};
+MnRun run_mn(uint16_t opcode, const Vec& y, const Vec& mu, const Mat& sigma,
+             uint8_t variant) {
+  using namespace stanli;
+  const int64_t n = y.size();
+  const int dims[] = {(int)n, 1, 1, 0};
+  MnRun r;
+  r.dy = Vec::Zero(n);
+  r.dmu = Vec::Zero(n);
+  r.dsigma = Mat::Zero(n, n);
+  std::vector<double> scratch((size_t)(2 * n + n * n));
+  double out = 0;
+  KernelCtx ctx;
+  ctx.n_in = 3;
+  ctx.idata = dims;
+  ctx.n_idata = 4;
+  ctx.variant = variant;
+  ctx.in[0] = {const_cast<double*>(y.data()), n};
+  ctx.in[1] = {const_cast<double*>(mu.data()), n};
+  ctx.in[2] = {const_cast<double*>(sigma.data()), n * n};
+  ctx.in_adj[0] = {(variant & 1) ? r.dy.data() : nullptr, n};
+  ctx.in_adj[1] = {(variant & 2) ? r.dmu.data() : nullptr, n};
+  ctx.in_adj[2] = {(variant & 4) ? r.dsigma.data() : nullptr, n * n};
+  ctx.out = {&out, 1};
+  ctx.out_adj = 1.0;
+  ctx.scratch = scratch.data();
+  const Kernel* k = find_kernel(opcode);
+  if (!registered(k, opcode)) return r;
+  const uint64_t before = blas::call_count();
+  try {
+    k->forward(ctx);
+    k->backward(ctx);
+  } catch (const std::exception& e) {
+    r.error = e.what();
+  }
+  r.calls = blas::call_count() - before;
+  r.lp = out;
+  return r;
+}
+
 void check_close(const std::string& what, const Mat& got, const Mat& want,
                  double tolerance) {
   const double e = scaled_error(got.data(), want.data(), got.size());
@@ -268,6 +318,30 @@ void thresholds_select_opcodes() {
             opcode_after_pass(OP_MULTI_NORMAL_CHOL_LPDF, {m, 1, 1, 0},
                               {m, m, int64_t(m) * m}, 1, 0x84),
             OP_MULTI_NORMAL_CHOL_LPDF_BLAS, OP_MULTI_NORMAL_CHOL_LPDF);
+  // multi_normal with a covariance: only one vector with an active
+  // covariance is accelerated.
+#ifdef STANLI_ACCELERATE
+  const int v = (int)t.mn_cov_min_n;
+#else
+  const int v = 64;
+#endif
+  expect_op(
+      "multi_normal below threshold",
+      opcode_after_pass(OP_MULTI_NORMAL_LPDF, {v - 1, 1, 1, 0},
+                        {v - 1, v - 1, int64_t(v - 1) * (v - 1)}, 1, 0x86),
+      OP_MULTI_NORMAL_LPDF, OP_MULTI_NORMAL_LPDF);
+  expect_op("multi_normal at threshold",
+            opcode_after_pass(OP_MULTI_NORMAL_LPDF, {v, 1, 1, 0},
+                              {v, v, int64_t(v) * v}, 1, 0x86),
+            OP_MULTI_NORMAL_LPDF_BLAS, OP_MULTI_NORMAL_LPDF);
+  expect_op("multi_normal with data covariance",
+            opcode_after_pass(OP_MULTI_NORMAL_LPDF, {v, 1, 1, 0},
+                              {v, v, int64_t(v) * v}, 1, 0x82),
+            OP_MULTI_NORMAL_LPDF, OP_MULTI_NORMAL_LPDF);
+  expect_op("multi_normal with an array of vectors",
+            opcode_after_pass(OP_MULTI_NORMAL_LPDF, {v, 3, 3, 3},
+                              {3 * v, 3 * v, int64_t(v) * v}, 1, 0x86),
+            OP_MULTI_NORMAL_LPDF, OP_MULTI_NORMAL_LPDF);
   // Every other activity keeps Stan Math's nested tape.
   expect_op("multi_normal_cholesky with active y",
             opcode_after_pass(OP_MULTI_NORMAL_CHOL_LPDF, {m, 1, 1, 0},
@@ -343,6 +417,80 @@ void accelerated_kernels_agree() {
             .c_str(),
         rel, analytic, numeric);
     expect_true("cholesky adjoint matches finite differences", rel <= 1e-6);
+  }
+  // multi_normal with an active covariance: the accelerated kernel against
+  // the plain one, for each activity that keeps the covariance active.
+  for (int64_t n : {t.mn_cov_min_n, int64_t(151)}) {
+    const Mat sigma = spd(n);
+    const Vec y = seed(n, 1, 0.2), mu = seed(n, 1, 1.7) * 0.1;
+    for (uint8_t variant : {uint8_t(0x84), uint8_t(0x86), uint8_t(0x87),
+                            uint8_t(0x04), uint8_t(0x06), uint8_t(0x07)}) {
+      const MnRun plain = run_mn(OP_MULTI_NORMAL_LPDF, y, mu, sigma, variant);
+      const MnRun fast =
+          run_mn(OP_MULTI_NORMAL_LPDF_BLAS, y, mu, sigma, variant);
+      const std::string at = " n=" + std::to_string(n) +
+                             " variant=" + std::to_string(int(variant));
+      expect_true("plain multi_normal succeeds" + at, plain.error.empty());
+      expect_true("accelerated multi_normal succeeds" + at, fast.error.empty());
+      expect_true("accelerated multi_normal calls LAPACK" + at, fast.calls > 0);
+      const double lp_rel =
+          std::abs(fast.lp - plain.lp) / std::max(1.0, std::abs(plain.lp));
+      std::printf("%-44s relative error %.2e\n",
+                  ("multi_normal lp" + at).c_str(), lp_rel);
+      expect_true("multi_normal lp" + at, lp_rel <= 1e-13);
+      check_close("multi_normal adjoint of Sigma" + at, fast.dsigma,
+                  plain.dsigma, 1e-12);
+      check_close("multi_normal adjoint of mu" + at, fast.dmu, plain.dmu,
+                  1e-12);
+      check_close("multi_normal adjoint of y" + at, fast.dy, plain.dy, 1e-12);
+    }
+  }
+  // Rejections: whenever the plain kernel throws, the accelerated one
+  // throws the same message, and a covariance that the Cholesky path cannot
+  // vouch for gets the plain kernel's result exactly.
+  {
+    const int64_t n = t.mn_cov_min_n;
+    const Vec y = seed(n, 1, 0.2), mu = seed(n, 1, 1.7) * 0.1;
+    Vec low = seed(n, 1, 0.9);
+    struct Bad {
+      const char* what;
+      Mat sigma;
+    };
+    std::vector<Bad> bad;
+    Mat asym = spd(n);
+    asym(0, n - 1) += 1e-3;
+    bad.push_back({"asymmetric", asym});
+    Mat indefinite = spd(n);
+    indefinite(n / 2, n / 2) = -1.0;
+    bad.push_back({"indefinite", indefinite});
+    Mat nan = spd(n);
+    nan(1, 1) = std::numeric_limits<double>::quiet_NaN();
+    bad.push_back({"nan", nan});
+    Mat inf = spd(n);
+    inf(2, 3) = inf(3, 2) = std::numeric_limits<double>::infinity();
+    bad.push_back({"infinite", inf});
+    bad.push_back({"singular", (low * low.transpose()).eval()});
+    Mat near = (low * low.transpose()).eval();
+    near.diagonal().array() += 1e-13;
+    bad.push_back({"nearly singular", near});
+    bad.push_back({"zero", Mat::Zero(n, n)});
+    for (const Bad& b : bad) {
+      const MnRun plain = run_mn(OP_MULTI_NORMAL_LPDF, y, mu, b.sigma, 0x86);
+      const MnRun fast =
+          run_mn(OP_MULTI_NORMAL_LPDF_BLAS, y, mu, b.sigma, 0x86);
+      const std::string what = std::string("multi_normal, ") + b.what;
+      std::printf("%-44s plain: %s\n", what.c_str(),
+                  plain.error.empty() ? "accepted" : plain.error.c_str());
+      expect_true(what + ": same error", fast.error == plain.error);
+      if (plain.error.empty()) {
+        expect_true(what + ": same lp bits", same_bits(fast.lp, plain.lp));
+        bool same = true;
+        for (int64_t i = 0; i < n * n; ++i)
+          same =
+              same && same_bits(fast.dsigma.data()[i], plain.dsigma.data()[i]);
+        expect_true(what + ": same adjoint bits", same);
+      }
+    }
   }
   for (int64_t n : {t.tri_inverse_min_n, int64_t(200)}) {
     const Mat L = spd(n).llt().matrixL();
