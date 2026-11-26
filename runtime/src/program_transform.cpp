@@ -75,6 +75,33 @@ void run_transform(const Program::Transform& tr, T* reg) {
                                             bound(2, i), lp);
       break;
     case CallableTransformKind::OffsetMultiplier:
+      // Stan Math checks a vector or matrix offset and multiplier whole
+      // before it transforms anything, so a message names the element.
+      if (tr.eigen != 0) {
+        const auto whole = [&](int k, const auto& check) {
+          const int n = tr.in_len[k];
+          if (n == 1) return check(stan::math::value_of(reg[tr.in[k]]));
+          if (n == 0) return;
+          std::vector<double> v(static_cast<size_t>(n));
+          for (int i = 0; i < n; ++i)
+            v[static_cast<size_t>(i)] = stan::math::value_of(reg[tr.in[k] + i]);
+          if (tr.eigen == 1)
+            check(Eigen::Map<const Eigen::VectorXd>(v.data(), n));
+          else if (tr.eigen == 2)
+            check(Eigen::Map<const Eigen::RowVectorXd>(v.data(), n));
+          else if (tr.rows > 0)
+            check(Eigen::Map<const Eigen::MatrixXd>(v.data(), tr.rows,
+                                                    n / tr.rows));
+        };
+        whole(1, [](const auto& mu) {
+          stan::math::check_finite("offset_multiplier_constrain", "offset",
+                                   mu);
+        });
+        whole(2, [](const auto& sigma) {
+          stan::math::check_positive_finite("offset_multiplier_constrain",
+                                            "multiplier", sigma);
+        });
+      }
       for (int i = 0; i < tr.out_len; ++i)
         reg[tr.out + i] =
             tr.direction == TransformDirection::Unconstrain
@@ -182,7 +209,13 @@ void run_transform(const Program::Transform& tr, T* reg) {
             x = stan::math::positive_ordered_constrain(y, lp);
           else if (tr.kind == CallableTransformKind::Simplex)
             x = stan::math::simplex_constrain(y, lp);
-          else if (tr.kind == CallableTransformKind::UnitVector)
+          else if (tr.kind == CallableTransformKind::UnitVector &&
+                   std::is_same_v<T, double> && tr.var_unit_vector) {
+            stan::math::check_nonzero_size("unit_vector", "y", y);
+            const auto SN = stan::math::dot_self(y);
+            lp -= 0.5 * SN;
+            x = y.array() / stan::math::sqrt(SN);
+          } else if (tr.kind == CallableTransformKind::UnitVector)
             x = stan::math::unit_vector_constrain(y, lp);
           else
             x = stan::math::sum_to_zero_constrain(y);

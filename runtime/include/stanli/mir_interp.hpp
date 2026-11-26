@@ -2841,6 +2841,8 @@ class MirInterp {
       tr.kind = transform.kind;
       tr.direction = transform.direction;
       tr.n_in = transform.structured ? 1 : (int8_t)transform.arity;
+      tr.var_unit_vector =
+          std::is_same_v<T, double> && model_types_ && autodiff(e.args[0]);
       Value o;
       o.dims = a[0].dims;
       size_t outer_rank = 0;
