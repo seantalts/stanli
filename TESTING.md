@@ -876,16 +876,20 @@ relative. A gradient component agrees within 10 times its error estimate
 plus 1e-6 relative.
 
 [`tests/interp_ledger.json`](tests/interp_ledger.json) lists every model
-that does not agree, with its state and a cause. Most entries are models
-that the compiled path refuses while it prepares them, and ODE models that
-differ by the solver's tolerance. A model whose state differs from its
-entry fails the test. This is true in both directions, so
-an entry for a model that now agrees must be removed. After an intended
-change, run `python3 tools/check_interp.py --update-ledger` and replace each
-`UNTRIAGED` cause with the reason.
+whose lp was not compared and agreed at one point or more, in groups that
+share a state and a cause. Most entries are lit cases and fixtures that are
+expected to fail, fixtures that have no data file, models that the compiled
+path refuses while it prepares them, and ODE models that differ by the
+solver's tolerance. A model whose state differs from its entry fails the
+test, in both directions: an entry for a model that now agrees must be
+removed, and a model that starts to fail the same way on both sides needs
+one. A model in a `skipped` group does not run. After an intended change,
+run `python3 tools/check_interp.py --update-ledger` and replace each
+`UNTRIAGED` cause with the reason. The test prints how many models it
+compared on lp, on the gradient and on write_array rows.
 
-The CTest entry is `test_interp_oracle`. It takes about 15 seconds with 4
-jobs. To run another corpus by hand, pass `--out DIR` and `--corpus` with
+The CTest entry is `test_interp_oracle`. It takes about 11 seconds with 4
+jobs. No state depends on the machine's speed: a model that times out fails. To run another corpus by hand, pass `--out DIR` and `--corpus` with
 `posteriordb`, `brms`, `stanc3_good`, `dir:PATH` or one of the others that
 `--help` lists.
 
