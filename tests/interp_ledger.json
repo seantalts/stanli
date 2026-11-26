@@ -249,6 +249,7 @@
   "models": [
    "fixtures/viewa_zero_product_mismatch",
    "fixtures/viewc_array_bind_mismatch",
+   "fixtures/viewc_array_matrix_single_index_transpose_mismatch",
    "fixtures/viewc_row_broadcast_graph",
    "fixtures/viewc_vec_broadcast_graph",
    "lit/assignment_size/model_local_vector",
@@ -340,13 +341,6 @@
   "state": "compiled_refused"
  },
  {
-  "cause": "compiled refuses an assignment between different logical views; the interpreter does not check the shape of a[1, :, :] = b and runs",
-  "models": [
-   "fixtures/viewc_array_matrix_prefix_mismatch"
-  ],
-  "state": "compiled_refused"
- },
- {
   "cause": "compiled refuses csr_extract_w of a parameter matrix",
   "models": [
    "lit/library_functions/csr_extract_w_parameter"
@@ -404,6 +398,7 @@
    "fixtures/viewc_append_col_mismatch",
    "fixtures/viewc_append_row_mismatch",
    "fixtures/viewc_append_row_row_matrix_bad",
+   "fixtures/viewc_array_matrix_prefix_mismatch",
    "fixtures/viewc_cholesky_zero_rect",
    "fixtures/viewc_column_assignment_mismatch",
    "fixtures/viewc_eigen_zero_rect",
@@ -424,13 +419,6 @@
   "cause": "compiled refuses at run time a local whose size depends on a branch on parameters",
   "models": [
    "lit/runtime_control/zero_size_local_untaken_branch"
-  ],
-  "state": "compiled_threw"
- },
- {
-  "cause": "the interpreter does not check the shape of a matrix assigned to an array element (a[1] = 3x2 into 2x3); CmdStan and the compiled path throw",
-  "models": [
-   "fixtures/viewc_array_matrix_single_index_transpose_mismatch"
   ],
   "state": "compiled_threw"
  },

@@ -560,6 +560,9 @@ class MirInterp {
             int64_t rest = 1;
             for (size_t d = prefix_len; d < en->dims.size(); ++d)
               rest *= en->dims[d];
+            check_prefix_assign_size(st.lhs, prefix_len,
+                                     st.lhs_idx.size() > prefix_len, en->dims,
+                                     v);
             if (static_cast<int64_t>(v.r.size()) != rest)
               fail("indexed assignment size mismatch", st.raw);
             for (int64_t k = 0; k < rest; ++k) {
@@ -1588,6 +1591,29 @@ class MirInterp {
       src = {count};
     const std::string message =
         assign_size_mismatch(name, shape.leaf, shape.array_levels, dst, src);
+    if (!message.empty()) throw std::invalid_argument(message);
+  }
+
+  // An assignment to the element that the first prefix_len indices of an
+  // array pick: x[i] = y, or x[i, :, :] = y with a `:` for every remaining
+  // dimension (omni).
+  void check_prefix_assign_size(const std::string& name, size_t prefix_len,
+                                bool omni, const std::vector<int64_t>& dst,
+                                const Value& v) {
+    const auto it = assign_shape_.find(name);
+    if (it == assign_shape_.end() || prefix_len > it->second.array_levels)
+      return;
+    const AssignShape& shape = it->second;
+    const size_t levels = shape.array_levels - prefix_len;
+    const std::vector<int64_t> rest(dst.begin() + prefix_len, dst.end());
+    std::vector<int64_t> src = v.dims;
+    if (src.empty() || (levels == 0 && (shape.leaf == AssignLeaf::Vector ||
+                                        shape.leaf == AssignLeaf::RowVector)))
+      src = {static_cast<int64_t>(std::max(v.r.size(), v.i.size()))};
+    const std::string message =
+        !omni ? assign_size_mismatch(name, shape.leaf, levels, rest, src)
+        : levels == 0 ? omni_assign_size_mismatch(name, shape.leaf, rest, src)
+                      : "";
     if (!message.empty()) throw std::invalid_argument(message);
   }
 
