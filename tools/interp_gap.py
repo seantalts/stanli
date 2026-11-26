@@ -388,7 +388,17 @@ def main():
     ap.add_argument("--jobs", type=int, default=24)
     ap.add_argument("--timeout", type=float, default=120.0)
     ap.add_argument("--filter", default="")
+    ap.add_argument("--report", action="store_true",
+                    help="only print the table of the JSON files in --out")
     args = ap.parse_args()
+    if args.report:
+        records = []
+        for f in sorted(args.out.glob("*.json")):
+            records += json.loads(f.read_text())
+        text = table(records)
+        (args.out / "table.txt").write_text(text + "\n")
+        print(text)
+        return
     corpora = args.corpus or ["fixtures", "lit", "stanc3_good", "posteriordb",
                               "brms", "rethinking", "cogmod", "other_local"]
     args.out.mkdir(parents=True, exist_ok=True)
