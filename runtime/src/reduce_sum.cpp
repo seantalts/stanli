@@ -1,4 +1,5 @@
 #include <stanli/reduce_sum.hpp>
+#include <stanli/dense_blas.hpp>
 #include <stanli/threading.hpp>
 #include <stanli/optable.hpp>
 #include <stan/math/rev/core/chainablestack.hpp>
@@ -75,6 +76,7 @@ struct ReduceExecutionContext::Impl {
   void worker() {
     // No Stan vars survive a job; each thread owns its nested-tape stack.
     std::unique_ptr<stan::math::ChainableStack> tape;
+    const SingleThreadedBlas blas_on_this_thread;
     try {
       tape = std::make_unique<stan::math::ChainableStack>();
     } catch (...) {
