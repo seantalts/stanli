@@ -254,9 +254,29 @@ void density_fwd_v(KernelCtx& ctx, FProp&& fp, FFull&& ff) {
 #define STANLI_NOINLINE __attribute__((noinline))
 #endif
 
+// One adjoint update for a scalar call. Not inlined, so that every caller
+// multiplies in the same operand order: on x86-64 and arm64 a NaN meeting a
+// NaN keeps the payload of the first operand (6d9af6ecf).
 STANLI_NOINLINE inline void accumulate_partial(double* adj, double out_adj,
                                                double partial) {
   *adj += out_adj * partial;
+}
+
+// accumulate_partial over the connected elements of a column. A result that
+// is not NaN does not depend on the operand order, so it is computed in
+// place; a NaN result is computed again by accumulate_partial itself, so
+// its payload is the one a scalar call gives.
+inline void accumulate_partials(double* adj, const double* out_adj,
+                                const double* partial, const double* connected,
+                                int64_t n) {
+  for (int64_t i = 0; i < n; ++i) {
+    if (connected[i] == 0.0) continue;
+    const double r = adj[i] + out_adj[i] * partial[i];
+    if (r == r)
+      adj[i] = r;
+    else
+      accumulate_partial(adj + i, out_adj[i], partial[i]);
+  }
 }
 
 // Partials for argument k live at scratch[sum of lens of args < k]. A scalar
@@ -283,10 +303,8 @@ void density_bwd(KernelCtx& ctx) {
         });
         ctx.in_adj[k].data[0] += acc;
       } else {
-        for (int64_t n = 0; n < N; ++n)
-          if (connected[n] != 0.0)
-            accumulate_partial(ctx.in_adj[k].data + n, ctx.out_adj_vec.data[n],
-                               col[n]);
+        accumulate_partials(ctx.in_adj[k].data, ctx.out_adj_vec.data, col,
+                            connected, N);
       }
     }
     return;
