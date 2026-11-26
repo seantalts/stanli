@@ -21,6 +21,7 @@
 #include <stanli/data.hpp>
 #include <stanli/dense_blas.hpp>
 #include <stanli/graph.hpp>
+#include <stanli/graph_print.hpp>
 #include <stanli/optable.hpp>
 
 #include <Eigen/Dense>
@@ -681,8 +682,7 @@ bool accelerated(uint16_t opcode) {
 // The accelerated opcodes in the log density and write_array graphs of the
 // dense test model, lowered with N x N factors, an N x N by N x P product
 // and an M x K by K matrix-vector product.
-std::vector<uint16_t> accelerated_ops(const std::string& mir, int n, int p,
-                                      int m, int k) {
+stanli::DataMap dense_model_data(int n, int p, int m, int k) {
   stanli::DataMap d;
   d.set_int("N", n);
   d.set_int("K", k);
@@ -698,7 +698,16 @@ std::vector<uint16_t> accelerated_ops(const std::string& mir, int n, int p,
   d.set_real_array("y", y);
   d.set_real_array("X", big, {n, n});
   d.set_real_array("Z", z, {m, k});
-  const stanli::CompiledModel cm = stanli::compile_model(mir, d);
+  return d;
+}
+
+// The accelerated opcodes in the log density and write_array graphs of the
+// dense test model, lowered with N x N factors, an N x N by N x P product
+// and an M x K by K matrix-vector product.
+std::vector<uint16_t> accelerated_ops(const std::string& mir, int n, int p,
+                                      int m, int k) {
+  const stanli::CompiledModel cm =
+      stanli::compile_model(mir, dense_model_data(n, p, m, k));
   std::vector<uint16_t> found;
   for (const stanli::Op& op : cm.graph.ops)
     if (accelerated(op.opcode)) found.push_back(op.opcode);
@@ -706,6 +715,26 @@ std::vector<uint16_t> accelerated_ops(const std::string& mir, int n, int p,
     for (const stanli::Op& op : cm.write_array->graph.ops)
       if (accelerated(op.opcode)) found.push_back(op.opcode);
   return found;
+}
+
+// parallel_blas is a property of the lowered program: both graphs carry the
+// compile option, and the program dump names it.
+void parallel_blas_flag(const std::string& mir) {
+  using namespace stanli;
+  for (bool on : {false, true}) {
+    CompileOptions options;
+    options.parallel_blas = on;
+    const CompiledModel cm =
+        compile_model(mir, dense_model_data(64, 32, 256, 64), 1, options);
+    const std::string what = on ? "parallel_blas on" : "parallel_blas off";
+    expect_true(what + ": log density graph", cm.graph.parallel_blas == on);
+    expect_true(what + ": write_array graph",
+                !cm.write_array || cm.write_array->graph.parallel_blas == on);
+    std::string dump;
+    print_graph(dump, cm.graph, GraphPrintInfo{});
+    expect_true(what + ": program dump",
+                (dump.find("parallel_blas") != std::string::npos) == on);
+  }
 }
 
 bool contains(const std::vector<uint16_t>& ops, uint16_t opcode) {
@@ -719,6 +748,7 @@ void lowered_programs(const char* mir_path) {
     return;
   }
   const std::string mir = slurp(mir_path);
+  parallel_blas_flag(mir);
   const bool on = std::string(blas_provider()) != "none";
   const std::vector<uint16_t> large = accelerated_ops(mir, 64, 32, 256, 64);
   const std::vector<uint16_t> small = accelerated_ops(mir, 16, 8, 64, 16);
@@ -751,12 +781,41 @@ void thread_policy() {
   using namespace stanli;
   expect_true("accelerated kernels with thread control",
               accelerated_kernels_enabled(true));
-  expect_true(
-      "accelerated kernels without thread control follow the policy",
-      accelerated_kernels_enabled(false) == kAccelerateWithoutThreadControl);
+  expect_true("no accelerated kernels without thread control",
+              !accelerated_kernels_enabled(false));
+  // Without BLASSetThreading (macOS 11 to 14) the pass selects nothing.
+  for (bool control : {true, false}) {
+    Graph g;
+    const int a = g.add_slot(64 * 64, false), b = g.add_slot(64 * 64, false);
+    const int o = g.add_slot(64 * 64, false);
+    g.add_op(OP_GEMM, {a, b}, o, {64, 64, 64});
+    accelerate_dense_ops(g, control);
+    const bool on = std::string(blas_provider()) != "none";
+    expect_true(std::string("gemm at 64 ") + (control ? "with" : "without") +
+                    " thread control: " + opcode_name(g.ops[0].opcode),
+                g.ops[0].opcode == (on && control ? OP_GEMM_BLAS : OP_GEMM));
+  }
+  // Accelerate's own threads: only for a program with parallel_blas, and
+  // only while the chains that run in parallel leave cores free.
+  struct Case {
+    bool flag;
+    int chains, cores;
+    bool threads;
+  };
+  const Case cases[] = {
+      {false, 1, 24, false}, {true, 1, 24, true}, {true, 12, 24, true},
+      {true, 13, 24, false}, {true, 1, 1, false}, {true, 2, 4, true},
+      {true, 3, 4, false},   {true, 4, 4, false}, {false, 2, 64, false},
+  };
+  for (const Case& c : cases)
+    expect_true("parallel_blas " + std::to_string(c.flag) + ", " +
+                    std::to_string(c.chains) + " chains on " +
+                    std::to_string(c.cores) + " cores",
+                blas_may_thread(c.flag, c.chains, c.cores) == c.threads);
+  expect_true("at least one performance core", performance_cores() >= 1);
 #if defined(STANLI_ACCELERATE) && defined(__APPLE__)
-  // A OneBlasThread runs the thread single-threaded and then gives it back
-  // the setting it had, read through the same entry points by name.
+  // A BlasCallThreads sets the thread's mode for one call and then gives it
+  // back the setting it had, read through the same entry points by name.
   using Get = unsigned (*)();
   using Set = int (*)(unsigned);
   const auto get =
@@ -770,18 +829,28 @@ void thread_policy() {
     set(0);  // BLAS_THREADING_MULTI_THREADED
     unsigned inside = 99;
     {
-      const OneBlasThread one;
+      const BlasCallThreads one;
       inside = get();
     }
-    expect_true("OneBlasThread runs single-threaded", inside == 1);
-    expect_true("OneBlasThread restores the multi-threaded setting",
-                get() == 0);
+    expect_true("a call outside a parallel_blas program is single-threaded",
+                inside == 1);
+    expect_true("the multi-threaded setting comes back", get() == 0);
     set(1);
     {
-      const OneBlasThread one;
+      const ParallelBlasScope program(true);
+      const BlasCallThreads call;
+      inside = get();
     }
-    expect_true("OneBlasThread leaves a single-threaded setting alone",
-                get() == 1);
+    expect_true("a parallel_blas call with cores free may thread", inside == 0);
+    expect_true("the single-threaded setting comes back", get() == 1);
+    {
+      const ParallelBlasScope program(true);
+      const ParallelChainsScope chains(1 << 20);
+      const BlasCallThreads call;
+      inside = get();
+    }
+    expect_true("a parallel_blas call with the cores full is single-threaded",
+                inside == 1);
     set(0);
   }
 #endif

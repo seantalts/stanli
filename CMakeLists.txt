@@ -1599,6 +1599,14 @@ if(NOT WIN32)
              WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
     set_tests_properties(test_blas_chains_${_model} PROPERTIES
                          SKIP_RETURN_CODE 77)
+    foreach(_cores free filled)
+      set(_name test_blas_chains_${_model}_parallel_${_cores})
+      add_test(NAME ${_name} COMMAND test_blas_chains ${_model} ${_cores}
+               WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
+      set_tests_properties(${_name} PROPERTIES SKIP_RETURN_CODE 77)
+      list(APPEND STANLI_DEBUG_SWITCH_TESTS ${_name})
+      list(APPEND STANLI_DEBUG_SWITCH_ONLY_TESTS ${_name})
+    endforeach()
   endforeach()
 endif()
 

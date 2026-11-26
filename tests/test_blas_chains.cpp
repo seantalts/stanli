@@ -8,7 +8,14 @@
 // time, no threads beyond the four chain workers, and each chain's draws the
 // same alone as next to three others.
 //
-// Arguments: gp|product [sizes].
+// With parallel_blas on, Accelerate may use its own threads while the chains
+// leave the performance cores free (STANLI_PERFORMANCE_CORES, a developer
+// switch, sets their number here), and keeps each call on one thread when
+// the chains fill them.
+//
+// Arguments: gp|product default|free|filled.
+#include "env_helpers.hpp"
+
 #include <stanli/capi.h>
 
 #include <chrono>
@@ -203,10 +210,19 @@ bool thread_limit_available() {
   return false;
 }
 
-void check_model(const char* name, const char* code, const std::string& data) {
+// default: parallel_blas off. free: parallel_blas on and 64 performance
+// cores. filled: parallel_blas on and 4 performance cores, which four chains
+// fill.
+enum class Mode { Default, Free, Filled };
+
+void check_model(const char* name, const char* code, const std::string& data,
+                 Mode mode) {
   char err[8192]{};
+  stanli_model_opts opts;
+  stanli_model_opts_init(&opts);
+  opts.parallel_blas = mode == Mode::Default ? 0 : 1;
   stanli_model* m = stanli_model_new_from_stan_with_opts(
-      code, data.c_str(), nullptr, err, sizeof err);
+      code, data.c_str(), &opts, err, sizeof err);
   if (m == nullptr) {
     expect(std::string(name) + " compiles: " + err, false);
     return;
@@ -223,7 +239,7 @@ void check_model(const char* name, const char* code, const std::string& data) {
       "%s: %d chains, wall %.3f s, cpu %.3f s, %.2f cores, "
       "threads %d before, at most %d during\n",
       name, C, par.wall, par.cpu, cores, before, par.max_threads);
-  if (thread_limit_available()) {
+  if (thread_limit_available() && mode != Mode::Free) {
     expect(std::string(name) + " uses at most about 4 cores (" +
                std::to_string(cores) + ")",
            cores <= 4.4);
@@ -231,6 +247,19 @@ void check_model(const char* name, const char* code, const std::string& data) {
                std::to_string(par.max_threads) + " > " +
                std::to_string(before + 1 + C) + ")",
            par.max_threads <= before + 1 + C);
+  }
+#ifdef STANLI_ACCELERATE
+  if (thread_limit_available() && mode == Mode::Free)
+    expect(std::string(name) + " lets Accelerate start threads (" +
+               std::to_string(par.max_threads) +
+               " <= " + std::to_string(before + 1 + C) + ")",
+           par.max_threads > before + 1 + C);
+#endif
+  // With parallel_blas on, a chain alone has the cores free and may get
+  // Accelerate's threads, whose results can differ in the last digits.
+  if (mode != Mode::Default) {
+    stanli_model_free(m);
+    return;
   }
 
   const size_t per_chain = par.draws.size() / C;
@@ -264,19 +293,34 @@ int main(int argc, char** argv) {
   // Adaptation notices and early rejections are expected with short runs.
   stanli_capture_messages(1);
   const std::string which = argc > 1 ? argv[1] : "gp";
-  std::printf("%s\n", thread_limit_available() ? "BLASSetThreading available"
-                                               : "no BLASSetThreading");
+  const std::string mode_name = argc > 2 ? argv[2] : "default";
+  Mode mode = Mode::Default;
+  if (mode_name == "free")
+    mode = Mode::Free;
+  else if (mode_name == "filled")
+    mode = Mode::Filled;
+  else if (mode_name != "default") {
+    std::printf("usage: test_blas_chains gp|product default|free|filled\n");
+    return 2;
+  }
+  if (mode != Mode::Default) {
+    if (!debug_switches_available()) {
+      std::printf("SKIP: STANLI_PERFORMANCE_CORES needs developer switches\n");
+      return 77;
+    }
+    test_setenv("STANLI_PERFORMANCE_CORES", mode == Mode::Free ? "64" : "4");
+  }
+  std::printf("%s, %s\n", mode_name.c_str(),
+              thread_limit_available() ? "BLASSetThreading available"
+                                       : "no BLASSetThreading");
   if (which == "gp") {
-    const int n = argc > 2 ? std::atoi(argv[2]) : 300;
-    std::printf("gp N=%d\n", n);
-    check_model("gp", kGp, gp_data(n));
+    std::printf("gp N=300\n");
+    check_model("gp", kGp, gp_data(300), mode);
   } else if (which == "product") {
-    const int n = argc > 2 ? std::atoi(argv[2]) : 512;
-    const int k = argc > 3 ? std::atoi(argv[3]) : 128;
-    std::printf("product %dx%d times %dx%d\n", n, k, k, n);
-    check_model("product", kProduct, product_data(n, k));
+    std::printf("product 512x128 times 128x512\n");
+    check_model("product", kProduct, product_data(512, 128), mode);
   } else {
-    std::printf("usage: test_blas_chains gp|product [sizes]\n");
+    std::printf("usage: test_blas_chains gp|product default|free|filled\n");
     return 2;
   }
   if (failures == 0) std::printf("ok\n");
