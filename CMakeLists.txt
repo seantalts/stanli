@@ -224,6 +224,23 @@ if(STANLI_THREADS AND NOT EMSCRIPTEN)
   endif()
 endif()
 
+# Apple's Accelerate framework for stanli's large dense kernels: matrix
+# products, matrix-vector products, the Cholesky factor and its adjoint, and
+# the triangular inverse in multi_normal_cholesky. A pass at the end of
+# lowering gives an op a separate opcode when its sizes are above that
+# operation's threshold (runtime/src/dense_blas.cpp); every other op runs the
+# same code as a build without the option. Eigen itself does not call BLAS.
+set(_stanli_accelerate_default OFF)
+if(APPLE AND NOT EMSCRIPTEN)
+  set(_stanli_accelerate_default ON)
+endif()
+option(STANLI_ACCELERATE
+  "Call Apple's Accelerate from the large dense kernels (macOS)"
+  ${_stanli_accelerate_default})
+if(STANLI_ACCELERATE AND (NOT APPLE OR EMSCRIPTEN))
+  message(FATAL_ERROR "STANLI_ACCELERATE needs a native macOS build")
+endif()
+
 if(EMSCRIPTEN)
   target_compile_options(stanmath INTERFACE -fwasm-exceptions)
   # SIMD128. Measured with tools/bench_wasm.cjs on this machine: geomean
@@ -412,6 +429,7 @@ set(STANLI_RUNTIME_SOURCES
   runtime/src/sparse_factor.cpp
   runtime/src/laplace.cpp
   runtime/src/reduce_sum.cpp
+  runtime/src/blas_threads.cpp
   runtime/src/init_interp.cpp
   runtime/src/unconstrain.cpp
   runtime/src/wa_interp.cpp
@@ -1410,6 +1428,24 @@ if(STANLI_EMBED_OBJECT OR STANLI_PORTABLE_COMPILER)
                    -DEMBEDDED=$<BOOL:${STANLI_EMBED_OBJECT}>
                    -DSTANC=${STANLI_STANC_EXECUTABLE}
                    -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/check_compiler_deployment.cmake)
+endif()
+
+# The BLAS provider the build was configured for, checked against what the
+# runtime reports and what the shipped library imports.
+if(STANLI_ACCELERATE)
+  set(STANLI_EXPECTED_BLAS accelerate)
+else()
+  set(STANLI_EXPECTED_BLAS none)
+endif()
+stanli_add_test(test_blas_backend)
+target_compile_definitions(test_blas_backend PRIVATE
+  STANLI_EXPECTED_BLAS="${STANLI_EXPECTED_BLAS}")
+if(NOT EMSCRIPTEN AND NOT WIN32)
+  add_test(NAME test_blas_link
+           COMMAND ${CMAKE_COMMAND}
+                   -DLIBRARY=$<TARGET_FILE:stanli_shared>
+                   -DEXPECTED=${STANLI_EXPECTED_BLAS}
+                   -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/check_blas_link.cmake)
 endif()
 
 set(STANLI_TESTS
