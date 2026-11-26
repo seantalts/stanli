@@ -2050,6 +2050,23 @@ class MirInterp {
     return result;
   }
 
+  // unit_vector_constrain as Stan Math's var overload computes it, which
+  // unlike the double one does not check the norm, for a double evaluation
+  // that stands in for CmdStan's var one (set_model_types).
+  static void unchecked_unit_vector(const Program::Transform& tr, T* reg) {
+    using Vec = Eigen::Matrix<T, Eigen::Dynamic, 1>;
+    T lp = 0.0;
+    for (int b = 0; b < tr.batch; ++b) {
+      Eigen::Map<const Vec> y(reg + tr.in[0] + b * tr.inner_raw, tr.inner_raw);
+      stan::math::check_nonzero_size("unit_vector", "y", y);
+      const T SN = stan::math::dot_self(y);
+      lp -= 0.5 * SN;
+      for (int i = 0; i < tr.out_rows; ++i)
+        reg[tr.out + b * tr.out_rows + i] = y(i) / stan::math::sqrt(SN);
+    }
+    reg[tr.jac] = lp;
+  }
+
   // An empty scope for one user-function body: function bodies see their
   // arguments and nothing else.
   MirInterp function_scope(bool propto) {
@@ -2848,8 +2865,6 @@ class MirInterp {
       tr.kind = transform.kind;
       tr.direction = transform.direction;
       tr.n_in = transform.structured ? 1 : (int8_t)transform.arity;
-      tr.var_unit_vector =
-          std::is_same_v<T, double> && model_types_ && autodiff(e.args[0]);
       Value o;
       o.dims = a[0].dims;
       size_t outer_rank = 0;
@@ -2940,7 +2955,12 @@ class MirInterp {
       reg.resize(reg.size() + (size_t)tr.out_len);
       tr.jac = (int32_t)reg.size();
       reg.emplace_back(T(0));
-      run_program_transform(tr, reg.data());
+      if (std::is_same_v<T, double> && model_types_ &&
+          transform.kind == CallableTransformKind::UnitVector &&
+          autodiff(e.args[0]))
+        unchecked_unit_vector(tr, reg.data());
+      else
+        run_program_transform(tr, reg.data());
       if (transform.direction == TransformDirection::Jacobian &&
           jacobian_sink_ != nullptr)
         *jacobian_sink_ += reg[(size_t)tr.jac];
@@ -3063,8 +3083,11 @@ class MirInterp {
       Value a = eval(e.args[0]);
       if constexpr (std::is_same_v<T, double>) {
         stan::math::check_nonzero_size("mean", "m", a.r);
-        const auto grouping = eigen_sum_grouping(e.args[0]).value_or(
-            std::pair<SumGrouping, int64_t>{SumGrouping::Packet, 0});
+        const auto grouping =
+            autodiff(e.args[0])
+                ? std::pair<SumGrouping, int64_t>{SumGrouping::InOrder, 0}
+                : eigen_sum_grouping(e.args[0]).value_or(
+                      std::pair<SumGrouping, int64_t>{SumGrouping::Packet, 0});
         r.r = {sum_grouped(a.r.data(), (int64_t)a.r.size(), grouping.first,
                            grouping.second) /
                static_cast<double>(a.r.size())};

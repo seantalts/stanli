@@ -208,13 +208,7 @@ void run_transform(const Program::Transform& tr, T* reg) {
             x = stan::math::positive_ordered_constrain(y, lp);
           else if (tr.kind == CallableTransformKind::Simplex)
             x = stan::math::simplex_constrain(y, lp);
-          else if (tr.kind == CallableTransformKind::UnitVector &&
-                   std::is_same_v<T, double> && tr.var_unit_vector) {
-            stan::math::check_nonzero_size("unit_vector", "y", y);
-            const auto SN = stan::math::dot_self(y);
-            lp -= 0.5 * SN;
-            x = y.array() / stan::math::sqrt(SN);
-          } else if (tr.kind == CallableTransformKind::UnitVector)
+          else if (tr.kind == CallableTransformKind::UnitVector)
             x = stan::math::unit_vector_constrain(y, lp);
           else
             x = stan::math::sum_to_zero_constrain(y);

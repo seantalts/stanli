@@ -294,10 +294,6 @@ struct Program {
     // name a bad element as Stan Math does.
     uint8_t eigen = 0;
     int32_t rows = 0;
-    // A double evaluation standing in for a var one: unit_vector skips the
-    // norm check that stan-math's double overload makes and its var
-    // overload does not.
-    bool var_unit_vector = false;
   };
 
   std::vector<Instr> code;
