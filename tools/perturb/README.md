@@ -157,7 +157,7 @@ coarse ladder locates a jump with far fewer points than the full one. On
 ten corpus models (30 ladders) the coarse ladder took 135 s against 341 s.
 It found the same cap crossings and three of the four thresholds. It missed
 one threshold (radon between 431 and 432 rows, a jump that the op count
-recovers from before 10^4), and five findings on four ladders, four of them
+recovers from before 10^4), and six findings on five ladders, three of them
 about preparation time. Use the coarse ladder to screen and the full one
 for a model that you are writing up. `--ladder full` measures 0, 1, 2, 3, 7, 8, 9, 31, 32, 33, 63,
 64, 65, 100, 1000, 10^4 and 10^5, which also shows changes at 8, 32 and 64
