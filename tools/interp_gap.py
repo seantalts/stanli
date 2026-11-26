@@ -546,6 +546,10 @@ def main():
         records = []
         for f in sorted(args.out.glob("*.json")):
             records += json.loads(f.read_text())
+        for r in records:
+            if "compiled" in r and "interp" in r:
+                r["cmp"] = compare(r["compiled"], r["interp"])
+                r["state"] = classify(r)
         text = table(records)
         (args.out / "table.txt").write_text(text + "\n")
         print(text)
