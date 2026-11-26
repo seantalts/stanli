@@ -259,6 +259,10 @@ option(STANLI_ACCELERATE
 if(STANLI_ACCELERATE AND (NOT APPLE OR EMSCRIPTEN))
   message(FATAL_ERROR "STANLI_ACCELERATE needs a native macOS build")
 endif()
+if(STANLI_ACCELERATE)
+  target_compile_definitions(stanmath INTERFACE STANLI_ACCELERATE=1)
+  target_link_libraries(stanmath INTERFACE "-framework Accelerate")
+endif()
 
 if(EMSCRIPTEN)
   target_compile_options(stanmath INTERFACE -fwasm-exceptions)
@@ -449,6 +453,7 @@ set(STANLI_RUNTIME_SOURCES
   runtime/src/laplace.cpp
   runtime/src/reduce_sum.cpp
   runtime/src/blas_threads.cpp
+  runtime/src/dense_blas.cpp
   runtime/src/init_interp.cpp
   runtime/src/unconstrain.cpp
   runtime/src/wa_interp.cpp

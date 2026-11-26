@@ -34,6 +34,51 @@ class SingleThreadedBlas {
   bool active_ = false;
 };
 
+#ifdef STANLI_ACCELERATE
+namespace blas {
+
+// The smallest sizes at which each accelerated kernel is used. See
+// runtime/src/dense_blas.cpp for the measurements behind them.
+struct Thresholds {
+  int64_t gemm_min_dim;     // smallest of rows, inner and columns
+  int64_t gemv_min_rows;    // matrix-vector product: rows and columns
+  int64_t gemv_min_cols;
+  int64_t cholesky_min_n;   // factor and adjoint
+  int64_t tri_inverse_min_n;  // multi_normal_cholesky's inverse of L
+};
+const Thresholds& thresholds();
+
+// Number of calls into BLAS or LAPACK since the process started, for tests.
+uint64_t call_count();
+
+// C = alpha * op(A) * op(B) + beta * C
+void gemm(bool trans_a, bool trans_b, int64_t m, int64_t n, int64_t k,
+          double alpha, const double* a, int64_t lda, const double* b,
+          int64_t ldb, double beta, double* c, int64_t ldc);
+// y = alpha * op(A) * x + beta * y
+void gemv(bool trans, int64_t m, int64_t n, double alpha, const double* a,
+          int64_t lda, const double* x, double beta, double* y);
+// Lower Cholesky factor in place; returns LAPACK's info.
+int potrf_lower(int64_t n, double* a, int64_t lda);
+// Inverse of a lower triangular matrix in place; returns LAPACK's info.
+int trtri_lower(int64_t n, double* a, int64_t lda);
+// B = alpha * op(L)^-1 * B (left) or alpha * B * op(L)^-1 (right), L lower.
+void trsm_lower(bool left, bool trans, int64_t m, int64_t n, double alpha,
+                const double* l, int64_t ldl, double* b, int64_t ldb);
+// B = alpha * op(L) * B, L lower, from the left.
+void trmm_lower_left(bool trans, int64_t m, int64_t n, double alpha,
+                     const double* l, int64_t ldl, double* b, int64_t ldb);
+// x = op(L) * x, L lower.
+void trmv_lower(bool trans, int64_t n, const double* l, int64_t ldl,
+                double* x);
+// C = alpha * S * B + beta * C, S symmetric with its lower triangle given.
+void symm_lower_left(int64_t m, int64_t n, double alpha, const double* s,
+                     int64_t lds, const double* b, int64_t ldb, double beta,
+                     double* c, int64_t ldc);
+
+}  // namespace blas
+#endif
+
 }  // namespace stanli
 
 #endif
