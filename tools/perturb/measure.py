@@ -218,7 +218,9 @@ def interp_differs(tools, comp, data):
     compiled, _ = check(tools, comp, data, extra=["--wa-values"])
     interp, _ = check(tools, comp, data, extra=["--wa-values", "--interp"],
                       env=clean_env({"STANLI_INTERP_NO_GRAD": "1"}))
-    return check_compare.lp_and_rows_differ(compiled, interp)
+    differs = check_compare.lp_and_rows_differ(compiled, interp)
+    return differs and differs.replace('"a":', '"compiled":').replace(
+        '"b":', '"interp":')
 
 
 def finite_values(outcome, points=check_compare.POINTS):
