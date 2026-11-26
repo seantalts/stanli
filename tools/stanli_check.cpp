@@ -41,6 +41,7 @@
 
 #include <stanli/compile.hpp>
 #include <stanli/graph.hpp>
+#include <stanli/large_stack.hpp>
 #include <stanli/region_map.hpp>
 #include <stanli/wa_interp.hpp>
 #include <stanli/builtin_registry.hpp>
@@ -412,6 +413,8 @@ int main(int argc, char** argv) {
     const auto body = [&]() -> int {
       std::optional<stan::math::ChainableStack> stack;
       if (stan::math::ChainableStack::instance_ == nullptr) stack.emplace();
+      const char* no_grad = std::getenv("STANLI_INTERP_NO_GRAD");
+      const bool gradient = no_grad == nullptr || no_grad[0] == '0';
       using Clock = std::chrono::steady_clock;
       const auto ms = [](Clock::time_point a, Clock::time_point b) {
         return std::chrono::duration<double, std::milli>(b - a).count();
@@ -451,22 +454,16 @@ int main(int argc, char** argv) {
           std::vector<double> theta((size_t)m->n_free);
           for (int64_t i = 0; i < m->n_free; ++i)
             theta[(size_t)i] = check_point(i, v);
-          stanli::oracle::PointResult r;
-          try {
-            r = stanli::oracle::log_density(*m, theta);
-          } catch (...) {
-            stan::math::recover_memory();
-            throw;
-          }
-          stan::math::recover_memory();
+          Clock::time_point lp_end;
+          stanli::oracle::PointResult r =
+              stanli::oracle::evaluate(*m, theta, gradient, &lp_end);
           const auto t2 = Clock::now();
           if (!m->wa) {
             std::fprintf(stderr, "write_array: no section\n");
           } else {
             try {
               stanli::WaRng rng(1234);
-              const std::vector<double> row = m->wa->eval(
-                  stanli::oracle::constrained(*m, theta), rng);
+              const std::vector<double> row = m->wa->eval(r.constrained, rng);
               int64_t bad = 0;
               for (double x : row)
                 if (!std::isfinite(x)) ++bad;
@@ -496,11 +493,16 @@ int main(int argc, char** argv) {
                             msg(we.what()).c_str());
             }
           }
-          std::fprintf(stderr, "INTERP_TIME point %d lp_ms %.3f wa_ms %.3f\n",
-                       v, ms(t1, t2), ms(t2, Clock::now()));
+          std::fprintf(stderr,
+                       "INTERP_TIME point %d lp_ms %.3f grad_ms %.3f "
+                       "wa_ms %.3f\n",
+                       v, ms(t1, lp_end), ms(lp_end, t2),
+                       ms(t2, Clock::now()));
           std::printf("OK");
           print_real(r.lp);
           for (double g : r.grad) print_real(g);
+          std::printf("\nGRAD_ERR");
+          for (double e : r.grad_err) print_real(e);
           std::printf("\n");
           record["ok"] = true;
           status.write(record);
