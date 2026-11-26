@@ -181,9 +181,9 @@
     },
     "ch11_m11_5": {
      "grad[10]": {
-      "bound": 14,
+      "bound": 15,
       "closer": "stanli",
-      "reason": "measured on Darwin arm64; 80-digit reference at point 1: stanli 2, CmdStan 15 scaled ULP from the true value; stanli is at least as close to it"
+      "reason": "measured on Darwin arm64; 80-digit reference at point 1: stanli 1, CmdStan 15 scaled ULP from the true value; stanli is at least as close to it"
      },
      "grad[9]": {
       "bound": 13,
