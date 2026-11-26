@@ -60,8 +60,9 @@ python3 tools/perturb/causes.py SCALING_OUT DATAVALUES_OUT           # findings 
    label. The variant also runs through `stanli_check --interp` on the
    same MIR, without a gradient. When its lp or write_array rows differ
    from the compiled path's, the variant gets the label `interp_differs`
-   and a line in the report. This catches a variant that the compiled
-   path gets wrong in the same way as its base. This stage
+   and a line in the report; when the interpreter cannot run it, the label
+   is `interp_unchecked`. This catches a variant that the compiled path
+   gets wrong in the same way as its base. This stage
    takes about a second for 30 variants once the binaries are warm, so
    authors can use it as their check.
 2. **Structure.** For base and variant: op counts of the log-density and

@@ -187,6 +187,12 @@ class InterpCheck(unittest.TestCase):
         self.assertIn("INTERP_DIFFERS lp: 1 vs 2", run.validity_line(rec))
         self.assertIn("interp_differs (lp: 1 vs 2)", report.note_of(rec))
 
+    def test_an_interpreter_failure_is_not_agreement(self):
+        rec = {"seed": "s", "variant": "v", "outcome": "valid",
+               "meta": {"equivalent": True}, "interp_unchecked": "timeout"}
+        self.assertIn("INTERP_UNCHECKED timeout", run.validity_line(rec))
+        self.assertIn("interp_unchecked (timeout)", report.note_of(rec))
+
 
 class Variants(unittest.TestCase):
     def test_work_not_dose_sets_the_expected_slowdown(self):

@@ -6,7 +6,8 @@ import re
 from collections import Counter, defaultdict
 
 from measure import decline_text, normalized_text, ratio_text
-from run import FLAG_RATIO, LOAD_WARNING, PREP_CLIFF_RATIO, PREP_CLIFF_S
+from run import (FLAG_RATIO, INTERP_LABELS, LOAD_WARNING, PREP_CLIFF_RATIO,
+                 PREP_CLIFF_S)
 
 OUTCOMES = ("invalid", "same_program", "fine", "flagged_cmdstan_equal",
             "cliff", "failure", "flagged", "valid", "error")
@@ -65,8 +66,8 @@ def note_of(r):
     if r.get("near_equivalent"):
         parts.append("near_equivalent (relative "
                      f"{r['near_equivalent']['largest_relative_difference']:.1e})")
-    if r.get("interp_differs"):
-        parts.append(f"interp_differs ({r['interp_differs']})")
+    parts += [f"{label} ({r[label]})" for label in INTERP_LABELS
+              if r.get(label)]
     if r.get("prep_cliff"):
         parts.append("prep_cliff")
     if r.get("differs") and r["outcome"] != "same_program":
@@ -161,9 +162,11 @@ def variant_report(records, meta, known):
             f"log_prob ops {ops_text(r)}" for r in preps] or ["None."]
     out += ["", "## Compiled path differs from the interpreter", "",
             "Variants whose log density or write_array rows differ from "
-            "`stanli_check --interp` on the same MIR.", ""]
-    out += [f"- {r['seed']}/{r['variant']}: {r['interp_differs']}"
-            for r in records if r.get("interp_differs")] or ["None."]
+            "`stanli_check --interp` on the same MIR (interp_differs), or "
+            "that the interpreter could not run (interp_unchecked).", ""]
+    out += [f"- {r['seed']}/{r['variant']}: {label} {r[label]}"
+            for r in records for label in INTERP_LABELS
+            if r.get(label)] or ["None."]
     out += ["", "## Every variant", "",
             "log_prob ops are the final count, the program that runs, then in "
             "parentheses the count before the passes, which explains "

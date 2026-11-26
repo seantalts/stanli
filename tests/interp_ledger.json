@@ -53,7 +53,7 @@
  },
  "fixtures/odevariadic": {
   "cause": "solver tolerance: the ODE solver on doubles and on vars differ by about its tolerance",
-  "state": "agree_1e-8"
+  "state": "solver_disagree"
  },
  "fixtures/structured_ragged_matvec_mismatch": {
   "cause": "the compiled path finds the size error while it prepares the model and fails to load; the interpreter throws at every point",
@@ -129,7 +129,7 @@
  },
  "fixtures/zero_size_kernels": {
   "cause": "solver tolerance: the ODE, DAE and algebra solvers on doubles and on vars differ by about their tolerance",
-  "state": "agree_1e-8"
+  "state": "solver_disagree"
  },
  "lit/function_returns/container_return_empty_first": {
   "cause": "compiled refuses: runtime-control region, a function result of different sizes under a condition on a parameter",

@@ -48,6 +48,7 @@ NEAR_TOL = 1e-7
 PREP_CLIFF_RATIO = 3.0
 PREP_CLIFF_S = 0.1
 PROPTO = re.compile(r"~|_lupdf\b|_lupmf\b")
+INTERP_LABELS = ("interp_differs", "interp_unchecked")
 
 
 ratio_text = m.ratio_text
@@ -125,9 +126,9 @@ def validity(tools, rec, stan, data, base_stan, base_data):
     why = m.finite_values(var_out)
     if why:
         return f"variant fails: {why}"
-    differs = m.interp_differs(tools, var_c, data)
-    if differs:
-        rec["interp_differs"] = differs
+    found = m.interp_check(tools, var_c, data)
+    if found:
+        rec[found[0]] = found[1]
     if meta.get("equivalent"):
         propto = bool(PROPTO.search(base_stan.read_text())
                       or PROPTO.search(stan.read_text()))
@@ -321,8 +322,9 @@ def validity_line(rec):
         kind = (f"near_equivalent, largest relative difference "
                 f"{rec['near_equivalent']['largest_relative_difference']:.1e}")
     shift = ", lp shifted by a constant" if rec.get("lp_constant_shift") else ""
-    if rec.get("interp_differs"):
-        shift += f", INTERP_DIFFERS {rec['interp_differs']}"
+    for label in INTERP_LABELS:
+        if rec.get(label):
+            shift += f", {label.upper()} {rec[label]}"
     if "variant_program" not in rec:
         return f"valid   {key} ({kind}{shift})"
     b, v = rec["base_program"], rec["variant_program"]

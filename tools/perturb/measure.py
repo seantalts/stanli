@@ -211,15 +211,20 @@ def check(tools, comp, data, points=check_compare.POINTS, status=None,
     return check_compare.run_outcome(raw, records), records
 
 
-def interp_differs(tools, comp, data):
-    """None when the compiled path gives the log density and write_array
-    rows of `stanli_check --interp` on the same MIR, else the first
-    difference. The interpreter computes no gradient here."""
+def interp_check(tools, comp, data):
+    """Compare the compiled path's log density and write_array rows with
+    `stanli_check --interp` on the same MIR, which computes no gradient
+    here. None when they agree, ("interp_differs", the first difference),
+    or ("interp_unchecked", why the interpreter gave no values)."""
     compiled, _ = check(tools, comp, data, extra=["--wa-values"])
     interp, _ = check(tools, comp, data, extra=["--wa-values", "--interp"],
                       env=clean_env({"STANLI_INTERP_NO_GRAD": "1"}))
+    if interp[0] != "points":
+        return "interp_unchecked", f"{interp[0]} {interp[1] or ''}".strip()[:300]
     differs = check_compare.lp_and_rows_differ(compiled, interp)
-    return differs and differs.replace('"a":', '"compiled":').replace(
+    if differs is None:
+        return None
+    return "interp_differs", differs.replace('"a":', '"compiled":').replace(
         '"b":', '"interp":')
 
 

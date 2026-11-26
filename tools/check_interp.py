@@ -109,10 +109,10 @@ def cases(names, pdb, tmp):
             out.append(("fixtures", stan.stem, stan, data))
     if "lit" in want:
         for stan in sorted((REPO / "tests" / "lit").rglob("*.stan")):
-            text = stan.read_text()
+            text = stan.read_text(encoding="utf-8")
             m = re.search(r"^// STANLI-LIT-DATA: (.*)$", text, re.M)
             data = tmp / f"lit_{stan.parent.name}_{stan.stem}.json"
-            data.write_text(m.group(1) if m else "{}")
+            data.write_text(m.group(1) if m else "{}", encoding="utf-8")
             out.append(("lit", f"{stan.parent.name}/{stan.stem}", stan, data))
     if "stanc3_good" in want:
         gdata = json.loads(gzip.decompress(good.DATA.read_bytes()))
@@ -422,6 +422,20 @@ def agrees(v, loose=False):
             and v.get("output", "same") == "same")
 
 
+def emit_mir(check, stan, extra, path, timeout):
+    """Write the model's MIR to `path` byte for byte; None, or why not."""
+    try:
+        r = subprocess.run([str(check), "--emit-mir", str(stan), *extra],
+                           capture_output=True, timeout=timeout)
+    except subprocess.TimeoutExpired:
+        return "timeout"
+    if r.returncode != 0:
+        text = (r.stderr or r.stdout).decode("utf-8", "replace").strip()
+        return (text.splitlines() or [f"exit {r.returncode}"])[0][:300]
+    path.write_bytes(r.stdout)
+    return None
+
+
 def one(case, check, tmp, timeout, interp_o0=False, grad_max=GRAD_MAX,
         survey=True):
     """Run one model both ways and classify it. A survey watches memory and,
@@ -432,12 +446,11 @@ def one(case, check, tmp, timeout, interp_o0=False, grad_max=GRAD_MAX,
     mir = tmp / f"{safe}.mir"
     mir0 = tmp / f"{safe}.o0.mir"
     rec = {"corpus": group, "model": name, "stan": str(stan), "data": str(data)}
-    e = run([check, "--emit-mir", stan], timeout, watch_rss=survey)
-    if e[0] != 0:
+    problem = emit_mir(check, stan, [], mir, timeout)
+    if problem:
         rec["state"] = "stanc_fail"
-        rec["message"] = (e[2] or e[1]).strip().splitlines()[:1]
+        rec["message"] = problem
         return rec
-    mir.write_text(e[1])
     base = [check, stan, data, "--points", POINTS, "--wa-values"]
 
     def side(tag, mir_path, extra, env=None):
@@ -464,12 +477,14 @@ def one(case, check, tmp, timeout, interp_o0=False, grad_max=GRAD_MAX,
     rec["compiled"] = side("compiled", mir, [])
     interp_mir = mir
     if interp_o0:
-        e0 = run([check, "--emit-mir", stan, "--passes", "none"], timeout,
-                 watch_rss=survey)
-        if e0[0] == 0:
-            mir0.write_text(e0[1])
+        problem = emit_mir(check, stan, ["--passes", "none"], mir0, timeout)
+        if problem is None:
             interp_mir = mir0
             rec["interp_mir"] = "none"
+        elif not survey:
+            rec["state"] = "o0_stanc_fail"
+            rec["message"] = problem
+            return rec
     rec["interp"] = interp("interp", interp_mir)
     rec["cmp"] = compare(rec["compiled"], rec["interp"])
     if interp_mir is mir0 and not agrees(rec["cmp"], loose=True):
@@ -502,7 +517,8 @@ SOLVERS = re.compile(r"\b(ode_\w+|integrate_ode\w*|integrate_1d|dae\w*|"
 
 def uses_solver(rec):
     try:
-        return bool(SOLVERS.search(pathlib.Path(rec["stan"]).read_text()))
+        return bool(SOLVERS.search(pathlib.Path(rec["stan"]).read_text(
+            encoding="utf-8", errors="replace")))
     except OSError:
         return False
 
@@ -530,9 +546,12 @@ def classify(rec):
         if cfail and not ifail:
             return "compiled_threw"
         return "one_side_threw"
+    if uses_solver(rec) and not all(v[q] in ("agree_1e-10", "n/a")
+                                    for q in ("lp", "wa")):
+        return "solver_disagree"
     if not all(v[q] in ("agree_1e-10", "agree_1e-8", "n/a")
                for q in ("lp", "wa")):
-        return "solver_disagree" if uses_solver(rec) else "disagree"
+        return "disagree"
     if v["messages"] not in ("identical", "n/a"):
         return "message_" + v["messages"]
     if v["output"] != "same":
@@ -569,13 +588,15 @@ def table(records):
             lines.append(f"  {k}: " + ", ".join(f"{a}={n}" for a, n in sorted(q[k].items())))
         groups = collections.defaultdict(list)
         for r in rs:
-            if r["state"] in ("interp_refused", "interp_threw"):
+            if r["state"] in ("interp_refused", "interp_threw",
+                              "interp_timeout", "interp_memory"):
                 groups[error_key(first_fail(r["interp"]))].append(r["model"])
         for key, ms in sorted(groups.items(), key=lambda kv: -len(kv[1])):
             lines.append(f"  interp fails x{len(ms)}: {key}  e.g. {', '.join(ms[:2])}")
         cgroups = collections.defaultdict(list)
         for r in rs:
-            if r["state"] in ("compiled_refused", "compiled_threw"):
+            if r["state"] in ("compiled_refused", "compiled_threw",
+                              "compiled_timeout", "compiled_memory"):
                 cgroups[error_key(first_fail(r["compiled"]))].append(r["model"])
         for key, ms in sorted(cgroups.items(), key=lambda kv: -len(kv[1])):
             lines.append(f"  compiled fails x{len(ms)}: {key}  e.g. {', '.join(ms[:2])}")
