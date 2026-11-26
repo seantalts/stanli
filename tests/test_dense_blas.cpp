@@ -676,7 +676,10 @@ namespace {
 bool accelerated(uint16_t opcode) {
   using namespace stanli;
   return opcode == OP_GEMM_BLAS || opcode == OP_MATVEC_BLAS ||
-         opcode == OP_CHOLESKY_BLAS || opcode == OP_MULTI_NORMAL_CHOL_LPDF_BLAS;
+         opcode == OP_CHOLESKY_BLAS ||
+         opcode == OP_MULTI_NORMAL_CHOL_LPDF_BLAS ||
+         opcode == OP_MULTI_NORMAL_LPDF_BLAS ||
+         opcode == OP_NORMAL_ID_GLM_LPDF_BLAS;
 }
 
 // The accelerated opcodes in the log density and write_array graphs of the
