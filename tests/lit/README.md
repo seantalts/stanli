@@ -115,3 +115,12 @@ tests/lit/run.py tests/lit/issue_257/to_array_1d.stan \
 tests/lit/run.py --discover tests/lit/issue_257/to_array_1d.stan \
   build/stanli_check
 ```
+
+`--interp` runs the case through the MIR interpreter alone
+(`stanli_check --interp`, the reference evaluator) against the same
+expectation. Pass dump checks are skipped there.
+
+```sh
+tests/lit/run.py --interp tests/lit/issue_257/to_array_1d.stan \
+  build/stanli_check
+```

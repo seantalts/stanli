@@ -482,22 +482,9 @@ std::string ProgramCompiler::whole_assign_size_message(const std::string& name,
 std::string ProgramCompiler::selected_assign_size_message(
     const std::string& name, const mir::Expr& index, bool array, int64_t want,
     int64_t got) {
-  const bool empty_range = index.kind == mir::Expr::IndexBetween && want == 0;
-  std::string label;
-  if (array)
-    label = empty_range ? "array[negative_min_max, ...] assign"
-                        : "array[multi, ...] assign";
-  else if (index.kind == mir::Expr::IndexBetween)
-    label = empty_range ? "vector[negative_min_max] assign"
-                        : "vector[min_max] assign";
-  else if (index.kind == mir::Expr::IndexUpfrom)
-    label = "vector[min] assign";
-  else
-    label = "vector[multi] assign";
-  const bool size_word = array && !empty_range;
-  return label + ": assigning variable " + name + " (" + std::to_string(want) +
-         ") and right hand side" + (size_word ? " size" : "") + " (" +
-         std::to_string(got) + ") must match in size";
+  return stanli::selected_assign_size_message(
+      name, index.kind == mir::Expr::IndexBetween,
+      index.kind == mir::Expr::IndexUpfrom, array, want, got);
 }
 
 ProgramCompiler::Path ProgramCompiler::compile_multi_return(const mir::Stmt& s,

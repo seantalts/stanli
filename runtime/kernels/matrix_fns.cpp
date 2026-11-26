@@ -11,6 +11,7 @@
 #include "density_fused.hpp"
 
 #include <stanli/graph.hpp>
+#include <stanli/dense_blas.hpp>
 #include <stanli/density_registry.hpp>
 #include <stanli/recorder.hpp>
 #include <stanli/legacy.hpp>
@@ -20,6 +21,7 @@
 
 #include <stan/math.hpp>
 
+#include <algorithm>
 #include <type_traits>
 #include <utility>
 #include <variant>
@@ -1027,16 +1029,11 @@ MncPath mnc_path(const KernelCtx& ctx) {
                   ctx.n_in == 3 ? ctx.in[2].len : -1, ctx.out.len);
 }
 
-double mnc_legacy_fwd(KernelCtx& ctx) {
+// The pinned single-vector Stan Math overload's checks. That overload
+// intentionally does not call check_cholesky_factor; changing its observable
+// domain here would make the native and fallback paths disagree.
+void mnc_legacy_checks(const CMapV& y, const CMapV& mu, const CMapM& L) {
   static constexpr const char* function = "multi_normal_cholesky_lpdf";
-  const int64_t n = vectorized_layout(ctx.idata, ctx.n_idata, 2).width;
-  CMapV y(ctx.in[0].data, n), mu(ctx.in[1].data, n);
-  CMapM L(ctx.in[2].data, n, n);
-
-  // Copy the pinned single-vector Stan Math overload's checks and
-  // arithmetic order. That overload intentionally does not call
-  // check_cholesky_factor; changing its observable domain here would make the
-  // native and fallback paths disagree.
   stan::math::check_size_match(function, "Size of random variable", y.size(),
                                "size of location parameter", mu.size());
   stan::math::check_size_match(function, "Size of random variable", y.size(),
@@ -1045,6 +1042,15 @@ double mnc_legacy_fwd(KernelCtx& ctx) {
                                "columns of covariance parameter", L.cols());
   stan::math::check_finite(function, "Location parameter", mu);
   stan::math::check_not_nan(function, "Random variable", y);
+}
+
+double mnc_legacy_fwd(KernelCtx& ctx) {
+  const int64_t n = vectorized_layout(ctx.idata, ctx.n_idata, 2).width;
+  CMapV y(ctx.in[0].data, n), mu(ctx.in[1].data, n);
+  CMapM L(ctx.in[2].data, n, n);
+
+  // The overload's checks and arithmetic order.
+  mnc_legacy_checks(y, mu, L);
   if (n == 0) return 0.0;
 
   VecD y_minus_mu = y - mu;
@@ -2719,6 +2725,157 @@ STANLI_TAIL_CDF_LIST(STANLI_TAIL_CDF_KERNEL)
 STANLI_TAIL_INT_CDF_LIST(STANLI_TAIL_INT_CDF_KERNEL)
 #undef STANLI_TAIL_INT_CDF_KERNEL
 
+#ifdef STANLI_ACCELERATE
+// ---- accelerated forms of the large dense kernels -------------------------
+// accelerate_dense_ops (runtime/src/dense_blas.cpp) gives an op one of these
+// opcodes only when its static sizes reach the threshold in
+// blas::thresholds(), and never inside a retained loop (dyn_lengths), so
+// the plain kernels above still run every smaller op. The results agree with
+// the plain kernels to rounding; they are not bitwise equal.
+
+// out = A * B; idata = {rows_a, cols_a, cols_b}.
+void gemm_blas_fwd(KernelCtx& ctx) {
+  const int64_t ra = ctx.idata[0], ca = ctx.idata[1], cb = ctx.idata[2];
+  blas::gemm(false, false, ra, cb, ca, 1.0, ctx.in[0].data, ra, ctx.in[1].data,
+             ca, 0.0, ctx.out.data, ra);
+}
+void gemm_blas_bwd(KernelCtx& ctx) {
+  const int64_t ra = ctx.idata[0], ca = ctx.idata[1], cb = ctx.idata[2];
+  const double* dO = ctx.out_adj_vec.data;
+  if (ctx.in_adj[0].data)
+    blas::gemm(false, true, ra, ca, cb, 1.0, dO, ra, ctx.in[1].data, ca, 1.0,
+               ctx.in_adj[0].data, ra);
+  if (ctx.in_adj[1].data)
+    blas::gemm(true, false, ca, cb, ra, 1.0, ctx.in[0].data, ra, dO, ra, 1.0,
+               ctx.in_adj[1].data, ca);
+}
+
+// out = X * beta with data X; idata = {rows, cols}.
+void matvec_blas_fwd(KernelCtx& ctx) {
+  const int64_t rows = ctx.idata[0], cols = ctx.idata[1];
+  blas::gemv(false, rows, cols, 1.0, ctx.in[0].data, rows, ctx.in[1].data, 0.0,
+             ctx.out.data);
+}
+void matvec_blas_bwd(KernelCtx& ctx) {
+  if (!ctx.in_adj[1].data) return;
+  const int64_t rows = ctx.idata[0], cols = ctx.idata[1];
+  blas::gemv(true, rows, cols, 1.0, ctx.in[0].data, rows, ctx.out_adj_vec.data,
+             1.0, ctx.in_adj[1].data);
+}
+
+// cholesky_decompose with LAPACK's dpotrf and the checks and messages of
+// Stan Math's double overload.
+void chol_blas_fwd(KernelCtx& ctx) {
+  static constexpr const char* function = "cholesky_decompose";
+  const int64_t n = ctx.idata[0];
+  CMapM a(ctx.in[0].data, n, n);
+  stan::math::check_symmetric(function, "m", a);
+  stan::math::check_not_nan(function, "m", a);
+  double* l = ctx.out.data;
+  std::copy(a.data(), a.data() + n * n, l);
+  const int info = blas::potrf_lower(n, l, n);
+  bool positive = info == 0;
+  for (int64_t j = 0; j < n; ++j) {
+    positive = positive && l[j + j * n] > 0.0;
+    for (int64_t i = 0; i < j; ++i) l[i + j * n] = 0.0;
+  }
+  if (!positive)
+    stan::math::throw_domain_error(function, "Matrix",
+                                   " is not positive definite", "m");
+}
+
+// The blocked reverse pass of Stan Math's cholesky_lambda (Iain Murray,
+// "Differentiation of the Cholesky decomposition", 2016), step for step,
+// with each block operation a BLAS call. Blocks are views into the n x n
+// factor L and the working adjoint W, both column-major with leading
+// dimension n; W starts as the lower triangle of the output adjoint.
+void chol_blas_bwd(KernelCtx& ctx) {
+  if (!ctx.in_adj[0].data) return;
+  const int64_t n = ctx.idata[0];
+  const double* L = ctx.out.data;
+  double* W = ctx.scratch;
+  for (int64_t c = 0; c < n; ++c)
+    for (int64_t r = 0; r < n; ++r)
+      W[r + c * n] = r >= c ? ctx.out_adj_vec.data[r + c * n] : 0.0;
+  const auto at = [n](auto* base, int64_t r, int64_t c) {
+    return base + r + c * n;
+  };
+  int64_t block = std::max<int64_t>(n / 8, 8);
+  block = std::min<int64_t>(block, 128);
+  for (int64_t k = n; k > 0; k -= block) {
+    const int64_t j = std::max<int64_t>(0, k - block);
+    const int64_t nb = k - j, mb = n - k;
+    const double* R = at(L, j, 0);  // nb x j
+    const double* D = at(L, j, j);  // nb x nb, lower
+    const double* B = at(L, k, 0);  // mb x j
+    const double* C = at(L, k, j);  // mb x nb
+    double* R_adj = at(W, j, 0);
+    double* D_adj = at(W, j, j);
+    double* B_adj = at(W, k, 0);
+    double* C_adj = at(W, k, j);
+    if (mb > 0) {
+      blas::trsm_lower(false, false, mb, nb, 1.0, D, n, C_adj, n);
+      blas::gemm(false, false, mb, j, nb, -1.0, C_adj, n, R, n, 1.0, B_adj, n);
+      blas::gemm(true, false, nb, nb, mb, -1.0, C_adj, n, C, n, 1.0, D_adj, n);
+    }
+    // D_adj = D' * tril(D_adj), then copy its lower triangle to the upper.
+    for (int64_t c = 1; c < nb; ++c)
+      for (int64_t r = 0; r < c; ++r) D_adj[r + c * n] = 0.0;
+    blas::trmm_lower_left(true, nb, nb, 1.0, D, n, D_adj, n);
+    for (int64_t c = 1; c < nb; ++c)
+      for (int64_t r = 0; r < c; ++r) D_adj[r + c * n] = D_adj[c + r * n];
+    blas::trsm_lower(true, true, nb, nb, 1.0, D, n, D_adj, n);
+    blas::trsm_lower(false, false, nb, nb, 1.0, D, n, D_adj, n);
+    blas::gemm(true, false, nb, j, mb, -1.0, C_adj, n, B, n, 1.0, R_adj, n);
+    blas::symm_lower_left(nb, j, -1.0, D_adj, n, R, n, 1.0, R_adj, n);
+    for (int64_t d = 0; d < nb; ++d) D_adj[d + d * n] *= 0.5;
+  }
+  double* adj = ctx.in_adj[0].data;
+  for (int64_t c = 0; c < n; ++c)
+    for (int64_t r = c; r < n; ++r) adj[r + c * n] += W[r + c * n];
+}
+int64_t chol_blas_scratch(const Op& op, const Slot*) {
+  return op.n_idata > 0 ? int64_t(op.idata[0]) * op.idata[0] : 0;
+}
+
+// multi_normal_cholesky on mnc_legacy_fwd's path, with the inverse of L from
+// LAPACK's dtrtri and the two triangular products from dtrmv.
+double mnc_blas_fwd_value(KernelCtx& ctx) {
+  const int64_t n = vectorized_layout(ctx.idata, ctx.n_idata, 2).width;
+  CMapV y(ctx.in[0].data, n), mu(ctx.in[1].data, n);
+  CMapM L(ctx.in[2].data, n, n);
+  mnc_legacy_checks(y, mu, L);
+  if (n == 0) return 0.0;
+
+  VecD y_minus_mu = y - mu;
+  MatD inv_L = MatD::Zero(n, n);
+  inv_L.triangularView<Eigen::Lower>() = L.triangularView<Eigen::Lower>();
+  // A zero on the diagonal: keep Stan Math's infinities and NaNs.
+  if (blas::trtri_lower(n, inv_L.data(), n) != 0)
+    inv_L = stan::math::mdivide_left_tri<Eigen::Lower>(L);
+  VecD half = y_minus_mu;
+  blas::trmv_lower(false, n, inv_L.data(), n, half.data());
+
+  double logp(0.0);
+  logp += stan::math::sum(stan::math::log(inv_L.diagonal()));
+  if (!values_only(ctx)) {
+    VecD scaled_diff = half;
+    blas::trmv_lower(true, n, inv_L.data(), n, scaled_diff.data());
+    MapM(ctx.scratch, n, n) =
+        scaled_diff * half.transpose() - inv_L.transpose();
+  }
+  logp -= 0.5 * stan::math::sum(stan::math::dot_self(half));
+  return logp;
+}
+void mnc_blas_fwd(KernelCtx& ctx) { ctx.out.data[0] = mnc_blas_fwd_value(ctx); }
+void mnc_blas_bwd(KernelCtx& ctx) {
+  if (!ctx.in_adj[2].data) return;
+  const int64_t n = vectorized_layout(ctx.idata, ctx.n_idata, 2).width;
+  for (int64_t i = 0; i < n * n; ++i)
+    ctx.in_adj[2].data[i] += ctx.out_adj * ctx.scratch[i];
+}
+#endif
+
 }  // namespace
 
 void register_matrix_kernels() {
@@ -2805,6 +2962,55 @@ void register_matrix_kernels() {
   Kernel normal_glm{nid_glm_fwd, nid_glm_bwd, nid_glm_scratch};
   normal_glm.derivative_mechanism = "recorded_partials";
   register_kernel(OP_NORMAL_ID_GLM_LPDF, normal_glm);
+#ifdef STANLI_ACCELERATE
+  register_kernel(OP_GEMM_BLAS, Kernel{gemm_blas_fwd, gemm_blas_bwd, nullptr});
+  register_kernel(OP_MATVEC_BLAS,
+                  Kernel{matvec_blas_fwd, matvec_blas_bwd, nullptr});
+  register_kernel(OP_CHOLESKY_BLAS,
+                  Kernel{chol_blas_fwd, chol_blas_bwd, chol_blas_scratch});
+  register_kernel(OP_MULTI_NORMAL_CHOL_LPDF_BLAS,
+                  Kernel{mnc_blas_fwd, mnc_blas_bwd, mnc_scratch});
+#endif
 }
+
+#ifdef STANLI_ACCELERATE
+namespace blas {
+uint16_t accelerated_opcode(const Op& op, const Slot* slots) {
+  if (op.dyn_lengths) return op.opcode;
+  const Thresholds& t = thresholds();
+  switch (op.opcode) {
+    case OP_GEMM:
+      if (op.n_idata >= 3 &&
+          std::min({op.idata[0], op.idata[1], op.idata[2]}) >= t.gemm_min_dim)
+        return OP_GEMM_BLAS;
+      break;
+    case OP_MATVEC:
+      if (op.n_idata >= 2 &&
+          ((op.idata[0] >= t.gemv_min_rows && op.idata[1] >= t.gemv_min_cols) ||
+           (op.idata[0] >= t.gemv_tall_min_rows &&
+            op.idata[1] >= t.gemv_tall_min_cols)))
+        return OP_MATVEC_BLAS;
+      break;
+    case OP_CHOLESKY:
+      if (op.n_idata >= 1 && op.idata[0] >= t.cholesky_min_n)
+        return OP_CHOLESKY_BLAS;
+      break;
+    case OP_MULTI_NORMAL_CHOL_LPDF:
+      if (op.n_in == 3 && op.out >= 0 && op.in[0] >= 0 && op.in[1] >= 0 &&
+          op.in[2] >= 0 &&
+          mnc_path(op.variant, op.idata, op.n_idata, op.n_in,
+                   slots[op.in[0]].len, slots[op.in[1]].len,
+                   slots[op.in[2]].len, slots[op.out].len) == kMncLegacy &&
+          vectorized_layout(op.idata, op.n_idata, 2).width >=
+              t.tri_inverse_min_n)
+        return OP_MULTI_NORMAL_CHOL_LPDF_BLAS;
+      break;
+    default:
+      break;
+  }
+  return op.opcode;
+}
+}  // namespace blas
+#endif
 
 }  // namespace stanli

@@ -9,6 +9,7 @@
 #include <stanli/target_sums.hpp>
 #include <stanli/execution_report.hpp>
 #include <stanli/large_stack.hpp>
+#include <stanli/dense_blas.hpp>
 #include <stanli/threading.hpp>
 
 #include <stan/math/rev/core/chainablestack.hpp>
@@ -198,42 +199,14 @@ void Lowering::bind_declared_shape(const std::string& key,
   } catch (const CompileError&) {
     return;
   }
-  int64_t size = 1;
-  for (int64_t d : dims) size *= d;
   const bool int_declared = type.base == "SInt" ||
                             (type.base == "SArray" && type.elem_base == "SInt");
-  if (size == 0) {
-    if (int_declared)
-      reshaped_data->set_int_array(key, {}, std::move(dims));
-    else
-      reshaped_data->set_real_array(key, {}, std::move(dims));
-    return;
-  }
-  if (!data.has(key)) return;
-  const DataMap::Entry& given = data.at(key);
-  if (!same_without_unit_extents(dims, given.dims)) return;
-  if (given.r.size() != static_cast<size_t>(size) ||
-      (given.is_int && given.i.size() != static_cast<size_t>(size)))
-    return;
-  const std::vector<size_t> order =
-      leaf ? mir::detail::reader_order(*leaf, dims) : std::vector<size_t>{};
-  if (given.dims == dims && order.empty()) return;
-  if (dims.empty()) {
-    if (given.is_int)
-      reshaped_data->set_int(key, given.i[0]);
-    else
-      reshaped_data->set_real(key, given.r[0]);
-    return;
-  }
-  if (given.is_int) {
-    std::vector<int> values = given.i;
-    for (size_t k = 0; k < order.size(); ++k) values[k] = given.i[order[k]];
-    reshaped_data->set_int_array(key, std::move(values), std::move(dims));
-  } else {
-    std::vector<double> values = given.r;
-    for (size_t k = 0; k < order.size(); ++k) values[k] = given.r[order[k]];
-    reshaped_data->set_real_array(key, std::move(values), std::move(dims));
-  }
+  std::optional<DataMap::Entry> value = declared_shape_value(
+      dims, int_declared, data.has(key) ? &data.at(key) : nullptr, [&] {
+        return leaf ? mir::detail::reader_order(*leaf, dims)
+                    : std::vector<size_t>{};
+      });
+  if (value) reshaped_data->set(key, std::move(*value));
 }
 void Lowering::bind_data(const mir::Program& p) {
   std::set<std::string> input_names;
@@ -1004,6 +977,7 @@ void Lowering::run_passes(const std::vector<int>& roots, const PassPlan& plan) {
     trace("constfold", constfold_time, update_roots,
           PrepTrace::Extra::ConstFold, constfolded.ops_removed,
           constfolded.slots_folded);
+    scalarize_uniform_constants(g, out.fills);
   }
   const auto reroll_time = prep.start();
   const RerollStats rerolled =
@@ -1089,6 +1063,9 @@ void Lowering::run_passes(const std::vector<int>& roots, const PassPlan& plan) {
     const int islands = carve_islands(g, out.fills, target_terms, roots);
     trace("island", island_time, roots, PrepTrace::Extra::Regions, islands);
   }
+  // After every pass that matches on opcodes: give the large dense ops the
+  // kernels that call Accelerate. A no-op without STANLI_ACCELERATE.
+  accelerate_dense_ops(g);
 }
 CompiledModel::WriteArray Lowering::run_write_array(const mir::Program& p) {
   const auto total_time = prep.start();

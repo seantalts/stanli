@@ -41,10 +41,12 @@
 
 #include <stanli/compile.hpp>
 #include <stanli/graph.hpp>
+#include <stanli/large_stack.hpp>
 #include <stanli/region_map.hpp>
 #include <stanli/wa_interp.hpp>
 #include <stanli/builtin_registry.hpp>
 
+#include "interp_oracle.hpp"
 #include "stanc_embedded.hpp"
 #include "stanc_process.hpp"
 
@@ -207,7 +209,7 @@ int main(int argc, char** argv) {
                  "usage: stanli_check model.stan data.json "
                  "[--stanli-compile PATH | --mir PATH]\n"
                  "       [--point N | --points N,N,...] [--sweep K] "
-                 "[--columns] [--fast-math] [--passes SPEC]\n"
+                 "[--columns] [--fast-math] [--passes SPEC] [--interp]\n"
                  "       [--paths] [--cross [--cross-one lp|grad|wa] "
                  "[--draw-variant N] [--cross-points N] [--cross-rel-tol T]\n"
                  "        [--cross-corpus] [--ledger PATH]]\n"
@@ -224,6 +226,7 @@ int main(int argc, char** argv) {
   int sweep = 0;
   bool columns_only = false;
   bool wa_values = false;
+  bool interp_only = false;
   bool paths_only = false;
   bool cross = false;
   bool fast_math = false;
@@ -246,6 +249,8 @@ int main(int argc, char** argv) {
       columns_only = true;
     else if (a == "--wa-values")
       wa_values = true;
+    else if (a == "--interp")
+      interp_only = true;
     else if (a == "--paths")
       paths_only = true;
     else if (a == "--cross")
@@ -401,6 +406,150 @@ int main(int argc, char** argv) {
     std::printf("  changed by:%s\n",
                 changed.empty() ? " none" : changed.c_str());
     return r.ok ? 0 : 1;
+  }
+
+  // --interp: the MIR interpreter alone, with the same output contract.
+  if (interp_only) {
+    const auto body = [&]() -> int {
+      std::optional<stan::math::ChainableStack> stack;
+      if (stan::math::ChainableStack::instance_ == nullptr) stack.emplace();
+      // The difference quotients cost four evaluations per parameter.
+      // STANLI_INTERP_NO_GRAD=1 skips them, STANLI_INTERP_GRAD_MAX=N skips
+      // them for a model with more than N free parameters, and
+      // STANLI_INTERP_GRAD_POINTS=3,4 computes them at those points only.
+      const char* no_grad = std::getenv("STANLI_INTERP_NO_GRAD");
+      bool gradient = no_grad == nullptr || no_grad[0] == '0';
+      const char* grad_max = std::getenv("STANLI_INTERP_GRAD_MAX");
+      std::vector<int> grad_points;
+      if (const char* list = std::getenv("STANLI_INTERP_GRAD_POINTS");
+          list != nullptr && !parse_points(list, &grad_points)) {
+        std::fprintf(stderr, "stanli_check: bad STANLI_INTERP_GRAD_POINTS\n");
+        return 2;
+      }
+      using Clock = std::chrono::steady_clock;
+      const auto ms = [](Clock::time_point a, Clock::time_point b) {
+        return std::chrono::duration<double, std::milli>(b - a).count();
+      };
+      std::unique_ptr<stanli::oracle::Model> m;
+      const char* stage = "data";
+      const auto t0 = Clock::now();
+      try {
+        stanli::DataMap data = stanli::DataMap::from_json_file(argv[2]);
+        stage = "model";
+        m = stanli::oracle::prepare(mir, data, 1);
+      } catch (const std::exception& e) {
+        status.write(failure(stage, e));
+        std::string what = e.what();
+        const size_t nl = what.find('\n');
+        if (nl != std::string::npos && points.empty())
+          what = what.substr(0, nl);
+        if (!points.empty()) what = one_line(what);
+        std::printf("COMPILE_FAIL %s\n", what.c_str());
+        std::fprintf(stderr, "INTERP_TIME prepare_ms %.3f\n",
+                     ms(t0, Clock::now()));
+        return 1;
+      }
+      std::fprintf(stderr, "INTERP_TIME prepare_ms %.3f\n",
+                   ms(t0, Clock::now()));
+      if (grad_max != nullptr && m->n_free > std::atoll(grad_max))
+        gradient = false;
+      status.write(
+          {{"record", "compile"},
+           {"ok", true},
+           {"interpreter_fallbacks", Json::array()},
+           {"write_array", {{"section", m->wa ? "interpreted" : "none"}}}});
+      const auto at = [&](int v, bool multi) -> int {
+        const auto msg = [multi](const std::string& s) {
+          return multi ? one_line(s) : s;
+        };
+        Json record = {{"record", "point"}, {"point", v}};
+        const auto t1 = Clock::now();
+        try {
+          std::vector<double> theta((size_t)m->n_free);
+          for (int64_t i = 0; i < m->n_free; ++i)
+            theta[(size_t)i] = check_point(i, v);
+          Clock::time_point lp_end;
+          stanli::oracle::PointResult r = stanli::oracle::evaluate(
+              *m, theta,
+              gradient && (grad_points.empty() ||
+                           std::find(grad_points.begin(), grad_points.end(),
+                                     v) != grad_points.end()),
+              &lp_end);
+          const auto t2 = Clock::now();
+          if (!m->wa) {
+            std::fprintf(stderr, "write_array: no section\n");
+          } else {
+            try {
+              stanli::WaRng rng(1234);
+              const std::vector<double> row =
+                  m->wa->eval(stanli::oracle::constrained(*m, theta), rng);
+              int64_t bad = 0;
+              for (double x : row)
+                if (!std::isfinite(x)) ++bad;
+              record["write_array"] = {{"ok", true},
+                                       {"columns", m->wa->columns().size()},
+                                       {"values", (int64_t)row.size()},
+                                       {"nonfinite", bad}};
+              if (wa_values) {
+                std::string joined;
+                for (const auto& nm :
+                     stanli::CompiledModel::csv_names(m->wa->columns())) {
+                  if (!joined.empty()) joined += ',';
+                  joined += nm;
+                }
+                std::printf("WANAMES %s\nWAVALS", joined.c_str());
+                for (double x : row) print_real(x);
+                std::printf("\n");
+              }
+            } catch (const std::exception& we) {
+              std::fprintf(stderr, "write_array interpreter threw: %s\n",
+                           we.what());
+              record["write_array"] = {{"ok", false},
+                                       {"error", error_kind(we)},
+                                       {"message", we.what()}};
+              if (wa_values)
+                std::printf("WANAMES FAIL %s\nWAVALS FAIL\n",
+                            msg(we.what()).c_str());
+            }
+          }
+          std::fprintf(stderr,
+                       "INTERP_TIME point %d lp_ms %.3f grad_ms %.3f "
+                       "wa_ms %.3f\n",
+                       v, ms(t1, lp_end), ms(lp_end, t2), ms(t2, Clock::now()));
+          std::printf("OK");
+          print_real(r.lp);
+          for (double g : r.grad) print_real(g);
+          std::printf("\nGRAD_ERR");
+          for (double e : r.grad_err) print_real(e);
+          std::printf("\n");
+          record["ok"] = true;
+          status.write(record);
+        } catch (const std::exception& e) {
+          std::printf("EVAL_FAIL %s\n", msg(e.what()).c_str());
+          record["ok"] = false;
+          record["error"] = error_kind(e);
+          record["message"] = e.what();
+          status.write(record);
+          return 1;
+        }
+        return 0;
+      };
+      if (points.empty()) return at(variant, false);
+      for (int k : points) {
+        std::printf("POINT %d\n", k);
+        at(k, true);
+        std::fflush(stdout);
+      }
+      return 0;
+    };
+    try {
+      return stanli::can_move_to_large_stack()
+                 ? stanli::run_on_large_stack([&] { return body(); })
+                 : body();
+    } catch (const std::exception& e) {
+      std::printf("COMPILE_FAIL large stack: %s\n", e.what());
+      return 1;
+    }
   }
 
   stanli::CompiledModel cm;

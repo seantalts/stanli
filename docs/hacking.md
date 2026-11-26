@@ -217,7 +217,10 @@ ones through every stage, op list and register programs included.
 The tools you will reach for most:
 
 - [`stanli_check`](../tools/stanli_check.cpp): one deterministic
-  gradient evaluation, printed.
+  gradient evaluation, printed. With `--interp` it runs the whole model
+  through the MIR interpreter instead, with a finite-difference gradient;
+  [`tools/check_interp.py`](../tools/check_interp.py) compares the two
+  ([the interpreter oracle](../TESTING.md#the-interpreter-oracle)).
 - [`stanli_run`](../tools/stanli_run.cpp): a full sampling run,
   CmdStan-style CSV out.
 - [`bench_grad`](../tools/bench_grad.cpp): gradient/forward timing. Pass
@@ -919,6 +922,22 @@ requires bitwise equal results, except 2 ULP for normal and cauchy.
 corpus replay there runs the fused kernels alone; its `build` keeps them.
 `STANLI_NO_FUSED_DENSITY=1` selects Stan Math's kernels in an ON build and
 prints a notice, then is ignored, in an OFF build.
+
+On macOS, `STANLI_ACCELERATE` (on by default on Apple silicon, off by
+default on Intel Macs, unavailable on other systems) links Apple's
+Accelerate framework. A pass at the end of lowering gives a
+matrix product, a matrix-vector product with data, a Cholesky factor or a
+`multi_normal_cholesky` with data `y` and `mu` an accelerated opcode when the
+op is at least as large as that operation's threshold; the kernel then calls
+BLAS or LAPACK. Every smaller op runs the same code as a build with
+`-DSTANLI_ACCELERATE=OFF`, and so do Linux, Windows and the browser builds.
+The thresholds and the sweep behind them are in
+[`notes/performance/2026-11-26-accelerate-thresholds.md`](../notes/performance/2026-11-26-accelerate-thresholds.md).
+Chains that run in parallel limit their BLAS calls to one thread when twice
+the number of chains exceeds the performance cores. On macOS 11 to 14, which
+lack `BLASSetThreading`, nothing is limited. In a build with developer
+switches, `STANLI_NO_ACCELERATE` keeps every op on the plain kernels and
+`STANLI_PERFORMANCE_CORES` sets the core count that the rule uses.
 
 For sampler changes, use
 [`tools/sampler_trace.py`](../tools/sampler_trace.py). For

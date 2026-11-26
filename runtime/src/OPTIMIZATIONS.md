@@ -242,6 +242,28 @@ cannot be folded, and nothing computed from it can be either.
 Unlike the other `STANLI_NO_*` developer switches, which act when they are set
 to any value, `STANLI_NO_CONSTFOLD` acts only when its value starts with `1`.
 
+### Vector statements from the compiler (`lower_expr.cpp`, `constfold.cpp`)
+
+stanc3's `vectorize_loops` pass turns `for (n in 1:N) mu[n] += b * x[n];`
+into `mu[1:N] = mu[1:N] + b * x[1:N];`. Since the fork commit 10833830 it
+also takes a loop whose statements write and then read the same element
+`mu[n]`, when every mention of `mu` in the body is that element and the
+whole body vectorizes. Such a loop no longer unrolls, so its size never
+meets the unroll ceiling.
+
+Two small rules keep the program of such a statement the same as the one
+that the unrolled loop gave after re-rolling:
+
+- A range over a whole vector (`mu[1:N]`) and a gather of every element in
+  order (`r[J]` with `J = 1, 2, ..., N`) return the vector and emit no
+  `SLICE` or `GATHER`. The value keeps the layout of a range, so a
+  reduction over it sums in the order that Stan Math uses.
+- After constant folding, an elementwise `ADD`, `SUB`, `MUL` or `DIV` that
+  reads a data vector whose elements are all equal reads one scalar
+  instead (`scalarize_uniform_constants`). brms multiplies a group effect
+  by a design column `Z` that is often all ones. This runs with constant
+  folding and has the same switch.
+
 ## Loop re-rolling (`reroll.cpp`, disable: `STANLI_NO_REROLL=1`)
 
 The main pass. An unrolled loop shows up as the same short op pattern
@@ -1988,6 +2010,8 @@ Graph passes:
 | `STANLI_LANE_REPORT` | print why re-rolling and partitioning left each group of matching lanes unfused, and how many target terms were listed twice | `lower.cpp`, `pass_util.hpp` |
 | `STANLI_NO_CSE` | turn off common-subexpression elimination | `cse.cpp` |
 | `STANLI_NO_DENSITY_MASK` | bind every density argument in a generated backward as a recorder scalar again, instead of by its activity mask | `adjoint.cpp` |
+| `STANLI_NO_ACCELERATE` | keep every op on the plain kernels in a `STANLI_ACCELERATE` build: no matrix product, matrix-vector product, Cholesky factor or `multi_normal_cholesky` gets an accelerated opcode | `dense_blas.cpp` |
+| `STANLI_PERFORMANCE_CORES=n` | the number of performance cores that the BLAS thread rule uses, in place of `hw.perflevel0.physicalcpu` | `blas_threads.cpp` |
 | `STANLI_NO_FUSED_DENSITY` | use Stan Math's kernels instead of the fused kernels for the seven fused densities; acts when the value is set, nonempty and not `0`; ignored, with a notice, in a build with CMake option `STANLI_STAN_DENSITY_ORACLE=OFF` | `density_fused.cpp` |
 
 Islands and register programs:

@@ -150,9 +150,8 @@ bool Lowering::scan_block(const std::vector<mir::Stmt>& body,
   // The container locals passed so far, with what decls held for each name
   // before, so `int n = rows(x)` on a local declared earlier in the block
   // answers from x's declared type the way the lowering that follows will.
-  // --O1 inlining declares every callee local this way, and without the
-  // view the query threw here and sent the whole write_array section to
-  // the interpreter.
+  // Without the view the query threw here and sent the whole write_array
+  // section to the interpreter.
   std::vector<std::pair<std::string, std::optional<DeclView>>> local_views;
   // Their values too: a local declared again on each pass of an enclosing
   // loop must not be read with the previous pass's value or extent.
@@ -1617,10 +1616,10 @@ void Lowering::lower_simple_stmt(const mir::Stmt& s) {
         }
         decls[s.decl_id] = sh;
       } else {
-        // A redeclaration shadows whatever the name held: --O1 inlining
-        // reuses one symbol for a callee's local across loop iterations,
-        // and its size can differ per iteration. The stale binding must
-        // not constrain the fresh variable's width.
+        // A redeclaration shadows whatever the name held: a local declared
+        // in a loop body gets one symbol on every iteration, and its size
+        // can differ per iteration. The stale binding must not constrain
+        // the fresh variable's width.
         scope.erase(s.decl_id);
         DeclView sh;
         sh.len = sized_len(s.decl_type, nullptr, nullptr, s.decl_id);

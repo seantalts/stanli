@@ -243,6 +243,31 @@ if(STANLI_THREADS AND NOT EMSCRIPTEN)
   endif()
 endif()
 
+# Apple's Accelerate framework for stanli's large dense kernels: matrix
+# products, matrix-vector products, the Cholesky factor and its adjoint, and
+# the triangular inverse in multi_normal_cholesky. A pass at the end of
+# lowering gives an op a separate opcode when its sizes are above that
+# operation's threshold (runtime/src/dense_blas.cpp); every other op runs the
+# same code as a build without the option. Eigen itself does not call BLAS.
+# On by default only for Apple silicon, where the thresholds were measured.
+# Intel Macs have Accelerate too and may turn it on; nothing there has been
+# timed.
+set(_stanli_accelerate_default OFF)
+if(APPLE AND NOT EMSCRIPTEN AND CMAKE_SYSTEM_PROCESSOR MATCHES "^(arm64|aarch64)$"
+   AND (NOT CMAKE_OSX_ARCHITECTURES OR CMAKE_OSX_ARCHITECTURES STREQUAL "arm64"))
+  set(_stanli_accelerate_default ON)
+endif()
+option(STANLI_ACCELERATE
+  "Call Apple's Accelerate from the large dense kernels (macOS; default on Apple silicon)"
+  ${_stanli_accelerate_default})
+if(STANLI_ACCELERATE AND (NOT APPLE OR EMSCRIPTEN))
+  message(FATAL_ERROR "STANLI_ACCELERATE needs a native macOS build")
+endif()
+if(STANLI_ACCELERATE)
+  target_compile_definitions(stanmath INTERFACE STANLI_ACCELERATE=1)
+  target_link_libraries(stanmath INTERFACE "-framework Accelerate")
+endif()
+
 if(EMSCRIPTEN)
   target_compile_options(stanmath INTERFACE -fwasm-exceptions)
   # SIMD128. Measured with tools/bench_wasm.cjs on this machine: geomean
@@ -431,6 +456,8 @@ set(STANLI_RUNTIME_SOURCES
   runtime/src/sparse_factor.cpp
   runtime/src/laplace.cpp
   runtime/src/reduce_sum.cpp
+  runtime/src/blas_threads.cpp
+  runtime/src/dense_blas.cpp
   runtime/src/init_interp.cpp
   runtime/src/unconstrain.cpp
   runtime/src/wa_interp.cpp
@@ -1156,6 +1183,10 @@ target_link_libraries(bench_opcost PRIVATE stanli)
 add_executable(bench_executor_clone EXCLUDE_FROM_ALL
   tools/bench_executor_clone.cpp tests/tbb_stub.cpp)
 target_link_libraries(bench_executor_clone PRIVATE stanli)
+# Crossover sweep behind the thresholds of the accelerated dense kernels.
+add_executable(bench_dense_blas EXCLUDE_FROM_ALL
+  tools/bench_dense_blas.cpp tests/tbb_stub.cpp)
+target_link_libraries(bench_dense_blas PRIVATE stanli)
 add_test(NAME test_bench_opcost_smoke COMMAND bench_opcost --smoke)
 set_tests_properties(test_bench_opcost_smoke PROPERTIES
   PASS_REGULAR_EXPRESSION "sink=")
@@ -1431,6 +1462,47 @@ if(STANLI_EMBED_OBJECT OR STANLI_PORTABLE_COMPILER)
                    -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/check_compiler_deployment.cmake)
 endif()
 
+# The BLAS provider the build was configured for, checked against what the
+# runtime reports and what the shipped library imports.
+if(STANLI_ACCELERATE)
+  set(STANLI_EXPECTED_BLAS accelerate)
+else()
+  set(STANLI_EXPECTED_BLAS none)
+endif()
+stanli_add_test(test_blas_backend)
+target_compile_definitions(test_blas_backend PRIVATE
+  STANLI_EXPECTED_BLAS="${STANLI_EXPECTED_BLAS}")
+if(NOT EMSCRIPTEN AND NOT WIN32)
+  add_test(NAME test_blas_link
+           COMMAND ${CMAKE_COMMAND}
+                   -DLIBRARY=$<TARGET_FILE:stanli_shared>
+                   -DEXPECTED=${STANLI_EXPECTED_BLAS}
+                   -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/check_blas_link.cmake)
+endif()
+# The model whose lowered program test_dense_blas inspects, compiled the way
+# the MIR fixtures are; outside tests/fixtures so that the fixture corpora do
+# not pick it up.
+set(STANLI_ACCELERATE_MODEL_MIR
+    "${CMAKE_CURRENT_BINARY_DIR}/accelerate/dense_model.mir")
+add_custom_command(
+  OUTPUT "${STANLI_ACCELERATE_MODEL_MIR}"
+  COMMAND ${STANLI_FIXTURE_PYTHON}
+          "${CMAKE_CURRENT_SOURCE_DIR}/tools/gen_fixtures.py"
+          --stanli-check $<TARGET_FILE:stanli_check>
+          --source-dir tests/accelerate
+          --output-dir "${CMAKE_CURRENT_BINARY_DIR}/accelerate"
+  DEPENDS ${_stanli_fixture_dependencies}
+          "${CMAKE_CURRENT_SOURCE_DIR}/tests/accelerate/dense_model.stan"
+  WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
+  COMMENT "Generating the accelerate test model's MIR"
+  VERBATIM)
+add_custom_target(stanli_accelerate_model_mir
+                  DEPENDS "${STANLI_ACCELERATE_MODEL_MIR}")
+add_dependencies(stanli_accelerate_model_mir stanli_check)
+stanli_add_test(test_dense_blas OPTIMIZED ARGS "${STANLI_ACCELERATE_MODEL_MIR}")
+add_dependencies(test_dense_blas stanli_accelerate_model_mir)
+list(APPEND STANLI_DEBUG_SWITCH_TESTS test_dense_blas)
+
 set(STANLI_TESTS
   test_execution_report test_json_writer test_rng
   test_executor test_recorder test_densities test_tile_calls
@@ -1509,6 +1581,23 @@ if(STANLI_FAST_TEST_TUS)
 endif()
 add_test(NAME test_capi COMMAND test_capi
          WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
+
+# Parallel chains with dense linear algebra, through the shipped library.
+# getrusage and the thread count are POSIX-only.
+if(NOT WIN32)
+  add_executable(test_blas_chains tests/test_blas_chains.cpp)
+  target_link_libraries(test_blas_chains PRIVATE stanli_shared Threads::Threads)
+  foreach(_model gp product)
+    foreach(_cores filled free)
+      set(_name test_blas_chains_${_model}_${_cores})
+      add_test(NAME ${_name} COMMAND test_blas_chains ${_model} ${_cores}
+               WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
+      set_tests_properties(${_name} PROPERTIES SKIP_RETURN_CODE 77)
+      list(APPEND STANLI_DEBUG_SWITCH_TESTS ${_name})
+      list(APPEND STANLI_DEBUG_SWITCH_ONLY_TESTS ${_name})
+    endforeach()
+  endforeach()
+endif()
 
 # The Laplace whitening builder, through the same boundary.
 add_executable(test_laplace_capi tests/test_laplace_capi.cpp)
@@ -1878,21 +1967,23 @@ if(Python3_Interpreter_FOUND)
   add_test(NAME test_stanc3_good_harness
            COMMAND ${Python3_EXECUTABLE} tests/test_stanc3_good.py
            WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
-  add_test(NAME test_fuzz_stanc_differential
-           COMMAND ${Python3_EXECUTABLE} tests/test_fuzz_stanc_differential.py
+  add_test(NAME test_interp_oracle
+           COMMAND ${Python3_EXECUTABLE} tools/check_interp.py
+                   --check $<TARGET_FILE:stanli_check> --jobs 4
            WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
-  foreach(_fuzz_test gen fuzz reduce nightly)
-    add_test(NAME test_fuzz_stanc_${_fuzz_test}
-             COMMAND ${Python3_EXECUTABLE} tests/test_fuzz_stanc_${_fuzz_test}.py
-             WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
-  endforeach()
+  set_tests_properties(test_interp_oracle PROPERTIES PROCESSORS 4 TIMEOUT 600)
+  add_test(NAME test_check_interp
+           COMMAND ${Python3_EXECUTABLE} tests/test_check_interp.py
+           WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
+  add_test(NAME test_interp_assign_shapes
+           COMMAND ${Python3_EXECUTABLE} tests/test_interp_assign_shapes.py
+                   $<TARGET_FILE:stanli_check>
+           WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
   foreach(_perturb_test scale ladder datavary)
     add_test(NAME test_perturb_${_perturb_test}
              COMMAND ${Python3_EXECUTABLE} tests/test_perturb_${_perturb_test}.py
              WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
   endforeach()
-  # test_generation_is_fast times the generator against a fixed budget.
-  set_tests_properties(test_fuzz_stanc_gen PROPERTIES RUN_SERIAL TRUE)
   # It picks the passes, so it needs the compiler executable.
   set(_stanli_compile
       "${CMAKE_CURRENT_SOURCE_DIR}/deps/stanc3/stanli-compile${CMAKE_EXECUTABLE_SUFFIX}")

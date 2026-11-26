@@ -51,13 +51,18 @@ python3 tools/perturb/causes.py SCALING_OUT DATAVALUES_OUT           # findings 
 1. **Validity.** Base and variant are compiled as the corpus benchmark does
    (the embedded compiler with loop vectorization on) and run in
    `stanli_check` at three points. An equivalent variant must give the
-   base's lp and gradient under `tools/fuzz_stanc/differential.py`'s rules
+   base's lp and gradient under the rules of `tools/check_compare.py`
    (relative 1e-10); other variants must give a finite lp and gradient.
    Differences in write_array, printed output or error wording do not count.
    Anything else is `invalid`, with the reason on one line, except that an
    equivalent variant whose lp and gradient are within 1e-7 relative of
    the base's is `near_equivalent` and goes on to the next stages with that
-   label. This stage
+   label. The variant also runs through `stanli_check --interp` on the
+   same MIR, without a gradient. When its lp or write_array rows differ
+   from the compiled path's, the variant gets the label `interp_differs`
+   and a line in the report; when the interpreter cannot run it, the label
+   is `interp_unchecked`. This catches a variant that the compiled path
+   gets wrong in the same way as its base. This stage
    takes about a second for 30 variants once the binaries are warm, so
    authors can use it as their check.
 2. **Structure.** For base and variant: op counts of the log-density and

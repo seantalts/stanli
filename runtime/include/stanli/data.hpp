@@ -5,6 +5,7 @@
 
 #include <cstdint>
 #include <map>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -64,6 +65,8 @@ class DataMap {
     e.r = std::move(v);
     m_[name] = std::move(e);
   }
+
+  void set(const std::string& name, Entry e) { m_[name] = std::move(e); }
 
   bool has(const std::string& name) const { return m_.count(name) > 0; }
   const Entry& at(const std::string& name) const {
@@ -155,6 +158,54 @@ inline void check_declared_dims(VarStage stage, const std::string& name,
   if (int_declared && !found.is_int)
     throw std::invalid_argument("int variable contained non-int values" +
                                 where + "; base type=int");
+}
+
+// The value data declared with `dims` is bound as, when that is not `given`
+// itself: the empty value of a declaration with no elements, which CmdStan
+// reads no elements for, so it may be left out or given any value with none;
+// the given values under the declared dims when the two differ only by
+// extents of 1; and a leaf of an array of tuples in array order, where
+// `reader_order()` gives each value's position in `given` (empty when the
+// orders agree). Empty also when `given` is missing or has the wrong number
+// of values: check_declared_dims reports those.
+template <class ReaderOrder>
+std::optional<DataMap::Entry> declared_shape_value(
+    std::vector<int64_t> dims, bool int_declared, const DataMap::Entry* given,
+    const ReaderOrder& reader_order) {
+  int64_t size = 1;
+  for (int64_t d : dims) size *= d;
+  DataMap::Entry out;
+  out.is_int = int_declared;
+  if (size == 0) {
+    out.dims = std::move(dims);
+    return out;
+  }
+  if (given == nullptr || !same_without_unit_extents(dims, given->dims) ||
+      given->r.size() != static_cast<size_t>(size) ||
+      (given->is_int && given->i.size() != static_cast<size_t>(size)))
+    return std::nullopt;
+  const std::vector<size_t> order = reader_order();
+  if (given->dims == dims && order.empty()) return std::nullopt;
+  out.is_int = given->is_int;
+  if (dims.empty()) {
+    if (given->is_int) {
+      out.i = {given->i[0]};
+      out.r = {static_cast<double>(given->i[0])};
+    } else {
+      out.r = {given->r[0]};
+    }
+    return out;
+  }
+  out.dims = std::move(dims);
+  if (given->is_int) {
+    out.i = given->i;
+    for (size_t k = 0; k < order.size(); ++k) out.i[k] = given->i[order[k]];
+    out.r.assign(out.i.begin(), out.i.end());
+  } else {
+    out.r = given->r;
+    for (size_t k = 0; k < order.size(); ++k) out.r[k] = given->r[order[k]];
+  }
+  return out;
 }
 
 }  // namespace stanli
