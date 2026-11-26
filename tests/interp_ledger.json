@@ -1,0 +1,226 @@
+{
+ "fixtures/intbcast": {
+  "cause": "Stan Math derivative inexact: the gradient of beta_neg_binomial_lcdf is about 2e-6 relative from its finite difference",
+  "state": "gradient_only"
+ },
+ "fixtures/ode_branch_returns": {
+  "cause": "solver tolerance: the ODE solver on doubles and on vars differ by about its tolerance",
+  "state": "solver_disagree"
+ },
+ "fixtures/ode_function_exits": {
+  "cause": "solver tolerance: the ODE solver on doubles and on vars differ by about its tolerance",
+  "state": "solver_disagree"
+ },
+ "fixtures/ode_integer_arithmetic": {
+  "cause": "solver tolerance: the ODE solver on doubles and on vars differ by about its tolerance",
+  "state": "solver_disagree"
+ },
+ "fixtures/ode_matrix_callback": {
+  "cause": "solver tolerance: the ODE solver on doubles and on vars differ by about its tolerance",
+  "state": "solver_disagree"
+ },
+ "fixtures/ode_matrix_callback_fallback": {
+  "cause": "solver tolerance: the ODE solver on doubles and on vars differ by about its tolerance",
+  "state": "solver_disagree"
+ },
+ "fixtures/ode_matrix_callback_flat": {
+  "cause": "solver tolerance: the ODE solver on doubles and on vars differ by about its tolerance",
+  "state": "solver_disagree"
+ },
+ "fixtures/ode_nested_callback": {
+  "cause": "solver tolerance: the ODE solver on doubles and on vars differ by about its tolerance",
+  "state": "solver_disagree"
+ },
+ "fixtures/ode_nested_callback_fallback": {
+  "cause": "solver tolerance: the ODE solver on doubles and on vars differ by about its tolerance",
+  "state": "solver_disagree"
+ },
+ "fixtures/ode_nested_for": {
+  "cause": "solver tolerance: the ODE solver on doubles and on vars differ by about its tolerance",
+  "state": "solver_disagree"
+ },
+ "fixtures/ode_runtime_for": {
+  "cause": "solver tolerance: the ODE solver on doubles and on vars differ by about its tolerance",
+  "state": "solver_disagree"
+ },
+ "fixtures/ode_runtime_index": {
+  "cause": "solver tolerance: the ODE solver on doubles and on vars differ by about its tolerance",
+  "state": "solver_disagree"
+ },
+ "fixtures/ode_structured_callback_branch": {
+  "cause": "solver tolerance: the ODE solver on doubles and on vars differ by about its tolerance",
+  "state": "solver_disagree"
+ },
+ "fixtures/odevariadic": {
+  "cause": "solver tolerance: the ODE solver on doubles and on vars differ by about its tolerance",
+  "state": "agree_1e-8"
+ },
+ "fixtures/structured_ragged_matvec_mismatch": {
+  "cause": "the compiled path finds the size error while it prepares the model and fails to load; the interpreter throws at every point",
+  "state": "compiled_refused"
+ },
+ "fixtures/view_island_flat_array": {
+  "cause": "compiled refuses: conditional arms of different logical views",
+  "state": "compiled_refused"
+ },
+ "fixtures/view_matrix_ternary_mismatch": {
+  "cause": "compiled refuses: conditional arms of different logical views",
+  "state": "compiled_refused"
+ },
+ "fixtures/viewc_append_col_matrix_vector_bad": {
+  "cause": "the compiled path finds the size error while it prepares the model and fails to load; the interpreter throws at every point",
+  "state": "compiled_refused"
+ },
+ "fixtures/viewc_append_col_mismatch": {
+  "cause": "the compiled path finds the size error while it prepares the model and fails to load; the interpreter throws at every point",
+  "state": "compiled_refused"
+ },
+ "fixtures/viewc_append_row_mismatch": {
+  "cause": "the compiled path finds the size error while it prepares the model and fails to load; the interpreter throws at every point",
+  "state": "compiled_refused"
+ },
+ "fixtures/viewc_append_row_row_matrix_bad": {
+  "cause": "the compiled path finds the size error while it prepares the model and fails to load; the interpreter throws at every point",
+  "state": "compiled_refused"
+ },
+ "fixtures/viewc_array_matrix_prefix_mismatch": {
+  "cause": "compiled refuses an assignment between different logical views; the interpreter does not check the shape of a[1, :, :] = b and runs",
+  "state": "compiled_refused"
+ },
+ "fixtures/viewc_array_matrix_single_index_transpose_mismatch": {
+  "cause": "the interpreter does not check the shape of a matrix assigned to an array element (a[1] = 3x2 into 2x3); CmdStan and the compiled path throw",
+  "state": "compiled_threw"
+ },
+ "fixtures/viewc_cholesky_zero_rect": {
+  "cause": "the compiled path finds the size error while it prepares the model and fails to load; the interpreter throws at every point",
+  "state": "compiled_refused"
+ },
+ "fixtures/viewc_column_assignment_mismatch": {
+  "cause": "the compiled path finds the size error while it prepares the model and fails to load; the interpreter throws at every point",
+  "state": "compiled_refused"
+ },
+ "fixtures/viewc_eigen_zero_rect": {
+  "cause": "the compiled path finds the size error while it prepares the model and fails to load; the interpreter throws at every point",
+  "state": "compiled_refused"
+ },
+ "fixtures/viewc_negative_range_assignment_mismatch": {
+  "cause": "the compiled path finds the size error while it prepares the model and fails to load; the interpreter throws at every point",
+  "state": "compiled_refused"
+ },
+ "fixtures/viewc_row_broadcast_program": {
+  "cause": "compiled refuses: runtime-control region, its add operands have different sizes",
+  "state": "compiled_refused"
+ },
+ "fixtures/viewc_to_matrix_mismatch": {
+  "cause": "the compiled path finds the size error while it prepares the model and fails to load; the interpreter throws at every point",
+  "state": "compiled_refused"
+ },
+ "fixtures/viewc_vec_broadcast_program": {
+  "cause": "compiled refuses: runtime-control region, its add operands have different sizes",
+  "state": "compiled_refused"
+ },
+ "fixtures/wapar_both_error": {
+  "cause": "the compiled path finds the size error while it prepares the model and fails to load; the interpreter throws at every point",
+  "state": "compiled_refused"
+ },
+ "fixtures/wapar_lp_error": {
+  "cause": "the compiled path finds the size error while it prepares the model and fails to load; the interpreter throws at every point",
+  "state": "compiled_refused"
+ },
+ "fixtures/zero_size_kernels": {
+  "cause": "solver tolerance: the ODE, DAE and algebra solvers on doubles and on vars differ by about their tolerance",
+  "state": "agree_1e-8"
+ },
+ "lit/function_returns/container_return_empty_first": {
+  "cause": "compiled refuses: runtime-control region, a function result of different sizes under a condition on a parameter",
+  "state": "compiled_refused"
+ },
+ "lit/function_returns/container_return_size_differs": {
+  "cause": "compiled refuses: runtime-control region, a function result of different sizes under a condition on a parameter",
+  "state": "compiled_refused"
+ },
+ "lit/function_returns/container_return_size_differs_in_loop": {
+  "cause": "compiled refuses: runtime-control region, a function result of different sizes under a condition on a parameter",
+  "state": "compiled_refused"
+ },
+ "lit/function_returns/inlined_return_size_differs": {
+  "cause": "compiled refuses: runtime-control region, a function result of different sizes under a condition on a parameter",
+  "state": "compiled_refused"
+ },
+ "lit/indexing/assign_uni_range_model": {
+  "cause": "the compiled path finds the size error while it prepares the model and fails to load; the interpreter throws at every point",
+  "state": "compiled_refused"
+ },
+ "lit/indexing/range_model_vector_assign_upfrom_past_end": {
+  "cause": "the compiled path finds the size error while it prepares the model and fails to load; the interpreter throws at every point",
+  "state": "compiled_refused"
+ },
+ "lit/indexing/range_retained_loop_upfrom_past_end": {
+  "cause": "compiled-path message wording: structured index out of range",
+  "state": "message_same_class"
+ },
+ "lit/indexing/uninitialized_int_index": {
+  "cause": "the compiled path finds the size error while it prepares the model and fails to load; the interpreter throws at every point",
+  "state": "compiled_refused"
+ },
+ "lit/library_functions/csr_extract_w_parameter": {
+  "cause": "compiled refuses csr_extract_w of a parameter matrix",
+  "state": "compiled_refused"
+ },
+ "lit/messages/complex_data": {
+  "cause": "both refuse complex numbers, with different messages",
+  "state": "both_unsupported"
+ },
+ "lit/messages/complex_local": {
+  "cause": "both refuse complex numbers: the compiled path at load, the interpreter at every point (no to_complex)",
+  "state": "compiled_refused"
+ },
+ "lit/messages/negative_dimension_model": {
+  "cause": "the compiled path finds the size error while it prepares the model and fails to load; the interpreter throws at every point",
+  "state": "compiled_refused"
+ },
+ "lit/passes/array_vector_index_oob": {
+  "cause": "the compiled path finds the size error while it prepares the model and fails to load; the interpreter throws at every point",
+  "state": "compiled_refused"
+ },
+ "lit/passes/matrix_cell_write_oob": {
+  "cause": "the compiled path finds the size error while it prepares the model and fails to load; the interpreter throws at every point",
+  "state": "compiled_refused"
+ },
+ "lit/passes/reject_before_vectorized_density": {
+  "cause": "vectorize_loops moves the density before the reject, so the shipping MIR throws the density's error and the --passes none MIR reaches the reject",
+  "state": "message_same_class"
+ },
+ "lit/regions/carried_int_chain_sizes_vector_in_while": {
+  "cause": "compiled refuses: runtime-control region, an integer size that is not known at compile time",
+  "state": "compiled_refused"
+ },
+ "lit/runtime_control/zero_size_local_second_size_never_runs": {
+  "cause": "compiled refuses: runtime-control region, a local of different sizes under a condition on a parameter",
+  "state": "compiled_refused"
+ },
+ "lit/runtime_control/zero_size_local_sequential_mismatch": {
+  "cause": "compiled refuses: runtime-control region, a local of different sizes under a condition on a parameter",
+  "state": "compiled_refused"
+ },
+ "lit/runtime_control/zero_size_local_sized_in_earlier_branch": {
+  "cause": "compiled refuses: runtime-control region, a local of different sizes under a condition on a parameter",
+  "state": "compiled_refused"
+ },
+ "lit/runtime_control/zero_size_local_takes_two_sizes": {
+  "cause": "compiled refuses: runtime-control region, a local of different sizes under a condition on a parameter",
+  "state": "compiled_refused"
+ },
+ "lit/runtime_control/zero_size_local_untaken_branch": {
+  "cause": "compiled refuses at run time a local whose size depends on a branch on parameters",
+  "state": "compiled_threw"
+ },
+ "lit/transforms/lb_free_below_bound": {
+  "cause": "compiled-path message wording: lb_free names the variable without [1]",
+  "state": "message_same_class"
+ },
+ "lit/while_sizes/unbounded_counter_size": {
+  "cause": "the compiled path refuses the size; the interpreter runs the while loop until the int overflows, which takes minutes",
+  "state": "interp_timeout"
+ }
+}

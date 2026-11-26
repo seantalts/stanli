@@ -1837,6 +1837,14 @@ if(Python3_Interpreter_FOUND)
   add_test(NAME test_stanc3_good_harness
            COMMAND ${Python3_EXECUTABLE} tests/test_stanc3_good.py
            WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
+  add_test(NAME test_interp_oracle
+           COMMAND ${Python3_EXECUTABLE} tools/check_interp.py
+                   --check $<TARGET_FILE:stanli_check> --jobs 4
+           WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
+  set_tests_properties(test_interp_oracle PROPERTIES PROCESSORS 4 TIMEOUT 600)
+  add_test(NAME test_check_interp
+           COMMAND ${Python3_EXECUTABLE} tests/test_check_interp.py
+           WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
   add_test(NAME test_fuzz_stanc_differential
            COMMAND ${Python3_EXECUTABLE} tests/test_fuzz_stanc_differential.py
            WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
