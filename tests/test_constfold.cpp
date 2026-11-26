@@ -248,6 +248,43 @@ static void test_one_throw_keeps_the_rest() {
   expect("the folded sum carries 2+3", have_fill);
 }
 
+// p .* c with c = [2, 2, 2] reads one scalar 2; [2, 3, 2] stays a vector, and
+// so does a uniform vector that would have to give the result its length.
+static void test_scalarizes_uniform_constant() {
+  for (const bool is_uniform : {true, false}) {
+    Graph g;
+    Fills fills;
+    const int p = g.add_slot(3, true);
+    const int c = g.add_slot(3, false);
+    fills.emplace_back(c,
+                       std::vector<double>{2.0, is_uniform ? 2.0 : 3.0, 2.0});
+    const int m = g.add_slot(3, false);
+    g.add_op(OP_MUL, {p, c}, m);
+    const int s = g.add_slot(1, false);
+    g.add_op(OP_SUM_VEC, {m}, s);
+    g.result_slot = s;
+    Graph ref = g;
+    const std::vector<double> want = run_grad(std::move(ref), fills);
+    const int replaced = scalarize_uniform_constants(g, fills);
+    expect("uniform operand replaced", replaced == (is_uniform ? 1 : 0));
+    expect("operand length",
+           g.slots[(size_t)g.ops[0].in[1]].len == (is_uniform ? 1 : 3));
+    const std::vector<double> got = run_grad(std::move(g), fills);
+    expect("same outputs", got.size() == want.size());
+    for (size_t i = 0; i < want.size() && i < got.size(); ++i)
+      expect("scalarized value and gradient", got[i] == want[i]);
+  }
+  Graph g;
+  Fills fills;
+  const int p = g.add_slot(1, true);
+  const int c = g.add_slot(3, false);
+  fills.emplace_back(c, std::vector<double>{2.0, 2.0, 2.0});
+  const int m = g.add_slot(3, false);
+  g.add_op(OP_MUL, {p, c}, m);
+  expect("a uniform vector beside a scalar stays",
+         scalarize_uniform_constants(g, fills) == 0);
+}
+
 int main() {
   {  // kernels register through the first Executor
     Graph g;
@@ -264,6 +301,7 @@ int main() {
   test_env_disable();
   test_known_outputs();
   test_one_throw_keeps_the_rest();
+  test_scalarizes_uniform_constant();
   if (failures == 0) std::printf("test_constfold OK\n");
   return failures == 0 ? 0 : 1;
 }
