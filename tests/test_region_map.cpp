@@ -28,6 +28,7 @@
 #include <set>
 #include <sstream>
 #include <string>
+#include <thread>
 #include <utility>
 #include <vector>
 
@@ -2286,6 +2287,35 @@ void test_lane_affine_index_reads() {
   }
 }
 
+// The run counters belong to the thread that runs the lanes: chains on
+// other threads neither see nor write the caller's counts, so the hot path
+// shares no cache line between them.
+void test_lane_counters_per_thread() {
+  CompiledModel cm = compile_with("region_map_density", 200);
+  check(map_payload(cm).lanes.active && map_payload(cm).lanes.tile_calls > 0,
+        "counters: the fixture runs lanes with a tile call");
+  const uint64_t lanes = stanli::region_map_lane_runs();
+  const uint64_t tiles = stanli::region_map_tile_call_runs();
+  uint64_t lanes_there = 0, tiles_there = 0;
+  std::thread other([&]() {
+    Executor ex(cm.graph);
+    cm.bind(ex);
+    evaluate(ex, spread_point(1, (size_t)ex.n_params()));
+    lanes_there = stanli::region_map_lane_runs();
+    tiles_there = stanli::region_map_tile_call_runs();
+  });
+  other.join();
+  check(lanes_there > 0 && tiles_there > 0,
+        "counters: the other thread counts its own runs");
+  check(stanli::region_map_lane_runs() == lanes &&
+            stanli::region_map_tile_call_runs() == tiles,
+        "counters: this thread's counts are unchanged (" +
+            std::to_string(stanli::region_map_lane_runs() - lanes) +
+            " lane runs, " +
+            std::to_string(stanli::region_map_tile_call_runs() - tiles) +
+            " tile calls)");
+}
+
 void test_out_register_is_not_hoisted() {
   const std::string minimal =
       "parameters { real p; }\n"
@@ -3687,6 +3717,7 @@ int main() {
   test_out_register_is_not_hoisted();
   test_lane_index_adjoint_sites();
   test_lane_affine_index_reads();
+  test_lane_counters_per_thread();
 #endif
   test_mode_policy();
   test_recompute_visits_taken_blocks();

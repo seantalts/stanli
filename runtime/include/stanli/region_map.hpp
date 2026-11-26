@@ -152,6 +152,7 @@ struct RegionMapProg : IslandProg {
 void plan_region_map_lanes(RegionMapProg& p, bool enabled,
                            int64_t storage_limit);
 
+// Counts of the calling thread.
 uint64_t region_map_lane_runs();
 
 uint64_t region_map_tile_call_runs();

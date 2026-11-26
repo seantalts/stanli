@@ -9,7 +9,6 @@
 
 #include <algorithm>
 #include <limits>
-#include <atomic>
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
@@ -1492,7 +1491,8 @@ class TileState {
   bool proven_ = false;
 };
 
-std::atomic<uint64_t> tile_call_runs{0};
+// Per thread, so that chains running at once share no counter.
+thread_local uint64_t tile_call_runs = 0;
 
 constexpr int kTileCallColumns = 20;
 
@@ -1576,7 +1576,7 @@ bool tile_call_forward(const RegionMapLanePlan::CallWindow& w,
         dst[lanes.idx[i]] = scratch[(size_t)c * n + i];
     }
   }
-  tile_call_runs.fetch_add(1, std::memory_order_relaxed);
+  ++tile_call_runs;
   return true;
 }
 
@@ -2531,7 +2531,7 @@ void lane_adjoint_instruction(const RegionMapProg& p, AdjointTile& t, int pc,
   }
 }
 
-std::atomic<uint64_t> lane_runs{0};
+thread_local uint64_t lane_runs = 0;
 
 void merge_tally(RegionMapProfile& profile, const RegionMapTally& tally) {
   std::lock_guard<std::mutex> lock(profile.mu);
@@ -2663,19 +2663,13 @@ std::string region_map_call_summary(const RegionMapProg& p) {
   return out;
 }
 
-uint64_t region_map_tile_call_runs() {
-  return tile_call_runs.load(std::memory_order_relaxed);
-}
+uint64_t region_map_tile_call_runs() { return tile_call_runs; }
 
-std::atomic<uint64_t> proven_runs{0};
+thread_local uint64_t proven_runs = 0;
 
-uint64_t region_map_proven_runs() {
-  return proven_runs.load(std::memory_order_relaxed);
-}
+uint64_t region_map_proven_runs() { return proven_runs; }
 
-uint64_t region_map_lane_runs() {
-  return lane_runs.load(std::memory_order_relaxed);
-}
+uint64_t region_map_lane_runs() { return lane_runs; }
 
 // Doubles per 64 bytes. The lane region starts on that boundary, so that
 // its rows load the same way whatever the register count before it.
@@ -2724,8 +2718,8 @@ static TileState seeded_tile(const RegionMapProg& p, double* reg, double* base,
 
 void region_map_lanes_forward(const RegionMapProg& p, KernelCtx& ctx,
                               double* region, bool proven) {
-  lane_runs.fetch_add(1, std::memory_order_relaxed);
-  if (proven) proven_runs.fetch_add(1, std::memory_order_relaxed);
+  ++lane_runs;
+  if (proven) ++proven_runs;
   const auto& plan = p.lanes;
   double* tiles = region;
   double* window = region + plan.storage;
