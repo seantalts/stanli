@@ -288,8 +288,11 @@ read_utf8_file <- function(path) {
 #' @param parallel_blas `TRUE` lets this model's large dense operations, which
 #'   the macOS runtime on Apple silicon runs through Apple's Accelerate on
 #'   macOS 15 or later, use Accelerate's own threads while the chains that run
-#'   in parallel leave cores free. With it on, results can differ in the last
-#'   digits from one run to the next. Defaults to `FALSE`, which runs each
+#'   in parallel leave cores free. With it on, results can differ from the
+#'   default in rounding, by up to about 6e-15 relative in each operation
+#'   that we measured. Models that use `multi_normal` with a covariance
+#'   matrix can also give wrong results, because Accelerate's threaded matrix
+#'   inverse (`dpotri`) sometimes returns a wrong answer. Defaults to `FALSE`, which runs each
 #'   such operation on one thread with the same result in every run.
 #'   Elsewhere it does nothing.
 #' @return An object of class `stanli_model` whose `columns` name every

@@ -96,7 +96,10 @@ int stanli_has_embedded_stanc(void);
  * threads while the chains that run in parallel leave cores free: twice the
  * number of parallel chains at most the number of performance cores. A
  * single gradient outside a sampler counts as one chain. Results can then
- * differ in the last digits from one run to the next. 0, the default, runs
+ * differ from the default in rounding, by up to about 6e-15 relative in
+ * each operation that we measured, and models that use multi_normal with a
+ * covariance matrix can give wrong results, because Accelerate's threaded
+ * dpotri sometimes returns a wrong inverse. 0, the default, runs
  * every such operation on the calling thread alone, with the same result in
  * every run. Accepted everywhere; it does nothing where no operation is
  * accelerated. */

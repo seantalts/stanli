@@ -78,9 +78,10 @@ class ParallelChainsScope {
 // Sets the calling thread's BLASSetThreading mode for one accelerated call,
 // by blas_may_thread, then restores the thread's previous setting, so that a
 // host such as numpy on the same thread keeps its own. Every accelerated
-// BLAS and LAPACK call runs inside one. Left to choose its own threads,
-// Accelerate split a large factorization differently under load and changed
-// results from one process to the next (tests/test_blas_determinism).
+// BLAS and LAPACK call runs inside one. With its own threads, Accelerate's
+// dpotri (through dlauum) sometimes returns a wrong inverse, so the same
+// gradient gave different results in different processes
+// (tests/test_blas_determinism).
 // Needs BLASSetThreading; elsewhere it does nothing.
 class BlasCallThreads {
  public:

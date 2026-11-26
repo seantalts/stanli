@@ -256,7 +256,7 @@ void check_model(const char* name, const char* code, const std::string& data,
            par.max_threads > before + 1 + C);
 #endif
   // With parallel_blas on, a chain alone has the cores free and may get
-  // Accelerate's threads, whose results can differ in the last digits.
+  // Accelerate's threads, whose results can differ from the default.
   if (mode != Mode::Default) {
     stanli_model_free(m);
     return;
