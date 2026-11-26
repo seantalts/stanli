@@ -501,6 +501,14 @@ class MirInterp {
             fail("full-span assignment needs a container", st.raw);
           if (assign_shape_.count(st.lhs))
             check_assign_size(st.lhs, en->dims, v);
+          // stan::model::assign checks sizes only against a destination
+          // with elements; an empty one takes the right-hand side's size.
+          if (en->r.empty() && en->i.empty() && !v.r.empty()) {
+            if (v.dims.empty())
+              v.dims = {static_cast<int64_t>(v.r.size())};
+            en->dims = v.dims;
+            en->r.resize(v.r.size());
+          }
           if (v.r.size() != en->r.size())
             fail("full-span assignment size mismatch", st.raw);
           if (v.dims != en->dims)
