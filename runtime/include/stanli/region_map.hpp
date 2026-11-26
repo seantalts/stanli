@@ -122,6 +122,9 @@ struct RegionMapLanePlan {
   // only clears its output, because no parameter reaches the container
   // (adj_drop), or adds straight into the container, because no other
   // instruction logs a site into its cells (adj_direct).
+  // Per live-in: the first of its adjoint cells when they are consecutive,
+  // else -1. The backward then clears, seeds and harvests them as runs.
+  std::vector<int32_t> live_in_cells;
   std::vector<char> adj_drop;
   std::vector<char> adj_direct;
   std::vector<int> segment_block;

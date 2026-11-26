@@ -2350,6 +2350,24 @@ void test_lane_evaluation_allocates_nothing() {
   }
 }
 
+// The adjoint cells of a vector live-in are consecutive, so the lane
+// backward clears, seeds and harvests them as runs.
+void test_lane_live_in_cells_are_runs() {
+  for (const char* stem : {"region_map_density", "region_map_branch"}) {
+    CompiledModel cm = compile_with(stem, 200);
+    const auto& p = map_payload(cm);
+    check(p.lanes.active, std::string(stem) + ": lanes run");
+    check(p.lanes.live_in_cells.size() == p.ins.size(),
+          std::string(stem) + ": a cell run per live-in (" +
+              std::to_string(p.lanes.live_in_cells.size()) + " of " +
+              std::to_string(p.ins.size()) + ")");
+    int runs = 0;
+    for (size_t k = 0; k < p.lanes.live_in_cells.size(); ++k)
+      runs += p.lanes.live_in_cells[k] >= 0 && p.ins[k].len > 1;
+    check(runs > 0, std::string(stem) + ": the vector live-ins are runs");
+  }
+}
+
 void test_out_register_is_not_hoisted() {
   const std::string minimal =
       "parameters { real p; }\n"
@@ -3753,6 +3771,7 @@ int main() {
   test_lane_affine_index_reads();
   test_lane_counters_per_thread();
   test_lane_evaluation_allocates_nothing();
+  test_lane_live_in_cells_are_runs();
 #endif
   test_mode_policy();
   test_recompute_visits_taken_blocks();

@@ -608,6 +608,16 @@ class Analysis {
     plan_.cell_slot.assign((size_t)n_cells_, -1);
     for (int c = 0; c < n_cells_; ++c)
       if (!shared[(size_t)c]) plan_.cell_slot[(size_t)c] = 0;
+    plan_.live_in_cells.assign(p_.ins.size(), -1);
+    for (size_t k = 0; k < p_.ins.size(); ++k) {
+      const auto& li = p_.ins[k];
+      if (li.len <= 0) continue;
+      const int32_t first = map[(size_t)li.reg];
+      bool run = first >= 0;
+      for (int i = 1; i < li.len && run; ++i)
+        run = map[(size_t)(li.reg + i)] == first + i;
+      if (run) plan_.live_in_cells[k] = first;
+    }
     const int32_t target = map[(size_t)p_.out_regs[0]];
     if (target < 0 || target >= n_cells_ || shared_cell(target))
       refuse("target cell is shared");
