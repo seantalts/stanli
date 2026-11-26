@@ -11,7 +11,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: libfuzzer-nightly
+  group: fuzz-nightly
   cancel-in-progress: false
 
 jobs:
