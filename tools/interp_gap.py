@@ -1,13 +1,19 @@
 #!/usr/bin/env python3
 """How far is `stanli_check --interp` from the compiled path?
 
-For each model this emits the shipping MIR once (and the `--passes none`
-MIR), then runs stanli_check on it twice at the same points: once through
-the compiled path and once with --interp, which runs the whole model through
-the MIR interpreter. It compares lp, the gradient and the write_array row,
-and writes one JSON file per corpus plus a table.
+For each model this emits the shipping MIR, then runs stanli_check at the
+same points twice: once through the compiled path and once with --interp,
+which runs the whole model through the MIR interpreter on doubles with a
+finite-difference gradient. It compares lp, the gradient (within the error
+the interpreter estimates for it), the write_array row, the printed output
+and the error messages, and writes one JSON file per corpus plus a table.
 
-    tools/interp_gap.py --out DIR [--corpus NAME ...] [--jobs N]
+With --interp-o0 the interpreter reads the `--passes none` MIR instead.
+Where that disagrees with the compiled path, the interpreter runs again on
+the shipping MIR: agreement there puts the difference in a stanc3 pass, and
+disagreement in the runtime.
+
+    tools/interp_gap.py --out DIR [--corpus NAME ...] [--jobs N] [--interp-o0]
 
 NAME is fixtures, lit, stanc3_good, posteriordb, brms, rethinking, cogmod,
 other_local (the remaining tests/ collections), or dir:PATH for every
@@ -34,10 +40,17 @@ sys.path.insert(0, str(REPO / "tools"))
 sys.path.insert(0, str(REPO / "tools" / "fuzz_stanc"))
 from corpus_inventory import corpus_cases, materialize_data  # noqa: E402
 import check_stanc3_good as good  # noqa: E402
+import check_status  # noqa: E402
+from differential import printed_lines  # noqa: E402
 
 POINTS = "0,1,2"
 TOLS = (1e-10, 1e-8)
 ABS_TOL = 1e-12
+# A gradient component agrees when |compiled - interp| is within
+# GRAD_ERR_FACTOR times the interpreter's error estimate plus
+# GRAD_REL_TOL * max(1, |compiled|).
+GRAD_ERR_FACTOR = 10.0
+GRAD_REL_TOL = 1e-6
 
 
 def close(a, b, rel):
@@ -145,8 +158,22 @@ def run(argv, timeout):
     return p.returncode, out, err, time.perf_counter() - t
 
 
-def summarize(proc):
+def grad_errors(out):
+    """{point: [error, ...]} from the GRAD_ERR lines of --interp."""
+    errs, current = {}, "pre"
+    for line in out.splitlines():
+        head, _, tail = line.partition(" ")
+        if head == "POINT" and tail.strip().isdigit():
+            current = str(int(tail))
+        elif head == "GRAD_ERR":
+            errs[current] = tail.split()
+    return errs
+
+
+def summarize(proc, status_path=None):
     code, out, err, wall = proc
+    records = check_status.read(status_path) if status_path else \
+        check_status.CheckStatus()
     if code is None:
         return {"state": "timeout", "wall": wall}
     if code == "rss":
@@ -156,13 +183,18 @@ def summarize(proc):
     pre = parsed["pre"]
     res = {"wall": wall, "code": code}
     if pre and pre[0] == "COMPILE_FAIL":
-        res.update(state="compile_fail", message=pre[1][:300])
+        res.update(state="compile_fail", message=pre[1][:300],
+                   error=(records.compile or {}).get("error"))
         return res
     if not parsed["points"] or code not in (0, 1):
         tail = (err or out).strip().splitlines()[-1:] or [f"exit {code}"]
         res.update(state="crash", message=tail[0][:300])
         return res
     pts = {}
+    errs = grad_errors(out)
+    prints = printed_lines(out)
+    res["prints"] = {str(k): [x for x in v if not x.startswith("GRAD_ERR")]
+                     for k, v in prints.items()}
     for k, sec in parsed["points"].items():
         st = sec["status"]
         p = {}
@@ -172,34 +204,86 @@ def summarize(proc):
             p["status"] = "ok"
             p["lp"] = st[1][0]
             p["grad"] = st[1][1:]
+            if str(k) in errs:
+                p["grad_err"] = errs[str(k)]
         else:
             p["status"] = "threw"
             p["message"] = st[1][:300]
+            p["error"] = records.points.get(k, {}).get("error")
         wa = sec["wa"]
         if wa and wa[0] == "ok":
             p["wa"] = {"names": wa[1], "values": wa[2]}
         elif wa:
-            p["wa"] = {"threw": wa[1][:300]}
+            p["wa"] = {"threw": wa[1][:300], "error": (
+                records.points.get(k, {}).get("write_array") or {}).get(
+                    "error")}
         pts[str(k)] = p
     res.update(state="points", points=pts)
-    ms = re.findall(r"INTERP_TIME point \d+ lp_ms ([\d.]+) wa_ms ([\d.]+)", err)
+    ms = re.findall(r"INTERP_TIME point \d+ lp_ms ([\d.]+) grad_ms ([\d.]+) "
+                    r"wa_ms ([\d.]+)", err)
     if ms:
-        res["lp_ms"] = [float(a) for a, _ in ms]
-        res["wa_ms"] = [float(b) for _, b in ms]
+        res["lp_ms"] = [float(a) for a, _, _ in ms]
+        res["grad_ms"] = [float(b) for _, b, _ in ms]
+        res["wa_ms"] = [float(c) for _, _, c in ms]
     m = re.search(r"INTERP_TIME prepare_ms ([\d.]+)", err)
     if m:
         res["prepare_ms"] = float(m.group(1))
     return res
 
 
+def message_verdict(cm, im, ce, ie):
+    """identical, same_class (the same exception class) or differ."""
+    if cm == im:
+        return "identical"
+    if ce and ce == ie:
+        return "same_class"
+    return "differ"
+
+
+def grad_check(cg, ig, ierr):
+    """(worst ratio of |difference| to the tolerance, unchecked count).
+
+    Without error estimates (an older stanli_check) the tolerance is
+    relative, as for lp."""
+    worst, unchecked = 0.0, 0
+    for k, (a, b) in enumerate(zip(cg, ig)):
+        a, b = float(a), float(b)
+        e = float(ierr[k]) if ierr is not None and k < len(ierr) else None
+        if e is not None and not math.isfinite(e):
+            unchecked += 1
+            continue
+        if math.isnan(a) and math.isnan(b) or a == b:
+            continue
+        if not (math.isfinite(a) and math.isfinite(b)):
+            return math.inf, unchecked
+        if e is None:
+            tol = max(ABS_TOL, TOLS[0] * max(abs(a), abs(b)))
+        else:
+            tol = GRAD_ERR_FACTOR * e + GRAD_REL_TOL * max(1.0, abs(a))
+        worst = max(worst, abs(a - b) / tol)
+    return worst, unchecked
+
+
 def compare(c, i):
-    """Per quantity verdicts: agree_1e-10, agree_1e-8, disagree, or n/a."""
+    """Per quantity verdicts.
+
+    lp and wa: agree_1e-10, agree_1e-8, disagree or n/a. grad: agree when
+    every checked component is within the tolerance GRAD_ERR gives, else
+    disagree. messages: identical, same_class or differ, over the failures
+    both sides share. output: same or differ, over the printed lines."""
     v = {}
+    if c["state"] == "compile_fail" and i["state"] == "compile_fail":
+        return {"messages": message_verdict(c["message"], i["message"],
+                                             c.get("error"), i.get("error")),
+                "notes": [] if c["message"] == i["message"] else [
+                    "compile: compiled %s / interp %s" % (
+                        c["message"][:120], i["message"][:120])]}
     if c["state"] != "points" or i["state"] != "points":
         return v
     lp_w, g_w, wa_w = [], [], []
     shape = []
-    both_threw = one_threw = 0
+    msgs = []
+    both_threw = one_threw = unchecked = 0
     for k, cp in c["points"].items():
         ip = i["points"].get(k, {"status": "none"})
         if cp["status"] == "ok" and ip["status"] == "ok":
@@ -208,7 +292,9 @@ def compare(c, i):
                 shape.append(f"grad width {len(cp['grad'])} vs {len(ip['grad'])}")
                 g_w.append(math.inf)
             else:
-                g_w.append(worst_rel(cp["grad"], ip["grad"]))
+                w, u = grad_check(cp["grad"], ip["grad"], ip.get("grad_err"))
+                g_w.append(w)
+                unchecked += u
             cw, iw = cp.get("wa"), ip.get("wa")
             # No write_array line and an empty row both mean no columns.
             if cw is None and iw and iw.get("names") == []:
@@ -223,7 +309,12 @@ def compare(c, i):
                     wa_w.append(worst_rel(cw["values"], iw["values"]))
             elif cw or iw:
                 if (cw or {}).get("threw") and (iw or {}).get("threw"):
-                    pass
+                    m = message_verdict(cw["threw"], iw["threw"],
+                                        cw.get("error"), iw.get("error"))
+                    msgs.append(m)
+                    if m != "identical":
+                        shape.append("point %s wa: compiled %s / interp %s" % (
+                            k, cw["threw"][:120], iw["threw"][:120]))
                 else:
                     wa_w.append(math.inf)
                     shape.append("wa only one side: compiled=%s interp=%s" % (
@@ -231,10 +322,24 @@ def compare(c, i):
                         "row" if iw and "names" in iw else (iw or {}).get("threw")))
         elif cp["status"] == "threw" and ip["status"] == "threw":
             both_threw += 1
+            m = message_verdict(cp["message"], ip["message"], cp.get("error"),
+                                ip.get("error"))
+            msgs.append(m)
+            if m != "identical":
+                shape.append("point %s: compiled %s / interp %s" % (
+                    k, cp["message"][:120], ip["message"][:120]))
         else:
             one_threw += 1
             shape.append("point %s: compiled %s / interp %s" % (
                 k, cp.get("message", cp["status"]), ip.get("message", ip["status"])))
+    cpr, ipr = c.get("prints", {}), i.get("prints", {})
+    output = "same" if cpr == ipr else "differ"
+    if output == "differ":
+        for key in sorted(set(cpr) | set(ipr)):
+            if cpr.get(key) != ipr.get(key):
+                shape.append("output %s: compiled %s / interp %s" % (
+                    key, (cpr.get(key) or [])[:2], (ipr.get(key) or [])[:2]))
+                break
 
     def verdict(ws):
         if not ws:
@@ -245,16 +350,33 @@ def compare(c, i):
         if w <= TOLS[1]:
             return "agree_1e-8"
         return "disagree"
-    v = {"lp": verdict(lp_w), "grad": verdict(g_w), "wa": verdict(wa_w),
+    order = ("identical", "same_class", "differ")
+    v = {"lp": verdict(lp_w), "wa": verdict(wa_w),
+         "grad": "n/a" if not g_w else ("agree" if max(g_w) <= 1 else
+                                        "disagree"),
+         "messages": max(msgs, key=order.index) if msgs else "n/a",
+         "output": output,
          "lp_worst": max(lp_w) if lp_w else None,
          "grad_worst": max(g_w) if g_w else None,
+         "grad_unchecked": unchecked,
          "wa_worst": max(wa_w) if wa_w else None,
          "points_both_threw": both_threw, "points_one_threw": one_threw,
          "notes": shape[:4]}
     return v
 
 
-def one(case, check, tmp, timeout):
+def agrees(v, loose=False):
+    """Do two sides agree on everything compare() looks at?"""
+    vals = ("agree_1e-10", "agree_1e-8", "n/a") if loose else (
+        "agree_1e-10", "n/a")
+    return (not v.get("points_one_threw") and v.get("lp", "n/a") in vals
+            and v.get("wa", "n/a") in vals
+            and v.get("grad", "n/a") in ("agree", "n/a")
+            and v.get("messages", "n/a") in ("identical", "n/a")
+            and v.get("output", "same") == "same")
+
+
+def one(case, check, tmp, timeout, interp_o0=False):
     group, name, stan, data = case
     safe = re.sub(r"[^A-Za-z0-9_.-]", "_", f"{group}_{name}")
     mir = tmp / f"{safe}.mir"
@@ -266,17 +388,28 @@ def one(case, check, tmp, timeout):
         rec["message"] = (e[2] or e[1]).strip().splitlines()[:1]
         return rec
     mir.write_text(e[1])
-    e0 = run([check, "--emit-mir", stan, "--passes", "none"], timeout)
-    if e0[0] == 0:
-        mir0.write_text(e0[1])
     base = [check, stan, data, "--points", POINTS, "--wa-values"]
-    rec["compiled"] = summarize(run(base + ["--mir", mir], timeout))
-    rec["interp"] = summarize(run(base + ["--mir", mir, "--interp"], timeout))
+
+    def side(tag, mir_path, extra):
+        status = tmp / f"{safe}.{tag}.status.jsonl"
+        status.unlink(missing_ok=True)
+        return summarize(run(base + ["--mir", mir_path, "--status-json", status]
+                             + extra, timeout), status)
+    rec["compiled"] = side("compiled", mir, [])
+    interp_mir = mir
+    if interp_o0:
+        e0 = run([check, "--emit-mir", stan, "--passes", "none"], timeout)
+        if e0[0] == 0:
+            mir0.write_text(e0[1])
+            interp_mir = mir0
+            rec["interp_mir"] = "none"
+    rec["interp"] = side("interp", interp_mir, ["--interp"])
     rec["cmp"] = compare(rec["compiled"], rec["interp"])
-    if e0[0] == 0:
-        rec["interp_o0"] = summarize(run(base + ["--mir", mir0, "--interp"],
-                                         timeout))
-        rec["cmp_o0"] = compare(rec["compiled"], rec["interp_o0"])
+    if interp_mir is mir0 and not agrees(rec["cmp"], loose=True):
+        rec["interp_shipping"] = side("interp_shipping", mir, ["--interp"])
+        rec["cmp_shipping"] = compare(rec["compiled"], rec["interp_shipping"])
+        rec["blame"] = ("stanc3_pass" if agrees(rec["cmp_shipping"], loose=True)
+                        else "runtime")
     rec["state"] = classify(rec)
     return rec
 
@@ -294,6 +427,8 @@ def first_fail(side):
 
 def classify(rec):
     c, i, v = rec["compiled"], rec["interp"], rec["cmp"]
+    if c["state"] == "compile_fail" and i["state"] == "compile_fail":
+        return "both_compile_fail_" + v["messages"]
     if c["state"] != "points":
         return "compiled_refused" if i["state"] == "points" else "both_refused"
     if i["state"] != "points":
@@ -306,14 +441,18 @@ def classify(rec):
         if cfail and not ifail:
             return "compiled_threw"
         return "one_side_threw"
-    if all(v[q] in ("agree_1e-10", "n/a") for q in ("lp", "grad", "wa")):
-        if v["lp"] == "n/a":
-            return "both_threw_everywhere"
+    if not all(v[q] in ("agree_1e-10", "agree_1e-8", "n/a")
+               for q in ("lp", "wa")) or v["grad"] == "disagree":
+        return "disagree"
+    if v["messages"] not in ("identical", "n/a"):
+        return "message_" + v["messages"]
+    if v["output"] != "same":
+        return "output_differs"
+    if v["lp"] == "n/a":
+        return "both_threw_everywhere"
+    if all(v[q] in ("agree_1e-10", "n/a") for q in ("lp", "wa")):
         return "agree_1e-10"
-    if all(v[q] in ("agree_1e-10", "agree_1e-8", "n/a")
-           for q in ("lp", "grad", "wa")):
-        return "agree_1e-8"
-    return "disagree"
+    return "agree_1e-8"
 
 
 def error_key(msg):
@@ -332,10 +471,10 @@ def table(records):
     for corpus, rs in sorted(by.items()):
         cnt = collections.Counter(r["state"] for r in rs)
         q = {k: collections.Counter(r.get("cmp", {}).get(k, "n/a") for r in rs)
-             for k in ("lp", "grad", "wa")}
+             for k in ("lp", "grad", "wa", "messages", "output")}
         lines.append(f"## {corpus}: {len(rs)} models")
         lines.append("  states: " + ", ".join(f"{k}={n}" for k, n in cnt.most_common()))
-        for k in ("lp", "grad", "wa"):
+        for k in ("lp", "grad", "wa", "messages", "output"):
             lines.append(f"  {k}: " + ", ".join(f"{a}={n}" for a, n in sorted(q[k].items())))
         groups = collections.defaultdict(list)
         for r in rs:
@@ -349,20 +488,20 @@ def table(records):
                 cgroups[error_key(first_fail(r["compiled"]))].append(r["model"])
         for key, ms in sorted(cgroups.items(), key=lambda kv: -len(kv[1])):
             lines.append(f"  compiled fails x{len(ms)}: {key}  e.g. {', '.join(ms[:2])}")
-        dis = [r for r in rs if r["state"] == "disagree"]
-        for r in dis[:12]:
+        dis = [r for r in rs if r["state"] == "disagree"
+               or r["state"].startswith(("message_", "output_",
+                                         "both_compile_fail_s",
+                                         "both_compile_fail_d"))]
+        for r in dis[:40]:
             v = r["cmp"]
-            lines.append(f"  disagree {r['model']}: lp={v['lp_worst']} grad={v['grad_worst']} wa={v['wa_worst']} {v['notes'][:2]}")
-        o0 = collections.Counter(r["state"] for r in rs)  # placeholder
-        o0 = collections.Counter(
-            ("ok" if r.get("cmp_o0") and all(
-                r["cmp_o0"].get(k) in ("agree_1e-10", "agree_1e-8", "n/a")
-                for k in ("lp", "grad", "wa")) and r["interp_o0"]["state"] == "points"
-             and not r["cmp_o0"].get("points_one_threw") else
-             (r.get("interp_o0") or {}).get("state", "no_o0"))
-            for r in rs if r["state"] not in ("stanc_fail", "compiled_refused", "both_refused"))
-        lines.append("  interp on --passes none MIR vs compiled: " + ", ".join(
-            f"{k}={n}" for k, n in o0.most_common()))
+            lines.append(f"  {r['state']} {r['model']}: lp={v.get('lp_worst')} "
+                         f"grad={v.get('grad_worst')} wa={v.get('wa_worst')} "
+                         f"{v.get('notes', [])[:2]}")
+        blame = collections.Counter(r["blame"] for r in rs if "blame" in r)
+        if blame:
+            lines.append("  interp on --passes none MIR disagrees; on shipping "
+                         "MIR: " + ", ".join(f"{k}={n}" for k, n in
+                                             blame.most_common()))
         ct = [r["compiled"]["wall"] for r in rs if r.get("compiled", {}).get("state") == "points"]
         it = [r["interp"]["wall"] for r in rs if r.get("interp", {}).get("state") == "points"
               and r.get("compiled", {}).get("state") == "points"]
@@ -388,6 +527,8 @@ def main():
     ap.add_argument("--jobs", type=int, default=24)
     ap.add_argument("--timeout", type=float, default=120.0)
     ap.add_argument("--filter", default="")
+    ap.add_argument("--interp-o0", action="store_true",
+                    help="give the interpreter the --passes none MIR")
     ap.add_argument("--report", action="store_true",
                     help="only print the table of the JSON files in --out")
     args = ap.parse_args()
@@ -409,7 +550,8 @@ def main():
         print(f"{len(cs)} models", flush=True)
         records = []
         with concurrent.futures.ThreadPoolExecutor(args.jobs) as pool:
-            futs = [pool.submit(one, c, args.check, tmp, args.timeout) for c in cs]
+            futs = [pool.submit(one, c, args.check, tmp, args.timeout,
+                                args.interp_o0) for c in cs]
             for n, f in enumerate(concurrent.futures.as_completed(futs), 1):
                 records.append(f.result())
                 if n % 100 == 0:
