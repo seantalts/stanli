@@ -1,21 +1,14 @@
-// Math threads only when cores are free. Accelerate (STANLI_ACCELERATE)
-// spreads a large product or factorization over several threads of its own.
-// Chains that run in parallel limit their BLAS calls to one thread when
-// parallel chains * 2 exceed the performance cores (stanli/dense_blas.hpp).
-// The developer switch STANLI_PERFORMANCE_CORES sets the core count, so the
-// test needs a build with developer switches.
+// Chains that run in parallel start no BLAS threads. With STANLI_ACCELERATE
+// every accelerated BLAS call runs on the calling thread alone wherever
+// BLASSetThreading exists (macOS 15 or later), so four chains with large
+// dense work use about four cores and no threads beyond the chain workers.
 //
 // For a Gaussian process (cholesky_decompose and multi_normal_cholesky) and
-// a large matrix product, with four chains:
-//  * filled (4 performance cores): the four chains use at most about four
-//    cores of CPU time, and the process gains no threads beyond the four
-//    chain workers (macOS 15 or later, which has BLASSetThreading);
-//  * free (64 performance cores): Accelerate starts threads of its own;
-//  * in both, chain k draws the same values alone as next to three others.
+// a large matrix product, with four chains: at most about four cores of CPU
+// time, no threads beyond the four chain workers, and each chain's draws the
+// same alone as next to three others.
 //
-// Arguments: gp|product filled|free [sizes].
-#include "env_helpers.hpp"
-
+// Arguments: gp|product [sizes].
 #include <stanli/capi.h>
 
 #include <chrono>
@@ -210,8 +203,7 @@ bool thread_limit_available() {
   return false;
 }
 
-void check_model(const char* name, const char* code, const std::string& data,
-                 bool filled) {
+void check_model(const char* name, const char* code, const std::string& data) {
   char err[8192]{};
   stanli_model* m = stanli_model_new_from_stan_with_opts(
       code, data.c_str(), nullptr, err, sizeof err);
@@ -231,7 +223,7 @@ void check_model(const char* name, const char* code, const std::string& data,
       "%s: %d chains, wall %.3f s, cpu %.3f s, %.2f cores, "
       "threads %d before, at most %d during\n",
       name, C, par.wall, par.cpu, cores, before, par.max_threads);
-  if (filled && thread_limit_available()) {
+  if (thread_limit_available()) {
     expect(std::string(name) + " uses at most about 4 cores (" +
                std::to_string(cores) + ")",
            cores <= 4.4);
@@ -240,13 +232,6 @@ void check_model(const char* name, const char* code, const std::string& data,
                std::to_string(before + 1 + C) + ")",
            par.max_threads <= before + 1 + C);
   }
-#ifdef STANLI_ACCELERATE
-  if (!filled)
-    expect(std::string(name) + " lets Accelerate start threads (" +
-               std::to_string(par.max_threads) +
-               " <= " + std::to_string(before + 1 + C) + ")",
-           par.max_threads > before + 1 + C);
-#endif
 
   const size_t per_chain = par.draws.size() / C;
   for (int k = 0; k < C; ++k) {
@@ -276,36 +261,22 @@ int main(int argc, char** argv) {
     std::printf("SKIP: this build runs chains sequentially\n");
     return 77;
   }
-  if (!debug_switches_available()) {
-    std::printf("SKIP: STANLI_PERFORMANCE_CORES needs developer switches\n");
-    return 77;
-  }
   // Adaptation notices and early rejections are expected with short runs.
   stanli_capture_messages(1);
-  // One model per process: Accelerate keeps its threads once started, so a
-  // second model in the same process would start with them already there.
   const std::string which = argc > 1 ? argv[1] : "gp";
-  const std::string cores = argc > 2 ? argv[2] : "filled";
-  if (cores != "filled" && cores != "free") {
-    std::printf("usage: test_blas_chains gp|product filled|free [sizes]\n");
-    return 2;
-  }
-  const bool filled = cores == "filled";
-  test_setenv("STANLI_PERFORMANCE_CORES", filled ? "4" : "64");
-  std::printf("%s performance cores, %s\n", filled ? "4" : "64",
-              thread_limit_available() ? "BLASSetThreading available"
-                                       : "no BLASSetThreading");
+  std::printf("%s\n", thread_limit_available() ? "BLASSetThreading available"
+                                               : "no BLASSetThreading");
   if (which == "gp") {
-    const int n = argc > 3 ? std::atoi(argv[3]) : 300;
+    const int n = argc > 2 ? std::atoi(argv[2]) : 300;
     std::printf("gp N=%d\n", n);
-    check_model("gp", kGp, gp_data(n), filled);
+    check_model("gp", kGp, gp_data(n));
   } else if (which == "product") {
-    const int n = argc > 3 ? std::atoi(argv[3]) : 512;
-    const int k = argc > 4 ? std::atoi(argv[4]) : 128;
+    const int n = argc > 2 ? std::atoi(argv[2]) : 512;
+    const int k = argc > 3 ? std::atoi(argv[3]) : 128;
     std::printf("product %dx%d times %dx%d\n", n, k, k, n);
-    check_model("product", kProduct, product_data(n, k), filled);
+    check_model("product", kProduct, product_data(n, k));
   } else {
-    std::printf("usage: test_blas_chains gp|product filled|free [sizes]\n");
+    std::printf("usage: test_blas_chains gp|product [sizes]\n");
     return 2;
   }
   if (failures == 0) std::printf("ok\n");

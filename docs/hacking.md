@@ -934,11 +934,16 @@ as that operation's threshold; the kernel then calls BLAS or LAPACK. Every small
 `-DSTANLI_ACCELERATE=OFF`, and so do Linux, Windows and the browser builds.
 The thresholds and the sweep behind them are in
 [`notes/performance/2026-11-26-accelerate-thresholds.md`](../notes/performance/2026-11-26-accelerate-thresholds.md).
-Chains that run in parallel limit their BLAS calls to one thread when twice
-the number of chains exceeds the performance cores. On macOS 11 to 14, which
-lack `BLASSetThreading`, nothing is limited. In a build with developer
-switches, `STANLI_NO_ACCELERATE` keeps every op on the plain kernels and
-`STANLI_PERFORMANCE_CORES` sets the core count that the rule uses.
+Every accelerated BLAS or LAPACK call runs on the calling thread alone
+(`BLASSetThreading`, macOS 15 or later), and the thread's previous setting
+is restored afterwards. Left to choose its own threads, Accelerate split a
+large factorization differently under load and gave different results from
+one process to the next (`tests/test_blas_determinism.cpp`). On macOS 11 to
+14, which lack `BLASSetThreading`, the accelerated kernels still run and
+Accelerate chooses its threads; `kAccelerateWithoutThreadControl` in
+`runtime/include/stanli/dense_blas.hpp` turns them off there. In a build
+with developer switches, `STANLI_NO_ACCELERATE` keeps every op on the plain
+kernels.
 
 For sampler changes, use
 [`tools/sampler_trace.py`](../tools/sampler_trace.py). For

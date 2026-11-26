@@ -25,6 +25,10 @@
 
 #include <Eigen/Dense>
 
+#ifdef __APPLE__
+#include <dlfcn.h>
+#endif
+
 #include <algorithm>
 #include <cmath>
 #include <limits>
@@ -739,42 +743,55 @@ void lowered_programs(const char* mir_path) {
   expect_true("STANLI_NO_ACCELERATE lowers no accelerated op", off.empty());
 }
 
-// The thread rule: limit a chain's BLAS calls to one thread when parallel
-// chains * 2 exceed the performance cores, and only where BLASSetThreading
-// exists. Without it the plan says the cores are full and applies nothing;
-// the choice of kernels never depends on it (accelerate_dense_ops reads
-// only the op sizes and STANLI_NO_ACCELERATE).
-void thread_plan() {
+// Where BLASSetThreading exists every accelerated call runs on its own
+// thread. Without it the accelerated kernels stay on by policy
+// (kAccelerateWithoutThreadControl); the choice of kernels reads nothing
+// else about the system.
+void thread_policy() {
   using namespace stanli;
-  struct Case {
-    int chains, cores;
-    bool available, full, limited;
-  };
-  const Case cases[] = {
-      {1, 4, true, false, false},   {2, 4, true, false, false},
-      {3, 4, true, true, true},     {4, 4, true, true, true},
-      {4, 8, true, false, false},   {4, 24, true, false, false},
-      {12, 24, true, false, false}, {13, 24, true, true, true},
-      {4, 4, false, true, false},   {64, 1, false, true, false},
-      {1, 1, true, true, true},
-  };
-  for (const Case& c : cases) {
-    const BlasThreadPlan plan =
-        plan_blas_threads(c.chains, c.cores, c.available);
-    const std::string what = std::to_string(c.chains) + " chains on " +
-                             std::to_string(c.cores) + " cores" +
-                             (c.available ? "" : " without BLASSetThreading");
-    expect_true(what + ": cores full", plan.cores_full == c.full);
-    expect_true(what + ": limited", plan.limited == c.limited);
+  expect_true("accelerated kernels with thread control",
+              accelerated_kernels_enabled(true));
+  expect_true(
+      "accelerated kernels without thread control follow the policy",
+      accelerated_kernels_enabled(false) == kAccelerateWithoutThreadControl);
+#if defined(STANLI_ACCELERATE) && defined(__APPLE__)
+  // A OneBlasThread runs the thread single-threaded and then gives it back
+  // the setting it had, read through the same entry points by name.
+  using Get = unsigned (*)();
+  using Set = int (*)(unsigned);
+  const auto get =
+      reinterpret_cast<Get>(dlsym(RTLD_DEFAULT, "BLASGetThreading"));
+  const auto set =
+      reinterpret_cast<Set>(dlsym(RTLD_DEFAULT, "BLASSetThreading"));
+  expect_true(
+      "BLASSetThreading found exactly when thread control is available",
+      (get != nullptr && set != nullptr) == blas_thread_control_available());
+  if (get && set) {
+    set(0);  // BLAS_THREADING_MULTI_THREADED
+    unsigned inside = 99;
+    {
+      const OneBlasThread one;
+      inside = get();
+    }
+    expect_true("OneBlasThread runs single-threaded", inside == 1);
+    expect_true("OneBlasThread restores the multi-threaded setting",
+                get() == 0);
+    set(1);
+    {
+      const OneBlasThread one;
+    }
+    expect_true("OneBlasThread leaves a single-threaded setting alone",
+                get() == 1);
+    set(0);
   }
-  expect_true("at least one performance core", performance_cores() >= 1);
+#endif
 }
 
 }  // namespace
 
 int main(int argc, char** argv) {
   thresholds_select_opcodes();
-  thread_plan();
+  thread_policy();
   lowered_programs(argc > 1 ? argv[1] : nullptr);
 #ifdef STANLI_ACCELERATE
   accelerated_kernels_agree();

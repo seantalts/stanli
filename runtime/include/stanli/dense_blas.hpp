@@ -19,49 +19,43 @@ struct Slot;
 // "accelerate" in a STANLI_ACCELERATE build, "none" otherwise.
 const char* blas_provider();
 
-// Math threads only when cores are free. Accelerate spreads a large product
-// or factorization over threads of its own; with chains already running one
-// per core that oversubscribes the machine. Chains that run in parallel limit
-// their BLAS calls to one thread each when
-//   parallel_chains * 2 > performance cores,
-// and otherwise leave Accelerate to choose. The limit needs BLASSetThreading
-// (macOS 15, a per-thread setting); without it, and in builds without
-// Accelerate, nothing is limited.
-struct BlasThreadPlan {
-  bool cores_full = false;  // the chains would fill the performance cores
-  bool limited = false;     // and the limit can be applied
-};
-BlasThreadPlan plan_blas_threads(int parallel_chains, int performance_cores,
-                                 bool thread_control_available);
-// hw.perflevel0.physicalcpu on Apple, else std::thread's
-// hardware_concurrency; the developer switch STANLI_PERFORMANCE_CORES
-// replaces it for tests.
-int performance_cores();
 // Whether this system has BLASSetThreading (macOS 15 or later).
 bool blas_thread_control_available();
 
-// Applies plan_blas_threads for the calling thread while it lives: limits its
-// BLAS calls to one thread when the chains fill the cores, then restores the
-// thread's previous setting.
-class ChainBlasThreads {
+// Whether the accelerated kernels run on a system without
+// BLASSetThreading (macOS 11 to 14). There Accelerate chooses its own
+// threads for every call, and a large factorization can give different
+// results from one run to the next on a busy machine. Turning this off keeps
+// every op on the plain kernels there.
+inline constexpr bool kAccelerateWithoutThreadControl = true;
+inline bool accelerated_kernels_enabled(bool thread_control_available) {
+  return thread_control_available || kAccelerateWithoutThreadControl;
+}
+
+// Runs the calling thread's BLAS calls on that thread alone while it lives,
+// then restores the thread's previous setting, so that a host such as numpy
+// on the same thread keeps its own. Every accelerated BLAS and LAPACK call
+// runs inside one: Accelerate would otherwise split a large factorization
+// over threads of its own, and how it splits depends on the load, which
+// changed results from one process to the next (tests/test_blas_determinism).
+// Needs BLASSetThreading; elsewhere it does nothing.
+class OneBlasThread {
  public:
-  // For threads that cannot tell how many others run beside them, such as a
-  // reduce_sum team inside a chain: limit whenever the limit is available.
-  static constexpr int kUnknownParallelism = 1 << 20;
-  explicit ChainBlasThreads(int parallel_chains);
-  ~ChainBlasThreads();
-  ChainBlasThreads(const ChainBlasThreads&) = delete;
-  ChainBlasThreads& operator=(const ChainBlasThreads&) = delete;
+  OneBlasThread();
+  ~OneBlasThread();
+  OneBlasThread(const OneBlasThread&) = delete;
+  OneBlasThread& operator=(const OneBlasThread&) = delete;
 
  private:
   unsigned saved_ = 0;
-  bool active_ = false;
+  bool restore_ = false;
 };
 
 // Gives each op of the graph whose sizes are at or above its operation's
 // threshold the accelerated opcode. Does nothing in a build without
-// STANLI_ACCELERATE, or when the developer switch STANLI_NO_ACCELERATE is
-// set. Returns the number of ops it changed.
+// STANLI_ACCELERATE, when the developer switch STANLI_NO_ACCELERATE is set,
+// or when accelerated_kernels_enabled says no. Returns the number of ops it
+// changed.
 int accelerate_dense_ops(Graph& g);
 
 #ifdef STANLI_ACCELERATE

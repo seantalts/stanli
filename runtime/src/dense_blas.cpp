@@ -59,6 +59,8 @@ int dim(int64_t v) {
 int ld(int64_t v) { return v < 1 ? 1 : dim(v); }
 void count() { g_calls.fetch_add(1, std::memory_order_relaxed); }
 
+// Every call below runs inside a OneBlasThread (stanli/dense_blas.hpp).
+
 }  // namespace
 
 // The smallest sizes at which the accelerated kernel was faster than the
@@ -97,6 +99,7 @@ void gemm(bool trans_a, bool trans_b, int64_t m, int64_t n, int64_t k,
   const int im = dim(m), in = dim(n), ik = dim(k), ia = ld(lda), ib = ld(ldb),
             ic = ld(ldc);
   count();
+  const OneBlasThread one_thread;
   dgemm_(&ta, &tb, &im, &in, &ik, &alpha, a, &ia, b, &ib, &beta, c, &ic);
 }
 
@@ -106,6 +109,7 @@ void gemv(bool trans, int64_t m, int64_t n, double alpha, const double* a,
   const char t = trans ? 'T' : 'N';
   const int im = dim(m), in = dim(n), ia = ld(lda), one = 1;
   count();
+  const OneBlasThread one_thread;
   dgemv_(&t, &im, &in, &alpha, a, &ia, x, &one, &beta, y, &one);
 }
 
@@ -115,6 +119,7 @@ int potrf_lower(int64_t n, double* a, int64_t lda) {
   const int in = dim(n), ia = ld(lda);
   int info = 0;
   count();
+  const OneBlasThread one_thread;
   dpotrf_(&lo, &in, a, &ia, &info);
   return info;
 }
@@ -125,6 +130,7 @@ int potri_lower(int64_t n, double* a, int64_t lda) {
   const int in = dim(n), ia = ld(lda);
   int info = 0;
   count();
+  const OneBlasThread one_thread;
   dpotri_(&lo, &in, a, &ia, &info);
   return info;
 }
@@ -135,6 +141,7 @@ int trtri_lower(int64_t n, double* a, int64_t lda) {
   const int in = dim(n), ia = ld(lda);
   int info = 0;
   count();
+  const OneBlasThread one_thread;
   dtrtri_(&lo, &nonunit, &in, a, &ia, &info);
   return info;
 }
@@ -146,6 +153,7 @@ void trsm_lower(bool left, bool trans, int64_t m, int64_t n, double alpha,
              nonunit = 'N';
   const int im = dim(m), in = dim(n), il = ld(ldl), ib = ld(ldb);
   count();
+  const OneBlasThread one_thread;
   dtrsm_(&side, &lo, &t, &nonunit, &im, &in, &alpha, l, &il, b, &ib);
 }
 
@@ -155,6 +163,7 @@ void trmm_lower_left(bool trans, int64_t m, int64_t n, double alpha,
   const char side = 'L', lo = 'L', t = trans ? 'T' : 'N', nonunit = 'N';
   const int im = dim(m), in = dim(n), il = ld(ldl), ib = ld(ldb);
   count();
+  const OneBlasThread one_thread;
   dtrmm_(&side, &lo, &t, &nonunit, &im, &in, &alpha, l, &il, b, &ib);
 }
 
@@ -164,6 +173,7 @@ void trmv_lower(bool trans, int64_t n, const double* l, int64_t ldl,
   const char lo = 'L', t = trans ? 'T' : 'N', nonunit = 'N';
   const int in = dim(n), il = ld(ldl), one = 1;
   count();
+  const OneBlasThread one_thread;
   dtrmv_(&lo, &t, &nonunit, &in, l, &il, x, &one);
 }
 
@@ -174,6 +184,7 @@ void symm_lower_left(int64_t m, int64_t n, double alpha, const double* s,
   const char side = 'L', lo = 'L';
   const int im = dim(m), in = dim(n), is = ld(lds), ib = ld(ldb), ic = ld(ldc);
   count();
+  const OneBlasThread one_thread;
   dsymm_(&side, &lo, &im, &in, &alpha, s, &is, b, &ib, &beta, c, &ic);
 }
 
@@ -182,7 +193,9 @@ void symm_lower_left(int64_t m, int64_t n, double alpha, const double* s,
 
 int accelerate_dense_ops(Graph& g) {
 #ifdef STANLI_ACCELERATE
-  if (debug_env("STANLI_NO_ACCELERATE") != nullptr) return 0;
+  if (debug_env("STANLI_NO_ACCELERATE") != nullptr ||
+      !accelerated_kernels_enabled(blas_thread_control_available()))
+    return 0;
   int changed = 0;
   for (Op& op : g.ops) {
     const uint16_t to = blas::accelerated_opcode(op, g.slots.data());

@@ -1595,14 +1595,10 @@ if(NOT WIN32)
   add_executable(test_blas_chains tests/test_blas_chains.cpp)
   target_link_libraries(test_blas_chains PRIVATE stanli_shared Threads::Threads)
   foreach(_model gp product)
-    foreach(_cores filled free)
-      set(_name test_blas_chains_${_model}_${_cores})
-      add_test(NAME ${_name} COMMAND test_blas_chains ${_model} ${_cores}
-               WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
-      set_tests_properties(${_name} PROPERTIES SKIP_RETURN_CODE 77)
-      list(APPEND STANLI_DEBUG_SWITCH_TESTS ${_name})
-      list(APPEND STANLI_DEBUG_SWITCH_ONLY_TESTS ${_name})
-    endforeach()
+    add_test(NAME test_blas_chains_${_model} COMMAND test_blas_chains ${_model}
+             WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
+    set_tests_properties(test_blas_chains_${_model} PROPERTIES
+                         SKIP_RETURN_CODE 77)
   endforeach()
 endif()
 
