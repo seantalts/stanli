@@ -2,6 +2,7 @@
 // kernels call, declared here rather than through Accelerate's headers or
 // Eigen's blas.h, which disagree about some prototypes. Nothing in this file
 // includes Eigen.
+#include <stanli/debug_switch.hpp>
 #include <stanli/dense_blas.hpp>
 #include <stanli/graph.hpp>
 
@@ -166,6 +167,7 @@ void symm_lower_left(int64_t m, int64_t n, double alpha, const double* s,
 
 int accelerate_dense_ops(Graph& g) {
 #ifdef STANLI_ACCELERATE
+  if (debug_env("STANLI_NO_ACCELERATE") != nullptr) return 0;
   int changed = 0;
   for (Op& op : g.ops) {
     const uint16_t to = blas::accelerated_opcode(op, g.slots.data());
