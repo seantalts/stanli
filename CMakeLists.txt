@@ -1585,6 +1585,13 @@ add_test(NAME test_capi COMMAND test_capi
 # Parallel chains with dense linear algebra, through the shipped library.
 # getrusage and the thread count are POSIX-only.
 if(NOT WIN32)
+  # The same gradient in many processes at once gives the same bits.
+  add_executable(test_blas_determinism tests/test_blas_determinism.cpp)
+  target_link_libraries(test_blas_determinism PRIVATE stanli_shared
+                        Threads::Threads)
+  add_test(NAME test_blas_determinism COMMAND test_blas_determinism
+           WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
+  set_tests_properties(test_blas_determinism PROPERTIES SKIP_RETURN_CODE 77)
   add_executable(test_blas_chains tests/test_blas_chains.cpp)
   target_link_libraries(test_blas_chains PRIVATE stanli_shared Threads::Threads)
   foreach(_model gp product)
