@@ -65,10 +65,12 @@ void count() { g_calls.fetch_add(1, std::memory_order_relaxed); }
 // higher than that sweep alone suggests: inside a whole Gaussian process
 // gradient, the ops around an accelerated Cholesky of n = 40 ran about 25%
 // slower and the model as a whole 1.05x slower, and models gained only from
-// n = 64. See notes/performance/2026-11-26-accelerate-thresholds.md.
+// n = 64. The product starts at 32 for the same reason: kronecker_gp's
+// 30 x 30 x 30 products ran 2.2x faster with Accelerate and the gradient
+// 1.012x slower. See notes/performance/2026-11-26-accelerate-thresholds.md.
 const Thresholds& thresholds() {
   static const Thresholds t{
-      /*gemm_min_dim=*/24,
+      /*gemm_min_dim=*/32,
       /*gemv_min_rows=*/256,
       /*gemv_min_cols=*/64,
       /*gemv_tall_min_rows=*/10000,

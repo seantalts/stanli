@@ -11,7 +11,7 @@ without the option.
 
 | Op | Accelerated when |
 | --- | --- |
-| `GEMM` (rows x inner x columns) | all three are at least 24 |
+| `GEMM` (rows x inner x columns) | all three are at least 32 |
 | `MATVEC` (data X, rows x columns) | rows >= 256 and columns >= 64, or rows >= 10000 and columns >= 10 |
 | `CHOLESKY` | n >= 64 |
 | `MULTI_NORMAL_CHOL_LPDF` (the propto, factor-only path) | n >= 64 |
@@ -63,8 +63,17 @@ six alternating `bench_grad --timed` runs, two sweeps, load average 9 to 11:
 
 Both thresholds are therefore 64. The census product model (two GEMMs) at
 N x K, one sweep: 16x16 (below the threshold) 0.988x, 24x24 1.30x, 32x32
-1.84x, 48x48 2.21x, 64x64 2.65x, 128x32 2.41x, 512x128 4.03x, so the gemm
-rule stands.
+1.84x, 48x48 2.21x, 64x64 2.65x, 128x32 2.41x, 512x128 4.03x, With the gemm threshold at 24, `kronecker_gp` (four 30 x 30 x 30 products
+among eigendecompositions) was 1.012x slower, four runs each of
+`harnesses/corpus_bench.py`, every candidate run slower. Its products ran
+2.2x faster (5.9 to 2.7 ms over 300 gradients) while the backward passes of
+`EIGENVECTORS_SYM`, `LKJ_CORR_CHOL_LPDF`, `MULT_LOWER_TRI_SELF_TRANSPOSE`
+and `CONSTRAIN_CHOL_CORR` ran about 25% slower; their forward passes did
+not. The gemm threshold is therefore 32. One untested explanation: results
+that Accelerate's matrix unit writes reach the core through L2, not L1, so
+the next op to read them waits longer. A size threshold cannot rule out this
+cost in a model where a small accelerated op sits among much larger plain
+ones.
 
 | Kernel | Shape | Plain ns (best) | Accelerated ns (best) | Speedup, lowest to highest run |
 |---|---|---:|---:|---|
