@@ -1886,6 +1886,10 @@ if(Python3_Interpreter_FOUND)
   add_test(NAME test_check_interp
            COMMAND ${Python3_EXECUTABLE} tests/test_check_interp.py
            WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
+  add_test(NAME test_interp_assign_shapes
+           COMMAND ${Python3_EXECUTABLE} tests/test_interp_assign_shapes.py
+                   $<TARGET_FILE:stanli_check>
+           WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
   foreach(_perturb_test scale ladder datavary)
     add_test(NAME test_perturb_${_perturb_test}
              COMMAND ${Python3_EXECUTABLE} tests/test_perturb_${_perturb_test}.py
