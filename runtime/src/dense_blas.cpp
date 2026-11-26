@@ -61,8 +61,11 @@ void count() { g_calls.fetch_add(1, std::memory_order_relaxed); }
 // The smallest sizes at which the accelerated kernel was faster than the
 // plain one, forward plus backward on one thread, at every measured size and
 // shape above them, with a step of margin where the sweep showed a dip
-// (tools/bench_dense_blas;
-// notes/performance/2026-11-26-accelerate-thresholds.md).
+// (tools/bench_dense_blas). Cholesky and the triangular inverse start
+// higher than that sweep alone suggests: inside a whole Gaussian process
+// gradient, the ops around an accelerated Cholesky of n = 40 ran about 25%
+// slower and the model as a whole 1.05x slower, and models gained only from
+// n = 64. See notes/performance/2026-11-26-accelerate-thresholds.md.
 const Thresholds& thresholds() {
   static const Thresholds t{
       /*gemm_min_dim=*/24,
@@ -70,8 +73,8 @@ const Thresholds& thresholds() {
       /*gemv_min_cols=*/64,
       /*gemv_tall_min_rows=*/10000,
       /*gemv_tall_min_cols=*/10,
-      /*cholesky_min_n=*/32,
-      /*tri_inverse_min_n=*/32,
+      /*cholesky_min_n=*/64,
+      /*tri_inverse_min_n=*/64,
   };
   return t;
 }
