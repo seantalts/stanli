@@ -191,9 +191,10 @@ def compile_source(tools, text):
         return result
 
 
-def check(tools, comp, data, points=check_compare.POINTS, status=None):
+def check(tools, comp, data, points=check_compare.POINTS, status=None,
+          extra=(), env=None):
     """stanli_check at `points`: check_compare.run_outcome's (state, payload)
-    and the status records."""
+    and the status records. `extra` adds arguments."""
     if status is None:
         fd, status = tempfile.mkstemp(suffix=".jsonl",
                                       dir=pathlib.Path(comp["mir"]).parent)
@@ -202,11 +203,22 @@ def check(tools, comp, data, points=check_compare.POINTS, status=None):
     status.unlink(missing_ok=True)
     code, out, err, _ = run(
         [tools.check, comp["stan"], data, "--mir", comp["mir"], "--points",
-         ",".join(map(str, points)), "--status-json", status], tools.timeout)
+         ",".join(map(str, points)), "--status-json", status, *extra],
+        tools.timeout, env)
     records = check_status.read(status)
     status.unlink(missing_ok=True)
     raw = None if code is None else (code, out, err)
     return check_compare.run_outcome(raw, records), records
+
+
+def interp_differs(tools, comp, data):
+    """None when the compiled path gives the log density and write_array
+    rows of `stanli_check --interp` on the same MIR, else the first
+    difference. The interpreter computes no gradient here."""
+    compiled, _ = check(tools, comp, data, extra=["--wa-values"])
+    interp, _ = check(tools, comp, data, extra=["--wa-values", "--interp"],
+                      env=clean_env({"STANLI_INTERP_NO_GRAD": "1"}))
+    return check_compare.lp_and_rows_differ(compiled, interp)
 
 
 def finite_values(outcome, points=check_compare.POINTS):

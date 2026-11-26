@@ -5,6 +5,7 @@ import unittest
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1] / "tools" / "perturb"))
 import causes  # noqa: E402
+import check_compare  # noqa: E402
 import ladder  # noqa: E402
 import measure  # noqa: E402
 import report  # noqa: E402
@@ -156,6 +157,35 @@ def outcome(values):
     """A check_compare.run_outcome payload with OK rows at the check points."""
     return ("points", {"points": {k: {"status": ("OK", [str(v) for v in values[k]])}
                                   for k in range(3)}, "prints": {}})
+
+
+def run_with_rows(lp, grad, row, prints=()):
+    """A run_outcome payload with the same lp, gradient and write_array row
+    at every check point."""
+    point = {"status": ("OK", [str(lp), *map(str, grad)]),
+             "wa": ("ok", ["x"], [str(row)])}
+    return ("points", {"points": {k: dict(point) for k in range(3)},
+                       "prints": {"pre": [], **{k: list(prints) for k in range(3)}}})
+
+
+class InterpCheck(unittest.TestCase):
+    def test_gradient_and_printed_lines_are_not_compared(self):
+        compiled = run_with_rows(-10.0, [1.5], 0.25)
+        interp = run_with_rows(-10.0, ["nan"], 0.25, ["GRAD_ERR inf"])
+        self.assertIsNone(check_compare.lp_and_rows_differ(compiled, interp))
+
+    def test_lp_and_rows_are_compared(self):
+        compiled = run_with_rows(-10.0, [1.5], 0.25)
+        self.assertIn("lp", check_compare.lp_and_rows_differ(
+            compiled, run_with_rows(-10.5, ["nan"], 0.25)))
+        self.assertIn("write_array", check_compare.lp_and_rows_differ(
+            compiled, run_with_rows(-10.0, ["nan"], 0.5)))
+
+    def test_a_difference_is_its_own_label(self):
+        rec = {"seed": "s", "variant": "v", "outcome": "valid",
+               "meta": {"equivalent": True}, "interp_differs": "lp: 1 vs 2"}
+        self.assertIn("INTERP_DIFFERS lp: 1 vs 2", run.validity_line(rec))
+        self.assertIn("interp_differs (lp: 1 vs 2)", report.note_of(rec))
 
 
 class Variants(unittest.TestCase):

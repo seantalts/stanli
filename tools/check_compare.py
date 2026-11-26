@@ -8,6 +8,7 @@ with its base this way.
 """
 from __future__ import annotations
 
+import json
 import math
 import pathlib
 import sys
@@ -209,3 +210,17 @@ def compare_runs(a, b, propto=False):
         diffs.append(("output", {"point": "pre", **printed_diff(
             pa["prints"]["pre"], pb["prints"]["pre"])}))
     return diffs, None
+
+
+def lp_and_rows_differ(a, b):
+    """The first difference of lp, write_array rows or which points throw
+    between two runs, as one line, or None. Gradients, printed output and
+    error wording are not compared."""
+    diffs, reason = compare_runs(a, b)
+    if reason:
+        return reason
+    for kind, d in diffs:
+        if kind in ("lp", "write_array", "one_side_threw", "crash",
+                    "timeout"):
+            return f"{kind}: {json.dumps(d)[:300]}"
+    return None

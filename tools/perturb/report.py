@@ -65,6 +65,8 @@ def note_of(r):
     if r.get("near_equivalent"):
         parts.append("near_equivalent (relative "
                      f"{r['near_equivalent']['largest_relative_difference']:.1e})")
+    if r.get("interp_differs"):
+        parts.append(f"interp_differs ({r['interp_differs']})")
     if r.get("prep_cliff"):
         parts.append("prep_cliff")
     if r.get("differs") and r["outcome"] != "same_program":
@@ -157,6 +159,11 @@ def variant_report(records, meta, known):
     preps = [r for r in records if r.get("prep_cliff")]
     out += [f"- {r['seed']}/{r['variant']}: preparation {prep_text(r)}, "
             f"log_prob ops {ops_text(r)}" for r in preps] or ["None."]
+    out += ["", "## Compiled path differs from the interpreter", "",
+            "Variants whose log density or write_array rows differ from "
+            "`stanli_check --interp` on the same MIR.", ""]
+    out += [f"- {r['seed']}/{r['variant']}: {r['interp_differs']}"
+            for r in records if r.get("interp_differs")] or ["None."]
     out += ["", "## Every variant", "",
             "log_prob ops are the final count, the program that runs, then in "
             "parentheses the count before the passes, which explains "
