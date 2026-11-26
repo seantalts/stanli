@@ -504,8 +504,7 @@ class MirInterp {
           // stan::model::assign checks sizes only against a destination
           // with elements; an empty one takes the right-hand side's size.
           if (en->r.empty() && en->i.empty() && !v.r.empty()) {
-            if (v.dims.empty())
-              v.dims = {static_cast<int64_t>(v.r.size())};
+            if (v.dims.empty()) v.dims = {static_cast<int64_t>(v.r.size())};
             en->dims = v.dims;
             en->r.resize(v.r.size());
           }
@@ -3444,8 +3443,8 @@ class MirInterp {
     // element count of a vector or matrix.
     if (const BuiltinSpec* query =
             e.args.size() == 1
-                ? shaped_builtin_spec(e.name == "FnLength" ? "size" : e.name,
-                                      1, BuiltinShapePolicy::ShapeQuery)
+                ? shaped_builtin_spec(e.name == "FnLength" ? "size" : e.name, 1,
+                                      BuiltinShapePolicy::ShapeQuery)
                 : nullptr) {
       Value a = eval(e.args[0]);
       if (a.is_int && a.r.size() != a.i.size()) {

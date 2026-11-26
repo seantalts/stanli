@@ -94,8 +94,7 @@ void run_transform(const Program::Transform& tr, T* reg) {
                                                     n / tr.rows));
         };
         whole(1, [](const auto& mu) {
-          stan::math::check_finite("offset_multiplier_constrain", "offset",
-                                   mu);
+          stan::math::check_finite("offset_multiplier_constrain", "offset", mu);
         });
         whole(2, [](const auto& sigma) {
           stan::math::check_positive_finite("offset_multiplier_constrain",

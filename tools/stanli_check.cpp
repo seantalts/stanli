@@ -430,7 +430,8 @@ int main(int argc, char** argv) {
         status.write(failure(stage, e));
         std::string what = e.what();
         const size_t nl = what.find('\n');
-        if (nl != std::string::npos && points.empty()) what = what.substr(0, nl);
+        if (nl != std::string::npos && points.empty())
+          what = what.substr(0, nl);
         if (!points.empty()) what = one_line(what);
         std::printf("COMPILE_FAIL %s\n", what.c_str());
         std::fprintf(stderr, "INTERP_TIME prepare_ms %.3f\n",
@@ -439,11 +440,11 @@ int main(int argc, char** argv) {
       }
       std::fprintf(stderr, "INTERP_TIME prepare_ms %.3f\n",
                    ms(t0, Clock::now()));
-      status.write({{"record", "compile"},
-                    {"ok", true},
-                    {"interpreter_fallbacks", Json::array()},
-                    {"write_array",
-                     {{"section", m->wa ? "interpreted" : "none"}}}});
+      status.write(
+          {{"record", "compile"},
+           {"ok", true},
+           {"interpreter_fallbacks", Json::array()},
+           {"write_array", {{"section", m->wa ? "interpreted" : "none"}}}});
       const auto at = [&](int v, bool multi) -> int {
         const auto msg = [multi](const std::string& s) {
           return multi ? one_line(s) : s;
@@ -496,8 +497,7 @@ int main(int argc, char** argv) {
           std::fprintf(stderr,
                        "INTERP_TIME point %d lp_ms %.3f grad_ms %.3f "
                        "wa_ms %.3f\n",
-                       v, ms(t1, lp_end), ms(lp_end, t2),
-                       ms(t2, Clock::now()));
+                       v, ms(t1, lp_end), ms(lp_end, t2), ms(t2, Clock::now()));
           std::printf("OK");
           print_real(r.lp);
           for (double g : r.grad) print_real(g);

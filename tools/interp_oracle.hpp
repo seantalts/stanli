@@ -474,8 +474,7 @@ struct Model {
 // the lowering's rules and messages (Lowering::bind_data).
 class DataBinder {
  public:
-  DataBinder(const mir::Program& p, const DataMap& data)
-      : p_(p), data_(data) {
+  DataBinder(const mir::Program& p, const DataMap& data) : p_(p), data_(data) {
     for (const auto& [name, type] : p.input_vars) types_[name] = &type;
   }
 
@@ -501,8 +500,8 @@ class DataBinder {
       }
       if (dims) {
         std::optional<Entry> value = declared_shape_value(
-            *dims, int_declared(type), data_.has(key) ? &data_.at(key) : nullptr,
-            [&] {
+            *dims, int_declared(type),
+            data_.has(key) ? &data_.at(key) : nullptr, [&] {
               return leaf ? mir::detail::reader_order(*leaf, *dims)
                           : std::vector<size_t>{};
             });
@@ -608,16 +607,16 @@ inline void lay_out_parameters(Model& m) {
             for (size_t k = 0; k < names.size(); ++k)
               gathers[k].resize((size_t)u.leaves[k].len);
             int64_t next = 0;
-            u.for_each_element([&](size_t k,
-                                   const std::vector<int64_t>& index) {
-              const CompiledModel::UncParam::Leaf& free = u.leaves[k];
-              const int64_t per = free.len / free.elements();
-              int64_t element = 0;
-              for (size_t dd = 0; dd < index.size(); ++dd)
-                element = element * free.dims[dd] + index[dd];
-              for (int64_t j = 0; j < per; ++j)
-                gathers[k][(size_t)(element * per + j)] = m.n_free + next++;
-            });
+            u.for_each_element(
+                [&](size_t k, const std::vector<int64_t>& index) {
+                  const CompiledModel::UncParam::Leaf& free = u.leaves[k];
+                  const int64_t per = free.len / free.elements();
+                  int64_t element = 0;
+                  for (size_t dd = 0; dd < index.size(); ++dd)
+                    element = element * free.dims[dd] + index[dd];
+                  for (int64_t j = 0; j < per; ++j)
+                    gathers[k][(size_t)(element * per + j)] = m.n_free + next++;
+                });
             for (size_t k = 0; k < names.size(); ++k)
               block.positions[names[k]] = std::move(gathers[k]);
             m.n_free += next;
