@@ -198,42 +198,14 @@ void Lowering::bind_declared_shape(const std::string& key,
   } catch (const CompileError&) {
     return;
   }
-  int64_t size = 1;
-  for (int64_t d : dims) size *= d;
   const bool int_declared = type.base == "SInt" ||
                             (type.base == "SArray" && type.elem_base == "SInt");
-  if (size == 0) {
-    if (int_declared)
-      reshaped_data->set_int_array(key, {}, std::move(dims));
-    else
-      reshaped_data->set_real_array(key, {}, std::move(dims));
-    return;
-  }
-  if (!data.has(key)) return;
-  const DataMap::Entry& given = data.at(key);
-  if (!same_without_unit_extents(dims, given.dims)) return;
-  if (given.r.size() != static_cast<size_t>(size) ||
-      (given.is_int && given.i.size() != static_cast<size_t>(size)))
-    return;
-  const std::vector<size_t> order =
-      leaf ? mir::detail::reader_order(*leaf, dims) : std::vector<size_t>{};
-  if (given.dims == dims && order.empty()) return;
-  if (dims.empty()) {
-    if (given.is_int)
-      reshaped_data->set_int(key, given.i[0]);
-    else
-      reshaped_data->set_real(key, given.r[0]);
-    return;
-  }
-  if (given.is_int) {
-    std::vector<int> values = given.i;
-    for (size_t k = 0; k < order.size(); ++k) values[k] = given.i[order[k]];
-    reshaped_data->set_int_array(key, std::move(values), std::move(dims));
-  } else {
-    std::vector<double> values = given.r;
-    for (size_t k = 0; k < order.size(); ++k) values[k] = given.r[order[k]];
-    reshaped_data->set_real_array(key, std::move(values), std::move(dims));
-  }
+  std::optional<DataMap::Entry> value = declared_shape_value(
+      dims, int_declared, data.has(key) ? &data.at(key) : nullptr, [&] {
+        return leaf ? mir::detail::reader_order(*leaf, dims)
+                    : std::vector<size_t>{};
+      });
+  if (value) reshaped_data->set(key, std::move(*value));
 }
 void Lowering::bind_data(const mir::Program& p) {
   std::set<std::string> input_names;
