@@ -2141,6 +2141,103 @@ void test_data_valued_locals_are_data_control() {
 // `target +=` sits under a branch that is never taken. That store must stay
 // in the body, because the lane kernel reads the sum after every iteration
 // and seeds only the registers that the body reads before it writes.
+// Compiles `source` twice, with and without lanes, and checks that the
+// lane form gives the scalar map's lp and gradient bit for bit. Returns the
+// lane payload's plan through `plan` (a copy, the model goes out of scope).
+stanli::RegionMapLanePlan expect_lanes_bitwise(const std::string& what,
+                                               const std::string& source,
+                                               int n) {
+  const std::string mir = mir_of_source(what, source);
+  const DataMap data = make_data(n);
+  CompiledModel lanes = stanli::compile_model(mir, data);
+  test_setenv("STANLI_REGION_MAP_LANES", "0", 1);
+  CompiledModel scalar = stanli::compile_model(mir, data);
+  test_unsetenv("STANLI_REGION_MAP_LANES");
+  check(count_opcode(lanes, OP_REGION_MAP) == 1, what + ": the loop is mapped");
+  if (count_opcode(lanes, OP_REGION_MAP) != 1) return {};
+  const auto& plan = map_payload(lanes).lanes;
+  check(plan.active, what + ": lanes run the body (" + plan.refusal + ")");
+  Executor el(lanes.graph), es(scalar.graph);
+  lanes.bind(el);
+  scalar.bind(es);
+  for (const Params& point : spread_points((size_t)el.n_params(), 5, 1.5)) {
+    const Run got = try_evaluate(el, point);
+    const Run want = try_evaluate(es, point);
+    check(got.threw == want.threw && got.what == want.what,
+          what + ": lanes and scalar throw alike");
+    if (got.threw || want.threw) continue;
+    check(same_bits(got.e.lp, want.e.lp), what + ": lp bitwise");
+    for (size_t i = 0; i < want.e.grad.size(); ++i)
+      check(same_bits(got.e.grad[i], want.e.grad[i]),
+            what + ": grad[" + std::to_string(i) + "] bitwise (" +
+                std::to_string(got.e.grad[i]) + " vs " +
+                std::to_string(want.e.grad[i]) + ")");
+  }
+  return plan;
+}
+
+// A read mu[n] of a shared container that no other read in the body
+// touches adds its adjoint straight into the container, in the order the
+// replay would have used, so it logs no site. A read of a data container
+// logs nothing. Reads that share cells keep their sites.
+void test_lane_index_adjoint_sites() {
+  const std::string head =
+      "functions { real guarded_lpdf(real y, real mu, real s) {\n"
+      "  if (s <= 0) return negative_infinity();\n"
+      "  return normal_lpdf(y | mu, s); } }\n"
+      "data { int N; vector[N] x; vector[N] y; }\n"
+      "parameters { real a; real b; real<lower=0> s; }\n"
+      "model { vector[N] mu = a + b * x;\n";
+  for (int n : {37, 64, 65, 200, 434}) {
+    const std::string at = " N=" + std::to_string(n);
+    const auto alone = expect_lanes_bitwise(
+        "region_map_sites_alone" + at,
+        head + "  for (n in 1:N) target += guarded_lpdf(y[n] | mu[n], s); }\n",
+        n);
+    check(alone.max_dynamic == 0, "sites alone" + at + ": no dynamic site (" +
+                                      std::to_string(alone.max_dynamic) + ")");
+    check(alone.max_sites == 1, "sites alone" + at + ": one site, for s (" +
+                                    std::to_string(alone.max_sites) + ")");
+    const auto reversed = expect_lanes_bitwise(
+        "region_map_sites_reversed" + at,
+        head +
+            "  for (n in 1:N) target += guarded_lpdf(y[n] | mu[n] - 0.5 *"
+            " mu[N + 1 - n], s); }\n",
+        n);
+    check(reversed.max_dynamic == 2,
+          "sites reversed" + at + ": both reads of mu keep their sites (" +
+              std::to_string(reversed.max_dynamic) + ")");
+    // theta[g[n]]: many lanes add into each cell of theta, in one site.
+    const auto grouped = expect_lanes_bitwise(
+        "region_map_sites_grouped" + at,
+        "functions { real guarded_lpdf(real y, real mu, real s) {\n"
+        "  if (s <= 0) return negative_infinity();\n"
+        "  return normal_lpdf(y | mu, s); } }\n"
+        "data { int N; vector[N] x; vector[N] y; }\n"
+        "transformed data { array[N] int g;\n"
+        "  for (n in 1:N) g[n] = 1 + (7 * n) % 5; }\n"
+        "parameters { real a; real b; real<lower=0> s; vector[5] theta; }\n"
+        "model { vector[N] mu = a + b * x;\n"
+        "  for (n in 1:N) target += guarded_lpdf(y[n] | mu[n] + theta[g[n]],"
+        " s); }\n",
+        n);
+    check(grouped.max_dynamic == 0,
+          "sites grouped" + at + ": theta[g[n]] adds directly (" +
+              std::to_string(grouped.max_dynamic) + ")");
+    const auto fixed = expect_lanes_bitwise(
+        "region_map_sites_fixed" + at,
+        head +
+            "  for (n in 1:N) target += guarded_lpdf(y[n] | mu[n] + 0.25 *"
+            " mu[1], s); }\n",
+        n);
+    check(fixed.max_dynamic == 1,
+          "sites fixed" + at +
+              ": mu[n] shares mu[1]'s cell and keeps its "
+              "site (" +
+              std::to_string(fixed.max_dynamic) + ")");
+  }
+}
+
 void test_out_register_is_not_hoisted() {
   const std::string minimal =
       "parameters { real p; }\n"
@@ -3540,6 +3637,7 @@ int main() {
   test_extent_bound_is_data_control();
   test_data_valued_locals_are_data_control();
   test_out_register_is_not_hoisted();
+  test_lane_index_adjoint_sites();
 #endif
   test_mode_policy();
   test_recompute_visits_taken_blocks();

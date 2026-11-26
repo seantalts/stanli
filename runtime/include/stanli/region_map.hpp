@@ -114,6 +114,12 @@ struct RegionMapLanePlan {
   std::vector<char> trail_reg;
   std::vector<char> adj_skip;
   std::vector<char> adj_sink;
+  // Per adjoint instruction: a DYN_INDEX from shared cells whose adjoint
+  // only clears its output, because no parameter reaches the container
+  // (adj_drop), or adds straight into the container, because no other
+  // instruction logs a site into its cells (adj_direct).
+  std::vector<char> adj_drop;
+  std::vector<char> adj_direct;
   std::vector<int> segment_block;
   int segment_count = 0;
   int64_t mask_cells = 0;

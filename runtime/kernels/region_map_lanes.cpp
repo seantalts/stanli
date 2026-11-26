@@ -218,6 +218,7 @@ class Analysis {
     classify_cells();
     find_adjoint_sinks();
     check_ranges();
+    find_direct_indexes();
     assign_register_slots();
     assign_cell_slots();
     decode_operands();
@@ -1209,34 +1210,101 @@ class Analysis {
     w.bwd_size = at;
   }
 
+  static std::vector<int> site_operands(const AdjInstr& A) {
+    switch (A.code) {
+      case Program::MOV:
+      case Program::NEG:
+        STANLI_PROGRAM_UNARY_LIST(STANLI_LANE_UNARY_CASE)
+        return {A.a};
+      case Program::ADD:
+      case Program::SUB:
+      case Program::MUL:
+      case Program::DIV:
+      case Program::POW:
+      case Program::FMAX:
+      case Program::FMIN:
+      case Program::LSE2:
+      case Program::LOG_DIFF_EXP:
+      case Program::LMULTIPLY:
+        return {A.a, A.b};
+      case Program::FMA:
+      case Program::LOG_MIX:
+        return {A.a, A.b, A.c};
+      default:
+        return {};
+    }
+  }
+
+  // The shared cells each adjoint instruction logs sites into, as spans.
+  template <typename F>
+  void each_site_span(size_t pc, F f) const {
+    const AdjInstr& A = p_.adj.code[pc];
+    if (A.code == Program::DYN_INDEX) {
+      if (shared_cell(A.a)) f(A.a, A.len);
+    } else if (A.code == Program::CALL) {
+      const Program::Call& call = p_.calls[(size_t)A.a];
+      for (int k = 0; k < call.n_in; ++k)
+        if ((call.input_adjoint_mask & (1u << k)) &&
+            shared_cell(call.bwd_adj_in[k]))
+          f(call.bwd_adj_in[k], call.in_len[k]);
+    } else {
+      for (int c : site_operands(A))
+        if (c >= 0 && c < n_cells_ && shared_cell(c)) f(c, 1);
+    }
+  }
+
+  // The replay adds a tile's sites lane by lane, descending, and each
+  // lane's sites in the order they were logged. For cells that only one
+  // instruction logs into, that is the order in which the instruction's own
+  // loop over the lanes visits them, so it can add there directly, with the
+  // same result bit for bit. A container that no parameter reaches needs no
+  // adjoint at all: its cells are not upstream of any parameter.
+  void find_direct_indexes() {
+    const size_t n_adj = p_.adj.code.size();
+    plan_.adj_drop.assign(n_adj, 0);
+    plan_.adj_direct.assign(n_adj, 0);
+    const auto& map = p_.adj.adj_reg;
+    std::vector<char> active_cell((size_t)n_cells_, 0);
+    for (size_t k = 0; k + 1 < p_.ins.size(); ++k) {
+      const auto& li = p_.ins[k];
+      if (!li.active) continue;
+      for (int i = 0; i < li.len; ++i)
+        active_cell[(size_t)map[(size_t)(li.reg + i)]] = 1;
+    }
+    for (size_t pc = 0; pc < n_adj; ++pc) {
+      const AdjInstr& A = p_.adj.code[pc];
+      if (A.code != Program::DYN_INDEX || plan_.adj_skip[pc] ||
+          !shared_cell(A.a))
+        continue;
+      bool active = false;
+      for (int k = 0; k < A.len; ++k)
+        active = active || active_cell[(size_t)(A.a + k)];
+      plan_.adj_drop[pc] = !active;
+    }
+    std::vector<int> loggers((size_t)n_cells_, 0);
+    for (size_t pc = 0; pc < n_adj; ++pc) {
+      if (plan_.adj_skip[pc] || plan_.adj_drop[pc]) continue;
+      each_site_span(pc, [&](int base, int len) {
+        for (int k = 0; k < len; ++k) ++loggers[(size_t)(base + k)];
+      });
+    }
+    for (size_t pc = 0; pc < n_adj; ++pc) {
+      const AdjInstr& A = p_.adj.code[pc];
+      if (A.code != Program::DYN_INDEX || plan_.adj_skip[pc] ||
+          plan_.adj_drop[pc] || !shared_cell(A.a))
+        continue;
+      bool alone = true;
+      for (int k = 0; k < A.len; ++k)
+        alone = alone && loggers[(size_t)(A.a + k)] == 1;
+      plan_.adj_direct[pc] = alone;
+    }
+  }
+
   void count_sites() {
-    const auto operands = [&](const AdjInstr& A) -> std::vector<int> {
-      switch (A.code) {
-        case Program::MOV:
-        case Program::NEG:
-          STANLI_PROGRAM_UNARY_LIST(STANLI_LANE_UNARY_CASE)
-          return {A.a};
-        case Program::ADD:
-        case Program::SUB:
-        case Program::MUL:
-        case Program::DIV:
-        case Program::POW:
-        case Program::FMAX:
-        case Program::FMIN:
-        case Program::LSE2:
-        case Program::LOG_DIFF_EXP:
-        case Program::LMULTIPLY:
-          return {A.a, A.b};
-        case Program::FMA:
-        case Program::LOG_MIX:
-          return {A.a, A.b, A.c};
-        default:
-          return {};
-      }
-    };
-    for (const auto& A : p_.adj.code) {
+    for (size_t pc = 0; pc < p_.adj.code.size(); ++pc) {
+      const AdjInstr& A = p_.adj.code[pc];
       if (A.code == Program::DYN_INDEX) {
-        if (shared_cell(A.a)) {
+        if (shared_cell(A.a) && !plan_.adj_drop[pc] && !plan_.adj_direct[pc]) {
           ++plan_.max_sites;
           ++plan_.max_dynamic;
         }
@@ -1254,7 +1322,7 @@ class Analysis {
               shared_cell(call.bwd_adj_in[k]))
             plan_.max_sites += call.in_len[k];
       } else {
-        for (int c : operands(A))
+        for (int c : site_operands(A))
           if (shared_cell(c)) ++plan_.max_sites;
       }
     }
@@ -1782,6 +1850,7 @@ class AdjointTile {
   bool shared_cell(int c) const { return plan_.cell_slot[(size_t)c] < 0; }
 
   double* cells() const { return cells_; }
+  double* shared() const { return shared_; }
 
   double* cell(int c) const {
     return cells_ + (size_t)plan_.cell_slot[(size_t)c] * kTile;
@@ -1825,7 +1894,43 @@ class AdjointTile {
     return d;
   }
 
+  // Adds every site into its shared cell: lanes descending, each lane's
+  // sites in the order they were logged, which is the scalar map's order.
+  // Sites with a fixed cell only interleave with the other sites of that
+  // cell, so each cell takes its own sequence of additions, in a register.
   void replay() {
+    constexpr int kGrouped = 64;
+    bool fixed = n_sites_ <= kGrouped;
+    for (int s = 0; s < n_sites_ && fixed; ++s) fixed = meta_[2 * s] >= 0.0;
+    if (fixed) {
+      int order[kGrouped];
+      for (int s = 0; s < n_sites_; ++s) {
+        int at = s;
+        while (at > 0 && meta_[2 * order[at - 1]] > meta_[2 * s]) {
+          order[at] = order[at - 1];
+          --at;
+        }
+        order[at] = s;
+      }
+      const int lanes = fwd_.lanes();
+      for (int g = 0; g < n_sites_;) {
+        const double cell = meta_[2 * order[g]];
+        int e = g + 1;
+        while (e < n_sites_ && meta_[2 * order[e]] == cell) ++e;
+        double acc = shared_[(size_t)cell];
+        if (e == g + 1) {
+          const double* row = rows_ + (size_t)order[g] * kTile;
+          for (int l = lanes; l-- > 0;) acc += row[l];
+        } else {
+          for (int l = lanes; l-- > 0;)
+            for (int k = g; k < e; ++k)
+              acc += rows_[(size_t)order[k] * kTile + l];
+        }
+        shared_[(size_t)cell] = acc;
+        g = e;
+      }
+      return;
+    }
     for (int l = fwd_.lanes(); l-- > 0;) {
       for (int s = 0; s < n_sites_; ++s) {
         const double* row = rows_ + (size_t)s * kTile;
@@ -2252,7 +2357,20 @@ void lane_adjoint_instruction(const RegionMapProg& p, AdjointTile& t, int pc,
     }
     case Program::DYN_INDEX: {
       double* const d = cells(o.dst);
+      if (p.lanes.adj_drop[(size_t)pc]) {
+        t.each(m, [&](int l) { d[l] = 0.0; });
+        return;
+      }
       t.with(o.vb, I.vb, [&](auto vb) {
+        if (o.a < 0 && p.lanes.adj_direct[(size_t)pc]) {
+          double* const base = t.shared() + I.a - 1;
+          t.each(m, [&](int l) {
+            const double u = d[l];
+            d[l] = 0.0;
+            base[static_cast<int32_t>(vb[l])] += u;
+          });
+          return;
+        }
         if (o.a < 0) {
           const auto site = t.acc_dynamic();
           t.each(m, [&](int l) {
