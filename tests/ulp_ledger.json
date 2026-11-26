@@ -325,6 +325,35 @@
       "reason": "measured on Darwin arm64; 80-digit reference at point 2 (grad[6]): stanli 0, CmdStan 157 scaled ULP from the true value; stanli is at least as close to it; the merged loop's sums are pairwise or compensated in stanli, while CmdStan adds one call at a time; 9 grad values over 10"
      }
     },
+    "ch14_m14_10": {
+     "grad[2]": {
+      "bound": 11,
+      "closer": "stanli",
+      "reason": "measured on Darwin arm64 with STANLI_ACCELERATE, where multi_normal inverts the 151 x 151 covariance with dpotrf and dpotri in place of an LDLT solve against the identity; 80-digit reference at point 1: stanli 2, CmdStan 13 scaled ULP from the true value"
+     },
+     "grad[4]": {
+      "bound": 24,
+      "closer": "stanli",
+      "reason": "measured on Darwin arm64 with STANLI_ACCELERATE, where multi_normal inverts the 151 x 151 covariance with dpotrf and dpotri in place of an LDLT solve against the identity; 80-digit reference at point 1: stanli 12, CmdStan 12 scaled ULP from the true value"
+     }
+    },
+    "ch14_m14_11": {
+     "grad[2]": {
+      "bound": 14,
+      "closer": "stanli",
+      "reason": "measured on Darwin arm64 with STANLI_ACCELERATE, where multi_normal inverts the 151 x 151 covariance with dpotrf and dpotri in place of an LDLT solve against the identity; 80-digit reference at point 2: stanli 2, CmdStan 16 scaled ULP from the true value"
+     },
+     "grad[4]": {
+      "bound": 32,
+      "closer": "stanli",
+      "reason": "measured on Darwin arm64 with STANLI_ACCELERATE, where multi_normal inverts the 151 x 151 covariance with dpotrf and dpotri in place of an LDLT solve against the identity; 80-digit reference at point 2: stanli 8, CmdStan 24 scaled ULP from the true value"
+     },
+     "grad[5]": {
+      "bound": 17,
+      "closer": "stanli",
+      "reason": "measured on Darwin arm64 with STANLI_ACCELERATE, where multi_normal inverts the 151 x 151 covariance with dpotrf and dpotri in place of an LDLT solve against the identity; 80-digit reference at point 0: stanli 6, CmdStan 11 scaled ULP from the true value"
+     }
+    },
     "ch14_m14_7": {
      "grad[1]": {
       "bound": 13,
