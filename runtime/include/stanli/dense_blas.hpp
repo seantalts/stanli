@@ -49,10 +49,10 @@ namespace blas {
 // The smallest sizes at which each accelerated kernel is used. See
 // runtime/src/dense_blas.cpp for the measurements behind them.
 struct Thresholds {
-  int64_t gemm_min_dim;     // smallest of rows, inner and columns
-  int64_t gemv_min_rows;    // matrix-vector product: rows and columns
+  int64_t gemm_min_dim;   // smallest of rows, inner and columns
+  int64_t gemv_min_rows;  // matrix-vector product: rows and columns
   int64_t gemv_min_cols;
-  int64_t cholesky_min_n;   // factor and adjoint
+  int64_t cholesky_min_n;     // factor and adjoint
   int64_t tri_inverse_min_n;  // multi_normal_cholesky's inverse of L
 };
 const Thresholds& thresholds();
@@ -82,8 +82,7 @@ void trsm_lower(bool left, bool trans, int64_t m, int64_t n, double alpha,
 void trmm_lower_left(bool trans, int64_t m, int64_t n, double alpha,
                      const double* l, int64_t ldl, double* b, int64_t ldb);
 // x = op(L) * x, L lower.
-void trmv_lower(bool trans, int64_t n, const double* l, int64_t ldl,
-                double* x);
+void trmv_lower(bool trans, int64_t n, const double* l, int64_t ldl, double* x);
 // C = alpha * S * B + beta * C, S symmetric with its lower triangle given.
 void symm_lower_left(int64_t m, int64_t n, double alpha, const double* s,
                      int64_t lds, const double* b, int64_t ldb, double beta,

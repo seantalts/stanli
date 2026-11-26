@@ -29,6 +29,27 @@ namespace {
 using Mat = Eigen::MatrixXd;
 using Vec = Eigen::VectorXd;
 
+uint16_t opcode_after_pass(uint16_t opcode, std::vector<int> idata,
+                           std::vector<int64_t> in_lens, int64_t out_len,
+                           uint8_t variant = 0) {
+  using namespace stanli;
+  Graph g;
+  std::vector<int> ins;
+  for (int64_t len : in_lens) ins.push_back(g.add_slot(len, false));
+  const int out = g.add_slot(out_len, false);
+  const int at = (int)g.ops.size();
+  if (ins.size() == 1)
+    g.add_op(opcode, {ins[0]}, out, idata);
+  else if (ins.size() == 2)
+    g.add_op(opcode, {ins[0], ins[1]}, out, idata);
+  else
+    g.add_op(opcode, {ins[0], ins[1], ins[2]}, out, idata);
+  g.ops[at].variant = variant;
+  accelerate_dense_ops(g);
+  return g.ops[at].opcode;
+}
+
+#ifdef STANLI_ACCELERATE
 // The largest difference relative to the largest magnitude of `want`.
 double scaled_error(const double* got, const double* want, int64_t len) {
   double worst = 0, scale = 0;
@@ -56,31 +77,10 @@ Mat seed(int64_t r, int64_t c, double phase) {
   return s;
 }
 
-uint16_t opcode_after_pass(uint16_t opcode, std::vector<int> idata,
-                           std::vector<int64_t> in_lens, int64_t out_len,
-                           uint8_t variant = 0) {
-  using namespace stanli;
-  Graph g;
-  std::vector<int> ins;
-  for (int64_t len : in_lens) ins.push_back(g.add_slot(len, false));
-  const int out = g.add_slot(out_len, false);
-  const int at = (int)g.ops.size();
-  if (ins.size() == 1)
-    g.add_op(opcode, {ins[0]}, out, idata);
-  else if (ins.size() == 2)
-    g.add_op(opcode, {ins[0], ins[1]}, out, idata);
-  else
-    g.add_op(opcode, {ins[0], ins[1], ins[2]}, out, idata);
-  g.ops[at].variant = variant;
-  accelerate_dense_ops(g);
-  return g.ops[at].opcode;
-}
-
-#ifdef STANLI_ACCELERATE
 bool registered(const stanli::Kernel* k, uint16_t opcode) {
-  expect_true(std::string("kernel registered for ") +
-                  stanli::opcode_name(opcode),
-              k != nullptr && k->forward != nullptr);
+  expect_true(
+      std::string("kernel registered for ") + stanli::opcode_name(opcode),
+      k != nullptr && k->forward != nullptr);
   return k != nullptr && k->forward != nullptr;
 }
 
@@ -233,22 +233,21 @@ void thresholds_select_opcodes() {
             OP_GEMM, OP_GEMM);
   expect_op("gemm at threshold",
             opcode_after_pass(OP_GEMM, {g, g, g},
-                              {int64_t(g) * g, int64_t(g) * g},
-                              int64_t(g) * g),
+                              {int64_t(g) * g, int64_t(g) * g}, int64_t(g) * g),
             OP_GEMM_BLAS, OP_GEMM);
   expect_op("cholesky below threshold",
             opcode_after_pass(OP_CHOLESKY, {c - 1}, {int64_t(c - 1) * (c - 1)},
                               int64_t(c - 1) * (c - 1)),
             OP_CHOLESKY, OP_CHOLESKY);
-  expect_op("cholesky at threshold",
-            opcode_after_pass(OP_CHOLESKY, {c}, {int64_t(c) * c},
-                              int64_t(c) * c),
-            OP_CHOLESKY_BLAS, OP_CHOLESKY);
-  expect_op("multi_normal_cholesky below threshold",
-            opcode_after_pass(OP_MULTI_NORMAL_CHOL_LPDF, {m - 1, 1},
-                              {m - 1, m - 1, int64_t(m - 1) * (m - 1)}, 1,
-                              0x84),
-            OP_MULTI_NORMAL_CHOL_LPDF, OP_MULTI_NORMAL_CHOL_LPDF);
+  expect_op(
+      "cholesky at threshold",
+      opcode_after_pass(OP_CHOLESKY, {c}, {int64_t(c) * c}, int64_t(c) * c),
+      OP_CHOLESKY_BLAS, OP_CHOLESKY);
+  expect_op(
+      "multi_normal_cholesky below threshold",
+      opcode_after_pass(OP_MULTI_NORMAL_CHOL_LPDF, {m - 1, 1},
+                        {m - 1, m - 1, int64_t(m - 1) * (m - 1)}, 1, 0x84),
+      OP_MULTI_NORMAL_CHOL_LPDF, OP_MULTI_NORMAL_CHOL_LPDF);
   expect_op("multi_normal_cholesky at threshold",
             opcode_after_pass(OP_MULTI_NORMAL_CHOL_LPDF, {m, 1},
                               {m, m, int64_t(m) * m}, 1, 0x84),
@@ -321,12 +320,12 @@ void accelerated_kernels_agree() {
     };
     const double numeric = (objective(h) - objective(-h)) / (2 * h);
     const double rel = std::abs(analytic - numeric) / std::abs(numeric);
-    std::printf("%-44s relative error %.2e (analytic %.17g, central "
-                "difference %.17g)\n",
-                ("cholesky adjoint vs finite differences n=" +
-                 std::to_string(n))
-                    .c_str(),
-                rel, analytic, numeric);
+    std::printf(
+        "%-44s relative error %.2e (analytic %.17g, central "
+        "difference %.17g)\n",
+        ("cholesky adjoint vs finite differences n=" + std::to_string(n))
+            .c_str(),
+        rel, analytic, numeric);
     expect_true("cholesky adjoint matches finite differences", rel <= 1e-6);
   }
   for (int64_t n : {t.tri_inverse_min_n, int64_t(200)}) {
@@ -336,8 +335,7 @@ void accelerated_kernels_agree() {
     const Run plain = run_mnc(OP_MULTI_NORMAL_CHOL_LPDF, y, mu, L, &lp_plain);
     const Run fast =
         run_mnc(OP_MULTI_NORMAL_CHOL_LPDF_BLAS, y, mu, L, &lp_fast);
-    expect_true("accelerated multi_normal_cholesky calls BLAS",
-                fast.calls > 0);
+    expect_true("accelerated multi_normal_cholesky calls BLAS", fast.calls > 0);
     const std::string at = " n=" + std::to_string(n);
     const double lp_rel = std::abs(lp_fast - lp_plain) / std::abs(lp_plain);
     std::printf("%-44s relative error %.2e\n",
