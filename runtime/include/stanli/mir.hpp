@@ -731,8 +731,8 @@ inline bool inherits_propto(const Expr& call) {
 // call's actual arguments. Nor is it right for an indexed formal that stanc3's
 // inliner substituted in the inlined MIR of the fixtures that
 // tools/gen_fixtures.py writes: `s[i]` keeps the formal's adlevel when `s`
-// becomes data. So read variables through `var_autodiff` and derive the rest from
-// them. `promoted_autodiff` is the type a promotion to a var produces.
+// becomes data. So read variables through `var_autodiff` and derive the rest
+// from them. `promoted_autodiff` is the type a promotion to a var produces.
 template <class VarAutodiff>
 bool instantiated_autodiff(const Expr& e, bool promoted_autodiff,
                            const VarAutodiff& var_autodiff) {
