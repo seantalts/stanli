@@ -153,7 +153,13 @@ python3 tools/perturb/scale.py MODEL.stan DATA.json --set N=1000 [--mode tile] -
 scale.py accepts, and every variant whose meta names `sizes`. The default
 ladder is coarse: 0 (when the lower bound allows it), 1, 8, 100 and 10^4.
 Bisection (below) then finds the size at which the op count jumps, so the
-coarse ladder locates a jump with far fewer points than the full one. `--ladder full` measures 0, 1, 2, 3, 7, 8, 9, 31, 32, 33, 63,
+coarse ladder locates a jump with far fewer points than the full one. On
+ten corpus models (30 ladders) the coarse ladder took 135 s against 341 s.
+It found the same cap crossings and three of the four thresholds. It missed
+one threshold (radon between 431 and 432 rows, a jump that the op count
+recovers from before 10^4), and five findings on four ladders, four of them
+about preparation time. Use the coarse ladder to screen and the full one
+for a model that you are writing up. `--ladder full` measures 0, 1, 2, 3, 7, 8, 9, 31, 32, 33, 63,
 64, 65, 100, 1000, 10^4 and 10^5, which also shows changes at 8, 32 and 64
 that do not move the op count. After it, the ladder adds the sizes 3% below
 and above where the program would cross the 8 MiB program budget, the

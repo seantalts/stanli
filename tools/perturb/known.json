@@ -1,113 +1,113 @@
 {
  "_format": {
   "kind": "cliff | ops_grow | prep_superlinear | per_element_jump | program_changes_shape | failure",
-  "match": "regular expression searched in the JSON of the record",
+  "match": "regular expression searched in the JSON of the record; the record is dumped with sorted keys, so \"class\" comes before \"variant\"",
   "reason": "the cause and the issue that tracks it"
  },
  "known": [
   {
    "kind": "cliff",
-   "match": "\"class\": \"param-branch-outer-store\"",
+   "match": "\"class\": \"param-branch-outer-store\".*\"variant\": \"(C3__continue_guard_all_in_loop|C3__move1_transforms_into_loop|C3__move2_transforms_into_loop|C3__move3_transforms_into_loop|C3__move4_transforms_into_loop|C3__move5_transforms_into_loop|C3__store_loglik_all_in_loop|C3__store_loglik_vector_transforms)",
    "reason": "the region map refuses a body that assigns mu[n] declared outside the loop, or that uses continue (notes/performance/2026-11-25-perturbation-cliffs.md)"
   },
   {
    "kind": "cliff",
-   "match": "\"class\": \"nested-param-branch\"",
+   "match": "\"class\": \"nested-param-branch\".*\"variant\": \"(C12__subjects_balanced_depth|C12__subjects_ragged_depth|C12__subjects_ragged_depth2_transforms_inside)",
    "reason": "an inner loop with a bound per subject has no generated backward, so each row is an island (notes/performance/2026-11-25-perturbation-cliffs.md)"
   },
   {
    "kind": "cliff",
-   "match": "\"class\": \"per-row-local-vector\"",
+   "match": "\"class\": \"per-row-local-vector\".*\"variant\": \"(C4__array_log_mix|C4__fused_loops|C4__log_phi_hoisted|C4__matrix_then_reduce|C4__vec_fresh_lse|C4__vec_init_log_theta)",
    "reason": "a container built per row is not a lane value; log_mix on a vector also uses the Stan Math wrapper (notes/performance/2026-11-25-perturbation-cliffs.md)"
   },
   {
    "kind": "cliff",
-   "match": "\"class\": \"mixture-lse-spelling\"",
+   "match": "\"class\": \"mixture-lse-spelling\".*\"variant\": \"(C2__genk|C2__log_mix_vector|C2__lse_local_array)",
    "reason": "a container built per row is not a lane value (notes/performance/2026-11-25-perturbation-cliffs.md)"
   },
   {
    "kind": "cliff",
-   "match": "\"class\": \"shared-scalar-two-positions\"",
+   "match": "\"class\": \"shared-scalar-two-positions\".*\"variant\": \"(C1__shared_sigma|C1__shared_sigma_manual|C1__std_residual)",
    "reason": "by decision: the gate on an active scalar read at two positions protects the accuracy of its adjoint (notes/performance/2026-11-25-perturbation-cliffs.md)"
   },
   {
    "kind": "cliff",
-   "match": "\"class\": \"small-groups\"",
+   "match": "\"class\": \"small-groups\".*\"variant\": \"(C7__nest_rows|C7__seg_ragged|C7__seg_rows)",
    "reason": "lanes mix a scalar per lane with a row of width W (notes/performance/2026-11-25-perturbation-cliffs.md)"
   },
   {
    "kind": "cliff",
-   "match": "\"class\": \"store-index-permuted\"",
+   "match": "\"class\": \"store-index-permuted\".*\"variant\": \"(C8__loop_store_and_reversed_mu|C8__mu_loop_reversed|C8__mu_loop_sorted_order)",
    "reason": "a run of stores must step by a constant positive stride (notes/performance/2026-11-25-perturbation-cliffs.md)"
   },
   {
    "kind": "cliff",
-   "match": "\"class\": \"udf-move\"",
+   "match": "\"class\": \"udf-move\".*\"variant\": \"(C15__udf_early_return)",
    "reason": "by decision: a branch on a parameter inside a row loop may stay slow (notes/performance/2026-11-25-perturbation-cliffs.md)"
   },
   {
    "kind": "cliff",
-   "match": "\"class\": \"invariant-loop-body\"",
+   "match": "\"class\": \"invariant-loop-body\".*\"variant\": \"(C16__check_loop_1e)",
    "reason": "by decision: a reject on a parameter inside a loop blocks the fold and may stay slow (notes/performance/2026-11-25-perturbation-cliffs.md)"
   },
   {
    "kind": "cliff",
-   "match": "\"class\": \"gp-jitter-spelling\"",
+   "match": "\"class\": \"gp-jitter-spelling\".*\"variant\": \"(C30__matern32_add_diag|C30__matern32_loop)",
    "reason": "by decision: Matern 3/2 has no closed-form backward (notes/performance/2026-11-25-perturbation-cliffs.md)"
   },
   {
    "kind": "cliff",
-   "match": "\"class\": \"hmm-forward-spelling\"",
+   "match": "\"class\": \"hmm-forward-spelling\".*\"variant\": \"(C18__hmm_marginal)",
    "reason": "hmm_marginal is evaluated in forward and again in backward (notes/performance/2026-11-25-perturbation-cliffs.md)"
   },
   {
    "kind": "cliff",
-   "match": "\"class\": \"index-spelling\"",
+   "match": "\"class\": \"index-spelling\".*\"variant\": \"(C13__colfn|C13__colslice|C13__row_dot|C13__rowfn|C13__transpose_row|C13__vec_array)",
    "reason": "the gather backward finds no runs when indices alternate between two slots; a transposed row is not an invariant base (notes/performance/2026-11-25-perturbation-cliffs.md)"
   },
   {
    "kind": "cliff",
-   "match": "\"class\": \"forwarding-distance\"",
+   "match": "\"class\": \"forwarding-distance\".*\"variant\": \"(C21__other_elem_dead)",
    "reason": "a read of another element stops store forwarding (notes/performance/2026-11-25-perturbation-cliffs.md)"
   },
   {
    "kind": "cliff",
-   "match": "\"class\": \"same-family-statements-per-row\"",
+   "match": "\"class\": \"same-family-statements-per-row\".*\"variant\": \"(C11__inner_d_loop|C11__rowloop)",
    "reason": "D statements per row go to the region map; Y[d][n] copies the whole row (notes/performance/2026-11-25-perturbation-cliffs.md)"
   },
   {
    "kind": "cliff",
-   "match": "\"class\": \"family-swap\"",
+   "match": "\"class\": \"family-swap\".*\"variant\": \"(C14__categorical_loop|C14__probit_loop|C14__probit_vector|C14__vector_eta)",
    "reason": "not a cliff: the base is fast because CSE merges its identical scalar terms (notes/performance/2026-11-25-perturbation-cliffs.md)"
   },
   {
    "kind": "cliff",
-   "match": "\"class\": \"rmw-accumulation-order\"",
+   "match": "\"class\": \"rmw-accumulation-order\".*\"variant\": \"(C20__onestmt_all|C20__rowmajor_all)",
    "reason": "a row reads back the element that its own store writes (notes/performance/2026-11-25-perturbation-cliffs.md)"
   },
   {
    "kind": "cliff",
-   "match": "\"class\": \"matrix-fill-loop-order\"",
+   "match": "\"class\": \"matrix-fill-loop-order\".*\"variant\": \"(C6__row_scalar_fill)",
    "reason": "reroll takes the shortest period first (notes/performance/2026-11-25-perturbation-cliffs.md)"
   },
   {
    "kind": "cliff",
-   "match": "\"class\": \"censor-truncate-per-row\"",
+   "match": "\"class\": \"censor-truncate-per-row\".*\"variant\": \"(C5__loop_f|C5__loop_right_f|C5__loop_rows)",
    "reason": "reroll takes the shortest period first; normal_lccdf costs more than normal_lcdf (notes/performance/2026-11-25-perturbation-cliffs.md)"
   },
   {
    "kind": "cliff",
-   "match": "\"class\": \"inner-sum-over-columns\"",
+   "match": "\"class\": \"inner-sum-over-columns\".*\"variant\": \"(C23__base_loop|C23__inner_loop)",
    "reason": "a row loop counts as carrying a value when an inner loop does; some variants only do more work (notes/performance/2026-11-25-perturbation-cliffs.md)"
   },
   {
    "kind": "cliff",
-   "match": "\"class\": \"recurrence-spelling\"",
+   "match": "\"class\": \"recurrence-spelling\".*\"variant\": \"(C17__lag)",
    "reason": "the variant does more work, or lanes read different slots (notes/performance/2026-11-25-perturbation-cliffs.md)"
   },
   {
    "kind": "cliff",
-   "match": "\"class\": \"matrix-expr-spelling\"",
+   "match": "\"class\": \"matrix-expr-spelling\".*\"variant\": \"(C26__base_form|C26__rows_dot_rep)",
    "reason": "not a cliff: the variant does more work (notes/performance/2026-11-25-perturbation-cliffs.md)"
   }
  ]

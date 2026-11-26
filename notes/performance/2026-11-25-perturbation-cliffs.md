@@ -8,9 +8,10 @@ proposes no change; each gate lists what a fix would need.
 Tree: the runtime of main at 6b00234d1, a Release build with debug switches
 and the embedded compiler. The harness is on `perf/perturbation-fuzz`.
 CmdStan is the pinned one. The timing ran on a machine that other work was
-using (1-minute load 4 to 12). A second timing of one variant per gate
-agreed with the first within 5% for every variant, so the ratios below are
-stable, but none of them is a corpus benchmark.
+using (1-minute load 4 to 14). A second timing of one variant per gate
+agreed with the first within 8% for every variant (27 variants; the
+largest change was 3.26x to 3.02x), so the ratios below are stable, but
+none of them is a corpus benchmark.
 
 Evidence, under `data/2026-11-25-perturbation-cliffs/`:
 
@@ -20,7 +21,9 @@ Evidence, under `data/2026-11-25-perturbation-cliffs/`:
 - `loop-fallback.md`, `lane-declines.md`, `unexplained.md`,
   `size-growth.md`: the four analyses, with the gate, the condition, and
   whether each claim was run or only read. Each has a directory of small
-  reproducers.
+  reproducers. The analyses name helper scripts and work directories that
+  are not checked in; the reproducers run with `dump_ops` and `bench_grad`
+  as `tools/perturb/README.md` describes.
 
 ## Method
 
@@ -62,7 +65,8 @@ wrong without any error. Issue #690, fixed in #691.
 ## Gates, ranked
 
 "Corpus today" counts the corpus models that reach the gate with their own
-source and data. "Cliffs" counts the variants that pass the cliff measure.
+source and data. The counts come from decline reasons, and several causes
+can share one reason, so read them as upper bounds. "Cliffs" counts the variants that pass the cliff measure.
 "vs CmdStan" is the worst variant's time against CmdStan on the same
 variant. Timings are from the second run.
 
@@ -70,9 +74,9 @@ variant. Timings are from the second run.
 
 | gate | corpus today | cliffs | size of the effect | what a fix needs |
 |---|---|---:|---|---|
-| The cost model for repeated lanes (`partition.cpp:1025-1095`, the same formula as `reroll_plan.hpp:194-222`) | 14 models when their data has repeated values: 12 radon, low_dim_gauss_mix and its collapsed form. 13 bases decline on it already. | data values, not source | It fuses only above about 46% distinct lanes. Measured break-even is 10% to 20%. Just under 46% the scalar form that it picks is 4.8x slower. The radon data has 46.7%. | Raise the price of a scalar op (one formula, shared by both passes), or fuse only the distinct lanes and multiply by integer counts. |
+| The cost model for repeated lanes (`partition.cpp:1025-1095`, the same formula as `reroll_plan.hpp:194-222`) | 19 bases decline on cost today (13 in partition, 10 in reroll). How many of them sit between the measured break-even and the model's threshold was not measured. 14 more models reach the gate only when their data gets repeated values: the 12 radon models, low_dim_gauss_mix and its collapsed form. | data values, not source | It fuses only above about 46% distinct lanes. Measured break-even is 10% to 20%. In the reproducer with 4,000 rows, 1,900 distinct rows fuse to 11 ops and 1,800 give 3,972 ops and run 4.5x slower. | Raise the price of a scalar op (one formula, shared by both passes), or fuse only the distinct lanes and multiply by integer counts. First measure the share of distinct lanes in the 19 bases: only those between about 15% and 46% would change. |
 | A container built per row (`reroll.cpp:1008-1024`, `partition.cpp:253-256`, `762-776`, `976-977`) | normal_mixture_k runs at 7,159 ops as written. 39 bases have the reroll decline, 21 the "no lane rule" decline. | 11 | 11 to 21 ops become 2,000 to 15,000. 1.5x to 5.3x. Four variants end up to 2.3x slower than CmdStan. | Treat a row container of width K as one lane value, with row rules for `log_sum_exp`, `log_mix` and concatenation. This is the largest change in this note. |
-| The unroll ceiling counts ops before the passes (`lower.cpp:1345`, `lower_stmt.cpp:2482-2484`) | Any model whose row loop lowers to more than 2^20 ops. In the sweep, 19 models switched to `OP_LOOP` at some size. | size | radon at N=149,700 folds to 21 ops. At N=149,900 it is one `OP_LOOP`: 14.4x slower for 0.13% more rows, and 1.5x slower than CmdStan. | Find the fused form without unrolling everything: lower the body once over whole columns, or prove the lanes on a prefix and extend the strides. |
+| The unroll ceiling counts ops before the passes (`lower.cpp:1345`, `lower_stmt.cpp:2482-2484`) | Any model whose row loop lowers to more than 2^20 ops. In the sweep, 19 models switched to `OP_LOOP` at some size. | size | radon at N=149,700 folds to 21 ops. At N=149,900 it is one `OP_LOOP`: 14.4x slower for 0.13% more rows, and 1.5x slower than CmdStan. | Find the fused form without unrolling everything: lower the body once over whole columns, or prove the lanes on a prefix and extend the strides. Reproduce with `scale.py base.stan base.json --set N=149700` and `N=149900` on radon_variable_intercept_slope_noncentered. |
 | Preparation: a loop bound is evaluated again on every iteration (`mir_interp.hpp:268`, `:333`) | 2pl_latent_reg_irt, gpcm_latent_reg_irt | size | 28 s of preparation at K=1000, growing as K^1.9. | Evaluate the bound once. |
 | Preparation: a constant write keeps a copy of the whole container (`lower_expr.cpp:110`, `:128`) | hbayesdm_prl_rp, hbayesdm_dd_hyperbolic | size | 4.8 GB and 3.3 GB at 63 subjects. Memory grows as the square of the container. | Update in place, or keep one copy per container. |
 | Preparation: reroll counts a run of stores again from every start (`reroll.cpp:1795`) | hbayesdm_prl_rp | size | Scan steps grow 4x per doubling, and nothing is fused. | Remember where a run was refused. |
@@ -96,12 +100,20 @@ variant. Timings are from the second run.
 | gate | cliffs | size of the effect | what a fix needs |
 |---|---:|---|---|
 | The gather backward finds no runs when indices alternate between two slots (`elementwise.cpp:323-345`) | 9 (every 2-vector spelling of the radon group effects) | Same op count, 1.6x. Still 6.5x faster than CmdStan. | Find runs at a fixed period, or lower a small `GROUP_DOT` as separate gathers. |
+| A standardized residual `(y - mu) / sigma` fuses, but to a slower kernel route (no lane gate) | 1 (rats_model) | 14 ops to 19. 2.7x where CmdStan slows 1.6x. Still 4.5x faster than CmdStan. | A summed density form for a density minus a constant. |
 | Lanes mix a scalar per lane with a row of width W (`reroll.cpp:1066-1078`, `partition.cpp:762-776`) | 5 (radon groups walked with `segment` or a nested loop) | 13 ops to 10,000 through 34,000. 3x to 4.5x. | Vector constants in partition, and a lane scalar repeated across its row. |
 | A run of stores must step by a constant positive stride (`reroll.cpp:1268-1281`, `partition.cpp:847-858`) | 5 (a loop that runs downward or in sorted order) | 1.6x to 4.2x. | Accept a negative stride by reversing the lane order. A general permutation needs a gather through its inverse. |
 | A statement per row for each of D outcomes goes to the region map (`partition.cpp`: lane widths do not agree) | 5 (radon with 16 to 32 outcomes per row) | 5.7x to 6.6x more than CmdStan for the same extra work. Still 2x faster than CmdStan. | Partition lanes of width D. |
 | A row reads back the element that its own store writes (`inplace.cpp:288-301`, `reroll.cpp:1158`, `partition.cpp:590-602`) | 3 | 21 ops to 1,905. 3.1x. | Forward reads of elements that were never written. |
 | Reroll takes the shortest period first (`reroll.cpp:939-948`) | 3 (a row-by-row matrix fill; censored rows at every 10th row) | 1.5x. | Strided stores in the island vocabulary. Merge groups that share a template. |
 | `normal_lccdf` costs more than the same math through `normal_lcdf` (`densities_cdf_b.cpp:16-30`, cause inferred) | 1 | 98 ns against 61 ns per call. | Negate the inputs without copying the context. |
+
+### Not traced
+
+| variant | effect | what is known |
+|---|---|---|
+| arK with `mu` stored in a vector and then one vectorized `~` (`C23__mu_vector_then_sample`) | 7.2x slower where CmdStan gets 1.2x faster. Level with CmdStan afterwards. | 21 ops become 9 with an island. Partition has used its split budget and reroll says that lanes read different slots. No analysis looked at it. |
+| stochvol with a scalar AR recurrence (`C17__scalar_ar`) | 1.5x | 43 ops become 11. Not analysed. |
 
 ### Slow by an earlier decision
 
@@ -118,7 +130,7 @@ again. Each follows from a decision that is already recorded.
 
 | group | flagged | why |
 |---|---:|---|
-| ch12_m12_4 with a vectorized or probit likelihood | 4 | The base is about 700x faster than CmdStan because its 9,930 scalar `ordered_logistic` terms are identical and CSE merges them into 7. A vector statement gives CSE nothing to merge, and the variant runs level with CmdStan. The categorical spelling does not merge because `OP_CATEGORICAL` counts as effectful (`optable.hpp:986`). |
+| ch12_m12_4 with a vectorized or probit likelihood | 4 | The base is about 700x faster than CmdStan because its 9,930 scalar `ordered_logistic` terms are identical and CSE merges them into 7. A vector statement gives CSE nothing to merge, and the variant runs level with CmdStan. The categorical spelling does not merge because `OP_CATEGORICAL` counts as effectful (`optable.hpp:986`, checked by reading). `unexplained.md` gives a second reason, that CSE keys a data slot by its id; that one would apply only if the first did not. |
 | blr with 200 columns, arK with 40 lags | 4 | The variant does 7x to 40x the work. CmdStan's ratio is smaller only because its fixed cost per gradient dominates the small base. stanli is 1.4x to 6.4x faster on every one. |
 
 ## What held
@@ -156,11 +168,17 @@ whose program changes. A gate that only variants reach changes no corpus
 program, so it cannot pass that bar on its own. Whether to fix those is a
 separate decision. By reach:
 
-1. **Re-price the cost model.** One formula, 14 corpus models, and the
-   threshold is measurably in the wrong place.
-2. **Count the unroll ceiling after the passes, or avoid the full unroll.**
-   This is the only cliff here where more data makes stanli slower than
-   CmdStan on an unchanged corpus model.
+1. **Re-price the cost model.** One formula, and the threshold is
+   measurably in the wrong place. Its reach in the corpus is not yet
+   known: 19 bases decline on cost, and only those with a share of
+   distinct lanes between the break-even and 46% would change. The radon
+   models fuse with their own data, so their programs would not change
+   and they cannot count toward the corpus bar.
+2. **Find the fused form above the unroll ceiling without the full
+   unroll.** This is the only cliff here where more data makes stanli
+   slower than CmdStan on an unchanged corpus model. Counting the ceiling
+   after the passes is not a fix, because the ceiling exists to avoid that
+   unroll.
 3. **The three preparation causes.** Each is local and has a reproducer.
 4. **The row container.** The largest change, and the one that covers the
    most variants (11) and one corpus model as written.
@@ -171,7 +189,8 @@ separate decision. By reach:
 ## Limits of this run
 
 - Seven corpus bases fail the validity check at the harness's random
-  points (for example `sir` and `kronecker_gp`), so they have no variants.
+  points (for example `sir` and `kronecker_gp`), so a variant of one of
+  them could not be checked.
 - `scale.py` refuses 174 size variables with a compound dimension, 65
   models with no integer size, and 17 with ragged groups.
 - The count of corpus models per gate comes from decline reasons, so the
