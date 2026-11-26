@@ -659,6 +659,14 @@ class MirInterp {
               fail(std::string("multi-index assignment: ") + error.what(),
                    st.raw);
             }
+            if (st.lhs_idx.size() == 1 && (int64_t)v.r.size() != map.count &&
+                st.lhs_idx[0].kind != mir::Expr::IndexSingle &&
+                st.lhs_idx[0].kind != mir::Expr::IndexAll)
+              throw std::invalid_argument(selected_assign_size_message(
+                  st.lhs, st.lhs_idx[0].kind == mir::Expr::IndexBetween,
+                  st.lhs_idx[0].kind == mir::Expr::IndexUpfrom,
+                  assigns_to_array(st.lhs), map.count,
+                  static_cast<int64_t>(v.r.size())));
             if ((int64_t)v.r.size() != map.count ||
                 (!map.dimensions.empty() && v.dims != map.dimensions))
               fail("multi-index assignment size mismatch", st.raw);
@@ -1189,8 +1197,9 @@ class MirInterp {
         spec.opcode == OP_POW
             ? mir::pow_zero_base_law(e.args[0], e.args[1], !e.args[1].data_only)
             : 0;
-    if (!std::is_same_v<T, double> && spec.opcode == OP_VARIANCE &&
-        e.args[0].unsized.depth == 1 && !e.args[0].data_only)
+    if ((!std::is_same_v<T, double> || model_types_) &&
+        spec.opcode == OP_VARIANCE && e.args[0].unsized.depth == 1 &&
+        !e.args[0].data_only)
       variant = kVarianceOfVarArray;
     Value o;
     std::vector<int> idata;
@@ -1483,8 +1492,9 @@ class MirInterp {
     return shape;
   }
 
-  static bool interpreter_autodiff(const mir::Expr& call) {
-    return !std::is_same_v<T, double> && mir::any_argument_active(call);
+  bool interpreter_autodiff(const mir::Expr& call) const {
+    return (!std::is_same_v<T, double> || model_types_) &&
+           mir::any_argument_active(call);
   }
 
   bool assigns_to_array(const std::string& name) const {

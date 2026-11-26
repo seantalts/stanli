@@ -56,6 +56,31 @@ inline std::string assign_size_mismatch(const std::string& name,
                        src[levels]);
 }
 
+// The message stan::model::assign throws when a selection of one index (a
+// range `between`, an open range `upfrom`, or a multi-index) and its
+// right-hand side differ in size.
+inline std::string selected_assign_size_message(const std::string& name,
+                                                bool between, bool upfrom,
+                                                bool array, int64_t want,
+                                                int64_t got) {
+  const bool empty_range = between && want == 0;
+  std::string label;
+  if (array)
+    label = empty_range ? "array[negative_min_max, ...] assign"
+                        : "array[multi, ...] assign";
+  else if (between)
+    label = empty_range ? "vector[negative_min_max] assign"
+                        : "vector[min_max] assign";
+  else if (upfrom)
+    label = "vector[min] assign";
+  else
+    label = "vector[multi] assign";
+  const bool size_word = array && !empty_range;
+  return label + ": assigning variable " + name + " (" + std::to_string(want) +
+         ") and right hand side" + (size_word ? " size" : "") + " (" +
+         std::to_string(got) + ") must match in size";
+}
+
 }  // namespace stanli
 
 #endif
