@@ -800,16 +800,28 @@ inline std::map<std::string, Entry> constrained(
   double lp = 0.0;
   MirInterp<double> in(m.funs, "write_array parameters");
   in.set_parent_env(m.shared_env.get());
+  // The statements among the reads compute bounds (a tuple temporary for
+  // `lower=foo().1`); those after the last read are the model's.
+  std::vector<const mir::Stmt*> flat;
   std::function<void(const std::vector<mir::Stmt>&)> walk =
       [&](const std::vector<mir::Stmt>& body) {
         for (const auto& st : body) {
           if (st.kind == mir::Stmt::Block || st.kind == mir::Stmt::SList)
             walk(st.body);
-          else if (st.read_transform)
-            read_param(in, st, d, lp, &out);
+          else
+            flat.push_back(&st);
         }
       };
   walk(m.prog->log_prob);
+  size_t end = 0;
+  for (size_t k = 0; k < flat.size(); ++k)
+    if (flat[k]->read_transform) end = k + 1;
+  for (size_t k = 0; k < end; ++k) {
+    if (flat[k]->read_transform)
+      read_param(in, *flat[k], d, lp, &out);
+    else if (in.exec(*flat[k]) != MirInterp<double>::Flow::Next)
+      break;
+  }
   return out;
 }
 
