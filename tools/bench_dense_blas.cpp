@@ -208,6 +208,27 @@ int main(int argc, char** argv) {
     d.ctx.scratch = d.add(nn, 0.8);
     compare("multi_normal_cholesky", shape, d, OP_MULTI_NORMAL_CHOL_LPDF,
             OP_MULTI_NORMAL_CHOL_LPDF_BLAS, min_ms);
+    // multi_normal with data y and active mu and covariance (0x86).
+    Case e;
+    e.idata = {n, 1, 1, 0};
+    e.ctx.n_in = 3;
+    e.ctx.idata = e.idata.data();
+    e.ctx.n_idata = 4;
+    e.ctx.variant = 0x86;
+    e.ctx.in[0] = {e.add(n, 0.5), n};
+    e.ctx.in[1] = {e.add(n, 0.6), n};
+    double* s = e.add(nn, 0);
+    std::copy(a.data(), a.data() + nn, s);
+    e.ctx.in[2] = {s, nn};
+    e.ctx.in_adj[0] = {nullptr, n};
+    e.ctx.in_adj[1] = {e.add(n, 0.7), n};
+    e.ctx.in_adj[2] = {e.add(nn, 0.7), nn};
+    double out_e = 0;
+    e.ctx.out = {&out_e, 1};
+    e.ctx.out_adj = 1.0;
+    e.ctx.scratch = e.add(2 * n + nn, 0.8);
+    compare("multi_normal", shape, e, OP_MULTI_NORMAL_LPDF,
+            OP_MULTI_NORMAL_LPDF_BLAS, min_ms);
   }
   return 0;
 #endif

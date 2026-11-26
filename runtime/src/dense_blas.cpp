@@ -22,6 +22,8 @@ void dpotrf_(const char* uplo, const int* n, double* a, const int* lda,
              int* info);
 void dtrtri_(const char* uplo, const char* diag, const int* n, double* a,
              const int* lda, int* info);
+void dpotri_(const char* uplo, const int* n, double* a, const int* lda,
+             int* info);
 void dtrsm_(const char* side, const char* uplo, const char* transa,
             const char* diag, const int* m, const int* n, const double* alpha,
             const double* a, const int* lda, double* b, const int* ldb);
@@ -78,6 +80,7 @@ const Thresholds& thresholds() {
       /*gemv_tall_min_cols=*/10,
       /*cholesky_min_n=*/64,
       /*tri_inverse_min_n=*/64,
+      /*mn_cov_min_n=*/32,
   };
   return t;
 }
@@ -111,6 +114,16 @@ int potrf_lower(int64_t n, double* a, int64_t lda) {
   int info = 0;
   count();
   dpotrf_(&lo, &in, a, &ia, &info);
+  return info;
+}
+
+int potri_lower(int64_t n, double* a, int64_t lda) {
+  if (n == 0) return 0;
+  const char lo = 'L';
+  const int in = dim(n), ia = ld(lda);
+  int info = 0;
+  count();
+  dpotri_(&lo, &in, a, &ia, &info);
   return info;
 }
 

@@ -22,6 +22,7 @@
 #include <stan/math.hpp>
 
 #include <algorithm>
+#include <limits>
 #include <type_traits>
 #include <utility>
 #include <variant>
@@ -2868,6 +2869,58 @@ double mnc_blas_fwd_value(KernelCtx& ctx) {
   return logp;
 }
 void mnc_blas_fwd(KernelCtx& ctx) { ctx.out.data[0] = mnc_blas_fwd_value(ctx); }
+
+// multi_normal for one vector with an active covariance: mn_single_fwd with
+// the inverse from LAPACK's dpotrf and dpotri. Stan Math decides rejection
+// with an LDLT factor, so this path takes a covariance only when it can
+// tell that the LDLT would accept it too: dpotrf succeeds, and the smallest
+// eigenvalue, which is at least 1 / |Sigma^-1|_F, is far above the rounding
+// error of a factorization, 1e4 * n * eps * |Sigma|_F. Any other
+// covariance, non-finite ones included, goes to mn_single_fwd, which gives
+// Stan Math's result and Stan Math's error.
+double mn_blas_fwd_value(KernelCtx& ctx) {
+  static constexpr const char* function = "multi_normal_lpdf";
+  const int64_t n = vectorized_layout(ctx.idata, ctx.n_idata, 2).width;
+  const bool propto = density_mode(ctx).propto;
+  const unsigned mask = density_mode(ctx).active & 7u;
+  const bool record = !values_only(ctx);
+  CMapV y(ctx.in[0].data, n), mu(ctx.in[1].data, n);
+  CMapM sigma(ctx.in[2].data, n, n);
+  // mn_single_fwd's checks, in its order.
+  stan::math::check_positive(function, "Covariance matrix rows", sigma.rows());
+  stan::math::check_finite(function, "Location parameter", mu);
+  stan::math::check_not_nan(function, "Random variable", y);
+  stan::math::check_symmetric(function, "Covariance matrix", sigma);
+  MatD inverse = MatD::Zero(n, n);
+  inverse.triangularView<Eigen::Lower>() = sigma.triangularView<Eigen::Lower>();
+  if (blas::potrf_lower(n, inverse.data(), n) != 0) return mn_single_fwd(ctx);
+  double log_det = 0;
+  for (int64_t i = 0; i < n; ++i) log_det += std::log(inverse(i, i));
+  log_det *= 2;
+  if (blas::potri_lower(n, inverse.data(), n) != 0) return mn_single_fwd(ctx);
+  inverse.triangularView<Eigen::StrictlyUpper>() = inverse.transpose();
+  const double floor =
+      1e4 * double(n) * std::numeric_limits<double>::epsilon() * sigma.norm();
+  if (!(1.0 / inverse.norm() > floor) || !std::isfinite(log_det))
+    return mn_single_fwd(ctx);
+
+  if (record) std::fill_n(ctx.scratch, 2 * n + n * n, 0.0);
+  double logp = 0.0;
+  if (!propto) logp += stan::math::NEG_LOG_SQRT_TWO_PI * n;
+  VecD difference = (y - mu).eval();
+  VecD half(n);
+  blas::gemv(false, n, n, 1.0, inverse.data(), n, difference.data(), 0.0,
+             half.data());
+  logp += -0.5 * log_det;
+  if (record)
+    MapM(ctx.scratch + 2 * n, n, n) +=
+        0.5 * (half * half.transpose() - inverse);
+  logp += -0.5 * stan::math::dot_product(difference, half);
+  if (record && (mask & 1u)) Eigen::Map<VecD>(ctx.scratch, n) += -half;
+  if (record && (mask & 2u)) Eigen::Map<VecD>(ctx.scratch + n, n) += half;
+  return logp;
+}
+void mn_blas_fwd(KernelCtx& ctx) { ctx.out.data[0] = mn_blas_fwd_value(ctx); }
 void mnc_blas_bwd(KernelCtx& ctx) {
   if (!ctx.in_adj[2].data) return;
   const int64_t n = vectorized_layout(ctx.idata, ctx.n_idata, 2).width;
@@ -2970,6 +3023,9 @@ void register_matrix_kernels() {
                   Kernel{chol_blas_fwd, chol_blas_bwd, chol_blas_scratch});
   register_kernel(OP_MULTI_NORMAL_CHOL_LPDF_BLAS,
                   Kernel{mnc_blas_fwd, mnc_blas_bwd, mnc_scratch});
+  register_kernel(
+      OP_MULTI_NORMAL_LPDF_BLAS,
+      Kernel{mn_blas_fwd, tail_density_bwd<3>, tail_density_scratch<3>});
 #endif
 }
 
@@ -3005,6 +3061,20 @@ uint16_t accelerated_opcode(const Op& op, const Slot* slots) {
               t.tri_inverse_min_n)
         return OP_MULTI_NORMAL_CHOL_LPDF_BLAS;
       break;
+    case OP_MULTI_NORMAL_LPDF: {
+      if (op.n_in != 3 || op.out < 0 || op.in[0] < 0 || op.in[1] < 0 ||
+          op.in[2] < 0 || slots[op.out].len != 1 ||
+          !(density_mode(op).active & 4u) || density_mode(op).elementwise)
+        break;
+      const VectorizedLayout layout =
+          vectorized_layout(op.idata, op.n_idata, 2);
+      const int64_t n = layout.width;
+      if (layout.is_array(0) || layout.is_array(1) ||
+          slots[op.in[0]].len != n || slots[op.in[1]].len != n ||
+          slots[op.in[2]].len != n * n || n < t.mn_cov_min_n)
+        break;
+      return OP_MULTI_NORMAL_LPDF_BLAS;
+    }
     default:
       break;
   }

@@ -77,6 +77,7 @@ struct Thresholds {
   int64_t gemv_tall_min_rows, gemv_tall_min_cols;
   int64_t cholesky_min_n;     // factor and adjoint
   int64_t tri_inverse_min_n;  // multi_normal_cholesky's inverse of L
+  int64_t mn_cov_min_n;       // multi_normal's covariance
 };
 const Thresholds& thresholds();
 
@@ -96,6 +97,9 @@ void gemv(bool trans, int64_t m, int64_t n, double alpha, const double* a,
           int64_t lda, const double* x, double beta, double* y);
 // Lower Cholesky factor in place; returns LAPACK's info.
 int potrf_lower(int64_t n, double* a, int64_t lda);
+// Inverse of a symmetric positive definite matrix from its lower Cholesky
+// factor, in place, lower triangle only; returns LAPACK's info.
+int potri_lower(int64_t n, double* a, int64_t lda);
 // Inverse of a lower triangular matrix in place; returns LAPACK's info.
 int trtri_lower(int64_t n, double* a, int64_t lda);
 // B = alpha * op(L)^-1 * B (left) or alpha * B * op(L)^-1 (right), L lower.
