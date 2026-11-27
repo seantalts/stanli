@@ -27,7 +27,8 @@ bool blas_thread_control_available();
 // threads for every call, and a large factorization can give different
 // results from one run to the next on a busy machine, so the selection pass
 // keeps every op on the plain kernels: no speedup, and the results of a
-// build without the option.
+// build without the option. It also keeps the library from calling
+// dpotri$NEWLAPACK, a weak import that macOS 11 to 13.2 lack.
 inline constexpr bool kAccelerateWithoutThreadControl = false;
 inline bool accelerated_kernels_enabled(bool thread_control_available) {
   return thread_control_available || kAccelerateWithoutThreadControl;
@@ -79,14 +80,11 @@ class ParallelChainsScope {
 // Sets the calling thread's BLASSetThreading mode for one accelerated call,
 // by blas_may_thread, then restores the thread's previous setting, so that a
 // host such as numpy on the same thread keeps its own. Every accelerated
-// BLAS and LAPACK call runs inside one. A call made with kOneThread never
-// uses Accelerate's threads: with them, the legacy dpotri_ (through dlauum)
-// sometimes returns a wrong inverse (tests/test_blas_determinism).
-// Needs BLASSetThreading; elsewhere it does nothing.
+// BLAS and LAPACK call runs inside one. Needs BLASSetThreading; elsewhere
+// it does nothing.
 class BlasCallThreads {
  public:
-  enum Policy { kByModel, kOneThread };
-  explicit BlasCallThreads(Policy policy = kByModel);
+  BlasCallThreads();
   ~BlasCallThreads();
   BlasCallThreads(const BlasCallThreads&) = delete;
   BlasCallThreads& operator=(const BlasCallThreads&) = delete;

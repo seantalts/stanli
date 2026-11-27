@@ -22,8 +22,16 @@ void dpotrf_(const char* uplo, const int* n, double* a, const int* lda,
              int* info);
 void dtrtri_(const char* uplo, const char* diag, const int* n, double* a,
              const int* lda, int* info);
-void dpotri_(const char* uplo, const int* n, double* a, const int* lda,
-             int* info);
+// dpotri from Accelerate's newer LAPACK interface (ACCELERATE_NEW_LAPACK),
+// by its symbol name, with 32-bit integers. With Accelerate's own threads,
+// the legacy dpotri_ (through dlauum) sometimes returns a wrong inverse; this
+// one gave the right inverse in every call that we tested. The symbol exists
+// from macOS 13.3, so it is a weak import and the library still loads on
+// macOS 11. Only accelerated ops call it, and accelerate_dense_ops gives ops
+// those opcodes only where BLASSetThreading exists (macOS 15 and later).
+void dpotri_new(const char* uplo, const int* n, double* a, const int* lda,
+                int* info) __asm("_dpotri$NEWLAPACK")
+    __attribute__((weak_import));
 void dtrsm_(const char* side, const char* uplo, const char* transa,
             const char* diag, const int* m, const int* n, const double* alpha,
             const double* a, const int* lda, double* b, const int* ldb);
@@ -130,8 +138,8 @@ int potri_lower(int64_t n, double* a, int64_t lda) {
   const int in = dim(n), ia = ld(lda);
   int info = 0;
   count();
-  const BlasCallThreads call_threads(BlasCallThreads::kOneThread);
-  dpotri_(&lo, &in, a, &ia, &info);
+  const BlasCallThreads call_threads;
+  dpotri_new(&lo, &in, a, &ia, &info);
   return info;
 }
 

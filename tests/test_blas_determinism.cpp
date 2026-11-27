@@ -3,8 +3,9 @@
 // separate processes, 24 at a time, the way a corpus replay or several
 // sampling jobs run side by side, and every process must print the same
 // bits. With STANLI_ACCELERATE the covariance goes through the accelerated
-// multi_normal kernel, whose dpotri sometimes returns a wrong inverse when
-// Accelerate uses threads of its own; it must run on one thread.
+// multi_normal kernel and its dpotri. Accelerate's legacy dpotri_ sometimes
+// returned a wrong inverse with threads of its own, and both tests failed
+// with it; the kernel now calls dpotri from the newer LAPACK interface.
 //
 // Run with --child to print one gradient's hash.
 //
