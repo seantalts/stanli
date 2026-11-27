@@ -7,10 +7,11 @@
 //   stress_blas_threads [--sizes 64,151,512] [--calls N] [--only NAMES]
 //
 // --calls (default 20000) is the number of threaded calls per routine,
-// spread over the sizes with fewer calls at the larger sizes. Prints one line per routine and size:
-// calls, how many differed, the largest normwise and elementwise relative
-// differences, a class (identical, rounding at most 1e-12 normwise, or
-// WRONG), and how many threaded calls differed from the first threaded one.
+// spread over the sizes with fewer calls at the larger sizes. Prints one line
+// per routine and size: calls, how many differed, the largest normwise and
+// elementwise relative differences, a class (identical, rounding at most 1e-12
+// normwise, or WRONG), and how many threaded calls differed from the first
+// threaded one.
 //
 // Built from the same source with STRESS_NEW_LAPACK, it calls the routines of
 // Accelerate's newer LAPACK interface (ACCELERATE_NEW_LAPACK) instead of the
@@ -22,8 +23,8 @@
 #include <vecLib/thread_api.h>
 extern "C" {
 void dgemm_(const char*, const char*, const int*, const int*, const int*,
-            const double*, const double*, const int*, const double*,
-            const int*, const double*, double*, const int*);
+            const double*, const double*, const int*, const double*, const int*,
+            const double*, double*, const int*);
 void dgemv_(const char*, const int*, const int*, const double*, const double*,
             const int*, const double*, const int*, const double*, double*,
             const int*);
@@ -40,8 +41,8 @@ void dtrmm_(const char*, const char*, const char*, const char*, const int*,
 void dtrmv_(const char*, const char*, const char*, const int*, const double*,
             const int*, double*, const int*);
 void dsymm_(const char*, const char*, const int*, const int*, const double*,
-            const double*, const int*, const double*, const int*,
-            const double*, double*, const int*);
+            const double*, const int*, const double*, const int*, const double*,
+            double*, const int*);
 }
 #endif
 
@@ -127,15 +128,15 @@ std::vector<Routine> routines() {
       {"dgemv_N",
        [=](const Inputs& in) {
          Vec y(in.n);
-         dgemv_("N", &in.n, &in.n, &one, in.m1.data(), &in.n, in.x.data(),
-                &inc, &zero, y.data(), &inc);
+         dgemv_("N", &in.n, &in.n, &one, in.m1.data(), &in.n, in.x.data(), &inc,
+                &zero, y.data(), &inc);
          return y;
        }},
       {"dgemv_T",
        [=](const Inputs& in) {
          Vec y(in.n);
-         dgemv_("T", &in.n, &in.n, &one, in.m1.data(), &in.n, in.x.data(),
-                &inc, &zero, y.data(), &inc);
+         dgemv_("T", &in.n, &in.n, &one, in.m1.data(), &in.n, in.x.data(), &inc,
+                &zero, y.data(), &inc);
          return y;
        }},
       {"dpotrf_L",
@@ -171,22 +172,22 @@ std::vector<Routine> routines() {
       {"dtrsm_right_N",
        [=](const Inputs& in) {
          Vec b = in.m1;
-         dtrsm_("R", "L", "N", "N", &in.n, &in.n, &one, in.lower.data(),
-                &in.n, b.data(), &in.n);
+         dtrsm_("R", "L", "N", "N", &in.n, &in.n, &one, in.lower.data(), &in.n,
+                b.data(), &in.n);
          return b;
        }},
       {"dtrsm_left_T",
        [=](const Inputs& in) {
          Vec b = in.m1;
-         dtrsm_("L", "L", "T", "N", &in.n, &in.n, &one, in.lower.data(),
-                &in.n, b.data(), &in.n);
+         dtrsm_("L", "L", "T", "N", &in.n, &in.n, &one, in.lower.data(), &in.n,
+                b.data(), &in.n);
          return b;
        }},
       {"dtrmm_left_T",
        [=](const Inputs& in) {
          Vec b = in.m1;
-         dtrmm_("L", "L", "T", "N", &in.n, &in.n, &one, in.lower.data(),
-                &in.n, b.data(), &in.n);
+         dtrmm_("L", "L", "T", "N", &in.n, &in.n, &one, in.lower.data(), &in.n,
+                b.data(), &in.n);
          return b;
        }},
       {"dtrmv_N",
@@ -229,9 +230,12 @@ int main(int argc, char** argv) {
   long calls = 20000;
   std::string only;
   for (int i = 1; i + 1 < argc; i += 2) {
-    if (!std::strcmp(argv[i], "--sizes")) sizes = parse_list(argv[i + 1]);
-    else if (!std::strcmp(argv[i], "--calls")) calls = std::atol(argv[i + 1]);
-    else if (!std::strcmp(argv[i], "--only")) only = argv[i + 1];
+    if (!std::strcmp(argv[i], "--sizes"))
+      sizes = parse_list(argv[i + 1]);
+    else if (!std::strcmp(argv[i], "--calls"))
+      calls = std::atol(argv[i + 1]);
+    else if (!std::strcmp(argv[i], "--only"))
+      only = argv[i + 1];
   }
   // Calls per size fall as n^-0.75: with the default sizes, about 52% of
   // them at n = 64 and 4% at n = 2048.
@@ -258,20 +262,24 @@ int main(int argc, char** argv) {
       Vec first;
       for (long c = 0; c < per_size[k]; ++c) {
         const Vec got = r.call(in);
-        if (c == 0) first = got;
-        else if (got != first) ++unlike_first;
+        if (c == 0)
+          first = got;
+        else if (got != first)
+          ++unlike_first;
         double d = 0, e = 0;
         for (size_t i = 0; i < got.size(); ++i) {
           const double diff = std::fabs(got[i] - ref[i]);
           d = std::max(d, diff);
-          if (ref[i] != 0) e = std::max(e, diff / std::fabs(ref[i]));
-          else if (diff != 0) e = INFINITY;
+          if (ref[i] != 0)
+            e = std::max(e, diff / std::fabs(ref[i]));
+          else if (diff != 0)
+            e = INFINITY;
         }
         if (d > 0 || std::isnan(d)) ++differ;
         worst_norm = std::max(worst_norm, d / ref_max);
         worst_elt = std::max(worst_elt, e);
       }
-      const char* cls = differ == 0             ? "identical"
+      const char* cls = differ == 0           ? "identical"
                         : worst_norm <= 1e-12 ? "rounding"
                                               : "WRONG";
       if (cls[0] == 'W') ++wrong;
