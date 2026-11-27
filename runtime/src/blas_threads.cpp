@@ -3,6 +3,7 @@
 #include <stanli/debug_switch.hpp>
 #include <stanli/dense_blas.hpp>
 
+#include <atomic>
 #include <cstdint>
 #include <cstdlib>
 #include <thread>
@@ -64,6 +65,7 @@ int performance_cores() {
 namespace {
 thread_local bool t_parallel_blas = false;
 thread_local int t_parallel_chains = 1;
+std::atomic<uint64_t> g_threaded_calls{0};
 }  // namespace
 
 ParallelBlasScope::ParallelBlasScope(bool parallel_blas)
@@ -86,11 +88,17 @@ BlasCallThreads::BlasCallThreads() {
                 blas_may_thread(true, t_parallel_chains, performance_cores())
             ? BLAS_THREADING_MULTI_THREADED
             : BLAS_THREADING_SINGLE_THREADED;
+    if (want == BLAS_THREADING_MULTI_THREADED)
+      g_threaded_calls.fetch_add(1, std::memory_order_relaxed);
     saved_ = static_cast<unsigned>(BLASGetThreading());
     if (saved_ != static_cast<unsigned>(want))
       restore_ = BLASSetThreading(want) == 0;
   }
 #endif
+}
+
+uint64_t BlasCallThreads::threaded_count() {
+  return g_threaded_calls.load(std::memory_order_relaxed);
 }
 
 BlasCallThreads::~BlasCallThreads() {

@@ -7,6 +7,7 @@
 //   stress_blas_threads [--sizes 64,151,512] [--calls N] [--only NAMES]
 //   stress_blas_threads --kernel-shapes [--scale X] [--max-n N] [--only NAMES]
 //   stress_blas_threads --sweep [--scale X] [--max-n N] [--only NAMES]
+//   stress_blas_threads --tri-range LO HI [--tri-step S] [--scale X]
 //
 // --calls (default 20000) is the number of threaded calls per routine,
 // spread over the sizes with fewer calls at the larger sizes. Prints one line
@@ -30,6 +31,9 @@
 // their thresholds to n = 1200 and on coarser grids above, and at a grid of
 // product and matrix-vector shapes, with fewer calls each. It prints each
 // shape whose threaded result differs, then one line per routine.
+//
+// --tri-range makes multi_normal_cholesky's dtrtri and dtrmv calls at every
+// n from LO to HI (or every S), in the same form as --sweep.
 //
 // By default it binds each routine the way runtime/src/dense_blas.cpp does:
 // dpotri from Accelerate's newer LAPACK interface (ACCELERATE_NEW_LAPACK),
@@ -682,6 +686,37 @@ int sweep(double scale, int max_n, const std::string& only) {
   return report(ck);
 }
 
+// multi_normal_cholesky's dtrtri and dtrmv at every n from lo to hi in steps
+// of step, on the leading n x n block of one factor of size hi, which is the
+// factor of the leading block of its matrix.
+int tri_range(double scale, int lo, int hi, int step) {
+  Checker ck;
+  ck.scale = scale;
+  ck.sweep = true;
+  const Vec full = lower_factor(hi);
+  const int inc = 1;
+  for (int n = lo; n <= hi; n += step) {
+    Vec inv(size_t(n) * n);
+    for (int c = 0; c < n; ++c)
+      std::memcpy(&inv[size_t(c) * n], &full[size_t(c) * hi],
+                  sizeof(double) * n);
+    const Vec y = random_vec(n, 14);
+    const std::string shape = dims({n});
+    int info = 0;
+    ck.check("dtrtri_L", shape, {inv.data(), n, n, n}, double(n) * n * n / 3,
+             [&] { dtrtri_("L", "N", &n, inv.data(), &n, &info); });
+    Vec half = y;
+    ck.check("dtrmv_N", shape, {half.data(), n, 1, n}, double(n) * n, [&] {
+      dtrmv_("L", "N", "N", &n, inv.data(), &n, half.data(), &inc);
+    });
+    Vec scaled = half;
+    ck.check("dtrmv_T", shape, {scaled.data(), n, 1, n}, double(n) * n, [&] {
+      dtrmv_("L", "T", "N", &n, inv.data(), &n, scaled.data(), &inc);
+    });
+  }
+  return report(ck);
+}
+
 int kernel_shapes(double scale, int max_n, const std::string& only) {
   Checker ck;
   ck.scale = scale;
@@ -757,6 +792,7 @@ int main(int argc, char** argv) {
   long calls = 20000;
   std::string only;
   bool shapes = false, sweeping = false;
+  int tri_lo = 0, tri_hi = 0, tri_step = 1;
   double scale = 1;
   int max_n = 4096;
   for (int i = 1; i < argc; ++i) {
@@ -767,6 +803,11 @@ int main(int argc, char** argv) {
       sweeping = true;
     else if (has_value && !std::strcmp(argv[i], "--scale"))
       scale = std::atof(argv[++i]);
+    else if (i + 2 < argc && !std::strcmp(argv[i], "--tri-range")) {
+      tri_lo = std::atoi(argv[++i]);
+      tri_hi = std::atoi(argv[++i]);
+    } else if (has_value && !std::strcmp(argv[i], "--tri-step"))
+      tri_step = std::max(1, std::atoi(argv[++i]));
     else if (has_value && !std::strcmp(argv[i], "--max-n"))
       max_n = std::atoi(argv[++i]);
     else if (has_value && !std::strcmp(argv[i], "--sizes"))
@@ -776,6 +817,7 @@ int main(int argc, char** argv) {
     else if (has_value && !std::strcmp(argv[i], "--only"))
       only = argv[++i];
   }
+  if (tri_hi > 0) return tri_range(scale, tri_lo, tri_hi, tri_step);
   if (sweeping) return sweep(scale, max_n, only);
   if (shapes) return kernel_shapes(scale, max_n, only);
   // Calls per size fall as n^-0.75: with the default sizes, about 52% of

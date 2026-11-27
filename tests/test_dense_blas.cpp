@@ -32,6 +32,8 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstring>
+#include <functional>
 #include <limits>
 #include <cstdio>
 #include <string>
@@ -673,6 +675,161 @@ void accelerated_kernels_agree() {
 
 namespace {
 
+#ifdef STANLI_ACCELERATE
+bool same_bits(const Mat& a, const Mat& b) {
+  return a.rows() == b.rows() && a.cols() == b.cols() &&
+         std::equal(a.data(), a.data() + a.size(), b.data(),
+                    [](double x, double y) {
+                      return std::memcmp(&x, &y, sizeof x) == 0;
+                    });
+}
+bool same_bits(const Run& a, const Run& b) {
+  return same_bits(a.out, b.out) && same_bits(a.adj0, b.adj0) &&
+         same_bits(a.adj1, b.adj1);
+}
+
+// The calls of one kernel's forward and backward for which BlasCallThreads
+// asked for Accelerate's threads.
+template <class F>
+uint64_t threaded_calls(F&& run) {
+  const uint64_t before = stanli::BlasCallThreads::threaded_count();
+  run();
+  return stanli::BlasCallThreads::threaded_count() - before;
+}
+
+// With the default options, no accelerated call asks for Accelerate's
+// threads. With parallel_blas every one does while the chains leave cores
+// free, and none does when they fill them.
+void default_threads() {
+  using namespace stanli;
+  const Mat a = seed(64, 64, 0.1), b = seed(64, 64, 0.9);
+  const Mat x = seed(256, 64, 0.4);
+  const Vec beta = seed(64, 1, 1.1);
+  const Mat factor_in = spd(64), w = seed(64, 64, 0.5);
+  const int64_t n = 128;
+  const Mat sigma = spd(n);
+  const Mat L = sigma.llt().matrixL();
+  const Vec y = seed(n, 1, 0.2), mu = seed(n, 1, 1.7) * 0.1;
+  const Vec gy = seed(4096, 1, 0.3), galpha = Vec::Constant(1, 0.2),
+            gbeta = seed(16, 1, 0.6), gsigma = Vec::Constant(1, 1.3);
+  const Mat gx = seed(4096, 16, 0.8);
+  double lp = 0;
+  struct Kernel {
+    const char* name;
+    std::function<void()> run;
+    uint64_t by_default;   // calls that may use threads without parallel_blas
+    uint64_t with_option;  // calls that may use them with parallel_blas
+  };
+  // The Cholesky adjoint at n = 64 has 8 blocks of 8. Each makes one dtrmm
+  // and two dtrsm, and the 7 below the first make one more dtrsm: 31 calls.
+  // Add its dpotrf, and in the blocks with a block above (7), below (7) or
+  // both (6), a dgemm and a dsymm, a dgemm, and a dgemm: 28 more. The
+  // product makes 3 dgemm, the matrix-vector product 2 dgemv,
+  // multi_normal_cholesky 1 dtrtri and 2 dtrmv, multi_normal dpotrf, dpotri
+  // and 1 dgemv, and normal_id_glm 2 dgemv.
+  const Kernel kernels[] = {
+      {"gemm", [&] { run_gemm(OP_GEMM_BLAS, a, b); }, 0, 3},
+      {"matvec", [&] { run_matvec(OP_MATVEC_BLAS, x, beta); }, 0, 2},
+      {"cholesky", [&] { run_cholesky(OP_CHOLESKY_BLAS, factor_in, w); }, 0,
+       31 + 28},
+      {"multi_normal_cholesky",
+       [&] { run_mnc(OP_MULTI_NORMAL_CHOL_LPDF_BLAS, y, mu, L, &lp); }, 0, 3},
+      {"multi_normal",
+       [&] { run_mn(OP_MULTI_NORMAL_LPDF_BLAS, y, mu, sigma, 0x84); }, 0, 3},
+      {"normal_id_glm",
+       [&] {
+         run_glm(OP_NORMAL_ID_GLM_LPDF_BLAS, gy, gx, galpha, gbeta, gsigma,
+                 0x08);
+       },
+       0, 2},
+  };
+  const int cores = performance_cores();
+  for (const Kernel& k : kernels) {
+    const std::string at = std::string(k.name) + ": ";
+    {
+      const ParallelChainsScope chains(1);
+      const uint64_t got = threaded_calls(k.run);
+      std::printf("%-40s threaded calls by default %llu\n", k.name,
+                  (unsigned long long)got);
+      expect_true(at + "default with cores free threads " +
+                      std::to_string(k.by_default) + " calls (got " +
+                      std::to_string(got) + ")",
+                  got == (cores >= 2 ? k.by_default : 0));
+    }
+    {
+      const ParallelChainsScope chains(1);
+      const ParallelBlasScope program(true);
+      const uint64_t got = threaded_calls(k.run);
+      expect_true(at + "parallel_blas with cores free threads " +
+                      std::to_string(k.with_option) + " calls (got " +
+                      std::to_string(got) + ")",
+                  got == (cores >= 2 ? k.with_option : 0));
+    }
+    for (bool option : {false, true}) {
+      // chains * 2 > performance cores.
+      const ParallelChainsScope chains(cores / 2 + 1);
+      const ParallelBlasScope program(option);
+      const uint64_t got = threaded_calls(k.run);
+      expect_true(at + "no threads with the cores full, parallel_blas " +
+                      std::to_string(option) + " (got " + std::to_string(got) +
+                      ")",
+                  got == 0);
+    }
+  }
+}
+
+// With the default options, many runs of the accelerated kernels give
+// exactly the bits of runs that are kept on one thread. The product of
+// 100 x 4096 by 4096 x 200 is a shape whose result changes with
+// Accelerate's threads on an M3 Ultra, so it checks that dgemm stays on one
+// thread; the Cholesky adjoint at n = 512 and multi_normal_cholesky at
+// n = 1024 make calls of every other routine at sizes where Accelerate
+// uses threads when it may.
+void default_threads_keep_bits() {
+  using namespace stanli;
+  const Mat pa = seed(100, 4096, 0.3), pb = seed(4096, 200, 1.4);
+  const int64_t n = 512, m = 1024;
+  const Mat ca = spd(n), cw = seed(n, n, 0.5);
+  const Mat sigma = spd(m);
+  const Mat L = sigma.llt().matrixL();
+  const Vec y = seed(m, 1, 0.2), mu = seed(m, 1, 1.7) * 0.1;
+  const auto all = [&] {
+    std::vector<Run> runs;
+    runs.push_back(run_gemm(OP_GEMM_BLAS, pa, pb));
+    runs.push_back(run_cholesky(OP_CHOLESKY_BLAS, ca, cw));
+    double lp = 0;
+    runs.push_back(run_mnc(OP_MULTI_NORMAL_CHOL_LPDF_BLAS, y, mu, L, &lp));
+    runs.back().out = Mat::Constant(1, 1, lp);
+    return runs;
+  };
+  std::vector<Run> one;
+  {
+    const ParallelChainsScope alone(ParallelChainsScope::kUnknownParallelism);
+    one = all();
+  }
+  const char* names[] = {"gemm 100x4096x200", "cholesky n=512",
+                         "multi_normal_cholesky n=1024"};
+  const int repeats = 40;
+  int differ[3] = {};
+  const uint64_t threaded_before = BlasCallThreads::threaded_count();
+  for (int r = 0; r < repeats; ++r) {
+    const ParallelChainsScope chains(1);
+    const std::vector<Run> got = all();
+    for (size_t k = 0; k < got.size(); ++k)
+      differ[k] += !same_bits(got[k], one[k]);
+  }
+  const uint64_t threaded = BlasCallThreads::threaded_count() - threaded_before;
+  std::printf("default options: %llu threaded calls in %d repeats\n",
+              (unsigned long long)threaded, repeats);
+  for (int k = 0; k < 3; ++k)
+    expect_true(std::string(names[k]) + ": " + std::to_string(differ[k]) +
+                    " of " + std::to_string(repeats) +
+                    " default runs differ from one thread",
+                differ[k] == 0);
+  expect_true("the default runs never asked for threads", threaded == 0);
+}
+#endif
+
 bool accelerated(uint16_t opcode) {
   using namespace stanli;
   return opcode == OP_GEMM_BLAS || opcode == OP_MATVEC_BLAS ||
@@ -867,6 +1024,10 @@ int main(int argc, char** argv) {
   lowered_programs(argc > 1 ? argv[1] : nullptr);
 #ifdef STANLI_ACCELERATE
   accelerated_kernels_agree();
+  if (stanli::blas_thread_control_available()) {
+    default_threads();
+    default_threads_keep_bits();
+  }
 #endif
   return finish("test_dense_blas");
 }

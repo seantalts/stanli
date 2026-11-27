@@ -89,6 +89,10 @@ class BlasCallThreads {
   BlasCallThreads(const BlasCallThreads&) = delete;
   BlasCallThreads& operator=(const BlasCallThreads&) = delete;
 
+  // Number of calls since the process started for which a BlasCallThreads
+  // asked for the multi-threaded mode, for tests.
+  static uint64_t threaded_count();
+
  private:
   unsigned saved_ = 0;
   bool restore_ = false;

@@ -1,0 +1,8 @@
+dtrtri_L                                         calls 10755  differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 6.57
+dtrmv_N                                          calls 10755  differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 1.00
+dtrmv_T                                          calls 10755  differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 1.00
+per routine
+TOTAL dtrmv_N                                    calls 10755  differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 1.00
+TOTAL dtrmv_T                                    calls 10755  differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 1.00
+TOTAL dtrtri_L                                   calls 10755  differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 6.57
+exit 0
