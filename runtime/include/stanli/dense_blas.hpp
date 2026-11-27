@@ -47,7 +47,8 @@ int performance_cores();
 
 // While it lives, the evaluation on this thread belongs to a program
 // lowered with (or without) parallel_blas. Executor sets it around each
-// forward and reverse sweep; nested scopes restore the outer value.
+// forward and reverse sweep of a graph that holds an accelerated op; nested
+// scopes restore the outer value.
 class ParallelBlasScope {
  public:
   explicit ParallelBlasScope(bool parallel_blas);
