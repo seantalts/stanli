@@ -332,9 +332,9 @@
       "reason": "measured on Darwin arm64 with STANLI_ACCELERATE, where multi_normal inverts the 151 x 151 covariance with dpotrf and dpotri in place of an LDLT solve against the identity; 80-digit reference at point 1: stanli 2, CmdStan 13 scaled ULP from the true value"
      },
      "grad[4]": {
-      "bound": 24,
-      "closer": "stanli",
-      "reason": "measured on Darwin arm64 with STANLI_ACCELERATE, where multi_normal inverts the 151 x 151 covariance with dpotrf and dpotri in place of an LDLT solve against the identity; 80-digit reference at point 1: stanli 12, CmdStan 12 scaled ULP from the true value"
+      "bound": 28,
+      "closer": "cmdstan",
+      "reason": "measured on Darwin arm64 with STANLI_ACCELERATE, where multi_normal inverts the 151 x 151 covariance with dpotrf and dpotri in place of an LDLT solve against the identity; the bound covers two Macs whose Accelerate libraries round this value differently, the M3 Ultra development machine (24) and the M1 runner in CI (28); 80-digit reference at point 1: stanli 12 on the M3 Ultra and 16 on the CI runner, CmdStan 12 scaled ULP from the true value; on the CI runner stanli is farther from it than CmdStan"
      }
     },
     "ch14_m14_11": {
