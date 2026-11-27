@@ -1645,13 +1645,14 @@ class Model:
     ``parallel_blas=True`` lets this model's large dense operations, which a
     macOS build on Apple silicon runs through Apple's Accelerate on macOS 15
     or later, use Accelerate's own threads while the chains that run in
-    parallel leave cores free. With it on, results can differ from
-    the default in rounding, by up to about 6e-15 relative in each operation
-    that we measured. Models that use ``multi_normal`` with a covariance
-    matrix can also give wrong results, because Accelerate's threaded matrix
-    inverse (``dpotri``) sometimes returns a wrong answer. The default runs each such operation on
-    one thread, with the same result in every run. Elsewhere it does
-    nothing.
+    parallel leave cores free. With it on, results can differ from those
+    with it off by rounding. In a stress test on macOS 26.6, threaded calls
+    gave the single-threaded bits, except a symmetric product (up to 6e-15
+    relative, n = 512 to 2048) and the Cholesky factorization at n = 2048
+    (5e-16). Whether a call uses threads depends on how many chains run in
+    parallel, so results can also change with that number. The default runs
+    each such operation on one thread, with the same result in every run.
+    Elsewhere it does nothing.
 
     ``allow_interpreter=False`` makes construction raise, naming the parts,
     when parts of the model have no compiled path and would run through the
@@ -1889,8 +1890,7 @@ class Model:
     @property
     def parallel_blas(self):
         """Whether this model's accelerated dense operations may use
-        Accelerate's own threads (results can differ in rounding, and
-        ``multi_normal`` with a covariance matrix can be wrong)."""
+        Accelerate's own threads (results can then differ by rounding)."""
         return self._parallel_blas
 
     @property

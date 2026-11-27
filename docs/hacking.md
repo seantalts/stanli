@@ -936,23 +936,23 @@ The thresholds and the sweep behind them are in
 [`notes/performance/2026-11-26-accelerate-thresholds.md`](../notes/performance/2026-11-26-accelerate-thresholds.md).
 Every accelerated BLAS or LAPACK call runs on the calling thread alone
 (`BLASSetThreading`, macOS 15 or later), and the thread's previous setting
-is restored afterwards. With its own threads, Accelerate's legacy `dpotri_`
-entry point (through `dlauum`) sometimes returns a wrong inverse: 1 call in
-250 to 1 in 700 at n = 151, and 1 in 20 to 1 in 35 at n = 512, on macOS
-26.6, with a relative error of about 1e-3 in the matrix, on a matrix with
-condition number 5. The same gradient then gave different results in
-different processes (`tests/test_blas_determinism.cpp`). The `dpotri` of
-Accelerate's newer LAPACK interface (`ACCELERATE_NEW_LAPACK`) gave the right
-answer in every such run. The other calls that we tested (`dpotrf`,
-`dtrtri`, `dtrsm`, `dtrmm`, `dtrmv`, `dgemm`, `dgemv`, `dsymm`) differ from
-their single-threaded results only in rounding, by up to about 6e-15
-relative. The model option `parallel_blas` (C API `stanli_model_opts`,
-Python `Model`, R `stanli_model()`) lets a model's accelerated calls use
-Accelerate's own threads while the chains that run in parallel leave cores
-free: twice the number of parallel chains at most the number of performance
-cores, with a single gradient outside a sampler counted as one chain. Its
-results can then differ in rounding, and models that use `multi_normal` with
-a covariance matrix can be wrong because of the `dpotri` problem above. The
+is restored afterwards, so results are the same in every run. The model
+option `parallel_blas` (C API `stanli_model_opts`, Python `Model`, R
+`stanli_model()`) lets a model's accelerated calls use Accelerate's own
+threads while the chains that run in parallel leave cores free: twice the
+number of parallel chains at most the number of performance cores, with a
+single gradient outside a sampler counted as one chain. `dpotri` is the
+exception and always runs on one thread: with Accelerate's threads, the
+legacy `dpotri_` (through `dlauum`) sometimes returns a wrong inverse, in
+about 1 call in 250 to 1 in 5000 at n = 151 and 1 in 18 to 1 in 45 at n =
+512 on macOS 26.6 (`tests/test_blas_determinism.cpp`).
+`tools/stress_blas_threads.cpp` (`make stress_blas_threads`) calls every
+routine that an accelerated kernel can reach, about 20,000 times each at n =
+64 to 2048 with threads on, and compares each result with the
+single-threaded one. On macOS 26.6 the others gave the same bits, except
+`dsymm` (up to 6e-15 relative at n = 512 to 2048) and `dpotrf` at n = 2048
+(5e-16), so with `parallel_blas` on, results can differ by rounding from
+those with it off, and with the number of chains that run in parallel. The
 lowered program carries the option, and the program dump names it. On macOS
 11 to 14, which lack `BLASSetThreading`, the selection pass keeps every op
 on the plain kernels (`kAccelerateWithoutThreadControl` in

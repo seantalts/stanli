@@ -4,7 +4,7 @@
 // sampling jobs run side by side, and every process must print the same
 // bits. With STANLI_ACCELERATE the covariance goes through the accelerated
 // multi_normal kernel, whose dpotri sometimes returns a wrong inverse when
-// Accelerate uses threads of its own.
+// Accelerate uses threads of its own; it must run on one thread.
 //
 // Run with --child to print one gradient's hash.
 //

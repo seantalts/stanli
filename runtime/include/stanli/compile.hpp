@@ -350,10 +350,9 @@ struct CompileOptions {
   int reduce_sum_max_chunks = 1024;
   bool fast_math = false;
   // Lets the accelerated BLAS calls of this model use Accelerate's own
-  // threads while the chains leave cores free; results can then differ in
-  // rounding, and Accelerate's threaded dpotri (multi_normal with a
-  // covariance matrix) sometimes returns a wrong inverse. Does nothing in
-  // a build without STANLI_ACCELERATE. See stanli/dense_blas.hpp.
+  // threads while the chains leave cores free; results can then differ by
+  // rounding. Does nothing in a build without STANLI_ACCELERATE. See
+  // stanli/dense_blas.hpp.
   bool parallel_blas = false;
   // False refuses, with a CompileError, a model that has any part without a
   // compiled path (interpreter_fallbacks). The environment variable
