@@ -42,11 +42,19 @@ def _cell(entries):
 KIND_NAME = {"lp": "lp", "grad": "gradient", "wa": "outputs"}
 
 
-def _limit(kinds):
-    """The limit against CmdStan for one model: the default, or the largest
-    ledger bound of each output kind that has one."""
-    over = [f"{KIND_NAME[kind]} {_count(max(e['bound'] for e in kinds[kind]))}"
-            for kind in KINDS if kinds[kind]]
+def _limit(kinds, truth):
+    """The limits for one model: the default, or for each output kind the
+    largest ledger bound against CmdStan of the entries without true values,
+    and the largest limit from the true value of the entries with them."""
+    over = []
+    for kind in KINDS:
+        cmdstan = [e["bound"] for label, e in kinds[kind] if label not in truth]
+        held = [v.truth_bound(truth[label]) for label, _ in kinds[kind]
+                if label in truth]
+        if cmdstan:
+            over.append(f"{KIND_NAME[kind]} {_count(max(cmdstan))}")
+        if held:
+            over.append(f"{KIND_NAME[kind]} {_count(max(held))} from the true value")
     return ", ".join(over) or str(v.DEFAULT_ULP_BOUND)
 
 
@@ -73,7 +81,7 @@ def _measured(record):
 def _by_kind(entries):
     kinds = collections.defaultdict(list)
     for label, entry in entries.items():
-        kinds[v.output_kind(label)].append(entry)
+        kinds[v.entry_kind(label)].append((label, entry))
     return kinds
 
 
@@ -124,7 +132,9 @@ def load_accuracy():
 
 def corpus_rows():
     refs = v.load_refs()[0]
-    ledger = v.load_ulp_ledger()["platforms"][LEDGER_PLATFORM]["main"]
+    loaded = v.load_ulp_ledger()
+    ledger = loaded["platforms"][LEDGER_PLATFORM]["main"]
+    truth = v.truth_section(loaded, "main")
     accuracy = load_accuracy()["models"]
     collection = _collections(refs)
     order = {name: i for i, name in enumerate(COLLECTIONS)}
@@ -140,11 +150,12 @@ def corpus_rows():
                      str(len(with_wa[0]["wa"]["values"])) if with_wa else "0"]
             for kind in KINDS:
                 cells += _measured(measured.get(kind))
-            cells.append(_limit(kinds))
+            cells.append(_limit(kinds, truth.get(model, {})))
         else:
             cells = [""] * 9
         rows.append({"model": model, "collection": collection[model],
                      "entries": ledger.get(model, {}), "cells": cells,
+                     "truth": truth.get(model, {}),
                      "has_wa": bool(compared and with_wa),
                      "measured": measured, "note": _note(model, ref)})
     return rows
@@ -248,6 +259,11 @@ def stats():
         "testing_entries_stanli": str(closer["stanli"]),
         "testing_entries_cmdstan": str(closer["cmdstan"]),
         "testing_entries_unknown": str(closer["unknown"]),
+        "testing_truth_entries": str(sum(len(row["truth"]) for row in rows)),
+        "testing_truth_models": str(sum(bool(row["truth"]) for row in rows)),
+        "testing_truth_over": str(sum(entry["bound"] > v.DEFAULT_ULP_BOUND
+                                      for row in rows
+                                      for entry in row["truth"].values())),
         "testing_models_no_wa": str(sum(bool(row["cells"][0])
                                         and not row["has_wa"] for row in rows)),
         **accuracy_stats(rows),

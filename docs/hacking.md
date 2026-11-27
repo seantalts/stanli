@@ -969,6 +969,24 @@ Each entry has three fields:
 - `closer` says which engine is closer to the 80-digit value. It is `stanli`,
   `cmdstan` or `unknown`.
 
+The ledger's `true_values` key holds the true values
+([TESTING.md](../TESTING.md#true-values)). They do not depend on the
+platform, so its keys are the corpus, then the model, then the label of a
+platform entry. Each entry has four fields:
+
+- `points` maps each point to the values that the entry covers there. Each
+  value has the true value as a decimal string (`value`) and the scale `S`
+  of its distance (`scale`). An entry for one value has one value per point.
+  A `grad` or `wa` entry lists every value that it covered when the tool
+  wrote it. A point where `S` is 0 has no values, and the check against
+  CmdStan stays on for it.
+- `bound` is the largest distance of stanli from the true value, in ULP of
+  `S`, over the points.
+- `method` is `fd` for a gradient entry (a full finite-difference gradient)
+  and `direct` for `lp` and outputs.
+- `platform` is where the bound was measured. It must have the platform
+  entry, with `closer` set to `stanli`.
+
 After you change the ledger, run `python3 tools/gen_docs.py` to rewrite the
 table in TESTING.md.
 
@@ -986,6 +1004,17 @@ the gate is off, and the run creates the section with an entry for every
 value over 10. Such a generated entry's reason says only where it was
 measured; a person replaces it with the cause. A replay that measures half
 the bound or less prints a `ULP LEDGER` note asking for a rerun to tighten it.
+
+The run does not hold a value with a true value to CmdStan, so it never
+lowers, deletes or adds a platform entry for that value. It lowers the bound
+of a true value to the new measurement, but only on the platform in the
+entry's `platform` field. A replay that measures half that bound or less
+prints a `TRUE VALUE` note. To fill `true_values` from a set of 80-digit
+results, run
+
+    PYTHONPATH=... tools/hp/ledger_accuracy.py HP_DIR --write-true-values
+
+on macOS arm64 ([tools/hp](../tools/hp/README.md#the-ulp-ledger)).
 
 Inside a section, a value over 10 that no entry covers fails the gate, so a
 model that is new to the corpus, or a value that moved for a known reason,
@@ -1008,8 +1037,9 @@ lists the values that need one.
 plain string means `closer` is `unknown`. Score an entry against the 80-digit
 value with [`tools/hp/ledger_accuracy.py`](../tools/hp/README.md).
 
-Linux and Windows have no section yet, so the 10 ULP rule is not enforced
-there. Record one by running the commands above on that platform.
+Linux and Windows have no section yet, so the 10 ULP rule against CmdStan is
+not enforced there. The check against true values runs there. Record a
+section by running the commands above on that platform.
 
 ### Tests that need developer switches
 

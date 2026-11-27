@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import pathlib
 import copy
+from decimal import Decimal
 import json
 import math
 import stat
@@ -645,7 +646,7 @@ class UlpLedgerTest(unittest.TestCase):
     def test_the_ledger_file_is_validated(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = pathlib.Path(tmp) / "ledger.json"
-            def ledger(entry, schema=2):
+            def ledger(entry, schema=3):
                 return json.dumps({"schema": schema, "platforms": {
                     "P": {"main": {"m": {"lp": entry}}}}})
             for entry in ({"bound": 10, "reason": "x", "closer": "stanli"},
@@ -672,7 +673,7 @@ class UlpLedgerTest(unittest.TestCase):
     def test_writing_a_section_ratchets_only_the_models_that_ran(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = pathlib.Path(tmp) / "ledger.json"
-            ledger = {"schema": 2, "platforms": {"P": {"main": {
+            ledger = {"schema": 3, "platforms": {"P": {"main": {
                 "kept": {"lp": {"bound": 99, "reason": "not run",
                                 "closer": "unknown"}},
                 "ran": {"lp": {"bound": 99, "reason": "why",
@@ -756,7 +757,7 @@ class UlpLedgerTest(unittest.TestCase):
     def test_adding_first_entries_writes_only_the_named_models(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = pathlib.Path(tmp) / "ledger.json"
-            ledger = {"schema": 2, "platforms": {"P": {"main": {
+            ledger = {"schema": 3, "platforms": {"P": {"main": {
                 "old": {"lp": {"bound": 99, "reason": "why",
                                "closer": "cmdstan"}}}}}}
             problems = verify_refs.add_first_entries(
@@ -801,7 +802,7 @@ class UlpLedgerTest(unittest.TestCase):
 
     def test_the_checked_in_ledger_loads(self):
         ledger = verify_refs.load_ulp_ledger()
-        self.assertEqual(ledger["schema"], 2)
+        self.assertEqual(ledger["schema"], 3)
         self.assertIsNotNone(ledger["platforms"])
         for corpora in ledger["platforms"].values():
             for models in corpora.values():
@@ -809,6 +810,213 @@ class UlpLedgerTest(unittest.TestCase):
                     for entry in entries.values():
                         self.assertIn(entry["closer"],
                                       ("stanli", "cmdstan", "unknown"))
+
+
+def near(x, ulps, scale=None):
+    """x moved by `ulps` ULPs of scale (of x by default)."""
+    return x + ulps * math.ulp(scale if scale is not None else x)
+
+
+def true_entry(label, values, bound, platform="P", method=None):
+    """A true_values entry with the same values at every point, each value
+    the exact decimal expansion of a double."""
+    return {"bound": bound, "platform": platform,
+            "method": method or ("fd" if label.startswith("grad") else "direct"),
+            "points": {str(p): {name: {"value": str(Decimal(t)), "scale": scale}
+                                for name, (t, scale) in values.items()}
+                       for p in POINTS}}
+
+
+class TrueValueGateTest(unittest.TestCase):
+    """Values with an 80-digit true value are held to it, and not to CmdStan."""
+
+    CMDSTAN = 2.0
+    # stanli was 1 and CmdStan 30 ULP of 2 from the true value when the
+    # bound was measured.
+    TRUE = near(2.0, 30)
+    TRUTH = {"grad[2]": true_entry("grad[2]", {"grad[2]": (TRUE, 2.0)}, 1)}
+    ENTRIES = {"grad[2]": {"bound": 29, "reason": "r", "closer": "stanli"}}
+
+    def gates(self, stanli):
+        held = verify_refs.truth_labels(self.TRUTH, 0)
+        cmdstan = verify_refs.ulp_gate(
+            self.ENTRIES, {"grad[2]": verify_refs.scaled_ulp(
+                self.CMDSTAN, stanli, 2.0)}, 0, skip=held)
+        truth = verify_refs.truth_gate(self.TRUTH, 0, {"grad[2]": stanli})
+        return cmdstan, truth
+
+    def test_a_move_toward_the_true_value_passes(self):
+        # 30 ULP from CmdStan, over its bound of 29, and 0 from the truth.
+        self.assertEqual(self.gates(self.TRUE), (None, None))
+        self.assertEqual(verify_refs.ulp_gate(
+            self.ENTRIES, {"grad[2]": 30}, 0)[0], "ULP_GATE")
+
+    def test_a_move_away_from_the_true_value_fails(self):
+        # 19 ULP from CmdStan, within its bound, and 11 from the truth.
+        cmdstan, truth = self.gates(near(2.0, 19))
+        self.assertIsNone(cmdstan)
+        self.assertEqual(truth[0], "TRUTH_GATE")
+        self.assertIn("grad[2] (stanli", truth[1])
+        self.assertIn("is 11.0 scaled ULP from the true value, allowed 10",
+                      truth[1])
+        self.assertIn("the bound of grad[2] is 1, measured on P", truth[1])
+        self.assertIsNone(self.gates(near(2.0, 20))[1])
+
+    def test_a_value_equal_to_cmdstan_is_still_held_to_the_truth(self):
+        self.assertEqual(self.gates(self.CMDSTAN)[1][0], "TRUTH_GATE")
+
+    def test_the_bound_counts_when_it_is_over_the_default(self):
+        truth = {"lp": true_entry("lp", {"lp": (-3.5, 3.5)}, 40)}
+        measured = {}
+        self.assertIsNone(verify_refs.truth_gate(
+            truth, 1, {"lp": near(-3.5, 40)}, measured))
+        self.assertEqual(measured, {"lp": 40.0})
+        self.assertEqual(verify_refs.truth_gate(
+            truth, 1, {"lp": near(-3.5, 41)})[0], "TRUTH_GATE")
+        self.assertIn("lp has a true value and stanli gave no value",
+                      verify_refs.truth_gate(truth, 1, {})[1])
+
+    def test_values_without_a_true_value_keep_the_cmdstan_gate(self):
+        held = verify_refs.truth_labels(self.TRUTH, 0)
+        self.assertEqual(held, {"grad[2]"})
+        failed = verify_refs.ulp_gate(self.ENTRIES, {"grad[1]": 11, "grad[2]": 99},
+                                      0, skip=held)
+        self.assertIn("grad[1]", failed[1])
+        self.assertIn("allowed 10 (default)", failed[1])
+
+    def test_a_kind_entry_holds_the_values_that_it_lists(self):
+        truth = {"grad": {"bound": 2, "platform": "P", "method": "fd",
+                          "points": {"0": {"grad[1]": {"value": "1", "scale": 4.0}},
+                                     "1": {"grad[3]": {"value": "1", "scale": 4.0}}}}}
+        self.assertEqual(verify_refs.truth_labels(truth, 0), {"grad[1]"})
+        self.assertEqual(verify_refs.truth_labels(truth),
+                         {"grad", "grad[1]", "grad[3]"})
+        self.assertIsNone(verify_refs.truth_gate(truth, 0, {"grad[1]": 1.0,
+                                                            "grad[3]": 9.0}))
+
+    def test_the_measure_is_ledger_accuracys(self):
+        from decimal import Decimal
+        from fractions import Fraction
+        value = "1.000000000000000222044604925031308084726333618164062500001"
+        self.assertEqual(verify_refs.truth_ulps(1.0, value, 1.0),
+                         verify_refs.hp_metrics.ulps_from_truth(
+                             1.0, Fraction(Decimal(value)), 1.0))
+        self.assertAlmostEqual(verify_refs.truth_ulps(1.0, value, 1.0), 1.0)
+        self.assertEqual(verify_refs.truth_ulps(math.nan, value, 1.0), math.inf)
+        self.assertNotIn("mpmath", sys.modules)
+
+
+class TrueValueLedgerTest(unittest.TestCase):
+    """The true_values section of the ledger file, and how the tools move it."""
+
+    PLATFORM_ENTRY = {"bound": 20, "reason": "r", "closer": "stanli"}
+
+    def ledger(self, truth, closer="stanli", schema=3):
+        return {"schema": schema, "platforms": {"P": {"main": {"m": {
+            label: {**self.PLATFORM_ENTRY, "closer": closer} for label in truth}}}},
+            "true_values": {"main": {"m": truth}}}
+
+    def load(self, ledger):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = pathlib.Path(tmp) / "ledger.json"
+            path.write_text(json.dumps(ledger))
+            return verify_refs.load_ulp_ledger(path)
+
+    def test_a_good_section_loads(self):
+        good = {"lp": true_entry("lp", {"lp": (-3.5, 3.5)}, 0),
+                "grad": true_entry("grad", {"grad[1]": (1.0, 2.0),
+                                            "grad[2]": (2.0, 2.0)}, 12)}
+        self.assertEqual(self.load(self.ledger(good))["true_values"]["main"]["m"],
+                         good)
+        self.assertEqual(self.load({"schema": 3, "platforms": {}})["true_values"], {})
+
+    def test_bad_sections_are_refused(self):
+        lp = true_entry("lp", {"lp": (-3.5, 3.5)}, 0)
+        bad = {
+            "missing key": {"lp": {k: x for k, x in lp.items() if k != "method"}},
+            "negative bound": {"lp": {**lp, "bound": -1}},
+            "float bound": {"lp": {**lp, "bound": 1.5}},
+            "method": {"lp": {**lp, "method": "fd"}},
+            "directional": {"grad[1]": true_entry(
+                "grad[1]", {"grad[1]": (1.0, 1.0)}, 0, method="directional")},
+            "platform": {"lp": {**lp, "platform": "Q"}},
+            "no points": {"lp": {**lp, "points": {}}},
+            "point 3": {"lp": {**lp, "points": {"3": lp["points"]["0"]}}},
+            "not covered": {"lp": true_entry("lp", {"grad[1]": (1.0, 1.0)}, 0)},
+            "zero scale": {"lp": true_entry("lp", {"lp": (0.0, 0.0)}, 0)},
+            "integer scale": {"lp": {**lp, "points": {"0": {"lp": {
+                "value": "1", "scale": 1}}}}},
+            "nonfinite value": {"lp": {**lp, "points": {"0": {"lp": {
+                "value": "nan", "scale": 1.0}}}}},
+            "not a number": {"lp": {**lp, "points": {"0": {"lp": {
+                "value": "x", "scale": 1.0}}}}},
+        }
+        for why, truth in bad.items():
+            with self.subTest(why=why), self.assertRaises(SystemExit):
+                self.load(self.ledger(truth))
+        for closer in ("cmdstan", "unknown"):
+            with self.subTest(closer=closer), self.assertRaises(SystemExit):
+                self.load(self.ledger({"lp": lp}, closer))
+        with self.assertRaises(SystemExit) as caught:
+            self.load(self.ledger({"lp": lp}, schema=2))
+        self.assertIn("schema 2", str(caught.exception))
+        with self.assertRaises(SystemExit):
+            self.load({**self.ledger({"lp": lp}), "extra": {}})
+
+    def test_entries_with_true_values_keep_their_cmdstan_entry(self):
+        old = {"grad[2]": {"bound": 14, "reason": "why", "closer": "stanli"},
+               "lp": {"bound": 30, "reason": "lp", "closer": "unknown"}}
+        truth = {"grad[2]": true_entry("grad[2]", {"grad[2]": (2.0, 2.0)}, 1)}
+        held = verify_refs.truth_labels(truth)
+        for got in (15, 3):
+            with self.subTest(got=got):
+                new = verify_refs.updated_entries(
+                    old, {"grad[2]": got, "lp": 12}, "new", held)
+                self.assertEqual(new["grad[2]"], old["grad[2]"])
+                self.assertEqual(new["lp"]["bound"], 12)
+        with self.assertRaises(ValueError):
+            verify_refs.updated_entries(old, {"grad[2]": 15}, "new")
+        new = verify_refs.updated_entries({}, {"grad[2]": 50}, "new", held)
+        self.assertEqual(new, {})
+
+    def test_first_entries_need_no_reason_for_values_with_true_values(self):
+        old = {"grad[2]": {"bound": 14, "reason": "why", "closer": "stanli"}}
+        held = verify_refs.truth_labels(
+            {"grad[2]": true_entry("grad[2]", {"grad[2]": (2.0, 2.0)}, 1)})
+        entries, problems = verify_refs.first_entries(
+            {"grad[2]": 15, "lp": 20}, {"lp": "lp why"}, "P", old, held)
+        self.assertEqual(problems, [])
+        self.assertEqual(entries["grad[2]"], old["grad[2]"])
+        _, problems = verify_refs.first_entries(
+            {"grad[2]": 15}, {}, "P", old)
+        self.assertEqual(problems, ["grad[2] measured 15 needs a reason"])
+
+    def test_the_bound_only_goes_down_on_its_platform(self):
+        truth = {"lp": true_entry("lp", {"lp": (-3.5, 3.5)}, 30)}
+        for platform, got, bound in (("P", 12.5, 13), ("P", 40.0, 30),
+                                     ("Q", 2.0, 30)):
+            with self.subTest(platform=platform, got=got), \
+                    tempfile.TemporaryDirectory() as tmp:
+                path = pathlib.Path(tmp) / "ledger.json"
+                ledger = copy.deepcopy(self.ledger(truth))
+                verify_refs.write_ulp_ledger(
+                    ledger, platform, "main", {"m": {"lp": 25}}, ["m"], {},
+                    path, {"m": {"lp": got}})
+                written = verify_refs.load_ulp_ledger(path)
+                self.assertEqual(
+                    written["true_values"]["main"]["m"]["lp"]["bound"], bound)
+                self.assertEqual(written["platforms"]["P"]["main"]["m"]["lp"],
+                                 self.PLATFORM_ENTRY)
+
+    def test_a_wide_margin_from_the_true_value_is_reported(self):
+        truth = {"lp": true_entry("lp", {"lp": (-3.5, 3.5)}, 30),
+                 "grad[1]": true_entry("grad[1]", {"grad[1]": (1.0, 1.0)}, 8)}
+        entries = {"lp": {"bound": 99, "reason": "r", "closer": "stanli"}}
+        notes = verify_refs.ledger_notes("m", entries, {"lp": 1}, truth,
+                                         {"lp": 15.0, "grad[1]": 0.0})
+        self.assertEqual(len(notes), 1)
+        self.assertIn("TRUE VALUE m lp: measured 15.0 from the true value, "
+                      "recorded bound 30", notes[0])
 
 
 class UlpGateReplayTest(unittest.TestCase):
@@ -844,6 +1052,50 @@ class UlpGateReplayTest(unittest.TestCase):
         self.assertEqual(result[1], "OK")
         self.assertIn("ULP LEDGER while_counter_size grad[2]: measured 0",
                       " ".join(result[6]))
+
+    def test_the_replay_holds_true_values_with_or_without_a_section(self):
+        # CmdStan's grad[2] is 2 and the true value is 50 ULP above it.
+        truth = {"grad[2]": true_entry("grad[2]", {"grad[2]": (near(2.0, 50), 2.0)}, 3)}
+        entries = {"grad[2]": {"bound": 40, "reason": "r", "closer": "stanli"}}
+        toward = f'echo "OK -3.5 1e-4 {near(2.0, 45)!r}"'
+        away = f'echo "OK -3.5 1e-4 {near(2.0, 20)!r}"'
+
+        def run(body, entries, truth, measured=None):
+            with tempfile.TemporaryDirectory() as tmp:
+                return check_model(MODEL, self.REF, REPO / "nonexistent-pdb",
+                                   stub(tmp, body), pathlib.Path(tmp), 60, 1e-9,
+                                   ulp_entries=entries, truth=truth,
+                                   truth_measured=measured)
+        self.assertEqual(run(toward, entries, None)[1], "ULP_GATE")
+        measured = {}
+        self.assertEqual(run(toward, entries, truth, measured)[1], "OK")
+        self.assertEqual(measured, {"grad[2]": 5.0})
+        self.assertEqual(run(away, entries, None)[1], "OK")
+        for section in (entries, None):
+            with self.subTest(section=section):
+                result = run(away, section, truth)
+                self.assertEqual(result[1], "TRUTH_GATE")
+                self.assertIn("is 30.0 scaled ULP from the true value, "
+                              "allowed 10", result[5])
+        # grad[1] has no true value and keeps the default bound.
+        result = run(f'echo "OK -3.5 {1e-4 + 9e-10!r} {near(2.0, 50)!r}"',
+                     entries, truth)
+        self.assertEqual(result[1], "ULP_GATE")
+        self.assertIn("grad[1]", result[5])
+
+    def test_true_values_of_outputs_are_held(self):
+        body = ('echo "OK -3.5 1e-4 2"\n'
+                'if [ -n "$wa" ]; then echo "WANAMES a"; '
+                f'echo "WAVALS {near(1.0, 30)!r}"; fi')
+        ref = {"primary": 0, "points": {str(p): {
+            **self.PT, "wa": {"names": "a", "values": ["1"]}} for p in POINTS}}
+        for true, status in ((near(1.0, 31), "OK"), (1.0, "TRUTH_GATE")):
+            truth = {"wa a": true_entry("wa a", {"wa a": (true, 1.0)}, 2)}
+            with self.subTest(true=true), tempfile.TemporaryDirectory() as tmp:
+                result = check_model(MODEL, ref, REPO / "nonexistent-pdb",
+                                     stub(tmp, body, wa=False), pathlib.Path(tmp),
+                                     60, 1e-9, ulp_entries={}, truth=truth)
+            self.assertEqual(result[1], status, result[5])
 
     def test_write_array_values_are_gated(self):
         body = ('echo "OK -3.5 1e-4 2"\n'
