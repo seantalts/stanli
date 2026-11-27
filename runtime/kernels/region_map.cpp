@@ -196,30 +196,64 @@ void region_map_bwd(KernelCtx& ctx) {
   const auto& p = *static_cast<const RegionMapProg*>(ctx.udata);
   const bool continuing = continue_input_adjoints(p, ctx);
   double* adj = ctx.scratch + p.n_regs;
-  std::fill_n(adj, p.adj.n_regs, 0.0);
   const auto& map = p.adj.adj_reg;
-  for (const auto& li : p.ins) {
+  // The lane form reads and writes no adjoint cell but the live-ins', and
+  // its plan knows which live-ins have consecutive cells.
+  const bool lanes = p.lanes.active;
+  const auto run_of = [&](size_t k) -> int32_t {
+    return lanes ? p.lanes.live_in_cells[k] : -1;
+  };
+  if (lanes) {
+    for (size_t k = 0; k < p.ins.size(); ++k) {
+      const auto& li = p.ins[k];
+      if (run_of(k) >= 0) {
+        std::fill_n(adj + run_of(k), li.len, 0.0);
+      } else {
+        for (int i = 0; i < li.len; ++i)
+          adj[(size_t)map[(size_t)(li.reg + i)]] = 0.0;
+      }
+    }
+  } else {
+    std::fill_n(adj, p.adj.n_regs, 0.0);
+  }
+  for (size_t k = 0; k < p.ins.size(); ++k) {
+    const auto& li = p.ins[k];
     if (li.input < 0 || !continuing || !li.immutable ||
         !ctx.in_adj[li.input].data)
       continue;
-    for (int i = 0; i < li.len; ++i)
-      adj[(size_t)map[(size_t)(li.reg + i)]] =
-          ctx.in_adj[li.input].data[li.offset + i];
+    const double* from = ctx.in_adj[li.input].data + li.offset;
+    if (run_of(k) >= 0) {
+      std::copy_n(from, li.len, adj + run_of(k));
+    } else {
+      for (int i = 0; i < li.len; ++i)
+        adj[(size_t)map[(size_t)(li.reg + i)]] = from[i];
+    }
   }
-  if (p.lanes.active)
+  if (lanes)
     region_map_lanes_backward(p, ctx, lane_region(p, ctx), adj);
   else if (p.calls.empty())
     sweep<false>(p, ctx, adj);
   else
     sweep<true>(p, ctx, adj);
-  for (const auto& li : p.ins) {
+  for (size_t k = 0; k < p.ins.size(); ++k) {
+    const auto& li = p.ins[k];
     if (li.input < 0 || !ctx.in_adj[li.input].data) continue;
+    double* const to = ctx.in_adj[li.input].data + li.offset;
+    const bool assign = continuing && li.immutable;
+    if (run_of(k) >= 0) {
+      const double* const from = adj + run_of(k);
+      if (assign)
+        std::copy_n(from, li.len, to);
+      else
+        for (int i = 0; i < li.len; ++i) to[i] += from[i];
+      continue;
+    }
     for (int i = 0; i < li.len; ++i) {
       const double contribution = adj[(size_t)map[(size_t)(li.reg + i)]];
-      if (continuing && li.immutable)
-        ctx.in_adj[li.input].data[li.offset + i] = contribution;
+      if (assign)
+        to[i] = contribution;
       else
-        ctx.in_adj[li.input].data[li.offset + i] += contribution;
+        to[i] += contribution;
     }
   }
 }

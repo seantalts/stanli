@@ -7,6 +7,8 @@
 #include <stanli/optable.hpp>
 #include <stanli/tile_call.hpp>
 
+#include "../runtime/kernels/density_fused.hpp"
+
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
@@ -65,12 +67,33 @@ std::vector<Entry> density_entries() {
   return v;
 }
 
+// Inputs that every argument check accepts in most lanes, so that a tile
+// of 64 lanes often passes its checks as a whole.
+bool clean_inputs = false;
+
 struct Rng {
   std::mt19937_64 gen;
   explicit Rng(uint64_t seed) : gen(seed) {}
   double u() { return std::uniform_real_distribution<double>(0.0, 1.0)(gen); }
   size_t pick(size_t n) { return (size_t)(gen() % n); }
+  double clean_value() {
+    static const double edges[] = {
+        1e-300,
+        1e300,
+        1e-8,
+        0.5,
+        2.0,
+        700.0,
+        std::numeric_limits<double>::denorm_min(),
+    };
+    const double r = u();
+    if (r < 0.002) return -1.0;
+    if (r < 0.03) return edges[pick(sizeof(edges) / sizeof(edges[0]))];
+    if (r < 0.7) return 0.02 + 5.0 * u();
+    return 0.001 + u();
+  }
   double value() {
+    if (clean_inputs) return clean_value();
     static const double edges[] = {
         0.0,
         -0.0,
@@ -138,7 +161,11 @@ void test_kernel(const Entry& e, uint8_t scalar_variant, int lanes, Rng& rng) {
   for (int a = 0; a < n; ++a) {
     shared[(size_t)a] = rng.u() < 0.3;
     const int len = shared[(size_t)a] ? 1 : lanes;
-    for (int l = 0; l < len; ++l) in[(size_t)a].push_back(rng.value());
+    for (int l = 0; l < len; ++l) {
+      double v = rng.value();
+      if (clean_inputs && a + 1 < n && rng.u() < 0.5) v = -v;
+      in[(size_t)a].push_back(v);
+    }
   }
   const auto arg = [&](int a, int l) {
     return in[(size_t)a][shared[(size_t)a] ? 0 : (size_t)l];
@@ -269,6 +296,38 @@ void test_density_kernels() {
       for (int lanes : {1, 5, 64})
         for (int trial = 0; trial < 6; ++trial) test_kernel(e, v, lanes, rng);
   }
+}
+
+// The same comparison on inputs that pass the argument checks in whole
+// tiles. A kernel with a batched elementwise form takes it there, which the
+// random inputs above, with an edge value in nearly every tile, seldom reach.
+void test_clean_tiles() {
+  clean_inputs = true;
+  for (const Entry& e : density_entries()) {
+    Rng rng(0x51ed270b2f0a3c1dull ^ e.opcode);
+    for (unsigned m = 0; m < (1u << e.nargs); ++m)
+      for (uint8_t v : {(uint8_t)m, (uint8_t)(m | 0x80u)})
+        for (int lanes : {5, 50, 64})
+          for (int trial = 0; trial < 4; ++trial) test_kernel(e, v, lanes, rng);
+  }
+  clean_inputs = false;
+#ifndef STANLI_FUSED_ONLY
+  if (!stanli::dens::fused_density_enabled()) return;
+#endif
+  // normal_lpdf runs whole tiles of clean lanes as one batch.
+  const size_t before = stanli::dens::fused_density_batched_lanes();
+  clean_inputs = true;
+  Rng rng(7);
+  const Entry normal{stanli::OP_NORMAL_LPDF, "normal_lpdf", 3};
+  for (unsigned m = 1; m < 8; ++m)
+    for (int trial = 0; trial < 4; ++trial)
+      test_kernel(normal, (uint8_t)m, 64, rng);
+  clean_inputs = false;
+  check(
+      stanli::dens::fused_density_batched_lanes() > before,
+      "normal_lpdf batches clean tiles (" +
+          std::to_string(stanli::dens::fused_density_batched_lanes() - before) +
+          " lanes)");
 }
 
 void test_unmarked_kernels() {
@@ -439,6 +498,7 @@ void test_nan_adjoints() {
 int main() {
   test_nan_adjoints();
   test_density_kernels();
+  test_clean_tiles();
   test_unmarked_kernels();
   test_unary_kernels();
   check(threw_trials > 100 && clean_trials > 1000,

@@ -59,7 +59,7 @@ def program_opcodes(program, wanted):
 
 
 def table_opcodes(optable_text):
-    return set(re.findall(r"X\(OP_(\w+)\)", optable_text))
+    return set(re.findall(r"X\(OP_(\w+)[,)]", optable_text))
 
 
 def ops_change(graph, base_ops, candidate_ops):

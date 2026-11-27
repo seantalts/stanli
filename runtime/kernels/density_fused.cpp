@@ -34,6 +34,7 @@ inline void count_call() { ++g_calls; }
 #else
 inline void count_call() {}
 #endif
+thread_local std::size_t g_batched_lanes = 0;
 
 using VecView = Eigen::Map<const Eigen::Array<double, -1, 1>>;
 using OutView = Eigen::Map<Eigen::Array<double, -1, 1>>;
@@ -861,6 +862,80 @@ struct GammaOp {
   }
 };
 
+// normal_lpdf over a tile of elementwise calls whose arguments all pass the
+// checks. Each lane computes what normal_summed computes for one element,
+// in the same order, so the bits agree. A shared scale is inverted and its
+// log taken once. Returns false, having written nothing, when a lane would
+// take another path; the caller then runs the lanes one at a time.
+bool normal_tile(KernelCtx& ctx, unsigned mask, bool propto) {
+  if (mask == 0) return false;
+  const int64_t N = ctx.out.len;
+  const double* y = ctx.in[0].data;
+  const double* mu = ctx.in[1].data;
+  const double* sigma = ctx.in[2].data;
+  const int64_t ys = ctx.in[0].len == 1 ? 0 : 1;
+  const int64_t ms = ctx.in[1].len == 1 ? 0 : 1;
+  const bool shared_sigma = ctx.in[2].len == 1;
+  bool clear = true;
+  for (int64_t n = 0; n < N; ++n) {
+    const double s = sigma[shared_sigma ? 0 : n];
+    clear &= std::isfinite(y[n * ys]) & std::isfinite(mu[n * ms]) &
+             std::isfinite(s) & (s > 0);
+  }
+  if (!clear) return false;
+  const bool ya = (mask & 1u) != 0, ma = (mask & 2u) != 0,
+             sa = (mask & 4u) != 0;
+  const bool log_term = !propto || sa;
+  double* const dy = ctx.scratch;
+  double* const dmu = ctx.scratch + N;
+  double* const dsigma = ctx.scratch + 2 * N;
+  double* const connected = ctx.scratch + 3 * N;
+  const double one = static_cast<double>(std::size_t{1});
+  const double constant = stan::math::NEG_LOG_SQRT_TWO_PI * one;
+  const double shared_inv = shared_sigma ? 1.0 / sigma[0] : 0.0;
+  const double shared_log =
+      shared_sigma && log_term ? std::log(sigma[0]) * one / one : 0.0;
+  for (int64_t n = 0; n < N; ++n) {
+    const double inv_sigma = shared_sigma ? shared_inv : 1.0 / sigma[n];
+    const double y_scaled = (y[n * ys] - mu[n * ms]) * inv_sigma;
+    const double y_scaled_sq = y_scaled * y_scaled;
+    double logp = -0.5 * y_scaled_sq;
+    if (!propto) logp += constant;
+    if (log_term)
+      logp -= shared_sigma ? shared_log : std::log(sigma[n]) * one / one;
+    const double scaled_diff = inv_sigma * y_scaled;
+    if (ya) dy[n] = -scaled_diff;
+    if (sa) dsigma[n] = inv_sigma * y_scaled_sq - inv_sigma;
+    if (ma) dmu[n] = scaled_diff;
+    ctx.out.data[n] = logp;
+    connected[n] = 1.0;
+  }
+  g_batched_lanes += static_cast<std::size_t>(N);
+  return true;
+}
+
+// The elementwise form, out of line so that the summed form's code is the
+// same as before the batched tile was added.
+template <typename Op>
+[[gnu::noinline]] void fused_lpdf_elementwise(KernelCtx& ctx, unsigned mask,
+                                              bool propto) {
+  if constexpr (std::is_same_v<Op, NormalOp>)
+    if (normal_tile(ctx, mask, propto)) return;
+  const int64_t N = ctx.out.len;
+  for (int64_t n = 0; n < N; ++n) {
+    Out o;
+    for (int k = 0; k < 3; ++k) {
+      o.buf[k] = ctx.scratch + static_cast<int64_t>(k) * N + n;
+      o.len[k] = 1;
+    }
+    o.connected = ctx.scratch + 3 * N + n;
+    o.value = ctx.out.data + n;
+    Op::run(ctx.in[0].data[ctx.in[0].len == 1 ? 0 : n],
+            ctx.in[1].data[ctx.in[1].len == 1 ? 0 : n],
+            ctx.in[2].data[ctx.in[2].len == 1 ? 0 : n], mask, propto, o);
+  }
+}
+
 template <typename Op>
 void fused_lpdf(KernelCtx& ctx) {
   count_call();
@@ -868,19 +943,7 @@ void fused_lpdf(KernelCtx& ctx) {
   const bool propto = mode.propto;
   const unsigned mask = mode.active;
   if (mode.elementwise) {
-    const int64_t N = ctx.out.len;
-    for (int64_t n = 0; n < N; ++n) {
-      Out o;
-      for (int k = 0; k < 3; ++k) {
-        o.buf[k] = ctx.scratch + static_cast<int64_t>(k) * N + n;
-        o.len[k] = 1;
-      }
-      o.connected = ctx.scratch + 3 * N + n;
-      o.value = ctx.out.data + n;
-      Op::run(ctx.in[0].data[ctx.in[0].len == 1 ? 0 : n],
-              ctx.in[1].data[ctx.in[1].len == 1 ? 0 : n],
-              ctx.in[2].data[ctx.in[2].len == 1 ? 0 : n], mask, propto, o);
-    }
+    fused_lpdf_elementwise<Op>(ctx, mask, propto);
     return;
   }
   Out o;
@@ -936,6 +999,8 @@ void set_fused_density(bool on) {
 
 std::size_t fused_density_calls() { return g_calls; }
 #endif
+
+std::size_t fused_density_batched_lanes() { return g_batched_lanes; }
 
 void ordered_logistic_lpmf_fused(KernelCtx& ctx, int64_t n) {
   count_call();

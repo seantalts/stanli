@@ -9,6 +9,9 @@
 namespace stanli {
 namespace dens {
 
+// Lanes of elementwise calls that this thread ran as one batch.
+std::size_t fused_density_batched_lanes();
+
 #ifndef STANLI_FUSED_ONLY
 bool fused_density_enabled();
 void set_fused_density(bool on);
