@@ -9,6 +9,7 @@ on:
 
 permissions:
   contents: read
+  actions: read
 
 concurrency:
   group: fuzz-nightly
@@ -61,6 +62,33 @@ jobs:
 
       - name: Fetch pinned dependencies
         run: ./deps/fetch.sh
+
+      # CMake will not configure without the pinned stanc, though the fuzz
+      # targets never run it. Take the one the last successful wheels run
+      # on main built.
+      - name: Find the last wheels run on main
+        id: wheels
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          id=$(gh run list -R "$GITHUB_REPOSITORY" --workflow wheels.yml \
+            --branch main --event push --status success --limit 1 \
+            --json databaseId --jq '.[0].databaseId')
+          echo "id=$id" >> "$GITHUB_OUTPUT"
+
+      - name: Install the pinned stanc from that run
+        uses: actions/download-artifact@v4
+        with:
+          name: stanc-linux-x86_64
+          path: deps/stanc3
+          run-id: ${{ steps.wheels.outputs.id }}
+          github-token: ${{ github.token }}
+
+      - name: Check compiler provenance
+        run: |
+          test "$(cat deps/stanc3/stanc.src)" = "$STANC3_SRC_SHA"
+          chmod +x deps/stanc3/stanc
+          ./deps/stanc3/stanc --version
 
       # The density kernels peak at about 8 GB each under ASan and
       # libFuzzer's coverage (measured with Homebrew Clang 23 on arm64), so
