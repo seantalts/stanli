@@ -221,3 +221,65 @@ The accelerated kernel is still faster at every size from 24, so the rule
 stays n >= 32. In the corpus only `ch14_m14_9`, `_10` and `_11` (n = 151)
 reach it, so no model moves across it.
 
+
+<a id="threads"></a>
+
+## Threads and the bits of each result (2026-11-27)
+
+`tools/stress_blas_threads` makes the BLAS and LAPACK calls of every
+accelerated kernel with Accelerate's threads allowed and compares each
+result bit for bit with the single-threaded call on the same inputs. The
+calls have the kernels' transposes, alpha, beta and leading dimensions.
+`--kernel-shapes` covers square and rectangular shapes from the thresholds
+to n = 4096, the shapes of the corpus models that reach the thresholds
+(`nn_rbm1bJ100`'s 60000 x 785 x 100 product, the Cholesky factor at n = 101,
+`multi_normal` at n = 151 and `normal_id_glm` at 5000 x 24), and the blocked
+Cholesky adjoint, replayed call for call on views into an n x n matrix.
+`--sweep` makes the same calls at every square size from the thresholds to
+1200, every 16 to 2048 and every 64 to 4096, and at a grid of 2,071
+product shapes and 54 matrix-vector shapes. On the M3 Ultra we also ran four
+processes at once and `VECLIB_MAXIMUM_THREADS` from 2 to 16, which changes
+how many threads Accelerate uses. On the M1 of the CI Mac we ran three
+processes at once. The raw output is in
+[`data/2026-11-27-accelerate-threads`](data/2026-11-27-accelerate-threads/README.md).
+
+Threaded calls, and how many of them gave bits other than one thread:
+
+| Routine | M3 Ultra, macOS 26.6.2 | M1 (CI, 3 cores), macOS 26.7.2 |
+| --- | --- | --- |
+| `dgemm` | 3,365 of 5,406,332 differ, up to 5.6e-15 | none of 3,825,171, but it never used threads |
+| `dsymm` | 426,200 of 1,980,407, up to 1.8e-15 | 270,971 of 1,399,052, up to 1.2e-15 |
+| `dpotrf` | 2,512 of 288,470, up to 7.8e-16 | none of 204,648, but it never used threads |
+| `dpotri` (newer interface) | 233 of 129,008, up to 2.9e-17 | 6,556 of 91,650, up to 3.9e-17 |
+| `dgemv` | none of 750,216, but it never used threads | none of 527,734, never used threads |
+| `dtrmv` | none of 461,250, never used threads | none of 325,868, never used threads |
+| `dtrsm` | none of 8,085,161 | none of 5,490,780 |
+| `dtrmm` | none of 2,928,152 | none of 1,991,598 |
+| `dtrtri` | none of 124,369 | none of 80,650 |
+
+A difference is the largest change of any entry over the largest entry of
+the result. None is above rounding level, and every threaded call of a shape
+gave the same bits as the other threaded calls of that shape. The
+differences start at these sizes in the sweep:
+
+- `dgemm`: 324 of the 2,071 product shapes differ in at least one of the
+  three calls of the product kernel. Examples are the two backward calls of
+  a 1000 x 100 by 100 x 1000 product and the forward call of a 100 x 1500
+  by 1500 x 1000 product. We found no simple rule that separates them, and
+  `nn_rbm1bJ100`'s shape gave the same bits. One block call of the Cholesky
+  adjoint differs at n = 1015.
+- `dsymm` in the Cholesky adjoint: from n = 74 on both Macs.
+- `dpotrf`: from n = 1025 on the M3 Ultra.
+- `dpotri`: from n = 1090 on the M3 Ultra and from n = 132 on the M1.
+
+`dtrsm` and `dtrmm` used threads only a little: CPU time over wall time was
+at most 1.35 on the M3 Ultra and about 1 on the M1. `dtrtri` used them on
+both Macs: up to 20 on the M3 Ultra at n = 4096 and up to 2.8 on the M1.
+Apple does not document any of this, so a later macOS can change it.
+
+Before this run, a stress of square matrices only had found differences
+only in `dsymm` from n = 512 and `dpotrf` at n = 2048, and none in `dgemm`.
+The rectangular shapes and the sweep found the others. On `main`, which lets
+any accelerated call use threads while the chains leave cores free, the
+results of `dgemm`, `dsymm` and `dpotrf` can therefore change with the
+number of chains.

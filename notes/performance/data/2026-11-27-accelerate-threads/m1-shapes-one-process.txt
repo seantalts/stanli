@@ -1,0 +1,266 @@
+dgemm_NN_a1_b0 32x32x32                          calls 6000   differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 1.08 one/threaded 3235.41
+dgemm_NT_a1_b1 32x32x32                          calls 6000   differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 1.06 one/threaded 643.62
+dgemm_TN_a1_b1 32x32x32                          calls 6000   differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 1.07 one/threaded 1382.58
+dgemm_NN_a1_b0 33x37x41                          calls 5997   differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 1.01 one/threaded 764.75
+dgemm_NT_a1_b1 33x37x41                          calls 5997   differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 0.99 one/threaded 229.71
+dgemm_TN_a1_b1 33x37x41                          calls 5997   differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 1.00 one/threaded 59.59
+dgemm_NN_a1_b0 32x32x4096                        calls 818    differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 0.98 one/threaded 0.89
+dgemm_NT_a1_b1 32x32x4096                        calls 818    differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 1.00 one/threaded 2.01
+dgemm_TN_a1_b1 32x32x4096                        calls 818    differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 1.01 one/threaded 1.86
+dgemm_NN_a1_b0 32x4096x32                        calls 818    differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 1.00 one/threaded 1.11
+dgemm_NT_a1_b1 32x4096x32                        calls 818    differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 0.98 one/threaded 1.29
+dgemm_TN_a1_b1 32x4096x32                        calls 818    differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 0.99 one/threaded 1.01
+dgemm_NN_a1_b0 4096x32x32                        calls 818    differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 0.95 one/threaded 1.15
+dgemm_NT_a1_b1 4096x32x32                        calls 818    differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 1.00 one/threaded 1.54
+dgemm_TN_a1_b1 4096x32x32                        calls 818    differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 0.99 one/threaded 2.54
+dgemm_NN_a1_b0 40x64x1000                        calls 1021   differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 1.00 one/threaded 1.13
+dgemm_NT_a1_b1 40x64x1000                        calls 1021   differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 1.00 one/threaded 1.59
+dgemm_TN_a1_b1 40x64x1000                        calls 1021   differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 0.98 one/threaded 1.29
+dgemm_NN_a1_b0 64x64x64                          calls 2847   differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 0.99 one/threaded 1.40
+dgemm_NT_a1_b1 64x64x64                          calls 2847   differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 1.04 one/threaded 1.63
+dgemm_TN_a1_b1 64x64x64                          calls 2847   differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 1.01 one/threaded 1.29
+dgemm_NN_a1_b0 100x50x200                        calls 1558   differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 0.96 one/threaded 1.67
+dgemm_NT_a1_b1 100x50x200                        calls 1558   differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 1.00 one/threaded 1.38
+dgemm_TN_a1_b1 100x50x200                        calls 1558   differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 0.99 one/threaded 1.11
+dgemm_NN_a1_b0 151x151x151                       calls 893    differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 0.99 one/threaded 1.49
+dgemm_NT_a1_b1 151x151x151                       calls 893    differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 0.98 one/threaded 3.65
+dgemm_TN_a1_b1 151x151x151                       calls 893    differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 0.99 one/threaded 0.90
+dgemm_NN_a1_b0 512x128x512                       calls 321    differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 0.98 one/threaded 0.88
+dgemm_NT_a1_b1 512x128x512                       calls 321    differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 0.99 one/threaded 1.09
+dgemm_TN_a1_b1 512x128x512                       calls 321    differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 0.99 one/threaded 1.40
+dgemm_NN_a1_b0 128x512x128                       calls 598    differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 0.98 one/threaded 1.11
+dgemm_NT_a1_b1 128x512x128                       calls 598    differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 1.00 one/threaded 1.10
+dgemm_TN_a1_b1 128x512x128                       calls 598    differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 1.00 one/threaded 1.08
+dgemm_NN_a1_b0 256x1024x64                       calls 438    differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 1.00 one/threaded 1.49
+dgemm_NT_a1_b1 256x1024x64                       calls 438    differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 1.00 one/threaded 0.92
+dgemm_TN_a1_b1 256x1024x64                       calls 438    differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 0.98 one/threaded 2.57
+dgemm_NN_a1_b0 500x784x100                       calls 299    differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 0.98 one/threaded 1.18
+dgemm_NT_a1_b1 500x784x100                       calls 299    differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 0.99 one/threaded 1.37
+dgemm_TN_a1_b1 500x784x100                       calls 299    differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 0.99 one/threaded 1.42
+dgemm_NN_a1_b0 100x784x500                       calls 299    differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 0.99 one/threaded 1.27
+dgemm_NT_a1_b1 100x784x500                       calls 299    differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 0.96 one/threaded 0.94
+dgemm_TN_a1_b1 100x784x500                       calls 299    differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 0.83 one/threaded 0.78
+dgemm_NN_a1_b0 1000x100x1000                     calls 196    differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 0.93 one/threaded 1.18
+dgemm_NT_a1_b1 1000x100x1000                     calls 196    differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 0.99 one/threaded 6.81
+dgemm_TN_a1_b1 1000x100x1000                     calls 196    differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 0.98 one/threaded 0.75
+dgemm_NN_a1_b0 1024x1024x1024                    calls 67     differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 0.97 one/threaded 1.00
+dgemm_NT_a1_b1 1024x1024x1024                    calls 67     differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 0.99 one/threaded 1.02
+dgemm_TN_a1_b1 1024x1024x1024                    calls 67     differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 1.00 one/threaded 1.07
+dgemm_NN_a1_b0 2048x64x2048                      calls 126    differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 0.99 one/threaded 0.89
+dgemm_NT_a1_b1 2048x64x2048                      calls 126    differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 1.00 one/threaded 0.97
+dgemm_TN_a1_b1 2048x64x2048                      calls 126    differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 1.00 one/threaded 1.13
+dgemm_NN_a1_b0 64x2048x64                        calls 598    differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 0.99 one/threaded 1.44
+dgemm_NT_a1_b1 64x2048x64                        calls 598    differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 0.99 one/threaded 1.10
+dgemm_TN_a1_b1 64x2048x64                        calls 598    differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 1.00 one/threaded 0.97
+dgemm_NN_a1_b0 3000x40x1500                      calls 151    differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 1.00 one/threaded 1.09
+dgemm_NT_a1_b1 3000x40x1500                      calls 151    differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 1.00 one/threaded 1.60
+dgemm_TN_a1_b1 3000x40x1500                      calls 151    differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 1.00 one/threaded 1.02
+dgemm_NN_a1_b0 4096x512x1024                     calls 49     differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 1.00 one/threaded 0.93
+dgemm_NT_a1_b1 4096x512x1024                     calls 49     differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 0.99 one/threaded 0.98
+dgemm_TN_a1_b1 4096x512x1024                     calls 49     differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 1.00 one/threaded 1.13
+dgemm_NN_a1_b0 2048x2048x2048                    calls 26     differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 0.96 one/threaded 0.97
+dgemm_NT_a1_b1 2048x2048x2048                    calls 26     differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 0.96 one/threaded 0.79
+dgemm_TN_a1_b1 2048x2048x2048                    calls 26     differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 1.00 one/threaded 1.08
+dgemm_NN_a1_b0 4096x4096x4096                    calls 10     differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 1.00 one/threaded 1.02
+dgemm_NT_a1_b1 4096x4096x4096                    calls 10     differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 0.99 one/threaded 1.28
+dgemm_TN_a1_b1 4096x4096x4096                    calls 10     differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 0.97 one/threaded 1.05
+dgemm_NN_a1_b0 60000x785x100                     calls 35     differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 0.99 one/threaded 1.34
+dgemm_NT_a1_b1 60000x785x100                     calls 35     differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 0.97 one/threaded 2.12
+dgemm_TN_a1_b1 60000x785x100                     calls 35     differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 0.97 one/threaded 5.46
+dgemv_N_a1_b0 256x64                             calls 6000   differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 0.98 one/threaded 1991.97
+dgemv_T_a1_b1 256x64                             calls 6000   differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 1.00 one/threaded 898.90
+dgemv_N_a1_b0 257x65                             calls 6000   differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 0.96 one/threaded 1.19
+dgemv_T_a1_b1 257x65                             calls 6000   differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 0.95 one/threaded 381.21
+dgemv_N_a1_b0 300x1000                           calls 2679   differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 0.98 one/threaded 2.56
+dgemv_T_a1_b1 300x1000                           calls 2679   differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 1.00 one/threaded 1.15
+dgemv_N_a1_b0 1000x300                           calls 2679   differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 1.00 one/threaded 1.11
+dgemv_T_a1_b1 1000x300                           calls 2679   differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 0.99 one/threaded 1.48
+dgemv_N_a1_b0 256x4096                           calls 1526   differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 0.92 one/threaded 1.86
+dgemv_T_a1_b1 256x4096                           calls 1526   differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 0.99 one/threaded 0.69
+dgemv_N_a1_b0 4096x256                           calls 1526   differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 1.00 one/threaded 2.05
+dgemv_T_a1_b1 4096x256                           calls 1526   differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 0.99 one/threaded 0.66
+dgemv_N_a1_b0 4096x4096                          calls 438    differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 0.98 one/threaded 1.02
+dgemv_T_a1_b1 4096x4096                          calls 438    differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 0.99 one/threaded 0.93
+dgemv_N_a1_b0 10000x10                           calls 4392   differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 1.01 one/threaded 1.44
+dgemv_T_a1_b1 10000x10                           calls 4392   differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 1.41 one/threaded 43.16
+dgemv_N_a1_b0 10000x11                           calls 4208   differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 1.00 one/threaded 1.09
+dgemv_T_a1_b1 10000x11                           calls 4208   differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 1.39 one/threaded 0.63
+dgemv_N_a1_b0 12345x24                           calls 2694   differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 1.00 one/threaded 1.92
+dgemv_T_a1_b1 12345x24                           calls 2694   differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 1.93 one/threaded 1.11
+dgemv_N_a1_b0 50000x10                           calls 2129   differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 1.00 one/threaded 1.40
+dgemv_T_a1_b1 50000x10                           calls 2129   differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 1.78 one/threaded 1.08
+dgemv_N_a1_b0 20000x64                           calls 2790   differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 0.99 one/threaded 2.13
+dgemv_T_a1_b1 20000x64                           calls 1395   differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 0.90 one/threaded 1.03
+dgemv_N_a1_b0 100000x100                         calls 553    differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 0.98 one/threaded 0.98
+dgemv_T_a1_b1 100000x100                         calls 553    differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 0.98 one/threaded 1.59
+dgemv_N_a1_b0 4096x16                            calls 5312   differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 1.00 one/threaded 1.04
+dgemv_T_a1_b0 4096x16                            calls 5312   differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 1.22 one/threaded 0.70
+dgemv_T_a1_b0 20000x64                           calls 1395   differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 0.99 one/threaded 0.97
+dgemv_N_a1_b0 100000x16                          calls 1261   differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 1.00 one/threaded 1.00
+dgemv_T_a1_b0 100000x16                          calls 1261   differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 1.50 one/threaded 2.91
+dpotrf_L 32                                      calls 6000   differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 1.00 one/threaded 1.48
+dpotri_L 32                                      calls 6000   differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 1.00 one/threaded 1720.72
+dgemv_N_a1_b0 32sq                               calls 6000   differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 1.02 one/threaded 4.24
+dpotrf_L 48                                      calls 6000   differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 1.03 one/threaded 1.49
+dpotri_L 48                                      calls 6000   differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 1.00 one/threaded 2.54
+dgemv_N_a1_b0 48sq                               calls 6000   differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 1.00 one/threaded 4.64
+dpotrf_L 64                                      calls 6000   differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 1.02 one/threaded 1.19
+dpotri_L 64                                      calls 4667   differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 1.00 one/threaded 2.10
+dgemv_N_a1_b0 64sq                               calls 6000   differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 1.00 one/threaded 3.23
+dpotrf_L 100                                     calls 3490   differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 1.00 one/threaded 0.88
+dpotri_L 100                                     calls 2555   differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 1.00 one/threaded 110.51
+dgemv_N_a1_b0 100sq                              calls 6000   differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 0.99 one/threaded 1.60
+dpotrf_L 151                                     calls 2001   differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 1.00 one/threaded 1.01
+dpotri_L 151                                     calls 1465   differ 1465   norm 2.939e-17 elt 1.190e-15 rounding  unlike_first_threaded 0     cpu/wall 1.00 one/threaded 12.02
+dgemv_N_a1_b0 151sq                              calls 6000   differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 0.98 one/threaded 1.25
+dpotrf_L 256                                     calls 981    differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 1.00 one/threaded 0.99
+dpotri_L 256                                     calls 718    differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 1.00 one/threaded 4.12
+dgemv_N_a1_b0 256sq                              calls 5312   differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 0.99 one/threaded 1.28
+dpotrf_L 512                                     calls 385    differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 1.00 one/threaded 1.05
+dpotri_L 512                                     calls 282    differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 1.00 one/threaded 1.20
+dgemv_N_a1_b0 512sq                              calls 2847   differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 0.99 one/threaded 1.00
+dpotrf_L 1000                                    calls 156    differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 1.00 one/threaded 0.94
+dpotri_L 1000                                    calls 114    differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 0.98 one/threaded 1.29
+dgemv_N_a1_b0 1000sq                             calls 1558   differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 0.97 one/threaded 1.22
+dpotrf_L 1024                                    calls 151    differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 1.00 one/threaded 0.97
+dpotri_L 1024                                    calls 111    differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 1.00 one/threaded 0.98
+dgemv_N_a1_b0 1024sq                             calls 1526   differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 1.00 one/threaded 1.24
+dpotrf_L 2048                                    calls 59     differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 1.00 one/threaded 0.99
+dpotri_L 2048                                    calls 43     differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 0.98 one/threaded 0.78
+dgemv_N_a1_b0 2048sq                             calls 818    differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 1.00 one/threaded 1.21
+dpotrf_L 4096                                    calls 23     differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 1.00 one/threaded 1.11
+dpotri_L 4096                                    calls 17     differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 0.99 one/threaded 1.15
+dgemv_N_a1_b0 4096sq                             calls 438    differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 0.99 one/threaded 1.71
+dtrtri_L 64                                      calls 6000   differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 1.01 one/threaded 8.94
+dtrmv_N 64                                       calls 6000   differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 0.84 one/threaded 1.07
+dtrmv_T 64                                       calls 6000   differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 1.00 one/threaded 24.16
+dtrtri_L 65                                      calls 6000   differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 1.27 one/threaded 12.34
+dtrmv_N 65                                       calls 6000   differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 1.01 one/threaded 1.46
+dtrmv_T 65                                       calls 6000   differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 1.04 one/threaded 3.47
+dtrtri_L 100                                     calls 3490   differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 1.23 one/threaded 2.11
+dtrmv_N 100                                      calls 6000   differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 0.93 one/threaded 4.59
+dtrmv_T 100                                      calls 6000   differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 0.95 one/threaded 3.31
+dtrtri_L 151                                     calls 2001   differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 1.37 one/threaded 1.06
+dtrmv_N 151                                      calls 6000   differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 0.94 one/threaded 1.32
+dtrmv_T 151                                      calls 6000   differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 0.96 one/threaded 1.58
+dtrtri_L 256                                     calls 981    differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 1.44 one/threaded 0.97
+dtrmv_N 256                                      calls 6000   differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 0.98 one/threaded 1.24
+dtrmv_T 256                                      calls 6000   differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 0.99 one/threaded 1.29
+dtrtri_L 512                                     calls 385    differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 2.00 one/threaded 1.18
+dtrmv_N 512                                      calls 3889   differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 0.98 one/threaded 1.42
+dtrmv_T 512                                      calls 3889   differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 0.99 one/threaded 1.05
+dtrtri_L 1000                                    calls 156    differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 2.55 one/threaded 1.28
+dtrmv_N 1000                                     calls 2129   differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 1.00 one/threaded 4.70
+dtrmv_T 1000                                     calls 2129   differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 1.00 one/threaded 0.98
+dtrtri_L 1024                                    calls 151    differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 2.56 one/threaded 1.32
+dtrmv_N 1024                                     calls 2084   differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 1.00 one/threaded 1.82
+dtrmv_T 1024                                     calls 2084   differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 1.00 one/threaded 0.95
+dtrtri_L 2048                                    calls 59     differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 2.81 one/threaded 2.36
+dtrmv_N 2048                                     calls 1117   differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 0.98 one/threaded 1.07
+dtrmv_T 2048                                     calls 1117   differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 0.96 one/threaded 0.98
+dtrtri_L 4096                                    calls 23     differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 2.67 one/threaded 1.58
+dtrmv_N 4096                                     calls 598    differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 0.99 one/threaded 1.00
+dtrmv_T 4096                                     calls 598    differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 0.95 one/threaded 0.95
+dpotrf_L chol 64                                 calls 6000   differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 1.04 one/threaded 0.89
+dtrmm_L_L_T cholbwd n=64                         calls 48000  differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 1.00 one/threaded 11.96
+dtrsm_L_L_T cholbwd n=64                         calls 48000  differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 1.01 one/threaded 5.04
+dtrsm_R_L_N cholbwd n=64                         calls 90000  differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 0.97 one/threaded 3.31
+dsymm_L_L_am1_b1 cholbwd n=64                    calls 42000  differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 1.01 one/threaded 21.71
+dgemm_NN_am1_b1 cholbwd n=64                     calls 36000  differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 1.01 one/threaded 38.85
+dgemm_TN_am1_b1 cholbwd n=64                     calls 78000  differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 0.97 one/threaded 35.21
+dpotrf_L chol 65                                 calls 6000   differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 1.01 one/threaded 0.97
+dtrmm_L_L_T cholbwd n=65                         calls 54000  differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 0.98 one/threaded 5.10
+dtrsm_L_L_T cholbwd n=65                         calls 54000  differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 0.99 one/threaded 4.07
+dtrsm_R_L_N cholbwd n=65                         calls 102000 differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 1.03 one/threaded 4.57
+dsymm_L_L_am1_b1 cholbwd n=65                    calls 48000  differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 1.01 one/threaded 4.50
+dgemm_NN_am1_b1 cholbwd n=65                     calls 42000  differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 1.04 one/threaded 8.02
+dgemm_TN_am1_b1 cholbwd n=65                     calls 90000  differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 0.96 one/threaded 10.12
+dpotrf_L chol 100                                calls 3490   differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 1.00 one/threaded 0.99
+dtrmm_L_L_T cholbwd n=100                        calls 54000  differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 1.01 one/threaded 4.37
+dtrsm_L_L_T cholbwd n=100                        calls 54000  differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 1.00 one/threaded 3.59
+dtrsm_R_L_N cholbwd n=100                        calls 102000 differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 1.11 one/threaded 1.52
+dsymm_L_L_am1_b1 cholbwd n=100                   calls 48000  differ 6000   norm 1.761e-16 elt 4.996e-16 rounding  unlike_first_threaded 0     cpu/wall 1.00 one/threaded 1.57
+dgemm_NN_am1_b1 cholbwd n=100                    calls 42000  differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 1.02 one/threaded 9.26
+dgemm_TN_am1_b1 cholbwd n=100                    calls 90000  differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 1.00 one/threaded 47.57
+dpotrf_L chol 101                                calls 3444   differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 1.00 one/threaded 1.02
+dtrmm_L_L_T cholbwd n=101                        calls 54000  differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 1.00 one/threaded 5.32
+dtrsm_L_L_T cholbwd n=101                        calls 54000  differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 1.02 one/threaded 3.52
+dtrsm_R_L_N cholbwd n=101                        calls 102000 differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 1.30 one/threaded 1.38
+dsymm_L_L_am1_b1 cholbwd n=101                   calls 48000  differ 18000  norm 7.689e-17 elt 8.818e-16 rounding  unlike_first_threaded 0     cpu/wall 0.99 one/threaded 1.36
+dgemm_NN_am1_b1 cholbwd n=101                    calls 42000  differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 1.01 one/threaded 6.10
+dgemm_TN_am1_b1 cholbwd n=101                    calls 90000  differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 1.00 one/threaded 4.94
+dpotrf_L chol 151                                calls 2001   differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 1.00 one/threaded 1.01
+dtrmm_L_L_T cholbwd n=151                        calls 54000  differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 1.01 one/threaded 9.04
+dtrsm_L_L_T cholbwd n=151                        calls 54000  differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 1.01 one/threaded 2.79
+dtrsm_R_L_N cholbwd n=151                        calls 102000 differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 1.21 one/threaded 0.88
+dsymm_L_L_am1_b1 cholbwd n=151                   calls 48000  differ 18000  norm 2.709e-16 elt 5.186e-16 rounding  unlike_first_threaded 0     cpu/wall 1.07 one/threaded 1.48
+dgemm_NN_am1_b1 cholbwd n=151                    calls 38410  differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 1.02 one/threaded 5.26
+dgemm_TN_am1_b1 cholbwd n=151                    calls 86410  differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 1.00 one/threaded 4.11
+dpotrf_L chol 200                                calls 1369   differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 1.00 one/threaded 0.98
+dtrmm_L_L_T cholbwd n=200                        calls 48000  differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 1.00 one/threaded 8.30
+dtrsm_L_L_T cholbwd n=200                        calls 48000  differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 1.00 one/threaded 9.63
+dtrsm_R_L_N cholbwd n=200                        calls 89763  differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 0.99 one/threaded 3.22
+dsymm_L_L_am1_b1 cholbwd n=200                   calls 37076  differ 25076  norm 1.903e-16 elt 9.213e-16 rounding  unlike_first_threaded 0     cpu/wall 1.13 one/threaded 0.93
+dgemm_NN_am1_b1 cholbwd n=200                    calls 22850  differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 1.02 one/threaded 3.23
+dgemm_TN_am1_b1 cholbwd n=200                    calls 59926  differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 0.99 one/threaded 3.38
+dpotrf_L chol 256                                calls 981    differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 0.99 one/threaded 0.81
+dtrmm_L_L_T cholbwd n=256                        calls 48000  differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 1.00 one/threaded 6.24
+dtrsm_L_L_T cholbwd n=256                        calls 48000  differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 1.00 one/threaded 5.02
+dtrsm_R_L_N cholbwd n=256                        calls 84673  differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 1.00 one/threaded 3.18
+dsymm_L_L_am1_b1 cholbwd n=256                   calls 29407  differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 1.01 one/threaded 57.29
+dgemm_NN_am1_b1 cholbwd n=256                    calls 16374  differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 1.00 one/threaded 2.86
+dgemm_TN_am1_b1 cholbwd n=256                    calls 45781  differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 0.99 one/threaded 3.95
+dpotrf_L chol 512                                calls 385    differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 1.00 one/threaded 0.99
+dtrmm_L_L_T cholbwd n=512                        calls 31112  differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 0.92 one/threaded 2.35
+dtrsm_L_L_T cholbwd n=512                        calls 31112  differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 0.96 one/threaded 2.10
+dtrsm_R_L_N cholbwd n=512                        calls 47545  differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 0.99 one/threaded 1.90
+dsymm_L_L_am1_b1 cholbwd n=512                   calls 12030  differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 0.98 one/threaded 2.45
+dgemm_NN_am1_b1 cholbwd n=512                    calls 6422   differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 0.83 one/threaded 2.00
+dgemm_TN_am1_b1 cholbwd n=512                    calls 18452  differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 0.99 one/threaded 3.73
+dpotrf_L chol 1000                               calls 156    differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 1.00 one/threaded 0.97
+dtrmm_L_L_T cholbwd n=1000                       calls 12600  differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 1.00 one/threaded 1.65
+dtrsm_L_L_T cholbwd n=1000                       calls 12600  differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 1.00 one/threaded 1.26
+dtrsm_R_L_N cholbwd n=1000                       calls 19255  differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 1.00 one/threaded 1.70
+dsymm_L_L_am1_b1 cholbwd n=1000                  calls 4872   differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 1.00 one/threaded 2.48
+dgemm_NN_am1_b1 cholbwd n=1000                   calls 2602   differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 1.00 one/threaded 1.75
+dgemm_TN_am1_b1 cholbwd n=1000                   calls 7474   differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 0.99 one/threaded 2.42
+dpotrf_L chol 1024                               calls 151    differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 1.00 one/threaded 1.11
+dtrmm_L_L_T cholbwd n=1024                       calls 12208  differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 0.82 one/threaded 1.30
+dtrsm_L_L_T cholbwd n=1024                       calls 12208  differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 0.97 one/threaded 1.19
+dtrsm_R_L_N cholbwd n=1024                       calls 18655  differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 1.00 one/threaded 1.69
+dsymm_L_L_am1_b1 cholbwd n=1024                  calls 4719   differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 0.98 one/threaded 1.97
+dgemm_NN_am1_b1 cholbwd n=1024                   calls 2520   differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 0.99 one/threaded 1.43
+dgemm_TN_am1_b1 cholbwd n=1024                   calls 7239   differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 0.80 one/threaded 1.54
+dpotrf_L chol 2048                               calls 59     differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 1.00 one/threaded 1.08
+dtrmm_L_L_T cholbwd n=2048                       calls 24416  differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 1.00 one/threaded 1.55
+dtrsm_L_L_T cholbwd n=2048                       calls 24416  differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 0.98 one/threaded 1.27
+dtrsm_R_L_N cholbwd n=2048                       calls 34985  differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 0.99 one/threaded 2.20
+dsymm_L_L_am1_b1 cholbwd n=2048                  calls 7736   differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 0.99 one/threaded 1.62
+dgemm_NN_am1_b1 cholbwd n=2048                   calls 3172   differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 0.99 one/threaded 1.21
+dgemm_TN_am1_b1 cholbwd n=2048                   calls 10908  differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 0.97 one/threaded 2.21
+dpotrf_L chol 4096                               calls 23     differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 1.00 one/threaded 1.06
+dtrmm_L_L_T cholbwd n=4096                       calls 48832  differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 1.00 one/threaded 2.04
+dtrsm_L_L_T cholbwd n=4096                       calls 48832  differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 1.00 one/threaded 1.48
+dtrsm_R_L_N cholbwd n=4096                       calls 65373  differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 1.00 one/threaded 2.75
+dsymm_L_L_am1_b1 cholbwd n=4096                  calls 12108  differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 1.00 one/threaded 1.45
+dgemm_NN_am1_b1 cholbwd n=4096                   calls 3712   differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 1.00 one/threaded 1.20
+dgemm_TN_am1_b1 cholbwd n=4096                   calls 15820  differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 0.99 one/threaded 2.42
+per routine
+TOTAL dgemm_NN_a1_b0                             calls 23983  differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 0.99 one/threaded 68.64
+TOTAL dgemm_NN_am1_b1                            calls 258062 differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 0.99 one/threaded 20.37
+TOTAL dgemm_NT_a1_b1                             calls 23983  differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 0.98 one/threaded 68.73
+TOTAL dgemm_TN_a1_b1                             calls 23983  differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 0.98 one/threaded 86.38
+TOTAL dgemm_TN_am1_b1                            calls 600010 differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 0.98 one/threaded 20.78
+TOTAL dgemv_N_a1_b0                              calls 86686  differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 0.99 one/threaded 8.20
+TOTAL dgemv_T_a1_b0                              calls 7968   differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 1.30 one/threaded 4.01
+TOTAL dgemv_T_a1_b1                              calls 36219  differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 1.06 one/threaded 7.26
+TOTAL dpotrf_L                                   calls 49305  differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 1.00 one/threaded 73.53
+TOTAL dpotri_L                                   calls 21972  differ 1465   norm 2.939e-17 elt 1.190e-15 rounding  unlike_first_threaded 0     cpu/wall 0.99 one/threaded 99.13
+TOTAL dsymm_L_L_am1_b1                           calls 341948 differ 67076  norm 2.709e-16 elt 9.213e-16 rounding  unlike_first_threaded 0     cpu/wall 1.01 one/threaded 8.58
+TOTAL dtrmm_L_L_T                                calls 489168 differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 0.97 one/threaded 4.16
+TOTAL dtrmv_N                                    calls 39817  differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 0.99 one/threaded 5.82
+TOTAL dtrmv_T                                    calls 39817  differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 0.96 one/threaded 4.61
+TOTAL dtrsm_L_L_T                                calls 489168 differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 0.99 one/threaded 3.25
+TOTAL dtrsm_R_L_N                                calls 858249 differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 1.00 one/threaded 6.92
+TOTAL dtrtri_L                                   calls 19246  differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 2.56 one/threaded 101.34
+exit 0

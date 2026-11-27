@@ -949,13 +949,14 @@ sometimes returns a wrong inverse: 265 of 192,000 calls at n = 151 on macOS
 26.6, and 1 in 18 to 1 in 45 at n = 512. The newer one gave the right
 inverse in all 192,000 calls at n = 151 and in all 100,000 at n = 64 to
 2048 (`tests/test_blas_determinism.cpp`).
-`tools/stress_blas_threads.cpp` (`make stress_blas_threads`) calls every
-routine that an accelerated kernel can reach, about 20,000 times each at n =
-64 to 2048 with threads on, and compares each result with the
-single-threaded one. On macOS 26.6 they gave the same bits, except
-`dsymm` (up to 6e-15 relative at n = 512 to 2048) and `dpotrf` at n = 2048
-(5e-16), so with `parallel_blas` on, results can differ by rounding from
-those with it off, and with the number of chains that run in parallel. The
+`tools/stress_blas_threads.cpp` (`make stress_blas_threads`) makes the calls
+that the kernels make, with the same arguments, at many shapes from the
+thresholds to n = 4096 with threads on (`--kernel-shapes`, `--sweep`), and
+compares each result with the single-threaded one. With threads, `dgemm`,
+`dsymm`, `dpotrf` and `dpotri` gave other bits for some shapes, at
+rounding level ([the thresholds note](../notes/performance/2026-11-26-accelerate-thresholds.md#threads)),
+so with `parallel_blas` on, results can differ by rounding from those with
+it off, and with the number of chains that run in parallel. The
 lowered program carries the option, and the program dump names it. On macOS
 11 to 14, which lack `BLASSetThreading`, the selection pass keeps every op
 on the plain kernels (`kAccelerateWithoutThreadControl` in

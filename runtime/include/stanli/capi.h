@@ -96,10 +96,10 @@ int stanli_has_embedded_stanc(void);
  * threads while the chains that run in parallel leave cores free: twice the
  * number of parallel chains at most the number of performance cores. A
  * single gradient outside a sampler counts as one chain. Results can then
- * differ from those with it off by rounding. In a stress test on macOS 26.6,
- * threaded calls gave the single-threaded bits, except a symmetric product
- * (up to 6e-15 relative, n = 512 to 2048) and the Cholesky factorization at
- * n = 2048 (5e-16). Whether a call uses threads depends on how many chains
+ * differ from those with it off by rounding: in our tests the threaded
+ * matrix products, symmetric products, Cholesky factorization and inverse
+ * from a Cholesky factor did, by up to about 6e-15 times the largest entry
+ * of the result. Whether a call uses threads depends on how many chains
  * run in parallel, so results can also change with that number. 0, the
  * default, runs every such operation on the calling thread alone, with the
  * same result in every run. Accepted everywhere; it does nothing where no
