@@ -15,6 +15,7 @@
 #include <cstring>
 #include <limits>
 #include <map>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <utility>
@@ -544,7 +545,9 @@ void Executor::bind_() {
   std::vector<char> written(graph_.slots.size(), 0);
   bool has_shared_primals = false;
   size_t n_forward = 0;
+  accelerated_ops_ = false;
   for (const auto& op : graph_.ops) {
+    accelerated_ops_ |= op.opcode >= OP_GEMM_BLAS;
     written[op.out] = 1;
     if (op.out2 >= 0) written[op.out2] = 1;
     has_shared_primals |= op.primal_source >= 0;
@@ -944,7 +947,8 @@ void Executor::run_forward_only(EvalState state) {
     ~RestoreState() { slot = previous; }
   } restore{eval_state_, eval_state_};
   eval_state_ = state;
-  const ParallelBlasScope parallel_blas(graph_.parallel_blas);
+  std::optional<ParallelBlasScope> parallel_blas;
+  if (accelerated_ops_) parallel_blas.emplace(graph_.parallel_blas);
   // The profiled path keeps the opcode-keyed loop (attribution needs the
   // opcode anyway, and the timing calls dwarf dispatch cost), but it must
   // invoke the same bound function pointer as the fast path. The registry is
@@ -1068,7 +1072,8 @@ void Executor::reverse(double* grad_out, double seed) {
     ~RestoreState() { state = previous; }
   } restore{eval_state_, eval_state_};
   eval_state_.reduce = reduce_context_;
-  const ParallelBlasScope parallel_blas(graph_.parallel_blas);
+  std::optional<ParallelBlasScope> parallel_blas;
+  if (accelerated_ops_) parallel_blas.emplace(graph_.parallel_blas);
   std::memset(adjoints_.data(), 0, sizeof(double) * adjoints_.size());
   assert(result_adjoint_offset_ >= 0);
   adjoints_[result_adjoint_offset_] = seed;

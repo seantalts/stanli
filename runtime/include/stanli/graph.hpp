@@ -334,6 +334,10 @@ class Executor {
   std::vector<FusedOp> fused_;
   std::vector<uint16_t> ctx_opcodes_;  // parallel to ctx_; profiling only
   bool profile_ = false;
+  // Only the accelerated kernels read the parallel_blas scope, and only the
+  // graph that holds such an op runs them, so the sweeps of any other graph
+  // skip the scope and its thread-local writes.
+  bool accelerated_ops_ = false;
   std::vector<ProfEntry> prof_;  // indexed by opcode; empty until enabled
   int64_t n_grad_evals_ = 0;
   int64_t n_params_ = 0;
