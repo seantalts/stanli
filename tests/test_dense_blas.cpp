@@ -21,12 +21,18 @@
 #include <stanli/data.hpp>
 #include <stanli/dense_blas.hpp>
 #include <stanli/graph.hpp>
+#include <stanli/graph_print.hpp>
 #include <stanli/optable.hpp>
 
 #include <Eigen/Dense>
 
+#ifdef __APPLE__
+#include <dlfcn.h>
+#endif
+
 #include <algorithm>
 #include <cmath>
+#include <limits>
 #include <cstdio>
 #include <string>
 #include <vector>
@@ -51,6 +57,8 @@ uint16_t opcode_after_pass(uint16_t opcode, std::vector<int> idata,
     g.add_op(opcode, {ins[0], ins[1]}, out, idata);
   else
     g.add_op(opcode, {ins[0], ins[1], ins[2]}, out, idata);
+  for (size_t k = 3; k < ins.size(); ++k) g.ops[at].in[k] = ins[k];
+  g.ops[at].n_in = (int)ins.size();
   g.ops[at].variant = variant;
   accelerate_dense_ops(g);
   return g.ops[at].opcode;
@@ -211,6 +219,107 @@ Run run_mnc(uint16_t opcode, const Vec& y, const Vec& mu, const Mat& L,
   return r;
 }
 
+// multi_normal(y | mu, Sigma) for one vector, with the activity in
+// `variant`. Returns the log density and fills the three partials (the
+// backward with out_adj 1), or reports the exception's message.
+struct MnRun {
+  double lp = 0;
+  Vec dy, dmu;
+  Mat dsigma;
+  std::string error;
+  uint64_t calls = 0;
+};
+MnRun run_mn(uint16_t opcode, const Vec& y, const Vec& mu, const Mat& sigma,
+             uint8_t variant) {
+  using namespace stanli;
+  const int64_t n = y.size();
+  const int dims[] = {(int)n, 1, 1, 0};
+  MnRun r;
+  r.dy = Vec::Zero(n);
+  r.dmu = Vec::Zero(n);
+  r.dsigma = Mat::Zero(n, n);
+  std::vector<double> scratch((size_t)(2 * n + n * n));
+  double out = 0;
+  KernelCtx ctx;
+  ctx.n_in = 3;
+  ctx.idata = dims;
+  ctx.n_idata = 4;
+  ctx.variant = variant;
+  ctx.in[0] = {const_cast<double*>(y.data()), n};
+  ctx.in[1] = {const_cast<double*>(mu.data()), n};
+  ctx.in[2] = {const_cast<double*>(sigma.data()), n * n};
+  ctx.in_adj[0] = {(variant & 1) ? r.dy.data() : nullptr, n};
+  ctx.in_adj[1] = {(variant & 2) ? r.dmu.data() : nullptr, n};
+  ctx.in_adj[2] = {(variant & 4) ? r.dsigma.data() : nullptr, n * n};
+  ctx.out = {&out, 1};
+  ctx.out_adj = 1.0;
+  ctx.scratch = scratch.data();
+  const Kernel* k = find_kernel(opcode);
+  if (!registered(k, opcode)) return r;
+  const uint64_t before = blas::call_count();
+  try {
+    k->forward(ctx);
+    k->backward(ctx);
+  } catch (const std::exception& e) {
+    r.error = e.what();
+  }
+  r.calls = blas::call_count() - before;
+  r.lp = out;
+  return r;
+}
+
+// normal_id_glm(y | X, alpha, beta, sigma) with data y and X: the log
+// density and the partials of alpha, beta and sigma, or the error.
+struct GlmRun {
+  double lp = 0;
+  Vec dalpha, dbeta, dsigma;
+  std::string error;
+  uint64_t calls = 0;
+};
+GlmRun run_glm(uint16_t opcode, const Vec& y, const Mat& x, const Vec& alpha,
+               const Vec& beta, const Vec& sigma, uint8_t variant) {
+  using namespace stanli;
+  const int64_t rows = x.rows(), cols = x.cols();
+  const int dims[] = {(int)rows, (int)cols, 0};
+  GlmRun r;
+  r.dalpha = Vec::Zero(alpha.size());
+  r.dbeta = Vec::Zero(cols);
+  r.dsigma = Vec::Zero(sigma.size());
+  std::vector<double> scratch(
+      (size_t)(rows + rows * cols + alpha.size() + cols + sigma.size()));
+  double out = 0;
+  KernelCtx ctx;
+  ctx.n_in = 5;
+  ctx.idata = dims;
+  ctx.n_idata = 3;
+  ctx.variant = variant;
+  ctx.in[0] = {const_cast<double*>(y.data()), rows};
+  ctx.in[1] = {const_cast<double*>(x.data()), rows * cols};
+  ctx.in[2] = {const_cast<double*>(alpha.data()), alpha.size()};
+  ctx.in[3] = {const_cast<double*>(beta.data()), cols};
+  ctx.in[4] = {const_cast<double*>(sigma.data()), sigma.size()};
+  ctx.in_adj[0] = {nullptr, rows};
+  ctx.in_adj[1] = {nullptr, rows * cols};
+  ctx.in_adj[2] = {(variant & 4) ? r.dalpha.data() : nullptr, alpha.size()};
+  ctx.in_adj[3] = {(variant & 8) ? r.dbeta.data() : nullptr, cols};
+  ctx.in_adj[4] = {(variant & 16) ? r.dsigma.data() : nullptr, sigma.size()};
+  ctx.out = {&out, 1};
+  ctx.out_adj = 1.0;
+  ctx.scratch = scratch.data();
+  const Kernel* k = find_kernel(opcode);
+  if (!registered(k, opcode)) return r;
+  const uint64_t before = blas::call_count();
+  try {
+    k->forward(ctx);
+    k->backward(ctx);
+  } catch (const std::exception& e) {
+    r.error = e.what();
+  }
+  r.calls = blas::call_count() - before;
+  r.lp = out;
+  return r;
+}
+
 void check_close(const std::string& what, const Mat& got, const Mat& want,
                  double tolerance) {
   const double e = scaled_error(got.data(), want.data(), got.size());
@@ -268,6 +377,57 @@ void thresholds_select_opcodes() {
             opcode_after_pass(OP_MULTI_NORMAL_CHOL_LPDF, {m, 1, 1, 0},
                               {m, m, int64_t(m) * m}, 1, 0x84),
             OP_MULTI_NORMAL_CHOL_LPDF_BLAS, OP_MULTI_NORMAL_CHOL_LPDF);
+  // multi_normal with a covariance: only one vector with an active
+  // covariance is accelerated.
+#ifdef STANLI_ACCELERATE
+  const int v = (int)t.mn_cov_min_n;
+#else
+  const int v = 64;
+#endif
+  expect_op(
+      "multi_normal below threshold",
+      opcode_after_pass(OP_MULTI_NORMAL_LPDF, {v - 1, 1, 1, 0},
+                        {v - 1, v - 1, int64_t(v - 1) * (v - 1)}, 1, 0x86),
+      OP_MULTI_NORMAL_LPDF, OP_MULTI_NORMAL_LPDF);
+  expect_op("multi_normal at threshold",
+            opcode_after_pass(OP_MULTI_NORMAL_LPDF, {v, 1, 1, 0},
+                              {v, v, int64_t(v) * v}, 1, 0x86),
+            OP_MULTI_NORMAL_LPDF_BLAS, OP_MULTI_NORMAL_LPDF);
+  expect_op("multi_normal with data covariance",
+            opcode_after_pass(OP_MULTI_NORMAL_LPDF, {v, 1, 1, 0},
+                              {v, v, int64_t(v) * v}, 1, 0x82),
+            OP_MULTI_NORMAL_LPDF, OP_MULTI_NORMAL_LPDF);
+  expect_op("multi_normal with an array of vectors",
+            opcode_after_pass(OP_MULTI_NORMAL_LPDF, {v, 3, 3, 3},
+                              {3 * v, 3 * v, int64_t(v) * v}, 1, 0x86),
+            OP_MULTI_NORMAL_LPDF, OP_MULTI_NORMAL_LPDF);
+  // normal_id_glm with data y and X and an active beta, on a design that
+  // reaches the threshold; a thin design, an active X and a row-vector
+  // design keep the plain kernel.
+#ifdef STANLI_ACCELERATE
+  const int gr = (int)t.glm_min_rows, gc = (int)t.glm_min_cols;
+#else
+  const int gr = 4096, gc = 24;
+#endif
+  const auto glm = [&](int rows, int cols, uint8_t variant, int flags) {
+    return opcode_after_pass(OP_NORMAL_ID_GLM_LPDF, {rows, cols, flags},
+                             {rows, int64_t(rows) * cols, 1, cols, 1}, 1,
+                             variant);
+  };
+  expect_op("normal_id_glm at threshold", glm(gr, gc, 0x1c, 0),
+            OP_NORMAL_ID_GLM_LPDF_BLAS, OP_NORMAL_ID_GLM_LPDF);
+  expect_op("normal_id_glm, propto, beta only", glm(gr, gc, 0x88, 0),
+            OP_NORMAL_ID_GLM_LPDF_BLAS, OP_NORMAL_ID_GLM_LPDF);
+  expect_op("normal_id_glm with fewer rows", glm(gr - 1, gc, 0x1c, 0),
+            OP_NORMAL_ID_GLM_LPDF, OP_NORMAL_ID_GLM_LPDF);
+  expect_op("normal_id_glm with fewer columns", glm(gr, gc - 1, 0x1c, 0),
+            OP_NORMAL_ID_GLM_LPDF, OP_NORMAL_ID_GLM_LPDF);
+  expect_op("normal_id_glm with data beta", glm(gr, gc, 0x14, 0),
+            OP_NORMAL_ID_GLM_LPDF, OP_NORMAL_ID_GLM_LPDF);
+  expect_op("normal_id_glm with an active X", glm(gr, gc, 0x1e, 0),
+            OP_NORMAL_ID_GLM_LPDF, OP_NORMAL_ID_GLM_LPDF);
+  expect_op("normal_id_glm with an active y", glm(gr, gc, 0x1d, 0),
+            OP_NORMAL_ID_GLM_LPDF, OP_NORMAL_ID_GLM_LPDF);
   // Every other activity keeps Stan Math's nested tape.
   expect_op("multi_normal_cholesky with active y",
             opcode_after_pass(OP_MULTI_NORMAL_CHOL_LPDF, {m, 1, 1, 0},
@@ -344,6 +504,152 @@ void accelerated_kernels_agree() {
         rel, analytic, numeric);
     expect_true("cholesky adjoint matches finite differences", rel <= 1e-6);
   }
+  // multi_normal with an active covariance: the accelerated kernel against
+  // the plain one, for each activity that keeps the covariance active.
+  for (int64_t n : {t.mn_cov_min_n, int64_t(151)}) {
+    const Mat sigma = spd(n);
+    const Vec y = seed(n, 1, 0.2), mu = seed(n, 1, 1.7) * 0.1;
+    for (uint8_t variant : {uint8_t(0x84), uint8_t(0x86), uint8_t(0x87),
+                            uint8_t(0x04), uint8_t(0x06), uint8_t(0x07)}) {
+      const MnRun plain = run_mn(OP_MULTI_NORMAL_LPDF, y, mu, sigma, variant);
+      const MnRun fast =
+          run_mn(OP_MULTI_NORMAL_LPDF_BLAS, y, mu, sigma, variant);
+      const std::string at = " n=" + std::to_string(n) +
+                             " variant=" + std::to_string(int(variant));
+      expect_true("plain multi_normal succeeds" + at, plain.error.empty());
+      expect_true("accelerated multi_normal succeeds" + at, fast.error.empty());
+      expect_true("accelerated multi_normal calls LAPACK" + at, fast.calls > 0);
+      const double lp_rel =
+          std::abs(fast.lp - plain.lp) / std::max(1.0, std::abs(plain.lp));
+      std::printf("%-44s relative error %.2e\n",
+                  ("multi_normal lp" + at).c_str(), lp_rel);
+      expect_true("multi_normal lp" + at, lp_rel <= 1e-13);
+      check_close("multi_normal adjoint of Sigma" + at, fast.dsigma,
+                  plain.dsigma, 1e-12);
+      check_close("multi_normal adjoint of mu" + at, fast.dmu, plain.dmu,
+                  1e-12);
+      check_close("multi_normal adjoint of y" + at, fast.dy, plain.dy, 1e-12);
+    }
+  }
+  // Rejections: whenever the plain kernel throws, the accelerated one
+  // throws the same message, and a covariance that the Cholesky path cannot
+  // vouch for gets the plain kernel's result exactly.
+  {
+    const int64_t n = t.mn_cov_min_n;
+    const Vec y = seed(n, 1, 0.2), mu = seed(n, 1, 1.7) * 0.1;
+    Vec low = seed(n, 1, 0.9);
+    struct Bad {
+      const char* what;
+      Mat sigma;
+    };
+    std::vector<Bad> bad;
+    Mat asym = spd(n);
+    asym(0, n - 1) += 1e-3;
+    bad.push_back({"asymmetric", asym});
+    Mat indefinite = spd(n);
+    indefinite(n / 2, n / 2) = -1.0;
+    bad.push_back({"indefinite", indefinite});
+    Mat nan = spd(n);
+    nan(1, 1) = std::numeric_limits<double>::quiet_NaN();
+    bad.push_back({"nan", nan});
+    Mat inf = spd(n);
+    inf(2, 3) = inf(3, 2) = std::numeric_limits<double>::infinity();
+    bad.push_back({"infinite", inf});
+    bad.push_back({"singular", (low * low.transpose()).eval()});
+    Mat near = (low * low.transpose()).eval();
+    near.diagonal().array() += 1e-13;
+    bad.push_back({"nearly singular", near});
+    bad.push_back({"zero", Mat::Zero(n, n)});
+    for (const Bad& b : bad) {
+      const MnRun plain = run_mn(OP_MULTI_NORMAL_LPDF, y, mu, b.sigma, 0x86);
+      const MnRun fast =
+          run_mn(OP_MULTI_NORMAL_LPDF_BLAS, y, mu, b.sigma, 0x86);
+      const std::string what = std::string("multi_normal, ") + b.what;
+      std::printf("%-44s plain: %s\n", what.c_str(),
+                  plain.error.empty() ? "accepted" : plain.error.c_str());
+      expect_true(what + ": same error", fast.error == plain.error);
+      if (plain.error.empty()) {
+        expect_true(what + ": same lp bits", same_bits(fast.lp, plain.lp));
+        bool same = true;
+        for (int64_t i = 0; i < n * n; ++i)
+          same =
+              same && same_bits(fast.dsigma.data()[i], plain.dsigma.data()[i]);
+        expect_true(what + ": same adjoint bits", same);
+      }
+    }
+  }
+  // normal_id_glm: the accelerated kernel against the plain one for each
+  // activity with an active beta, scalar and vector alpha and sigma, and the
+  // plain kernel's errors for a non-positive or non-finite scale and
+  // non-finite data.
+  {
+    const int64_t rows = t.glm_min_rows, cols = t.glm_min_cols;
+    const Mat x = seed(rows, cols, 0.3) * 0.5;
+    const Vec beta = seed(cols, 1, 1.1) * 0.2;
+    const Vec y = (x * beta + seed(rows, 1, 2.0) * 0.3).eval();
+    const Vec a1 = Vec::Constant(1, 0.1), av = seed(rows, 1, 0.4) * 0.1;
+    const Vec s1 = Vec::Constant(1, 0.7),
+              sv = (seed(rows, 1, 0.8).array().abs() + 0.5).matrix();
+    for (uint8_t variant : {uint8_t(0x1c), uint8_t(0x9c), uint8_t(0x88),
+                            uint8_t(0x08), uint8_t(0x18), uint8_t(0x8c)})
+      for (int shape = 0; shape < 4; ++shape) {
+        const Vec& alpha = (shape & 1) ? av : a1;
+        const Vec& sigma = (shape & 2) ? sv : s1;
+        const GlmRun plain =
+            run_glm(OP_NORMAL_ID_GLM_LPDF, y, x, alpha, beta, sigma, variant);
+        const GlmRun fast = run_glm(OP_NORMAL_ID_GLM_LPDF_BLAS, y, x, alpha,
+                                    beta, sigma, variant);
+        const std::string at = " variant=" + std::to_string(int(variant)) +
+                               ((shape & 1) ? " alpha vector" : "") +
+                               ((shape & 2) ? " sigma vector" : "");
+        expect_true("plain normal_id_glm succeeds" + at, plain.error.empty());
+        expect_true("accelerated normal_id_glm succeeds" + at,
+                    fast.error.empty());
+        expect_true("accelerated normal_id_glm calls BLAS" + at,
+                    fast.calls > 0);
+        const double lp_rel =
+            std::abs(fast.lp - plain.lp) / std::max(1.0, std::abs(plain.lp));
+        std::printf("%-44s relative error %.2e\n",
+                    ("normal_id_glm lp" + at).c_str(), lp_rel);
+        expect_true("normal_id_glm lp" + at, lp_rel <= 1e-13);
+        check_close("normal_id_glm adjoint of beta" + at, fast.dbeta,
+                    plain.dbeta, 1e-13);
+        check_close("normal_id_glm adjoint of alpha" + at, fast.dalpha,
+                    plain.dalpha, 1e-13);
+        check_close("normal_id_glm adjoint of sigma" + at, fast.dsigma,
+                    plain.dsigma, 1e-13);
+      }
+    const double nan = std::numeric_limits<double>::quiet_NaN(),
+                 inf = std::numeric_limits<double>::infinity();
+    struct Bad {
+      const char* what;
+      Vec y, sigma;
+      Mat x;
+    };
+    std::vector<Bad> bad;
+    bad.push_back({"zero scale", y, Vec::Constant(1, 0.0), x});
+    bad.push_back({"negative scale", y, Vec::Constant(1, -1.0), x});
+    bad.push_back({"infinite scale", y, Vec::Constant(1, inf), x});
+    Vec ynan = y;
+    ynan(3) = nan;
+    bad.push_back({"nan in y", ynan, s1, x});
+    Mat xinf = x;
+    xinf(5, 2) = inf;
+    bad.push_back({"infinite x", y, s1, xinf});
+    Mat xnan = x;
+    xnan(7, 1) = nan;
+    bad.push_back({"nan in x", y, s1, xnan});
+    for (const Bad& b : bad) {
+      const GlmRun plain =
+          run_glm(OP_NORMAL_ID_GLM_LPDF, b.y, b.x, a1, beta, b.sigma, 0x1c);
+      const GlmRun fast = run_glm(OP_NORMAL_ID_GLM_LPDF_BLAS, b.y, b.x, a1,
+                                  beta, b.sigma, 0x1c);
+      const std::string what = std::string("normal_id_glm, ") + b.what;
+      std::printf("%-44s plain: %s\n", what.c_str(),
+                  plain.error.empty() ? "accepted" : plain.error.c_str());
+      expect_true(what + ": same error", fast.error == plain.error);
+    }
+  }
   for (int64_t n : {t.tri_inverse_min_n, int64_t(200)}) {
     const Mat L = spd(n).llt().matrixL();
     const Vec y = seed(n, 1, 0.2), mu = seed(n, 1, 1.7) * 0.1;
@@ -370,14 +676,16 @@ namespace {
 bool accelerated(uint16_t opcode) {
   using namespace stanli;
   return opcode == OP_GEMM_BLAS || opcode == OP_MATVEC_BLAS ||
-         opcode == OP_CHOLESKY_BLAS || opcode == OP_MULTI_NORMAL_CHOL_LPDF_BLAS;
+         opcode == OP_CHOLESKY_BLAS ||
+         opcode == OP_MULTI_NORMAL_CHOL_LPDF_BLAS ||
+         opcode == OP_MULTI_NORMAL_LPDF_BLAS ||
+         opcode == OP_NORMAL_ID_GLM_LPDF_BLAS;
 }
 
 // The accelerated opcodes in the log density and write_array graphs of the
 // dense test model, lowered with N x N factors, an N x N by N x P product
 // and an M x K by K matrix-vector product.
-std::vector<uint16_t> accelerated_ops(const std::string& mir, int n, int p,
-                                      int m, int k) {
+stanli::DataMap dense_model_data(int n, int p, int m, int k) {
   stanli::DataMap d;
   d.set_int("N", n);
   d.set_int("K", k);
@@ -393,7 +701,16 @@ std::vector<uint16_t> accelerated_ops(const std::string& mir, int n, int p,
   d.set_real_array("y", y);
   d.set_real_array("X", big, {n, n});
   d.set_real_array("Z", z, {m, k});
-  const stanli::CompiledModel cm = stanli::compile_model(mir, d);
+  return d;
+}
+
+// The accelerated opcodes in the log density and write_array graphs of the
+// dense test model, lowered with N x N factors, an N x N by N x P product
+// and an M x K by K matrix-vector product.
+std::vector<uint16_t> accelerated_ops(const std::string& mir, int n, int p,
+                                      int m, int k) {
+  const stanli::CompiledModel cm =
+      stanli::compile_model(mir, dense_model_data(n, p, m, k));
   std::vector<uint16_t> found;
   for (const stanli::Op& op : cm.graph.ops)
     if (accelerated(op.opcode)) found.push_back(op.opcode);
@@ -401,6 +718,26 @@ std::vector<uint16_t> accelerated_ops(const std::string& mir, int n, int p,
     for (const stanli::Op& op : cm.write_array->graph.ops)
       if (accelerated(op.opcode)) found.push_back(op.opcode);
   return found;
+}
+
+// parallel_blas is a property of the lowered program: both graphs carry the
+// compile option, and the program dump names it.
+void parallel_blas_flag(const std::string& mir) {
+  using namespace stanli;
+  for (bool on : {false, true}) {
+    CompileOptions options;
+    options.parallel_blas = on;
+    const CompiledModel cm =
+        compile_model(mir, dense_model_data(64, 32, 256, 64), 1, options);
+    const std::string what = on ? "parallel_blas on" : "parallel_blas off";
+    expect_true(what + ": log density graph", cm.graph.parallel_blas == on);
+    expect_true(what + ": write_array graph",
+                !cm.write_array || cm.write_array->graph.parallel_blas == on);
+    std::string dump;
+    print_graph(dump, cm.graph, GraphPrintInfo{});
+    expect_true(what + ": program dump",
+                (dump.find("parallel_blas") != std::string::npos) == on);
+  }
 }
 
 bool contains(const std::vector<uint16_t>& ops, uint16_t opcode) {
@@ -414,6 +751,7 @@ void lowered_programs(const char* mir_path) {
     return;
   }
   const std::string mir = slurp(mir_path);
+  parallel_blas_flag(mir);
   const bool on = std::string(blas_provider()) != "none";
   const std::vector<uint16_t> large = accelerated_ops(mir, 64, 32, 256, 64);
   const std::vector<uint16_t> small = accelerated_ops(mir, 16, 8, 64, 16);
@@ -438,42 +776,94 @@ void lowered_programs(const char* mir_path) {
   expect_true("STANLI_NO_ACCELERATE lowers no accelerated op", off.empty());
 }
 
-// The thread rule: limit a chain's BLAS calls to one thread when parallel
-// chains * 2 exceed the performance cores, and only where BLASSetThreading
-// exists. Without it the plan says the cores are full and applies nothing;
-// the choice of kernels never depends on it (accelerate_dense_ops reads
-// only the op sizes and STANLI_NO_ACCELERATE).
-void thread_plan() {
+// Where BLASSetThreading exists every accelerated call runs on its own
+// thread. Without it the accelerated kernels stay on by policy
+// (kAccelerateWithoutThreadControl); the choice of kernels reads nothing
+// else about the system.
+void thread_policy() {
   using namespace stanli;
+  expect_true("accelerated kernels with thread control",
+              accelerated_kernels_enabled(true));
+  expect_true("no accelerated kernels without thread control",
+              !accelerated_kernels_enabled(false));
+  // Without BLASSetThreading (macOS 11 to 14) the pass selects nothing.
+  for (bool control : {true, false}) {
+    Graph g;
+    const int a = g.add_slot(64 * 64, false), b = g.add_slot(64 * 64, false);
+    const int o = g.add_slot(64 * 64, false);
+    g.add_op(OP_GEMM, {a, b}, o, {64, 64, 64});
+    accelerate_dense_ops(g, control);
+    const bool on = std::string(blas_provider()) != "none";
+    expect_true(std::string("gemm at 64 ") + (control ? "with" : "without") +
+                    " thread control: " + opcode_name(g.ops[0].opcode),
+                g.ops[0].opcode == (on && control ? OP_GEMM_BLAS : OP_GEMM));
+  }
+  // Accelerate's own threads: only for a program with parallel_blas, and
+  // only while the chains that run in parallel leave cores free.
   struct Case {
+    bool flag;
     int chains, cores;
-    bool available, full, limited;
+    bool threads;
   };
   const Case cases[] = {
-      {1, 4, true, false, false},   {2, 4, true, false, false},
-      {3, 4, true, true, true},     {4, 4, true, true, true},
-      {4, 8, true, false, false},   {4, 24, true, false, false},
-      {12, 24, true, false, false}, {13, 24, true, true, true},
-      {4, 4, false, true, false},   {64, 1, false, true, false},
-      {1, 1, true, true, true},
+      {false, 1, 24, false}, {true, 1, 24, true}, {true, 12, 24, true},
+      {true, 13, 24, false}, {true, 1, 1, false}, {true, 2, 4, true},
+      {true, 3, 4, false},   {true, 4, 4, false}, {false, 2, 64, false},
   };
-  for (const Case& c : cases) {
-    const BlasThreadPlan plan =
-        plan_blas_threads(c.chains, c.cores, c.available);
-    const std::string what = std::to_string(c.chains) + " chains on " +
-                             std::to_string(c.cores) + " cores" +
-                             (c.available ? "" : " without BLASSetThreading");
-    expect_true(what + ": cores full", plan.cores_full == c.full);
-    expect_true(what + ": limited", plan.limited == c.limited);
-  }
+  for (const Case& c : cases)
+    expect_true("parallel_blas " + std::to_string(c.flag) + ", " +
+                    std::to_string(c.chains) + " chains on " +
+                    std::to_string(c.cores) + " cores",
+                blas_may_thread(c.flag, c.chains, c.cores) == c.threads);
   expect_true("at least one performance core", performance_cores() >= 1);
+#if defined(STANLI_ACCELERATE) && defined(__APPLE__)
+  // A BlasCallThreads sets the thread's mode for one call and then gives it
+  // back the setting it had, read through the same entry points by name.
+  using Get = unsigned (*)();
+  using Set = int (*)(unsigned);
+  const auto get =
+      reinterpret_cast<Get>(dlsym(RTLD_DEFAULT, "BLASGetThreading"));
+  const auto set =
+      reinterpret_cast<Set>(dlsym(RTLD_DEFAULT, "BLASSetThreading"));
+  expect_true(
+      "BLASSetThreading found exactly when thread control is available",
+      (get != nullptr && set != nullptr) == blas_thread_control_available());
+  if (get && set) {
+    set(0);  // BLAS_THREADING_MULTI_THREADED
+    unsigned inside = 99;
+    {
+      const BlasCallThreads one;
+      inside = get();
+    }
+    expect_true("a call outside a parallel_blas program is single-threaded",
+                inside == 1);
+    expect_true("the multi-threaded setting comes back", get() == 0);
+    set(1);
+    {
+      const ParallelBlasScope program(true);
+      const BlasCallThreads call;
+      inside = get();
+    }
+    expect_true("a parallel_blas call with cores free may thread", inside == 0);
+    expect_true("the single-threaded setting comes back", get() == 1);
+    {
+      const ParallelBlasScope program(true);
+      const ParallelChainsScope chains(1 << 20);
+      const BlasCallThreads call;
+      inside = get();
+    }
+    expect_true("a parallel_blas call with the cores full is single-threaded",
+                inside == 1);
+    set(0);
+  }
+#endif
 }
 
 }  // namespace
 
 int main(int argc, char** argv) {
   thresholds_select_opcodes();
-  thread_plan();
+  thread_policy();
   lowered_programs(argc > 1 ? argv[1] : nullptr);
 #ifdef STANLI_ACCELERATE
   accelerated_kernels_agree();

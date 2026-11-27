@@ -11,7 +11,7 @@ execute_process(COMMAND "${NM}" -u "${LIBRARY}"
 if(NOT result EQUAL 0)
   message(FATAL_ERROR "nm -u ${LIBRARY} failed: ${error}")
 endif()
-set(routines dgemm_ dgemv_ dpotrf_ dtrsm_ dtrmm_ dsymm_ dtrtri_ dtrmv_)
+set(routines dgemm_ dgemv_ dpotrf_ dpotri_ dtrsm_ dtrmm_ dsymm_ dtrtri_ dtrmv_)
 set(imported "")
 foreach(routine IN LISTS routines)
   if(symbols MATCHES "(^|\n)[ \t]*_?${routine}(\n|$)")

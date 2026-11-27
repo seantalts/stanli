@@ -1066,6 +1066,7 @@ void Lowering::run_passes(const std::vector<int>& roots, const PassPlan& plan) {
   // After every pass that matches on opcodes: give the large dense ops the
   // kernels that call Accelerate. A no-op without STANLI_ACCELERATE.
   accelerate_dense_ops(g);
+  g.parallel_blas = compile_options.parallel_blas;
 }
 CompiledModel::WriteArray Lowering::run_write_array(const mir::Program& p) {
   const auto total_time = prep.start();
@@ -1864,6 +1865,9 @@ CompiledModel compile_model(const std::string& mir_text, const DataMap& data,
   };
   if (wa_lowering) {
     CompiledModel::WriteArray w = wa_lowering->finish(lo, prep);
+    // The write_array lowering has its own options; the program property
+    // is the model's.
+    w.graph.parallel_blas = options.parallel_blas;
     for (const std::string& note : wa_lowering->interpreter_fallbacks())
       add_interpreter_fallback(cm, note);
     wa_lowering.reset();

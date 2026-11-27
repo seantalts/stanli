@@ -258,9 +258,10 @@ onmessage = async (e) => {
     const errPtr = M._malloc(errLen);
     // The construction seed CmdStan would use: transformed data draws
     // from it once, at build time, so every chain of this run shares them.
-    const optsPtr = M._malloc(24);
+    // stanli_model_opts: seven 4-byte fields (C ABI 7).
+    const optsPtr = M._malloc(28);
     M._stanli_model_opts_init(optsPtr);
-    const fields = new Uint32Array(M.HEAPF64.buffer, optsPtr, 6);
+    const fields = new Uint32Array(M.HEAPF64.buffer, optsPtr, 7);
     fields[0] = (req.seed ?? 1) >>> 0;
     fields[2] = req.fastMath ? 1 : 0;
     const model = M._stanli_model_new_with_opts(mirPtr, dataPtr, optsPtr,

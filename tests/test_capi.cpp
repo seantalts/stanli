@@ -2752,6 +2752,37 @@ void test_fast_math_options() {
   stanli_string_free(fast);
 }
 
+// parallel_blas is off by default, and a model built with it gives the same
+// gradient as one without when no op of it is large enough for Accelerate.
+void test_parallel_blas_option() {
+  stanli_model_opts defaults;
+  stanli_model_opts_init(&defaults);
+  expect_true("opts default parallel_blas off", defaults.parallel_blas == 0);
+  if (!stanli_has_embedded_stanc()) return;
+  char err[8192]{};
+  const std::string code = slurp("tests/compiler/portable_fast_math.stan");
+  const char* data = "{\"N\":4,\"x\":[1,2,3,4],\"y\":[1.1,1.9,3.2,3.9]}";
+  stanli_model_opts on = defaults;
+  on.parallel_blas = 1;
+  stanli_model* a = stanli_model_new_from_stan_with_opts(
+      code.c_str(), data, &defaults, err, sizeof err);
+  stanli_model* b = stanli_model_new_from_stan_with_opts(code.c_str(), data,
+                                                         &on, err, sizeof err);
+  expect_true(std::string("model with parallel_blas: ") + err, b != nullptr);
+  if (a && b) {
+    const double q[3] = {0.3, 0.7, -0.2};
+    double lp_a = 0, lp_b = 0, g_a[3]{}, g_b[3]{};
+    expect_true("grad default", stanli_grad(a, q, &lp_a, g_a) == 0);
+    expect_true("grad parallel_blas", stanli_grad(b, q, &lp_b, g_b) == 0);
+    expect_true("parallel_blas leaves a small model's lp alone", lp_a == lp_b);
+    for (int i = 0; i < 3; ++i)
+      expect_true("parallel_blas leaves a small model's gradient alone",
+                  g_a[i] == g_b[i]);
+  }
+  stanli_model_free(a);
+  stanli_model_free(b);
+}
+
 // stanli_bridgestan_data builds the payload bs_model_construct reads, from
 // data as a structure: non-finite tokens survive, and a manifest already in
 // the data is replaced rather than duplicated.
@@ -4686,6 +4717,7 @@ int main() {
   test_tuple_array_parameters();
   test_declaration_annotations();
   test_fast_math_options();
+  test_parallel_blas_option();
   test_source_include_paths();
   test_reduce_sum_threads();
   test_transformed_data_seed();

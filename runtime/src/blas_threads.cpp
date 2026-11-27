@@ -3,6 +3,7 @@
 #include <stanli/debug_switch.hpp>
 #include <stanli/dense_blas.hpp>
 
+#include <cstdint>
 #include <cstdlib>
 #include <thread>
 
@@ -28,30 +29,6 @@ const char* blas_provider() {
 #endif
 }
 
-BlasThreadPlan plan_blas_threads(int parallel_chains, int performance_cores,
-                                 bool thread_control_available) {
-  BlasThreadPlan plan;
-  plan.cores_full = int64_t(parallel_chains) * 2 > int64_t(performance_cores);
-  plan.limited = plan.cores_full && thread_control_available;
-  return plan;
-}
-
-int performance_cores() {
-  if (const char* v = debug_env("STANLI_PERFORMANCE_CORES")) {
-    const int n = std::atoi(v);
-    if (n > 0) return n;
-  }
-#ifdef __APPLE__
-  int n = 0;
-  size_t len = sizeof n;
-  if (sysctlbyname("hw.perflevel0.physicalcpu", &n, &len, nullptr, 0) == 0 &&
-      n > 0)
-    return n;
-#endif
-  const unsigned hc = std::thread::hardware_concurrency();
-  return hc > 0 ? static_cast<int>(hc) : 1;
-}
-
 bool blas_thread_control_available() {
 #ifdef STANLI_VECLIB_THREADING
   if (__builtin_available(macOS 15.0, *)) return true;
@@ -59,25 +36,68 @@ bool blas_thread_control_available() {
   return false;
 }
 
-ChainBlasThreads::ChainBlasThreads(int parallel_chains) {
+bool blas_may_thread(bool parallel_blas, int parallel_chains,
+                     int performance_cores) {
+  return parallel_blas &&
+         int64_t(parallel_chains) * 2 <= int64_t(performance_cores);
+}
+
+int performance_cores() {
+  static const int cores = [] {
+    if (const char* v = debug_env("STANLI_PERFORMANCE_CORES")) {
+      const int n = std::atoi(v);
+      if (n > 0) return n;
+    }
+#ifdef __APPLE__
+    int n = 0;
+    size_t len = sizeof n;
+    if (sysctlbyname("hw.perflevel0.physicalcpu", &n, &len, nullptr, 0) == 0 &&
+        n > 0)
+      return n;
+#endif
+    const unsigned hc = std::thread::hardware_concurrency();
+    return hc > 0 ? static_cast<int>(hc) : 1;
+  }();
+  return cores;
+}
+
+namespace {
+thread_local bool t_parallel_blas = false;
+thread_local int t_parallel_chains = 1;
+}  // namespace
+
+ParallelBlasScope::ParallelBlasScope(bool parallel_blas)
+    : previous_(t_parallel_blas) {
+  t_parallel_blas = parallel_blas;
+}
+ParallelBlasScope::~ParallelBlasScope() { t_parallel_blas = previous_; }
+
+ParallelChainsScope::ParallelChainsScope(int chains)
+    : previous_(t_parallel_chains) {
+  t_parallel_chains = chains;
+}
+ParallelChainsScope::~ParallelChainsScope() { t_parallel_chains = previous_; }
+
+BlasCallThreads::BlasCallThreads(Policy policy) {
+  (void)policy;
 #ifdef STANLI_VECLIB_THREADING
-  if (!plan_blas_threads(parallel_chains, performance_cores(),
-                         blas_thread_control_available())
-           .limited)
-    return;
   if (__builtin_available(macOS 15.0, *)) {
+    const BLAS_THREADING want =
+        policy == kByModel && t_parallel_blas &&
+                blas_may_thread(true, t_parallel_chains, performance_cores())
+            ? BLAS_THREADING_MULTI_THREADED
+            : BLAS_THREADING_SINGLE_THREADED;
     saved_ = static_cast<unsigned>(BLASGetThreading());
-    active_ = BLASSetThreading(BLAS_THREADING_SINGLE_THREADED) == 0;
+    if (saved_ != static_cast<unsigned>(want))
+      restore_ = BLASSetThreading(want) == 0;
   }
-#else
-  (void)parallel_chains;
 #endif
 }
 
-ChainBlasThreads::~ChainBlasThreads() {
+BlasCallThreads::~BlasCallThreads() {
 #ifdef STANLI_VECLIB_THREADING
   if (__builtin_available(macOS 15.0, *)) {
-    if (active_) BLASSetThreading(static_cast<BLAS_THREADING>(saved_));
+    if (restore_) BLASSetThreading(static_cast<BLAS_THREADING>(saved_));
   }
 #endif
 }

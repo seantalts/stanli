@@ -6,7 +6,8 @@
 
 extern SEXP stanli_bridge_load(SEXP);
 extern SEXP stanli_bridge_loaded(void);
-extern SEXP stanli_r_model_new(SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP);
+extern SEXP stanli_r_model_new(SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP,
+                               SEXP);
 extern SEXP stanli_r_compiler_messages(SEXP);
 extern SEXP stanli_r_variables(SEXP, SEXP);
 extern SEXP stanli_r_reduce_sum_count(SEXP);
@@ -50,7 +51,7 @@ extern SEXP stanli_r_variational(SEXP, SEXP, SEXP);
 static const R_CallMethodDef CallEntries[] = {
     {"stanli_bridge_load", (DL_FUNC)&stanli_bridge_load, 1},
     {"stanli_bridge_loaded", (DL_FUNC)&stanli_bridge_loaded, 0},
-    {"stanli_r_model_new", (DL_FUNC)&stanli_r_model_new, 8},
+    {"stanli_r_model_new", (DL_FUNC)&stanli_r_model_new, 9},
     {"stanli_r_compiler_messages", (DL_FUNC)&stanli_r_compiler_messages, 1},
     {"stanli_r_variables", (DL_FUNC)&stanli_r_variables, 2},
     {"stanli_r_reduce_sum_count", (DL_FUNC)&stanli_r_reduce_sum_count, 1},

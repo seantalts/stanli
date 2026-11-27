@@ -49,7 +49,7 @@ typedef struct stanli_model stanli_model;
  * from the wrong seed with the wrong step size. A binding must compare
  * this against the value it was compiled against before calling
  * anything, and refuse on a mismatch. */
-#define STANLI_ABI_VERSION 6
+#define STANLI_ABI_VERSION 7
 int stanli_abi_version(void);
 
 /* 1 if this build embeds stanc3, else 0. */
@@ -57,7 +57,8 @@ int stanli_has_embedded_stanc(void);
 
 /* Model construction options. Call stanli_model_opts_init before setting
  * fields: seed 1, one thread per chain, fast_math 0, allow_interpreter 1,
- * execution_report 0, parallel_write_array STANLI_PARALLEL_WA_AUTO.
+ * execution_report 0, parallel_write_array STANLI_PARALLEL_WA_AUTO,
+ * parallel_blas 0.
  *
  * seed is the model-construction seed: RNG calls in transformed data draw from
  * create_rng(seed, 0) once, when the model is built, exactly as CmdStan's
@@ -88,7 +89,21 @@ int stanli_has_embedded_stanc(void);
  * built: AUTO on a second thread when the build has threads and the model has
  * enough to lower on both sides, OFF on the calling thread after log_prob,
  * FORCE on a second thread whenever the build has threads. Results are the
- * same either way. */
+ * same either way.
+ *
+ * parallel_blas 1 lets this model's accelerated dense operations (in a macOS
+ * build with STANLI_ACCELERATE, on macOS 15 or later) use Accelerate's own
+ * threads while the chains that run in parallel leave cores free: twice the
+ * number of parallel chains at most the number of performance cores. A
+ * single gradient outside a sampler counts as one chain. Results can then
+ * differ from those with it off by rounding. In a stress test on macOS 26.6,
+ * threaded calls gave the single-threaded bits, except a symmetric product
+ * (up to 6e-15 relative, n = 512 to 2048) and the Cholesky factorization at
+ * n = 2048 (5e-16). Whether a call uses threads depends on how many chains
+ * run in parallel, so results can also change with that number. 0, the
+ * default, runs every such operation on the calling thread alone, with the
+ * same result in every run. Accepted everywhere; it does nothing where no
+ * operation is accelerated. */
 typedef enum {
   STANLI_PARALLEL_WA_AUTO = 0,
   STANLI_PARALLEL_WA_OFF = 1,
@@ -101,6 +116,7 @@ typedef struct {
   int allow_interpreter;
   int execution_report;
   int parallel_write_array; /* a stanli_parallel_wa */
+  int parallel_blas;
 } stanli_model_opts;
 void stanli_model_opts_init(stanli_model_opts* o);
 

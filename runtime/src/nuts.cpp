@@ -515,8 +515,6 @@ std::vector<ChainResult> run_nuts_chains(
   if (!thread_safe_build()) threads = 1;
 
   if (threads <= 1) {
-    // One chain at a time: Accelerate may thread while cores are free.
-    const ChainBlasThreads blas_on_this_thread(1);
     std::exception_ptr progress_error;
     for (size_t c = 0; c < n_chains; ++c) {
       ProgressObserver one_progress;
@@ -588,7 +586,7 @@ std::vector<ChainResult> run_nuts_chains(
       // first nested_rev_autodiff on a worker dereferences null inside
       // start_nested(), which is a segfault, not a wrong number.
       stan::math::ChainableStack ad_tape_for_this_thread;
-      const ChainBlasThreads blas_on_this_thread(threads);
+      const ParallelChainsScope parallel_chains(threads);
       for (size_t c = next++; c < n_chains; c = next++) {
         ProgressObserver one_progress;
         if (progress)

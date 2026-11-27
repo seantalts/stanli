@@ -285,6 +285,17 @@ read_utf8_file <- function(path) {
 #' @param allow_interpreter `FALSE` makes it an error, naming the parts, when
 #'   part of the model has no compiled path and would run through the much
 #'   slower MIR interpreter. Defaults to `TRUE`.
+#' @param parallel_blas `TRUE` lets this model's large dense operations, which
+#'   the macOS runtime on Apple silicon runs through Apple's Accelerate on
+#'   macOS 15 or later, use Accelerate's own threads while the chains that
+#'   run in parallel leave cores free. With it on, results can differ from
+#'   those with it off by rounding. In a stress test on macOS 26.6, threaded
+#'   calls gave the single-threaded bits, except a symmetric product (up to
+#'   6e-15 relative, n = 512 to 2048) and the Cholesky factorization at n =
+#'   2048 (5e-16). Whether a call uses threads depends on how many chains
+#'   run in parallel, so results can also change with that number. Defaults
+#'   to `FALSE`, which runs each such operation on one thread with the same
+#'   result in every run. Elsewhere it does nothing.
 #' @return An object of class `stanli_model` whose `columns` name every
 #'   output the way the posterior package reads them, `theta[1,2]` for an
 #'   indexed value. Warns, naming the part and the
@@ -295,13 +306,17 @@ read_utf8_file <- function(path) {
 #' @export
 stanli_model <- function(file = NULL, code = NULL, data = NULL, mir = NULL,
                          seed = 1, threads_per_chain = 1, include_paths = NULL,
-                         fast_math = FALSE, allow_interpreter = TRUE) {
+                         fast_math = FALSE, allow_interpreter = TRUE,
+                         parallel_blas = FALSE) {
   cstan_integer(threads_per_chain, "threads_per_chain")
   if (!is.logical(fast_math) || length(fast_math) != 1L || is.na(fast_math))
     stop("fast_math must be TRUE or FALSE", call. = FALSE)
   if (!is.logical(allow_interpreter) || length(allow_interpreter) != 1L ||
       is.na(allow_interpreter))
     stop("allow_interpreter must be TRUE or FALSE", call. = FALSE)
+  if (!is.logical(parallel_blas) || length(parallel_blas) != 1L ||
+      is.na(parallel_blas))
+    stop("parallel_blas must be TRUE or FALSE", call. = FALSE)
   load_runtime()
   source_file <- NULL
   if (is.null(mir)) {
@@ -340,7 +355,8 @@ stanli_model <- function(file = NULL, code = NULL, data = NULL, mir = NULL,
       tools::file_path_sans_ext(basename(file)),
     model_code = if (is.null(code)) character(0) else code,
     threads_per_chain = threads_per_chain, fast_math = fast_math,
-    allow_interpreter = allow_interpreter, file = source_file))
+    allow_interpreter = allow_interpreter, file = source_file,
+    parallel_blas = parallel_blas))
   warn_compiler_messages(.Call("stanli_r_compiler_messages", model$ptr))
   note <- .Call("stanli_r_warnings", model$ptr)
   if (nzchar(note)) warning(note, call. = FALSE)
@@ -393,10 +409,10 @@ build_model <- function(code, data_json, is_mir, seed,
                         model_name = "stanli_model", model_code = character(0),
                         threads_per_chain = 1, fast_math = FALSE,
                         allow_interpreter = TRUE, file = NULL,
-                        whitening = NULL) {
+                        whitening = NULL, parallel_blas = FALSE) {
   ptr <- .Call("stanli_r_model_new", code, data_json, is_mir,
                as.numeric(seed), as.integer(threads_per_chain), fast_math,
-               allow_interpreter, file)
+               allow_interpreter, file, parallel_blas)
   if (!is.null(whitening)) ptr <- apply_whitening(ptr, whitening)
   variables <- runtime_variables(ptr, parameters = FALSE)
   structure(list(ptr = ptr,
@@ -409,6 +425,7 @@ build_model <- function(code, data_json, is_mir, seed,
                                is_mir = is_mir),
                  seed = seed, threads_per_chain = threads_per_chain,
                  fast_math = fast_math, allow_interpreter = allow_interpreter,
+                 parallel_blas = parallel_blas,
                  reduce_sum_count = .Call("stanli_r_reduce_sum_count", ptr),
                  reduce_sum_fallbacks =
                    .Call("stanli_r_reduce_sum_fallbacks", ptr),
@@ -444,7 +461,8 @@ with_run_seed <- function(model, seed, threads_per_chain = model$threads_per_cha
   build_model(model$source$code, model$source$data_json,
               model$source$is_mir, seed, model$model_name, model$model_code,
               threads_per_chain, model$fast_math,
-              !isFALSE(model$allow_interpreter), whitening = model$whitening)
+              !isFALSE(model$allow_interpreter), whitening = model$whitening,
+              parallel_blas = isTRUE(model$parallel_blas))
 }
 
 # The declared variables behind a model's columns, from the runtime: a named
