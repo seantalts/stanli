@@ -13,9 +13,21 @@
 // normwise, or WRONG), and how many threaded calls differed from the first
 // threaded one.
 //
-// Built from the same source with STRESS_NEW_LAPACK, it calls the routines of
-// Accelerate's newer LAPACK interface (ACCELERATE_NEW_LAPACK) instead of the
-// legacy Fortran symbols that runtime/src/dense_blas.cpp binds.
+// By default it binds each routine the way runtime/src/dense_blas.cpp does:
+// dpotri from Accelerate's newer LAPACK interface (ACCELERATE_NEW_LAPACK),
+// the others by their legacy Fortran symbols. Built from the same source
+// with STRESS_NEW_LAPACK, it calls every routine from the newer interface.
+// Either way dpotri_legacy_L and dlauum_legacy_L call the legacy dpotri_ and
+// dlauum_ for comparison: with threads, these sometimes return a wrong
+// result on macOS 26.6.
+extern "C" {
+void dpotri_legacy(const char*, const int*, double*, const int*,
+                   int*) __asm("_dpotri_");
+void dlauum_legacy(const char*, const int*, double*, const int*,
+                   int*) __asm("_dlauum_");
+void dlauum_new(const char*, const int*, double*, const int*,
+                int*) __asm("_dlauum$NEWLAPACK");
+}
 #ifdef STRESS_NEW_LAPACK
 #define ACCELERATE_NEW_LAPACK
 #include <Accelerate/Accelerate.h>
@@ -29,9 +41,9 @@ void dgemv_(const char*, const int*, const int*, const double*, const double*,
             const int*, const double*, const int*, const double*, double*,
             const int*);
 void dpotrf_(const char*, const int*, double*, const int*, int*);
-void dpotri_(const char*, const int*, double*, const int*, int*);
+void dpotri_(const char*, const int*, double*, const int*,
+             int*) __asm("_dpotri$NEWLAPACK");
 void dtrtri_(const char*, const char*, const int*, double*, const int*, int*);
-void dlauum_(const char*, const int*, double*, const int*, int*);
 void dtrsm_(const char*, const char*, const char*, const char*, const int*,
             const int*, const double*, const double*, const int*, double*,
             const int*);
@@ -160,15 +172,27 @@ std::vector<Routine> routines() {
          dpotri_("L", &in.n, a.data(), &in.n, &info);
          return a;
        }},
-#ifndef STRESS_NEW_LAPACK
       {"dlauum_L",
        [=](const Inputs& in) {
          Vec a = in.lower_inverse;
          int info = 0;
-         dlauum_("L", &in.n, a.data(), &in.n, &info);
+         dlauum_new("L", &in.n, a.data(), &in.n, &info);
          return a;
        }},
-#endif
+      {"dpotri_legacy_L",
+       [=](const Inputs& in) {
+         Vec a = in.lower;
+         int info = 0;
+         dpotri_legacy("L", &in.n, a.data(), &in.n, &info);
+         return a;
+       }},
+      {"dlauum_legacy_L",
+       [=](const Inputs& in) {
+         Vec a = in.lower_inverse;
+         int info = 0;
+         dlauum_legacy("L", &in.n, a.data(), &in.n, &info);
+         return a;
+       }},
       {"dtrsm_right_N",
        [=](const Inputs& in) {
          Vec b = in.m1;
