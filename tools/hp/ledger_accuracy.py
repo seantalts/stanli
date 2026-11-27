@@ -289,6 +289,16 @@ def cmdstan_value(name, rv, cw):
     return cw.get(name[3:]) if name.startswith("wa ") else rv[0 if name == "lp" else int(name[5:-1])]
 
 
+# Models that get no true value, each with the reason. Their entries keep
+# the limit on the distance from CmdStan.
+NO_TRUE_VALUE = {
+    m: "the gradient goes through the inverse of a 151 x 151 covariance, and "
+       "its distance from the true value changes with the machine: one value "
+       "measured at 8 scaled ULP on one Mac was 15 on Linux x86-64, and another "
+       "measured at 12 was 16 on a second Mac and 28 on Linux aarch64"
+    for m in ("ch14_m14_10", "ch14_m14_11")}
+
+
 def truth_entry(model, label, entries, h, ref, got):
     """(true-value entry, None) for one ledger entry, or (None, why).
 
@@ -296,6 +306,8 @@ def truth_entry(model, label, entries, h, ref, got):
     CmdStan) gets no true value at that point, and the CmdStan gate keeps
     it there.
     """
+    if model in NO_TRUE_VALUE:
+        return None, NO_TRUE_VALUE[model]
     if h is None:
         return None, "no 80-digit run"
     if h.get("error"):

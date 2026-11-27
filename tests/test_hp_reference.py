@@ -158,6 +158,14 @@ class LedgerTrueValues(unittest.TestCase):
         entries = {label: {"bound": 30, "closer": "stanli", "reason": reason}}
         return self.la.truth_entry("m", label, entries, h or self.h, self.ref, self.got)
 
+    def test_a_model_on_the_exclusion_list_gets_no_true_value(self):
+        entries = {"grad[2]": {"bound": 30, "closer": "stanli",
+                               "reason": "at point 0: stanli 29, CmdStan 0 scaled ULP"}}
+        model = sorted(self.la.NO_TRUE_VALUE)[0]
+        entry, why = self.la.truth_entry(model, "grad[2]", entries, self.h, self.ref, self.got)
+        self.assertIsNone(entry)
+        self.assertEqual(why, self.la.NO_TRUE_VALUE[model])
+
     def test_reasons_state_their_distances_in_four_phrasings(self):
         stated = self.la.stated
         self.assertEqual(stated("grad[10]", "at point 1: stanli 1, CmdStan 15 scaled ULP"),
