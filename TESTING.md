@@ -59,8 +59,8 @@ within the entry's own bound if that is larger.**
   entry also needs a full finite-difference gradient from the 80-digit
   evaluation at every point that CmdStan accepts. The distances that the
   entry's reason gives must agree with those that the tool measures again.
-- <!--gen:testing_truth_entries-->111<!--/gen--> entries of <!--gen:testing_truth_models-->66<!--/gen--> models store true
-  values. The bounds of <!--gen:testing_truth_over-->22<!--/gen--> of them are over 10.
+- <!--gen:testing_truth_entries-->107<!--/gen--> entries of <!--gen:testing_truth_models-->64<!--/gen--> models store true
+  values. The bounds of <!--gen:testing_truth_over-->20<!--/gen--> of them are over 10.
 - `tools/hp/ledger_accuracy.py --write-true-values` writes them
   ([`tools/hp`](tools/hp/README.md#the-ulp-ledger)).
 
@@ -149,7 +149,7 @@ CmdStan. The other <!--gen:testing_models_over-->89<!--/gen--> models have <!--g
 ledger entries. stanli is at least as close to the true value as CmdStan in <!--gen:testing_entries_stanli-->151<!--/gen-->
 of those entries. CmdStan is closer in <!--gen:testing_entries_cmdstan-->6<!--/gen-->. We
 cannot tell for the other <!--gen:testing_entries_unknown-->40<!--/gen-->. Of the entries where
-stanli is closer, <!--gen:testing_truth_entries-->111<!--/gen--> store true values, and the run
+stanli is closer, <!--gen:testing_truth_entries-->107<!--/gen--> store true values, and the run
 checks those values against the [true values](#true-values).
 
 <!--gen:testing_collections-->
@@ -539,8 +539,8 @@ table and those files disagree.
 | `ch13_m13_7` | rethinking | 2 | 2 | 5.07 | 5.07 | 0.25 | 0.25 | <0.01 | <0.01 | 10 |  |
 | `ch13_m13_7nc` | rethinking | 2 | 3 | 0.52 | 0.52 | 0.35 | 0.35 | 0.10 | 0.10 | 10 |  |
 | `ch14_m14_1` | rethinking | 46 | 49 | 0.50 | 0.50 | 0.04 | 0.04 | 0.02 | 0.02 | 10 |  |
-| `ch14_m14_10` | rethinking | 4 | 4 | 3.57 | 3.57 | 5.96 | 4.46 | 0.07 | 0.07 | gradient 11, gradient 12 from the true value |  |
-| `ch14_m14_11` | rethinking | 5 | 5 | 6.71 | 6.71 | 6.32 | 6.41 | 0.10 | 0.10 | gradient 14 from the true value |  |
+| `ch14_m14_10` | rethinking | 4 | 4 | 3.57 | 3.57 | 5.96 | 4.46 | 0.07 | 0.07 | gradient 24 |  |
+| `ch14_m14_11` | rethinking | 5 | 5 | 6.71 | 6.71 | 6.32 | 6.41 | 0.10 | 0.10 | gradient 32 |  |
 | `ch14_m14_2` | rethinking | 76 | 96 | 14.0 | 13.3 | 0.15 | 0.11 | 0.03 | 0.03 | 10 |  |
 | `ch14_m14_3` | rethinking | 76 | 1188 | 8.16 | 7.82 | 0.16 | 0.12 | 0.24 | 0.24 | 10 |  |
 | `ch14_m14_4` | rethinking | 3 | 3 | 1.06 | 1.06 | 1.45 | 1.00 | 0.05 | 0.05 | 10 |  |
