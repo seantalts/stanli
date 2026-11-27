@@ -25,7 +25,8 @@ void dtrtri_(const char* uplo, const char* diag, const int* n, double* a,
 // dpotri from Accelerate's newer LAPACK interface (ACCELERATE_NEW_LAPACK),
 // by its symbol name, with 32-bit integers. With Accelerate's own threads,
 // the legacy dpotri_ (through dlauum) sometimes returns a wrong inverse; this
-// one gave the right inverse in every call that we tested. The symbol exists
+// one gave the right inverse in every call that we tested, though with
+// threads not always the single-threaded bits. The symbol exists
 // from macOS 13.3, so it is a weak import and the library still loads on
 // macOS 11. Only accelerated ops call it, and accelerate_dense_ops gives ops
 // those opcodes only where BLASSetThreading exists (macOS 15 and later).

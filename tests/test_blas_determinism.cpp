@@ -9,9 +9,10 @@
 //
 // Run with --child to print one gradient's hash.
 //
-// With --parallel-blas, the same model at N = 512 with the parallel_blas
-// option on, so that Accelerate may use its own threads, must give the
-// bits of the option off in every one of many gradients in one process.
+// With --parallel-blas, the same model at N = 151, 512 and 1100 with the
+// parallel_blas option on, so that Accelerate may use its own threads in
+// dpotrf, dpotri and dgemv, must agree with the option off to rounding level
+// in every one of 400 gradients in one process (kParallelBlasTolerance).
 #include <stanli/capi.h>
 
 #include <algorithm>
@@ -105,38 +106,76 @@ stanli_model* model(int n, bool parallel_blas) {
   return m;
 }
 
-std::string gradient(stanli_model* m) {
-  const double q[3] = {0.1, 0.2, 0.3};
+// The largest relative difference that a gradient with parallel_blas on may
+// have from the gradient with it off: the log density against its own
+// magnitude and the gradient against its largest entry. Threads change the
+// bits of dpotrf and of the newer dpotri for some sizes, so the gradients
+// need not be equal. Measured over 2000 gradients of this model per size:
+//   M3 Ultra, macOS 26.6.2: equal at N = 151 and 512, at most 2.9e-13 at
+//     1100 and 9.6e-13 at 2048;
+//   M1 CI runner, macOS 26.7.2: at most 1.2e-15 at N = 151, equal at 512
+//     and 1100.
+// The bound is about 100 times the largest of these. With the legacy dpotri_
+// in its place on the M3 Ultra, 68 of 2000 gradients at N = 512 were
+// more than 1e-12 off, the worst by 1.3e-4 and the closest by 2.5e-11, and
+// in three runs of this test 19 to 26 of the 400 gradients at N = 512 were
+// beyond the bound, so the test failed every time.
+constexpr double kParallelBlasTolerance = 1e-10;
+
+struct Gradient {
   double lp = 0, g[3] = {};
-  if (stanli_grad(m, q, &lp, g) != 0) return "gradient failed";
-  char buf[160];
-  std::snprintf(buf, sizeof buf, "%.17g %.17g %.17g %.17g", lp, g[0], g[1],
-                g[2]);
-  return buf;
+  bool ok = false;
+};
+
+Gradient gradient_values(stanli_model* m) {
+  const double q[3] = {0.1, 0.2, 0.3};
+  Gradient r;
+  r.ok = stanli_grad(m, q, &r.lp, r.g) == 0;
+  return r;
+}
+
+// The relative distance of a gradient from the one-thread gradient: the log
+// density against its own magnitude, and the gradient against its largest
+// entry.
+double distance(const Gradient& got, const Gradient& want) {
+  double largest = 0, worst = 0;
+  for (int k = 0; k < 3; ++k) {
+    largest = std::max(largest, std::fabs(want.g[k]));
+    worst = std::max(worst, std::fabs(got.g[k] - want.g[k]));
+  }
+  const double lp =
+      std::fabs(got.lp - want.lp) / std::max(std::fabs(want.lp), 1.0);
+  const double g = largest > 0 ? worst / largest : worst;
+  return std::isnan(lp) || std::isnan(g) ? INFINITY : std::max(lp, g);
 }
 
 int parallel_blas_repeats() {
-  const int n = 512, repeats = 400;
-  stanli_model* off = model(n, false);
-  stanli_model* on = model(n, true);
-  if (off == nullptr || on == nullptr) return 1;
-  const std::string want = gradient(off);
-  int differ = 0;
-  std::string first_bad;
-  for (int k = 0; k < repeats; ++k) {
-    const std::string got = gradient(on);
-    if (got != want) {
-      if (differ++ == 0) first_bad = got;
+  const int repeats = 400;
+  bool ok = true;
+  for (int n : {151, 512, 1100}) {
+    stanli_model* off = model(n, false);
+    stanli_model* on = model(n, true);
+    if (off == nullptr || on == nullptr) return 1;
+    const Gradient want = gradient_values(off);
+    int differ = 0, over = 0;
+    double worst = 0;
+    for (int k = 0; k < repeats; ++k) {
+      const Gradient got = gradient_values(on);
+      const double d = got.ok ? distance(got, want) : INFINITY;
+      differ += d != 0;
+      over += !(d <= kParallelBlasTolerance);
+      worst = std::max(worst, d);
     }
+    stanli_model_free(off);
+    stanli_model_free(on);
+    std::printf(
+        "N = %d: %d of %d gradients with parallel_blas on differ from it "
+        "off, %d beyond %.0e, largest relative difference %.3e\n",
+        n, differ, repeats, over, kParallelBlasTolerance, worst);
+    ok = ok && want.ok && over == 0;
   }
-  stanli_model_free(off);
-  stanli_model_free(on);
-  std::printf("parallel_blas off: %s\n", want.c_str());
-  std::printf("%d of %d gradients with parallel_blas on differ\n", differ,
-              repeats);
-  if (differ) std::printf("  first: %s\n", first_bad.c_str());
-  const bool ok = differ == 0 && want.find("failed") == std::string::npos;
-  std::printf(ok ? "ok\n" : "FAIL parallel_blas changes the gradient\n");
+  std::printf(ok ? "ok\n"
+                 : "FAIL parallel_blas moves the gradient beyond rounding\n");
   return ok ? 0 : 1;
 }
 
