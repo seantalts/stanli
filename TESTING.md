@@ -59,8 +59,8 @@ within the entry's own bound if that is larger.**
   entry also needs a full finite-difference gradient from the 80-digit
   evaluation at every point that CmdStan accepts. The distances that the
   entry's reason gives must agree with those that the tool measures again.
-- <!--gen:testing_truth_entries-->111<!--/gen--> entries of <!--gen:testing_truth_models-->66<!--/gen--> models store true
-  values. The bounds of <!--gen:testing_truth_over-->22<!--/gen--> of them are over 10.
+- <!--gen:testing_truth_entries-->107<!--/gen--> entries of <!--gen:testing_truth_models-->64<!--/gen--> models store true
+  values. The bounds of <!--gen:testing_truth_over-->20<!--/gen--> of them are over 10.
 - `tools/hp/ledger_accuracy.py --write-true-values` writes them
   ([`tools/hp`](tools/hp/README.md#the-ulp-ledger)).
 
@@ -149,7 +149,7 @@ CmdStan. The other <!--gen:testing_models_over-->87<!--/gen--> models have <!--g
 ledger entries. stanli is at least as close to the true value as CmdStan in <!--gen:testing_entries_stanli-->146<!--/gen-->
 of those entries. CmdStan is closer in <!--gen:testing_entries_cmdstan-->6<!--/gen-->. We
 cannot tell for the other <!--gen:testing_entries_unknown-->40<!--/gen-->. Of the entries where
-stanli is closer, <!--gen:testing_truth_entries-->111<!--/gen--> store true values, and the run
+stanli is closer, <!--gen:testing_truth_entries-->107<!--/gen--> store true values, and the run
 checks those values against the [true values](#true-values).
 
 <!--gen:testing_collections-->
