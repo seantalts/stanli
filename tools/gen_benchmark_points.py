@@ -45,7 +45,8 @@ MAX_VALUE_DOUBLES = 1 << 26
 class _ModelOpts(ctypes.Structure):
     _fields_ = [("seed", ctypes.c_uint32), ("threads_per_chain", ctypes.c_int),
                 ("fast_math", ctypes.c_int), ("allow_interpreter", ctypes.c_int),
-                ("execution_report", ctypes.c_int), ("parallel_write_array", ctypes.c_int)]
+                ("execution_report", ctypes.c_int), ("parallel_write_array", ctypes.c_int),
+                ("parallel_blas", ctypes.c_int)]
 
 
 class _SampleOpts(ctypes.Structure):

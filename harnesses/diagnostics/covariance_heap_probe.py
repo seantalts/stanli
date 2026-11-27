@@ -29,7 +29,8 @@ class Stats(c.Structure):
 class Options(c.Structure):
     _fields_ = [("seed", c.c_uint32), ("threads", c.c_int),
                 ("fast_math", c.c_int), ("allow_interpreter", c.c_int),
-                ("execution_report", c.c_int), ("parallel_write_array", c.c_int)]
+                ("execution_report", c.c_int), ("parallel_write_array", c.c_int),
+                ("parallel_blas", c.c_int)]
 
 
 def worker(args):
