@@ -145,9 +145,9 @@ and <!--gen:testing_values-->1,504,551<!--/gen--> values. CmdStan rejects <!--ge
 of the points.
 
 In <!--gen:testing_models_within-->326<!--/gen--> models, every value is within 10 ULP of
-CmdStan. The other <!--gen:testing_models_over-->89<!--/gen--> models have <!--gen:testing_entries-->197<!--/gen-->
-ledger entries. stanli is at least as close to the true value as CmdStan in <!--gen:testing_entries_stanli-->150<!--/gen-->
-of those entries. CmdStan is closer in <!--gen:testing_entries_cmdstan-->7<!--/gen-->. We
+CmdStan. The other <!--gen:testing_models_over-->89<!--/gen--> models have <!--gen:testing_entries-->199<!--/gen-->
+ledger entries. stanli is at least as close to the true value as CmdStan in <!--gen:testing_entries_stanli-->153<!--/gen-->
+of those entries. CmdStan is closer in <!--gen:testing_entries_cmdstan-->6<!--/gen-->. We
 cannot tell for the other <!--gen:testing_entries_unknown-->40<!--/gen-->. Of the entries where
 stanli is closer, <!--gen:testing_truth_entries-->107<!--/gen--> store true values, and the run
 checks those values against the [true values](#true-values).
@@ -539,8 +539,8 @@ table and those files disagree.
 | `ch13_m13_7` | rethinking | 2 | 2 | 5.07 | 5.07 | 0.25 | 0.25 | <0.01 | <0.01 | 10 |  |
 | `ch13_m13_7nc` | rethinking | 2 | 3 | 0.52 | 0.52 | 0.35 | 0.35 | 0.10 | 0.10 | 10 |  |
 | `ch14_m14_1` | rethinking | 46 | 49 | 0.50 | 0.50 | 0.04 | 0.04 | 0.02 | 0.02 | 10 |  |
-| `ch14_m14_10` | rethinking | 4 | 4 | 3.57 | 3.57 | 5.96 | 4.46 | 0.07 | 0.07 | gradient 28 |  |
-| `ch14_m14_11` | rethinking | 5 | 5 | 6.71 | 6.71 | 6.32 | 6.41 | 0.10 | 0.10 | gradient 32 |  |
+| `ch14_m14_10` | rethinking | 4 | 4 | 3.57 | 3.57 | 5.96 | 4.46 | 0.07 | 0.07 | gradient 21 |  |
+| `ch14_m14_11` | rethinking | 5 | 5 | 6.71 | 6.71 | 6.32 | 6.41 | 0.10 | 0.10 | gradient 27 |  |
 | `ch14_m14_2` | rethinking | 76 | 96 | 14.0 | 13.3 | 0.15 | 0.11 | 0.03 | 0.03 | 10 |  |
 | `ch14_m14_3` | rethinking | 76 | 1188 | 8.16 | 7.82 | 0.16 | 0.12 | 0.24 | 0.24 | 10 |  |
 | `ch14_m14_4` | rethinking | 3 | 3 | 1.06 | 1.06 | 1.45 | 1.00 | 0.05 | 0.05 | 10 |  |
