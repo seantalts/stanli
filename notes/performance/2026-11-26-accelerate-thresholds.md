@@ -203,3 +203,21 @@ accelerated kernel of each size run back to back):
   at 4096 x 24 and above; 2.1x at 10000 x 10. The rule is rows >= 4096 and
   columns >= 16. In the corpus only `diamonds` (5000 x 24) reaches it, and
   its gradient is 2.53x faster in-model (six pairs, load average 5.0 to 5.2).
+
+## multi_normal with the newer dpotri (2026-11-27)
+
+The multi_normal kernel now calls `dpotri$NEWLAPACK` from Accelerate's newer
+LAPACK interface. On one thread that routine is 1.05x to 1.1x slower than
+the legacy `dpotri_` at n = 32 to 64, and faster from n = 128 (1.3x at 128,
+1.8x at 512). `bench_dense_blas`, Release build, three runs, load average
+3.5 to 5.6, plain / accelerated for the whole kernel, forward plus backward:
+
+| n | 16 | 24 | 32 | 36 | 40 | 48 | 56 | 64 | 80 | 96 | 128 |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| lowest | 0.88x | 1.07x | 1.18x | 1.09x | 1.18x | 1.30x | 1.37x | 1.36x | 1.52x | 2.01x | 2.76x |
+| highest | 0.90x | 1.09x | 1.22x | 1.23x | 1.18x | 1.32x | 1.50x | 1.49x | 1.66x | 2.04x | 2.81x |
+
+The accelerated kernel is still faster at every size from 24, so the rule
+stays n >= 32. In the corpus only `ch14_m14_9`, `_10` and `_11` (n = 151)
+reach it, so no model moves across it.
+
