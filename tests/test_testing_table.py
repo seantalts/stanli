@@ -42,14 +42,33 @@ class CorpusRowsTest(unittest.TestCase):
         self.assertLessEqual(set(self.ledger), set(self.rows))
 
     def test_the_limit_names_the_largest_bound_of_each_kind(self):
+        truth = v.truth_section(v.load_ulp_ledger(), "main")
         for model, entries in self.ledger.items():
             limit = self.rows[model]["cells"][8]
+            held = truth.get(model, {})
             for kind in table.KINDS:
                 bounds = [e["bound"] for label, e in entries.items()
-                          if v.output_kind(label) == kind]
+                          if v.entry_kind(label) == kind and label not in held]
                 if bounds:
                     self.assertIn(f"{table.KIND_NAME[kind]} "
                                   f"{table._count(max(bounds))}", limit, model)
+                limits = [v.truth_bound(held[label]) for label in entries
+                          if v.entry_kind(label) == kind and label in held]
+                if limits:
+                    self.assertIn(f"{table.KIND_NAME[kind]} "
+                                  f"{table._count(max(limits))} from the true value",
+                                  limit, model)
+
+    def test_a_kind_entry_counts_for_its_own_kind(self):
+        self.assertEqual(table._limit(table._by_kind(
+            {"grad": entry(91, "unknown")}), {}), "gradient 91")
+        truth = {"grad[2]": {"bound": 3}, "lp": {"bound": 40}}
+        kinds = table._by_kind({"grad[1]": entry(20, "stanli"),
+                                "grad[2]": entry(30, "stanli"),
+                                "lp": entry(50, "stanli")})
+        self.assertEqual(table._limit(kinds, truth),
+                         "lp 40 from the true value, gradient 20, "
+                         "gradient 10 from the true value")
 
     def test_a_model_without_entries_has_the_default_limit(self):
         row = self.rows["arK"]
