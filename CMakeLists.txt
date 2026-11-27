@@ -1187,6 +1187,24 @@ target_link_libraries(bench_executor_clone PRIVATE stanli)
 add_executable(bench_dense_blas EXCLUDE_FROM_ALL
   tools/bench_dense_blas.cpp tests/tbb_stub.cpp)
 target_link_libraries(bench_dense_blas PRIVATE stanli)
+# Stress of Accelerate's BLAS and LAPACK routines with its own threads, each
+# call compared with the single-threaded result. Needs macOS 15 or later.
+if(APPLE)
+  add_executable(stress_blas_threads EXCLUDE_FROM_ALL
+    tools/stress_blas_threads.cpp)
+  target_link_libraries(stress_blas_threads PRIVATE "-framework Accelerate")
+  add_executable(stress_blas_threads_new_lapack EXCLUDE_FROM_ALL
+    tools/stress_blas_threads.cpp)
+  target_compile_definitions(stress_blas_threads_new_lapack PRIVATE
+    STRESS_NEW_LAPACK)
+  # The tool calls BLASSetThreading directly and runs only on macOS 15+.
+  target_compile_options(stress_blas_threads PRIVATE
+    -Wno-unguarded-availability-new)
+  target_compile_options(stress_blas_threads_new_lapack PRIVATE
+    -Wno-unguarded-availability-new)
+  target_link_libraries(stress_blas_threads_new_lapack PRIVATE
+    "-framework Accelerate")
+endif()
 add_test(NAME test_bench_opcost_smoke COMMAND bench_opcost --smoke)
 set_tests_properties(test_bench_opcost_smoke PROPERTIES
   PASS_REGULAR_EXPRESSION "sink=")
