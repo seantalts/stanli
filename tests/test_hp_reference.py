@@ -129,6 +129,102 @@ class LedgerWriteArray(unittest.TestCase):
         self.assertEqual(metrics.exact("0.25"), 0.25)
 
 
+class LedgerTrueValues(unittest.TestCase):
+    """How ledger_accuracy.py --write-true-values decides which entries get
+    true values, and what it stores."""
+
+    def setUp(self):
+        sys.path.insert(0, str(REPO / "tools"))
+        import ledger_accuracy
+        self.la = ledger_accuracy
+        from decimal import Decimal
+        exact = lambda x: str(Decimal(x))
+        u = math.ulp(2.0)
+        self.true = 2.0 + 30 * u
+        self.ref = {"points": {
+            "0": {"values": ["-3.5", "1", "2"],
+                  "wa": {"names": "a,b", "values": ["0.5", "4"]}},
+            "1": {"values": ["-3.5", "1", "2"],
+                  "wa": {"names": "a,b", "values": ["0", "4"]}},
+            "2": {"status": "REJECTED_BOTH"}}}
+        hp = {"lp": "-3.5", "method": "fd", "grad": ["1", exact(self.true)],
+              "wa": {"names": ["a", "b"], "values": ["0.5", "4"]}}
+        self.h = {"points": {"0": hp, "1": {**hp, "wa": {"names": ["a", "b"],
+                                                         "values": ["0", "4"]}}}}
+        row = [-3.5, 1.0, 2.0 + 29 * u, {"a": 0.5, "b": 4.0}]
+        self.got = {0: row, 1: row[:3] + [{"a": 0.0, "b": 4.0}]}
+
+    def entry(self, label, reason, h=None):
+        entries = {label: {"bound": 30, "closer": "stanli", "reason": reason}}
+        return self.la.truth_entry("m", label, entries, h or self.h, self.ref, self.got)
+
+    def test_a_model_on_the_exclusion_list_gets_no_true_value(self):
+        entries = {"grad[2]": {"bound": 30, "closer": "stanli",
+                               "reason": "at point 0: stanli 29, CmdStan 0 scaled ULP"}}
+        model = sorted(self.la.NO_TRUE_VALUE)[0]
+        entry, why = self.la.truth_entry(model, "grad[2]", entries, self.h, self.ref, self.got)
+        self.assertIsNone(entry)
+        self.assertEqual(why, self.la.NO_TRUE_VALUE[model])
+
+    def test_reasons_state_their_distances_in_four_phrasings(self):
+        stated = self.la.stated
+        self.assertEqual(stated("grad[10]", "at point 1: stanli 1, CmdStan 15 scaled ULP"),
+                         (1, "grad[10]", "1", "15"))
+        self.assertEqual(stated("grad", "at point 2 (grad[7]): stanli 0, CmdStan 157"),
+                         (2, "grad[7]", "0", "157"))
+        self.assertEqual(stated("wa", "at point 0: log_lik.9 is 0.6 (stanli) and 43.4 (CmdStan)"),
+                         (0, "wa log_lik.9", "0.6", "43.4"))
+        self.assertEqual(stated("grad[17]", "at point 0 stanli is 8413 and CmdStan 8470 scaled"),
+                         (0, "grad[17]", "8413", "8470"))
+        self.assertEqual(stated("lp", "over the three points stanli is at most 0.9 and CmdStan "
+                                      "at most 44.1 scaled ULP from the true value"),
+                         (None, "lp", "0.9", "44.1"))
+        self.assertEqual(stated("grad[2]", "over the three points stanli is at most 0.9 and "
+                                           "CmdStan at most 13.2 scaled ULP from the true "
+                                           "value in the gradient")[1], "grad")
+        self.assertIsNone(stated("lp", "cholesky_decompose runs LAPACK"))
+
+    def test_a_distance_agrees_within_one_unit_of_its_last_digit(self):
+        self.assertTrue(self.la.agrees(109.46, "110"))
+        self.assertTrue(self.la.agrees(15.8, "15.8"))
+        self.assertFalse(self.la.agrees(0.4, "4"))
+        self.assertFalse(self.la.agrees(12.1, "13.2"))
+
+    def test_an_entry_gets_every_point_that_cmdstan_accepts(self):
+        entry, why = self.entry("grad[2]", "at point 0: stanli 1, CmdStan 30")
+        self.assertIsNone(why)
+        self.assertEqual(entry["bound"], 1)
+        self.assertEqual(entry["method"], "fd")
+        self.assertEqual(set(entry["points"]), {"0", "1"})
+        stored = entry["points"]["0"]["grad[2]"]
+        self.assertEqual(stored["scale"], 2.0)
+        self.assertEqual(metrics.exact(stored["value"]), self.true)
+
+    def test_a_reason_that_disagrees_leaves_the_entry_without_true_values(self):
+        _, why = self.entry("grad[2]", "at point 0: stanli 1, CmdStan 20")
+        self.assertTrue(why.startswith("stale reference: CmdStan is 30.0"), why)
+        _, why = self.entry("grad[2]", "at point 0: stanli 5, CmdStan 30")
+        self.assertTrue(why.startswith("stanli moved: it is 1.0"), why)
+        _, why = self.entry("grad[2]", "no numbers here")
+        self.assertEqual(why, "the reason states no distances")
+
+    def test_directional_gradients_do_not_qualify(self):
+        h = {"points": {p: {**o, "method": "directional"} for p, o in self.h["points"].items()}}
+        for o in h["points"].values():
+            del o["grad"]
+        _, why = self.entry("grad[2]", "at point 0: stanli 1, CmdStan 30", h)
+        self.assertEqual(why, "directional derivatives only")
+
+    def test_an_output_with_zero_scale_keeps_the_cmdstan_gate_at_that_point(self):
+        entry, why = self.entry("wa a", "at point 0 a is 0.0 (stanli) and 0.0 (CmdStan)")
+        self.assertIsNone(why)
+        self.assertEqual(set(entry["points"]), {"0"})
+        self.assertEqual(entry["method"], "direct")
+        entry, _ = self.entry("wa", "at point 0: b is 0.0 (stanli) and 0.0 (CmdStan)")
+        self.assertEqual({p: set(x) for p, x in entry["points"].items()},
+                         {"0": {"wa a", "wa b"}, "1": {"wa b"}})
+
+
 class Directions(unittest.TestCase):
     def test_unit_length_and_deterministic(self):
         a = metrics.direction("m:0:1", 50)

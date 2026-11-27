@@ -107,6 +107,21 @@ ULPs of the scale each engine is from the true value, and whether stanli is
 index. `--census` scores every value of the listed models instead of the
 ledger's entries, and counts how often stanli is the closer one.
 
+    PYTHONPATH=... tools/hp/ledger_accuracy.py HP_DIR --write-true-values
+
+Writes the true values of the `main` entries whose `closer` is `stanli` into
+the ledger's `true_values`, which the corpus replay checks stanli against
+([TESTING.md](../../TESTING.md#true-values)). An entry gets them when every
+point that CmdStan accepts has an 80-digit value for every value that the
+entry covers. For a gradient that has to be a full finite-difference
+gradient. The distances that the entry's reason states must also agree with
+this tool's measure, within one unit of their last digit. The bound is the
+largest distance of stanli from the true value over the points. The run
+lists every other entry with the reason that it has none: a stale
+reference, a stanli value that has moved since the reason was written,
+directional derivatives only, or no 80-digit run. `--only` limits the run to
+some models and keeps the true values of the others.
+
 ## Attribution
 
     PYTHONPATH=... tools/hp/attribute.py /tmp/hp MODEL...

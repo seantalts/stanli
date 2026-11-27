@@ -57,6 +57,22 @@ from corpus_inventory import (CorpusCase, corpus_cases, local_cases, materialize
 import toolchain
 import check_status
 import gen_fixtures
+import importlib.util
+
+
+def _hp_metrics():
+    """tools/hp/metrics.py, which measures the distance from an 80-digit
+    value for both this gate and tools/hp/ledger_accuracy.py. It uses only
+    the standard library. It is loaded from its path, because putting
+    tools/hp on sys.path would let its common.py shadow other modules."""
+    spec = importlib.util.spec_from_file_location(
+        "hp_metrics", pathlib.Path(__file__).resolve().parent / "hp" / "metrics.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+hp_metrics = _hp_metrics()
 
 REPO = pathlib.Path(__file__).resolve().parent.parent
 N_SAMPLER_COLS = 7
@@ -556,9 +572,10 @@ def gradient_ulp(rv, gv):
 # DEFAULT_ULP_BOUND, counted by scaled_ulp, unless the ledger lists a
 # larger bound measured for that model, output and platform. It is an
 # extra condition: the scaled-error gate and the per-element ULP_LIMITS
-# still apply.
+# still apply. A value with a stored true value is held to that instead
+# (truth_gate, below).
 ULP_LEDGER_PATH = REPO / "tests" / "ulp_ledger.json"
-ULP_LEDGER_SCHEMA = 2
+ULP_LEDGER_SCHEMA = 3
 # Each entry's "closer" says which engine is closer to the high-precision
 # value of that output: "stanli" (a tie counts as stanli), "cmdstan" (stanli
 # is farther), or "unknown" (no usable reference, one more than 1e6 scaled
@@ -603,6 +620,11 @@ def output_kind(label):
     if label == "lp":
         return "lp"
     return "grad" if label.startswith("grad[") else "wa"
+
+
+def entry_kind(label):
+    """The output kind of a ledger entry: its own kind for a kind entry."""
+    return label if label in KIND_ENTRIES else output_kind(label)
 
 
 def entry_measured(label, entries, measured):
@@ -656,10 +678,13 @@ def ulp_bound(entries, label):
     return entry["bound"], entry["reason"]
 
 
-def ulp_gate(entries, ulps, point, values=None):
+def ulp_gate(entries, ulps, point, values=None, skip=()):
     """A ("ULP_GATE", detail) failure for the first value over its bound,
-    or None."""
+    or None. The values in `skip` have a true value, and truth_gate holds
+    them instead."""
     for label, ulps_here in ulps.items():
+        if label in skip:
+            continue
         bound, reason = ulp_bound(entries, label)
         if ulps_here > bound:
             shown = ""
@@ -671,13 +696,146 @@ def ulp_gate(entries, ulps, point, values=None):
     return None
 
 
+# True values (TESTING.md, "The rule"). The ledger's "true_values" maps
+# corpus -> model -> entry label -> {bound, method, platform, points}. They
+# do not depend on the platform, so they sit outside "platforms". `points`
+# maps each point to {value label: {"value": the 80-digit value as a decimal
+# string, "scale": the scale of its scaled ULP}}. An entry for one value has
+# one label per point. A kind entry ("grad" or "wa") lists the values that it
+# covered when it was measured. `bound` is the largest distance of stanli
+# from the true value over the points, measured on `platform`. `method` is
+# "fd" for a gradient entry (a full finite-difference gradient) and "direct"
+# for lp and outputs.
+#
+# A value with a true value is held to within max(bound, DEFAULT_ULP_BOUND)
+# scaled ULP of it on every platform, and its distance from CmdStan is not
+# gated. tools/hp/ledger_accuracy.py --write-true-values writes the entries.
+TRUTH_KEYS = {"bound", "method", "platform", "points"}
+
+
+def truth_ulps(x, value, scale):
+    """Scaled ULPs of stanli's x from the stored true value (a decimal
+    string), in ULPs of scale. The same measure as ledger_accuracy.py."""
+    return hp_metrics.ulps_from_truth(x, hp_metrics.exact(value), scale)
+
+
+def truth_section(ledger, corpus):
+    """{model: {entry label: true-value entry}} for one corpus."""
+    return ledger.get("true_values", {}).get(corpus, {})
+
+
+def truth_labels(truth, point=None):
+    """The value labels that one model's true values cover at `point`, or
+    at any point, with the entry labels. These values are held to the true
+    value and not to CmdStan."""
+    labels = set(truth or {}) if point is None else set()
+    for entry in (truth or {}).values():
+        for at, values in entry["points"].items():
+            if point is None or at == str(point):
+                labels.update(values)
+    return labels
+
+
+def truth_bound(entry):
+    return max(entry["bound"], DEFAULT_ULP_BOUND)
+
+
+def truth_gate(truth, point, got, measured=None):
+    """A ("TRUTH_GATE", detail) failure for the first value at `point` that
+    is farther from its true value than its entry allows, or None.
+
+    got maps value labels to stanli's values. Every value with a true value
+    at this point is checked, also one that equals CmdStan's. measured, when
+    given, keeps the largest distance seen for each entry label.
+    """
+    for label, entry in sorted((truth or {}).items()):
+        for name, stored in sorted(entry["points"].get(str(point), {}).items()):
+            if name not in got:
+                return ("TRUTH_GATE", f"point {point}: {name} has a true value "
+                                      f"and stanli gave no value for it")
+            x = got[name]
+            ulps = truth_ulps(x, stored["value"], stored["scale"])
+            if measured is not None:
+                measured[label] = max(measured.get(label, 0.0), ulps)
+            if ulps > truth_bound(entry):
+                return ("TRUTH_GATE",
+                        f"point {point}: {name} (stanli {x!r}, true value "
+                        f"{stored['value'][:22]}) is {ulps:.1f} scaled ULP "
+                        f"from the true value, allowed {truth_bound(entry)} "
+                        f"(the bound of {label} is {entry['bound']}, measured "
+                        f"on {entry['platform']})")
+    return None
+
+
+def truth_problems(ledger):
+    """Why the "true_values" of a ledger are malformed, if they are."""
+    problems = []
+    for corpus, models in ledger.get("true_values", {}).items():
+        for model, entries in models.items():
+            for label, entry in entries.items():
+                where = f"true_values {corpus} {model} {label}"
+                if not isinstance(entry, dict) or set(entry) != TRUTH_KEYS:
+                    problems.append(f"{where} needs exactly "
+                                    f"{', '.join(sorted(TRUTH_KEYS))}")
+                    continue
+                bound = entry["bound"]
+                if isinstance(bound, bool) or not isinstance(bound, int) \
+                        or bound < 0:
+                    problems.append(f"{where} needs a bound that is an "
+                                    f"integer of 0 or more")
+                want = "fd" if entry_kind(label) == "grad" else "direct"
+                if entry["method"] != want:
+                    problems.append(f"{where} needs method {want!r}")
+                platform_entry = ledger["platforms"].get(
+                    entry["platform"], {}).get(corpus, {}).get(model, {}).get(label)
+                if platform_entry is None or platform_entry["closer"] != "stanli":
+                    problems.append(f"{where} needs an entry with closer "
+                                    f"stanli on {entry['platform']}")
+                points = entry["points"]
+                if not (isinstance(points, dict) and points
+                        and set(points) <= {str(p) for p in POINTS}):
+                    problems.append(f"{where} needs points among "
+                                    f"{', '.join(map(str, POINTS))}")
+                    continue
+                for point, values in points.items():
+                    if not (isinstance(values, dict) and values):
+                        problems.append(f"{where} point {point} has no values")
+                        continue
+                    for name, stored in values.items():
+                        if not (name == label or (label in KIND_ENTRIES
+                                                  and output_kind(name) == label)):
+                            problems.append(f"{where} point {point} lists "
+                                            f"{name}, which {label} does not cover")
+                        if not truth_value_ok(stored):
+                            problems.append(f"{where} point {point} {name} needs "
+                                            f"a finite decimal value and a "
+                                            f"positive finite scale")
+    return problems
+
+
+def truth_value_ok(stored):
+    if not (isinstance(stored, dict) and set(stored) == {"value", "scale"}
+            and isinstance(stored["value"], str)
+            and isinstance(stored["scale"], float)
+            and math.isfinite(stored["scale"]) and stored["scale"] > 0):
+        return False
+    try:
+        return hp_metrics.exact(stored["value"]) is not None
+    except ArithmeticError:
+        return False
+
+
 def load_ulp_ledger(path=ULP_LEDGER_PATH):
     if not path.exists():
-        return {"schema": ULP_LEDGER_SCHEMA, "platforms": {}}
+        return {"schema": ULP_LEDGER_SCHEMA, "platforms": {}, "true_values": {}}
     ledger = json.loads(path.read_text())
     if ledger.get("schema") != ULP_LEDGER_SCHEMA:
         raise SystemExit(f"{path} is schema {ledger.get('schema')!r}, "
                          f"these tools read {ULP_LEDGER_SCHEMA}")
+    if set(ledger) - {"schema", "platforms", "true_values"}:
+        raise SystemExit(f"{path} has keys other than schema, platforms and "
+                         f"true_values")
+    ledger.setdefault("true_values", {})
     for platform_name, corpora in ledger["platforms"].items():
         for corpus, models in corpora.items():
             for model, entries in models.items():
@@ -690,6 +848,9 @@ def load_ulp_ledger(path=ULP_LEDGER_PATH):
                             f"{path}: {platform_name} {corpus} {model} {label} "
                             f"needs an integer bound over {DEFAULT_ULP_BOUND}, "
                             f"a reason and a closer of {', '.join(CLOSER)}")
+    problems = truth_problems(ledger)
+    if problems:
+        raise SystemExit(f"{path}: " + "; ".join(problems[:5]))
     return ledger
 
 
@@ -699,10 +860,24 @@ def ulp_section(ledger, target_platform, corpus):
     return ledger["platforms"].get(target_platform, {}).get(corpus)
 
 
-def ledger_notes(model, entries, measured):
-    """Notes for ledger entries that this replay beats by a wide margin."""
+def ledger_notes(model, entries, measured, truth=None, truth_measured=None):
+    """Notes for ledger entries that this replay beats by a wide margin.
+
+    An entry with true values gets a note only for its distance from the
+    true value, and only when its bound is over the default.
+    """
     notes = []
+    for label, entry in sorted((truth or {}).items()):
+        got = (truth_measured or {}).get(label)
+        if got is not None and entry["bound"] > DEFAULT_ULP_BOUND \
+                and got <= entry["bound"] * ULP_TIGHTEN_FRACTION:
+            notes.append(f"TRUE VALUE {model} {label}: measured {got:.1f} "
+                         f"from the true value, recorded bound "
+                         f"{entry['bound']}; rerun with --update-ulp-ledger "
+                         f"on {entry['platform']} to lower it")
     for label, entry in sorted(entries.items()):
+        if label in (truth or {}):
+            continue
         got = entry_measured(label, entries, measured)
         if got <= entry["bound"] * ULP_TIGHTEN_FRACTION:
             notes.append(f"ULP LEDGER {model} {label}: measured {got}, "
@@ -711,7 +886,7 @@ def ledger_notes(model, entries, measured):
     return notes
 
 
-def updated_entries(old, measured, reason):
+def updated_entries(old, measured, reason, truth=frozenset()):
     """The ledger entries for one model after a replay that passed.
 
     Existing entries keep their reason and closer and can only go down: to
@@ -719,9 +894,17 @@ def updated_entries(old, measured, reason):
     the default that no entry covers gets a new entry with `reason` and
     closer "unknown". A value over its bound is an error: the gate fails it
     before this runs.
+
+    truth is truth_labels() of the model. The gate does not hold those
+    values to CmdStan, so their entries stay as they are, and they get no
+    new entries.
     """
-    new = {}
+    new = {label: dict(entry) for label, entry in old.items() if label in truth}
+    measured = {label: got for label, got in measured.items()
+                if label not in truth}
     for label, entry in old.items():
+        if label in truth:
+            continue
         got = entry_measured(label, old, measured)
         if got > entry["bound"]:
             raise ValueError(f"{label} measured {got} over bound {entry['bound']}")
@@ -759,7 +942,8 @@ def uncovered_bounds(old, measured):
 # bounds, because the ledger cannot tell a new model, or a value that moved
 # for a known reason, from a regression: only the person who names the
 # model can.
-def first_entries(measured, reasons, target_platform, old=None):
+def first_entries(measured, reasons, target_platform, old=None,
+                  truth=frozenset()):
     """(entries, problems) for a model named in the --add-ulp-entries file.
 
     reasons maps labels that the replay measured over the default to why:
@@ -769,17 +953,24 @@ def first_entries(measured, reasons, target_platform, old=None):
     measurement is within: that entry keeps its reason and closer, at the
     measured bound. A label with neither, or a reason for a label within
     the default, is a problem, and nothing may be written.
+
+    truth is truth_labels() of the model. Those values are held to their
+    true values, so their entries in `old` are kept as they are, and they
+    need no reason.
     """
     old = old or {}
     given = {label: why if isinstance(why, dict)
              else {"reason": why, "closer": "unknown"}
              for label, why in reasons.items()}
-    bounds = uncovered_bounds({}, measured)
+    bounds = uncovered_bounds({}, {label: got for label, got in measured.items()
+                                   if label not in truth})
     kept = {label: {"bound": bound, "reason": old[label]["reason"],
                     "closer": old[label]["closer"]}
             for label, (bound, _) in bounds.items()
             if label not in reasons and label in old
             and bound <= old[label]["bound"]}
+    kept.update({label: dict(entry) for label, entry in old.items()
+                 if label in truth})
     problems = [f"{label} measured {bounds[label][0]} needs a reason"
                 for label in sorted(set(bounds) - set(reasons) - set(kept))]
     problems += [f"{label} has a reason but is within {DEFAULT_ULP_BOUND}"
@@ -832,10 +1023,12 @@ def add_first_entries(ledger, target_platform, corpus, measured, reasons,
     Returns the problems that stopped the write, if any.
     """
     section = ledger["platforms"][target_platform][corpus]
+    truth = truth_section(ledger, corpus)
     problems, added = [], {}
     for model, labels in sorted(reasons.items()):
         entries, bad = first_entries(measured.get(model, {}), labels,
-                                     target_platform, section.get(model))
+                                     target_platform, section.get(model),
+                                     truth_labels(truth.get(model)))
         problems += [f"{model}: {problem}" for problem in bad]
         added[model] = dict(sorted(entries.items()))
     if problems:
@@ -850,21 +1043,30 @@ def add_first_entries(ledger, target_platform, corpus, measured, reasons,
 
 
 def write_ulp_ledger(ledger, target_platform, corpus, measured, ran,
-                     provenance, path=ULP_LEDGER_PATH):
+                     provenance, path=ULP_LEDGER_PATH, truth_measured=None):
     """Ratchet this platform's section for the models that ran.
 
     measured is {model: {label: worst scaled ULP over the points}}.
+    truth_measured is {model: {entry label: worst distance from the true
+    value}}. A true-value bound can only go down, and only on the platform
+    that measured it.
     """
     section = ledger["platforms"].setdefault(target_platform, {}).setdefault(
         corpus, {})
+    truth = truth_section(ledger, corpus)
     for model in ran:
+        for label, entry in truth.get(model, {}).items():
+            got = (truth_measured or {}).get(model, {}).get(label)
+            if got is not None and entry["platform"] == target_platform:
+                entry["bound"] = min(entry["bound"], math.ceil(got))
         old = section.get(model, {})
         recorded_on = provenance.get(model)
         reason = (f"measured on {target_platform}"
                   + (f" against a reference recorded on {recorded_on}"
                      if recorded_on and recorded_on != target_platform else "")
                   + "; cause not yet explained")
-        entries = updated_entries(old, measured.get(model, {}), reason)
+        entries = updated_entries(old, measured.get(model, {}), reason,
+                                  truth_labels(truth.get(model)))
         if entries:
             section[model] = dict(sorted(entries.items()))
         else:
@@ -1184,8 +1386,12 @@ def density_interpreted(status):
 def check_point(model, stan, dj, check_bin, point, pt, timeout, no_wa,
                 strict=False, fast_math=False, opts=None, off_platform=False,
                 ulp_entries=None, measured=None, floored=None, notes=None,
-                wa_gap=False):
+                wa_gap=False, truth=None, truth_measured=None):
     """Replay one recorded point. (status, worst, worst_ulp, n, detail).
+
+    truth, when given, is the model's entries in the ledger's true_values.
+    Their values are held to the true value (truth_gate) and not to CmdStan
+    (ulp_gate), and truth_measured keeps their distances from it.
 
     wa_gap (a WRITE_ARRAY gap, replayed with no_wa) lets the write_array
     section run through the interpreter, and nothing else
@@ -1270,12 +1476,21 @@ def check_point(model, stan, dj, check_bin, point, pt, timeout, no_wa,
     own = opts.value_limits if opts else {}
     ulps = density_ulps(rv, gv)
     record_ulps(measured, ulps)
+    held = truth_labels(truth, point)
+    labels = {("lp" if i == 0 else f"grad[{i}]"): (a, b)
+              for i, (a, b) in enumerate(zip(rv, gv))}
     if ulp_entries is not None:
-        labels = {("lp" if i == 0 else f"grad[{i}]"): (a, b)
-                  for i, (a, b) in enumerate(zip(rv, gv))}
-        failed = ulp_gate(ulp_entries, ulps, point, labels)
+        failed = ulp_gate(ulp_entries, ulps, point, labels, held)
         if failed:
             return (failed[0], 0.0, max(ulps.values()), len(rv), failed[1])
+    if truth:
+        failed = truth_gate({label: entry for label, entry in truth.items()
+                             if entry_kind(label) != "wa"}, point,
+                            {label: b for label, (_, b) in labels.items()},
+                            truth_measured)
+        if failed:
+            return (failed[0], 0.0, max(ulps.values(), default=0), len(rv),
+                    failed[1])
     # The scaled-error gate reads `scored`, in which the values that have
     # their own floor (floored_outputs) are set to CmdStan's after being
     # held to that floor here. Every ULP check still reads gv.
@@ -1343,6 +1558,14 @@ def check_point(model, stan, dj, check_bin, point, pt, timeout, no_wa,
         if wa is None:
             return ("WA_FAIL", worst, worst_ulp, n,
                     f"point {point}: no or failed write_array output")
+        if truth:
+            failed = truth_gate({label: entry for label, entry in truth.items()
+                                 if entry_kind(label) == "wa"}, point,
+                                {f"wa {c}": float(x) for c, x in
+                                 zip(wa[0].split(","), wa[1])},
+                                truth_measured)
+            if failed:
+                return (failed[0], worst, worst_ulp, n, failed[1])
         if "wa" not in pt:
             return ("OK", worst, worst_ulp, n, where)
         names, vals = wa
@@ -1372,7 +1595,7 @@ def check_point(model, stan, dj, check_bin, point, pt, timeout, no_wa,
         record_ulps(measured, wulps)
         if ulp_entries is not None:
             labels = {f"wa {c}": (a, b) for c, a, b in zip(columns, wref, wgot)}
-            failed = ulp_gate(ulp_entries, wulps, point, labels)
+            failed = ulp_gate(ulp_entries, wulps, point, labels, held)
             if failed:
                 return (failed[0], worst, max(wulps.values()), n, failed[1])
         if fast_math:
@@ -1419,7 +1642,8 @@ def worst_values(rv, gv, floor, skip, label):
 
 def check_model(model, ref, pdb, check_bin, tmp, timeout, max_rel,
                 no_wa=False, target_platform=None,
-                fast_math=False, opts=None, ulp_entries=None, measured=None):
+                fast_math=False, opts=None, ulp_entries=None, measured=None,
+                truth=None, truth_measured=None):
     """Replay one model, under whatever KNOWN_GAPS says about it.
 
     A WRITE_ARRAY gap replays lp and the gradient first, without the
@@ -1427,13 +1651,14 @@ def check_model(model, ref, pdb, check_bin, tmp, timeout, max_rel,
     """
     args = (model, ref, pdb, check_bin, tmp, timeout, max_rel)
     rest = (target_platform, fast_math, opts, ulp_entries, measured)
+    held = {"truth": truth, "truth_measured": truth_measured}
     gap = KNOWN_GAPS.get(model)
     density = None
     if gap is not None and gap.excuses == WRITE_ARRAY:
-        density = replay_model(*args, True, *rest, wa_gap=True)
+        density = replay_model(*args, True, *rest, wa_gap=True, **held)
         if density[1] != "OK":
             return density
-    result = replay_model(*args, no_wa, *rest)
+    result = replay_model(*args, no_wa, *rest, **held)
     if gap is None:
         return result
     _, status, rel, ulp, total, _, notes = result
@@ -1452,10 +1677,11 @@ def check_model(model, ref, pdb, check_bin, tmp, timeout, max_rel,
 def replay_model(model, ref, pdb, check_bin, tmp, timeout, max_rel,
                  no_wa=False, target_platform=None,
                  fast_math=False, opts=None, ulp_entries=None, measured=None,
-                 wa_gap=False):
+                 wa_gap=False, truth=None, truth_measured=None):
     """Replay every point of one model.
 
-    ulp_entries, measured and wa_gap are as in check_point, over all points.
+    ulp_entries, measured, wa_gap, truth and truth_measured are as in
+    check_point, over all points.
 
     Returns (model, status, max_rel, max_ulp, n_values, detail, notes).
     The deviation reported is the worst over the values held to the clean
@@ -1503,6 +1729,8 @@ def replay_model(model, ref, pdb, check_bin, tmp, timeout, max_rel,
     worst, worst_ulp, total, notes = 0.0, 0, 0, []
     if measured is None:
         measured = {}
+    if truth_measured is None:
+        truth_measured = {}
     unnamed = [p for p, pt in ref["points"].items()
                if pt.get("status") == "MISMATCH" and model not in MISMATCH_OUTPUTS]
     if unnamed:
@@ -1515,12 +1743,14 @@ def replay_model(model, ref, pdb, check_bin, tmp, timeout, max_rel,
     if opts:
         # One dict per point: the workers would race on a shared one.
         point_measured = {point: {} for point in POINTS}
+        point_truth = {point: {} for point in POINTS}
         with concurrent.futures.ThreadPoolExecutor(len(POINTS)) as pool:
             done = {point: pool.submit(
                         check_point, model, stan, dj, check_bin, point,
                         ref["points"][str(point)], timeout, no_wa, strict,
                         fast_math, opts, off_platform, ulp_entries,
-                        point_measured[point], floored[point], notes, wa_gap)
+                        point_measured[point], floored[point], notes, wa_gap,
+                        truth, point_truth[point])
                     for point in POINTS if str(point) in ref["points"]
                     and (model, point) not in QUARANTINED}
     for point in POINTS:
@@ -1552,12 +1782,14 @@ def replay_model(model, ref, pdb, check_bin, tmp, timeout, max_rel,
             status, rel, ulp, n, detail = done[point].result()
             for label, got in point_measured[point].items():
                 measured[label] = max(measured.get(label, 0), got)
+            for label, got in point_truth[point].items():
+                truth_measured[label] = max(truth_measured.get(label, 0.0), got)
         else:
             status, rel, ulp, n, detail = check_point(
                 model, stan, dj, check_bin, point, pt, timeout, no_wa, strict,
                 fast_math, off_platform=off_platform, ulp_entries=ulp_entries,
                 measured=measured, floored=floored[point], notes=notes,
-                wa_gap=wa_gap)
+                wa_gap=wa_gap, truth=truth, truth_measured=truth_measured)
         total += n
         if status != "OK":
             return (model, status, worst, worst_ulp, total, detail, notes)
@@ -1577,8 +1809,9 @@ def replay_model(model, ref, pdb, check_bin, tmp, timeout, max_rel,
                     f"allowed {ulp_limit}, worst at {detail[1]}", notes)
         if floored[point] is None:
             worst, worst_ulp = max(worst, rel), max(worst_ulp, ulp)
-    if ulp_entries:
-        notes += ledger_notes(model, ulp_entries, measured)
+    if ulp_entries or truth:
+        notes += ledger_notes(model, ulp_entries or {}, measured, truth,
+                              truth_measured)
     return (model, "OK", worst, worst_ulp, total, "", notes)
 
 
@@ -2082,6 +2315,13 @@ def ulp_gate_banner(section, target_platform, corpus):
             f"{target_platform}")
 
 
+def truth_gate_banner(truth):
+    entries = sum(len(entries) for entries in truth.values())
+    return (f"true-value gate: {entries} ledger entries of {len(truth)} models "
+            f"within max(bound, {DEFAULT_ULP_BOUND}) scaled ULP of their "
+            f"80-digit values, on every platform")
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("pdb", type=pathlib.Path, nargs="?")
@@ -2237,7 +2477,18 @@ def main():
     print("ULP gate off: fast mode and --no-wa replays keep their own gates"
           if args.fast_math or args.no_wa
           else ulp_gate_banner(section, args.target_platform, "main"))
+    # The true values do not depend on the platform, so they hold on every
+    # platform, also where the ledger has no section.
+    truth = ({} if args.fast_math or args.no_wa
+             else truth_section(ledger, "main"))
+    if not args.models and set(truth) - set(refs):
+        print("true values for models with no reference: "
+              + " ".join(sorted(set(truth) - set(refs))))
+        return 2
+    if truth:
+        print(truth_gate_banner(truth))
     measured = {m: {} for m in models}
+    truth_measured = {m: {} for m in models}
     tmp = pathlib.Path(tempfile.mkdtemp(prefix="stanli_refs_"))
     failures, values = [], 0
     worst_overall = ("", 0.0, 0)
@@ -2247,7 +2498,7 @@ def main():
                             args.target_platform, args.fast_math, None,
                             None if section is None or m in (first_reasons or {})
                             else section.get(m, {}),
-                            measured[m])
+                            measured[m], truth.get(m), truth_measured[m])
                 for m in models]
         for fut in concurrent.futures.as_completed(futs):
             model, status, rel, ulp, n, detail, notes = fut.result()
@@ -2277,7 +2528,8 @@ def main():
         return 1
     if args.update_ulp_ledger:
         write_ulp_ledger(ledger, args.target_platform, "main", measured, models,
-                         {m: refs[m]["recorded"].get("platform") for m in models})
+                         {m: refs[m]["recorded"].get("platform") for m in models},
+                         truth_measured=truth_measured)
         print(f"updated {ULP_LEDGER_PATH.relative_to(REPO)} for "
               f"{args.target_platform}, main")
     if first_reasons is not None:
