@@ -951,8 +951,8 @@ inverse in all 192,000 calls at n = 151 and in all 100,000 at n = 64 to
 2048 (`tests/test_blas_determinism.cpp`).
 `tools/stress_blas_threads.cpp` (`make stress_blas_threads`) makes the calls
 that the kernels make, with the same arguments, at many shapes from the
-thresholds to n = 4096 with threads on (`--kernel-shapes`, `--sweep`), and
-compares each result with the single-threaded one. With threads, `dgemm`,
+thresholds to n = 4096 with threads on (`--kernel-shapes`, `--sweep`,
+`--tri-range`), and compares each result with the single-threaded one. With threads, `dgemm`,
 `dsymm`, `dpotrf` and `dpotri` gave other bits for some shapes, at
 rounding level ([the thresholds note](../notes/performance/2026-11-26-accelerate-thresholds.md#threads)),
 so with `parallel_blas` on, results can differ by rounding from those with
