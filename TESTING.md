@@ -59,8 +59,8 @@ within the entry's own bound if that is larger.**
   entry also needs a full finite-difference gradient from the 80-digit
   evaluation at every point that CmdStan accepts. The distances that the
   entry's reason gives must agree with those that the tool measures again.
-- <!--gen:testing_truth_entries-->114<!--/gen--> entries of <!--gen:testing_truth_models-->68<!--/gen--> models store true
-  values. The bounds of <!--gen:testing_truth_over-->25<!--/gen--> of them are over 10.
+- <!--gen:testing_truth_entries-->111<!--/gen--> entries of <!--gen:testing_truth_models-->66<!--/gen--> models store true
+  values. The bounds of <!--gen:testing_truth_over-->22<!--/gen--> of them are over 10.
 - `tools/hp/ledger_accuracy.py --write-true-values` writes them
   ([`tools/hp`](tools/hp/README.md#the-ulp-ledger)).
 
@@ -149,7 +149,7 @@ CmdStan. The other <!--gen:testing_models_over-->87<!--/gen--> models have <!--g
 ledger entries. stanli is at least as close to the true value as CmdStan in <!--gen:testing_entries_stanli-->146<!--/gen-->
 of those entries. CmdStan is closer in <!--gen:testing_entries_cmdstan-->6<!--/gen-->. We
 cannot tell for the other <!--gen:testing_entries_unknown-->40<!--/gen-->. Of the entries where
-stanli is closer, <!--gen:testing_truth_entries-->114<!--/gen--> store true values, and the run
+stanli is closer, <!--gen:testing_truth_entries-->111<!--/gen--> store true values, and the run
 checks those values against the [true values](#true-values).
 
 <!--gen:testing_collections-->
@@ -604,7 +604,7 @@ table and those files disagree.
 | `examplemodels_mr_ss` | examplemodels | 2 | 19602 | 14.7 | 14.4 | 277 | 110 | 0.14 | 0.14 | gradient 233 from the true value |  |
 | `examplemodels_ms` | examplemodels | 6 | 72036 | 7.19 | 1.01 | 36.4 | 13.3 | 0.05 | 0.05 | gradient 53 from the true value |  |
 | `examplemodels_ode_one_comp_mm` | examplemodels | 4 | 44 |  |  |  |  |  |  | gradient 30, outputs 13 |  |
-| `examplemodels_probit_multi_good` | examplemodels | 2038 | 2064 | 87.8 | 61.1 |  |  | 0.17 | 0.18 | lp 150 from the true value |  |
+| `examplemodels_probit_multi_good` | examplemodels | 2038 | 2064 | 87.8 | 61.1 |  |  | 0.17 | 0.18 | lp 75 |  |
 | `examplemodels_radon_group` | examplemodels | 92 | 92 | 4.99 | 4.33 | 0.09 | 0.08 | 0.15 | 0.14 | 10 |  |
 | `examplemodels_roaches_overdispersion` | examplemodels | 267 | 267 | 3.05 | 3.05 | 0.01 | 0.01 | 0.33 | 0.33 | 10 |  |
 | `examplemodels_ssm` | examplemodels | 28 | 55 | 1.92 | 1.83 | 1.13 | 1.13 | 0.24 | 0.24 | 10 |  |
@@ -627,7 +627,7 @@ table and those files disagree.
 | `rstanarm_polr` | rstanarm | 9 | 113 |  |  |  |  |  |  | 10 | CmdStan rejects point 2, and stanli must too |
 | `multinma_ndmm_mspline` | multinma | 62 | 956 |  |  |  |  |  |  | 10 |  |
 | `multinma_smoking_re` | multinma | 59 | 375 |  |  |  |  |  |  | 10 |  |
-| `epinow2_estimate_infections` | epinow2 | 24 | 352 | 1.4e6 | 1.4e6 | 1.6e6 | 1.6e6 | 5.4e5 | 5.4e5 | gradient 34,141, gradient 8,414 from the true value, outputs 24 |  |
+| `epinow2_estimate_infections` | epinow2 | 24 | 352 | 1.4e6 | 1.4e6 | 1.6e6 | 1.6e6 | 5.4e5 | 5.4e5 | gradient 34,141, outputs 24 |  |
 | `epinow2_estimate_secondary` | epinow2 | 4 | 72 | 105 | 4.27 | 38.3 | 10.9 | 18.0 | 18.0 | lp 10 from the true value, gradient 10 from the true value |  |
 | `mlumr_survival_mspline_relaxed` | mlumr | 32 | 1052 | 1.03 | 0.53 | 0.24 | 0.18 | 3.34 | 3.57 | outputs 128 |  |
 | `mlumr_survival_relaxed` | mlumr | 12 | 925 | 1.52 | 2.23 | 0.69 | 0.69 | 1.71 | 1.70 | outputs 10 from the true value |  |

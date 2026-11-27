@@ -362,8 +362,14 @@ def truth_entry(model, label, entries, h, ref, got):
         return None, "stale reference: CmdStan is %.1f from the true value, the reason says %s" % (dc, c)
     if not agrees(ds, s):
         return None, "stanli moved: it is %.1f from the true value, the reason says %s" % (ds, s)
-    return {"bound": math.ceil(max(d[0] for (p, n), d in dist.items()
-                                   if n in points.get(str(p), {}))),
+    bound = math.ceil(max(d[0] for (p, n), d in dist.items()
+                          if n in points.get(str(p), {})))
+    if bound > entries[label]["bound"]:
+        # A limit on the distance from the true value would then allow more
+        # movement than the limit on the distance from CmdStan does.
+        return None, ("stanli is %d scaled ULP from the true value at some point, more than "
+                      "its bound of %d from CmdStan" % (bound, entries[label]["bound"]))
+    return {"bound": bound,
             "method": "fd" if v.entry_kind(label) == "grad" else "direct",
             "platform": v.native_platform(), "points": points}, None
 
