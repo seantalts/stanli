@@ -101,6 +101,10 @@ struct RegionMapLanePlan {
   int max_dynamic = 0;
   int tile_calls = 0;
   int proven_calls = 0;
+  // DYN_INDEX instructions whose index is the loop variable plus a shared
+  // integer, with dyn_step[pc] = 1 for them.
+  int affine_reads = 0;
+  std::vector<char> dyn_step;
   std::vector<int32_t> reg_slot;
   std::vector<int32_t> seed_regs;
   std::vector<int32_t> cell_slot;
@@ -114,6 +118,15 @@ struct RegionMapLanePlan {
   std::vector<char> trail_reg;
   std::vector<char> adj_skip;
   std::vector<char> adj_sink;
+  // Per adjoint instruction: a DYN_INDEX from shared cells whose adjoint
+  // only clears its output, because no parameter reaches the container
+  // (adj_drop), or adds straight into the container, because no other
+  // instruction logs a site into its cells (adj_direct).
+  // Per live-in: the first of its adjoint cells when they are consecutive,
+  // else -1. The backward then clears, seeds and harvests them as runs.
+  std::vector<int32_t> live_in_cells;
+  std::vector<char> adj_drop;
+  std::vector<char> adj_direct;
   std::vector<int> segment_block;
   int segment_count = 0;
   int64_t mask_cells = 0;
@@ -142,6 +155,7 @@ struct RegionMapProg : IslandProg {
 void plan_region_map_lanes(RegionMapProg& p, bool enabled,
                            int64_t storage_limit);
 
+// Counts of the calling thread.
 uint64_t region_map_lane_runs();
 
 uint64_t region_map_tile_call_runs();

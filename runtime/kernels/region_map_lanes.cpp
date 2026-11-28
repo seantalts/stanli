@@ -9,7 +9,6 @@
 
 #include <algorithm>
 #include <limits>
-#include <atomic>
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
@@ -17,6 +16,7 @@
 #include <cstring>
 #include <map>
 #include <mutex>
+#include <optional>
 #include <memory>
 #include <stdexcept>
 #include <set>
@@ -218,9 +218,11 @@ class Analysis {
     classify_cells();
     find_adjoint_sinks();
     check_ranges();
+    find_direct_indexes();
     assign_register_slots();
     assign_cell_slots();
     decode_operands();
+    find_affine_reads();
     collect_seeds();
     build_windows();
     find_proven_gathers();
@@ -606,6 +608,16 @@ class Analysis {
     plan_.cell_slot.assign((size_t)n_cells_, -1);
     for (int c = 0; c < n_cells_; ++c)
       if (!shared[(size_t)c]) plan_.cell_slot[(size_t)c] = 0;
+    plan_.live_in_cells.assign(p_.ins.size(), -1);
+    for (size_t k = 0; k < p_.ins.size(); ++k) {
+      const auto& li = p_.ins[k];
+      if (li.len <= 0) continue;
+      const int32_t first = map[(size_t)li.reg];
+      bool run = first >= 0;
+      for (int i = 1; i < li.len && run; ++i)
+        run = map[(size_t)(li.reg + i)] == first + i;
+      if (run) plan_.live_in_cells[k] = first;
+    }
     const int32_t target = map[(size_t)p_.out_regs[0]];
     if (target < 0 || target >= n_cells_ || shared_cell(target))
       refuse("target cell is shared");
@@ -884,6 +896,36 @@ class Analysis {
       }
       if (blocks[b].taken >= 0) meet((size_t)blocks[b].taken, defined);
       if (blocks[b].fall >= 0) meet((size_t)blocks[b].fall, defined);
+    }
+  }
+
+  // A DYN_INDEX whose index is the loop variable, or the loop variable
+  // plus or minus a shared register, steps by one from lane to lane.
+  void find_affine_reads() {
+    std::vector<int> writer((size_t)p_.n_regs, -1);
+    for (size_t pc = 0; pc < p_.code.size(); ++pc)
+      each_instr_write(p_.code[pc], [&](int reg, int len) {
+        for (int k = 0; k < len; ++k) writer[(size_t)(reg + k)] = (int)pc;
+      });
+    const auto steps = [&](int r) {
+      if (r == p_.iter_reg) return true;
+      if (r < 0 || r >= p_.n_regs || writes_[(size_t)r] != 1 ||
+          undefined_read_[(size_t)r] || writer[(size_t)r] < 0)
+        return false;
+      const Program::Instr& W = p_.code[(size_t)writer[(size_t)r]];
+      if (W.code == Program::IADD)
+        return (W.a == p_.iter_reg && shared_reg(W.b)) ||
+               (W.b == p_.iter_reg && shared_reg(W.a));
+      if (W.code == Program::ISUB) return W.a == p_.iter_reg && shared_reg(W.b);
+      return false;
+    };
+    plan_.dyn_step.assign(p_.code.size(), 0);
+    for (size_t pc = 0; pc < p_.code.size(); ++pc) {
+      const Program::Instr& I = p_.code[pc];
+      if (I.code != Program::DYN_INDEX || !steps(I.b) || shared_reg(I.b))
+        continue;
+      plan_.dyn_step[pc] = 1;
+      ++plan_.affine_reads;
     }
   }
 
@@ -1209,34 +1251,101 @@ class Analysis {
     w.bwd_size = at;
   }
 
+  static std::vector<int> site_operands(const AdjInstr& A) {
+    switch (A.code) {
+      case Program::MOV:
+      case Program::NEG:
+        STANLI_PROGRAM_UNARY_LIST(STANLI_LANE_UNARY_CASE)
+        return {A.a};
+      case Program::ADD:
+      case Program::SUB:
+      case Program::MUL:
+      case Program::DIV:
+      case Program::POW:
+      case Program::FMAX:
+      case Program::FMIN:
+      case Program::LSE2:
+      case Program::LOG_DIFF_EXP:
+      case Program::LMULTIPLY:
+        return {A.a, A.b};
+      case Program::FMA:
+      case Program::LOG_MIX:
+        return {A.a, A.b, A.c};
+      default:
+        return {};
+    }
+  }
+
+  // The shared cells each adjoint instruction logs sites into, as spans.
+  template <typename F>
+  void each_site_span(size_t pc, F f) const {
+    const AdjInstr& A = p_.adj.code[pc];
+    if (A.code == Program::DYN_INDEX) {
+      if (shared_cell(A.a)) f(A.a, A.len);
+    } else if (A.code == Program::CALL) {
+      const Program::Call& call = p_.calls[(size_t)A.a];
+      for (int k = 0; k < call.n_in; ++k)
+        if ((call.input_adjoint_mask & (1u << k)) &&
+            shared_cell(call.bwd_adj_in[k]))
+          f(call.bwd_adj_in[k], call.in_len[k]);
+    } else {
+      for (int c : site_operands(A))
+        if (c >= 0 && c < n_cells_ && shared_cell(c)) f(c, 1);
+    }
+  }
+
+  // The replay adds a tile's sites lane by lane, descending, and each
+  // lane's sites in the order they were logged. For cells that only one
+  // instruction logs into, that is the order in which the instruction's own
+  // loop over the lanes visits them, so it can add there directly, with the
+  // same result bit for bit. A container that no parameter reaches needs no
+  // adjoint at all: its cells are not upstream of any parameter.
+  void find_direct_indexes() {
+    const size_t n_adj = p_.adj.code.size();
+    plan_.adj_drop.assign(n_adj, 0);
+    plan_.adj_direct.assign(n_adj, 0);
+    const auto& map = p_.adj.adj_reg;
+    std::vector<char> active_cell((size_t)n_cells_, 0);
+    for (size_t k = 0; k + 1 < p_.ins.size(); ++k) {
+      const auto& li = p_.ins[k];
+      if (!li.active) continue;
+      for (int i = 0; i < li.len; ++i)
+        active_cell[(size_t)map[(size_t)(li.reg + i)]] = 1;
+    }
+    for (size_t pc = 0; pc < n_adj; ++pc) {
+      const AdjInstr& A = p_.adj.code[pc];
+      if (A.code != Program::DYN_INDEX || plan_.adj_skip[pc] ||
+          !shared_cell(A.a))
+        continue;
+      bool active = false;
+      for (int k = 0; k < A.len; ++k)
+        active = active || active_cell[(size_t)(A.a + k)];
+      plan_.adj_drop[pc] = !active;
+    }
+    std::vector<int> loggers((size_t)n_cells_, 0);
+    for (size_t pc = 0; pc < n_adj; ++pc) {
+      if (plan_.adj_skip[pc] || plan_.adj_drop[pc]) continue;
+      each_site_span(pc, [&](int base, int len) {
+        for (int k = 0; k < len; ++k) ++loggers[(size_t)(base + k)];
+      });
+    }
+    for (size_t pc = 0; pc < n_adj; ++pc) {
+      const AdjInstr& A = p_.adj.code[pc];
+      if (A.code != Program::DYN_INDEX || plan_.adj_skip[pc] ||
+          plan_.adj_drop[pc] || !shared_cell(A.a))
+        continue;
+      bool alone = true;
+      for (int k = 0; k < A.len; ++k)
+        alone = alone && loggers[(size_t)(A.a + k)] == 1;
+      plan_.adj_direct[pc] = alone;
+    }
+  }
+
   void count_sites() {
-    const auto operands = [&](const AdjInstr& A) -> std::vector<int> {
-      switch (A.code) {
-        case Program::MOV:
-        case Program::NEG:
-          STANLI_PROGRAM_UNARY_LIST(STANLI_LANE_UNARY_CASE)
-          return {A.a};
-        case Program::ADD:
-        case Program::SUB:
-        case Program::MUL:
-        case Program::DIV:
-        case Program::POW:
-        case Program::FMAX:
-        case Program::FMIN:
-        case Program::LSE2:
-        case Program::LOG_DIFF_EXP:
-        case Program::LMULTIPLY:
-          return {A.a, A.b};
-        case Program::FMA:
-        case Program::LOG_MIX:
-          return {A.a, A.b, A.c};
-        default:
-          return {};
-      }
-    };
-    for (const auto& A : p_.adj.code) {
+    for (size_t pc = 0; pc < p_.adj.code.size(); ++pc) {
+      const AdjInstr& A = p_.adj.code[pc];
       if (A.code == Program::DYN_INDEX) {
-        if (shared_cell(A.a)) {
+        if (shared_cell(A.a) && !plan_.adj_drop[pc] && !plan_.adj_direct[pc]) {
           ++plan_.max_sites;
           ++plan_.max_dynamic;
         }
@@ -1254,7 +1363,7 @@ class Analysis {
               shared_cell(call.bwd_adj_in[k]))
             plan_.max_sites += call.in_len[k];
       } else {
-        for (int c : operands(A))
+        for (int c : site_operands(A))
           if (shared_cell(c)) ++plan_.max_sites;
       }
     }
@@ -1277,6 +1386,21 @@ class Analysis {
 
 using Mask = uint64_t;
 constexpr int kTile = kRegionMapTile;
+
+// A buffer of n values on the stack, or on the heap when n is large, so that
+// an evaluation of an ordinary body allocates nothing.
+template <typename T, size_t kStack = 256>
+class SmallBuffer {
+ public:
+  explicit SmallBuffer(size_t n) {
+    if (n > kStack) heap_.resize(n);
+  }
+  T* data() { return heap_.empty() ? local_ : heap_.data(); }
+
+ private:
+  T local_[kStack];
+  std::vector<T> heap_;
+};
 
 class TileState {
  public:
@@ -1393,7 +1517,8 @@ class TileState {
   bool proven_ = false;
 };
 
-std::atomic<uint64_t> tile_call_runs{0};
+// Per thread, so that chains running at once share no counter.
+thread_local uint64_t tile_call_runs = 0;
 
 constexpr int kTileCallColumns = 20;
 
@@ -1477,7 +1602,7 @@ bool tile_call_forward(const RegionMapLanePlan::CallWindow& w,
         dst[lanes.idx[i]] = scratch[(size_t)c * n + i];
     }
   }
-  tile_call_runs.fetch_add(1, std::memory_order_relaxed);
+  ++tile_call_runs;
   return true;
 }
 
@@ -1591,12 +1716,12 @@ void lane_instruction(const RegionMapProg& p, const TileState& t, int pc,
       break;
     case Program::LSE_RANGE: {
       double* const d = t.slot(I.dst);
-      std::vector<double> terms((size_t)I.len);
+      SmallBuffer<double> buffer((size_t)I.len);
+      double* const terms = buffer.data();
       t.each(m, [&](int l) {
-        for (int32_t k = 0; k < I.len; ++k)
-          terms[(size_t)k] = t.value(I.a + k, l);
+        for (int32_t k = 0; k < I.len; ++k) terms[k] = t.value(I.a + k, l);
         d[l] = stan::math::log_sum_exp(
-            Eigen::Map<const Eigen::VectorXd>(terms.data(), I.len));
+            Eigen::Map<const Eigen::VectorXd>(terms, I.len));
       });
       break;
     }
@@ -1624,6 +1749,27 @@ void lane_instruction(const RegionMapProg& p, const TileState& t, int pc,
       double* d = t.slot(I.dst);
       const int first = I.a + I.c;
       const double len = static_cast<double>(I.len);
+      if (p.lanes.dyn_step[(size_t)pc] && m) {
+        // The index steps by one per lane, so the lanes in the mask read
+        // inside the container when the lowest and the highest do.
+        const double* const idx = t.base() + o.b;
+        const int low = __builtin_ctzll(m), high = 63 - __builtin_clzll(m);
+        const double lo = idx[low], hi = idx[high];
+        if (std::isfinite(lo) && std::trunc(lo) == lo && lo >= 1.0 &&
+            std::isfinite(hi) && std::trunc(hi) == hi && hi <= len &&
+            hi - lo == high - low) {
+          const int32_t at = static_cast<int32_t>(lo) - 1 - low;
+          if (o.a >= 0) {
+            const double* base = t.base() + o.a;
+            t.each(m,
+                   [&](int l) { d[l] = base[(size_t)(at + l) * kTile + l]; });
+          } else {
+            const double* base = t.shared_regs() + first + at;
+            t.each(m, [&](int l) { d[l] = base[l]; });
+          }
+          break;
+        }
+      }
       t.with(o.b, I.b, [&](auto idx) {
         const auto pick = [&](auto read) {
           t.each(m, [&](int l) {
@@ -1725,10 +1871,9 @@ void tally_block(const RegionMapProg& p, const RegionMapLanePlan::Block& block,
 
 void lane_tile_forward(const RegionMapProg& p, const TileState& t,
                        double* window, KernelCtx& call_ctx, EvalState* state,
-                       std::vector<Mask>& entry, double* seg_masks,
-                       RegionMapTally* tally) {
+                       Mask* entry, double* seg_masks, RegionMapTally* tally) {
   const auto& blocks = p.lanes.blocks;
-  entry.assign(blocks.size() + 1, 0);
+  std::fill_n(entry, blocks.size() + 1, Mask{0});
   entry[0] = t.full();
   for (size_t b = 0; b < blocks.size(); ++b) {
     const Mask m = entry[b];
@@ -1750,9 +1895,15 @@ void lane_tile_forward(const RegionMapProg& p, const TileState& t,
     } else if (tail.code == Program::JZ) {
       Mask taken = 0;
       t.with(p.lanes.ops[(size_t)last].a, tail.a, [&](auto flag) {
-        t.each(m, [&](int l) {
-          if (flag[l] == 0.0) taken |= Mask{1} << l;
-        });
+        if constexpr (std::is_same_v<decltype(flag), TileState::Shared>) {
+          taken = flag.v == 0.0 ? m : 0;
+        } else {
+          // Every lane of the tile, then the mask: a flag row has a cell
+          // for each lane, and the inactive ones are discarded.
+          for (int l = 0; l < t.lanes(); ++l)
+            taken |= Mask{flag[l] == 0.0} << l;
+          taken &= m;
+        }
       });
       entry[(size_t)block.taken] |= taken;
       entry[(size_t)block.fall] |= m & ~taken;
@@ -1782,6 +1933,7 @@ class AdjointTile {
   bool shared_cell(int c) const { return plan_.cell_slot[(size_t)c] < 0; }
 
   double* cells() const { return cells_; }
+  double* shared() const { return shared_; }
 
   double* cell(int c) const {
     return cells_ + (size_t)plan_.cell_slot[(size_t)c] * kTile;
@@ -1825,7 +1977,43 @@ class AdjointTile {
     return d;
   }
 
+  // Adds every site into its shared cell: lanes descending, each lane's
+  // sites in the order they were logged, which is the scalar map's order.
+  // Sites with a fixed cell only interleave with the other sites of that
+  // cell, so each cell takes its own sequence of additions, in a register.
   void replay() {
+    constexpr int kGrouped = 64;
+    bool fixed = n_sites_ <= kGrouped;
+    for (int s = 0; s < n_sites_ && fixed; ++s) fixed = meta_[2 * s] >= 0.0;
+    if (fixed) {
+      int order[kGrouped];
+      for (int s = 0; s < n_sites_; ++s) {
+        int at = s;
+        while (at > 0 && meta_[2 * order[at - 1]] > meta_[2 * s]) {
+          order[at] = order[at - 1];
+          --at;
+        }
+        order[at] = s;
+      }
+      const int lanes = fwd_.lanes();
+      for (int g = 0; g < n_sites_;) {
+        const double cell = meta_[2 * order[g]];
+        int e = g + 1;
+        while (e < n_sites_ && meta_[2 * order[e]] == cell) ++e;
+        double acc = shared_[(size_t)cell];
+        if (e == g + 1) {
+          const double* row = rows_ + (size_t)order[g] * kTile;
+          for (int l = lanes; l-- > 0;) acc += row[l];
+        } else {
+          for (int l = lanes; l-- > 0;)
+            for (int k = g; k < e; ++k)
+              acc += rows_[(size_t)order[k] * kTile + l];
+        }
+        shared_[(size_t)cell] = acc;
+        g = e;
+      }
+      return;
+    }
     for (int l = fwd_.lanes(); l-- > 0;) {
       for (int s = 0; s < n_sites_; ++s) {
         const double* row = rows_ + (size_t)s * kTile;
@@ -2252,7 +2440,20 @@ void lane_adjoint_instruction(const RegionMapProg& p, AdjointTile& t, int pc,
     }
     case Program::DYN_INDEX: {
       double* const d = cells(o.dst);
+      if (p.lanes.adj_drop[(size_t)pc]) {
+        t.each(m, [&](int l) { d[l] = 0.0; });
+        return;
+      }
       t.with(o.vb, I.vb, [&](auto vb) {
+        if (o.a < 0 && p.lanes.adj_direct[(size_t)pc]) {
+          double* const base = t.shared() + I.a - 1;
+          t.each(m, [&](int l) {
+            const double u = d[l];
+            d[l] = 0.0;
+            base[static_cast<int32_t>(vb[l])] += u;
+          });
+          return;
+        }
         if (o.a < 0) {
           const auto site = t.acc_dynamic();
           t.each(m, [&](int l) {
@@ -2361,7 +2562,7 @@ void lane_adjoint_instruction(const RegionMapProg& p, AdjointTile& t, int pc,
   }
 }
 
-std::atomic<uint64_t> lane_runs{0};
+thread_local uint64_t lane_runs = 0;
 
 void merge_tally(RegionMapProfile& profile, const RegionMapTally& tally) {
   std::lock_guard<std::mutex> lock(profile.mu);
@@ -2493,19 +2694,13 @@ std::string region_map_call_summary(const RegionMapProg& p) {
   return out;
 }
 
-uint64_t region_map_tile_call_runs() {
-  return tile_call_runs.load(std::memory_order_relaxed);
-}
+uint64_t region_map_tile_call_runs() { return tile_call_runs; }
 
-std::atomic<uint64_t> proven_runs{0};
+thread_local uint64_t proven_runs = 0;
 
-uint64_t region_map_proven_runs() {
-  return proven_runs.load(std::memory_order_relaxed);
-}
+uint64_t region_map_proven_runs() { return proven_runs; }
 
-uint64_t region_map_lane_runs() {
-  return lane_runs.load(std::memory_order_relaxed);
-}
+uint64_t region_map_lane_runs() { return lane_runs; }
 
 // Doubles per 64 bytes. The lane region starts on that boundary, so that
 // its rows load the same way whatever the register count before it.
@@ -2554,27 +2749,27 @@ static TileState seeded_tile(const RegionMapProg& p, double* reg, double* base,
 
 void region_map_lanes_forward(const RegionMapProg& p, KernelCtx& ctx,
                               double* region, bool proven) {
-  lane_runs.fetch_add(1, std::memory_order_relaxed);
-  if (proven) proven_runs.fetch_add(1, std::memory_order_relaxed);
+  ++lane_runs;
+  if (proven) ++proven_runs;
   const auto& plan = p.lanes;
   double* tiles = region;
   double* window = region + plan.storage;
   double* reg = ctx.scratch;
   KernelCtx call_ctx;
-  std::vector<Mask> entry;
-  entry.reserve(plan.blocks.size() + 1);
+  SmallBuffer<Mask> entry(plan.blocks.size() + 1);
   double total = 0.0;
   CompensatedSum compensated;
   const int target = p.out_regs[0];
-  RegionMapTally tally;
-  RegionMapTally* counting = plan.profile ? &tally : nullptr;
+  std::optional<RegionMapTally> tally;
+  if (plan.profile) tally.emplace();
+  RegionMapTally* counting = tally ? &*tally : nullptr;
   for (int tile = 0; tile < plan.tiles; ++tile) {
     const int64_t first = (int64_t)tile * kTile;
     const int lanes = (int)std::min<int64_t>(kTile, p.count - first);
     double* base = tile_base(plan, tiles, tile);
     TileState t = seeded_tile(p, reg, base, first, lanes);
     t.set_proven(proven);
-    lane_tile_forward(p, t, window, call_ctx, ctx.eval_state, entry,
+    lane_tile_forward(p, t, window, call_ctx, ctx.eval_state, entry.data(),
                       segment_masks(plan, region, tile), counting);
     const double* out = t.slot(target);
     for (int l = 0; l < lanes; ++l) total += out[l];
@@ -2582,9 +2777,9 @@ void region_map_lanes_forward(const RegionMapProg& p, KernelCtx& ctx,
       for (int l = 0; l < lanes; ++l) compensated.add(out[l]);
   }
   if (counting) {
-    tally.evaluations = 1;
-    tally.tiles = (uint64_t)plan.tiles;
-    merge_tally(*plan.profile, tally);
+    counting->evaluations = 1;
+    counting->tiles = (uint64_t)plan.tiles;
+    merge_tally(*plan.profile, *counting);
   }
   ctx.out.data[0] =
       p.compensated && p.count > kPlainSumMax ? compensated.result() : total;
@@ -2602,11 +2797,11 @@ void region_map_lanes_backward(const RegionMapProg& p, KernelCtx& ctx,
   double* window = region + plan.storage;
   double* log = window + plan.max_window;
   KernelCtx call_ctx;
-  std::vector<Mask> entry;
-  entry.reserve(plan.blocks.size() + 1);
+  SmallBuffer<Mask> entry(plan.blocks.size() + 1);
   const bool verify = p.check_clean;
-  RegionMapTally tally;
-  RegionMapTally* counting = plan.profile ? &tally : nullptr;
+  std::optional<RegionMapTally> tally;
+  if (plan.profile) tally.emplace();
+  RegionMapTally* counting = tally ? &*tally : nullptr;
   struct DirtyOnThrow {
     double* tile;
     int cells;
@@ -2631,7 +2826,7 @@ void region_map_lanes_backward(const RegionMapProg& p, KernelCtx& ctx,
     // The forward of this evaluation checked every selector.
     fwd.set_proven(true);
     if (plan.tile_recompute)
-      lane_tile_forward(p, fwd, window, call_ctx, ctx.eval_state, entry,
+      lane_tile_forward(p, fwd, window, call_ctx, ctx.eval_state, entry.data(),
                         segment_masks(plan, region, tile), counting);
     AdjointTile t(p, fwd, adj_tile, adj, log);
     const auto seed_cell = t.cell(target);
@@ -2683,7 +2878,7 @@ void region_map_lanes_backward(const RegionMapProg& p, KernelCtx& ctx,
     }
   }
   dirty.swept = true;
-  if (counting) merge_tally(*plan.profile, tally);
+  if (counting) merge_tally(*plan.profile, *counting);
 }
 
 void plan_region_map_lanes(RegionMapProg& p, bool enabled,

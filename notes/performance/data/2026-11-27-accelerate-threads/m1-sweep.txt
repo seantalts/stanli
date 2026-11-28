@@ -1,0 +1,1157 @@
+DIFF dsymm_L_L_am1_b1 cholbwd n=74: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=75: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=76: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=77: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=78: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=79: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=80: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=83: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=84: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=85: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=85: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=86: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=86: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=87: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=87: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=88: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=88: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=89: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=89: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=90: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=91: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=92: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=92: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=93: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=94: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=95: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=95: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=96: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=97: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=97: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=98: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=98: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=99: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=100: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=101: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=101: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=101: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=102: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=102: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=102: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=103: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=103: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=104: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=104: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=104: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=105: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=105: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=106: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=106: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=107: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=107: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=107: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=108: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=108: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=109: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=109: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=110: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=110: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=111: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=111: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=112: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=112: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=112: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=113: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=113: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=114: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=114: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=115: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=115: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=116: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=116: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=117: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=117: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=117: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=118: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=118: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=118: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=119: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=119: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=119: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=120: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=120: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=120: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=121: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=121: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=122: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=122: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=123: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=123: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=124: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=124: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=125: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=125: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=126: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=126: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=126: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=127: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=127: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=127: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=127: 3 of 3 calls
+DIFF dpotri_L 132: 3 of 3 calls
+DIFF dpotri_L 133: 3 of 3 calls
+DIFF dpotri_L 134: 3 of 3 calls
+DIFF dpotri_L 135: 3 of 3 calls
+DIFF dpotri_L 136: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=136: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=136: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=136: 3 of 3 calls
+DIFF dpotri_L 137: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=137: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=137: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=137: 3 of 3 calls
+DIFF dpotri_L 138: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=138: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=138: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=138: 3 of 3 calls
+DIFF dpotri_L 139: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=139: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=139: 3 of 3 calls
+DIFF dpotri_L 140: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=140: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=140: 3 of 3 calls
+DIFF dpotri_L 141: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=141: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=141: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=141: 3 of 3 calls
+DIFF dpotri_L 142: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=142: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=142: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=142: 3 of 3 calls
+DIFF dpotri_L 143: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=143: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=143: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=143: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=143: 3 of 3 calls
+DIFF dpotri_L 144: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=144: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=144: 3 of 3 calls
+DIFF dpotri_L 145: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=145: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=145: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=145: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=145: 3 of 3 calls
+DIFF dpotri_L 146: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=146: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=146: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=146: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=146: 3 of 3 calls
+DIFF dpotri_L 147: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=147: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=147: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=147: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=147: 3 of 3 calls
+DIFF dpotri_L 148: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=148: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=148: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=148: 3 of 3 calls
+DIFF dpotri_L 149: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=149: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=149: 3 of 3 calls
+DIFF dpotri_L 150: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=150: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=150: 3 of 3 calls
+DIFF dpotri_L 151: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=151: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=151: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=151: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=152: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=152: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=152: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=153: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=153: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=153: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=154: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=154: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=154: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=154: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=155: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=155: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=155: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=156: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=156: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=157: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=157: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=157: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=158: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=158: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=158: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=159: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=159: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=159: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=159: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=160: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=160: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=161: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=161: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=161: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=161: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=162: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=162: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=162: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=163: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=163: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=163: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=164: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=164: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=164: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=165: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=165: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=165: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=165: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=165: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=166: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=166: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=166: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=166: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=167: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=167: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=167: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=168: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=168: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=168: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=168: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=169: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=169: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=169: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=170: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=170: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=170: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=170: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=171: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=171: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=171: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=172: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=172: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=172: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=173: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=173: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=173: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=173: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=174: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=174: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=174: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=174: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=175: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=175: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=175: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=175: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=176: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=176: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=177: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=177: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=177: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=177: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=178: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=178: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=178: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=178: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=179: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=179: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=179: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=179: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=179: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=180: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=180: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=180: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=180: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=180: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=181: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=181: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=181: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=181: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=182: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=182: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=182: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=182: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=183: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=183: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=183: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=183: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=184: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=184: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=184: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=184: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=184: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=185: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=185: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=185: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=185: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=185: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=186: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=186: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=186: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=186: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=187: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=187: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=188: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=188: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=189: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=189: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=190: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=190: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=190: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=191: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=191: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=191: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=191: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=200: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=200: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=200: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=200: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=200: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=201: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=201: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=201: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=201: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=201: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=202: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=202: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=202: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=202: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=202: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=203: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=203: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=203: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=203: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=204: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=204: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=205: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=206: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=206: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=207: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=207: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=207: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=208: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=208: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=208: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=209: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=209: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=209: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=210: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=210: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=211: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=211: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=211: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=211: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=212: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=212: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=212: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=212: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=213: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=213: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=213: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=213: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=213: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=214: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=214: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=214: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=214: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=214: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=215: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=215: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=215: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=215: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=215: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=216: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=216: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=216: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=216: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=217: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=217: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=217: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=217: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=218: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=218: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=218: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=218: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=219: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=219: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=219: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=219: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=220: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=220: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=220: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=220: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=221: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=221: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=221: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=221: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=222: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=222: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=222: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=223: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=223: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=223: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=224: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=224: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=224: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=224: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=225: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=225: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=225: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=225: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=225: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=226: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=226: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=226: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=226: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=227: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=227: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=227: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=228: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=228: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=228: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=229: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=229: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=229: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=229: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=229: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=230: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=230: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=230: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=231: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=231: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=231: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=232: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=232: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=232: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=233: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=233: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=233: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=234: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=234: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=234: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=234: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=235: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=235: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=235: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=235: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=236: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=236: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=236: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=237: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=237: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=237: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=237: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=238: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=238: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=238: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=238: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=239: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=239: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=239: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=239: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=239: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=239: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=240: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=240: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=240: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=241: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=241: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=241: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=241: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=241: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=242: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=242: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=242: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=242: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=242: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=243: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=243: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=243: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=243: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=243: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=244: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=244: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=244: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=245: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=245: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=245: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=246: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=246: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=246: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=247: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=247: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=247: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=247: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=247: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=247: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=248: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=248: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=248: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=248: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=249: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=249: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=249: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=249: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=250: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=250: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=250: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=250: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=251: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=251: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=251: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=251: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=251: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=252: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=252: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=252: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=252: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=252: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=253: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=253: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=253: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=253: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=253: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=254: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=254: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=254: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=254: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=255: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=255: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=255: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=255: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=255: 3 of 3 calls
+DIFF dpotri_L 259: 3 of 3 calls
+DIFF dpotri_L 260: 3 of 3 calls
+DIFF dpotri_L 261: 3 of 3 calls
+DIFF dpotri_L 262: 3 of 3 calls
+DIFF dpotri_L 263: 3 of 3 calls
+DIFF dpotri_L 264: 3 of 3 calls
+DIFF dpotri_L 265: 3 of 3 calls
+DIFF dpotri_L 266: 3 of 3 calls
+DIFF dpotri_L 267: 3 of 3 calls
+DIFF dpotri_L 268: 3 of 3 calls
+DIFF dpotri_L 269: 3 of 3 calls
+DIFF dpotri_L 270: 3 of 3 calls
+DIFF dpotri_L 271: 3 of 3 calls
+DIFF dpotri_L 272: 3 of 3 calls
+DIFF dpotri_L 273: 3 of 3 calls
+DIFF dpotri_L 274: 3 of 3 calls
+DIFF dpotri_L 275: 3 of 3 calls
+DIFF dpotri_L 276: 3 of 3 calls
+DIFF dpotri_L 277: 3 of 3 calls
+DIFF dpotri_L 278: 3 of 3 calls
+DIFF dpotri_L 279: 3 of 3 calls
+DIFF dpotri_L 324: 3 of 3 calls
+DIFF dpotri_L 325: 3 of 3 calls
+DIFF dpotri_L 326: 3 of 3 calls
+DIFF dpotri_L 327: 3 of 3 calls
+DIFF dpotri_L 328: 3 of 3 calls
+DIFF dpotri_L 329: 3 of 3 calls
+DIFF dpotri_L 330: 3 of 3 calls
+DIFF dpotri_L 331: 3 of 3 calls
+DIFF dpotri_L 332: 3 of 3 calls
+DIFF dpotri_L 333: 3 of 3 calls
+DIFF dpotri_L 334: 3 of 3 calls
+DIFF dpotri_L 335: 3 of 3 calls
+DIFF dpotri_L 336: 3 of 3 calls
+DIFF dpotri_L 337: 3 of 3 calls
+DIFF dpotri_L 338: 3 of 3 calls
+DIFF dpotri_L 339: 3 of 3 calls
+DIFF dpotri_L 340: 3 of 3 calls
+DIFF dpotri_L 341: 3 of 3 calls
+DIFF dpotri_L 342: 3 of 3 calls
+DIFF dpotri_L 343: 3 of 3 calls
+DIFF dpotri_L 452: 3 of 3 calls
+DIFF dpotri_L 453: 3 of 3 calls
+DIFF dpotri_L 454: 3 of 3 calls
+DIFF dpotri_L 455: 3 of 3 calls
+DIFF dpotri_L 456: 3 of 3 calls
+DIFF dpotri_L 457: 3 of 3 calls
+DIFF dpotri_L 458: 3 of 3 calls
+DIFF dpotri_L 459: 3 of 3 calls
+DIFF dpotri_L 460: 3 of 3 calls
+DIFF dpotri_L 461: 3 of 3 calls
+DIFF dpotri_L 462: 3 of 3 calls
+DIFF dpotri_L 463: 3 of 3 calls
+DIFF dpotri_L 464: 3 of 3 calls
+DIFF dpotri_L 465: 3 of 3 calls
+DIFF dpotri_L 466: 3 of 3 calls
+DIFF dpotri_L 467: 3 of 3 calls
+DIFF dpotri_L 468: 3 of 3 calls
+DIFF dpotri_L 469: 3 of 3 calls
+DIFF dpotri_L 470: 3 of 3 calls
+DIFF dpotri_L 471: 3 of 3 calls
+DIFF dpotri_L 514: 3 of 3 calls
+DIFF dpotri_L 516: 3 of 3 calls
+DIFF dpotri_L 517: 3 of 3 calls
+DIFF dpotri_L 518: 3 of 3 calls
+DIFF dpotri_L 519: 3 of 3 calls
+DIFF dpotri_L 520: 3 of 3 calls
+DIFF dpotri_L 521: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=521: 3 of 3 calls
+DIFF dpotri_L 522: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=522: 3 of 3 calls
+DIFF dpotri_L 523: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=523: 3 of 3 calls
+DIFF dpotri_L 524: 3 of 3 calls
+DIFF dpotri_L 525: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=525: 3 of 3 calls
+DIFF dpotri_L 526: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=526: 3 of 3 calls
+DIFF dpotri_L 527: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=527: 3 of 3 calls
+DIFF dpotri_L 528: 3 of 3 calls
+DIFF dpotri_L 529: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=529: 3 of 3 calls
+DIFF dpotri_L 530: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=530: 3 of 3 calls
+DIFF dpotri_L 531: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=531: 3 of 3 calls
+DIFF dpotri_L 532: 3 of 3 calls
+DIFF dpotri_L 533: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=533: 3 of 3 calls
+DIFF dpotri_L 534: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=534: 3 of 3 calls
+DIFF dpotri_L 535: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=535: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=537: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=538: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=539: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=541: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=542: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=543: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=545: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=546: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=547: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=549: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=550: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=551: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=553: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=554: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=555: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=557: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=558: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=559: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=561: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=562: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=563: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=565: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=566: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=567: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=569: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=570: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=571: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=573: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=574: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=575: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=577: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=578: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=579: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=581: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=582: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=583: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=585: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=586: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=587: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=589: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=590: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=591: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=593: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=594: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=595: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=597: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=598: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=599: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=601: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=602: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=603: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=605: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=606: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=607: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=609: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=610: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=611: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=613: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=614: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=615: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=617: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=618: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=619: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=621: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=622: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=623: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=625: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=626: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=627: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=629: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=630: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=631: 3 of 3 calls
+DIFF dpotri_L 644: 3 of 3 calls
+DIFF dpotri_L 645: 3 of 3 calls
+DIFF dpotri_L 646: 3 of 3 calls
+DIFF dpotri_L 647: 3 of 3 calls
+DIFF dpotri_L 648: 3 of 3 calls
+DIFF dpotri_L 649: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=649: 3 of 3 calls
+DIFF dpotri_L 650: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=650: 3 of 3 calls
+DIFF dpotri_L 651: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=651: 3 of 3 calls
+DIFF dpotri_L 652: 3 of 3 calls
+DIFF dpotri_L 653: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=653: 3 of 3 calls
+DIFF dpotri_L 654: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=654: 3 of 3 calls
+DIFF dpotri_L 655: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=655: 3 of 3 calls
+DIFF dpotri_L 656: 3 of 3 calls
+DIFF dpotri_L 657: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=657: 3 of 3 calls
+DIFF dpotri_L 658: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=658: 3 of 3 calls
+DIFF dpotri_L 659: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=659: 3 of 3 calls
+DIFF dpotri_L 660: 3 of 3 calls
+DIFF dpotri_L 661: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=661: 3 of 3 calls
+DIFF dpotri_L 662: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=662: 3 of 3 calls
+DIFF dpotri_L 663: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=663: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=665: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=666: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=667: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=669: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=670: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=671: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=673: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=674: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=675: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=677: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=678: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=679: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=681: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=682: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=683: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=685: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=686: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=687: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=689: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=690: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=691: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=693: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=694: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=695: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=697: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=698: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=699: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=701: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=702: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=703: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=705: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=706: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=707: 3 of 3 calls
+DIFF dpotri_L 708: 3 of 3 calls
+DIFF dpotri_L 709: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=709: 3 of 3 calls
+DIFF dpotri_L 710: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=710: 3 of 3 calls
+DIFF dpotri_L 711: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=711: 3 of 3 calls
+DIFF dpotri_L 712: 3 of 3 calls
+DIFF dpotri_L 713: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=713: 3 of 3 calls
+DIFF dpotri_L 714: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=714: 3 of 3 calls
+DIFF dpotri_L 715: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=715: 3 of 3 calls
+DIFF dpotri_L 716: 3 of 3 calls
+DIFF dpotri_L 717: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=717: 3 of 3 calls
+DIFF dpotri_L 718: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=718: 3 of 3 calls
+DIFF dpotri_L 719: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=719: 3 of 3 calls
+DIFF dpotri_L 720: 3 of 3 calls
+DIFF dpotri_L 721: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=721: 3 of 3 calls
+DIFF dpotri_L 722: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=722: 3 of 3 calls
+DIFF dpotri_L 723: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=723: 3 of 3 calls
+DIFF dpotri_L 724: 3 of 3 calls
+DIFF dpotri_L 725: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=725: 3 of 3 calls
+DIFF dpotri_L 726: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=726: 3 of 3 calls
+DIFF dpotri_L 727: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=727: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=729: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=730: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=731: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=733: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=734: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=735: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=737: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=738: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=739: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=741: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=742: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=743: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=745: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=746: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=747: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=749: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=750: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=751: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=753: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=754: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=755: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=757: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=758: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=759: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=777: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=778: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=779: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=781: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=782: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=783: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=785: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=786: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=787: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=789: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=790: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=791: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=793: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=794: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=795: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=797: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=798: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=799: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=801: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=802: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=803: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=805: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=806: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=807: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=809: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=810: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=811: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=813: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=814: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=815: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=817: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=818: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=819: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=821: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=822: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=823: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=825: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=826: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=827: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=829: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=830: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=831: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=833: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=834: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=835: 3 of 3 calls
+DIFF dpotri_L 836: 3 of 3 calls
+DIFF dpotri_L 837: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=837: 3 of 3 calls
+DIFF dpotri_L 838: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=838: 3 of 3 calls
+DIFF dpotri_L 839: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=839: 3 of 3 calls
+DIFF dpotri_L 840: 3 of 3 calls
+DIFF dpotri_L 841: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=841: 3 of 3 calls
+DIFF dpotri_L 842: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=842: 3 of 3 calls
+DIFF dpotri_L 843: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=843: 3 of 3 calls
+DIFF dpotri_L 844: 3 of 3 calls
+DIFF dpotri_L 845: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=845: 3 of 3 calls
+DIFF dpotri_L 846: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=846: 3 of 3 calls
+DIFF dpotri_L 847: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=847: 3 of 3 calls
+DIFF dpotri_L 848: 3 of 3 calls
+DIFF dpotri_L 849: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=849: 3 of 3 calls
+DIFF dpotri_L 850: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=850: 3 of 3 calls
+DIFF dpotri_L 851: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=851: 3 of 3 calls
+DIFF dpotri_L 852: 3 of 3 calls
+DIFF dpotri_L 853: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=853: 3 of 3 calls
+DIFF dpotri_L 854: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=854: 3 of 3 calls
+DIFF dpotri_L 855: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=855: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=857: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=858: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=859: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=861: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=862: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=863: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=865: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=866: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=867: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=869: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=870: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=871: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=873: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=874: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=875: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=877: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=878: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=879: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=881: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=882: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=883: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=885: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=886: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=887: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=889: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=890: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=891: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=893: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=894: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=895: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=897: 3 of 3 calls
+DIFF dpotri_L 898: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=898: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=899: 3 of 3 calls
+DIFF dpotri_L 900: 3 of 3 calls
+DIFF dpotri_L 901: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=901: 3 of 3 calls
+DIFF dpotri_L 902: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=902: 3 of 3 calls
+DIFF dpotri_L 903: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=903: 3 of 3 calls
+DIFF dpotri_L 904: 3 of 3 calls
+DIFF dpotri_L 905: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=905: 3 of 3 calls
+DIFF dpotri_L 906: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=906: 3 of 3 calls
+DIFF dpotri_L 907: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=907: 3 of 3 calls
+DIFF dpotri_L 908: 3 of 3 calls
+DIFF dpotri_L 909: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=909: 3 of 3 calls
+DIFF dpotri_L 910: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=910: 3 of 3 calls
+DIFF dpotri_L 911: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=911: 3 of 3 calls
+DIFF dpotri_L 912: 3 of 3 calls
+DIFF dpotri_L 913: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=913: 3 of 3 calls
+DIFF dpotri_L 914: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=914: 3 of 3 calls
+DIFF dpotri_L 915: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=915: 3 of 3 calls
+DIFF dpotri_L 916: 3 of 3 calls
+DIFF dpotri_L 917: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=917: 3 of 3 calls
+DIFF dpotri_L 918: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=918: 3 of 3 calls
+DIFF dpotri_L 919: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=919: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=921: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=922: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=923: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=925: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=926: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=927: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=929: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=930: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=931: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=933: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=934: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=935: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=937: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=938: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=939: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=941: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=942: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=943: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=969: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=970: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=971: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=973: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=974: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=975: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=977: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=978: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=979: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=981: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=982: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=983: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=985: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=986: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=987: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=989: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=990: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=991: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=993: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=994: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=995: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=997: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=998: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=999: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=1001: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=1002: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=1003: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=1005: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=1006: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=1007: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=1009: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=1010: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=1011: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=1013: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=1014: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=1015: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=1017: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=1018: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=1019: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=1021: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=1022: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=1023: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=1025: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=1026: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=1027: 3 of 3 calls
+DIFF dpotri_L 1028: 3 of 3 calls
+DIFF dpotri_L 1029: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=1029: 3 of 3 calls
+DIFF dpotri_L 1030: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=1030: 3 of 3 calls
+DIFF dpotri_L 1031: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=1031: 3 of 3 calls
+DIFF dpotri_L 1032: 3 of 3 calls
+DIFF dpotri_L 1033: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=1033: 3 of 3 calls
+DIFF dpotri_L 1034: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=1034: 3 of 3 calls
+DIFF dpotri_L 1035: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=1035: 3 of 3 calls
+DIFF dpotri_L 1036: 3 of 3 calls
+DIFF dpotri_L 1037: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=1037: 3 of 3 calls
+DIFF dpotri_L 1038: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=1038: 3 of 3 calls
+DIFF dpotri_L 1039: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=1039: 3 of 3 calls
+DIFF dpotri_L 1040: 3 of 3 calls
+DIFF dpotri_L 1041: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=1041: 3 of 3 calls
+DIFF dpotri_L 1042: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=1042: 3 of 3 calls
+DIFF dpotri_L 1043: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=1043: 3 of 3 calls
+DIFF dpotri_L 1044: 3 of 3 calls
+DIFF dpotri_L 1045: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=1045: 3 of 3 calls
+DIFF dpotri_L 1046: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=1046: 3 of 3 calls
+DIFF dpotri_L 1047: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=1047: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=1049: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=1050: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=1051: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=1053: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=1054: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=1055: 3 of 3 calls
+DIFF dpotri_L 1092: 3 of 3 calls
+DIFF dpotri_L 1093: 3 of 3 calls
+DIFF dpotri_L 1094: 3 of 3 calls
+DIFF dpotri_L 1095: 3 of 3 calls
+DIFF dpotri_L 1096: 3 of 3 calls
+DIFF dpotri_L 1097: 3 of 3 calls
+DIFF dpotri_L 1098: 3 of 3 calls
+DIFF dpotri_L 1099: 3 of 3 calls
+DIFF dpotri_L 1100: 3 of 3 calls
+DIFF dpotri_L 1101: 3 of 3 calls
+DIFF dpotri_L 1102: 3 of 3 calls
+DIFF dpotri_L 1103: 3 of 3 calls
+DIFF dpotri_L 1104: 3 of 3 calls
+DIFF dpotri_L 1105: 3 of 3 calls
+DIFF dpotri_L 1106: 3 of 3 calls
+DIFF dpotri_L 1107: 3 of 3 calls
+DIFF dpotri_L 1108: 3 of 3 calls
+DIFF dpotri_L 1109: 3 of 3 calls
+DIFF dpotri_L 1110: 3 of 3 calls
+DIFF dpotri_L 1111: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=1153: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=1154: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=1155: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=1157: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=1158: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=1159: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=1161: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=1162: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=1163: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=1165: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=1166: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=1167: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=1169: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=1170: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=1171: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=1173: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=1174: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=1175: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=1177: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=1178: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=1179: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=1181: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=1182: 3 of 3 calls
+DIFF dsymm_L_L_am1_b1 cholbwd n=1183: 3 of 3 calls
+DIFF dpotri_L 1232: 3 of 3 calls
+DIFF dpotri_L 1296: 3 of 3 calls
+DIFF dpotri_L 1424: 3 of 3 calls
+DIFF dpotri_L 1488: 3 of 3 calls
+DIFF dpotri_L 1616: 3 of 3 calls
+DIFF dpotri_L 1680: 3 of 3 calls
+DIFF dpotri_L 1808: 3 of 3 calls
+DIFF dpotri_L 1872: 3 of 3 calls
+DIFF dpotri_L 2000: 3 of 3 calls
+dpotrf_L                                         calls 7428   differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 1.00 one/threaded 1.00
+dpotri_L                                         calls 3762   differ 696    norm 3.866e-17 elt 1.290e-14 rounding  unlike_first_threaded 0     cpu/wall 1.00 one/threaded 1.01
+dgemv_N_a1_b0                                    calls 4002   differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 1.00 one/threaded 3.88
+dtrtri_L                                         calls 3666   differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 2.57 one/threaded 1.36
+dtrmv_N                                          calls 3666   differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 1.00 one/threaded 1.66
+dtrmv_T                                          calls 3666   differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 1.00 one/threaded 1.00
+dtrmm_L_L_T                                      calls 34926  differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 1.02 one/threaded 1.34
+dtrsm_L_L_T                                      calls 34926  differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 0.99 one/threaded 1.09
+dtrsm_R_L_N                                      calls 66186  differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 1.00 one/threaded 1.25
+dsymm_L_L_am1_b1                                 calls 31260  differ 2667   norm 1.214e-15 elt 6.255e-13 rounding  unlike_first_threaded 0     cpu/wall 1.00 one/threaded 1.22
+dgemm_NN_am1_b1                                  calls 27594  differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 1.00 one/threaded 1.19
+dgemm_TN_am1_b1                                  calls 58854  differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 1.00 one/threaded 1.23
+dgemm_NN_a1_b0                                   calls 6213   differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 1.00 one/threaded 1.02
+dgemm_NT_a1_b1                                   calls 6213   differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 1.00 one/threaded 1.06
+dgemm_TN_a1_b1                                   calls 6213   differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 1.00 one/threaded 1.03
+dgemv_T_a1_b1                                    calls 162    differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 1.01 one/threaded 1.04
+dgemv_T_a1_b0                                    calls 78     differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 1.01 one/threaded 0.99
+per routine
+TOTAL dgemm_NN_a1_b0                             calls 6213   differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 1.00 one/threaded 1.02
+TOTAL dgemm_NN_am1_b1                            calls 27594  differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 1.00 one/threaded 1.19
+TOTAL dgemm_NT_a1_b1                             calls 6213   differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 1.00 one/threaded 1.06
+TOTAL dgemm_TN_a1_b1                             calls 6213   differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 1.00 one/threaded 1.03
+TOTAL dgemm_TN_am1_b1                            calls 58854  differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 1.00 one/threaded 1.23
+TOTAL dgemv_N_a1_b0                              calls 4002   differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 1.00 one/threaded 3.88
+TOTAL dgemv_T_a1_b0                              calls 78     differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 1.01 one/threaded 0.99
+TOTAL dgemv_T_a1_b1                              calls 162    differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 1.01 one/threaded 1.04
+TOTAL dpotrf_L                                   calls 7428   differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 1.00 one/threaded 1.00
+TOTAL dpotri_L                                   calls 3762   differ 696    norm 3.866e-17 elt 1.290e-14 rounding  unlike_first_threaded 0     cpu/wall 1.00 one/threaded 1.01
+TOTAL dsymm_L_L_am1_b1                           calls 31260  differ 2667   norm 1.214e-15 elt 6.255e-13 rounding  unlike_first_threaded 0     cpu/wall 1.00 one/threaded 1.22
+TOTAL dtrmm_L_L_T                                calls 34926  differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 1.02 one/threaded 1.34
+TOTAL dtrmv_N                                    calls 3666   differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 1.00 one/threaded 1.66
+TOTAL dtrmv_T                                    calls 3666   differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 1.00 one/threaded 1.00
+TOTAL dtrsm_L_L_T                                calls 34926  differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 0.99 one/threaded 1.09
+TOTAL dtrsm_R_L_N                                calls 66186  differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 1.00 one/threaded 1.25
+TOTAL dtrtri_L                                   calls 3666   differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 2.57 one/threaded 1.36
+exit 0

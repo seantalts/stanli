@@ -926,18 +926,44 @@ prints a notice, then is ignored, in an OFF build.
 On macOS, `STANLI_ACCELERATE` (on by default on Apple silicon, off by
 default on Intel Macs, unavailable on other systems) links Apple's
 Accelerate framework. A pass at the end of lowering gives a
-matrix product, a matrix-vector product with data, a Cholesky factor or a
-`multi_normal_cholesky` with data `y` and `mu` an accelerated opcode when the
-op is at least as large as that operation's threshold; the kernel then calls
-BLAS or LAPACK. Every smaller op runs the same code as a build with
+matrix product, a matrix-vector product with data, a Cholesky factor, a
+`multi_normal_cholesky` with data `y` and `mu`, a `multi_normal` of one
+vector with an active covariance, or a `normal_id_glm` with data `y` and `X`
+and an active `beta` an accelerated opcode when the op is at least as large
+as that operation's threshold; the kernel then calls BLAS or LAPACK. Every smaller op runs the same code as a build with
 `-DSTANLI_ACCELERATE=OFF`, and so do Linux, Windows and the browser builds.
 The thresholds and the sweep behind them are in
 [`notes/performance/2026-11-26-accelerate-thresholds.md`](../notes/performance/2026-11-26-accelerate-thresholds.md).
-Chains that run in parallel limit their BLAS calls to one thread when twice
-the number of chains exceeds the performance cores. On macOS 11 to 14, which
-lack `BLASSetThreading`, nothing is limited. In a build with developer
+Every accelerated BLAS or LAPACK call runs on the calling thread alone
+(`BLASSetThreading`, macOS 15 or later), and the thread's previous setting
+is restored afterwards, so results are the same in every run. The model
+option `parallel_blas` (C API `stanli_model_opts`, Python `Model`, R
+`stanli_model()`) lets a model's accelerated calls use Accelerate's own
+threads while the chains that run in parallel leave cores free: twice the
+number of parallel chains at most the number of performance cores, with a
+single gradient outside a sampler counted as one chain. `dpotri` comes
+from Accelerate's newer LAPACK interface (`dpotri$NEWLAPACK`, a weak import,
+since it exists only from macOS 13.3); the other routines keep their legacy
+names. With Accelerate's threads, the legacy `dpotri_` (through `dlauum`)
+sometimes returns a wrong inverse: 265 of 192,000 calls at n = 151 on macOS
+26.6, and 1 in 18 to 1 in 45 at n = 512. The newer one gave the right
+inverse in all 192,000 calls at n = 151 and in all 100,000 at n = 64 to
+2048 (`tests/test_blas_determinism.cpp`).
+`tools/stress_blas_threads.cpp` (`make stress_blas_threads`) makes the calls
+that the kernels make, with the same arguments, at many shapes from the
+thresholds to n = 4096 with threads on (`--kernel-shapes`, `--sweep`,
+`--tri-range`), and compares each result with the single-threaded one. With threads, `dgemm`,
+`dsymm`, `dpotrf` and `dpotri` gave other bits for some shapes, at
+rounding level ([the thresholds note](../notes/performance/2026-11-26-accelerate-thresholds.md#threads)),
+so with `parallel_blas` on, results can differ by rounding from those with
+it off, and with the number of chains that run in parallel. The
+lowered program carries the option, and the program dump names it. On macOS
+11 to 14, which lack `BLASSetThreading`, the selection pass keeps every op
+on the plain kernels (`kAccelerateWithoutThreadControl` in
+`runtime/include/stanli/dense_blas.hpp`), so those systems get no speedup
+and the results of a build without the option. In a build with developer
 switches, `STANLI_NO_ACCELERATE` keeps every op on the plain kernels and
-`STANLI_PERFORMANCE_CORES` sets the core count that the rule uses.
+`STANLI_PERFORMANCE_CORES` sets the core count that `parallel_blas` uses.
 
 For sampler changes, use
 [`tools/sampler_trace.py`](../tools/sampler_trace.py). For

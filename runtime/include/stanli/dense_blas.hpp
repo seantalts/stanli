@@ -19,50 +19,93 @@ struct Slot;
 // "accelerate" in a STANLI_ACCELERATE build, "none" otherwise.
 const char* blas_provider();
 
-// Math threads only when cores are free. Accelerate spreads a large product
-// or factorization over threads of its own; with chains already running one
-// per core that oversubscribes the machine. Chains that run in parallel limit
-// their BLAS calls to one thread each when
-//   parallel_chains * 2 > performance cores,
-// and otherwise leave Accelerate to choose. The limit needs BLASSetThreading
-// (macOS 15, a per-thread setting); without it, and in builds without
-// Accelerate, nothing is limited.
-struct BlasThreadPlan {
-  bool cores_full = false;  // the chains would fill the performance cores
-  bool limited = false;     // and the limit can be applied
-};
-BlasThreadPlan plan_blas_threads(int parallel_chains, int performance_cores,
-                                 bool thread_control_available);
-// hw.perflevel0.physicalcpu on Apple, else std::thread's
-// hardware_concurrency; the developer switch STANLI_PERFORMANCE_CORES
-// replaces it for tests.
-int performance_cores();
 // Whether this system has BLASSetThreading (macOS 15 or later).
 bool blas_thread_control_available();
 
-// Applies plan_blas_threads for the calling thread while it lives: limits its
-// BLAS calls to one thread when the chains fill the cores, then restores the
-// thread's previous setting.
-class ChainBlasThreads {
+// Whether the accelerated kernels run on a system without
+// BLASSetThreading (macOS 11 to 14). There Accelerate would choose its own
+// threads for every call, and a large factorization can give different
+// results from one run to the next on a busy machine, so the selection pass
+// keeps every op on the plain kernels: no speedup, and the results of a
+// build without the option. It also keeps the library from calling
+// dpotri$NEWLAPACK, a weak import that macOS 11 to 13.2 lack.
+inline constexpr bool kAccelerateWithoutThreadControl = false;
+inline bool accelerated_kernels_enabled(bool thread_control_available) {
+  return thread_control_available || kAccelerateWithoutThreadControl;
+}
+
+// Accelerate's own threads for one accelerated call: only in a program
+// lowered with parallel_blas, and only while the chains that run in
+// parallel leave cores free, parallel_chains * 2 <= performance_cores.
+// Otherwise the call runs on the calling thread alone, and its result is the
+// same in every run.
+bool blas_may_thread(bool parallel_blas, int parallel_chains,
+                     int performance_cores);
+// hw.perflevel0.physicalcpu on Apple, else std::thread's
+// hardware_concurrency, read once. The developer switch
+// STANLI_PERFORMANCE_CORES replaces it for tests.
+int performance_cores();
+
+// While it lives, the evaluation on this thread belongs to a program
+// lowered with (or without) parallel_blas. Executor sets it around each
+// forward and reverse sweep of a graph that holds an accelerated op; nested
+// scopes restore the outer value.
+class ParallelBlasScope {
+ public:
+  explicit ParallelBlasScope(bool parallel_blas);
+  ~ParallelBlasScope();
+  ParallelBlasScope(const ParallelBlasScope&) = delete;
+  ParallelBlasScope& operator=(const ParallelBlasScope&) = delete;
+
+ private:
+  bool previous_;
+};
+
+// While it lives, this thread is one of `chains` that run in parallel. A
+// thread outside a chain pool counts as one chain alone.
+class ParallelChainsScope {
  public:
   // For threads that cannot tell how many others run beside them, such as a
-  // reduce_sum team inside a chain: limit whenever the limit is available.
+  // reduce_sum team inside a chain: never Accelerate's threads.
   static constexpr int kUnknownParallelism = 1 << 20;
-  explicit ChainBlasThreads(int parallel_chains);
-  ~ChainBlasThreads();
-  ChainBlasThreads(const ChainBlasThreads&) = delete;
-  ChainBlasThreads& operator=(const ChainBlasThreads&) = delete;
+  explicit ParallelChainsScope(int chains);
+  ~ParallelChainsScope();
+  ParallelChainsScope(const ParallelChainsScope&) = delete;
+  ParallelChainsScope& operator=(const ParallelChainsScope&) = delete;
+
+ private:
+  int previous_;
+};
+
+// Sets the calling thread's BLASSetThreading mode for one accelerated call,
+// by blas_may_thread, then restores the thread's previous setting, so that a
+// host such as numpy on the same thread keeps its own. Every accelerated
+// BLAS and LAPACK call runs inside one. Needs BLASSetThreading; elsewhere
+// it does nothing.
+class BlasCallThreads {
+ public:
+  BlasCallThreads();
+  ~BlasCallThreads();
+  BlasCallThreads(const BlasCallThreads&) = delete;
+  BlasCallThreads& operator=(const BlasCallThreads&) = delete;
+
+  // Number of calls since the process started for which a BlasCallThreads
+  // asked for the multi-threaded mode, for tests.
+  static uint64_t threaded_count();
 
  private:
   unsigned saved_ = 0;
-  bool active_ = false;
+  bool restore_ = false;
 };
 
 // Gives each op of the graph whose sizes are at or above its operation's
 // threshold the accelerated opcode. Does nothing in a build without
-// STANLI_ACCELERATE, or when the developer switch STANLI_NO_ACCELERATE is
-// set. Returns the number of ops it changed.
+// STANLI_ACCELERATE, when the developer switch STANLI_NO_ACCELERATE is set,
+// or when accelerated_kernels_enabled says no. Returns the number of ops it
+// changed.
 int accelerate_dense_ops(Graph& g);
+// The same with the availability of BLASSetThreading given, for tests.
+int accelerate_dense_ops(Graph& g, bool thread_control_available);
 
 #ifdef STANLI_ACCELERATE
 namespace blas {
@@ -77,6 +120,9 @@ struct Thresholds {
   int64_t gemv_tall_min_rows, gemv_tall_min_cols;
   int64_t cholesky_min_n;     // factor and adjoint
   int64_t tri_inverse_min_n;  // multi_normal_cholesky's inverse of L
+  int64_t mn_cov_min_n;       // multi_normal's covariance
+  // normal_id_glm's design matrix: at least these rows and columns.
+  int64_t glm_min_rows, glm_min_cols;
 };
 const Thresholds& thresholds();
 
@@ -96,6 +142,9 @@ void gemv(bool trans, int64_t m, int64_t n, double alpha, const double* a,
           int64_t lda, const double* x, double beta, double* y);
 // Lower Cholesky factor in place; returns LAPACK's info.
 int potrf_lower(int64_t n, double* a, int64_t lda);
+// Inverse of a symmetric positive definite matrix from its lower Cholesky
+// factor, in place, lower triangle only; returns LAPACK's info.
+int potri_lower(int64_t n, double* a, int64_t lda);
 // Inverse of a lower triangular matrix in place; returns LAPACK's info.
 int trtri_lower(int64_t n, double* a, int64_t lda);
 // B = alpha * op(L)^-1 * B (left) or alpha * B * op(L)^-1 (right), L lower.

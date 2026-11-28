@@ -38,7 +38,7 @@ _BIN = pathlib.Path(__file__).parent / "_bin"
 
 # The C ABI this module's ctypes declarations are written against: must
 # equal STANLI_ABI_VERSION in runtime/include/stanli/capi.h.
-_ABI_VERSION = 6
+_ABI_VERSION = 7
 
 # stanli_compiler_message_kind in capi.h.
 _COMPILER_WARNING = 0
@@ -158,7 +158,8 @@ class _ModelOpts(ctypes.Structure):
                 ("fast_math", ctypes.c_int),
                 ("allow_interpreter", ctypes.c_int),
                 ("execution_report", ctypes.c_int),
-                ("parallel_write_array", ctypes.c_int)]
+                ("parallel_write_array", ctypes.c_int),
+                ("parallel_blas", ctypes.c_int)]
 
 
 # stanli_parallel_wa: where write_array is lowered while a model is built.
@@ -1641,6 +1642,17 @@ class Model:
     the last bits. Pass the same ``fast_math`` with ``mir=`` that was used
     to produce it with ``stan_to_mir``.
 
+    ``parallel_blas=True`` lets this model's large dense operations, which a
+    macOS build on Apple silicon runs through Apple's Accelerate on macOS 15
+    or later, use Accelerate's own threads while the chains that run in
+    parallel leave cores free. With it on, results can differ from those
+    with it off by rounding: in our tests the threaded matrix products,
+    symmetric products, Cholesky factorization and inverse from a Cholesky
+    factor did. Whether a call uses threads depends on how many chains run in
+    parallel, so results can also change with that number. The default runs
+    each such operation on one thread, with the same result in every run.
+    Elsewhere it does nothing.
+
     ``allow_interpreter=False`` makes construction raise, naming the parts,
     when parts of the model have no compiled path and would run through the
     much slower MIR interpreter.
@@ -1649,7 +1661,7 @@ class Model:
     def __init__(self, stan_file=None, data=None, stan_code=None, mir=None,
                  seed=1, threads_per_chain=1, include_paths=None,
                  fast_math=False, allow_interpreter=True,
-                 _parallel_write_array="auto"):
+                 parallel_blas=False, _parallel_write_array="auto"):
         self._lock = threading.RLock()
         threads_per_chain = _threads_per_chain(threads_per_chain)
         if _parallel_write_array not in _PARALLEL_WRITE_ARRAY:
@@ -1661,6 +1673,9 @@ class Model:
         if not isinstance(allow_interpreter, bool):
             raise TypeError("allow_interpreter must be True or False")
         self._allow_interpreter = allow_interpreter
+        if not isinstance(parallel_blas, bool):
+            raise TypeError("parallel_blas must be True or False")
+        self._parallel_blas = parallel_blas
         self._label = None
         if mir is None:
             self._label = _source_label(stan_file, stan_code)
@@ -1699,7 +1714,7 @@ class Model:
         err = ctypes.create_string_buffer(8192)
         opts = _ModelOpts(seed, threads_per_chain, int(self._fast_math),
                           int(self._allow_interpreter), 0,
-                          self._parallel_write_array)
+                          self._parallel_write_array, int(self._parallel_blas))
         with _native_output():
             if mir is not None:
                 m = _lib.stanli_model_new_with_opts(
@@ -1844,6 +1859,7 @@ class Model:
         out = Model.__new__(Model)
         out._lock = threading.RLock()
         out._fast_math = self._fast_math
+        out._parallel_blas = self._parallel_blas
         out._label = self._label
         out._source = self._source
         out._whitening = (q_hat.copy(), perm.copy(), col_ptr.copy(),
@@ -1869,6 +1885,12 @@ class Model:
     def fast_math(self):
         """Whether this model was built in fast mode."""
         return self._fast_math
+
+    @property
+    def parallel_blas(self):
+        """Whether this model's accelerated dense operations may use
+        Accelerate's own threads (results can then differ by rounding)."""
+        return self._parallel_blas
 
     @property
     def threads_per_chain(self):

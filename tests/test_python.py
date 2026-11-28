@@ -2078,6 +2078,29 @@ def test_fast_math_is_off_by_default_and_opt_in():
             raise AssertionError(f"fast_math={bad!r} was accepted")
 
 
+def test_parallel_blas_is_off_by_default_and_opt_in():
+    q = np.array([0.3, 0.7, -0.2])
+    default = stanli.Model(stan_code=FAST_MATH_SOURCE, data=FAST_MATH_DATA)
+    assert default.parallel_blas is False
+    threaded = stanli.Model(stan_code=FAST_MATH_SOURCE, data=FAST_MATH_DATA,
+                            parallel_blas=True)
+    assert threaded.parallel_blas is True
+    lp, grad = default.log_prob_grad(q)
+    threaded_lp, threaded_grad = threaded.log_prob_grad(q)
+    assert threaded_lp == lp
+    np.testing.assert_array_equal(threaded_grad, grad)
+    threaded._prepare_run(7)
+    assert threaded.parallel_blas is True
+    for bad in (1, "yes", None):
+        try:
+            stanli.Model(stan_code=FAST_MATH_SOURCE, data=FAST_MATH_DATA,
+                         parallel_blas=bad)
+        except TypeError as exc:
+            assert "parallel_blas" in str(exc)
+        else:
+            raise AssertionError(f"parallel_blas={bad!r} was accepted")
+
+
 def test_fast_math_reaches_the_subprocess_compiler():
     suffix = ".exe" if sys.platform == "win32" else ""
     with tempfile.TemporaryDirectory() as tmpdir:

@@ -69,6 +69,11 @@ class OpcodeTests(unittest.TestCase):
         table = "  X(OP_ADD_N)                         \\\n  X(OP_CATEGORICAL)   \\\n"
         self.assertEqual(select.table_opcodes(table), {"ADD_N", "CATEGORICAL"})
 
+    def test_list_entries_with_arguments_are_opcodes_too(self):
+        table = ("  X(OP_NORMAL_LPDF, normal_lpdf, 3, 3)         \\\n"
+                 "  X(OP_LOGIT)  \\\n")
+        self.assertEqual(select.table_opcodes(table), {"NORMAL_LPDF", "LOGIT"})
+
 
 class ChangeTests(unittest.TestCase):
     def test_identical_programs_are_unchanged(self):

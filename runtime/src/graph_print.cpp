@@ -159,8 +159,8 @@ void print_island_body(std::string& out, const Graph& g, size_t u, int n) {
 }  // namespace
 
 void print_graph(std::string& out, const Graph& g, const GraphPrintInfo& info) {
-  appendf(out, "ops=%zu slots=%zu result=s%d\n", g.ops.size(), g.slots.size(),
-          g.result_slot);
+  appendf(out, "ops=%zu slots=%zu result=s%d%s\n", g.ops.size(), g.slots.size(),
+          g.result_slot, g.parallel_blas ? " parallel_blas" : "");
   append_slot_list(out, "roots", info.roots);
   append_slot_list(out, "target_terms", info.target_terms);
   append_slot_list(out, "jac_slots", info.jac_slots);

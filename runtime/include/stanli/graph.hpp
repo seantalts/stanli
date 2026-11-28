@@ -35,6 +35,10 @@ struct Graph {
   // Set for a graph that only ever runs forward, such as write_array. Its
   // executor allocates no adjoints and refuses a gradient.
   bool forward_only = false;
+  // The parallel_blas model option (CompileOptions::parallel_blas): the
+  // accelerated BLAS calls of this program may use Accelerate's own threads
+  // while the chains leave cores free (stanli/dense_blas.hpp).
+  bool parallel_blas = false;
 
   Graph() = default;
 
@@ -45,6 +49,7 @@ struct Graph {
         udata_pool(src.udata_pool),
         result_slot(src.result_slot),
         forward_only(src.forward_only),
+        parallel_blas(src.parallel_blas),
         compact_idata_(src.compact_idata_) {
     // Finalized graphs usually have no mutable pool: their raw idata views
     // remain valid through the shared immutable owner, with no rebinding.
@@ -329,6 +334,10 @@ class Executor {
   std::vector<FusedOp> fused_;
   std::vector<uint16_t> ctx_opcodes_;  // parallel to ctx_; profiling only
   bool profile_ = false;
+  // Only the accelerated kernels read the parallel_blas scope, and only the
+  // graph that holds such an op runs them, so the sweeps of any other graph
+  // skip the scope and its thread-local writes.
+  bool accelerated_ops_ = false;
   std::vector<ProfEntry> prof_;  // indexed by opcode; empty until enabled
   int64_t n_grad_evals_ = 0;
   int64_t n_params_ = 0;

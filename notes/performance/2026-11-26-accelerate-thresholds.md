@@ -15,6 +15,8 @@ without the option.
 | `MATVEC` (data X, rows x columns) | rows >= 256 and columns >= 64, or rows >= 10000 and columns >= 10 |
 | `CHOLESKY` | n >= 64 |
 | `MULTI_NORMAL_CHOL_LPDF` (the propto, factor-only path) | n >= 64 |
+| `MULTI_NORMAL_LPDF` (one vector, active covariance) | n >= 32 |
+| `NORMAL_ID_GLM_LPDF` (data `y` and `X`, active `beta`) | rows >= 4096 and columns >= 16 |
 
 Ops inside retained loops (`dyn_lengths`) are never accelerated.
 
@@ -22,7 +24,7 @@ Ops inside retained loops (`dyn_lengths`) are never accelerated.
 
 `tools/bench_dense_blas` (target `bench_dense_blas`, excluded from the
 default build) times the plain kernel and its accelerated form, forward plus
-backward, on one thread (`ChainBlasThreads` with an unknown chain count, which limits BLAS to one thread), best of 7 rounds of at least
+backward, on one thread, best of 7 rounds of at least
 20 ms. Apple M3 Ultra, macOS 26.6.2, revision 8a11fd7d0 plus the sweep
 shapes, 2026-11-26, load average 5 to 10 from other work on the 32-core
 host. Four runs; the first two lack the shapes added in the last two.
@@ -182,3 +184,129 @@ ones.
 | multi_normal_cholesky | 512 | 3969536 | 827035 | 4.01x to 4.88x |
 | cholesky | 1024 | 27921417 | 7640802 | 3.43x to 3.91x |
 | multi_normal_cholesky | 1024 | 30282125 | 4017417 | 6.53x to 7.61x |
+
+## multi_normal and normal_id_glm (2026-11-26, later)
+
+`bench_dense_blas`, two runs, load average 5.8 to 10.7 (the plain and the
+accelerated kernel of each size run back to back):
+
+- **multi_normal** (data y, active mu and covariance): 0.81x to 0.99x at
+  n = 4 to 12, 1.17x at 16, 1.35x to 1.47x at 24 to 32, 1.30x to 1.65x at
+  36 to 64, 2.27x to 2.79x at 96 to 128, 6.3x to 9.0x from 256. The rule is
+  n >= 32. Only `ch14_m14_9`, `_10` and `_11` (n = 151) reach it; inside
+  those models, six interleaved `bench_grad --timed` pairs each at load
+  average 5.0, the gradient is 2.13x, 2.30x and 1.46x faster.
+- **normal_id_glm** (data y and X, active alpha, beta and sigma), load
+  average 3.6 to 3.9: slower at 919 x 2 (0.68x), 1000 x 10 (0.83x) and
+  1000 x 24 (0.82x to 0.87x); 0.99x to 1.03x at 236 x 4, 2000 x 24 and
+  10000 x 5; 1.15x at 5000 x 10; 1.31x to 1.39x at 4096 x 16; 2.6x to 3.6x
+  at 4096 x 24 and above; 2.1x at 10000 x 10. The rule is rows >= 4096 and
+  columns >= 16. In the corpus only `diamonds` (5000 x 24) reaches it, and
+  its gradient is 2.53x faster in-model (six pairs, load average 5.0 to 5.2).
+
+## multi_normal with the newer dpotri (2026-11-27)
+
+The multi_normal kernel now calls `dpotri$NEWLAPACK` from Accelerate's newer
+LAPACK interface. On one thread that routine is 1.05x to 1.1x slower than
+the legacy `dpotri_` at n = 32 to 64, and faster from n = 128 (1.3x at 128,
+1.8x at 512). `bench_dense_blas`, Release build, three runs, load average
+3.5 to 5.6, plain / accelerated for the whole kernel, forward plus backward:
+
+| n | 16 | 24 | 32 | 36 | 40 | 48 | 56 | 64 | 80 | 96 | 128 |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| lowest | 0.88x | 1.07x | 1.18x | 1.09x | 1.18x | 1.30x | 1.37x | 1.36x | 1.52x | 2.01x | 2.76x |
+| highest | 0.90x | 1.09x | 1.22x | 1.23x | 1.18x | 1.32x | 1.50x | 1.49x | 1.66x | 2.04x | 2.81x |
+
+The accelerated kernel is still faster at every size from 24, so the rule
+stays n >= 32. In the corpus only `ch14_m14_9`, `_10` and `_11` (n = 151)
+reach it, so no model moves across it.
+
+
+<a id="threads"></a>
+
+## Threads and the bits of each result (2026-11-27)
+
+`tools/stress_blas_threads` makes the BLAS and LAPACK calls of every
+accelerated kernel with Accelerate's threads allowed and compares each
+result bit for bit with the single-threaded call on the same inputs. The
+calls have the kernels' transposes, alpha, beta and leading dimensions.
+`--kernel-shapes` covers square and rectangular shapes from the thresholds
+to n = 4096, the shapes of the corpus models that reach the thresholds
+(`nn_rbm1bJ100`'s 60000 x 785 x 100 product, the Cholesky factor at n = 101,
+`multi_normal` at n = 151 and `normal_id_glm` at 5000 x 24), and the blocked
+Cholesky adjoint, replayed call for call on views into an n x n matrix.
+`--sweep` makes the same calls at every square size from the thresholds to
+1200, every 16 to 2048 and every 64 to 4096, and at a grid of 2,071
+product shapes and 54 matrix-vector shapes. On the M3 Ultra we also ran four
+processes at once and `VECLIB_MAXIMUM_THREADS` from 2 to 16, which changes
+how many threads Accelerate uses. On the M1 of the CI Mac we ran three
+processes at once. The raw output is in
+[`data/2026-11-27-accelerate-threads`](data/2026-11-27-accelerate-threads/README.md).
+
+Threaded calls, and how many of them gave bits other than one thread:
+
+| Routine | M3 Ultra, macOS 26.6.2 | M1 (CI, 3 cores), macOS 26.7.2 |
+| --- | --- | --- |
+| `dgemm` | 3,365 of 5,406,332 differ, up to 5.6e-15 | none of 3,825,171, but it never used threads |
+| `dsymm` | 426,200 of 1,980,407, up to 1.8e-15 | 270,971 of 1,399,052, up to 1.2e-15 |
+| `dpotrf` | 2,512 of 288,470, up to 7.8e-16 | none of 204,648, but it never used threads |
+| `dpotri` (newer interface) | 233 of 129,008, up to 2.9e-17 | 6,556 of 91,650, up to 3.9e-17 |
+| `dgemv` | none of 750,216; threads only for X' y at 4096 x 16 | none of 527,734; threads for some tall X' y |
+| `dtrmv` | none of 461,250, never used threads | none of 325,868, never used threads |
+| `dtrsm` | none of 8,085,161 | none of 5,490,780 |
+| `dtrmm` | none of 2,928,152 | none of 1,991,598 |
+| `dtrtri` | none of 124,369 | none of 80,650 |
+
+A difference is the largest change of any entry over the largest entry of
+the result. None is above rounding level, and every threaded call of a shape
+gave the same bits as the other threaded calls of that shape. The
+differences start at these sizes in the sweep:
+
+- `dgemm`: 323 of the 2,071 product shapes differ in at least one of the
+  three calls of the product kernel. Examples are the two backward calls of
+  a 1000 x 100 by 100 x 1000 product and the forward call of a 100 x 1500
+  by 1500 x 1000 product. We found no simple rule that separates them, and
+  `nn_rbm1bJ100`'s shape gave the same bits. One block call of the Cholesky
+  adjoint differs at n = 1015.
+- `dsymm` in the Cholesky adjoint: from n = 74 on both Macs.
+- `dpotrf`: from n = 1025 on the M3 Ultra.
+- `dpotri`: from n = 1090 on the M3 Ultra and from n = 132 on the M1.
+
+`dtrsm` and `dtrmm` used threads only a little: CPU time over wall time was
+at most 1.6 for one shape on the M3 Ultra and 1.3 on the M1. `dgemv` used them
+only for the transposed product of a tall matrix with at most 24 columns (up
+to 1.24 on the M3 Ultra and 1.9 on the M1), and `dtrmv` never did. `dtrtri`
+used them on both Macs: up to 20 on the M3 Ultra at n = 4096 and up to 2.8
+on the M1. `--tri-range 512 4096` then made `dtrtri` at every n in that
+range: on the M3 Ultra in four processes at once and with
+`VECLIB_MAXIMUM_THREADS` at 2, 4 and 8 (75,285 threaded calls), and on the M1
+in one process (10,755 calls). Every call gave the single-threaded bits.
+Apple does not document any of this, so a later macOS can change it.
+
+Before this run, a stress of square matrices only had found differences
+only in `dsymm` from n = 512 and `dpotrf` at n = 2048, and none in `dgemm`.
+The rectangular shapes and the sweep found the others. On `main`, which lets
+any accelerated call use threads while the chains leave cores free, the
+results of `dgemm`, `dsymm` and `dpotrf` can therefore change with the
+number of chains.
+
+### Threads by default for the routines that keep their bits (not taken)
+
+We tried letting the routines that kept their bits use Accelerate's threads
+by default, while the chains leave cores free (branch
+`spike/dtrtri-default-threads`, not pushed). `dgemm` is ruled out by the
+table above. `dtrmv` never used threads and `dgemv` rarely did. `dtrsm` and
+`dtrmm` hardly did, and asking for threads in the Cholesky adjoint made
+`examplemodels_gp_fit_multi_output` (n = 101) 1.04x slower (eight
+interleaved `bench_grad --timed` pairs). That left `dtrtri`. A Gaussian
+process gradient (`cholesky_decompose` and `multi_normal_cholesky`), six
+interleaved pairs per size, with `dtrtri`'s threads against one thread:
+
+| n | 64 | 100 | 128 | 256 | 384 | 512 | 768 | 1024 | 2048 |
+|---|---|---|---|---|---|---|---|---|---|
+| with threads | 1.00x | 1.08x slower | 1.07x slower | 1.03x slower | 1.01x slower | 1.015x faster | 1.02x faster | 1.05x faster | 1.10x faster |
+
+With threads only from n = 512 to 4096, no corpus model changes, because
+none has a `multi_normal_cholesky` that large, and the rule would add an
+option kind and two thresholds. So every accelerated call stays on one
+thread unless the model sets `parallel_blas`.

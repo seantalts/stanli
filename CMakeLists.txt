@@ -1187,6 +1187,24 @@ target_link_libraries(bench_executor_clone PRIVATE stanli)
 add_executable(bench_dense_blas EXCLUDE_FROM_ALL
   tools/bench_dense_blas.cpp tests/tbb_stub.cpp)
 target_link_libraries(bench_dense_blas PRIVATE stanli)
+# Stress of Accelerate's BLAS and LAPACK routines with its own threads, each
+# call compared with the single-threaded result. Needs macOS 15 or later.
+if(APPLE)
+  add_executable(stress_blas_threads EXCLUDE_FROM_ALL
+    tools/stress_blas_threads.cpp)
+  target_link_libraries(stress_blas_threads PRIVATE "-framework Accelerate")
+  add_executable(stress_blas_threads_new_lapack EXCLUDE_FROM_ALL
+    tools/stress_blas_threads.cpp)
+  target_compile_definitions(stress_blas_threads_new_lapack PRIVATE
+    STRESS_NEW_LAPACK)
+  # The tool calls BLASSetThreading directly and runs only on macOS 15+.
+  target_compile_options(stress_blas_threads PRIVATE
+    -Wno-unguarded-availability-new)
+  target_compile_options(stress_blas_threads_new_lapack PRIVATE
+    -Wno-unguarded-availability-new)
+  target_link_libraries(stress_blas_threads_new_lapack PRIVATE
+    "-framework Accelerate")
+endif()
 add_test(NAME test_bench_opcost_smoke COMMAND bench_opcost --smoke)
 set_tests_properties(test_bench_opcost_smoke PROPERTIES
   PASS_REGULAR_EXPRESSION "sink=")
@@ -1585,11 +1603,27 @@ add_test(NAME test_capi COMMAND test_capi
 # Parallel chains with dense linear algebra, through the shipped library.
 # getrusage and the thread count are POSIX-only.
 if(NOT WIN32)
+  # The same gradient in many processes at once gives the same bits.
+  add_executable(test_blas_determinism tests/test_blas_determinism.cpp)
+  target_link_libraries(test_blas_determinism PRIVATE stanli_shared
+                        Threads::Threads)
+  add_test(NAME test_blas_determinism COMMAND test_blas_determinism
+           WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
+  set_tests_properties(test_blas_determinism PROPERTIES SKIP_RETURN_CODE 77)
+  add_test(NAME test_blas_determinism_parallel_blas
+           COMMAND test_blas_determinism --parallel-blas
+           WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
+  set_tests_properties(test_blas_determinism_parallel_blas PROPERTIES
+                       SKIP_RETURN_CODE 77)
   add_executable(test_blas_chains tests/test_blas_chains.cpp)
   target_link_libraries(test_blas_chains PRIVATE stanli_shared Threads::Threads)
   foreach(_model gp product)
-    foreach(_cores filled free)
-      set(_name test_blas_chains_${_model}_${_cores})
+    add_test(NAME test_blas_chains_${_model} COMMAND test_blas_chains ${_model}
+             WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
+    set_tests_properties(test_blas_chains_${_model} PROPERTIES
+                         SKIP_RETURN_CODE 77)
+    foreach(_cores free filled)
+      set(_name test_blas_chains_${_model}_parallel_${_cores})
       add_test(NAME ${_name} COMMAND test_blas_chains ${_model} ${_cores}
                WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
       set_tests_properties(${_name} PROPERTIES SKIP_RETURN_CODE 77)

@@ -557,6 +557,7 @@ static stanli_model* model_new(const char* mir_text, const char* data_json,
     stanli::CompileOptions options;
     options.reduce_sum_threads = threads_per_chain;
     options.fast_math = fast_math;
+    options.parallel_blas = opts.parallel_blas != 0;
     options.allow_interpreter = opts.allow_interpreter != 0;
     options.execution_report = opts.execution_report != 0;
     switch (opts.parallel_write_array) {
@@ -656,6 +657,7 @@ void stanli_model_opts_init(stanli_model_opts* o) {
   o->allow_interpreter = 1;
   o->execution_report = 0;
   o->parallel_write_array = STANLI_PARALLEL_WA_AUTO;
+  o->parallel_blas = 0;
 }
 
 stanli_model* stanli_model_new_with_opts(const char* mir_text,
@@ -2790,6 +2792,7 @@ const stanli_field_layout kFieldLayouts[] = {
     STANLI_FIELD(stanli_model_opts, allow_interpreter),
     STANLI_FIELD(stanli_model_opts, execution_report),
     STANLI_FIELD(stanli_model_opts, parallel_write_array),
+    STANLI_FIELD(stanli_model_opts, parallel_blas),
     STANLI_FIELD(stanli_sample_opts, seed),
     STANLI_FIELD(stanli_sample_opts, chains),
     STANLI_FIELD(stanli_sample_opts, chain_id),

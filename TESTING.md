@@ -144,9 +144,9 @@ answers at 3 points for each model. That makes <!--gen:testing_points-->1245<!--
 and <!--gen:testing_values-->1,504,551<!--/gen--> values. CmdStan rejects <!--gen:testing_rejected_points-->6<!--/gen-->
 of the points.
 
-In <!--gen:testing_models_within-->328<!--/gen--> models, every value is within 10 ULP of
-CmdStan. The other <!--gen:testing_models_over-->87<!--/gen--> models have <!--gen:testing_entries-->192<!--/gen-->
-ledger entries. stanli is at least as close to the true value as CmdStan in <!--gen:testing_entries_stanli-->146<!--/gen-->
+In <!--gen:testing_models_within-->326<!--/gen--> models, every value is within 10 ULP of
+CmdStan. The other <!--gen:testing_models_over-->89<!--/gen--> models have <!--gen:testing_entries-->199<!--/gen-->
+ledger entries. stanli is at least as close to the true value as CmdStan in <!--gen:testing_entries_stanli-->153<!--/gen-->
 of those entries. CmdStan is closer in <!--gen:testing_entries_cmdstan-->6<!--/gen-->. We
 cannot tell for the other <!--gen:testing_entries_unknown-->40<!--/gen-->. Of the entries where
 stanli is closer, <!--gen:testing_truth_entries-->107<!--/gen--> store true values, and the run
@@ -158,7 +158,7 @@ checks those values against the [true values](#true-values).
 | posteriordb | 119 | 43 |
 | educational | 13 | 1 |
 | brms | 124 | 4 |
-| rethinking | 62 | 12 |
+| rethinking | 62 | 14 |
 | cogmod | 22 | 12 |
 | ctsem | 3 | 1 |
 | examplemodels | 23 | 6 |
@@ -177,7 +177,7 @@ checks those values against the [true values](#true-values).
 | walker | 2 | 0 |
 | bayesdfa | 2 | 0 |
 | regressions | 14 | 0 |
-| all | 415 | 87 |
+| all | 415 | 89 |
 <!--/gen-->
 
 The models come from posteriordb, brms formulas, the code of Statistical
@@ -539,8 +539,8 @@ table and those files disagree.
 | `ch13_m13_7` | rethinking | 2 | 2 | 5.07 | 5.07 | 0.25 | 0.25 | <0.01 | <0.01 | 10 |  |
 | `ch13_m13_7nc` | rethinking | 2 | 3 | 0.52 | 0.52 | 0.35 | 0.35 | 0.10 | 0.10 | 10 |  |
 | `ch14_m14_1` | rethinking | 46 | 49 | 0.50 | 0.50 | 0.04 | 0.04 | 0.02 | 0.02 | 10 |  |
-| `ch14_m14_10` | rethinking | 4 | 4 | 3.57 | 3.57 | 5.96 | 4.46 | 0.07 | 0.07 | 10 |  |
-| `ch14_m14_11` | rethinking | 5 | 5 | 6.71 | 6.71 | 6.32 | 6.41 | 0.10 | 0.10 | 10 |  |
+| `ch14_m14_10` | rethinking | 4 | 4 | 3.57 | 3.57 | 5.96 | 4.46 | 0.07 | 0.07 | gradient 21 |  |
+| `ch14_m14_11` | rethinking | 5 | 5 | 6.71 | 6.71 | 6.32 | 6.41 | 0.10 | 0.10 | gradient 27 |  |
 | `ch14_m14_2` | rethinking | 76 | 96 | 14.0 | 13.3 | 0.15 | 0.11 | 0.03 | 0.03 | 10 |  |
 | `ch14_m14_3` | rethinking | 76 | 1188 | 8.16 | 7.82 | 0.16 | 0.12 | 0.24 | 0.24 | 10 |  |
 | `ch14_m14_4` | rethinking | 3 | 3 | 1.06 | 1.06 | 1.45 | 1.00 | 0.05 | 0.05 | 10 |  |

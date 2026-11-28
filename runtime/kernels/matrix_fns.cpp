@@ -22,6 +22,7 @@
 #include <stan/math.hpp>
 
 #include <algorithm>
+#include <limits>
 #include <type_traits>
 #include <utility>
 #include <variant>
@@ -2868,6 +2869,153 @@ double mnc_blas_fwd_value(KernelCtx& ctx) {
   return logp;
 }
 void mnc_blas_fwd(KernelCtx& ctx) { ctx.out.data[0] = mnc_blas_fwd_value(ctx); }
+
+// multi_normal for one vector with an active covariance: mn_single_fwd with
+// the inverse from LAPACK's dpotrf and dpotri. Stan Math decides rejection
+// with an LDLT factor, so this path takes a covariance only when it can
+// tell that the LDLT would accept it too: dpotrf succeeds, and the smallest
+// eigenvalue, which is at least 1 / |Sigma^-1|_F, is far above the rounding
+// error of a factorization, 1e4 * n * eps * |Sigma|_F. Any other
+// covariance, non-finite ones included, goes to mn_single_fwd, which gives
+// Stan Math's result and Stan Math's error.
+double mn_blas_fwd_value(KernelCtx& ctx) {
+  static constexpr const char* function = "multi_normal_lpdf";
+  const int64_t n = vectorized_layout(ctx.idata, ctx.n_idata, 2).width;
+  const bool propto = density_mode(ctx).propto;
+  const unsigned mask = density_mode(ctx).active & 7u;
+  const bool record = !values_only(ctx);
+  CMapV y(ctx.in[0].data, n), mu(ctx.in[1].data, n);
+  CMapM sigma(ctx.in[2].data, n, n);
+  // mn_single_fwd's checks, in its order.
+  stan::math::check_positive(function, "Covariance matrix rows", sigma.rows());
+  stan::math::check_finite(function, "Location parameter", mu);
+  stan::math::check_not_nan(function, "Random variable", y);
+  stan::math::check_symmetric(function, "Covariance matrix", sigma);
+  MatD inverse = MatD::Zero(n, n);
+  inverse.triangularView<Eigen::Lower>() = sigma.triangularView<Eigen::Lower>();
+  if (blas::potrf_lower(n, inverse.data(), n) != 0) return mn_single_fwd(ctx);
+  double log_det = 0;
+  for (int64_t i = 0; i < n; ++i) log_det += std::log(inverse(i, i));
+  log_det *= 2;
+  if (blas::potri_lower(n, inverse.data(), n) != 0) return mn_single_fwd(ctx);
+  inverse.triangularView<Eigen::StrictlyUpper>() = inverse.transpose();
+  const double floor =
+      1e4 * double(n) * std::numeric_limits<double>::epsilon() * sigma.norm();
+  if (!(1.0 / inverse.norm() > floor) || !std::isfinite(log_det))
+    return mn_single_fwd(ctx);
+
+  if (record) std::fill_n(ctx.scratch, 2 * n + n * n, 0.0);
+  double logp = 0.0;
+  if (!propto) logp += stan::math::NEG_LOG_SQRT_TWO_PI * n;
+  VecD difference = (y - mu).eval();
+  VecD half(n);
+  blas::gemv(false, n, n, 1.0, inverse.data(), n, difference.data(), 0.0,
+             half.data());
+  logp += -0.5 * log_det;
+  if (record)
+    MapM(ctx.scratch + 2 * n, n, n) +=
+        0.5 * (half * half.transpose() - inverse);
+  logp += -0.5 * stan::math::dot_product(difference, half);
+  if (record && (mask & 1u)) Eigen::Map<VecD>(ctx.scratch, n) += -half;
+  if (record && (mask & 2u)) Eigen::Map<VecD>(ctx.scratch + n, n) += half;
+  return logp;
+}
+void mn_blas_fwd(KernelCtx& ctx) { ctx.out.data[0] = mn_blas_fwd_value(ctx); }
+
+// normal_id_glm with data y (one per row) and a data design X, and an active
+// beta: Stan Math's prim normal_id_glm_lpdf step for step, with X * beta and
+// X' * mu_derivative from dgemv. The partials of alpha, beta and sigma go to
+// scratch in nid_glm_eval's layout, so nid_glm_bwd reads them.
+double nid_glm_blas_value(KernelCtx& ctx) {
+  static constexpr const char* function = "normal_id_glm_lpdf";
+  const GlmLayout layout = glm_layout(ctx.idata, ctx.n_idata);
+  const int64_t rows = layout.rows, cols = layout.cols;
+  const DensityMode mode = density_mode(ctx);
+  const bool propto = mode.propto;
+  const bool alpha_var = mode.is_active(2), sigma_var = mode.is_active(4);
+  const int64_t na = ctx.in[2].len, ns = ctx.in[4].len;
+  CMapV y(ctx.in[0].data, rows), beta(ctx.in[3].data, cols);
+  CMapV alpha(ctx.in[2].data, na), sigma(ctx.in[4].data, ns);
+  const double* x = ctx.in[1].data;
+  if (ns == 1)
+    stan::math::check_positive_finite(function, "Scale vector", sigma(0));
+  else
+    stan::math::check_positive_finite(function, "Scale vector", sigma);
+  if (rows == 0 || ns == 0) return 0;
+
+  double* d_alpha = ctx.scratch;
+  double* d_beta = d_alpha + na;
+  double* d_sigma = d_beta + cols;
+  const bool record = !values_only(ctx);
+  if (record) std::fill_n(ctx.scratch, na + cols + ns, 0.0);
+
+  Eigen::ArrayXd y_scaled(rows);
+  blas::gemv(false, rows, cols, 1.0, x, rows, beta.data(), 0.0,
+             y_scaled.data());
+  double y_scaled_sq_sum;
+  const auto finish = [&](const auto& inv_sigma) {
+    if (na == 1)
+      y_scaled = (y.array() - y_scaled - alpha(0)) * inv_sigma;
+    else
+      y_scaled = (y.array() - y_scaled - alpha.array()) * inv_sigma;
+    if (!record) {
+      y_scaled_sq_sum = (y_scaled * y_scaled).sum();
+      return;
+    }
+    const VecD mu_derivative = (inv_sigma * y_scaled).matrix();
+    blas::gemv(true, rows, cols, 1.0, x, rows, mu_derivative.data(), 0.0,
+               d_beta);
+    if (alpha_var) {
+      if (na == 1)
+        d_alpha[0] = mu_derivative.sum();
+      else
+        Eigen::Map<VecD>(d_alpha, na) = mu_derivative;
+    }
+    if (sigma_var) {
+      if constexpr (std::is_same_v<std::decay_t<decltype(inv_sigma)>, double>) {
+        y_scaled_sq_sum = (y_scaled * y_scaled).sum();
+        d_sigma[0] = (y_scaled_sq_sum - double(rows)) * inv_sigma;
+      } else {
+        const Eigen::ArrayXd y_scaled_sq = y_scaled * y_scaled;
+        y_scaled_sq_sum = y_scaled_sq.sum();
+        Eigen::Map<Eigen::ArrayXd>(d_sigma, ns) = (y_scaled_sq - 1) * inv_sigma;
+      }
+    } else {
+      y_scaled_sq_sum = (y_scaled * y_scaled).sum();
+    }
+  };
+  if (ns == 1)
+    finish(1.0 / sigma(0));
+  else
+    finish((1.0 / sigma.array()).eval());
+
+  if (!std::isfinite(y_scaled_sq_sum)) {
+    stan::math::check_finite(function, "Vector of dependent variables", y);
+    stan::math::check_finite(function, "Weight vector", beta);
+    if (na == 1)
+      stan::math::check_finite(function, "Intercept", alpha(0));
+    else
+      stan::math::check_finite(function, "Intercept", alpha);
+    stan::math::check_finite(function, "Matrix of independent variables",
+                             y_scaled_sq_sum);
+  }
+  double logp = 0.0;
+  if (!propto) logp += stan::math::NEG_LOG_SQRT_TWO_PI * rows;
+  if (!propto || sigma_var) {
+    if (ns == 1)
+      logp -= rows * std::log(sigma(0));
+    else
+      logp -= stan::math::sum(stan::math::log(sigma));
+  }
+  logp -= 0.5 * y_scaled_sq_sum;
+  if (record)
+    for (int64_t i = 0; i < na + cols + ns; ++i)
+      ctx.scratch[i] = 0.0 + ctx.scratch[i];
+  return logp;
+}
+void nid_glm_blas_fwd(KernelCtx& ctx) {
+  ctx.out.data[0] = nid_glm_blas_value(ctx);
+}
 void mnc_blas_bwd(KernelCtx& ctx) {
   if (!ctx.in_adj[2].data) return;
   const int64_t n = vectorized_layout(ctx.idata, ctx.n_idata, 2).width;
@@ -2970,6 +3118,14 @@ void register_matrix_kernels() {
                   Kernel{chol_blas_fwd, chol_blas_bwd, chol_blas_scratch});
   register_kernel(OP_MULTI_NORMAL_CHOL_LPDF_BLAS,
                   Kernel{mnc_blas_fwd, mnc_blas_bwd, mnc_scratch});
+  {
+    Kernel glm{nid_glm_blas_fwd, nid_glm_bwd, nid_glm_scratch};
+    glm.derivative_mechanism = "recorded_partials";
+    register_kernel(OP_NORMAL_ID_GLM_LPDF_BLAS, glm);
+  }
+  register_kernel(
+      OP_MULTI_NORMAL_LPDF_BLAS,
+      Kernel{mn_blas_fwd, tail_density_bwd<3>, tail_density_scratch<3>});
 #endif
 }
 
@@ -3005,6 +3161,38 @@ uint16_t accelerated_opcode(const Op& op, const Slot* slots) {
               t.tri_inverse_min_n)
         return OP_MULTI_NORMAL_CHOL_LPDF_BLAS;
       break;
+    case OP_MULTI_NORMAL_LPDF: {
+      if (op.n_in != 3 || op.out < 0 || op.in[0] < 0 || op.in[1] < 0 ||
+          op.in[2] < 0 || slots[op.out].len != 1 ||
+          !(density_mode(op).active & 4u) || density_mode(op).elementwise)
+        break;
+      const VectorizedLayout layout =
+          vectorized_layout(op.idata, op.n_idata, 2);
+      const int64_t n = layout.width;
+      if (layout.is_array(0) || layout.is_array(1) ||
+          slots[op.in[0]].len != n || slots[op.in[1]].len != n ||
+          slots[op.in[2]].len != n * n || n < t.mn_cov_min_n)
+        break;
+      return OP_MULTI_NORMAL_LPDF_BLAS;
+    }
+    case OP_NORMAL_ID_GLM_LPDF: {
+      if (op.n_in != 5 || op.out < 0) break;
+      for (int k = 0; k < 5; ++k)
+        if (op.in[k] < 0) return op.opcode;
+      const DensityMode mode = density_mode(op);
+      if (mode.is_active(0) || mode.is_active(1) || !mode.is_active(3) ||
+          mode.elementwise)
+        break;
+      const GlmLayout layout = glm_layout(op.idata, op.n_idata);
+      const int64_t rows = layout.rows, cols = layout.cols;
+      const int64_t na = slots[op.in[2]].len, ns = slots[op.in[4]].len;
+      if (layout.row_vector_design() || slots[op.in[0]].len != rows ||
+          slots[op.in[1]].len != rows * cols || slots[op.in[3]].len != cols ||
+          (na != 1 && na != rows) || (ns != 1 && ns != rows) ||
+          rows < t.glm_min_rows || cols < t.glm_min_cols)
+        break;
+      return OP_NORMAL_ID_GLM_LPDF_BLAS;
+    }
     default:
       break;
   }

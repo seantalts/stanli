@@ -28,6 +28,9 @@
 #include <set>
 #include <sstream>
 #include <string>
+#include <atomic>
+#include <new>
+#include <thread>
 #include <utility>
 #include <vector>
 
@@ -97,6 +100,17 @@ static bool same_graph_structure(const stanli::CompiledModel& a,
   }
   return true;
 }
+
+// Counts heap allocations, so that a test can check that a warmed
+// evaluation allocates nothing.
+static std::atomic<uint64_t> heap_allocations{0};
+void* operator new(size_t n) {
+  heap_allocations.fetch_add(1, std::memory_order_relaxed);
+  if (void* p = std::malloc(n ? n : 1)) return p;
+  throw std::bad_alloc();
+}
+void operator delete(void* p) noexcept { std::free(p); }
+void operator delete(void* p, size_t) noexcept { std::free(p); }
 
 namespace region_map_test {
 
@@ -2141,6 +2155,219 @@ void test_data_valued_locals_are_data_control() {
 // `target +=` sits under a branch that is never taken. That store must stay
 // in the body, because the lane kernel reads the sum after every iteration
 // and seeds only the registers that the body reads before it writes.
+// Compiles `source` twice, with and without lanes, and checks that the
+// lane form gives the scalar map's lp and gradient bit for bit. Returns the
+// lane payload's plan through `plan` (a copy, the model goes out of scope).
+int lanes_bitwise_throws = 0;
+
+stanli::RegionMapLanePlan expect_lanes_bitwise(const std::string& what,
+                                               const std::string& source,
+                                               int n) {
+  const std::string mir = mir_of_source(what, source);
+  const DataMap data = make_data(n);
+  CompiledModel lanes = stanli::compile_model(mir, data);
+  test_setenv("STANLI_REGION_MAP_LANES", "0", 1);
+  CompiledModel scalar = stanli::compile_model(mir, data);
+  test_unsetenv("STANLI_REGION_MAP_LANES");
+  check(count_opcode(lanes, OP_REGION_MAP) == 1, what + ": the loop is mapped");
+  if (count_opcode(lanes, OP_REGION_MAP) != 1) return {};
+  const auto& plan = map_payload(lanes).lanes;
+  check(plan.active, what + ": lanes run the body (" + plan.refusal + ")");
+  Executor el(lanes.graph), es(scalar.graph);
+  lanes.bind(el);
+  scalar.bind(es);
+  for (const Params& point : spread_points((size_t)el.n_params(), 5, 1.5)) {
+    const Run got = try_evaluate(el, point);
+    const Run want = try_evaluate(es, point);
+    check(got.threw == want.threw && got.what == want.what,
+          what + ": lanes and scalar throw alike");
+    if (got.threw || want.threw) {
+      ++lanes_bitwise_throws;
+      continue;
+    }
+    check(same_bits(got.e.lp, want.e.lp), what + ": lp bitwise");
+    for (size_t i = 0; i < want.e.grad.size(); ++i)
+      check(same_bits(got.e.grad[i], want.e.grad[i]),
+            what + ": grad[" + std::to_string(i) + "] bitwise (" +
+                std::to_string(got.e.grad[i]) + " vs " +
+                std::to_string(want.e.grad[i]) + ")");
+  }
+  return plan;
+}
+
+// A read mu[n] of a shared container that no other read in the body
+// touches adds its adjoint straight into the container, in the order the
+// replay would have used, so it logs no site. A read of a data container
+// logs nothing. Reads that share cells keep their sites.
+void test_lane_index_adjoint_sites() {
+  const std::string head =
+      "functions { real guarded_lpdf(real y, real mu, real s) {\n"
+      "  if (s <= 0) return negative_infinity();\n"
+      "  return normal_lpdf(y | mu, s); } }\n"
+      "data { int N; vector[N] x; vector[N] y; }\n"
+      "parameters { real a; real b; real<lower=0> s; }\n"
+      "model { vector[N] mu = a + b * x;\n";
+  for (int n : {37, 64, 65, 200, 434}) {
+    const std::string at = " N=" + std::to_string(n);
+    const auto alone = expect_lanes_bitwise(
+        "region_map_sites_alone" + at,
+        head + "  for (n in 1:N) target += guarded_lpdf(y[n] | mu[n], s); }\n",
+        n);
+    check(alone.max_dynamic == 0, "sites alone" + at + ": no dynamic site (" +
+                                      std::to_string(alone.max_dynamic) + ")");
+    check(alone.max_sites == 1, "sites alone" + at + ": one site, for s (" +
+                                    std::to_string(alone.max_sites) + ")");
+    const auto reversed = expect_lanes_bitwise(
+        "region_map_sites_reversed" + at,
+        head +
+            "  for (n in 1:N) target += guarded_lpdf(y[n] | mu[n] - 0.5 *"
+            " mu[N + 1 - n], s); }\n",
+        n);
+    check(reversed.max_dynamic == 2,
+          "sites reversed" + at + ": both reads of mu keep their sites (" +
+              std::to_string(reversed.max_dynamic) + ")");
+    // theta[g[n]]: many lanes add into each cell of theta, in one site.
+    const auto grouped = expect_lanes_bitwise(
+        "region_map_sites_grouped" + at,
+        "functions { real guarded_lpdf(real y, real mu, real s) {\n"
+        "  if (s <= 0) return negative_infinity();\n"
+        "  return normal_lpdf(y | mu, s); } }\n"
+        "data { int N; vector[N] x; vector[N] y; }\n"
+        "transformed data { array[N] int g;\n"
+        "  for (n in 1:N) g[n] = 1 + (7 * n) % 5; }\n"
+        "parameters { real a; real b; real<lower=0> s; vector[5] theta; }\n"
+        "model { vector[N] mu = a + b * x;\n"
+        "  for (n in 1:N) target += guarded_lpdf(y[n] | mu[n] + theta[g[n]],"
+        " s); }\n",
+        n);
+    check(grouped.max_dynamic == 0,
+          "sites grouped" + at + ": theta[g[n]] adds directly (" +
+              std::to_string(grouped.max_dynamic) + ")");
+    const auto fixed = expect_lanes_bitwise(
+        "region_map_sites_fixed" + at,
+        head +
+            "  for (n in 1:N) target += guarded_lpdf(y[n] | mu[n] + 0.25 *"
+            " mu[1], s); }\n",
+        n);
+    check(fixed.max_dynamic == 1,
+          "sites fixed" + at +
+              ": mu[n] shares mu[1]'s cell and keeps its "
+              "site (" +
+              std::to_string(fixed.max_dynamic) + ")");
+  }
+}
+
+// A read y[n], y[n - 1] or y[n + 1] has an index that steps by one per lane,
+// so the lane form checks the tile's first and last index and copies a run.
+// An index out of range throws as the scalar map does.
+void test_lane_affine_index_reads() {
+  const std::string head =
+      "functions { real guarded_lpdf(real y, real mu, real s) {\n"
+      "  if (s <= 0) return negative_infinity();\n"
+      "  return normal_lpdf(y | mu, s); } }\n"
+      "data { int N; vector[N] x; vector[N] y; }\n"
+      "parameters { real a; real b; real<lower=0> s; }\n"
+      "model { vector[N] mu = a + b * x;\n";
+  for (int n : {37, 64, 65, 200}) {
+    const std::string at = " N=" + std::to_string(n);
+    const auto plain = expect_lanes_bitwise(
+        "region_map_affine_plain" + at,
+        head + "  for (n in 1:N) target += guarded_lpdf(y[n] | mu[n], s); }\n",
+        n);
+    check(plain.affine_reads == 2, "affine plain" + at + ": y[n] and mu[n] (" +
+                                       std::to_string(plain.affine_reads) +
+                                       ")");
+    const auto shifted = expect_lanes_bitwise(
+        "region_map_affine_shifted" + at,
+        head +
+            "  for (n in 2:N) target += guarded_lpdf(y[n - 1] | mu[n] +"
+            " x[n - 1], s); }\n",
+        n);
+    check(shifted.affine_reads == 3,
+          "affine shifted" + at + ": y[n - 1], x[n - 1] and mu[n] (" +
+              std::to_string(shifted.affine_reads) + ")");
+    const int threw = lanes_bitwise_throws;
+    const auto past = expect_lanes_bitwise(
+        "region_map_affine_past" + at,
+        head +
+            "  for (n in 1:N) target += guarded_lpdf(y[n] | mu[n] +"
+            " x[n + 1], s); }\n",
+        n);
+    check(past.affine_reads == 3, "affine past the end" + at + " (" +
+                                      std::to_string(past.affine_reads) + ")");
+    check(lanes_bitwise_throws > threw,
+          "affine past the end" + at + ": x[N + 1] throws");
+  }
+}
+
+// The run counters belong to the thread that runs the lanes: chains on
+// other threads neither see nor write the caller's counts, so the hot path
+// shares no cache line between them.
+void test_lane_counters_per_thread() {
+  CompiledModel cm = compile_with("region_map_density", 200);
+  check(map_payload(cm).lanes.active && map_payload(cm).lanes.tile_calls > 0,
+        "counters: the fixture runs lanes with a tile call");
+  const uint64_t lanes = stanli::region_map_lane_runs();
+  const uint64_t tiles = stanli::region_map_tile_call_runs();
+  uint64_t lanes_there = 0, tiles_there = 0;
+  std::thread other([&]() {
+    Executor ex(cm.graph);
+    cm.bind(ex);
+    evaluate(ex, spread_point(1, (size_t)ex.n_params()));
+    lanes_there = stanli::region_map_lane_runs();
+    tiles_there = stanli::region_map_tile_call_runs();
+  });
+  other.join();
+  check(lanes_there > 0 && tiles_there > 0,
+        "counters: the other thread counts its own runs");
+  check(stanli::region_map_lane_runs() == lanes &&
+            stanli::region_map_tile_call_runs() == tiles,
+        "counters: this thread's counts are unchanged (" +
+            std::to_string(stanli::region_map_lane_runs() - lanes) +
+            " lane runs, " +
+            std::to_string(stanli::region_map_tile_call_runs() - tiles) +
+            " tile calls)");
+}
+
+// A warmed lane-form gradient allocates nothing: the per-evaluation state
+// (block masks, profile tallies) lives on the stack or in the scratch.
+void test_lane_evaluation_allocates_nothing() {
+  for (const char* stem : {"region_map_branch", "region_map_logic",
+                           "region_map_density", "region_map_lse"}) {
+    CompiledModel cm = compile_with(stem, 200);
+    check(map_payload(cm).lanes.active, std::string(stem) + ": lanes run");
+    Executor ex(cm.graph);
+    cm.bind(ex);
+    const Params point = spread_point(2, (size_t)ex.n_params());
+    std::vector<double> grad(point.size());
+    for (size_t i = 0; i < point.size(); ++i) ex.params_data()[i] = point[i];
+    ex.gradient(grad.data());
+    const uint64_t before = heap_allocations.load();
+    for (int k = 0; k < 3; ++k) ex.gradient(grad.data());
+    const uint64_t used = heap_allocations.load() - before;
+    check(used == 0, std::string(stem) + ": a warmed gradient allocates " +
+                         std::to_string(used) + " times in 3 gradients");
+  }
+}
+
+// The adjoint cells of a vector live-in are consecutive, so the lane
+// backward clears, seeds and harvests them as runs.
+void test_lane_live_in_cells_are_runs() {
+  for (const char* stem : {"region_map_density", "region_map_branch"}) {
+    CompiledModel cm = compile_with(stem, 200);
+    const auto& p = map_payload(cm);
+    check(p.lanes.active, std::string(stem) + ": lanes run");
+    check(p.lanes.live_in_cells.size() == p.ins.size(),
+          std::string(stem) + ": a cell run per live-in (" +
+              std::to_string(p.lanes.live_in_cells.size()) + " of " +
+              std::to_string(p.ins.size()) + ")");
+    int runs = 0;
+    for (size_t k = 0; k < p.lanes.live_in_cells.size(); ++k)
+      runs += p.lanes.live_in_cells[k] >= 0 && p.ins[k].len > 1;
+    check(runs > 0, std::string(stem) + ": the vector live-ins are runs");
+  }
+}
+
 void test_out_register_is_not_hoisted() {
   const std::string minimal =
       "parameters { real p; }\n"
@@ -3540,6 +3767,11 @@ int main() {
   test_extent_bound_is_data_control();
   test_data_valued_locals_are_data_control();
   test_out_register_is_not_hoisted();
+  test_lane_index_adjoint_sites();
+  test_lane_affine_index_reads();
+  test_lane_counters_per_thread();
+  test_lane_evaluation_allocates_nothing();
+  test_lane_live_in_cells_are_runs();
 #endif
   test_mode_policy();
   test_recompute_visits_taken_blocks();

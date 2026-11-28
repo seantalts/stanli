@@ -325,6 +325,45 @@
       "reason": "measured on Darwin arm64; 80-digit reference at point 2 (grad[6]): stanli 0, CmdStan 157 scaled ULP from the true value; stanli is at least as close to it; the merged loop's sums are pairwise or compensated in stanli, while CmdStan adds one call at a time; 9 grad values over 10"
      }
     },
+    "ch14_m14_10": {
+     "grad[2]": {
+      "bound": 16,
+      "closer": "stanli",
+      "reason": "measured on Darwin arm64 with STANLI_ACCELERATE, where multi_normal inverts the 151 x 151 covariance with dpotrf and the newer LAPACK interface's dpotri in place of an LDLT solve against the identity; the bound covers two Macs whose Accelerate libraries round this value differently, the M3 Ultra development machine (14) and the M1 runner in CI (16); 80-digit reference at point 1: stanli 0.8 on the M3 Ultra and 2.3 on the CI runner, CmdStan 13.2 scaled ULP from the true value"
+     },
+     "grad[3]": {
+      "bound": 17,
+      "closer": "stanli",
+      "reason": "measured on Darwin arm64 with STANLI_ACCELERATE, where multi_normal inverts the 151 x 151 covariance with dpotrf and the newer LAPACK interface's dpotri in place of an LDLT solve against the identity; the bound covers two Macs whose Accelerate libraries round this value differently, the M3 Ultra development machine (16) and the M1 runner in CI (17); 80-digit reference at point 1: stanli 0.4 on the M3 Ultra and 0.6 on the CI runner, CmdStan 16.4 scaled ULP from the true value"
+     },
+     "grad[4]": {
+      "bound": 21,
+      "closer": "stanli",
+      "reason": "measured on Darwin arm64 with STANLI_ACCELERATE, where multi_normal inverts the 151 x 151 covariance with dpotrf and the newer LAPACK interface's dpotri in place of an LDLT solve against the identity; the M3 Ultra development machine and the M1 runner in CI both measure 21; 80-digit reference at point 1: stanli 8.9 on the M3 Ultra and 8.9 on the CI runner, CmdStan 11.6 scaled ULP from the true value; at point 0 on the M3 Ultra, 13 scaled ULP from CmdStan, stanli is 9.9 and CmdStan 3.1 from the true value, so there CmdStan is closer"
+     }
+    },
+    "ch14_m14_11": {
+     "grad[2]": {
+      "bound": 20,
+      "closer": "stanli",
+      "reason": "measured on Darwin arm64 with STANLI_ACCELERATE, where multi_normal inverts the 151 x 151 covariance with dpotrf and the newer LAPACK interface's dpotri in place of an LDLT solve against the identity; the bound covers two Macs whose Accelerate libraries round this value differently, the M3 Ultra development machine (18) and the M1 runner in CI (20); 80-digit reference at point 2: stanli 2.2 on the M3 Ultra and 4.2 on the CI runner, CmdStan 15.8 scaled ULP from the true value"
+     },
+     "grad[3]": {
+      "bound": 14,
+      "closer": "stanli",
+      "reason": "measured on Darwin arm64 with STANLI_ACCELERATE, where multi_normal inverts the 151 x 151 covariance with dpotrf and the newer LAPACK interface's dpotri in place of an LDLT solve against the identity; the bound covers two Macs whose Accelerate libraries round this value differently, the M3 Ultra development machine (14) and the M1 runner in CI (11); 80-digit reference at point 1: stanli 6.5 on the M3 Ultra and 3.5 on the CI runner, CmdStan 7.5 scaled ULP from the true value"
+     },
+     "grad[4]": {
+      "bound": 27,
+      "closer": "stanli",
+      "reason": "measured on Darwin arm64 with STANLI_ACCELERATE, where multi_normal inverts the 151 x 151 covariance with dpotrf and the newer LAPACK interface's dpotri in place of an LDLT solve against the identity; the bound covers two Macs whose Accelerate libraries round this value differently, the M3 Ultra development machine (27) and the M1 runner in CI (25); 80-digit reference at point 2: stanli 3.0 on the M3 Ultra and 1.0 on the CI runner, CmdStan 24.0 scaled ULP from the true value"
+     },
+     "grad[5]": {
+      "bound": 18,
+      "closer": "stanli",
+      "reason": "measured on Darwin arm64 with STANLI_ACCELERATE, where multi_normal inverts the 151 x 151 covariance with dpotrf and the newer LAPACK interface's dpotri in place of an LDLT solve against the identity; the bound covers two Macs whose Accelerate libraries round this value differently, the M3 Ultra development machine (16) and the M1 runner in CI (18); 80-digit reference at point 0: stanli 5.0 on the M3 Ultra and 7.1 on the CI runner, CmdStan 10.7 scaled ULP from the true value; at point 1 on the CI runner, 12 scaled ULP from CmdStan, stanli is 13.6 and CmdStan 2.2 from the true value, so there CmdStan is closer"
+     }
+    },
     "ch14_m14_7": {
      "grad[1]": {
       "bound": 13,

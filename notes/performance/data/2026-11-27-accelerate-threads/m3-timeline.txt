@@ -1,0 +1,19 @@
+start single Fri Nov 27 12:04:29 EST 2026 load { 3.45 3.54 3.54 }
+start quad Fri Nov 27 12:07:21 EST 2026 load { 4.79 4.03 3.74 }
+start sweep Fri Nov 27 12:11:12 EST 2026 load { 9.36 7.69 5.49 }
+done Fri Nov 27 12:16:55 EST 2026 load { 4.54 5.90 5.36 }
+start shapes 2 Fri Nov 27 12:19:53 EST 2026 load { 12.23 9.02 6.75 }
+start shapes 3 Fri Nov 27 12:20:21 EST 2026 load { 9.98 8.79 6.74 }
+start shapes 4 Fri Nov 27 12:20:49 EST 2026 load { 11.54 9.25 6.98 }
+start shapes 6 Fri Nov 27 12:21:19 EST 2026 load { 13.66 9.98 7.32 }
+start shapes 8 Fri Nov 27 12:21:49 EST 2026 load { 15.33 10.75 7.69 }
+start shapes 12 Fri Nov 27 12:22:17 EST 2026 load { 13.36 10.68 7.76 }
+start shapes 16 Fri Nov 27 12:22:45 EST 2026 load { 13.12 10.89 7.94 }
+start sweep 2 Fri Nov 27 12:23:12 EST 2026 load { 10.19 10.37 7.83 }
+start sweep 4 Fri Nov 27 12:26:41 EST 2026 load { 3.87 6.98 6.92 }
+start sweep 8 Fri Nov 27 12:30:08 EST 2026 load { 4.24 5.63 6.34 }
+done Fri Nov 27 12:33:32 EST 2026
+start four Fri Nov 27 13:34:01 EST 2026 load { 3.38 5.48 6.60 }
+start veclib Fri Nov 27 13:48:42 EST 2026 load { 18.21 19.19 15.50 }
+start above Fri Nov 27 14:11:14 EST 2026 load { 4.45 6.46 9.11 }
+done Fri Nov 27 14:13:17 EST 2026 load { 7.17 6.81 8.88 }

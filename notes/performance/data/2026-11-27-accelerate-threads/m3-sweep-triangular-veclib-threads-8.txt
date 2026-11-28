@@ -1,0 +1,10 @@
+dtrtri_L                                         calls 3666   differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 5.59 one/threaded 2.12
+dtrmm_L_L_T                                      calls 34926  differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 1.04 one/threaded 1.01
+dtrsm_L_L_T                                      calls 34926  differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 1.01 one/threaded 0.99
+dtrsm_R_L_N                                      calls 66186  differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 1.13 one/threaded 1.11
+per routine
+TOTAL dtrmm_L_L_T                                calls 34926  differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 1.04 one/threaded 1.01
+TOTAL dtrsm_L_L_T                                calls 34926  differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 1.01 one/threaded 0.99
+TOTAL dtrsm_R_L_N                                calls 66186  differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 1.13 one/threaded 1.11
+TOTAL dtrtri_L                                   calls 3666   differ 0      norm 0.000e+00 elt 0.000e+00 identical unlike_first_threaded 0     cpu/wall 5.59 one/threaded 2.12
+exit 0
